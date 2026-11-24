@@ -49,6 +49,9 @@ const en = {
     noRecords: 'No records found',
     createNew: 'Create new',
     createNamed: 'Create new "{{name}}"',
+    // objectstack#36865 — a quick-created record the field's lookupFilters exclude is not selected; this says why.
+    createdOutsideFilters: "The record was created, but it does not match this field's filters, so it cannot be chosen here.",
+    createdUnchecked: "The record was created, but it could not be checked against this field's filters, so it was not chosen. Search for it here rather than creating it again.",
     showingResults: 'Showing {{shown}} of {{total}} results',
     showAllResults: 'Show all results ({{count}})',
     selectedBadge: 'Selected',
@@ -73,6 +76,8 @@ const en = {
     autofillCurrencyDiffers: '{{field}} was not filled: the picked amount is {{amount}} in {{from}}, but {{field}} here is in {{to}}. Enter it in {{to}}.',
     autofillSourceNoCurrency: '{{field}} was not filled: the picked amount {{amount}} names no currency, but {{field}} here is in {{to}}. Enter it in {{to}}.',
     autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
+    autofillCurrencyUnread: '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
+    autofillKept: '{{field}} still holds its earlier value.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -195,6 +200,10 @@ const en = {
     // handler for an undoable success toast.
     failed: 'Action failed',
     parallelFailed: 'One or more parallel actions failed',
+    // A `type: 'api'` action whose backing service this deployment does not
+    // run or cannot reach (503 SERVICE_UNAVAILABLE, 501 NOT_IMPLEMENTED, a route
+    // miss), shown instead of the server's operator prose (objectstack#36840).
+    serviceUnavailable: 'This action needs a service that is not available in this environment. Contact your administrator.',
     // The two row-count refusals of a single-record action launched from a
     // list toolbar (`resolveServerActionRecordId` in `@object-ui/core`); the
     // runner asks for them before any confirmation or param dialog opens
@@ -829,6 +838,12 @@ const en = {
     // objectstack#36023 — why a list cell's typed value was not saved, under the editor.
     cellNotNumber: 'Enter a number.',
     cellInvalid: 'This value isn\'t valid.',
+    // objectstack#36289 — a list cell's menu, and why its Paste left the cell as it was.
+    copyCell: 'Copy',
+    pasteCell: 'Paste',
+    clearCell: 'Clear',
+    pasteNotValue: 'The copied text can\'t go in this cell.',
+    pasteUnavailable: 'The browser didn\'t let the list read the clipboard. Select the cell and press Ctrl+V (⌘V) to paste.',
     // objectstack#35685 — a list cell's own save state, and the way out of a rule the list cannot complete.
     cellSaving: 'Saving…',
     cellSaved: 'Saved',
@@ -1149,6 +1164,8 @@ const en = {
       aggregateNotCompleted: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
       resultNotConfirmed: ' \u00b7 Not confirmed {{count}}',
       notConfirmedRecords: 'The action did not report on these records. Check their current values:',
+      resultRefused: ' \u00b7 Refused {{count}}',
+      refusedRecords: 'The action refused these records:',
       aggregateUnreadable: 'The action finished, but its result could not be read, so it is not known which records were changed. The list shows their current values when you close this.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
@@ -1339,6 +1356,9 @@ const en = {
       kanbanShowFieldLabels: "Show field names",
       kanbanHideEmptyFields: "Hide empty fields",
       kanbanSummary: "Column summary",
+      kanbanSummaryAvg: "Average",
+      kanbanSummaryMin: "Minimum",
+      kanbanSummaryMax: "Maximum",
       kanbanHiddenLanes: "Hidden columns",
       kanbanHiddenLanesHint: "Cards of a hidden column show under Uncategorized.",
       viewName: 'View name',
@@ -1393,9 +1413,6 @@ const en = {
       hideHint: "Its cards move to Uncategorized",
       createIn: "New record in {{column}}",
       create: "New",
-    },
-    laneStatistic: {
-      loadedOnly: "loaded cards",
     },
     addCard: 'Add card',
     addColumn: 'Add column',
@@ -2157,6 +2174,7 @@ const en = {
     dateRange: {
       from: 'From',
       to: 'To',
+      comparePrevious: 'Compare with previous period',
       datasetUnreadable: 'This report’s date range names no dimension, and the “{{dataset}}” dataset could not be read to find its date dimension ({{reason}}).',
       noSingleDateDimension: 'This report’s date range names no dimension, and the “{{dataset}}” dataset declares {{total}} date dimensions ({{found}}) where it needs exactly one. Name the date dimension in the report’s dateRange.dimension.',
     },
@@ -2200,9 +2218,10 @@ const en = {
       settings: 'Report settings',
       pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
       nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
-      addsToMenu: 'Saving creates this report and adds it to the menu where you placed it, with your other design changes.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
+      designModeOnTitle: 'Finish designing the layout first',
+      designModeOn: 'A report is built outside the design mode. Save or cancel the layout, and the builder opens here.',
       type: {
         label: 'Report type',
         snapshot: 'Current state',
@@ -2932,6 +2951,7 @@ const en = {
     },
     reportIndex: {
       title: 'Reports',
+      newReport: 'New report',
       emptyTitle: 'No reports',
       emptyDescription: 'This app has no reports you can open.',
       otherApps: 'Reports in your other apps:',
@@ -3442,6 +3462,7 @@ const en = {
       summary: 'Records you can read: {{total}}, owns {{owned}}, assigned {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Lists several people, so it cannot be handed over here.',
+      ownerKept: 'Not handed over: this object keeps the owner of each record (Change Owner is off for it).',
       truncated: 'Not every user field was counted; this person may hold more.',
       unreadable: 'Not counted, because you cannot read them: {{objects}}',
       handoverTo: 'Hand over to',
@@ -3466,9 +3487,7 @@ const en = {
       targetQueue: 'A queue',
       queue: 'Queue',
       queuePlaceholder: 'Pick a queue',
-      queuesLoading: 'Loading queues…',
-      queuesFailed: 'The queues could not be read: {{message}}',
-      noQueues: 'No queue is set up.',
+      declaredQueues: 'Or a queue an installed app declares',
       notify: 'Notify the new owner',
       alreadyOwner: 'This person already owns this record.',
       submit: 'Change Owner',
@@ -3482,7 +3501,14 @@ const en = {
       skipped: '{{count}} selected records do not offer Change Owner and are left out.',
       skipped_one: '{{count}} selected record does not offer Change Owner and is left out.',
       skipped_other: '{{count}} selected records do not offer Change Owner and are left out.',
-      noClient: 'The owner cannot be changed here.',
+      cascadeHeading: 'Also move related records',
+      cascadeHelp: 'Related records that point at this one and belong to its previous owner go to the new owner too.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'The related records that can move along could not be read: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): moved {{moved}}, {{failed}} could not be moved.',
+      cascadeRemaining: 'Left with the previous owner, past the 500-record limit of one change: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): the related records could not be read: {{message}}',
+      gridOnly: 'To change the owner of several records at once, switch to a grid view.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
@@ -4197,7 +4223,7 @@ const en = {
     },
     language: {
       title: 'Language',
-      description: 'The language used for notifications and messages sent to you. The interface language is chosen separately, from the globe menu.',
+      description: 'The language of the interface and of the notifications and messages sent to you. It is the same setting as the globe menu, so changing one changes the other.',
       label: 'Preferred language',
       systemDefault: 'Use the deployment default',
       save: 'Save',
@@ -4322,9 +4348,10 @@ const en = {
     resize: 'Resize sidebar',
   },
   designMode: {
-    title: 'Design mode',
-    leaveUnsaved: 'Leave design mode? Your unsaved changes will be lost.',
+    title: 'Design layout',
+    leaveUnsaved: 'Leave Design layout? Your unsaved changes will be lost.',
     saveFailed: 'Some changes were not saved: {{reason}}',
+    editorOpen: 'Save or cancel your dashboard or report changes before designing the layout.',
     menu: {
       title: 'Menu',
       addItem: 'Add menu item',
@@ -4337,7 +4364,7 @@ const en = {
       addBefore: 'Add an item before',
       addAfter: 'Add an item after',
       rename: 'Rename and icon',
-      renameSourceOnly: 'Menu names are changed in the app\'s source language',
+      renameTranslation: 'The new name is shown in {{language}}. The app\'s other languages keep their names.',
       remove: 'Remove from menu',
       contributed: 'Another package adds this item. It is moved, renamed or removed there.',
       pickerTitle: 'Add menu item',
@@ -4363,15 +4390,17 @@ const en = {
       pendingDraft: 'This app has unpublished changes in Studio. Publish or discard them there, then save again.',
       noVersion: 'This app\'s package states no version, so its menu cannot be customized.',
       notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
+      storedUnread: 'This app\'s saved menu could not be read, so nothing was saved.',
+      publishedMoved: 'Someone published this app\'s menu while you were saving, so nothing was saved. Save again to apply your changes over theirs.',
+      translationPendingDraft: 'This app\'s menu names in this language have unpublished changes in Studio. Publish or discard them there, then save again.',
+      keyboardHint: 'Drag an item to move it, or focus it and press Space, then the arrow keys. Enter opens it.',
       newDashboard: 'New dashboard…',
       newDashboardTitle: 'New dashboard',
-      newReport: 'New report…',
       newItemSavesAll: 'Creating it saves your other design changes too, then opens it for editing.',
       create: 'Create',
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
-      newReportLeft: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
     },
     pins: {
       button: 'Header buttons',
@@ -4420,8 +4449,10 @@ const en = {
   topbar: {
     aiAssistant: 'AI Assistant',
     designInStudio: 'Design in Studio',
+    designLayout: 'Design layout',
     editApp: 'Edit app',
     openAppInStudio: 'Open {{app}} in Studio',
+    viewInStudio: 'View in Studio',
     openAssistant: 'Open {{name}} assistant',
     offline: 'Offline',
     usersOnline: 'Users currently online',
@@ -4632,8 +4663,8 @@ const en = {
   search: {
     title: 'Search',
     back: 'Back',
-    placeholder: 'Search objects, dashboards, pages, reports…',
-    inputAriaLabel: 'Search objects, dashboards, pages, reports',
+    placeholder: 'Search objects, dashboards, pages, reports, components, docs…',
+    inputAriaLabel: 'Search objects, dashboards, pages, reports, components, docs',
     resultsCount: '{{count}} result for "{{query}}"',
     resultsCount_one: '{{count}} result for "{{query}}"',
     resultsCount_other: '{{count}} results for "{{query}}"',
@@ -4646,10 +4677,16 @@ const en = {
     typeDashboards: 'Dashboards',
     typePages: 'Pages',
     typeReports: 'Reports',
+    typeComponents: 'Components',
+    typeDocs: 'Docs',
+    typeUrls: 'Links',
     badgeObject: 'object',
     badgeDashboard: 'dashboard',
     badgePage: 'page',
     badgeReport: 'report',
+    badgeComponent: 'component',
+    badgeDoc: 'doc',
+    badgeUrl: 'link',
   },
   empty: {
     objectNotFound: 'Object Not Found',
@@ -4694,7 +4731,7 @@ const en = {
     appOpensFromMenuDescription: 'This app has no page of its own. Choose an entry in its menu to open a link or run an action.',
     // objectstack#36748 — an app whose stored menu is empty, for a caller who can fill it.
     appMenuEmpty: "{{app}} has nothing in its menu yet",
-    appMenuEmptyDescription: "Create objects for this app in Studio and they join its menu, or add entries in design mode.",
+    appMenuEmptyDescription: "Create objects for this app in Studio and they join its menu, or add entries in Design layout.",
     openInStudio: "Open in Studio",
     openSetup: 'Open Setup',
     createFirstApp: 'Create Your First App',
@@ -5287,6 +5324,23 @@ const en = {
     desktopEnabled: 'Desktop notifications',
     desktopBlocked: 'Blocked. Allow notifications for this site in your browser settings.',
     desktopUnsupported: 'This browser does not support desktop notifications.',
+  },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: 'Back to the list',
+    openFullRecord: 'Open full record',
+    occurrences: 'Each time it was sent',
+    moreApprovals: 'See the rest in the Approvals inbox',
+    goApprove: 'Review ›',
+    loadEarlier: 'Load earlier notifications',
+    loadEarlierFailed: 'Could not load. Try again',
+    pickApproval: 'Pick a request to review it here.',
+    pickItem: 'Pick an item to see it here.',
+    openRequest: 'Open request',
+    nextHint: 'Moves to the next once decided · J / K to move',
+    openLink: 'Open',
+    unreadOnly: 'Unread only',
+    allApprovals: 'All approvals',
   },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
@@ -6376,6 +6430,11 @@ const en = {
     // Terminal success, used only when the flow declares no `successMessage`
     // of its own.
     completed: 'Flow "{{flow}}" completed',
+    // A resume whose answer was lost had already gone through: the dialog now
+    // shows the step the run waits on (objectstack#36831).
+    alreadySubmitted: 'Your previous submission went through. The flow has moved on to this step.',
+    // ...or the run waits on no screen any more, so Submit is withdrawn.
+    noLongerWaiting: 'This step may already have been processed. Close this dialog and check the record before trying again.',
   },
   // Console › System › Applications (objectui#4307). The page's OWN chrome —
   // headings, controls, badges and the frames of its toasts.
@@ -6820,6 +6879,8 @@ const en = {
     sourceDefault: "Organization default",
     sourceBuiltin: "Default",
     sourceMandatory: "Required",
+    followOrganization: "Follow organization setting",
+    followOrganizationFor: "Follow organization setting for {{setting}}",
   },
   slackLink: {
     title: "Slack direct messages",
@@ -6837,6 +6898,43 @@ const en = {
     linked: "Connected to {{workspace}} as {{slackUser}}.",
     linkedAt: "Connected {{at}}",
     disconnect: "Disconnect",
+  },
+  publicFormsSetup: {
+    title: "Public forms",
+    subtitle: "Forms anyone can fill in without signing in, such as a contact form on your website. Each submission becomes a record.",
+    notAllowed: "Only system administrators can manage public forms.",
+    designHint: "Switch a form off to stop taking submissions; its address then opens nothing. Forms are designed in Studio.",
+    refresh: "Refresh",
+    emptyTitle: "No public forms yet",
+    emptyBody: "Public forms are designed in Studio. Once an app has one, it is listed here.",
+    loadFailed: "Couldn't load the public forms. Refresh to try again.",
+    columnName: "Name",
+    columnObject: "Creates a record of",
+    columnAddress: "Address",
+    columnStatus: "Status",
+    columnActions: "Actions",
+    on: "On",
+    off: "Off",
+    switchOnLabel: "Switch {{name}} on",
+    switchOffLabel: "Switch {{name}} off",
+    copy: "Copy address",
+    copied: "Address copied",
+    clipboardUnavailable: "Clipboard unavailable",
+    open: "Open in a new tab",
+    switchedOn: "{{name}} is on: visitors can fill it in.",
+    switchedOff: "{{name}} is off: its address no longer opens.",
+    pendingDraft: "{{name}} has unpublished changes in Studio. Publish or discard them there first.",
+    switchFailed: "Couldn't switch {{name}}: {{message}}",
+    refusalNoPackage: "the app this form belongs to could not be found.",
+    refusalNoVersion: "the app this form belongs to declares no version, so its customization cannot be saved.",
+    refusalLoadFailed: "the form could not be read.",
+    refusalShippedOff: "its app ships it switched off, so it cannot be switched on here.",
+    refusalForbidden: "you don't have permission to change app configuration.",
+    refusalServer: "the server refused the change. Try again, or ask an administrator.",
+    switchedOnEarlierVersion: "{{name}} is on. It stays on the app's earlier version {{version}}, which this environment customized; to take the app's current form, restore the original in Studio.",
+    noSwitchPermission: "Switching forms on or off needs permission to change app configuration, which you don't have.",
+    shippedOff: "Off (switched off by its app)",
+    statusUnknown: "Unknown (couldn't read its app's version of this form)",
   },
   slackSetup: {
     title: "Slack direct messages",

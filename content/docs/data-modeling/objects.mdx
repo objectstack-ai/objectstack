@@ -354,7 +354,7 @@ bare bucket string.
 | `system-data` | Platform-defined schema holding **admin/user-writable data** (RBAC link tables, preferences, messaging config). New / Edit / Delete / Export by default — **no CSV import**, which is opt-in per object; narrow the rest with `userActions`. |
 | `engine-owned` | Runtime rows a platform service owns end to end — generic CRUD hidden, exposed `['get', 'list']` only, **no user writes ever**. |
 | `append-only` | Immutable audit trail — View + Export only. |
-| `synced` | Rows a scheduled pull copies from a connector or a federated source — View + Export only. The one bucket `userActions` cannot open a write on: a member's edit would be kept or overwritten by the next pull, so a change belongs in the source. The target of every mapping with a `connectorSource` or `datasourceSource`. |
+| `synced` | Rows a scheduled pull copies from a connector or a federated source — View + Export only. The one bucket `userActions` cannot open a write on: a member's edit would be kept or overwritten by the next pull, so a change belongs in the source. The target of every mapping with a `connectorSource` or `datasourceSource`. The platform adds five hidden `_sync_` provenance columns that only the pull writes (see [Jobs](/docs/automation/jobs)). |
 | `better-auth` | Identity tables owned by the better-auth driver — generic user-context CRUD is suppressed; mutations flow through the auth API (sign-in, invite, reset). |
 
 **`engine-owned` vs. `system-data` (ADR-0103, #3355).** Both hold a

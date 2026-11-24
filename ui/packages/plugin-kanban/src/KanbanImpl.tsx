@@ -32,12 +32,14 @@ import type { KanbanCard, KanbanColumn } from './types'
 import { createSafeTranslation } from "@object-ui/i18n"
 import { EyeOff, FoldHorizontal, MoreHorizontal, Plus, Sigma, UnfoldHorizontal } from "lucide-react"
 import { useKanbanRecordsSettled } from './KanbanRecordsSettled'
-import { useKanbanColumnSummary, sumLaneField, laneStatistic } from './KanbanColumnSummary'
+import { useKanbanColumnSummary, sumLaneField } from './KanbanColumnSummary'
+import { laneFigureOf } from './KanbanLaneStatistic'
 import { useKanbanCardDisplay } from './KanbanCardDisplay'
 import { laneCount, useKanbanLanePaging } from './KanbanLanePaging'
 import { readCollapsedLanes, useKanbanLaneMenu, writeCollapsedLanes } from './KanbanLaneMenu'
 import { ownerInitials, type KanbanCardOwner } from './KanbanCardOwner'
 import { createKanbanDndAnnouncer } from './kanbanDndAnnouncements'
+import { laneKeyOf, lanesFromRecords } from './kanbanReferenceLanes'
 
 // Utility function to merge class names (inline to avoid external dependency)
 const cn = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(' ')
@@ -86,7 +88,6 @@ const useKanbanT = createSafeTranslation(
     'kanban.laneMenu.hideHint': 'Its cards move to Uncategorized',
     'kanban.laneMenu.createIn': 'New record in {{column}}',
     'kanban.laneMenu.create': 'New',
-    'kanban.laneStatistic.loadedOnly': 'loaded cards',
   },
   'kanban.noCards',
 )
@@ -98,6 +99,35 @@ const useKanbanT = createSafeTranslation(
  * `kanban.uncategorized` (objectui#12899).
  */
 const UNCATEGORIZED_LANE = 'Uncategorized'
+
+/**
+ * The swimlane a card's swimlane-field value belongs to (objectstack#36841).
+ *
+ * Keyed the way a column lane keys a card (`laneKeyOf`, objectstack#36430): an
+ * expanded reference (a lookup, user or master-detail value the board fetched
+ * with `$expand`) by its foreign key, never by `String(value)`, which is the
+ * same `"[object Object]"` for every target. A
+ * missing value, and an expanded record with no key, sit in the no-value lane;
+ * any other value keeps the key it always had. This one key buckets, sorts,
+ * counts and tracks the collapsed set; the heading is drawn from it.
+ */
+function swimlaneKeyOf(value: unknown): string {
+  if (value == null) return UNCATEGORIZED_LANE
+  const key = laneKeyOf(value)
+  return key === '' && typeof value === 'object' ? UNCATEGORIZED_LANE : key
+}
+
+/**
+ * The `displayField` a reference swimlane field declares, read only when the
+ * field names the object it references — the rule `ObjectKanban` applies to a
+ * reference column lane.
+ */
+function swimlaneDisplayFieldOf(objectFields: unknown, swimlaneField: string): string | undefined {
+  const def = (objectFields as Record<string, { reference?: unknown; displayField?: unknown } | undefined> | undefined)?.[swimlaneField]
+  return typeof def?.reference === 'string' && def.reference && typeof def.displayField === 'string' && def.displayField
+    ? def.displayField
+    : undefined
+}
 
 /**
  * Marks a swimlane row as a participant in the board's ONE horizontal axis
@@ -224,6 +254,15 @@ export interface KanbanBoardProps {
   objectFields?: unknown
   /** Field name for swimlane rows (2D grouping) */
   swimlaneField?: string
+  /**
+   * The object `swimlaneField` references, as read by `ObjectKanban`
+   * (objectstack#36930). A reference swimlane is titled through it by
+   * `lanesFromRecords` → `referencedRecordTitle`, so it names a record by the
+   * target's declared `nameField` (ADR-0079) exactly as a column lane over the
+   * same reference does. Absent, the title falls to the field's
+   * `displayField` and then the shared ladder on the expanded record.
+   */
+  swimlaneTargetDef?: unknown
   /**
    * The cards in `columns` are a fetched WINDOW, not the whole group
    * (`5591f03bd`) — see `laneCountLabel`. Injected by `ObjectKanban`, the
@@ -785,37 +824,43 @@ function LaneTotal({
  * objectstack#36370 — the view's lane statistic (`kanban.summary`), at the
  * lane's foot: its calculation's name and its figure, 「Sum · Amount
  * ¥1,200」. A count over a lane the board pages for itself is the server's
- * count of the lane, and carries the windowed `+` where that is a floor. A sum
- * covers the cards the lane holds: over a lane that holds more than it drew it
- * is no bound (a value may be negative), so it says so in words, 「Sum ·
- * Amount · loaded cards」, rather than with a `+`. Renders nothing without
- * the statistic, or while the figure is unknowable.
+ * count of the lane, and carries the windowed `+` where that is a floor.
+ *
+ * objectstack#36520 — a `sum`, `avg`, `min` or `max` covers every record of
+ * the lane: the server lane read's figure (`KanbanColumnSummary.figures`),
+ * never one added up over the cards the lane has loaded, on every board that
+ * queries its own cards. Over cards a host hands in, a `sum` adds them: that
+ * is a whole lane only if the host handed every card in. `ListView` hands a
+ * board whose lanes it does not know before the query (lanes over a lookup,
+ * a view with grouping) its fetched page, so there the `sum` covers that
+ * page alone, with no marker (a known gap). Renders nothing without the
+ * statistic, or while the figure is pending or unknowable.
  */
 function LaneFootStatistic({
+  laneId,
   cards,
   count,
-  partial,
 }: {
+  laneId: string
   cards: KanbanCard[]
   /** The lane's count as its header writes it, for a `count`. */
   count: { count: number; atLeast: boolean }
-  partial: boolean
 }) {
-  const { t } = useKanbanT()
   const summary = useKanbanColumnSummary()
   if (!summary || summary.placement !== 'foot' || !summary.type) return null
-  const isCount = summary.type === 'count'
-  const value = isCount ? count.count : laneStatistic(cards, summary.field, summary.type)
+  const type = summary.type
+  const isCount = type === 'count'
+  const value = isCount
+    ? count.count
+    : summary.figures !== undefined
+      ? summary.figures === null ? null : laneFigureOf(summary.figures, laneId, type, count.count > 0)
+      : type === 'sum' ? sumLaneField(cards, summary.field) : null
   if (value === null) return null
-  const partialSum = !isCount && partial
-  const name = isCount
-    ? summary.typeLabel
-    : `${summary.typeLabel} · ${summary.label}${partialSum ? ` · ${t('kanban.laneStatistic.loadedOnly')}` : ''}`
+  const name = isCount ? summary.typeLabel : `${summary.typeLabel} · ${summary.label}`
   return (
     <div
       className="flex items-center justify-between gap-2 border-t border-border/40 px-3 sm:px-4 py-1.5 text-xs text-muted-foreground tabular-nums"
       data-kanban-lane-statistic=""
-      {...(partialSum ? { 'data-kanban-lane-statistic-partial': '' } : {})}
     >
       <span className="truncate" title={name}>{name}</span>
       <span className="shrink-0 font-medium text-foreground/85">
@@ -1153,9 +1198,9 @@ function KanbanColumnView({
       )}
       {!isCollapsed && !countPending && (
         <LaneFootStatistic
+          laneId={String(column.id)}
           cards={safeCards}
           count={pagedCount ?? { count: safeCards.length, atLeast: countsAreWindowed === true }}
-          partial={laneTotalPartial}
         />
       )}
     </div>
@@ -1187,7 +1232,7 @@ function moveOutcomeSentence(outcome: unknown, movedSentence: string): string | 
   return movedSentence
 }
 
-export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, cardsMovable = true, rowOpensRecord = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
+export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneTargetDef, swimlaneField, countsAreWindowed, cardsMovable = true, rowOpensRecord = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
   const hasDnd = useHasDndProvider()
 
   if (hasDnd) {
@@ -1195,7 +1240,7 @@ export default function KanbanBoard({ columns, onCardMove, onCardClick, classNam
       <KanbanCardsMovable.Provider value={cardsMovable}>
       <KanbanCardsOpenRecord.Provider value={rowOpensRecord}>
         <DndBridge>
-          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />}
+          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneTargetDef={swimlaneTargetDef} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />}
         </DndBridge>
       </KanbanCardsOpenRecord.Provider>
       </KanbanCardsMovable.Provider>
@@ -1205,13 +1250,13 @@ export default function KanbanBoard({ columns, onCardMove, onCardClick, classNam
   return (
     <KanbanCardsMovable.Provider value={cardsMovable}>
       <KanbanCardsOpenRecord.Provider value={rowOpensRecord}>
-      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />
+      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneTargetDef={swimlaneTargetDef} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />
     </KanbanCardsOpenRecord.Provider>
       </KanbanCardsMovable.Provider>
   )
 }
 
-function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
+function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneTargetDef, swimlaneField, countsAreWindowed, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
   const { t } = useKanbanT()
   // The prefix of each swimlane cell's drop-reason element id (#27099).
   const dropReasonIdBase = React.useId()
@@ -1372,17 +1417,22 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
     setBoardColumns(safeColumns)
   }
 
-  // Compute swimlane rows when swimlaneField is provided
+  // Compute swimlane rows when swimlaneField is provided: one per lane key
+  // (`swimlaneKeyOf`), sorted by that key, each titled by the referenced
+  // record's name when the value is an expanded reference (`lanesFromRecords`,
+  // the column lanes' titling), else by the key itself.
+  const swimlaneDisplayField = swimlaneField ? swimlaneDisplayFieldOf(objectFields, swimlaneField) : undefined
   const swimlanes = React.useMemo(() => {
     if (!swimlaneField) return null
     const allCards = boardColumns.flatMap(col => col.cards)
-    const laneValues = new Set<string>()
-    allCards.forEach(card => {
-      const val = card[swimlaneField]
-      laneValues.add(val != null ? String(val) : UNCATEGORIZED_LANE)
-    })
-    return Array.from(laneValues).sort()
-  }, [boardColumns, swimlaneField])
+    const titles = new Map(
+      lanesFromRecords(allCards, swimlaneField, swimlaneTargetDef, swimlaneDisplayField).map(lane => [lane.id, lane.title]),
+    )
+    const keys = new Set<string>()
+    allCards.forEach(card => keys.add(swimlaneKeyOf(card[swimlaneField])))
+    return Array.from(keys).sort().map(key => ({ key, title: titles.get(key) ?? key }))
+  }, [boardColumns, swimlaneField, swimlaneTargetDef, swimlaneDisplayField])
+  const swimlaneOf = (card: KanbanCard) => swimlaneKeyOf(card[swimlaneField!])
 
   const toggleLane = React.useCallback((lane: string) => {
     setCollapsedLanes(prev => {
@@ -1770,14 +1820,12 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
   // (AGENTS.md #10): the board re-buckets into new arrays on every pass.
   const shownLanes: KanbanLaneRows[] = []
   if (onLaneRowsChange) {
-    const swimlaneOf = (card: KanbanCard) =>
-      card[swimlaneField!] != null ? String(card[swimlaneField!]) : UNCATEGORIZED_LANE
     for (const col of boardColumns) {
       if (isColumnCollapsed(col)) continue
       const rows = swimlanes
         ? swimlanes
-            .filter((lane) => !collapsedLanes.has(lane))
-            .flatMap((lane) => col.cards.filter((card) => swimlaneOf(card) === lane))
+            .filter((lane) => !collapsedLanes.has(lane.key))
+            .flatMap((lane) => col.cards.filter((card) => swimlaneOf(card) === lane.key))
         : col.cards
       if (rows.length > 0) shownLanes.push({ key: String(col.id), label: String(col.title ?? col.id), rows })
     }
@@ -2002,12 +2050,12 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
           </div>
 
           {/* Swimlane rows */}
-          {swimlanes.map(lane => {
+          {swimlanes.map(({ key: lane, title }) => {
             const isCollapsed = collapsedLanes.has(lane)
             // Display only: the key above and below is still `lane`.
-            const laneLabel = lane === UNCATEGORIZED_LANE ? t('kanban.uncategorized') : lane
+            const laneLabel = lane === UNCATEGORIZED_LANE ? t('kanban.uncategorized') : title
             const laneCardCount = boardColumns.reduce((sum, col) =>
-              sum + col.cards.filter(c => (c[swimlaneField!] != null ? String(c[swimlaneField!]) : UNCATEGORIZED_LANE) === lane).length, 0)
+              sum + col.cards.filter(c => swimlaneOf(c) === lane).length, 0)
 
             return (
               <div key={lane} className="border rounded-lg bg-muted/10">
@@ -2033,9 +2081,7 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
                     data-swimlane-scroll-row=""
                   >
                     {boardColumns.map(col => {
-                      const laneCards = col.cards.filter(c =>
-                        (c[swimlaneField!] != null ? String(c[swimlaneField!]) : UNCATEGORIZED_LANE) === lane
-                      )
+                      const laneCards = col.cards.filter(c => swimlaneOf(c) === lane)
                       // A collapsed column narrows in EVERY row and withholds
                       // its cards in each of them (objectui#9628) — a column
                       // collapsed in the title row and open here would be the

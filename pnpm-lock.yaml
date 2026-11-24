@@ -2547,6 +2547,9 @@ importers:
       '@objectstack/service-messaging':
         specifier: workspace:*
         version: link:../../services/service-messaging
+      '@objectstack/service-print':
+        specifier: workspace:*
+        version: link:../../services/service-print
       '@objectstack/service-storage':
         specifier: workspace:*
         version: link:../../services/service-storage
@@ -3126,6 +3129,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../service-settings
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
@@ -3133,6 +3139,9 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -3262,6 +3271,9 @@ importers:
       '@objectstack/core':
         specifier: workspace:*
         version: link:../../core
+      '@objectstack/plugin-hono-server':
+        specifier: workspace:*
+        version: link:../../plugins/plugin-hono-server
       '@objectstack/service-storage':
         specifier: workspace:*
         version: link:../service-storage
@@ -5840,6 +5852,9 @@ importers:
       rehype-slug:
         specifier: ^6.0.0
         version: 6.0.0
+      remark-cjk-friendly:
+        specifier: ^2.3.4
+        version: 2.3.4(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2)(unified@11.0.5)
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1

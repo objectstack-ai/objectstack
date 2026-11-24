@@ -403,9 +403,17 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * layer shipped that rule name, and its `fields` also carry each field a
    * code extender ADDS under a name the owner does not declare, as that
    * extender ships it — the catalog rows for such a field can only translate
-   * what its extender ships. Its scalars and every field the owner declares
+   * what its extender ships, and, where the owner declares `relatedLists`,
+   * those `relatedLists` carry each entry a code extender's list placement
+   * (`place`) splices in, as the fold splices it, so a placed tab's `label`
+   * reads the catalog. Its scalars and every field the owner declares
    * stay the owner's: an extension's `fieldPatches` are never folded in, so a
-   * patched owner field still reads as diverged.
+   * patched owner field still reads as diverged. Whether a placement applies
+   * is judged on the OWNER here and on the served object's base layer (a
+   * tenant overlay's own `relatedLists`, else the owner's) by the fold: where
+   * only a tenant overlay declares `relatedLists`, the served placed tab has
+   * no packaged counterpart, so it reads as authored and the deployment
+   * catalog does not translate its `label`.
    *
    * Supplied by the serving layer, which is the only one that knows it; when
    * it is absent the translators behave exactly as they did before #8284 (the
@@ -6326,6 +6334,38 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
     next.groups = form.groups.map(translateSection);
   }
   return next as T;
+}
+
+/**
+ * Translate the column headers of a metadata type's Studio list layout (a
+ * `METADATA_LIST_REGISTRY` entry) against the active translation bundle.
+ *
+ * A column is translated through the slot of the type's form field of the
+ * same path, `metadataForms.<type>.fields.<field>.label`, so a column header
+ * and the form label of that key read the same words. A column whose slot has
+ * no translation keeps its English header.
+ *
+ * Returns a new list object; the input is not mutated.
+ *
+ * @example
+ * ```ts
+ * const localized = resolveMetadataListLabels(METADATA_LIST_REGISTRY.hook, 'hook', bundle, { locale: 'zh-CN' });
+ * ```
+ */
+export function resolveMetadataListLabels<T extends { columns?: ReadonlyArray<Record<string, any>> }>(
+  list: T,
+  type: string,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!list || typeof list !== 'object' || !Array.isArray(list.columns)) return list;
+  if (!lookupMetadataForm(bundle, type, opts)) return list;
+  const columns = list.columns.map((column) => {
+    if (!column || typeof column !== 'object' || typeof column.field !== 'string') return column;
+    const label = lookupMetadataFormField(bundle, type, column.field, 'label', opts);
+    return label ? { ...column, label } : column;
+  });
+  return { ...list, columns };
 }
 
 /**

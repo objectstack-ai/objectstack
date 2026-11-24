@@ -150,6 +150,16 @@
         "must_contain": ["hooks", "lead_follow_up", "texts", "follow_up_subject", "defaultLocale"],
         "must_not_contain": ["messages: {", "_hooks"]
       }
+    },
+    {
+      "id": 16,
+      "prompt": "In zh-CN the `crm_account` record page still titles one tab `Meetings`: the object declares `relatedLists: [{ list: 'crm_event.related_to', label: 'Meetings' }, 'crm_contact']`. The manual's drawing of the `opportunity_approval` flow names its `high_value` decision in English too, and `os i18n check` never asks for the flow's `mark_approved` `update_record` step. Which keys do I add, and is the check missing one?",
+      "expected_output": "`objects.crm_account._relatedLists['crm_event.related_to'].label` on the parent, keyed by the entry's literal `list` as one key; the bare `crm_contact` entry authors no `label`, so it has no key and keeps the child field's `relatedListTitle`, else the child's plural label. `flows.opportunity_approval.nodes.high_value.label` for the decision. The check is not missing one: `update_record` is one of the technical node types, whose `nodes` key it asks for only where a decision's branch leads to the step.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["_relatedLists", "crm_event.related_to", "nodes", "high_value"],
+        "must_not_contain": ["approvals.high_value", "screens.high_value"]
+      }
     }
   ]
 }

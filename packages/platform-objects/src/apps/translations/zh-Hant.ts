@@ -40,7 +40,7 @@ export const zhHant: TranslationData = {
         group_overview: { label: '總覽' },
         group_apps: { label: '應用程式' },
         nav_marketplace_browse: { label: '瀏覽應用程式市場' },
-        nav_marketplace_installed: { label: '已安裝應用程式' },
+        nav_packages: { label: '套件' },
         nav_cloud_connection: { label: '雲端連線' },
         group_people_org: { label: '人員與組織' },
         group_access_control: { label: '存取控制' },
@@ -108,6 +108,7 @@ export const zhHant: TranslationData = {
         nav_settings_knowledge: { label: '知識庫' },
         nav_settings_lifecycle: { label: '資料生命週期' },
         nav_recycle_bin: { label: '回收站' },
+        nav_public_forms: { label: '對外表單' },
         nav_notification_preferences: { label: '通知偏好設定' },
         nav_notification_templates: { label: '通知範本' },
 

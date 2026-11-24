@@ -34,6 +34,7 @@ import { FlowRunner, type ScreenFlowState } from '@object-ui/app-shell';
 import { TokenStorage } from '@object-ui/auth';
 import { loadLanguage } from './loadLanguage';
 import { publishAuthState } from './i18nSession';
+import { __resetLocalesRead } from './localesRead';
 
 /**
  * Serve `body` as the endpoint's JSON answer. A real `Response`: the loader
@@ -63,6 +64,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // One /i18n/locales read per page load (cloud#4964): each case is its own page load.
+  __resetLocalesRead();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   TokenStorage.clear();
@@ -188,9 +191,12 @@ describe('loadLanguage — reads only for a signed-in page load, with its creden
 
     publishAuthState({ isAuthenticated: true, isLoading: false });
     expect(Object.keys(await pending)).toEqual(['app']);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('/api/v1/i18n/translations/zh-CN');
-    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer tok-12034');
+    // The bundle, and the locale list that names the server's declared
+    // fallback chain beside it (objectstack#36809): both with the bearer.
+    const calls = fetchSpy.mock.calls as Array<[string, RequestInit]>;
+    expect(calls.map(([url]) => url).sort()).toEqual(['/api/v1/i18n/locales', '/api/v1/i18n/translations/zh-CN']);
+    for (const [, init] of calls) {
+      expect(new Headers(init.headers).get('Authorization')).toBe('Bearer tok-12034');
+    }
   });
 });

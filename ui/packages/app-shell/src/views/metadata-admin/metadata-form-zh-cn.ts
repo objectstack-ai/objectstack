@@ -343,11 +343,22 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'blocks.values': { label: '指标' },
       'blocks.runtimeFilter': { label: '运行时筛选' },
       'blocks.order': { label: '排序' },
-      runtimeFilter: { label: '运行时筛选', helpText: '渲染时的范围筛选，在查询时以 AND 方式并入' },
+      // ⟨36373⟩ follows the English (objectstack#36838); the platform's zh-CN row is
+      // the ledger-pinned rendering of the older render-time / AND sentence.
+      runtimeFilter: { label: '运行时筛选', helpText: '每次显示报表时都会应用的筛选，叠加在数据来源自身的条件之上' },
       chart: { label: '图表', helpText: '图表类型与配置' },
       // ⟨36373⟩ dateRange · exportOptions
-      dateRange: { label: '日期范围', helpText: '默认时间段与自定义范围开关。按数据来源里的一个日期分组筛选；只有一个日期分组时可留空' },
+      // The date-grouping sentence lives on the `dateRange.dimension` child below (objectstack#36838).
+      dateRange: { label: '日期范围', helpText: '打开报表时显示的时间段，以及使用者能否自己选择范围' },
       exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定' },
+      // The children `report.form.ts` declares for both composites (objectstack#36447),
+      // copied from the platform zh-CN bundle like every unmarked row here.
+      'dateRange.dimension': { label: '日期字段', helpText: '时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空' },
+      'dateRange.defaultRange': { label: '默认时间段', helpText: '打开报表时显示的时间段' },
+      'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许使用者自己选择开始和结束日期' },
+      'exportOptions.formats': { label: '格式', helpText: '可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载' },
+      'exportOptions.includeHeaders': { label: '包含表头', helpText: '在下载文件的第一行写入列名' },
+      'exportOptions.fileNamePrefix': { label: '文件名', helpText: '下载文件名的开头。留空时以报表的显示名称命名，没有显示名称时用名称' },
     },
   },
 
@@ -477,7 +488,7 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       'navigation.mode': { label: '模式', helpText: '[已弃用] 在对象列表（列表视图、对象的 `listViews`）上不再决定记录如何打开：在控制台中，对所有用户而言，点记录名称进入整页，点名称旁的悬停图标从侧边面板打开。这里 `drawer`、`page`、`new_window` 仍可解析，但不再起作用，请省略此键；`none` 仍表示列表行不打开任何内容——建议改用 `preventNavigation: true`。带 `navigation` 的页面区块（列表区块、时间线、嵌入视图）仍按所有取值生效。' },
       'navigation.preventNavigation': { label: '禁止导航', helpText: '完全禁用标准导航' },
       'navigation.openNewTab': { label: '在新标签页打开', helpText: '点击记录时在新的浏览器标签页中打开其整页；设为不打开的行保持不打开，手机上仍在当前页打开' },
-      'navigation.size': { label: '尺寸', helpText: '抽屉详情的浮层尺寸档位：\'auto\'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。' },
+      'navigation.size': { label: '尺寸', helpText: '记录抽屉的宽度档位：\'auto\'（默认）沿用宿主固定的默认宽度，每个对象都一样，与字段数无关（控制台的记录侧边面板以 460px 打开）；或粗粒度覆盖 sm/md/lg/xl/full（上限分别为 480/720/960/1200/1600px，始终受视口限制）。读者拖动出的宽度优先于两者。优先使用它而非像素 `width`；记录以整页打开时它不起作用（控制台在手机上一律以整页打开记录），在手机宽度的屏幕上也不起作用，那里抽屉占满屏幕。' },
       'navigation.width': { label: '宽度', helpText: '[已弃用 → size] 抽屉的像素 / 百分比宽度（如 "600px"）。编写时无法预知客户端视口，因此选不出合适的像素宽度——请使用 `size` 档位。' },
       sharing: { label: '共享', helpText: '视图共享配置：谁锁定了视图配置' },
       'sharing.lockedBy': { label: '锁定者', helpText: '锁定该视图配置的用户' },

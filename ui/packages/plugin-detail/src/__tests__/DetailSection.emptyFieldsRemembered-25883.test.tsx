@@ -24,7 +24,9 @@
  *   4. the store receives the choice per object, both ways;
  *   5. with no store (no host, no signed-in user) the toggle is what it was:
  *      per section, gone on unmount;
- *   6. the choice never undoes an authored `hideEmpty: true` all-empty section.
+ *   6. the choice reveals a `hideEmpty: true` all-empty section too: the hide
+ *      holds only while the reader hides empty fields (objectstack#36593; this
+ *      item read "the choice never undoes" it before that route).
  */
 
 import React from 'react';
@@ -163,7 +165,10 @@ describe('the empty-field toggle is one remembered choice per object (objectstac
     expect(mem.writes).toEqual([]);
   });
 
-  it('a remembered choice does not undo an authored `hideEmpty: true` on an all-empty section', () => {
+  // Flipped by objectstack#36593 (seat route: `hideEmpty` hides an all-empty
+  // section only while the reader hides empty fields). It read "a remembered
+  // choice does not undo an authored `hideEmpty: true` on an all-empty section".
+  it('a remembered choice reveals an authored `hideEmpty: true` all-empty section, and choosing to hide hides it again', () => {
     const mem = memoryStore({ opportunity: { showEmptyFields: true } });
     render(
       <Host mem={mem}>
@@ -176,6 +181,11 @@ describe('the empty-field toggle is one remembered choice per object (objectstac
       </Host>,
     );
     expect(emptyShown('Details')).toBe(true);
+    expect(screen.getByText('Shipping')).toBeTruthy();
+    expect(screen.getByText('Shipping Name')).toBeTruthy();
+
+    fireEvent.click(inSection('Details').getByRole('button', { name: /hide empty fields/i }));
+    expect(emptyShown('Details')).toBe(false);
     expect(screen.queryByText('Shipping')).toBeNull();
     expect(screen.queryByText('Shipping Name')).toBeNull();
   });

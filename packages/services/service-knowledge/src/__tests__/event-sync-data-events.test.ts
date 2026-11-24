@@ -1,21 +1,123 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #4626 — the knowledge event sync reads the FULFILLED `DataEvent`.
+ * The knowledge event sync: which `data.record.*` events reach the service, and
+ * what the service then makes of a written row.
  *
  * `data.record.*` envelopes carry the spec's `DataEvent` in `payload`: the
  * written row is `after`, the id is the required top-level `recordId`. The
- * shared branch this sync used to take read the payload itself as if it were
- * the record, so an object source indexed `{ recordId, after }` — a document
- * with none of the record's fields — and a delete never resolved an id at all.
+ * envelope is never the row.
+ *
+ * A source's `where` decides which rows it indexes (ADR-0049: a declared key
+ * holds on every path it applies to — the reindex walk already honoured it).
+ * So for a created, updated or restored row the service does NOT build the
+ * document from `after`: with a data engine bound it re-reads the row under
+ * the source's `where`, indexes the re-read row when one comes back, and
+ * deletes the document when none does. Without an engine a source with no
+ * `where` still builds from `after`, and a source with one is skipped, said
+ * once at `warn`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { RealtimeEventHandler, RealtimeEventPayload } from '@objectstack/spec/contracts';
+import type {
+  IDataEngine,
+  IKnowledgeAdapter,
+  RealtimeEventHandler,
+  RealtimeEventPayload,
+} from '@objectstack/spec/contracts';
+import type { KnowledgeDocument, KnowledgeHit, KnowledgeSource } from '@objectstack/spec/ai';
+import { RECORD_RESTORED_EVENT } from '@objectstack/spec/data';
 import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
 import type { KnowledgeService } from '../knowledge-service.js';
 
-function makeCtx() {
+type Row = Record<string, unknown>;
+
+/**
+ * The rows of one object, and a `find` over them that applies what the sync
+ * sends: scalar equality and `$and`. Any other operator is REFUSED by a throw,
+ * so a query this double does not understand turns the suite red rather than
+ * answering it wrongly. `limit` is applied by presence, after the filter.
+ *
+ * `holdNextFind()` makes the next `find` read the rows at call time but resolve
+ * only when released — the window in which a second event can arrive.
+ */
+function makeEngine(initial: Row[] = []) {
+  const rows = new Map<string, Row>(initial.map((r) => [String(r.id), { ...r }]));
+  let hold: Promise<void> | undefined;
+
+  const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
+    if (!where) return true;
+    for (const [key, value] of Object.entries(where)) {
+      if (key === '$and') {
+        if (!Array.isArray(value)) throw new Error('engine double: $and takes an array');
+        if (!value.every((clause) => matches(row, clause as Record<string, unknown>))) return false;
+        continue;
+      }
+      if (key.startsWith('$')) throw new Error(`engine double: operator ${key} is not implemented`);
+      if (value !== null && typeof value === 'object') {
+        throw new Error(`engine double: a non-scalar condition on '${key}' is not implemented`);
+      }
+      if (row[key] !== value) return false;
+    }
+    return true;
+  };
+
+  const find = vi.fn(async (
+    _object: string,
+    query?: { where?: Record<string, unknown>; limit?: number },
+    _options?: { context?: unknown },
+  ): Promise<Row[]> => {
+    const matched = [...rows.values()].filter((row) => matches(row, query?.where));
+    const bounded = typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
+    const snapshot = bounded.map((row) => ({ ...row }));
+    const gate = hold;
+    hold = undefined;
+    if (gate) await gate;
+    return snapshot;
+  });
+
+  return {
+    rows,
+    find,
+    engine: { find } as unknown as IDataEngine,
+    put(row: Row) {
+      rows.set(String(row.id), { ...row });
+    },
+    holdNextFind(): () => void {
+      let release!: () => void;
+      hold = new Promise<void>((resolve) => { release = resolve; });
+      return release;
+    },
+  };
+}
+
+/** An adapter that keeps documents by id and answers a search by substring. */
+function makeAdapter() {
+  const docs = new Map<string, KnowledgeDocument>();
+  const adapter: IKnowledgeAdapter = {
+    id: 'memory',
+    upsert: vi.fn(async (batch: KnowledgeDocument[]) => {
+      for (const doc of batch) docs.set(doc.id, doc);
+    }),
+    delete: vi.fn(async (ids: string[]) => {
+      for (const id of ids) docs.delete(id);
+    }),
+    search: vi.fn(async (query: string): Promise<KnowledgeHit[]> =>
+      [...docs.values()]
+        .filter((doc) => doc.content.includes(query))
+        .map((doc) => ({
+          chunkId: doc.id,
+          documentId: doc.id,
+          sourceId: doc.sourceId,
+          sourceRecordId: doc.sourceRecordId,
+          score: 1,
+          snippet: doc.content,
+        }))),
+  };
+  return { adapter, docs };
+}
+
+function makeCtx(engine?: IDataEngine) {
   let readyHook: (() => Promise<void>) | undefined;
   let handler: RealtimeEventHandler | undefined;
   let service: KnowledgeService | undefined;
@@ -34,7 +136,8 @@ function makeCtx() {
           unsubscribe: async () => undefined,
         };
       }
-      throw new Error(`no service ${name}`);
+      if (name === 'objectql' && engine) return engine;
+      throw new Error(`[Kernel] Service '${name}' not found`);
     },
   };
 
@@ -52,58 +155,68 @@ function makeCtx() {
   };
 }
 
-const CREATED: RealtimeEventPayload = {
-  type: 'data.record.created',
-  object: 'task',
-  payload: {
-    id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-    type: 'data.record.created',
-    object: 'task',
-    recordId: 'task_1',
-    after: { id: 'task_1', title: 'Ship it', notes: 'the record body' },
-    timestamp: '2026-08-02T12:00:00.000Z',
-  },
-  timestamp: '2026-08-02T12:00:00.000Z',
-};
+const AT = '2026-08-02T12:00:00.000Z';
 
-const DELETED: RealtimeEventPayload = {
-  type: 'data.record.deleted',
-  object: 'task',
-  payload: {
-    id: '1b2c3d4e-5f60-4718-9a2b-3c4d5e6f7081',
-    type: 'data.record.deleted',
-    object: 'task',
-    recordId: 'task_1',
-    timestamp: '2026-08-02T12:00:01.000Z',
-  },
-  timestamp: '2026-08-02T12:00:01.000Z',
-};
+/** A `data.record.*` envelope carrying the spec's `DataEvent`. */
+function dataEvent(type: string, recordId: string, after?: Row): RealtimeEventPayload {
+  return {
+    type,
+    object: 'kb_article',
+    payload: {
+      id: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+      type,
+      object: 'kb_article',
+      recordId,
+      ...(after ? { after } : {}),
+      timestamp: AT,
+    },
+    timestamp: AT,
+  };
+}
 
-/** [#4639] What a predicate (`multi: true`) write publishes: a count, no rows. */
-const BULK_DELETED: RealtimeEventPayload = {
-  type: 'data.records.deleted',
-  object: 'task',
-  payload: {
-    id: '9c8b7a65-4321-4fed-8ba9-876543210fed',
-    type: 'data.records.deleted',
-    object: 'task',
-    matched: 12,
-    timestamp: '2026-08-02T12:00:02.000Z',
-  },
-  timestamp: '2026-08-02T12:00:02.000Z',
-};
+const PUBLISHED: Row = { id: 'a1', title: 'Leave policy', body: 'Twenty days of paid leave', status: 'published' };
+const DRAFT: Row = { ...PUBLISHED, body: 'Draft wording, not yet approved', status: 'draft' };
 
-describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
-  it('upserts the RECORD (payload.after), not the event envelope', async () => {
+function source(where?: Record<string, unknown>): KnowledgeSource {
+  return {
+    id: 'kb',
+    label: 'Knowledge base',
+    adapter: 'memory',
+    source: {
+      kind: 'object',
+      object: 'kb_article',
+      contentFields: ['title', 'body'],
+      ...(where ? { where } : {}),
+    },
+  };
+}
+
+const PUBLISHED_ONLY = { status: 'published' };
+const SYSTEM = { executionContext: { positions: [], permissions: [], systemPermissions: [], isSystem: true } };
+
+async function bootWith(opts: { rows?: Row[]; where?: Record<string, unknown>; engine?: false }) {
+  const db = makeEngine(opts.rows ?? []);
+  const harness = makeCtx(opts.engine === false ? undefined : db.engine);
+  const { service, deliver } = await harness.boot(new KnowledgeServicePlugin({ sources: [source(opts.where)] }));
+  const memory = makeAdapter();
+  service.registerAdapter('memory', memory.adapter);
+  return { db, harness, service, deliver, ...memory };
+}
+
+describe('the event bridge: which data.record.* events reach the service', () => {
+  it.each([
+    ['data.record.created'],
+    ['data.record.updated'],
+    [RECORD_RESTORED_EVENT],
+  ])('%s hands the service the RECORD (payload.after), not the event envelope', async (type) => {
     const harness = makeCtx();
     const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
     const upsert = vi.spyOn(service, 'handleRecordUpsert').mockResolvedValue(undefined);
 
-    await deliver(CREATED);
+    await deliver(dataEvent(type, 'a1', PUBLISHED));
 
     expect(upsert).toHaveBeenCalledTimes(1);
-    expect(upsert.mock.calls[0][0]).toBe('task');
-    expect(upsert.mock.calls[0][1]).toEqual({ id: 'task_1', title: 'Ship it', notes: 'the record body' });
+    expect(upsert).toHaveBeenCalledWith('kb_article', PUBLISHED);
   });
 
   it('resolves the delete id from the required top-level recordId', async () => {
@@ -111,9 +224,9 @@ describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
     const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
     const del = vi.spyOn(service, 'handleRecordDelete').mockResolvedValue(undefined);
 
-    await deliver(DELETED);
+    await deliver(dataEvent('data.record.deleted', 'a1'));
 
-    expect(del).toHaveBeenCalledWith('task', 'task_1');
+    expect(del).toHaveBeenCalledWith('kb_article', 'a1');
   });
 
   it('ignores a data event that carries no record body', async () => {
@@ -121,47 +234,36 @@ describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
     const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
     const upsert = vi.spyOn(service, 'handleRecordUpsert').mockResolvedValue(undefined);
 
-    await deliver({
-      ...CREATED,
-      payload: { ...(CREATED.payload as Record<string, unknown>), after: undefined },
-    });
+    await deliver(dataEvent('data.record.created', 'a1'));
 
     expect(upsert).not.toHaveBeenCalled();
   });
 
-  it('[#4639] says out loud that a predicate write leaves the index stale', async () => {
+  it('says out loud that a predicate write leaves the index stale', async () => {
     const harness = makeCtx();
     const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
     const upsert = vi.spyOn(service, 'handleRecordUpsert').mockResolvedValue(undefined);
     const del = vi.spyOn(service, 'handleRecordDelete').mockResolvedValue(undefined);
 
-    await deliver(BULK_DELETED);
+    await deliver({
+      type: 'data.records.deleted',
+      object: 'kb_article',
+      payload: { id: '9c8b7a65-4321-4fed-8ba9-876543210fed', type: 'data.records.deleted', object: 'kb_article', matched: 12, timestamp: AT },
+      timestamp: AT,
+    });
 
     // A knowledge index is a per-record projection and `matched: 12` names no
-    // record, so there is nothing to upsert or delete — the adapters take
-    // neither a count nor a predicate. The index is now stale in a way this
-    // subscription cannot repair, and a silent no-op here would read exactly
-    // like "nothing happened".
+    // record, so there is nothing to upsert or delete. A silent no-op here
+    // would read exactly like "nothing happened". The two halves of the line
+    // the warn draws (the reap guard covers retention deletes; application
+    // predicate writes are not covered) are pinned so it neither over- nor
+    // under-claims coverage.
     expect(upsert).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
     expect(harness.ctx.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('may now be stale'),
-      expect.objectContaining({ object: 'task', matched: 12 }),
+      expect.objectContaining({ object: 'kb_article', matched: 12 }),
     );
-  });
-
-  it('[#4672] the warn draws the honest line: reap covered, application predicate writes not', async () => {
-    // #4672 shipped the reap guard, which covers the platform's OWN predicate
-    // delete (the retention sweep). It did NOT cover a caller's `multi: true`
-    // write, and the decision was to say so rather than imply a reconciliation
-    // pass that does not exist. The warn is the signal that stays honest, so
-    // its two halves are pinned: a message that stopped naming either one
-    // would be over- or under-claiming coverage.
-    const harness = makeCtx();
-    const { deliver } = await harness.boot(new KnowledgeServicePlugin());
-
-    await deliver(BULK_DELETED);
-
     const [message] = harness.ctx.logger.warn.mock.calls.at(-1) as [string];
     expect(message).toContain('cannot be repaired from the event stream');
     expect(message).toContain('the lifecycle reap guard de-indexes those rows before they are deleted');
@@ -170,28 +272,18 @@ describe('#4626 — KnowledgeServicePlugin event sync on data.record.*', () => {
 });
 
 /**
- * No producer emits a bare `record.created|updated|deleted` event: the ObjectQL
- * engine publishes `data.record.*` (and `data.records.*` for a predicate
- * write), and the spec's `RealtimeEventType` no longer contains the bare names.
- * The bridge therefore has no branch for them — and no `payload.record ??
- * payload` fallback to read a record out of a shape nothing sends. Each case
- * delivers the legacy shape and then the same record as `data.record.*` on the
- * SAME subscription: the legacy delivery must sync nothing while the
- * `data.record.*` one does, so a silent harness cannot pass for a removed branch.
+ * No producer emits a bare `record.created|updated|deleted` event, and the
+ * bridge has no branch for one. Each case delivers the legacy shape and then
+ * the same record as `data.record.*` on the SAME subscription: the legacy
+ * delivery must sync nothing while the `data.record.*` one does, so a silent
+ * harness cannot pass for a removed branch.
  */
 describe('a bare record.* event is not part of the sync vocabulary', () => {
-  const ROW = { id: 'task_1', title: 'Ship it', notes: 'the record body' };
-  const at = '2026-08-02T12:00:00.000Z';
-  const legacy = (type: string, payload: Record<string, unknown>): RealtimeEventPayload => ({
-    type,
-    object: 'task',
-    payload,
-    timestamp: at,
-  });
+  const legacy = (type: string, payload: Row): RealtimeEventPayload => ({ type, object: 'kb_article', payload, timestamp: AT });
 
   it.each([
-    ['record.created', 'under payload.record', { record: ROW }],
-    ['record.updated', 'as the payload itself', ROW],
+    ['record.created', 'under payload.record', { record: PUBLISHED }],
+    ['record.updated', 'as the payload itself', PUBLISHED],
   ])('%s (%s) upserts nothing, while data.record.created upserts the same row', async (type, _shape, payload) => {
     const harness = makeCtx();
     const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
@@ -199,20 +291,17 @@ describe('a bare record.* event is not part of the sync vocabulary', () => {
     const del = vi.spyOn(service, 'handleRecordDelete').mockResolvedValue(undefined);
 
     await deliver(legacy(type, payload));
-
     expect(upsert).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
 
-    // Control: same subscription, same row, the name the engine publishes.
-    await deliver(CREATED);
-
+    await deliver(dataEvent('data.record.created', 'a1', PUBLISHED));
     expect(upsert).toHaveBeenCalledTimes(1);
-    expect(upsert).toHaveBeenCalledWith('task', ROW);
+    expect(upsert).toHaveBeenCalledWith('kb_article', PUBLISHED);
   });
 
   it.each([
-    ['payload.id', { id: 'task_1' }],
-    ['payload.record.id', { record: { id: 'task_1' } }],
+    ['payload.id', { id: 'a1' }],
+    ['payload.record.id', { record: { id: 'a1' } }],
   ])('record.deleted (id from %s) deletes nothing, while data.record.deleted deletes the same id', async (_shape, payload) => {
     const harness = makeCtx();
     const { service, deliver } = await harness.boot(new KnowledgeServicePlugin());
@@ -220,14 +309,173 @@ describe('a bare record.* event is not part of the sync vocabulary', () => {
     const del = vi.spyOn(service, 'handleRecordDelete').mockResolvedValue(undefined);
 
     await deliver(legacy('record.deleted', payload));
-
     expect(upsert).not.toHaveBeenCalled();
     expect(del).not.toHaveBeenCalled();
 
-    // Control: same subscription, same id, the name the engine publishes.
-    await deliver(DELETED);
-
+    await deliver(dataEvent('data.record.deleted', 'a1'));
     expect(del).toHaveBeenCalledTimes(1);
-    expect(del).toHaveBeenCalledWith('task', 'task_1');
+    expect(del).toHaveBeenCalledWith('kb_article', 'a1');
+  });
+});
+
+describe("a written row is re-read against the source's where", () => {
+  it('re-reads by where AND id, one row, under the system context', async () => {
+    const t = await bootWith({ rows: [PUBLISHED], where: PUBLISHED_ONLY });
+
+    await t.deliver(dataEvent('data.record.created', 'a1', PUBLISHED));
+
+    expect(t.db.find).toHaveBeenCalledTimes(1);
+    expect(t.db.find).toHaveBeenCalledWith(
+      'kb_article',
+      { where: { $and: [PUBLISHED_ONLY, { id: 'a1' }] }, limit: 1 },
+      { context: expect.objectContaining({ isSystem: true }) },
+    );
+  });
+
+  it('a matching row enters the index', async () => {
+    const t = await bootWith({ rows: [PUBLISHED], where: PUBLISHED_ONLY });
+
+    await t.deliver(dataEvent('data.record.created', 'a1', PUBLISHED));
+
+    expect([...t.docs.keys()]).toEqual(['kb:a1']);
+    expect(t.docs.get('kb:a1')?.content).toBe('Leave policy\n\nTwenty days of paid leave');
+  });
+
+  it('a row that does not match is not indexed', async () => {
+    const t = await bootWith({ rows: [DRAFT], where: PUBLISHED_ONLY });
+
+    await t.deliver(dataEvent('data.record.created', 'a1', DRAFT));
+
+    expect(t.docs.size).toBe(0);
+    expect(t.adapter.upsert).not.toHaveBeenCalled();
+  });
+
+  it('a row that stops matching leaves the index — and is no longer found', async () => {
+    const t = await bootWith({ rows: [PUBLISHED], where: PUBLISHED_ONLY });
+    await t.deliver(dataEvent('data.record.created', 'a1', PUBLISHED));
+    expect(await t.service.search('paid leave', SYSTEM)).toHaveLength(1);
+
+    t.db.put(DRAFT);
+    await t.deliver(dataEvent('data.record.updated', 'a1', DRAFT));
+
+    expect(t.docs.size).toBe(0);
+    expect(t.adapter.delete).toHaveBeenCalledWith(['kb:a1'], expect.objectContaining({ reason: 'event-sync' }));
+    expect(await t.service.search('paid leave', SYSTEM)).toEqual([]);
+    expect(await t.service.search('Draft wording', SYSTEM)).toEqual([]);
+  });
+
+  it('a source with no where re-reads by id alone and indexes the row', async () => {
+    const t = await bootWith({ rows: [DRAFT] });
+
+    await t.deliver(dataEvent('data.record.created', 'a1', DRAFT));
+
+    expect(t.db.find).toHaveBeenCalledWith(
+      'kb_article',
+      { where: { id: 'a1' }, limit: 1 },
+      { context: expect.objectContaining({ isSystem: true }) },
+    );
+    expect(t.docs.get('kb:a1')?.content).toBe('Leave policy\n\nDraft wording, not yet approved');
+  });
+
+  it('a payload missing a content field still yields the whole document — from the re-read row', async () => {
+    const t = await bootWith({ rows: [PUBLISHED], where: PUBLISHED_ONLY });
+
+    // A projected write result: the id and the field the write touched.
+    await t.deliver(dataEvent('data.record.updated', 'a1', { id: 'a1', status: 'published' }));
+
+    expect(t.docs.get('kb:a1')?.content).toBe('Leave policy\n\nTwenty days of paid leave');
+  });
+
+  it('a restored row that matches is searchable again', async () => {
+    const t = await bootWith({ rows: [PUBLISHED], where: PUBLISHED_ONLY });
+    expect(await t.service.search('paid leave', SYSTEM)).toEqual([]);
+
+    await t.deliver(dataEvent(RECORD_RESTORED_EVENT, 'a1', PUBLISHED));
+
+    const hits = await t.service.search('paid leave', SYSTEM);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ sourceId: 'kb', sourceRecordId: 'a1' });
+  });
+
+  it('a restored row that does not match is not indexed', async () => {
+    const t = await bootWith({ rows: [DRAFT], where: PUBLISHED_ONLY });
+
+    await t.deliver(dataEvent(RECORD_RESTORED_EVENT, 'a1', DRAFT));
+
+    expect(t.docs.size).toBe(0);
+    expect(t.adapter.upsert).not.toHaveBeenCalled();
+    expect(await t.service.search('Draft wording', SYSTEM)).toEqual([]);
+  });
+});
+
+describe('with no data engine bound', () => {
+  it('a source with no where still builds the document from the payload', async () => {
+    const t = await bootWith({ engine: false });
+
+    await t.deliver(dataEvent('data.record.created', 'a1', DRAFT));
+
+    expect(t.docs.get('kb:a1')?.content).toBe('Leave policy\n\nDraft wording, not yet approved');
+  });
+
+  it('a source with a where is skipped, said once at warn', async () => {
+    const t = await bootWith({ engine: false, where: PUBLISHED_ONLY });
+
+    await t.deliver(dataEvent('data.record.created', 'a1', PUBLISHED));
+    await t.deliver(dataEvent('data.record.updated', 'a1', DRAFT));
+
+    expect(t.adapter.upsert).not.toHaveBeenCalled();
+    expect(t.adapter.delete).not.toHaveBeenCalled();
+    const reports = (t.harness.ctx.logger.warn.mock.calls as Array<[string]>)
+      .filter(([message]) => message.includes("source 'kb' declares a where filter and no data engine is bound"));
+    expect(reports).toHaveLength(1);
+  });
+});
+
+/**
+ * Two events for one row, the first one's re-read still in flight when the
+ * second arrives. The first re-read saw the row as it was; acting on it after
+ * the second sync would leave the index disagreeing with the database. Syncs of
+ * one document run one after another, so the last one re-reads last.
+ */
+describe('two opposite events for one row end consistent with the database', () => {
+  it('matching, then not matching: the document ends absent', async () => {
+    const t = await bootWith({ rows: [PUBLISHED], where: PUBLISHED_ONLY });
+
+    const release = t.db.holdNextFind();
+    const first = t.deliver(dataEvent('data.record.updated', 'a1', PUBLISHED));
+    t.db.put(DRAFT);
+    const second = t.deliver(dataEvent('data.record.updated', 'a1', DRAFT));
+    release();
+    await Promise.all([first, second]);
+
+    expect(t.db.rows.get('a1')?.status).toBe('draft');
+    expect(t.docs.has('kb:a1')).toBe(false);
+  });
+
+  it('not matching, then matching: the document ends present, from the latest row', async () => {
+    const t = await bootWith({ rows: [DRAFT], where: PUBLISHED_ONLY });
+    await t.deliver(dataEvent('data.record.created', 'a1', DRAFT));
+
+    const release = t.db.holdNextFind();
+    const first = t.deliver(dataEvent('data.record.updated', 'a1', DRAFT));
+    t.db.put(PUBLISHED);
+    const second = t.deliver(dataEvent('data.record.updated', 'a1', PUBLISHED));
+    release();
+    await Promise.all([first, second]);
+
+    expect(t.docs.get('kb:a1')?.content).toBe('Leave policy\n\nTwenty days of paid leave');
+  });
+
+  it('an update, then a delete: the document ends absent', async () => {
+    const t = await bootWith({ rows: [PUBLISHED], where: PUBLISHED_ONLY });
+
+    const release = t.db.holdNextFind();
+    const first = t.deliver(dataEvent('data.record.updated', 'a1', PUBLISHED));
+    t.db.rows.delete('a1');
+    const second = t.deliver(dataEvent('data.record.deleted', 'a1'));
+    release();
+    await Promise.all([first, second]);
+
+    expect(t.docs.has('kb:a1')).toBe(false);
   });
 });

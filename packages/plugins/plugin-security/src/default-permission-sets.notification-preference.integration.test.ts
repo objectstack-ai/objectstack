@@ -353,4 +353,52 @@ describe('member_default: who reads and writes sys_notification_preference rows'
       ]);
     });
   });
+
+  // [ruling 7073270426 on #35123] An empty digest or quiet hours on a member's
+  // own `(*, *)` row is "not set": the next row decides, in the end the
+  // organization's default. Clearing a field is therefore an UPDATE of the
+  // member's own row, inside the grant (no delete), which is what the
+  // Notification Settings page's "Follow organization setting" sends.
+  describe('a member clears their own digest and quiet hours and follows the organization again', () => {
+    const general = async () =>
+      (await new PreferenceResolver({ getData: () => ql as never, logger: silent }).effectiveFor(ALICE, ORG, [], ['inbox'])).general;
+
+    it('save a value of their own, clear it to empty, and the resolver answers the organization default, and a later change of it', async () => {
+      const orgWindow = { tz: 'UTC', start: '22:00', end: '07:00' };
+      const ownWindow = { start: '12:00', end: '13:00' };
+      const orgDefault = String((await insert(SYS, { topic: '*', channel: '*', enabled: true, digest: 'daily', quiet_hours: orgWindow })).id);
+      const own = String(
+        (await insert(as.alice, { user_id: ALICE, topic: '*', channel: '*', enabled: true, digest: 'weekly', quiet_hours: ownWindow })).id,
+      );
+      try {
+        expect(await general()).toMatchObject({
+          ownRowId: own,
+          digest: { value: 'weekly', source: 'own' },
+          quietHours: { value: ownWindow, source: 'own' },
+        });
+
+        // The member's own update writing empty to both fields: accepted by the own-row policy.
+        await update(as.alice, own, { digest: null, quiet_hours: null });
+        const row = await storedById(own);
+        expect(row).toMatchObject({ user_id: ALICE, topic: '*', channel: '*' });
+        expect(row?.digest ?? null).toBeNull();
+        expect(row?.quiet_hours ?? null).toBeNull();
+        expect(await general()).toMatchObject({
+          ownRowId: own,
+          digest: { value: 'daily', source: 'default' },
+          quietHours: { value: orgWindow, source: 'default' },
+        });
+
+        // A later change of the organization's default reaches the member.
+        await update(SYS, orgDefault, { digest: 'weekly', quiet_hours: { tz: 'UTC', start: '20:00', end: '06:00' } });
+        expect(await general()).toMatchObject({
+          digest: { value: 'weekly', source: 'default' },
+          quietHours: { value: { tz: 'UTC', start: '20:00', end: '06:00' }, source: 'default' },
+        });
+      } finally {
+        await ql.delete(OBJ, { where: { id: own }, context: SYS } as never);
+        await ql.delete(OBJ, { where: { id: orgDefault }, context: SYS } as never);
+      }
+    });
+  });
 });

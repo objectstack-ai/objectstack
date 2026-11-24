@@ -27,7 +27,6 @@ export default ObjectSchema.create({
     account_id: {
       type: 'lookup',
       reference: 'account',
-      required: false,
     },
   }
 });
@@ -36,7 +35,7 @@ export default ObjectSchema.create({
 ### One-to-Many: master_detail
 
 ```typescript
-// Parent: Invoice
+// Parent
 export default ObjectSchema.create({
   name: 'invoice',
   sharingModel: 'public_read_write',
@@ -53,7 +52,7 @@ export default ObjectSchema.create({
   }
 });
 
-// Child: Line Item (owned by parent)
+// Child
 export default ObjectSchema.create({
   name: 'invoice_line_item',
   sharingModel: 'controlled_by_parent',
@@ -154,7 +153,6 @@ export default ObjectSchema.create({
     parent_category: {
       type: 'tree',
       reference: 'category',
-      required: false,
     },
   }
 });
@@ -177,6 +175,12 @@ then cascades, clears or refuses exactly as a `lookup` does; undeclared, the
 field keeps the deleted user's id. `restrict`, and `set_null` on a `required`
 field (a `multiple` one only when the removal would empty it), refuse the delete
 with `409 DELETE_RESTRICTED`.
+
+**Change Owner:** `transferBehavior: 'cascade'` (default `'none'`) on a child's `lookup` /
+`master_detail` has the parent's Change Owner dialog offer to move the child rows its
+previous owner owns too; declare it where children follow the parent's owner. Parse
+refuses the key on other types, and `cascade` on a `sys_*` reference, `multiple: true`,
+or a child not offering Change Owner itself (a `controlled_by_parent` detail).
 
 ## Roll-up Summaries
 
@@ -253,9 +257,8 @@ field group of the parent names that child** (`relatedList`): the group draws
 the child's table at its place in the record's details and in the parent's
 entry form (below the form's fields when its sections name no field group),
 and parent + children save in **one atomic transaction**. Without the group
-nothing changes: the child is a tab and the form has no lines, whatever
-`inlineEdit` says. A parent or child declaring `enable.apiMethods` must list
-`'bulk'`, or that save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`.
+nothing changes: the child is a tab and the form has no lines. A parent or child
+declaring `enable.apiMethods` must list `'bulk'`, or that save is refused `405 OBJECT_API_METHOD_NOT_ALLOWED`.
 
 ```typescript
 // PARENT `invoice`: the group places the lines and holds no fields
@@ -282,17 +285,17 @@ The rendering side: objectstack-ui → Master-Detail Forms.
 `inlineEdit` only picks how a placed child's rows are entered:
 
 ```typescript
-inlineEdit: true       // auto — pick grid/form from the child's shape (default)
+inlineEdit: true       // auto (default)
 inlineEdit: 'grid'     // editable line-item grid (fast bulk entry; thin children)
 inlineEdit: 'form'     // read-only list; "Add" / per-row edit opens the FULL form
 ```
 
 **`true`** / omitted — **smart default**: picks `form` when the child has
 rich/form-only fields (textarea, file, image, json, location…) or more than ~8
-editable fields, else `grid`. Set the string to override.
+editable fields, else `grid`.
 
 **Modeling a `'grid'` line item for the full editor.** The grid lights up extra
-behaviors purely from how you model the child + parent:
+behaviors from how you model the child + parent:
 
 ```typescript
 // Parent (a field group names invoice_line, as above)
@@ -333,14 +336,15 @@ InvoiceLine = {
   clock: a scheduled flow too).
 - **Catalog auto-fill** — a `lookup` line field + sibling columns whose names
   match fields on the referenced record (e.g. `unit_price`, `description`) →
-  picking a record fills those cells.
+  picking a record fills those cells (a `currency` amount only in the same
+  currency: field-types.md → `lookupAutofill`).
 - **Sort field** — a numeric `position` / `sort_order` / `sequence` field is
   auto-detected, hidden from the grid, and stamped on drag-reorder.
 
 ### Detail-page related lists (the read-side mirror)
 
-You usually don't declare the **related list** on the parent's record detail page: every child relationship
-is shown **by default** as a tab with its count, a `master_detail` child too. The
+On the parent's record detail page every child relationship is a **related list**,
+shown **by default** as a tab with its count, a `master_detail` child too. The
 relationship flags *refine* that:
 
 ```typescript
@@ -356,45 +360,31 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 - `relatedList: false` — the child object is not shown on the parent record page.
 - `'primary'` — a full-width table in the record's details, with no tab. A parent field
   group naming a `master_detail` child (`relatedList: 'quote_line'`, written only when asked)
-  places its table there too; its tab stays unless a declared `relatedLists` omits it.
-- The parent's `relatedLists` is the tab list (objectstack-ui Record Page): absent,
-  nothing changes; declared, only the named lists show, in order, built-ins by name
+  places its table there too; its tab stays unless `relatedLists` omits it.
+- The parent's `relatedLists` is the tab list (objectstack-ui Record Page): declared,
+  only the named lists show, in order, built-ins by name
   (`sys_attachment`, `sys_approval_request`, `sys_activity`). An entry is the child,
-  `object.field` or `{ list, label, columns }`. A child in the stack with no inbound FK
+  `object.field` or `{ list, label, columns }`; its `label` translates at
+  `objects.{parent}._relatedLists.{list}.label` (none: nothing to translate).
+  A child in the stack with no inbound FK
   is refused everywhere; one that exists nowhere is refused by `os validate` /
   `os build` (bar a platform or sibling-artifact name) and by a metadata
   write naming no package (one into a package is stored, placing nothing).
 
 `relatedListTitle` / `relatedListColumns` override the derived title / columns
-(an entry's `label` / `columns` win); otherwise columns auto-derive from
-the child object's `highlightFields`. Audit FKs
+(columns: the child's `highlightFields`); an entry's `label` / `columns` win. Audit FKs
 (`created_by`/`updated_by`/`owner_id`) never become related lists. A child that
 references the parent through several FKs (e.g. `primary_account` +
 `partner_account`) yields **one related list per FK**; a self-referential FK
-(a hierarchy) surfaces a "children" list.
+surfaces a "children" list.
 
 ## Incorrect vs Correct
 
 ### ❌ Incorrect — Using lookup When master_detail is Needed
 
-```typescript
-export default ObjectSchema.create({
-  name: 'invoice_line_item',
-  fields: {
-    invoice_id: {
-      type: 'lookup',  // ❌ Child can exist without parent — use the master_detail pattern above
-      reference: 'invoice',
-    },
-  }
-});
-```
+A line item on a `lookup` can exist without its parent: use `master_detail`.
 
 ### ❌ Incorrect — Native Many-to-Many
 
-```typescript
-{
-  type: 'many_to_many',  // ❌ Not a valid field type — use a junction object
-  reference: 'tag',
-}
-```
+No `many_to_many` field type exists: use a junction object.
 

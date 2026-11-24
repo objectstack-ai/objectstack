@@ -122,6 +122,12 @@ describe('KnowledgeService — permission-aware search', () => {
       { chunkId: 'c2', documentId: 'd2', sourceId: 'http_src', score: 0.5, snippet: 'web' },
     ];
     const { svc } = buildSetup(hits);
+    // The fixture's http hit names a source, so the source is registered: a
+    // hit is served only as a registered source it was searched for.
+    svc.registerSource({
+      id: 'http_src', label: 'HTTP', adapter: 'memory',
+      source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
+    });
     const out = await svc.search('q');
     expect(out.map((h) => h.documentId)).toEqual(['d2']);
   });
@@ -199,7 +205,8 @@ describe('KnowledgeService — permission-aware search', () => {
     const svc = new KnowledgeService();
     svc.registerAdapter('memory', adapter);
     svc.registerSource(objectSource('s1', 'task'));
-    const out = await svc.search('q', { topK: 2 });
+    // System context: an object source is searched for no other caller without an engine.
+    const out = await svc.search('q', { topK: 2, executionContext: { positions: [], permissions: [], isSystem: true } });
     expect(out.map((h) => h.documentId)).toEqual(['d2', 'd3']);
   });
 
@@ -209,7 +216,7 @@ describe('KnowledgeService — permission-aware search', () => {
     svc.registerAdapter('memory', a);
     svc.registerSource(objectSource('s1', 'task'));
     svc.registerSource(objectSource('s2', 'note'));
-    await svc.search('q', { sourceIds: ['s2'] });
+    await svc.search('q', { sourceIds: ['s2'], executionContext: { positions: [], permissions: [], isSystem: true } });
     expect(a.searchSpy).toHaveBeenCalledOnce();
     const callArg = a.searchSpy.mock.calls[0][1] as { source: KnowledgeSource };
     expect(callArg.source.id).toBe('s2');
@@ -385,16 +392,27 @@ describe('recordToDocument withholds credential-class and internal fields', () =
     expect(JSON.stringify(doc)).not.toContain(INTERNAL);
   });
 
-  it('the event-sync path reads the schema off the bound engine', async () => {
+  // The event-sync path builds its document from the row it RE-READS (the
+  // source's `where` decides membership), and that row carries every column —
+  // the payload here carries only the id. The re-read row goes through the same
+  // gate as the reindex walk, so a withheld field stays out of the document
+  // whether the source takes `'*'` or names it.
+  it.each([
+    ["'*'", ['*'], [] as string[], 'Visible\n\nBody', {}],
+    ['named explicitly', ['title', 'api_token', 'lookup_digest'], ['passphrase', 'notes'], 'Visible', { notes: 'Body' }],
+  ])('the event-sync path withholds them from the re-read row (%s)', async (_label, content, meta, text, metadata) => {
     const getSchema = vi.fn((name: string) => (name === 'probe_doc' ? schema : undefined));
-    const svc = new KnowledgeService({ dataEngine: { find: vi.fn(), getSchema } as unknown as IDataEngine });
+    const find = vi.fn(async () => [record()]);
+    const svc = new KnowledgeService({ dataEngine: { find, getSchema } as unknown as IDataEngine });
     const adapter = makeAdapter('memory');
     svc.registerAdapter('memory', adapter);
-    svc.registerSource(source(['*']));
-    await svc.handleRecordUpsert('probe_doc', record());
+    svc.registerSource(source(content, meta));
+    await svc.handleRecordUpsert('probe_doc', { id: 'r1' });
+    expect(find).toHaveBeenCalledTimes(1);
     expect(getSchema).toHaveBeenCalledWith('probe_doc');
     const [docs] = adapter.upsertSpy.mock.calls[0] as unknown as [KnowledgeDocument[]];
-    expect(docs[0].content).toBe('Visible\n\nBody');
+    expect(docs[0].content).toBe(text);
+    expect(docs[0].metadata).toEqual(metadata);
     expect(JSON.stringify(docs)).not.toContain(CREDENTIAL);
     expect(JSON.stringify(docs)).not.toContain(INTERNAL);
   });

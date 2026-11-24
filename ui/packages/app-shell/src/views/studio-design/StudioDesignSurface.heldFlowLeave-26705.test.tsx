@@ -61,7 +61,13 @@ const mockClient = vi.hoisted(() => ({
 
 vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../metadata-admin/useMetadata')>();
-  return { ...mod, useMetadataClient: () => mockClient, useMetadataTypes: () => ({ entries: [] }) };
+  return { ...mod, useMetadataClient: () => mockClient, // objectstack#36899 — the registry serves the designer types the left menu lists.
+    useMetadataTypes: () => ({
+      entries: [
+        { type: 'object', domain: 'data' },
+        { type: 'flow', domain: 'automation' },
+      ],
+    }), };
 });
 
 vi.mock('./packages-io', async (importOriginal) => {
@@ -80,6 +86,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -150,6 +159,8 @@ async function openFlow(): Promise<void> {
     <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        {/* objectstack#36899 — a menu type entry opens that type's area list. */}
+        <Route path="/studio/:packageId/metadata/*" element={<output data-testid="area-landed" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -171,28 +182,27 @@ function reloadAsks(): boolean {
   return e.defaultPrevented;
 }
 
-const pillarLink = (name: string) => within(screen.getByTestId('studio-pillar-nav')).getByRole('link', { name });
+/** objectstack#36899 — the left menu's entry for a type: a link to that type's area list. */
+const menuEntry = (type: string) => within(screen.getByTestId('studio-menu')).getByTestId(`studio-menu-entry-type:${type}`);
 
 describe('a held flow step guards every departure (objectstack#26705)', () => {
-  it('leaving the pillar asks; Cancel keeps the held step, OK leaves and clears the guard', async () => {
+  it('leaving the pillar through the menu asks; Cancel keeps the held step, OK leaves and clears the guard', async () => {
     await openFlow();
     await holdANotifyStep();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(pillarLink('Data'));
+    fireEvent.click(menuEntry('object'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(confirmSpy).toHaveBeenCalledWith(LEAVE_QUESTION);
     expect(screen.getByTestId('studio-held')).toBeInTheDocument();
     expect(screen.getByTestId('studio-rail-automations')).toBeInTheDocument();
 
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(pillarLink('Data'));
+    fireEvent.click(menuEntry('object'));
     expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await screen.findByTestId('studio-rail-data');
+    await screen.findByTestId('area-landed');
     // The unmounted pillar took its hold back: nothing is asked any more.
     expect(reloadAsks()).toBe(false);
-    fireEvent.click(pillarLink('Automations'));
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
   });
 
   it('opening another flow in the rail asks; Cancel keeps the held step, OK opens the other flow', async () => {
@@ -225,14 +235,14 @@ describe('a held flow step guards every departure (objectstack#26705)', () => {
   });
 
   // CONTROL: nothing held, nothing asked.
-  it('with no edit held, the rail, the reload and the pillar link never ask', async () => {
+  it('with no edit held, the rail, the reload and the menu link never ask', async () => {
     await openFlow();
 
     fireEvent.click(screen.getByTestId('auto-rail-row-reminder'));
     await screen.findByTitle('API name: reminder', undefined, { timeout: 8000 });
     expect(reloadAsks()).toBe(false);
-    fireEvent.click(pillarLink('Data'));
-    await screen.findByTestId('studio-rail-data');
+    fireEvent.click(menuEntry('object'));
+    await screen.findByTestId('area-landed');
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 });

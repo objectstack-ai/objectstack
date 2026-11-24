@@ -27,7 +27,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema, SpecifierSchema } from '@objectstack/spec/system';
-import { builtinSettingsManifests } from './manifests/index.js';
+import { builtinSettingsManifests, knowledgeSettingsManifest, withAiEmbedderSection } from './manifests/index.js';
 import { evaluateVisibility, visibilitySource } from './visibility-eval.js';
 
 /** Wrap a predicate in the smallest specifier that carries one. */
@@ -50,11 +50,22 @@ const evaluatorParses = (visible: unknown): boolean => {
   }
 };
 
+/**
+ * The bundled corpus: every manifest declaration this package ships. #33933
+ * took the `knowledge` manifest and the `ai` embedder section out of the
+ * default aggregate; `@objectstack/service-knowledge` registers them from these
+ * same declarations, so they stay in the corpus the ruling measured.
+ */
+const corpus = [
+  ...builtinSettingsManifests.map((m) => (m.namespace === 'ai' ? withAiEmbedderSection(m) : m)),
+  knowledgeSettingsManifest,
+];
+
 describe('settings `visible` — declaration ⇄ evaluator', () => {
   it('the corpus: every bundled manifest parses against the narrowed declaration', () => {
     // The #7169 corpus, on the declaration side. Expected refusals: 0.
     const refusals: string[] = [];
-    for (const manifest of builtinSettingsManifests as Array<Record<string, any>>) {
+    for (const manifest of corpus as Array<Record<string, any>>) {
       const parsed = SettingsManifestSchema.safeParse(manifest);
       if (!parsed.success) {
         refusals.push(`${manifest.namespace}: ${parsed.error.issues.map((i) => `${i.path.join('.')} — ${i.message}`).join(' | ')}`);
@@ -68,7 +79,7 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // the reader is sent back to the measurement rather than trusting a stale
     // one. It is a tripwire on the premise, not a rule about how many
     // predicates a manifest may have — move it deliberately.
-    const predicates = (builtinSettingsManifests as Array<Record<string, any>>).flatMap((m) => [
+    const predicates = (corpus as Array<Record<string, any>>).flatMap((m) => [
       ...(typeof m.visible === 'undefined' ? [] : [m.visible]),
       ...(m.specifiers ?? []).filter((s: any) => typeof s.visible !== 'undefined').map((s: any) => s.visible),
     ]);
@@ -78,7 +89,10 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
     // policy, ADR-0069 TL;DR 6); it declares no `visible`, so the predicate
     // count does not move. `auth.mfa_grace_period_days` keeps its one
     // predicate, now over the three-level `mfa_required`.
-    expect(builtinSettingsManifests).toHaveLength(10);
+    // #33933: the aggregate is 9 now, and the corpus is still 10 with the
+    // `knowledge` manifest the knowledge service registers.
+    expect(builtinSettingsManifests).toHaveLength(9);
+    expect(corpus).toHaveLength(10);
     // 94 -> 96 at #11768: the `audience` group added two gated fields
     // (`audience_allowed_email_domains`, `audience_self_registration_permission_set`),
     // each with one `visible` predicate over `data.audience_posture`.
@@ -90,7 +104,7 @@ describe('settings `visible` — declaration ⇄ evaluator', () => {
   });
 
   it('every bundled predicate is accepted by BOTH sides', () => {
-    for (const manifest of builtinSettingsManifests as Array<Record<string, any>>) {
+    for (const manifest of corpus as Array<Record<string, any>>) {
       for (const spec of manifest.specifiers ?? []) {
         if (typeof spec.visible === 'undefined') continue;
         const where = `${manifest.namespace}.${spec.key ?? '(layout)'}: ${visibilitySource(spec.visible)}`;

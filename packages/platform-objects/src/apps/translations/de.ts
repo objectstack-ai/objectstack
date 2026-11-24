@@ -40,7 +40,7 @@ export const de: TranslationData = {
         group_overview: { label: 'Übersicht' },
         group_apps: { label: 'Apps' },
         nav_marketplace_browse: { label: 'Marketplace durchsuchen' },
-        nav_marketplace_installed: { label: 'Installierte Apps' },
+        nav_packages: { label: 'Pakete' },
         nav_cloud_connection: { label: 'Cloud-Verbindung' },
         group_people_org: { label: 'Personen und Organisation' },
         group_access_control: { label: 'Zugriffssteuerung' },
@@ -110,6 +110,7 @@ export const de: TranslationData = {
         nav_settings_knowledge: { label: 'Wissen' },
         nav_settings_lifecycle: { label: 'Datenlebenszyklus' },
         nav_recycle_bin: { label: 'Papierkorb' },
+        nav_public_forms: { label: 'Öffentliche Formulare' },
         nav_notification_preferences: { label: 'Benachrichtigungseinstellungen' },
         nav_notification_templates: { label: 'Benachrichtigungsvorlagen' },
 

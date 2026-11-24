@@ -108,7 +108,7 @@ async function removePlace(first: Response) {
       <DataPillar packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   fireEvent.click((await screen.findByText('Place')).closest('.cursor-grab') as HTMLElement);
   fireEvent.click(await screen.findByRole('button', { name: 'Remove “Place”' }));
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByTestId('field-remove-confirm-action'));

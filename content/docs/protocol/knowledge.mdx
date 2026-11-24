@@ -21,7 +21,9 @@ The Knowledge Protocol contract and the `service-knowledge` orchestrator are ope
 framework mechanisms. The AI **consumer** that wires the `search_knowledge` tool
 into an in-product chat loop (shown below) ships in
 **ObjectOS**. On the open-source framework, reach your data through `@objectstack/mcp`
-(BYO-AI) instead.
+(BYO-AI) instead: its door serves the same `search_knowledge` tool wherever the
+knowledge service is installed, searching only the sources whose `aiExposed` is
+not `false`, as the caller.
 </Callout>
 
 This document describes the **why**, the **contract**, the **plugin
@@ -50,7 +52,7 @@ distinctive value to add **around** them:
    caller's `ExecutionContext` so RLS naturally applies — the same
    policy that protects REST and ObjectQL queries also protects what
    the LLM can read.
-3. **Realtime sync.** ObjectQL `record.*` events drive incremental
+3. **Realtime sync.** ObjectQL `data.record.*` events drive incremental
    reindex without manual cron jobs.
 4. **Unified audit + observability.** Knowledge searches participate in
    the same trace / audit pipeline as REST, ObjectQL, and tool calls.
@@ -268,6 +270,9 @@ search_knowledge tool
    ▼
 IKnowledgeService.search(q, { executionContext, sourceIds })
    │
+   ├─► per object source: may U reach it? (exposure + field-level rules,
+   │       see below) ── a refused source is not searched for U
+   │
    ├─► adapter.search(q, …)  ──► returns raw hits with sourceRecordId
    │
    ├─► group hits by underlying object
@@ -286,6 +291,50 @@ This is the same pattern as the existing permission-aware data tools
 No matter how aggressive an adapter's retrieval is, the user never
 sees a chunk extracted from a record they can't read.
 
+### Source admission: exposure and field-level rules
+
+A passage is built at index time, under a system context, from every
+`contentFields` member of its source, the record `title` and the source's
+`metadataFields`. A row re-check alone would therefore serve a caller the text
+of a field a field-level rule hides from them. So before an `object` source is
+searched for a non-system caller, the service asks, once per object per search:
+
+- **Disabled package** — an object whose owning package is disabled is not
+  searched.
+- **API exposure** — the spec's one exposure decision for the `search`
+  operation, the one the cross-object search asks: `enable.apiEnabled: false`,
+  or an `enable.apiMethods` whitelist that does not grant `search` (granting
+  `list` does), keeps the object's sources out of the search.
+- **System objects** — a `sys_*` object is searched only when it declares
+  `enable.aiReadable: true` (the AI read tools' posture).
+- **Field-level rules** — every field the source serves (each `contentFields`
+  member, `'*'` meaning every field the object declares except `id`; each `metadataFields`
+  member; `title`), less the credential-class and `internal: true` fields an
+  index never carries, must be one the caller may **query**, per the `security`
+  service's `getQueryableFields`. Without that answer: its `getReadableFields`
+  less every field declaring a `maskingRule`; with no `security` service at
+  all: every field except those declaring a `maskingRule`. Queryable, not
+  merely readable, because a passage carries the unmasked value.
+
+The answer is per **source**, not per field: when one served field is hidden
+from the caller, that source is not searched for them at all — its passages
+mix the hidden field's text into one unit that cannot be partially withheld.
+To keep a source searchable for restricted callers, declare its
+`contentFields` / `metadataFields` from fields every intended reader may query,
+and put sensitive fields in a separate source. Every gate fails closed: a
+lookup that throws — the `security` service lookup included, unless the kernel
+answers that no `security` service is registered — or a `security` service
+that answers neither field question, keeps the source out of that caller's
+search. The system context bypasses these gates as it bypasses the row
+re-check. A caller with no execution context, or a service with no data engine
+bound, is searched no `object` source at all; an `object` source's hit with no
+`sourceRecordId` cannot be re-checked and is dropped; and the service drops a
+hit whose reported `sourceId` names another source than the one searched. That
+check sees only the `sourceId` an adapter reports: an adapter that labels
+another source's passage with the searched source's id is not caught by it, so
+two sources must not share one adapter-side store. A restricted caller's empty
+answer is this narrowing, not a missing index.
+
 For `file` and `http` sources (no underlying ObjectQL record), the
 adapter is responsible for honouring an opaque `permissions` field on
 each document. Sources that need fine-grained ACLs should be declared
@@ -296,10 +345,54 @@ with a `permissions` mapping function at index time.
 ## 6. Sync model
 
 For `object` sources, `KnowledgeService` subscribes to the ObjectQL engine's
-`data.record.created`, `data.record.updated` and `data.record.deleted` events
-(the legacy unprefixed `record.*` shape is still accepted). Each event triggers
-a single `adapter.upsert` / `adapter.delete` call — the record body is read
-from the event's `after`, and a delete's id from its required `recordId`.
+`data.record.created`, `data.record.updated`, `data.record.restored` and
+`data.record.deleted` events. A bare `record.*` event is not part of the
+vocabulary: no producer emits one, and the subscription ignores it.
+
+A source's `where` decides which rows it indexes on every path — the event
+sync as well as `reindexSource`. For a created, updated or restored row, with a
+data engine bound, each source re-reads the row under the system context:
+`find(object, { where: { $and: [where, { id }] }, limit: 1 })` (just `{ id }`
+when the source has no `where`).
+
+- **A row comes back** — the document is built from the re-read row, not from
+  the event's `after`, so a write result that omits a field (a projected
+  result, a formula the write did not return) cannot leave the document
+  short. The same field rules as a reindex apply: the fields the source lists
+  and the record `title`, never a credential-class or `internal` field.
+- **No row comes back** — the row does not match (a draft, or a row that
+  stopped matching), and its document is deleted. Deleting an absent document
+  changes nothing.
+- **A restored row** (a recycle-bin restore) takes the same path, so it
+  re-enters the index only if it matches.
+- **No data engine bound** — nothing can be re-read: a source without `where`
+  builds the document from the event's `after`, and a source with `where` is
+  not synced, which the service logs once per source as a warning.
+
+A delete removes the document named by the event's required `recordId`. Syncs
+of one document run one after another in the process, so two events for the
+same row cannot interleave: each re-reads after the previous one finished, and
+the last leaves the index agreeing with the database. Because the sync is
+inline, a write's sync can wait behind an earlier in-flight sync of the same
+document (on a single-connection pool, up to the pool's acquire timeout); the
+index still ends consistent.
+
+**When the sync runs.** The engine publishes `data.record.created` and
+`data.record.updated` from inside the write, after its `after*` hooks — before
+any unit of work around the write commits (the write's own unit, opened when a
+metadata hook can abort it, or a caller's `engine.transaction(…)`). The
+in-process realtime service awaits each subscriber, so the re-read runs inside
+the same open transaction and sees the row the write just made. If that unit
+then rolls back, the index is wrong in one of two ways until the row's next
+event or a `reindexSource`:
+
+- **The uncommitted row matched** — the document stays built from a row that
+  never committed.
+- **The uncommitted row did not match** — the document was deleted, so the
+  committed row, which may still match, is missing from the index.
+
+`data.record.restored` is
+published after the restore's own unit has committed.
 
 - **MVP (Phase 1):** synchronous, inline with the originating mutation.
   Fast for low-volume dev / demo. Indexing failures are logged but do
@@ -383,7 +476,9 @@ up.
 ### 7.1 Non-goals for Phase 1
 
 - Reranker hooks, hybrid retrieval toggles, MMR — adapter-private.
-- Field-level masking — Phase 1 enforces row-level only.
+- Field-level masking inside a passage. A source serving a field the caller
+  may not query is not searched for that caller at all (§5, source
+  admission); a passage is never re-projected or redacted per caller.
 - Cost / quota enforcement — Phase 2.
 - Multi-tenant index isolation — defer to adapter capability matrix.
 
@@ -404,10 +499,13 @@ internally (RAGFlow, Dify, Vectara).
 
 ## 9. Open questions
 
-- **Where does chunk-level ACL live?** Currently the framework checks
-  row-level ACLs by re-querying via `dataEngine.find`. Field-level
-  masking would require either (a) re-running `select` projections or
-  (b) standardising a `redact` step. Deferred.
+- **Where does chunk-level ACL live?** The framework checks row-level
+  ACLs by re-querying via `dataEngine.find`, and field-level rules at
+  source granularity (§5): a source serving a field the caller may not
+  query is not searched for them. Finer grain — serving such a caller a
+  passage with the hidden field's text removed — would require either
+  (a) indexing one passage per field-visibility class or (b) standardising
+  a `redact` step. Deferred.
 - **Multiple adapters per source.** Useful for mirroring (e.g. write
   to RAGFlow and pgvector simultaneously) but adds significant
   complexity. Not in Phase 1.

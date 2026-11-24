@@ -2079,6 +2079,32 @@ describe('[ADR-0131 D2] declared sharing rules are read from the registry, never
       h.rules.addDeclaredRuleScope('org_b');
       expect((await h.rules.listRules({}, BOOT)).map((r) => r.organization_id)).toEqual(['org_b']);
     });
+
+    it('the record hooks bind on a declared rule’s object whatever organizations serve it, so a later organization needs no rebind', async () => {
+      // No organization yet: nothing is served, and the object is bound all the same.
+      h.rules.setDeclaredRuleScopes([]);
+      expect(await h.rules.listRules({}, BOOT)).toEqual([]);
+      expect(await h.rules.listRuleHookObjects()).toEqual(['project']);
+      // Unknown scopes serve nothing either; the binding does not follow them.
+      h.rules.setDeclaredRuleScopesUnknown();
+      expect(await h.rules.listRuleHookObjects()).toEqual(['project']);
+      // Nor does it follow the activation ledger: a rule switched off at boot and
+      // on later is evaluated by the hooks already bound.
+      h.rules.setDeclaredRuleScopes(['org_a']);
+      h.engine._tables.sys_metadata_activation = [{ id: 'act_1', metadata_type: 'sharing_rule', name: DECLARED.name, active: false }];
+      expect(await h.rules.listRules({}, BOOT)).toEqual([]);
+      expect(await h.rules.listRuleHookObjects()).toEqual(['project']);
+      // A stored row's object joins it; an inactive declaration binds nothing.
+      h.engine._tables.sys_sharing_rule = [{
+        id: 'srule_t', organization_id: 'org_a', name: 'tasks_to_exec', label: 'tasks', object_name: 'task',
+        criteria_json: JSON.stringify({ status: 'open' }), recipient_type: 'user', recipient_id: 'exec',
+        access_level: 'read', active: true, managed_by: 'admin', customized: false,
+      }];
+      expect(await h.rules.listRuleHookObjects()).toEqual(['project', 'task']);
+      const inactive = harness([{ ...DECLARED, name: 'off_rule', object: 'invoice', active: false }], []);
+      inactive.rules.setDeclaredRuleScopes([]);
+      expect(await inactive.rules.listRuleHookObjects()).toEqual([]);
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────

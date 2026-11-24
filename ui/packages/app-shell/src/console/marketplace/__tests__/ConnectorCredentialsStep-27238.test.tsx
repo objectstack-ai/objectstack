@@ -64,7 +64,7 @@ beforeEach(() => {
       const method = (init?.method ?? 'GET').toUpperCase();
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       const answer = url === DOOR && method === 'GET' ? listing : writes.shift() ?? { status: 500, body: {} };
-      return { ok: answer.status >= 200 && answer.status < 300, status: answer.status, json: async () => answer.body } as unknown as Response;
+      return { ok: answer.status >= 200 && answer.status < 300, status: answer.status, headers: new Headers(), json: async () => answer.body } as unknown as Response;
     }),
   );
 });

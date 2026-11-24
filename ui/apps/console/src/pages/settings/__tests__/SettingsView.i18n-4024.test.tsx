@@ -124,6 +124,7 @@ beforeEach(() => {
     ok: true,
     status: 200,
     statusText: 'OK',
+    headers: new Headers(),
     json: async () => ({ success: true, data: PAYLOAD }),
   } as unknown as Response);
 });
@@ -241,6 +242,7 @@ describe('SettingsView refusal toasts interpolate through the bundle (objectui#4
       ok: false,
       status: 409,
       statusText: 'Conflict',
+      headers: new Headers(),
       json: async () => ({
         success: false,
         error: { code: 'SETTINGS_LOCKED', message: 'locked', details: { key: 'timezone' } },
@@ -267,6 +269,7 @@ describe('SettingsView refusal toasts interpolate through the bundle (objectui#4
       ok: false,
       status: 503,
       statusText: 'Service Unavailable',
+      headers: new Headers(),
       json: async () => ({
         success: false,
         error: {
@@ -302,6 +305,7 @@ async function saveRefusedWith(status: number, error: Record<string, unknown>, s
     ok: false,
     status,
     statusText: 'Refused',
+    headers: new Headers(),
     json: async () => ({ success: false, error }),
   } as unknown as Response);
   fireEvent.click(await screen.findByText(saveLabel));
@@ -316,6 +320,7 @@ function serveNamespace(payload: unknown) {
     ok: true,
     status: 200,
     statusText: 'OK',
+    headers: new Headers(),
     json: async () => ({ success: true, data: payload }),
   } as unknown as Response);
 }

@@ -4,7 +4,7 @@
  * The shell's design mode (objectstack#36362): the mode and its bar, and the
  * extension point other surfaces stage their changes through.
  *
- * - The bar holds 「Design mode」, 「Cancel」 and 「Save」 and nothing else;
+ * - The bar holds 「Design layout」, 「Cancel」 and 「Save」 and nothing else;
  *   「Save」 is off while nothing is staged.
  * - 「Save」 commits every staged change in the order first staged, then
  *   leaves the mode; a failed commit stops there, keeps it and every later
@@ -43,8 +43,10 @@ import {
   DesignModeProvider,
   isPageOfApp,
   useDesignMode,
+  useDesignModeActive,
   useDesignModeChange,
   useDesignModeController,
+  useHoldDesignModeOut,
 } from '../designMode';
 import { DesignModeBar } from '../DesignModeBar';
 
@@ -101,13 +103,13 @@ afterEach(() => {
 });
 
 describe('the bar (objectstack#36362)', () => {
-  it('holds 「Design mode」, 「Cancel」 and 「Save」, and nothing else', () => {
+  it('holds 「Design layout」, 「Cancel」 and 「Save」, and nothing else', () => {
     render(<Shell><EnterButton /></Shell>);
     expect(bar()).toBeNull();
     fireEvent.click(screen.getByText('enter'));
 
-    const region = screen.getByRole('region', { name: 'Design mode' });
-    expect(region).toHaveTextContent(/^Design modeCancelSave$/);
+    const region = screen.getByRole('region', { name: 'Design layout' });
+    expect(region).toHaveTextContent(/^Design layoutCancelSave$/);
     expect(within(region).getAllByRole('button').map((b) => b.textContent)).toEqual(['Cancel', 'Save']);
     expect(within(region).queryAllByRole('link')).toEqual([]);
   });
@@ -264,7 +266,7 @@ describe('leaving with something staged (objectstack#36362)', () => {
       inApp.click();
       expect(confirmSpy).not.toHaveBeenCalled();
       home.click();
-      expect(confirmSpy).toHaveBeenCalledWith('Leave design mode? Your unsaved changes will be lost.');
+      expect(confirmSpy).toHaveBeenCalledWith('Leave Design layout? Your unsaved changes will be lost.');
     } finally {
       window.removeEventListener('click', stop);
       inApp.remove();
@@ -353,5 +355,103 @@ describe('staging a change and saving at once (objectstack#36364)', () => {
     await flush();
     expect(screen.getByTestId('saved-with-menu')).toHaveTextContent('false');
     expect(commit).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#36692 — a dashboard's or a report's own editor and the mode
+ * exclude each other through one hold: an open editor holds the mode out, so
+ * `enter` refuses and says why; the mode on, `useDesignModeActive` is what an
+ * editor reads to not offer its Edit.
+ */
+describe('an editor of its own holds the mode out (objectstack#36692)', () => {
+  /** An editor that holds the mode out while it is open, and says whether it may be offered. */
+  function Editor({ name }: { name: string }) {
+    const [open, setOpen] = React.useState(false);
+    useHoldDesignModeOut(open);
+    const offered = !useDesignModeActive();
+    return (
+      <div>
+        <output data-testid={`offered-${name}`}>{offered ? 'yes' : 'no'}</output>
+        <button type="button" onClick={() => setOpen((o) => !o)}>
+          toggle {name}
+        </button>
+      </div>
+    );
+  }
+
+  /** The door, with what `enter` answered. */
+  function Door() {
+    const mode = useDesignMode();
+    const [answer, setAnswer] = React.useState('');
+    return (
+      <button type="button" onClick={() => setAnswer(String(mode?.enter()))}>
+        door {answer}
+      </button>
+    );
+  }
+
+  const PROMPT = 'Save or cancel your dashboard or report changes before designing the layout.';
+
+  it('while an editor is open, entering refuses with the prompt and the mode stays off', () => {
+    render(<Shell><Door /><Editor name="dashboard" /></Shell>);
+    fireEvent.click(screen.getByText('toggle dashboard'));
+    fireEvent.click(screen.getByText(/^door/));
+    expect(screen.getByText(/^door/)).toHaveTextContent('door false');
+    expect(bar()).toBeNull();
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError).toHaveBeenCalledWith(PROMPT);
+  });
+
+  it('the hold is let go when the editor closes: entering works again', () => {
+    render(<Shell><Door /><Editor name="dashboard" /></Shell>);
+    fireEvent.click(screen.getByText('toggle dashboard'));
+    fireEvent.click(screen.getByText('toggle dashboard'));
+    fireEvent.click(screen.getByText(/^door/));
+    expect(screen.getByText(/^door/)).toHaveTextContent('door true');
+    expect(bar()).not.toBeNull();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('two editors hold it out until both close', () => {
+    render(<Shell><Door /><Editor name="dashboard" /><Editor name="report" /></Shell>);
+    fireEvent.click(screen.getByText('toggle dashboard'));
+    fireEvent.click(screen.getByText('toggle report'));
+    fireEvent.click(screen.getByText('toggle dashboard'));
+    fireEvent.click(screen.getByText(/^door/));
+    expect(bar()).toBeNull();
+    fireEvent.click(screen.getByText('toggle report'));
+    fireEvent.click(screen.getByText(/^door/));
+    expect(bar()).not.toBeNull();
+  });
+
+  it('an editor unmounted while open lets go too', () => {
+    function Page() {
+      const [shown, setShown] = React.useState(true);
+      return (
+        <>
+          {shown && <Editor name="report" />}
+          <button type="button" onClick={() => setShown(false)}>leave page</button>
+        </>
+      );
+    }
+    render(<Shell><Door /><Page /></Shell>);
+    fireEvent.click(screen.getByText('toggle report'));
+    fireEvent.click(screen.getByText('leave page'));
+    fireEvent.click(screen.getByText(/^door/));
+    expect(bar()).not.toBeNull();
+  });
+
+  it('while the mode is on, an editor reads that it is not offered; outside a shell it always is', () => {
+    render(<Shell><Door /><Editor name="dashboard" /></Shell>);
+    expect(screen.getByTestId('offered-dashboard')).toHaveTextContent('yes');
+    fireEvent.click(screen.getByText(/^door/));
+    expect(screen.getByTestId('offered-dashboard')).toHaveTextContent('no');
+    fireEvent.click(screen.getByTestId('design-mode-cancel'));
+    expect(screen.getByTestId('offered-dashboard')).toHaveTextContent('yes');
+    cleanup();
+    render(<Editor name="bare" />);
+    fireEvent.click(screen.getByText('toggle bare'));
+    expect(screen.getByTestId('offered-bare')).toHaveTextContent('yes');
   });
 });

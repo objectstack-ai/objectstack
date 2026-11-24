@@ -19,14 +19,21 @@
  * `ChatPane`: inside the package's Studio the param goes onto the current
  * location, so the surface stays mounted and keeps its selection; from
  * anywhere else (the full-page chat, the console dock) the link opens the
- * package's Interfaces pillar with it.
+ * package's Studio home (the Data pillar) with it.
  */
 
-/** The query key the surface reads. */
-export const STUDIO_CHANGES_PARAM = 'changes';
+import {
+  STUDIO_CHANGES_PARAM,
+  STUDIO_CHANGES_REVIEW,
+  studioChangesReviewPath,
+  studioPackagePath,
+} from './studioAddress.js';
 
-/** The one value it acts on: open the drawer to review the pending drafts. */
-export const STUDIO_CHANGES_REVIEW = 'review';
+// objectstack#36895 — the param and its value are Studio address vocabulary,
+// owned by `studioAddress.ts` (the server's review link spells the same
+// address); re-exported here, where the surface reads them.
+/** The query key the surface reads, and the one value it acts on: open the drawer to review the pending drafts. */
+export { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioAddress.js';
 
 /** Where to go, and whether the move replaces the current history entry. */
 export interface StudioChangesTarget {
@@ -40,14 +47,14 @@ export interface StudioChangesTarget {
  *  - Already on one of that package's Studio pillars: the same path, search
  *    and hash with the param set, replacing the entry. No route changes, so
  *    nothing remounts.
- *  - Anywhere else: the package's Interfaces pillar with the param, as a new
- *    entry (Back returns to where the user was).
+ *  - Anywhere else: the package's Studio home (the Data pillar) with the
+ *    param, as a new entry (Back returns to where the user was).
  */
 export function studioChangesReviewTarget(
   packageId: string,
   current: { pathname: string; search: string; hash?: string },
 ): StudioChangesTarget {
-  const base = `/studio/${encodeURIComponent(packageId)}`;
+  const base = studioPackagePath(packageId);
   const onPillar = current.pathname.startsWith(`${base}/`) && current.pathname.length > base.length + 1;
   if (onPillar) {
     const params = new URLSearchParams(current.search);
@@ -55,7 +62,7 @@ export function studioChangesReviewTarget(
     return { to: `${current.pathname}?${params.toString()}${current.hash ?? ''}`, replace: true };
   }
   return {
-    to: `${base}/interfaces?${STUDIO_CHANGES_PARAM}=${STUDIO_CHANGES_REVIEW}`,
+    to: studioChangesReviewPath(packageId),
     replace: false,
   };
 }

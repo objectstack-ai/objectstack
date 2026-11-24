@@ -190,6 +190,13 @@ export interface ViewSettingsKanbanSummaryValue {
 }
 
 /**
+ * objectstack#36880 — the fields each lane statistic that aggregates a field
+ * may name, per function: the aggregate × field-type table's row for it, so
+ * `min` / `max` also offer a date, a date-time or a time.
+ */
+export type ViewSettingsKanbanSummaryFields = Record<'sum' | 'avg' | 'min' | 'max', ReadonlyArray<{ value: string; label: string }>>;
+
+/**
  * objectstack#36370 — the board's own settings, which the panel shows IN
  * PLACE OF the table's columns, grouping, row height and row colour while the
  * view is a kanban. Every part is the view's (the host holds a change in the
@@ -214,10 +221,13 @@ export interface ViewSettingsKanban {
   showFieldLabels?: ViewSettingsToggle;
   /** Whether a card leaves out a field that holds nothing. */
   hideEmptyFields?: ViewSettingsToggle;
-  /** The statistic each lane shows at its foot: none, a count, or a number field's sum or average. */
+  /**
+   * The statistic each lane shows at its foot: none, a count, a number
+   * field's sum or average, or the minimum or maximum of a number or a date.
+   */
   summary?: {
     value: ViewSettingsKanbanSummaryValue | null;
-    numberFields: ReadonlyArray<{ value: string; label: string }>;
+    fields: ViewSettingsKanbanSummaryFields;
     onChange: (next: ViewSettingsKanbanSummaryValue | null) => void;
   };
 }
@@ -695,16 +705,26 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
   };
   const kanbanFieldLabel = (name: string) =>
     kanban?.cardFieldCandidates.find((f) => f.name === name)?.label || fieldLabel(name);
+  // objectstack#36520 — every calculation the board's `kanban.summary` takes
+  // has a name here, so an authored `avg` / `min` / `max` reads as a word, not
+  // as its raw type.
+  const summaryWords: Record<string, string> = {
+    count: t('grid.summary.count', { defaultValue: 'Count' }),
+    sum: t('grid.summary.sum', { defaultValue: 'Sum' }),
+    avg: t('list.optionsMenu.kanbanSummaryAvg', { defaultValue: 'Average' }),
+    min: t('list.optionsMenu.kanbanSummaryMin', { defaultValue: 'Minimum' }),
+    max: t('list.optionsMenu.kanbanSummaryMax', { defaultValue: 'Maximum' }),
+  };
   const summaryWord = (type: string) =>
-    type === 'count'
-      ? t('grid.summary.count', { defaultValue: 'Count' })
-      : type === 'sum'
-        ? t('grid.summary.sum', { defaultValue: 'Sum' })
-        : type;
+    Object.prototype.hasOwnProperty.call(summaryWords, type) ? summaryWords[type] : type;
   const summaryText = (value: ViewSettingsKanbanSummaryValue | null): string => {
     if (!value || value.type === 'none') return none;
     if (!value.field || value.type === 'count') return summaryWord(value.type);
-    const label = kanban?.summary?.numberFields.find((f) => f.value === value.field)?.label || kanbanFieldLabel(value.field);
+    const offered = kanban?.summary?.fields;
+    const list = offered && Object.prototype.hasOwnProperty.call(offered, value.type)
+      ? offered[value.type as keyof ViewSettingsKanbanSummaryFields]
+      : undefined;
+    const label = list?.find((f) => f.value === value.field)?.label || kanbanFieldLabel(value.field);
     return `${summaryWord(value.type)} · ${label}`;
   };
   const toggleRow = (label: string, toggle: ViewSettingsToggle, testId: string) => (
@@ -1004,13 +1024,17 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     const options: Array<{ value: string; label: string; pick: ViewSettingsKanbanSummaryValue | null }> = [
       { value: 'none', label: none, pick: null },
       { value: 'count', label: summaryWord('count'), pick: { type: 'count' } },
-      // objectstack#36370 — what the board computes (`KanbanLaneSummarySchema`):
-      // a count, or a number field's sum.
-      ...summary.numberFields.map((f) => ({
-        value: `sum:${f.value}`,
-        label: `${summaryWord('sum')} · ${f.label}`,
-        pick: { type: 'sum', field: f.value },
-      })),
+      // objectstack#36370, objectstack#36520 — what the board computes
+      // (`KanbanLaneSummarySchema`): a count, or a field's sum, average,
+      // minimum or maximum; objectstack#36880 — each over the fields the
+      // aggregate table accepts for it, so a date has a minimum and a maximum.
+      ...(['sum', 'avg', 'min', 'max'] as const).flatMap((type) =>
+        summary.fields[type].map((f) => ({
+          value: `${type}:${f.value}`,
+          label: `${summaryWord(type)} · ${f.label}`,
+          pick: { type, field: f.value },
+        })),
+      ),
     ];
     const current = !summary.value || summary.value.type === 'none'
       ? 'none'

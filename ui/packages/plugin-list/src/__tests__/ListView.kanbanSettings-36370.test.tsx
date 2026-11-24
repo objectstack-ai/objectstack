@@ -11,8 +11,11 @@
  * header menu.
  *
  * Pinned here:
- *   - the lane field picker offers the option-backed fields only (a select or
- *     a radio): a lookup, a user or a boolean draws no sensible lanes yet;
+ *   - the lane field picker offers the option-backed fields (a select, a
+ *     radio) and the single-valued references (a lookup, a user, a
+ *     master-detail, a tree: objectstack#36643), never a many-valued
+ *     reference, a boolean or a text field; choosing a person writes it as
+ *     the board's `groupByField`;
  *   - the lane statistic sums what the aggregate table's `sum` row accepts
  *     (a number, a currency), never a percent, a formula or a boolean — the
  *     verdict `@objectstack/lint` gives `kanban.summary`;
@@ -40,11 +43,18 @@ const objectDef = {
     tier: { name: 'tier', type: 'radio', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }] },
     account: { name: 'account', type: 'lookup', label: 'Account', reference: 'account' },
     owner: { name: 'owner', type: 'user', label: 'Owner' },
+    parent: { name: 'parent', type: 'master_detail', label: 'Parent', reference: 'account' },
+    region: { name: 'region', type: 'tree', label: 'Region', reference: 'region' },
+    partners: { name: 'partners', type: 'lookup', label: 'Partners', reference: 'account', multiple: true },
+    watchers: { name: 'watchers', type: 'user', label: 'Watchers', multiple: true },
     closed: { name: 'closed', type: 'boolean', label: 'Closed' },
     amount: { name: 'amount', type: 'currency', label: 'Amount' },
     seats: { name: 'seats', type: 'number', label: 'Seats' },
     rate: { name: 'rate', type: 'percent', label: 'Rate' },
     score: { name: 'score', type: 'formula', label: 'Score' },
+    close_date: { name: 'close_date', type: 'date', label: 'Close date' },
+    signed_at: { name: 'signed_at', type: 'datetime', label: 'Signed at' },
+    call_time: { name: 'call_time', type: 'time', label: 'Call time' },
   },
 };
 
@@ -74,7 +84,7 @@ const makeDataSource = () =>
     onMutation: () => () => {},
   }) as any;
 
-function mount(opts: { userId?: string; laneCollapseKey?: string; schemaExtras?: Record<string, unknown> } = {}) {
+function mount(opts: { userId?: string; laneCollapseKey?: string; schemaExtras?: Record<string, unknown>; onKanbanChange?: (patch: Record<string, unknown>) => void } = {}) {
   laneMenus = [];
   const list = (
     <SchemaRendererProvider dataSource={makeDataSource()}>
@@ -89,7 +99,7 @@ function mount(opts: { userId?: string; laneCollapseKey?: string; schemaExtras?:
         } as never}
         dataSource={makeDataSource()}
         laneCollapseKey={opts.laneCollapseKey}
-        onKanbanChange={() => {}}
+        onKanbanChange={opts.onKanbanChange ?? (() => {})}
       />
     </SchemaRendererProvider>
   );
@@ -104,16 +114,28 @@ async function collapseKey(): Promise<string | undefined> {
 afterEach(cleanup);
 
 describe('ListView on a board: the settings it offers (objectstack#36370)', () => {
-  it('offers only option-backed lane fields: a select and a radio', async () => {
+  it('offers option-backed and single-valued reference lane fields, never a many-valued one', async () => {
     mount();
     await waitFor(() => expect(screen.getByTestId('object-kanban-spy')).toBeTruthy());
     fireEvent.click(await screen.findByTestId('toolbar-display-trigger'));
     fireEvent.click(await screen.findByTestId('options-row-lane-field'));
-    expect(screen.getByTestId('options-lane-field-stage')).toBeTruthy();
-    expect(screen.getByTestId('options-lane-field-tier')).toBeTruthy();
-    for (const out of ['account', 'owner', 'closed', 'name', 'amount']) {
+    for (const offered of ['stage', 'tier', 'account', 'owner', 'parent', 'region']) {
+      expect(screen.getByTestId(`options-lane-field-${offered}`)).toBeTruthy();
+    }
+    for (const out of ['partners', 'watchers', 'closed', 'name', 'amount']) {
       expect(screen.queryByTestId(`options-lane-field-${out}`)).toBeNull();
     }
+  });
+
+  it('choosing a person in the lane field picker writes it as the lane field (objectstack#36643)', async () => {
+    const onKanbanChange = vi.fn();
+    mount({ onKanbanChange });
+    await waitFor(() => expect(screen.getByTestId('object-kanban-spy')).toBeTruthy());
+    fireEvent.click(await screen.findByTestId('toolbar-display-trigger'));
+    fireEvent.click(await screen.findByTestId('options-row-lane-field'));
+    fireEvent.click(screen.getByTestId('options-lane-field-owner'));
+    // The lanes chosen on the old field name none of the owners: they go.
+    expect(onKanbanChange).toHaveBeenCalledWith({ groupByField: 'owner', lanes: null });
   });
 
   it('offers a sum over the fields the aggregate table adds, and no percent, formula or boolean', async () => {
@@ -141,5 +163,33 @@ describe('ListView on a board: the settings it offers (objectstack#36370)', () =
     // Without the host's key the schema's own id names the view; signed out reads `-`.
     mount({ schemaExtras: { id: 'board_view' } });
     expect(await collapseKey()).toBe(`-:${OBJECT}:board_view`);
+  });
+});
+
+/**
+ * objectstack#36880 — each lane statistic offers the fields the aggregate
+ * table's row for THAT function accepts (the verdict `@objectstack/lint` gives
+ * `kanban.summary`): a date, a date-time and a time have a minimum and a
+ * maximum, and neither a sum nor an average; a percent averages but does not
+ * add; a formula and a boolean are offered under none.
+ */
+describe('ListView on a board: each lane statistic offers its own fields (objectstack#36880)', () => {
+  const OFFERED: Record<string, string[]> = {
+    sum: ['amount', 'seats'],
+    avg: ['amount', 'seats', 'rate'],
+    min: ['amount', 'seats', 'rate', 'close_date', 'signed_at', 'call_time'],
+    max: ['amount', 'seats', 'rate', 'close_date', 'signed_at', 'call_time'],
+  };
+  const CANDIDATES = ['amount', 'seats', 'rate', 'score', 'closed', 'name', 'close_date', 'signed_at', 'call_time'];
+
+  it('offers min and max over the temporal fields, and every function only what its row accepts', async () => {
+    mount();
+    await waitFor(() => expect(screen.getByTestId('object-kanban-spy')).toBeTruthy());
+    fireEvent.click(await screen.findByTestId('toolbar-display-trigger'));
+    fireEvent.click(await screen.findByTestId('options-row-lane-summary'));
+    for (const [fn, offered] of Object.entries(OFFERED)) {
+      const shown = CANDIDATES.filter((name) => screen.queryByTestId(`options-lane-summary-${fn}:${name}`) !== null);
+      expect({ fn, shown }).toEqual({ fn, shown: offered });
+    }
   });
 });

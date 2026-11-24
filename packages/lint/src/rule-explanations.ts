@@ -964,12 +964,18 @@ const SECURITY_WILDCARD_VAMA_EXPLANATION: RuleExplanation = {
       'superuser over the whole deployment, objects other packages own included. Only the platform\'s own ' +
       'admin set may combine the two, and it lives outside every package, so the rule is an error on any ' +
       'set a stack authors.',
+    '`viewAllFields` on the `\'*\'` entry is reported the same way. It is the field half of the same superuser: ' +
+      'a read vote on every field of every object, other packages\' objects included, so a field another ' +
+      'package hides with `readable: false` is read by every holder of the set that also reaches the object. ' +
+      'The organization boundary refuses to distribute such a set as it refuses the two record bits, and the ' +
+      'platform\'s own admin set carries it on its wildcard. On an object entry the bit is not reported here.',
     'An app needs no wildcard of its own: platform admins already reach every installed package\'s objects ' +
       'through that platform set. An app-level admin (`crm_admin`, say) is an ordinary set that names the ' +
       'objects it needs and that the customer binds to a position of their own choosing (ADR-0090 D9), ' +
       'because "who runs this app" and "who runs the platform" are rarely the same people.',
     'To fix it, enumerate the objects the set really needs, with `viewAllRecords` / `modifyAllRecords` only ' +
-      'on the entries where the bypass is meant, or drop the two flags from the `\'*\'` entry.',
+      'on the entries where the bypass is meant (and `viewAllFields` on the entries whose every field the set ' +
+      'should read), or drop the flags from the `\'*\'` entry.',
   ],
 };
 
@@ -1012,14 +1018,50 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
       'it binds as well.',
     'The set\'s bypass is read the way the runtime reads it: its own entry for the object when it has one, ' +
       'otherwise its `\'*\'` entry, as a lookup and never a merge. Only the set that declares the entry is ' +
-      'judged: a holder of two sets is unmasked by the other set\'s View All or Modify All too, but no ' +
-      'author wrote an inert entry there.',
+      'judged here. A holder of two sets is unmasked by the other set\'s View All, Modify All or ' +
+      '`viewAllFields` too; that is `security-cross-set-field-reopen`, which skips a row this rule reports, ' +
+      'so one row earns one finding.',
     'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide which half ' +
       'is meant. If the field must stay hidden or read-only, remove `modifyAllRecords` from the object entry ' +
       'and reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
       '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. `viewAllRecords` ' +
       'may stay, since the set\'s own `readable: false` binds beside it. If the bypass is meant, delete the ' +
       'field entry, which never took effect.',
+  ],
+};
+
+const SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION: RuleExplanation = {
+  rule: 'security-cross-set-field-reopen',
+  covers: 'why a field one set hides is still read through another set',
+  paragraphs: [
+    'Field permissions from every set a caller holds are merged as a union, with no deny. A set that holds ' +
+      '`viewAllRecords` (View All), `modifyAllRecords` (Modify All) or `viewAllFields` on an object votes ' +
+      '`readable: true` on every field of it, and Modify All votes `editable: true` as well. So when one set ' +
+      'hides a field (`readable: false`) or locks it (`editable: false`, or `editable` omitted, which parses ' +
+      'to false), a caller who also holds a second set with one of those bits on the object reads the field ' +
+      '(and, under Modify All, edits it). The first set still reads as protecting the field, and nothing ' +
+      'refuses the pair, which is why an author takes the field to be hidden.',
+    'The bits are read the way the runtime reads them: the second set\'s own entry for the object when it ' +
+      'has one, otherwise its `\'*\'` entry, as a lookup and never a merge. Inside one set the specific row ' +
+      'beats the general bit: a second set whose own row declares the field `readable: false` beside View ' +
+      'All or `viewAllFields` casts no read vote on it, so it is not reported. View All and `viewAllFields` ' +
+      'never vote an edit, so an edit lock beside them binds and is not reported either. A row its own set\'s ' +
+      'Modify All already unbinds is `security-superuser-field-mask-inert`, not this rule, so one row earns ' +
+      'one finding.',
+    'What is not reported: a field that declares `requiredPermissions` (ADR-0066 D3), because that AND-gate ' +
+      'is applied after the merge and no set\'s bit opens it to a caller without the capabilities; a key on ' +
+      'an object this stack does not define, or naming a field the object does not declare; and any field ' +
+      'judged by its name. The rule reads only the declared two-set shape.',
+    'This is a warning, not an error: the pair is legal and no door refuses it. To fix it, decide what the ' +
+      'second set means. If it should not read the field, drop the bit from its entry (reach the rows with ' +
+      '`readScope` / `writeScope` or a row-level policy instead of View All or Modify All), or give it its own ' +
+      '`readable: false` row on the field, which binds beside View All and `viewAllFields` but not beside ' +
+      'Modify All. If it really should read every field, say so with `viewAllFields: true` on its entry: that ' +
+      'read then survives the major release in which View All and Modify All stop voting on fields. A field ' +
+      'that must stay hidden from everyone without a capability, such as a salary or an ID number, is ' +
+      'protected on the field itself: declare `requiredPermissions` on it (ADR-0066 D3), and add a ' +
+      '`maskingRule` where a partial value is needed, so the rule no longer depends on which sets a caller ' +
+      'holds.',
   ],
 };
 
@@ -1478,12 +1520,20 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
       'local another name. `var input = …` is not a redeclaration and compiles.',
     'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
       'with this host\'s JavaScript engine and without running it. The runtime\'s engine is QuickJS. ' +
-      'The two agree on redeclarations, grammar and strict-mode errors; they measurably differ inside the ' +
-      'pattern of a regular expression (duplicate named groups, modifier groups), so a pattern the host ' +
-      'refuses is reported as a warning rather than refused. A literal that never closes on its line, or ' +
-      'whose flags are not a flag set, is refused like any other compile error: QuickJS refuses it too. ' +
-      'Syntax the host accepts and QuickJS does not is not caught here; at run time such an action answers ' +
-      'a 500 that names the action and the compile error.',
+      'The two agree on redeclarations, grammar and strict-mode errors, and on almost every ' +
+      'regular-expression pattern: an unterminated group, nothing to repeat, a class range out of order, ' +
+      'a back-reference to a group the pattern does not name, a Unicode property name neither knows and an ' +
+      'incomplete quantifier are refused by both, so they are refused here like any other compile error. ' +
+      'Measured against Node 22\'s V8, the two differ on two pattern constructs, duplicate named capture ' +
+      'groups and modifier groups (`(?i:…)`), and on three Unicode property names, `IDS_Unary_Operator`, ' +
+      '`Modifier_Combining_Mark` and the script `Katakana_Or_Hiragana` (with their aliases): Node 22 ' +
+      'refuses them and QuickJS runs them, so such a pattern is reported as a warning rather than refused (a ' +
+      'later Node that accepts them reports nothing). A property name is judged by this host\'s Unicode ' +
+      'tables; on a host whose tables are older than the measured Unicode 17.0, every property name it ' +
+      'refuses is a warning. A literal that never closes on its line, or whose flags ' +
+      'are not a flag set, is refused: QuickJS refuses it too. Syntax the host accepts and QuickJS does ' +
+      'not is not caught here; at run time such an action answers a 500 that names the action and the ' +
+      'compile error.',
   ],
 };
 
@@ -1491,10 +1541,13 @@ const ACTION_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
 const CTX_BODY_COMPILE: readonly string[] = [
   'The rule compiles the body inside the same expression the runtime builds, from the same function, ' +
     'with this host\'s JavaScript engine and without running it, and reads the failure the way ' +
-    '`action-body-does-not-compile` does: a regular-expression pattern the host refuses is a warning, ' +
-    'because the runtime\'s QuickJS accepts some patterns the host does not; every other compile failure, ' +
-    'a literal that never closes or whose flags are not a flag set included, is refused. Syntax the host ' +
-    'accepts and QuickJS does not is not caught here.',
+    '`action-body-does-not-compile` does: a regular-expression pattern Node 22 refuses as a duplicate ' +
+    'named capture group, a modifier group or a Unicode property name only QuickJS knows ' +
+    '(`IDS_Unary_Operator`, `Modifier_Combining_Mark`, `Katakana_Or_Hiragana`) is a warning, because the ' +
+    'runtime\'s QuickJS runs it; ' +
+    'every other compile failure, every other pattern failure and a literal that never closes or whose ' +
+    'flags are not a flag set included, is refused. Syntax the host accepts and QuickJS does not is not ' +
+    'caught here; at run time such a body fails with a sentence that names it and the compile error.',
 ];
 
 const HOOK_BODY_DOES_NOT_COMPILE_EXPLANATION: RuleExplanation = {
@@ -4328,11 +4381,12 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'judged the same way, under this id, and refused when the page is saved. The grid is bound by its ' +
       '`dataSource.object`, else `properties.objectName`; its grouped header numbers come from its ' +
       '`aggregations` (`grid-aggregation-field-type-refused`), not from the column summaries.',
-    'A board\'s lane foot statistic, `kanban.summary`, is judged under this id too: a `sum` totals its ' +
-      'field over each lane, so the pair is the table\'s `sum` row over the field\'s declaration, and a ' +
-      'refused pair is reported at `kanban.summary`, as is a `sum` over a `boolean` or `toggle` field, which the ' +
-      'board does not add. `count` and `none` compare no value. The board totals ' +
-      'its loaded cards in the browser today, where a value that is no number draws no figure.',
+    'A board\'s lane foot statistic, `kanban.summary`, is judged under this id too: a `sum`, `avg`, `min` or ' +
+      '`max` is answered by one grouped aggregate over every record of each lane, so the pair is the table\'s ' +
+      'row for that function over the field\'s declaration, and a refused pair is reported at ' +
+      '`kanban.summary`, as is any of the four over a field of the boolean class (`boolean`, `toggle`), which ' +
+      'the board does not aggregate. `count` and `none` compare no value. A refused pair draws no figure at ' +
+      'the lane\'s foot.',
     AGGREGATE_PAIR_ROWS,
     'The yes / no counts of a boolean column, `count_true` and `count_false`, lower to `SUM(field)` ' +
       '(booleans aggregate as numbers, so the sum is the number of true cells) and `COUNT(field)`. The ' +
@@ -5116,7 +5170,9 @@ const FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION: RuleExplanation = {
       'its `formViews.default` and `formViews.create`, and a stored form view item that is the default ' +
       '(`isDefault`) or is named `<object>.create`. A form shared publicly (`sharing.enabled: true`) keeps ' +
       'loading at its own link and is never reported; neither is a form view under any other name, which ' +
-      'an action of type `form` opens by that name.',
+      'an action of type `form` opens by that name. Nor is a default or create form that an action of type ' +
+      '`form` opens by name: its `target` equals the name the form is served under (`<object>.form` for a ' +
+      'container\'s default form, `<object>.create` for its `formViews.create`), so it keeps loading there.',
     'The rule is a warning: the declared form still parses, installs and runs, and changes nothing. To ' +
       'clear it, move the sections into the object\'s field groups, put each required and show/hide rule ' +
       'on its field (a create-time default goes on the field\'s `defaultValue`), and delete the form.',
@@ -5822,6 +5878,13 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
       'it. To run an app action, bind `action_<name>` (or `action_*`) rather than `run_action`: the MCP ' +
       'door serves that entry through `run_action`, and the in-product agents call the action tool itself. ' +
       'Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
+    // Held to the rule by its test: the verdict fires for the ask product's tools the door lacks, on a projected skill only.
+    'A name that resolves can still cost the skill its MCP prompt. The MCP door offers a skill that has ' +
+      '`instructions` only on a connection that serves every tool its `tools` names, and the `ask` product\'s ' +
+      'data tools missing from `MCP_DOOR_TOOL_NAMES` (`aggregate_data`, `query_data`, `visualize_data`) are ' +
+      'served by no MCP connection, so a skill offered over MCP that binds one is withheld from every ' +
+      '`prompts/list`; that is its own verdict, naming the tool. Bind only tools both doors serve, or set ' +
+      '`mcpPrompt: false` when the skill is written for the in-product agents.',
     'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
       'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
       'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +
@@ -6967,6 +7030,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_CREATE_UPDATE_PAIR_EXPLANATION.rule]: FLOW_CREATE_UPDATE_PAIR_EXPLANATION,
   [STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION.rule]: STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION,
   [ACTION_NO_OBJECT_BINDING_EXPLANATION.rule]: ACTION_NO_OBJECT_BINDING_EXPLANATION,
+  [SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION.rule]: SECURITY_CROSS_SET_FIELD_REOPEN_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

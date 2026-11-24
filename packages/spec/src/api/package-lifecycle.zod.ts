@@ -44,6 +44,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { MetadataLockSchema } from '../kernel/metadata-protection.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
 import { RuntimeAuthoringIssueSchema } from './protocol.zod';
+import { CUSTOM_ARRANGEMENT_KEYS } from '../data/field-customization';
 
 // Ruling 5A — the `/api` re-export of the one existing declaration. The
 // schema (and its type) stay declared in `system/metadata-persistence.zod.ts`
@@ -540,8 +541,19 @@ export const GetPackageCustomizationsRequestSchema = lazySchema(() => z.object({
  * packages adding a field of the same name are two entries and nothing is
  * joined by name on the client. Neither X's own items nor its pair's are
  * contributions: a pair item that overrides one of X's (a flow included) is in
- * `overrides`, the pair's extension members are in `extensions`, and any other
- * pair flow is in no list of this answer.
+ * `overrides`, the pair's extension members are in `extensions`, the
+ * arrangements its extensions write are in `arrangements`, and any other pair
+ * flow is in no list of this answer.
+ *
+ * [#36626, ADR-0146 D10] `arrangements` names each whole arrangement the
+ * pair's object extension of an object X owns writes, one entry per object
+ * and key of `CUSTOM_ARRANGEMENT_KEYS` (`fieldGroups`, `relatedLists`,
+ * `actionLayout`): the record-page tab list or field groups an administrator
+ * arranged, which replaces the owner's. Its own kind, never an `extensions`
+ * member: an arrangement is one declaration of the whole object, not a
+ * member joining one of its collections. Named, never copied and never
+ * compared with the owner's: the arrangement itself is the pair's stored
+ * `object_extension` item.
  *
  * [#27928, ruling 6566915346 letter E; served by #28722] A `nav` entry MUST be
  * read from the same `appNavContributions` registry the served app's
@@ -585,6 +597,21 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
     'Every field, validation rule and index the paired `<base>.custom` package declares in an object '
     + 'extension (`objectExtensions`) of an object the base owns, one entry per member, as the extension '
     + 'declares it. Ordered by object, kind and name.',
+  ),
+  arrangements: z.array(z.object({
+    object: z.string().describe('The base-owned object whose arrangement the pair\'s extension declares.'),
+    key: z.enum(CUSTOM_ARRANGEMENT_KEYS).describe(
+      'Which arrangement the extension writes, under its key (`CUSTOM_ARRANGEMENT_KEYS`): `fieldGroups`, the '
+      + 'record page\'s field groups; `relatedLists`, its tab list (order, titles, hidden tabs); `actionLayout`, '
+      + 'its action layout.',
+    ),
+  }).strict()).describe(
+    'Every arrangement the paired `<base>.custom` package writes in an object extension of an object the base '
+    + 'owns: one entry per object and key the extension carries a value under (an empty list included), '
+    + 'whichever of the base\'s pairs writes it. The extension declares that arrangement whole and it replaces '
+    + 'the owner\'s (ADR-0146 D10); the entry names it and nothing more: its content is the pair\'s '
+    + '`object_extension` item, and nothing is compared with the base. Ordered by object, then key in the order '
+    + '`fieldGroups`, `relatedLists`, `actionLayout`.',
   ),
   switchedOff: z.array(z.object({
     type: z.string().describe('The ledger row\'s metadata type (`flow`, `action`, `position`, …).'),
@@ -648,12 +675,13 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
   counts: z.object({
     overrides: z.number().int().nonnegative().describe('`overrides.length`.'),
     extensions: z.number().int().nonnegative().describe('`extensions.length`: members, not objects.'),
+    arrangements: z.number().int().nonnegative().describe('`arrangements.length`: object and key pairs, not objects.'),
     switchedOff: z.number().int().nonnegative().describe('`switchedOff.length`.'),
     contributions: z.number().int().nonnegative().describe('`contributions.length`: items, not packages.'),
   }).strict().describe('Each list\'s length, derived from the lists in this same answer.'),
 }).strict().describe(
-  'Per-package customization read: overrides, extensions and switched-off items of one installed base, and the '
-  + 'fields, flows and navigation items other packages contribute to it.',
+  'Per-package customization read: overrides, extensions, arrangements and switched-off items of one installed '
+  + 'base, and the fields, flows and navigation items other packages contribute to it.',
 ));
 
 /**

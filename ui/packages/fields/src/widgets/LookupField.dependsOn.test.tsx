@@ -303,3 +303,67 @@ describe('LookupField — "+ New" seeds the dependsOn value it filters by (objec
     expect(onModal.mock.calls[0][0]).not.toHaveProperty('initialValues');
   });
 });
+
+describe('LookupField — a populated dependsOn parent scopes by its id (objectstack#36837)', () => {
+  const dependentField = {
+    name: 'contact',
+    label: 'Contact',
+    reference: 'contacts',
+    reference_field: 'name',
+    dependsOn: ['account'],
+  } as any;
+
+  // A record page hands the widget the record as the server returned it: the
+  // parent lookup arrives populated (`populate=account`), not as a bare id.
+  const populatedParent = { account: { id: 'a1', name: 'Acme' } };
+
+  it('sends the parent record\'s id, never the stringified object', async () => {
+    const ds = makeDataSource();
+    render(
+      <LookupField
+        field={dependentField}
+        value={undefined}
+        onChange={vi.fn()}
+        readonly={false}
+        dataSource={ds}
+        {...({ dependentValues: populatedParent } as any)}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select/i }));
+    });
+
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+    for (const [, params] of ds.find.mock.calls) {
+      expect(params.$filter.account).toBe('a1');
+    }
+    await waitFor(() => {
+      expect(screen.getByText('Nora Field')).toBeInTheDocument();
+      expect(screen.queryByText('Oscar Grant')).not.toBeInTheDocument();
+    });
+  });
+
+  it('control: the same parent as a bare id sends the identical filter', async () => {
+    const ds = makeDataSource();
+    render(
+      <LookupField
+        field={dependentField}
+        value={undefined}
+        onChange={vi.fn()}
+        readonly={false}
+        dataSource={ds}
+        {...({ dependentValues: { account: 'a1' } } as any)}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /select/i }));
+    });
+
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+    for (const [, params] of ds.find.mock.calls) {
+      expect(params.$filter.account).toBe('a1');
+    }
+  });
+});

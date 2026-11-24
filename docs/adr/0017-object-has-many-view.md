@@ -1,6 +1,6 @@
 # ADR-0017: Object has-many View (Independent View Entities)
 
-**Status**: Accepted · Implemented Phases 1–4 (2026-05-30) · Phase 5 (Studio designer) deferred · **Amended** (2026-09-04, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D13 — §3.4's `sys_view_definition` store and §3.6's objectui repointing are **retired as inert**: verified on 2026-09-04 that no framework writer or reader of its rows exists, that `objectui` never referenced the object in its history (its runtime-view CRUD writes the ADR-0005 `view` overlay via `client.meta.saveItem`), and that a per-user view scope is a parked v18 direction. Runtime-authored views are environment metadata; §3.5's `GET /meta/view?object=` filter stands)
+**Status**: Accepted · Implemented Phases 1–4 (2026-05-30) · Phase 5 (Studio designer) deferred · **Amended** (2026-09-04, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D13 — §3.4's `sys_view_definition` store and §3.6's objectui repointing are **retired as inert**: verified on 2026-09-04 that no framework writer or reader of its rows exists, that `objectui` never referenced the object in its history (its runtime-view CRUD writes the ADR-0005 `view` overlay via `client.meta.saveItem`), and that a per-user view scope is a parked v18 direction. Runtime-authored views are environment metadata; §3.5's `GET /meta/view?object=` filter stands) · **Amended** (2026-11-24, [ADR-0159](./0159-forms-are-their-own-metadata-type-public-forms-are-form-items-view-is-lists-only.md) D7 and D10, on the maintainer's ruling 「拆成 form 类型，对外表单并入」, ruling record [`7123091354`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7123091354) — **a view is a list**: a form is an item of the `form` metadata type, not a view item. `viewKind`'s `form` value, the `form` arm of the item and the container's `form` and `formViews` members keep loading until protocol major 19, read through ADR-0159 D5's projection, and are tombstoned in that major with the ADR-0087 conversion and the stored-row ceremony ADR-0159 D7 names. The container, the item identity and the switcher query are unchanged for lists. The note at §2's ViewItem bullet governs how §2, §3.1 and §3.2 are read. It lands by an authorized approval or the maintainer's merge of the PR cut from #36868)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0003](./0003-package-as-first-class-citizen.md) (package as first-class citizen), [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type, org overlay), [ADR-0010](./0010-metadata-protection-model.md) (L1/L2/L3 protection)
 **Consumers**: `@objectstack/spec`, `@objectstack/metadata`, `@objectstack/objectql`, `@objectstack/rest`, `@objectstack/platform-objects`, `../objectui` (runtime switcher + Studio designer)
@@ -64,6 +64,17 @@ has-many ViewItem.**
 - **`ViewItem`** — name `<object>.<viewKey>` (qualified, globally
   unique), an `object` foreign key, a `viewKind` (`list` | `form`), a
   `scope`, and the existing `ListView`/`FormView` payload under `config`.
+
+    > **Note (2026-11-24, [ADR-0159](./0159-forms-are-their-own-metadata-type-public-forms-are-form-items-view-is-lists-only.md), ruling record `7123091354` on
+    > [#36444](https://github.com/objectstack-ai/objectstack/issues/36444), 「拆成 form 类型，对外表单并入」) — a form is a `form`
+    > item, and `viewKind` is list-only.** The `form` kind this bullet, §3.1's `ViewKindSchema` and `ViewItemSchema`, and §3.2's
+    > per-`formViews` expansion describe is carved out of `view` into its own metadata type. Until protocol major 19 the three
+    > shapes that carry a form in a view (the container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading
+    > and are read as `form` items through one projection (ADR-0159 D5); in major 19 they are tombstoned, `ViewKindSchema` is
+    > `list` alone, and the migration is ADR-0159 D7's. Everything this record says about lists stands as written: the
+    > container as authoring sugar, the qualified `OBJECT.KEY` identity, `getViewsByObject()` and the `?object=` filter. A
+    > form keeps the name it was served under. The bullet and the sections stay as written, and this note governs how they
+    > are read.
 - **Three scopes** (a layer axis, *distinct* from ADR-0010 `_provenance`):
   - `package` — ships from `*.view.ts` source; immutable at runtime
     (not deletable / hideable / overridable in the switcher).

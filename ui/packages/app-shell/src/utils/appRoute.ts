@@ -15,6 +15,8 @@
  *   framework-owned, app-independent page for this user (see below).
  */
 
+import { studioHomePath, studioItemPath, studioMetadataItemAddress } from '../views/studio-design/studioAddress.js';
+
 /**
  * The minimal app shape THESE ROUTE HELPERS read.
  *
@@ -260,20 +262,18 @@ export function appStudioDesignPath(
   if (!isWorkspaceAdmin) return null;
   const packageId = studioPackageId(app);
   if (!packageId) return null;
-  return `/studio/${encodeURIComponent(packageId)}/data`;
+  return studioHomePath(packageId);
 }
 
 /**
- * Deep-link from a running app straight to a specific interface's design
- * surface in Studio's Interfaces pillar — e.g. viewing a dashboard opens
- * `/studio/:packageId/interfaces?surface=dashboard:<name>`, which the pillar's
- * `?surface=` restore honors (see `nav-selection.ts`). Same admin/package
- * guards as {@link appStudioDesignPath}; returns null when the surface identity
- * is incomplete so the caller can fall back to the plain design path.
- *
- * The `surface` param value is `type:name`; types never contain `:`, so the
- * pillar splits on the first colon. Only the name is percent-encoded — the
- * type is a fixed keyword (`dashboard`/`report`/…).
+ * Deep-link from a running app straight to a specific interface's metadata in
+ * Studio's "All metadata" area — e.g. viewing a dashboard opens
+ * `/studio/:packageId/metadata/dashboard/<name>`, the item's page there.
+ * objectstack#36502: the Interfaces pillar it used to open is retired; an
+ * interface is designed in the running app, and this item page is where it is
+ * read and, as a fallback, edited as metadata. Same admin/package guards as
+ * {@link appStudioDesignPath}; returns null when the surface identity is
+ * incomplete so the caller can fall back to the plain design path.
  */
 export function appStudioSurfacePath(
   app: AppRouteLike | null | undefined,
@@ -286,8 +286,9 @@ export function appStudioSurfacePath(
   const type = surface?.type;
   const name = surface?.name;
   if (!type || !name) return null;
-  const value = `${type}:${encodeURIComponent(name)}`;
-  return `/studio/${encodeURIComponent(packageId)}/interfaces?surface=${value}`;
+  // The area's item page for every type, explicitly: not `studioItemPath`,
+  // which sends a pillar type to its pillar.
+  return studioMetadataItemAddress(packageId, type, name);
 }
 
 /**
@@ -299,9 +300,8 @@ export function appStudioSurfacePath(
  * {@link appStudioDesignPath}; returns null when the object name is missing so
  * the caller can fall back to the plain Data tab.
  *
- * The `surface` param value is `object:<name>` — the same `type:name` shape the
- * Interfaces pillar uses; only the name is percent-encoded (`object` is a fixed
- * keyword).
+ * The `surface` param value is `object:<name>`; only the name is
+ * percent-encoded (`object` is a fixed keyword).
  */
 export function appStudioObjectPath(
   app: AppRouteLike | null | undefined,
@@ -312,15 +312,15 @@ export function appStudioObjectPath(
   const packageId = studioPackageId(app);
   if (!packageId) return null;
   if (!objectName) return null;
-  const value = `object:${encodeURIComponent(objectName)}`;
-  return `/studio/${encodeURIComponent(packageId)}/data?surface=${value}`;
+  // The `'name'` spelling (`object:` as written, the name encoded), as this
+  // bridge has always spelled it.
+  return studioItemPath(packageId, 'object', objectName, { spelling: 'name' });
 }
 
 /**
- * Route types that correspond to a designable **interface** surface in Studio's
- * Interfaces pillar. The console route type (`/apps/:pkg/<type>/<name>`) doubles
- * as the Studio surface type — the keywords match `resolveSurface` in
- * `StudioDesignSurface` (`dashboard` / `page` / `report`).
+ * Route types that correspond to an **interface** item. The console route type
+ * (`/apps/:pkg/<type>/<name>`) doubles as the metadata type
+ * (`dashboard` / `page` / `report`).
  */
 const INTERFACE_SURFACE_ROUTE_TYPES = new Set(['dashboard', 'page', 'report']);
 
@@ -336,8 +336,8 @@ const NON_OBJECT_ROUTE_TYPES = new Set([...INTERFACE_SURFACE_ROUTE_TYPES, 'syste
 /**
  * App → Studio bridge target for a running-app route (ADR-0080). When the route
  * names a specific interface (a dashboard, page, or report — see
- * {@link INTERFACE_SURFACE_ROUTE_TYPES}), deep-link straight to THAT surface in
- * the Interfaces pillar via {@link appStudioSurfacePath}. When it names an
+ * {@link INTERFACE_SURFACE_ROUTE_TYPES}), deep-link straight to THAT item in
+ * Studio's "All metadata" area via {@link appStudioSurfacePath}. When it names an
  * object record page (the route type IS the object name), deep-link that object
  * in the Data pillar via {@link appStudioObjectPath}. Otherwise (bare app root,
  * a `system` route, or an interface list route with no surface name) fall back

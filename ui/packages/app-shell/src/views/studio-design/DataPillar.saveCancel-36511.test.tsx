@@ -146,7 +146,7 @@ async function mountOnForm(): Promise<void> {
       </StudioSaveHarness>
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await screen.findByTestId('form-toolbar');
 }
 

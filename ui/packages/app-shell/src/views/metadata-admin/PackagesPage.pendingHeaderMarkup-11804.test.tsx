@@ -22,6 +22,9 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { PackageDetailSheet, type InstalledPackageRow } from './PackagesPage';
+// Loaded at import so their first load is not paid inside a test's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 const PKG: InstalledPackageRow = {
   manifest: { id: 'com.acme.crm', name: 'Acme CRM', version: '1.0.0', type: 'app' },
@@ -39,7 +42,7 @@ let errors: string[];
 
 function respond(body: unknown) {
   const text = JSON.stringify(body);
-  return { ok: true, status: 200, text: async () => text, json: async () => JSON.parse(text) } as unknown as Response;
+  return { ok: true, status: 200, text: async () => text, headers: new Headers(), json: async () => JSON.parse(text) } as unknown as Response;
 }
 
 beforeEach(() => {

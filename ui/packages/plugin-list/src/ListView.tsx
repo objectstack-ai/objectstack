@@ -22,6 +22,7 @@ import {
   isGroupableField,
   type ViewSettingsField,
   type ViewSettingsKanban,
+  type ViewSettingsKanbanSummaryFields,
   PHONE_TOUCH_TARGET,
   useBelowSm,
 } from './components/ViewSettingsPopover';
@@ -75,7 +76,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { ColumnSummary, GroupingConfig } from '@objectstack/spec/ui';
-import { canonicalAstOperator, isAggregateCompatibleWithFieldType, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { BOOLEAN_VALUE_TYPES, canonicalAstOperator, isAggregateCompatibleWithFieldType, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
@@ -480,6 +481,12 @@ export interface ListViewProps {
    * objectstack#35403 — the built-in bulk Change Owner, forwarded to
    * `ObjectGrid` (which declares it with this signature): the grid's selection
    * bar offers it while the host wires it.
+   *
+   * Grid-only (objectstack#36395): the grid is the one view that holds a
+   * selection of several rows. A kanban, calendar, gallery or any other view
+   * type takes none, so it ignores this prop and offers no bulk Change Owner;
+   * there, a record's owner is changed one record at a time, from its record
+   * page.
    */
   onBulkChangeOwner?: (records: any[]) => void;
   /**
@@ -1749,15 +1756,21 @@ function kanbanLaneFieldOf(schema: ListViewSchema, objectDef: unknown): string |
   return kanbanBlockOf(schema).groupByField || detectStatusField(objectDef as any) || undefined;
 }
 
+/** The lane statistics that aggregate a field (`KanbanLaneSummarySchema`). */
+const LANE_STATISTIC_AGGREGATES = ['sum', 'avg', 'min', 'max'] as const;
+
 /**
- * objectstack#36370 — may a board's lane statistic total a field of `type`?
- * The aggregate × field-type table's `sum` row, the verdict `@objectstack/lint`
- * gives `kanban.summary` (a percent does not add, a formula stores no value),
- * less the true / false class: a board totals numbers, not yes / no counts.
+ * objectstack#36370, objectstack#36880 — may a board's lane statistic `fn`
+ * aggregate a field of `type`? The aggregate × field-type table's row for
+ * that function, the verdict `@objectstack/lint` gives `kanban.summary` (a
+ * percent does not add, a formula stores no value; `min` / `max` also take a
+ * date, a date-time or a time), less the spec's boolean class
+ * (`BOOLEAN_VALUE_TYPES`, objectstack#36520): a board aggregates values, not
+ * yes / no counts.
  */
-function laneStatisticSums(type: unknown): boolean {
-  return typeof type === 'string' && type !== 'boolean' && type !== 'toggle'
-    && isAggregateCompatibleWithFieldType('sum', type);
+function laneStatisticAccepts(fn: (typeof LANE_STATISTIC_AGGREGATES)[number], type: unknown): boolean {
+  return typeof type === 'string' && !BOOLEAN_VALUE_TYPES.has(type)
+    && isAggregateCompatibleWithFieldType(fn, type);
 }
 
 /**
@@ -7447,26 +7460,39 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       ? { type: 'sum', field: kanbanBlock.summarizeField }
       : null;
   })();
-  // The fields a lane may total: the object's number fields the
-  // caller may read.
-  const boardNumberFields: Array<{ value: string; label: string }> = kanbanBlock
-    ? Object.entries((objectDef?.fields ?? {}) as Record<string, { type?: unknown; label?: string; hidden?: unknown; multiple?: unknown } | undefined>)
-        .filter(([name, def]) =>
-          !!def && laneStatisticSums(def.type) && def.multiple !== true && def.hidden !== true
-          && canReadField(perms, schema.objectName, name))
-        .map(([name, def]) => ({ value: name, label: tFieldLabel(name, def?.label || name) }))
-    : [];
+  // The fields each lane statistic may aggregate: the object's fields the
+  // table accepts for that function (objectstack#36880) that the caller may
+  // read.
+  const boardStatisticFields: ViewSettingsKanbanSummaryFields = (() => {
+    const readable = kanbanBlock
+      ? Object.entries((objectDef?.fields ?? {}) as Record<string, { type?: unknown; label?: string; hidden?: unknown; multiple?: unknown } | undefined>)
+          .filter(([name, def]) =>
+            !!def && def.multiple !== true && def.hidden !== true && canReadField(perms, schema.objectName, name))
+      : [];
+    const out = {} as ViewSettingsKanbanSummaryFields;
+    for (const fn of LANE_STATISTIC_AGGREGATES) {
+      out[fn] = readable
+        .filter(([, def]) => laneStatisticAccepts(fn, def?.type))
+        .map(([name, def]) => ({ value: name, label: tFieldLabel(name, def?.label || name) }));
+    }
+    return out;
+  })();
   const kanbanSettings: ViewSettingsKanban | undefined = kanbanBlock
     ? {
         laneField: boardLaneField,
         // objectstack#36370 — the fields the board can lane on: a select or a
-        // radio, whose options are the lanes. A lookup, user, master-detail or
-        // tree field draws no sensible lanes yet (the board keys a lane on the
-        // stored value, and an expanded reference is an object), and a boolean
-        // has no options to title its lanes, so the picker leaves them out.
+        // radio, whose options are the lanes, and a single-valued reference
+        // (`EXPANDABLE_FIELD_TYPES`: lookup, user, master-detail, tree), whose
+        // lanes are the referenced records, keyed by the foreign key and
+        // titled by name (objectstack#36643). A many-valued reference puts one
+        // card in several lanes and a drag cannot say which to replace, and a
+        // boolean has no options to title its lanes, so the picker leaves
+        // them out.
         laneFieldOptions: groupOptions.filter((option) => {
-          const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[option.value]?.type;
-          return type === 'select' || type === 'radio';
+          const def = (objectDef?.fields as Record<string, { type?: unknown; multiple?: unknown } | undefined> | undefined)?.[option.value];
+          const type = typeof def?.type === 'string' ? def.type : undefined;
+          if (type === 'select' || type === 'radio') return true;
+          return !!type && EXPANDABLE_FIELD_TYPES.has(type) && def?.multiple !== true;
         }),
         // A new lane field draws every lane it offers: the lanes chosen on the
         // old field name none of its values.
@@ -7494,7 +7520,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
         summary: writeKanban
           ? {
               value: boardLaneStatistic,
-              numberFields: boardNumberFields,
+              fields: boardStatisticFields,
               // 「None」 over a view that sums `summarizeField` says so
               // (`{ type: 'none' }`); over one that shows nothing, the key goes.
               onChange: (next) => writeKanban({

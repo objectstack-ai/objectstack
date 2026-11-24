@@ -32,6 +32,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The first load of the engine is paid at collection, not inside a test's clock:
+// the server under test reaches it through dynamic imports.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server';
 import { GetMetaItemLayeredResponseSchema, GetMetaItemResponseSchema } from '@objectstack/spec/api';
 
@@ -180,7 +183,8 @@ describe('#5882 GET /meta/:type/:name/layers — the declared layered resource',
         expect(protocol.getMetaItemLayered).toHaveBeenCalledWith(
             expect.objectContaining({ packageId: 'com.acme.crm' }),
             // [#29814] The draft layer's option: this caller is not admitted to pending drafts.
-            { withDraft: false },
+            // [#36601] The published row's version is always asked for: Studio's Save pins its publish to it.
+            { withDraft: false, withVersion: true },
         );
     });
 

@@ -151,7 +151,9 @@ describe('objectui#12274 — a straight-through action-door launch closes by the
 
     const result = await click(DECLARED_WITHOUT_MESSAGE);
 
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    // The refusal also rides on the result (objectstack#36915), for a caller
+    // that counts outcomes; the notice above is still this launch's surface.
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, refusal: { message: 'Refused: already escalated' } });
     expect(await screen.findByText('Refused: already escalated')).toBeTruthy();
     expect((toast as any).success).not.toHaveBeenCalled();
   });

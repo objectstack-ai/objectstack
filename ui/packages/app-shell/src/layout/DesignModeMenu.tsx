@@ -15,15 +15,22 @@
  *   to a group, add an item before or after it, rename and icon, remove from
  *   the menu. Removing takes the entry off the menu only; what it opened is
  *   kept, and the picker offers it again.
- * - An entry can be dragged to another place, in its group or another one.
+ * - An entry can be dragged to another place, in its group or another one,
+ *   or moved from the keyboard: Space picks it up, the arrows move it, Space
+ *   or Enter drops it and Escape puts it back. Enter on an entry not picked up
+ *   opens its page (objectstack#36538, review N13). A drop outside the menu
+ *   moves nothing (review N14).
  *
- * A name is changed only in the app's source language (objectstack#36363,
- * ruling (4)): the stored labels are the app's own, and a translation is
- * written elsewhere. The rename's name field is open when the session
- * language is the deployment's default (`GET /i18n/locales`, the server
- * stating no source language of its own yet, objectstack#36504) and the
- * entry's shown label is its stored one; else it is closed and says why.
- * The icon, adding and moving are open in every language.
+ * A name is changed in any language, and lands where that language reads it
+ * (objectstack#36504, relaxing ruling (4) of objectstack#36363): in the app's
+ * source language (`sourceLocale` on `GET /i18n/locales`) over an entry shown
+ * by its stored label, the stored label; in any other language, or over a
+ * translation, that language's translation of the entry, the stored label
+ * kept (`saveAppMenu`). A stored label written as an inline locale map takes
+ * the name in the entry shown only, every other language kept
+ * (objectstack#36876). The rename says so when the name will be a
+ * translation. A link added outside the source language takes its name the
+ * same way: stored without one, translated (review N5 of objectstack#36437).
  *
  * An entry another package puts into the menu (its manifest's
  * `navigationContributions`, appended when the app is served) is not in the
@@ -31,6 +38,10 @@
  * 「⋮」 says it is changed in that package, and it is not dragged. Adding an
  * item before or after it stays open; no other entry is moved past it (a
  * move up, a move down or a drop onto it), since its place is that package's.
+ * A group another package puts into the menu takes no own entry: it is not
+ * offered by 「Move to group」, is no drop target, and has no 「Add menu item」
+ * (objectstack#36538, review N9), since the save could put such an entry
+ * nowhere but the end of the stored menu.
  *
  * In the picker's 「Dashboards」, the first row is 「New dashboard…」
  * (objectstack#36364): it asks for a name, and on 「Create」 the dashboard is
@@ -38,10 +49,9 @@
  * place, and the mode saves at once, every other staged change with it
  * (`saveAppMenuWithNewItem`); then the mode is left and the new dashboard
  * opens for editing (`dashboardEditArrival`). 「Cancel」 writes nothing.
- * In 「Reports」 the first row is 「New report…」: a report needs a data source
- * and a measure, so the place stays held and the report builder opens; its
- * Save creates the report and saves the mode the same way
- * (`designModeReportSlot`), and its Close drops the place, writing nothing.
+ * 「Reports」 lists only reports that exist (objectstack#36692, the
+ * maintainer's ruling to keep report editing its own entry, as Twenty does):
+ * a new report is made from the reports index, then linked here.
  *
  * Every edit is staged with the mode (`useDesignModeChange`), under one key
  * for the app's menu: the mode's 「Save」 writes it (`saveAppMenu`), its
@@ -60,17 +70,21 @@
  */
 
 import * as React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   DndContext,
+  KeyboardCode,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
+  type DragStartEvent,
+  type KeyboardCodes,
 } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -151,20 +165,22 @@ import {
   storedEntriesById,
   targetKeyFor,
   withEntryIds,
+  withOwnBeforeForeignRuns,
   type Menu,
+  labelGoesToTranslation,
   type MenuEntry,
   type MenuTargetKind,
 } from './designModeMenuModel.js';
 import {
   consoleAppMenuDoors,
-  fetchDefaultLocale,
-  isSameLanguage,
+  fetchDeploymentLocales,
+  labelLanguageOf,
   readStoredMenu,
   saveAppMenu,
+  type DeploymentLocales,
 } from './designModeMenuSave.js';
 import { freeItemName, isNewMenuItemKind, saveAppMenuWithNewItem, type NewMenuItemKind } from './designModeMenuCreate.js';
 import { dashboardEditArrival } from './designModeArrival.js';
-import { offerNewReportSlot, withdrawNewReportSlot, type NewReportSlot } from './designModeReportSlot.js';
 
 /**
  * The group label's icon-mode hiding, as the sidebar's own labels declare it
@@ -192,6 +208,22 @@ const parentOfEndZone = (id: string): string | null | undefined => {
   return rest === '' ? null : rest;
 };
 
+/**
+ * The keys of a keyboard move (objectstack#36538, review N13): Space picks an
+ * entry up, so Enter on an entry still opens its page, as on any link; Space
+ * or Enter drops it, Escape puts it back.
+ */
+const MENU_KEYBOARD_CODES: KeyboardCodes = {
+  start: [KeyboardCode.Space],
+  cancel: [KeyboardCode.Esc],
+  end: [KeyboardCode.Space, KeyboardCode.Enter],
+};
+
+/** Whether the point `at` lies outside the box `box`. */
+function outside(at: { x: number; y: number }, box: DOMRect): boolean {
+  return at.x < box.left || at.x > box.right || at.y < box.top || at.y > box.bottom;
+}
+
 export interface DesignModeMenuProps {
   /** The app on screen: its name, its served `navigation` and its package. */
   readonly app: { readonly name: string; readonly navigation?: unknown; readonly _packageId?: unknown };
@@ -211,7 +243,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     () => withEntryIds(inShownOrder(Array.isArray(app.navigation) ? (app.navigation as Menu) : [])),
     [app.navigation],
   );
-  const menu = change.value ?? served;
+  const staged = change.value ?? served;
 
   const texts = React.useMemo(
     () => ({
@@ -227,14 +259,26 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
       notWritable: t('designMode.menu.notWritable', {
         defaultValue: "This app's customization package cannot be written, so its menu cannot be saved.",
       }),
+      storedUnread: t('designMode.menu.storedUnread', {
+        defaultValue: "This app's saved menu could not be read, so nothing was saved.",
+      }),
+      publishedMoved: t('designMode.menu.publishedMoved', {
+        defaultValue: "Someone published this app's menu while you were saving, so nothing was saved. Save again to apply your changes over theirs.",
+      }),
+      translationPendingDraft: t('designMode.menu.translationPendingDraft', {
+        defaultValue: "This app's menu names in this language have unpublished changes in Studio. Publish or discard them there, then save again.",
+      }),
     }),
     [t],
   );
   const appName = app.name;
+  // The language the labels of an edit are typed in, as the edit is staged
+  // (objectstack#36504): the save stores each label where that language reads it.
+  const labels = React.useMemo(() => ({ language }), [language]);
   const commit = React.useCallback(
     (navigation: Menu) =>
-      saveAppMenu({ appName, packageId, served, navigation }, texts, consoleAppMenuDoors(client as never)),
-    [appName, packageId, served, texts, client],
+      saveAppMenu({ appName, packageId, served, navigation, labels }, texts, consoleAppMenuDoors(client as never)),
+    [appName, packageId, served, labels, texts, client],
   );
   const stage = change.stage;
   const update = React.useCallback((next: Menu) => stage(next, commit), [stage, commit]);
@@ -242,14 +286,14 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   const [addAt, setAddAt] = React.useState<AddAt | null>(null);
   const [renaming, setRenaming] = React.useState<string | null>(null);
 
-  // The stored menu and the deployment's default language, for the rename's
-  // source-language rule; both `undefined` while read.
+  // The stored menu and the deployment's languages, for where a rename lands
+  // (objectstack#36504); both `undefined` while read.
   const [storedMenu, setStoredMenu] = React.useState<Menu | null | undefined>(undefined);
-  const [defaultLocale, setDefaultLocale] = React.useState<string | null | undefined>(undefined);
+  const [locales, setLocales] = React.useState<DeploymentLocales | null | undefined>(undefined);
   React.useEffect(() => {
     let cancelled = false;
     void readStoredMenu(appName, packageId, client as never).then((nav) => !cancelled && setStoredMenu(nav));
-    void fetchDefaultLocale().then((code) => !cancelled && setDefaultLocale(code));
+    void fetchDeploymentLocales().then((read) => !cancelled && setLocales(read));
     return () => {
       cancelled = true;
     };
@@ -260,6 +304,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   );
   /** Whether the entry `id` is another package's (served, and not in the stored menu). */
   const contributed = (id: string): boolean => !!storedById && !storedById.has(id) && !!entryOf(served, id);
+  // An own entry the editor put in or past another package's closing entries
+  // before the stored read told them apart is drawn where the save puts it:
+  // before them (objectstack#36538, review N10).
+  const menu = storedById ? withOwnBeforeForeignRuns(staged, served, contributed) : staged;
+  /** Whether the group `parentId` (the top level for `null`) is another package's: no own entry goes into it. */
+  const foreignGroup = (parentId: string | null): boolean => parentId !== null && contributed(parentId);
   /** Whether the entry beside `id`, `by` places away in its group, is another package's. */
   const besideContributed = (id: string, by: -1 | 1): boolean => {
     const place = placeOf(menu, id);
@@ -293,8 +343,22 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates, keyboardCodes: MENU_KEYBOARD_CODES }),
   );
+  // The collision rule (objectstack#36538, review N14): a pointer released
+  // outside the menu's own box is over nothing, so the drop moves nothing;
+  // inside it, and for a keyboard move (which has no pointer), the nearest
+  // entry's centre, as before.
+  const menuArea = React.useRef<HTMLDivElement>(null);
+  const collision = React.useCallback<CollisionDetection>((args) => {
+    const at = args.pointerCoordinates;
+    const box = at ? menuArea.current?.getBoundingClientRect() : null;
+    if (at && box && outside(at, box)) return [];
+    return closestCenter(args);
+  }, []);
+  const keyboardHint = t('designMode.menu.keyboardHint', {
+    defaultValue: 'Drag an item to move it, or focus it and press Space, then the arrow keys. Enter opens it.',
+  });
   const leafIds = React.useMemo(() => {
     const out: string[] = [];
     const walk = (entries: Menu) => {
@@ -312,18 +376,33 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   // it is not a click, so it opens nothing. dnd-kit stops that click's
   // propagation in the document's capture phase but leaves its default (a full
   // navigation), so the default is cancelled before it, on the window.
+  //
+  // The window after a pointer drag starts at the RELEASE of the press that
+  // dragged, never at the drag's end: an Escape while the button is held ends
+  // the drag, and the release that follows, however late, is still no click
+  // (objectstack#36538, review N12). A keyboard move holds the links shut
+  // until it ends, whatever the pointer does meanwhile (review N16).
   const lastDragEnd = React.useRef(0);
-  const dragging = React.useRef(false);
-  const onDragStart = () => {
-    dragging.current = true;
+  /** A pointer press began a drag, and has not been released. */
+  const pointerDrag = React.useRef(false);
+  /** A keyboard move is held. */
+  const keyboardDrag = React.useRef(false);
+  /** A pointer button is down. */
+  const pointerHeld = React.useRef(false);
+  const onDragStart = (event: DragStartEvent) => {
+    if (typeof KeyboardEvent !== 'undefined' && event.activatorEvent instanceof KeyboardEvent) keyboardDrag.current = true;
+    else pointerDrag.current = true;
   };
   const endDrag = () => {
-    dragging.current = false;
+    keyboardDrag.current = false;
+    // Still held (an Escape mid-drag): the release stamps the window.
+    if (pointerHeld.current) return;
+    pointerDrag.current = false;
     lastDragEnd.current = Date.now();
   };
   React.useEffect(() => {
     const onClick = (event: MouseEvent) => {
-      const justDragged = dragging.current || Date.now() - lastDragEnd.current < 300;
+      const justDragged = keyboardDrag.current || pointerDrag.current || Date.now() - lastDragEnd.current < 300;
       if (justDragged && event.target instanceof Element && event.target.closest('[data-design-menu-link]')) event.preventDefault();
     };
     // The drag's end is stamped from the pointer itself too: dnd-kit reports a
@@ -331,11 +410,13 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     // that would leave the flag set and every link of the editor shut. A new
     // press starts over.
     const onPress = () => {
-      dragging.current = false;
+      pointerHeld.current = true;
+      pointerDrag.current = false;
     };
     const onRelease = () => {
-      if (!dragging.current) return;
-      dragging.current = false;
+      pointerHeld.current = false;
+      if (!pointerDrag.current) return;
+      pointerDrag.current = false;
       lastDragEnd.current = Date.now();
     };
     window.addEventListener('click', onClick, true);
@@ -357,12 +438,12 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     if (!overId || overId === id) return;
     const endParent = parentOfEndZone(overId);
     if (endParent !== undefined) {
-      update(moveToOwnEnd(id, endParent));
+      if (!foreignGroup(endParent)) update(moveToOwnEnd(id, endParent));
       return;
     }
     const from = placeOf(menu, id);
     const to = placeOf(menu, overId);
-    if (!from || !to || contributed(overId)) return;
+    if (!from || !to || contributed(overId) || foreignGroup(to.parentId)) return;
     // `to.index` read after the entry leaves: below its old place in the same
     // group it lands after the entry dropped on, elsewhere before it.
     update(moveEntry(menu, id, to.parentId, to.index));
@@ -411,7 +492,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     };
     const saved = await saveWith(insertEntry(menu, addAt.parentId, addAt.index, entry), (navigation) =>
       saveAppMenuWithNewItem(
-        { appName, packageId, served, navigation, item },
+        { appName, packageId, served, navigation, labels, item },
         itemTexts,
         consoleAppMenuDoors(client as never),
       ),
@@ -420,83 +501,6 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     setAddAt(null);
     navigate(resolveHref(entry as unknown as NavigationItem, basePath).href, { state: dashboardEditArrival(name) });
     return true;
-  };
-
-  // objectstack#36364 (report half) — 「New report…」: a report cannot be
-  // made from a name (the spec wants `dataset` and `values`), so the place
-  // stays held and the report builder opens at `reports/new`. The builder
-  // saves through the slot offered here (`designModeReportSlot`): the report
-  // is created in the menu's package and its entry saved in the held place
-  // with every other staged change, in one act; nothing is written before.
-  // The builder's Close drops the place. Resolves `false` when nothing was
-  // saved (the mode has said why); the builder stays open for another try.
-  const [buildingReport, setBuildingReport] = React.useState(false);
-  const saveNewReport = async (name: string, label: string, body: Record<string, unknown>): Promise<boolean> => {
-    if (!addAt) return false;
-    // A report entry with no label shows its machine name (only an object,
-    // view or dashboard entry inherits its target's label), so the entry
-    // carries the name the reader gave the report.
-    const entry = { ...entryFor('report', name, newEntryId([...menu, ...(storedMenu ?? [])])), label };
-    const itemTexts = {
-      ...texts,
-      itemPendingDraft: t('designMode.menu.newItemPendingDraft', {
-        defaultValue: 'A draft with this name is already pending. Try again.',
-      }),
-      itemLeft: t('designMode.menu.newReportLeft', {
-        defaultValue: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
-        name: label,
-      }),
-    };
-    const saved = await saveWith(insertEntry(menu, addAt.parentId, addAt.index, entry), (navigation) =>
-      saveAppMenuWithNewItem(
-        { appName, packageId, served, navigation, item: { kind: 'report', name, label, body } },
-        itemTexts,
-        consoleAppMenuDoors(client as never),
-      ),
-    );
-    if (!saved) return false;
-    setAddAt(null);
-    setBuildingReport(false);
-    return true;
-  };
-  // The builder's address the held place waits on.
-  const newReportPath = `${basePath}/reports/new`;
-  const saveNewReportRef = React.useRef(saveNewReport);
-  React.useLayoutEffect(() => {
-    saveNewReportRef.current = saveNewReport;
-  });
-  React.useEffect(() => {
-    if (!buildingReport) return;
-    const slot: NewReportSlot = {
-      path: newReportPath,
-      save: (name, label, body) => saveNewReportRef.current(name, label, body),
-      cancel: () => {
-        setBuildingReport(false);
-        setAddAt(null);
-      },
-    };
-    offerNewReportSlot(slot);
-    // Withdrawn when the place is no longer held, and when the menu unmounts
-    // (the design mode ended): the builder then saves on its own, off the menu.
-    return () => withdrawNewReportSlot(slot);
-  }, [buildingReport, newReportPath]);
-  // Leaving the builder another way than its Save or Close (a menu link, the
-  // browser's Back) drops the place too, so no held row waits for a builder
-  // that is gone. Read once the builder has been reached.
-  const { pathname } = useLocation();
-  const [reachedBuilder, setReachedBuilder] = React.useState(false);
-  const onBuilder = pathname === newReportPath || pathname.endsWith(newReportPath);
-  if (buildingReport && onBuilder && !reachedBuilder) setReachedBuilder(true);
-  if (!buildingReport && reachedBuilder) setReachedBuilder(false);
-  if (buildingReport && reachedBuilder && !onBuilder) {
-    setBuildingReport(false);
-    setReachedBuilder(false);
-    setAddAt(null);
-  }
-  const startNewReport = () => {
-    if (!addAt) return;
-    setBuildingReport(true);
-    navigate(newReportPath);
   };
 
   const renderLeaf = (entry: MenuEntry, depth: number) => {
@@ -519,8 +523,9 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
             canUp={canMoveBy(menu, id, -1) && !besideContributed(id, -1)}
             canDown={canMoveBy(menu, id, 1) && !besideContributed(id, 1)}
             groups={groups
-              .filter((g) => g.id !== place?.parentId)
+              .filter((g) => g.id !== place?.parentId && !contributed(g.id))
               .map((g) => ({ id: g.id, label: labelOf(g.entry), depth: g.depth }))}
+            canAdd={!foreignGroup(place?.parentId ?? null)}
             atTopLevel={place?.parentId === null}
             onUp={() => update(moveBy(menu, id, -1))}
             onDown={() => update(moveBy(menu, id, 1))}
@@ -538,7 +543,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   const renderEntries = (entries: Menu, parentId: string | null, depth: number): React.ReactNode[] => {
     const rows: React.ReactNode[] = [];
     entries.forEach((entry, index) => {
-      if (addAt && addAt.parentId === parentId && addAt.index === index) rows.push(<Placeholder key="placeholder" depth={depth} buildingReport={buildingReport} />);
+      if (addAt && addAt.parentId === parentId && addAt.index === index) rows.push(<Placeholder key="placeholder" depth={depth} />);
       if (isGroup(entry)) {
         const gid = String(entry.id);
         rows.push(
@@ -559,7 +564,9 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         rows.push(renderLeaf(entry, depth));
       }
     });
-    if (addAt && addAt.parentId === parentId && addAt.index >= entries.length) rows.push(<Placeholder key="placeholder" depth={depth} buildingReport={buildingReport} />);
+    if (addAt && addAt.parentId === parentId && addAt.index >= entries.length) rows.push(<Placeholder key="placeholder" depth={depth} />);
+    // Another package's group takes no own entry: no 「Add menu item」, no drop at its end.
+    if (foreignGroup(parentId)) return rows;
     rows.push(
       <AddRow
         key="add"
@@ -573,39 +580,51 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   };
 
   const renamed = renaming ? entryOf(menu, renaming) : null;
-  /** Whether the entry `id`'s name may be changed here (ruling (4)). */
-  const nameOpen = (id: string): boolean => {
-    if (!defaultLocale || !isSameLanguage(language, defaultLocale)) return false;
-    const shown = entryOf(served, id);
-    if (!shown) return true; // added in this session: its name is the editor's own
-    const stored = storedById?.get(id);
-    return !!stored && labelOf(shown) === labelOf(stored);
+  /**
+   * The language a name typed for the entry `id` is a translation in, or
+   * `null` when it is the stored label (objectstack#36504): the save's own
+   * rule (`labelGoesToTranslation`), read here to say so. Unsaid while the
+   * languages or the stored menu are read.
+   */
+  const translatedIn = (id: string): string | null => {
+    if (locales === undefined || storedMenu === undefined) return null;
+    const typedIn = labelLanguageOf(language, locales);
+    const goes = labelGoesToTranslation(typedIn, entryOf(served, id), storedById?.get(id));
+    return goes ? typedIn.locale : null;
   };
 
   return (
     <SidebarGroup data-testid="design-mode-menu">
       <SidebarGroupLabel className={HIDDEN_ICON_LABEL_NOT_FOCUSABLE}>{t('designMode.menu.title', { defaultValue: 'Menu' })}</SidebarGroupLabel>
+      <p
+        className={cn('px-2 pb-1 text-xs text-sidebar-foreground/60', HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}
+        data-testid="design-menu-keyboard-hint"
+      >
+        {keyboardHint}
+      </p>
       <SidebarGroupContent>
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
+          collisionDetection={collision}
+          accessibility={{ screenReaderInstructions: { draggable: keyboardHint } }}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onDragCancel={endDrag}
         >
           <SortableContext items={leafIds} strategy={verticalListSortingStrategy}>
-            <SidebarMenu>{renderEntries(menu, null, 0)}</SidebarMenu>
+            <div ref={menuArea} data-testid="design-menu-area">
+              <SidebarMenu>{renderEntries(menu, null, 0)}</SidebarMenu>
+            </div>
           </SortableContext>
         </DndContext>
       </SidebarGroupContent>
-      {addAt && !buildingReport && (
+      {addAt && (
         <MenuItemPicker
           packageId={packageId}
           inMenu={menuTargets(menu)}
           onClose={() => setAddAt(null)}
           onPick={(kind, name, link) => pick(entryFor(kind, name, newEntryId([...menu, ...(storedMenu ?? [])]), link))}
           onCreate={createItem}
-          onNewReport={startNewReport}
           language={language}
         />
       )}
@@ -613,12 +632,14 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         <RenameDialog
           label={labelOf(renamed)}
           icon={typeof renamed.icon === 'string' ? renamed.icon : ''}
-          nameLocked={!nameOpen(String(renamed.id))}
+          translatedIn={translatedIn(String(renamed.id))}
+          language={language}
           onClose={() => setRenaming(null)}
           onDone={(label, icon) => {
-            // A name left as it was stays inherited (or as authored); a cleared one inherits again.
+            // A name left as it was stays inherited (or as authored); a cleared one inherits again
+            // (one that is a translation drops it). Where the name is stored is the save's.
             const patch: Record<string, unknown> = { icon: icon || undefined };
-            if (nameOpen(String(renamed.id)) && label !== labelOf(renamed)) patch.label = label || undefined;
+            if (label !== labelOf(renamed)) patch.label = label || undefined;
             update(patchEntry(menu, String(renamed.id), patch));
             setRenaming(null);
           }}
@@ -695,14 +716,12 @@ function MenuLeaf({
   );
 }
 
-function Placeholder({ depth, buildingReport }: { depth: number; buildingReport?: boolean }) {
+function Placeholder({ depth }: { depth: number }) {
   const { t } = useObjectTranslation();
   return (
     <li className="list-none" style={indent(depth)} data-testid="design-menu-placeholder">
       <div className="mx-0.5 flex h-8 items-center rounded-md border border-dashed border-sidebar-border px-2 text-sm text-sidebar-foreground/60">
-        {buildingReport
-          ? t('designMode.menu.newReport', { defaultValue: 'New report…' })
-          : t('designMode.menu.placeholder', { defaultValue: 'Choose a menu item…' })}
+        {t('designMode.menu.placeholder', { defaultValue: 'Choose a menu item…' })}
       </div>
     </li>
   );
@@ -731,6 +750,7 @@ function EntryActions({
   canUp,
   canDown,
   groups,
+  canAdd,
   atTopLevel,
   onUp,
   onDown,
@@ -746,6 +766,8 @@ function EntryActions({
   canUp: boolean;
   canDown: boolean;
   groups: Array<{ id: string; label: string; depth: number }>;
+  /** Whether an item may be added beside it: not in another package's group. */
+  canAdd: boolean;
   atTopLevel: boolean;
   onUp: () => void;
   onDown: () => void;
@@ -800,10 +822,10 @@ function EntryActions({
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onAddBefore}>
+        <DropdownMenuItem disabled={!canAdd} onSelect={onAddBefore}>
           {t('designMode.menu.addBefore', { defaultValue: 'Add an item before' })}
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onAddAfter}>
+        <DropdownMenuItem disabled={!canAdd} onSelect={onAddAfter}>
           {t('designMode.menu.addAfter', { defaultValue: 'Add an item after' })}
         </DropdownMenuItem>
         <DropdownMenuItem disabled={fixed} onSelect={onRename}>
@@ -896,7 +918,6 @@ function MenuItemPicker({
   onClose,
   onPick,
   onCreate,
-  onNewReport,
   language,
 }: {
   packageId: string;
@@ -905,8 +926,6 @@ function MenuItemPicker({
   onPick: (kind: MenuTargetKind, name: string, link?: { label: string; url: string }) => void;
   /** Create a new `kind` named `label`; `taken` is every name of that kind the picker lists. */
   onCreate: (kind: NewMenuItemKind, label: string, taken: readonly string[]) => Promise<boolean>;
-  /** Build a new report for the held place, in the report builder. */
-  onNewReport: () => void;
   language: string;
 }) {
   const { t } = useObjectTranslation();
@@ -1031,19 +1050,6 @@ function MenuItemPicker({
                 </button>
               </li>
             )}
-            {kind === 'report' && (
-              <li>
-                <button
-                  type="button"
-                  onClick={onNewReport}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm font-medium text-primary hover:bg-accent"
-                  data-testid="design-menu-picker-new-report"
-                >
-                  <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  <span className="flex-1 truncate">{t('designMode.menu.newReport', { defaultValue: 'New report…' })}</span>
-                </button>
-              </li>
-            )}
             {loading ? (
               <li className="px-2 py-2 text-sm text-muted-foreground">{t('designMode.menu.loading', { defaultValue: 'Loading…' })}</li>
             ) : offered.length === 0 ? (
@@ -1155,17 +1161,32 @@ function NewItemDialog({
   );
 }
 
+/** The name of the language `locale`, in the language `reader`; the tag itself where the runtime names none. */
+function languageName(locale: string, reader: string): string {
+  try {
+    return new Intl.DisplayNames([reader, 'en'], { type: 'language' }).of(locale) ?? locale;
+  } catch {
+    return locale;
+  }
+}
+
 function RenameDialog({
   label,
   icon,
-  nameLocked,
+  translatedIn,
+  language,
   onClose,
   onDone,
 }: {
   label: string;
   icon: string;
-  /** The name is shown, not changed: the session is not in the app's source language. */
-  nameLocked: boolean;
+  /**
+   * The language a new name is that language's translation in, the stored
+   * name kept (objectstack#36504); `null` when it is the stored name.
+   */
+  translatedIn: string | null;
+  /** The reader's language, the one the hint names a language in. */
+  language: string;
   onClose: () => void;
   onDone: (label: string, icon: string) => void;
 }) {
@@ -1190,15 +1211,17 @@ function RenameDialog({
             <Label htmlFor="design-menu-rename-label">{t('designMode.menu.name', { defaultValue: 'Name' })}</Label>
             <Input
               id="design-menu-rename-label"
-              autoFocus={!nameLocked}
-              disabled={nameLocked}
-              aria-describedby={nameLocked ? 'design-menu-rename-label-hint' : undefined}
+              autoFocus
+              aria-describedby={translatedIn ? 'design-menu-rename-label-hint' : undefined}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-            {nameLocked && (
-              <p id="design-menu-rename-label-hint" className="text-xs text-muted-foreground" data-testid="design-menu-rename-source-only">
-                {t('designMode.menu.renameSourceOnly', { defaultValue: "Menu names are changed in the app's source language" })}
+            {translatedIn && (
+              <p id="design-menu-rename-label-hint" className="text-xs text-muted-foreground" data-testid="design-menu-rename-translation">
+                {t('designMode.menu.renameTranslation', {
+                  defaultValue: "The new name is shown in {{language}}. The app's other languages keep their names.",
+                  language: languageName(translatedIn, language),
+                })}
               </p>
             )}
           </div>
@@ -1208,7 +1231,7 @@ function RenameDialog({
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border">
                 {preview}
               </span>
-              <Input id="design-menu-rename-icon" autoFocus={nameLocked} value={iconName} onChange={(e) => setIconName(e.target.value)} placeholder="briefcase" />
+              <Input id="design-menu-rename-icon" value={iconName} onChange={(e) => setIconName(e.target.value)} placeholder="briefcase" />
             </div>
             <p className="text-xs text-muted-foreground">
               {t('designMode.menu.iconHint', { defaultValue: 'A Lucide icon name, such as "briefcase".' })}

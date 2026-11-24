@@ -104,6 +104,7 @@ import {
     STORED_VERSION_DOOR_POLICY,
     translateMetaEnvelope,
     translateMetaList,
+    translateMetaTypesListing,
     wantsMetaItemLayers,
     type MetaHolderItemReader,
     type MetaItemAnswer,
@@ -951,7 +952,7 @@ type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol
  */
 type LayeredReadWithDraft = (
     request: Parameters<MetaLayeredProtocol['getMetaItemLayered']>[0],
-    opts: { withDraft?: boolean },
+    opts: { withDraft?: boolean; withVersion?: boolean },
 ) => ReturnType<MetaLayeredProtocol['getMetaItemLayered']>;
 
 /**
@@ -1030,7 +1031,8 @@ async function answerMetaLayered(
     // declaration as every draft switch in this domain is). A caller it does
     // not admit is answered the layers without a `draft` key, byte-identical to
     // a read that never asked, as `RestServer`'s layered read answers.
-    const layeredOptions = { withDraft: mayReadPendingDrafts(context.executionContext) };
+    // [#36601] …and `overlayVersion`, the published layer's version, as `RestServer`'s layered read serves it.
+    const layeredOptions = { withDraft: mayReadPendingDrafts(context.executionContext), withVersion: true };
     let answer: MetaLayeredAnswer;
     try {
         const layered = await (protocol as { getMetaItemLayered: LayeredReadWithDraft }).getMetaItemLayered({
@@ -1387,7 +1389,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (protocol && typeof protocol.getMetaTypes === 'function') {
             try {
                 const result = await protocol.getMetaTypes({});
-                return { handled: true, response: deps.success(result) };
+                // [#36886] In the reader's language, through the one
+                // translation `RestServer`'s `/meta/types` runs; the body is
+                // translated per request, so it varies on `Accept-Language`.
+                const translated = await translateMetaTypesListing(
+                    metaTranslationSources(deps, _context, protocol, (i18n) =>
+                        metaRequestLocale({ headers: _context.request?.headers, query }, i18n)),
+                    result,
+                );
+                return successWithHeaders(deps, translated, { Vary: 'Accept-Language' });
             } catch (e: any) {
                 console.warn('[HttpDispatcher] protocol.getMetaTypes() failed:', e?.message);
             }
@@ -2884,7 +2894,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (protocol && typeof protocol.getMetaTypes === 'function') {
             try {
                 const result = await protocol.getMetaTypes({});
-                return { handled: true, response: deps.success(result) };
+                // [#36886] In the reader's language, through the one
+                // translation `RestServer`'s `/meta/types` runs; the body is
+                // translated per request, so it varies on `Accept-Language`.
+                const translated = await translateMetaTypesListing(
+                    metaTranslationSources(deps, _context, protocol, (i18n) =>
+                        metaRequestLocale({ headers: _context.request?.headers, query }, i18n)),
+                    result,
+                );
+                return successWithHeaders(deps, translated, { Vary: 'Accept-Language' });
             } catch { /* fall through */ }
         }
         const metadataService = await deps.resolveService(_context, 'metadata', _context.environmentId);

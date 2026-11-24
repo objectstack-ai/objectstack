@@ -2373,16 +2373,23 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
 /**
  * objectstack#36370 — a board lane's foot statistic (`kanban.summary`).
  *
- * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`: the
- * board computes these in the browser, so the set is exactly what a reader
- * computes. `count` counts the lane's records (the lane's own count, the one
- * its header shows); `sum` totals a number field (`field` required) over the
- * cards the lane has LOADED, not over every record of the lane, and says so
- * at the foot when the lane holds more than it drew; `none` shows nothing,
- * also over `summarizeField`. A sum over the whole lane, and an average, a
- * minimum or a maximum, wait for a lane aggregate the query answers
- * (objectstack#36520): over a lane that has loaded only part of its cards none
- * of them is even a bound.
+ * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`.
+ * `count` counts the lane's records (the lane's own count, the one its header
+ * shows); `sum` totals a number field over every record of the lane, `avg`
+ * averages it, and `min` / `max` show its smallest / largest value
+ * (`field` required for all four); `none` shows nothing, also over
+ * `summarizeField`. objectstack#36520: the four aggregates are computed in the
+ * query — one grouped aggregate over the board's filter and search, grouped by
+ * the lane field, under the reader's permissions — never added up over the
+ * cards a lane has loaded, so a lane longer than its page still shows the
+ * whole lane's figure. A field the reader may not read shows no figure.
+ *
+ * One carve-out, a known gap: a board that does not query its own cards adds
+ * up a `sum` over the cards its host hands it (the other three draw nothing
+ * there). The list view hands a board whose lanes it cannot know before the
+ * query — lanes over a lookup field, or a view with grouping — the page of
+ * records it fetched, so on that board `sum` totals that page, not every
+ * record of the lane, and says nothing to mark it.
  */
 export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
   strictObject({
@@ -2402,9 +2409,30 @@ export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('ty
     history: VIEW_HISTORY,
   }, {
     type: z.literal('sum'),
-    field: z.string().min(1).describe('The number field the lane totals over its loaded cards (e.g. amount)'),
+    field: z.string().min(1).describe('The number field the lane totals over all of its records (e.g. amount)'),
   }),
-]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum of a number field over the lane\'s loaded cards'));
+  strictObject({
+    surface: 'this `avg` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('avg'),
+    field: z.string().min(1).describe('The number field the lane averages over all of its records (e.g. amount)'),
+  }),
+  strictObject({
+    surface: 'this `min` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('min'),
+    field: z.string().min(1).describe('The field whose smallest value over all of the lane\'s records the lane shows (e.g. amount)'),
+  }),
+  strictObject({
+    surface: 'this `max` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('max'),
+    field: z.string().min(1).describe('The field whose largest value over all of the lane\'s records the lane shows (e.g. amount)'),
+  }),
+]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum, average, minimum or maximum of a field over all of the lane\'s records'));
 
 /**
  * Kanban Settings
@@ -2472,19 +2500,24 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
   /**
    * objectstack#36370 — the statistic each lane shows at its foot
    * ({@link KanbanLaneSummarySchema}): `{ type: 'count' }` counts the lane's
-   * records; `{ type: 'sum', field }` totals a number field over the cards
-   * the lane has loaded (not the lane's every record: objectstack#36520);
-   * `{ type: 'none' }` shows nothing, also over a `summarizeField`. Without
-   * it a lane shows the sum of `summarizeField` where that is set, as before
-   * this key, and nothing otherwise.
+   * records; `{ type: 'sum' | 'avg' | 'min' | 'max', field }` totals, averages,
+   * or takes the smallest / largest value of a field over all of the lane's
+   * records, computed in the query (objectstack#36520); `{ type: 'none' }`
+   * shows nothing, also over a `summarizeField`. Without it a lane shows the
+   * sum of `summarizeField` where that is set, as before this key, and nothing
+   * otherwise.
    *
    * ⛔ No spec-side default: absence keeps a board stored before this key
    * exactly as it was.
    */
   summary: KanbanLaneSummarySchema.optional().describe(
     'The statistic each lane shows at its foot. `{ type: \'count\' }` counts the lane records; '
-    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over the cards the lane has loaded, '
-    + 'not every record of the lane (the foot says so when the lane holds more); `{ type: \'none\' }` shows nothing. '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over all of the lane records, '
+    + '`avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query '
+    + '(a field the reader may not read shows no figure); `{ type: \'none\' }` shows nothing. '
+    + 'Known gap: on a board given its records by its host instead of querying them (in a list view, '
+    + 'lanes over a lookup field or a view with grouping), `sum` totals the records handed in, one page, '
+    + 'unmarked, and the other three show nothing. '
     + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
   ),
   /**
@@ -3102,14 +3135,25 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   openNewTab: z.boolean().default(false).describe('Open the record\'s full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place'),
   
   /**
-   * [#2578] Overlay size for a drawer detail — coarse T-shirt buckets,
-   * aligned with `FormView.modalSize` (`page` mode ignores it). `'auto'`
-   * (default): the renderer derives the size from the object's field count and
-   * clamps it to the client viewport, so AI writes nothing — it cannot know the
-   * client width. Explicit buckets are a coarse, viewport-independent override.
+   * [#2578] Width of the record drawer, as a coarse T-shirt bucket. Each
+   * explicit bucket is a pixel cap the renderer clamps to the viewport
+   * (`min(92vw, CAP)`): sm 480, md 720, lg 960, xl 1200, full 1600.
+   *
+   * `'auto'` (default) is the host's fixed default width, the same for every
+   * object whatever its field count — nothing is derived from the object's
+   * fields. The console's record side panel (opened from an object's list, and
+   * the drawer level over a record page) opens at `min(92vw, 460px)`; a page
+   * block's drawer opens at that block's own default (`min(960px, 60vw)` for
+   * the grid, kanban, calendar, gantt and tree; 42rem for the list, gallery,
+   * map and timeline). A width the reader drags is remembered and wins over
+   * both `'auto'` and a bucket.
+   *
+   * The key has no effect where the record opens as a page rather than a
+   * drawer (in the console every record opens as a page on a phone), nor on a
+   * phone-width screen, where a block's drawer fills the screen.
    */
   size: z.enum(['auto', 'sm', 'md', 'lg', 'xl', 'full']).default('auto')
-    .describe("Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
+    .describe("Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it."),
 
   /**
    * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:
@@ -3650,7 +3694,7 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
   /** Grid Features */
   resizable: z.boolean().optional().describe('Enable column resizing'),
-  compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover'),
+  compactToolbar: z.boolean().optional().describe('Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key.'),
 
   /** Selection */
   selection: SelectionConfigSchema.optional().describe('Row selection configuration'),
@@ -3892,6 +3936,55 @@ export const ListViewSchema = lazySchema(() =>
     .superRefine(checkListViewCalendarVisualization)
     .superRefine(checkListViewChartBinding)
     .superRefine(checkListViewTimesheetBinding));
+
+/**
+ * How a metadata list cell draws its value. The vocabulary is closed: each value
+ * names a renderer the Studio metadata list ships.
+ *
+ * - `text` (the default): the value as written.
+ * - `badge`: a short enum value, as a chip.
+ * - `boolean`: a yes/no mark.
+ * - `count`: how many entries an array or a keyed record holds.
+ * - `list`: the entries of an array, joined; a single value as itself.
+ * - `summary`: the scalar members of an object value, joined in key order.
+ */
+export const MetadataListCellTypeSchema = lazySchema(() => z.enum([
+  'text',
+  'badge',
+  'boolean',
+  'count',
+  'list',
+  'summary',
+]).describe('How a metadata list cell draws its value'));
+
+/**
+ * One column of a metadata type's list: {@link ListColumnSchema} narrowed to the
+ * three members a platform list declares. `field` names a key of the type's own
+ * schema (or a dotted path into it), `label` is the English header, and `type`
+ * picks the cell renderer from {@link MetadataListCellTypeSchema}.
+ *
+ * The header is translated through the same slot as the type's form field of
+ * that path: `metadataForms.<type>.fields.<field>.label`.
+ */
+export const MetadataListColumnSchema = lazySchema(() => ListColumnSchema
+  .pick({ field: true, label: true, type: true })
+  .extend({
+    field: z.string().min(1).describe('Key of the metadata type\'s schema: a top-level key, or a dotted path into it'),
+    type: MetadataListCellTypeSchema.optional().describe('Cell renderer; `text` when absent'),
+  })
+  .describe('One column of a metadata type list'));
+
+/**
+ * The list layout of a metadata type in Studio: {@link ListViewSchema} narrowed
+ * to its data binding and its columns, the list counterpart of a
+ * {@link defineForm} layout. Build one with {@link defineList}.
+ */
+export const MetadataListViewSchema = lazySchema(() => ListViewShapeSchema
+  .pick({ data: true, columns: true })
+  .extend({
+    columns: z.array(MetadataListColumnSchema).min(1).describe('Columns of the list, in display order'),
+  })
+  .describe('List layout of a metadata type: its schema binding and its columns'));
 
 /**
  * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
@@ -8192,6 +8285,39 @@ export function defineForm(
 }
 
 /**
+ * Type-safe factory for a metadata type's Studio list layout — the list
+ * counterpart of {@link defineForm}. It binds the columns to the type's JSON
+ * Schema (`data.provider === 'schema'`) and validates them against
+ * {@link MetadataListViewSchema} at definition time, so a malformed column
+ * fails at module load.
+ *
+ * @example
+ * ```ts
+ * export const hookList = defineList({
+ *   schemaId: 'hook',
+ *   columns: [
+ *     { field: 'name', label: 'Name' },
+ *     { field: 'object', label: 'Object', type: 'list' },
+ *     { field: 'events', label: 'Events', type: 'list' },
+ *   ],
+ * });
+ * ```
+ */
+export function defineList(
+  config: Omit<z.input<typeof MetadataListViewSchema>, 'data'> & { schemaId: string },
+): MetadataListViewParsed {
+  const { schemaId, ...rest } = config;
+  const parsed = MetadataListViewSchema.safeParse({
+    ...rest,
+    data: { provider: 'schema', schemaId },
+  });
+  if (parsed.success) return parsed.data;
+  const refusal = new z.ZodRealError(parsed.error.issues);
+  z.core.util.captureStackTrace(refusal, defineList);
+  throw refusal;
+}
+
+/**
  * [#19678] The remedy {@link defineForm}'s refusal of an unspellable inline
  * option `value` carries — ruling 乙 (record 5805845085, narrowing ruling
  * 不动 + 声明): the bound stays, an enum-typed row may still list spellable
@@ -8327,6 +8453,15 @@ export type FormSelectOptionParsed = z.infer<typeof FormSelectOptionSchema>;
 export type ListColumn = z.input<typeof ListColumnSchema>;
 /** Post-parse shape of {@link ListColumn} — defaults applied, transforms run (ADR-0122). */
 export type ListColumnParsed = z.infer<typeof ListColumnSchema>;
+export type MetadataListCellType = z.input<typeof MetadataListCellTypeSchema>;
+/** Post-parse shape of {@link MetadataListCellType} (ADR-0122). */
+export type MetadataListCellTypeParsed = z.infer<typeof MetadataListCellTypeSchema>;
+export type MetadataListColumn = z.input<typeof MetadataListColumnSchema>;
+/** Post-parse shape of {@link MetadataListColumn} — defaults applied, transforms run (ADR-0122). */
+export type MetadataListColumnParsed = z.infer<typeof MetadataListColumnSchema>;
+export type MetadataListView = z.input<typeof MetadataListViewSchema>;
+/** Post-parse shape of {@link MetadataListView} — defaults applied, transforms run (ADR-0122). */
+export type MetadataListViewParsed = z.infer<typeof MetadataListViewSchema>;
 // `FormField` is declared next to FormFieldSchema — it IS that schema's
 // annotation, so it cannot be inferred back out of it (#4171).
 export type SelectionConfig = z.input<typeof SelectionConfigSchema>;

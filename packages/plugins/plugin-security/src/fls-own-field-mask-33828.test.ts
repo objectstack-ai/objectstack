@@ -332,3 +332,21 @@ describe('[ruling 6912661484, step 2] no behaviour change: the built-in admin se
     expect(merge([withBit(variant), APP_MASK])).not.toEqual(merge([variant, APP_MASK]));
   });
 });
+
+describe('[ruling 6912661484] a wildcard viewAllFields is posture-blind: it votes on a private object\'s fields and grants no object · getFieldPermissions', () => {
+  it('the wildcard does not cover the object when it is private, and its read vote on the fields stands', () => {
+    // The object axis honours the posture: a plain `'*'` (no View All, no
+    // Modify All) covers a public object and not a private one.
+    expect(evaluator.checkObjectPermission('find', OBJ, [WILDCARD_VIEW_ALL_FIELDS], { isPrivate: false })).toBe(true);
+    expect(evaluator.checkObjectPermission('find', OBJ, [WILDCARD_VIEW_ALL_FIELDS], { isPrivate: true })).toBe(false);
+    // The field axis takes no posture: the bit votes on every field of the
+    // object, so it re-opens what the set that DOES grant the object hides.
+    // Control first: a plain wildcard leaves the fields hidden. The row-blind
+    // merge is pinned beside it in core's `superuser-field-vote-33828.test.ts`.
+    const plainWildcard = set({ name: 'wildcard_plain', objects: { '*': { allowRead: true } } });
+    const hidden = merge([plainWildcard, APP_MASK]);
+    for (const f of MASKED) expect(hidden[f], f).toEqual({ readable: false, editable: false });
+    const fp = merge([WILDCARD_VIEW_ALL_FIELDS, APP_MASK]);
+    for (const f of MASKED) expect(fp[f], f).toEqual({ readable: true, editable: false });
+  });
+});

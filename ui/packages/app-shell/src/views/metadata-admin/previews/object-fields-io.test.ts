@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { ObjectSchema } from '@objectstack/spec/data';
+import { ObjectExtensionSchema, ObjectSchema } from '@objectstack/spec/data';
 import {
   newField,
   readFields,
@@ -20,6 +20,9 @@ import {
   groupEntries,
   currentGroupLayout,
   writeGroupLayout,
+  groupListLayout,
+  groupArrangement,
+  groupMembership,
   diffFields,
   type FieldsView,
 } from './object-fields-io';
@@ -507,5 +510,81 @@ describe('groupEntries reads a group\'s own fields list (objectstack#35900)', ()
       ['basic', ['account', 'name', 'terms']],
       [null, ['other']],
     ]);
+  });
+});
+
+describe('groupListLayout — an object in the older per-field `group` spelling converts, membership unchanged (objectstack#36505)', () => {
+  // `basic` holds name and account by the older `group`; `money` lists
+  // valid_until and also picks up `fee` by its `group`; terms is ungrouped;
+  // `orphan` names no declared group.
+  const view: FieldsView = readFields({
+    name: { type: 'text', group: 'basic' },
+    account: { type: 'text', group: 'basic' },
+    valid_until: { type: 'date' },
+    fee: { type: 'currency', group: 'money' },
+    terms: { type: 'textarea' },
+    orphan: { type: 'text', group: 'gone' },
+  });
+  const groups = readGroups([
+    { key: 'basic', label: 'Basic' },
+    { key: 'money', label: 'Money', fields: ['valid_until'] },
+    { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+  ]);
+
+  it('lists every group\'s members in display order and drops each `group` a list now holds', () => {
+    const out = groupListLayout(view, groups);
+    expect(out.changed).toBe(true);
+    expect(out.groups).toEqual([
+      { key: 'basic', label: 'Basic', fields: ['name', 'account'] },
+      { key: 'money', label: 'Money', fields: ['valid_until', 'fee'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const fields = writeFields(out.view) as Record<string, Record<string, unknown>>;
+    expect(Object.keys(fields)).toEqual(['name', 'account', 'valid_until', 'fee', 'terms', 'orphan']);
+    expect(['name', 'account', 'fee'].map((n) => fields[n].group)).toEqual([undefined, undefined, undefined]);
+    // A `group` naming no declared group says nothing and is kept.
+    expect(fields.orphan.group).toBe('gone');
+  });
+
+  it('the converted object places every field exactly where the old spelling did', () => {
+    const before = groupMembership(view, groups);
+    const out = groupListLayout(view, groups);
+    const after = groupMembership(out.view, out.groups);
+    expect([...after.members]).toEqual([...before.members]);
+    expect(Object.fromEntries(after.groupOf)).toEqual(Object.fromEntries(before.groupOf));
+    const parsed = ObjectSchema.safeParse({ name: 'quote', label: 'Quote', fields: writeFields(out.view), fieldGroups: out.groups });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('an object already in the list spelling is answered as it is', () => {
+    const out = groupListLayout(view, groups);
+    const again = groupListLayout(out.view, out.groups);
+    expect(again.changed).toBe(false);
+    expect(again.view).toBe(out.view);
+    expect(again.groups).toBe(out.groups);
+  });
+});
+
+describe('groupArrangement — the whole arrangement an installed object\'s .custom extension writes (objectstack#36505)', () => {
+  it('lists every group\'s members, the older spelling included, and keeps a related-table group as it is', () => {
+    const view = readFields({
+      name: { type: 'text', group: 'basic' },
+      region__c: { type: 'text' },
+      account: { type: 'text' },
+      terms: { type: 'textarea' },
+    });
+    const groups = readGroups([
+      { key: 'basic', label: 'Basic' },
+      { key: 'extra', label: 'Extra', fields: ['region__c', 'account'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const arrangement = groupArrangement(view, groups);
+    expect(arrangement).toEqual([
+      { key: 'basic', label: 'Basic', fields: ['name'] },
+      { key: 'extra', label: 'Extra', fields: ['region__c', 'account'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const parsed = ObjectExtensionSchema.safeParse({ extend: 'quote', fieldGroups: arrangement });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 });

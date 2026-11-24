@@ -72,6 +72,36 @@
  * A create, with nothing read, calls the client directly with
  * `ifNoneMatch: '*'`: the door refuses it when the name already holds a draft,
  * instead of writing the new skeleton over it.
+ *
+ * ## The published layer (objectstack#36601)
+ *
+ * A Studio Save is a draft save and then that one item's publish, so it leaves
+ * no draft behind, and a draft pin alone cannot tell two editors apart: each
+ * opened the item with no draft, each asserts none, and the later Save used to
+ * publish over the earlier one. The guard therefore also holds the PUBLISHED
+ * layer's version for the same buffer:
+ *
+ *  6. A load records what its `/layers` read served as `overlayVersion`
+ *     ({@link publishedPinOf}) with `recordPublished`: a token pins the publish
+ *     `If-Match`, a served `null` (no published row) `If-None-Match: *`, and a
+ *     server that serves no `overlayVersion` pins nothing — the publish goes
+ *     unpinned, as before.
+ *  7. {@link DraftVersionGuard.publish} sends that pin; a publish that lands
+ *     holds its receipt's `version`, the published row it left.
+ *  8. A `409 METADATA_CONFLICT` on the publish opens the same dialog, worded for
+ *     a live change: reload (the caller's `beforeReload` runs first, so the
+ *     draft the Save just wrote is taken back before the buffer is re-read),
+ *     overwrite after the confirmation (re-sent pinned to the refusal's
+ *     `currentVersion`), or keep editing (nothing goes live).
+ *  9. objectstack#36726 — a reload whose `beforeReload` leaves a draft pending
+ *     (`'kept'`: one that was there before the Save, a copilot's, which the
+ *     Save wrote into and never discards) re-reads THAT draft, now carrying
+ *     the page's edits. Its publish stays pinned to the version the conflict
+ *     was raised on until the author re-confirms: the next Save is refused and
+ *     asked again, and only an overwrite, a publish that lands, or a load that
+ *     reads no pending draft (the buffer is then the live row) takes the
+ *     fresh read's pin. A reload over a discarded draft re-reads the live row
+ *     and is pinned to it at once, as before.
  */
 
 import * as React from 'react';
@@ -87,9 +117,17 @@ import {
   cn,
 } from '@object-ui/components';
 import type { MetadataClient, MetadataClientSaveOptions } from '@object-ui/data-objectstack';
-import { GetMetaItemResponseSchema, MetadataConflictErrorSchema } from '@objectstack/spec/api';
+import { GetMetaItemLayeredResponseSchema, GetMetaItemResponseSchema, MetadataConflictErrorSchema } from '@objectstack/spec/api';
 import { errorCodeIs } from '@object-ui/types';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
+
+/**
+ * objectstack#36726 — what a publish conflict's `beforeReload` left at the
+ * item: `'discarded'`, the draft the Save wrote was taken back, so the reload
+ * re-reads the live row; `'kept'`, a draft pending before the Save stays (it
+ * carries the page's edits), so the reload re-reads that draft (rule 9).
+ */
+export type BeforeReloadOutcome = 'discarded' | 'kept';
 
 /** What a guarded save ended in, when it did not throw. */
 export type DraftSaveOutcome = 'saved' | 'reloaded';
@@ -101,6 +139,23 @@ export type DraftConflictChoice = 'reload' | 'overwrite' | 'cancel';
 export interface DraftConflict {
   type: string;
   name: string;
+  /**
+   * objectstack#36601 — which layer moved: the draft (the draft save was
+   * refused, the default) or the published row (the Save's publish was).
+   */
+  layer?: 'draft' | 'published';
+}
+
+const KEPT_EDITING = new WeakSet<object>();
+
+/**
+ * objectstack#36601 — `err` is the "not saved" error the guarded publish
+ * throws when the author, asked about a published row that moved, chose to
+ * keep editing: no request failed, so the caller shows it as the draft
+ * conflict's own "not saved" line, never as a refused publish.
+ */
+export function isPublishConflictKeptEditing(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && KEPT_EDITING.has(err);
 }
 
 /**
@@ -142,6 +197,23 @@ export function draftPinOf(answer: unknown): DraftPin | null {
   if (answer === null) return { ifNoneMatch: '*' };
   if (!answer || typeof answer !== 'object' || !('version' in answer)) return null;
   const version = GetMetaItemResponseSchema.shape.version.safeParse((answer as { version: unknown }).version);
+  return version.success && version.data !== undefined ? pinOfVersion(version.data) : null;
+}
+
+/**
+ * objectstack#36601 — what a load's `/layers` read (`MetadataClient.layered`,
+ * at the address the buffer's publish writes) says the Save's publish is
+ * pinned with: its `overlayVersion`, read through
+ * `GetMetaItemLayeredResponseSchema`'s own member — a token pins `If-Match`, a
+ * served `null` (no published row there) pins `If-None-Match: *`. An answer
+ * that carries no `overlayVersion` (a server from before it was served) pins
+ * nothing, and the publish goes unpinned as it always did.
+ */
+export function publishedPinOf(layered: unknown): DraftPin | null {
+  if (!layered || typeof layered !== 'object' || !('overlayVersion' in layered)) return null;
+  const version = GetMetaItemLayeredResponseSchema.shape.overlayVersion.safeParse(
+    (layered as { overlayVersion: unknown }).overlayVersion,
+  );
   return version.success && version.data !== undefined ? pinOfVersion(version.data) : null;
 }
 
@@ -249,6 +321,15 @@ export class DraftVersionGuard {
    * hook panel) keeps each item's own.
    */
   private readonly held = new Map<string, DraftPin>();
+  /** objectstack#36601 — the published layer's pin per item, for the Save's publish (rules 6–8). */
+  private readonly published = new Map<string, DraftPin>();
+  /**
+   * objectstack#36726 — rule 9: per item, the published pin a conflict was
+   * raised on, held over a reload that re-read a pending draft until the
+   * author re-confirms; `fresh` is what the reload's load recorded meanwhile
+   * (absent until it has), taken once the item is confirmed.
+   */
+  private readonly unconfirmed = new Map<string, { pin: DraftPin; fresh?: DraftPin | null }>();
   private tail: Promise<void> | null = null;
   /** Bumped by a reload: a save queued before it carries the replaced buffer. */
   private epoch = 0;
@@ -265,9 +346,110 @@ export class DraftVersionGuard {
     return this.held.get(itemKey(type, name, packageId)) ?? null;
   }
 
+  /** The published pin held, for the item `publish` would address (tests read it). */
+  publishedFor(type: string, name: string, packageId?: string | null): DraftPin | null {
+    const key = itemKey(type, name, packageId);
+    return this.unconfirmed.get(key)?.pin ?? this.published.get(key) ?? null;
+  }
+
   /** The buffer was installed with no draft read behind it: nothing describes it. */
   forget = (): void => {
     this.held.clear();
+    this.published.clear();
+    this.unconfirmed.clear();
+  };
+
+  /**
+   * objectstack#36726 — rule 9 ends for the item: its publish takes the pin
+   * the last load recorded, if one has since the reload.
+   */
+  private confirm(key: string): void {
+    const entry = this.unconfirmed.get(key);
+    if (!entry) return;
+    this.unconfirmed.delete(key);
+    if (entry.fresh) this.published.set(key, entry.fresh);
+    else if (entry.fresh === null) this.published.delete(key);
+  }
+
+  /**
+   * objectstack#36601 — the buffer was installed from a load whose `/layers`
+   * read, at the address the buffer's publish writes, served `pin`
+   * ({@link publishedPinOf}). `null` pins nothing.
+   */
+  recordPublished = (type: string, name: string, packageId: string | null | undefined, pin: DraftPin | null): void => {
+    const key = itemKey(type, name, packageId);
+    // objectstack#36726 — a reload that re-read a pending draft is not the
+    // author's answer to the conflict: the pin it was raised on stays (rule 9).
+    const entry = this.unconfirmed.get(key);
+    if (entry) {
+      entry.fresh = pin;
+      return;
+    }
+    if (pin) this.published.set(key, pin);
+    else this.published.delete(key);
+  };
+
+  /**
+   * objectstack#36601 — the Save's publish of the draft it just wrote, pinned
+   * to the published version this buffer holds (rules 6–9 above). Resolves
+   * `'published'`, or `'reloaded'` when the author chose to reload after a
+   * conflict (`beforeReload` has run, then the caller's reload); throws the
+   * client's error otherwise, and the guard's "not saved" error when the
+   * author kept editing. `beforeReload` answers what it left at the item
+   * ({@link BeforeReloadOutcome}); one that answers nothing is `'discarded'`.
+   */
+  publish = async (
+    client: Pick<MetadataClient, 'publish'>,
+    type: string,
+    name: string,
+    options: { packageId?: string; member?: string } = {},
+    beforeReload?: () => Promise<BeforeReloadOutcome | void>,
+  ): Promise<'published' | 'reloaded'> => {
+    const key = itemKey(type, name, options.packageId);
+    let pin = this.unconfirmed.get(key)?.pin ?? this.published.get(key) ?? null;
+    for (;;) {
+      try {
+        const receipt = await client.publish(type, name, { ...options, ...(pin ?? {}) });
+        // The publish the author's buffer was built for landed: rule 9 is over for it.
+        this.unconfirmed.delete(key);
+        const version = receiptVersion(receipt);
+        if (version) this.published.set(key, { ifMatch: version });
+        else this.published.delete(key);
+        return 'published';
+      } catch (err) {
+        if (!isDraftVersionConflict(err)) throw err;
+        const conflict: DraftConflict = { type, name, layer: 'published' };
+        const choice = await this.deps.ask(conflict);
+        if (choice === 'reload') {
+          // A `beforeReload` that throws (its draft could not be taken back)
+          // stops the reload here: nothing is re-read and the pins stay, so
+          // the next Save is asked about again (contract review S2).
+          const left = await beforeReload?.();
+          this.held.clear();
+          this.published.clear();
+          this.epoch += 1;
+          // objectstack#36726 — the reload re-reads the pending draft it kept,
+          // which carries the page's edits: never pinned to the fresh read's
+          // version, so its next Save is refused and asked again (rule 9).
+          if (left === 'kept' && pin) this.unconfirmed.set(key, { pin });
+          this.deps.reload();
+          return 'reloaded';
+        }
+        if (choice !== 'overwrite') {
+          const kept = this.deps.notSaved(conflict);
+          KEPT_EDITING.add(kept);
+          throw kept;
+        }
+        // As for a draft: the re-send is pinned to the version the refusal
+        // names, so a publish landing in between is asked about again. The
+        // author has seen the live row move and chose this buffer over it:
+        // that is the re-confirmation rule 9 waits for.
+        this.unconfirmed.delete(key);
+        pin = pinOfConflict(err);
+        if (pin) this.published.set(key, pin);
+        else this.published.delete(key);
+      }
+    }
   };
 
   /**
@@ -276,7 +458,11 @@ export class DraftVersionGuard {
    * {@link readDraftForSave} returned. `null` pins nothing, as `forget()`.
    */
   recordRead = (type: string, name: string, packageId: string | null | undefined, pin: DraftPin | null): void => {
-    this.pin(itemKey(type, name, packageId), pin);
+    const key = itemKey(type, name, packageId);
+    this.pin(key, pin);
+    // objectstack#36726 — no draft is pending at the address: the buffer is
+    // the live row, which the load's published read describes (rule 9 ends).
+    if (pin && 'ifNoneMatch' in pin) this.confirm(key);
   };
 
   /**
@@ -331,6 +517,7 @@ export class DraftVersionGuard {
         const choice = await this.deps.ask(conflict);
         if (choice === 'reload') {
           this.held.clear();
+          this.published.clear();
           this.epoch += 1;
           this.deps.reload();
           return 'reloaded';
@@ -366,6 +553,10 @@ export interface DraftSaveGuard {
   recordRead: DraftVersionGuard['recordRead'];
   /** Call where the buffer is installed with no draft read behind it (rule 3 above). */
   forget: () => void;
+  /** Call where the buffer is installed from a load's `/layers` read (rule 6 above). */
+  recordPublished: DraftVersionGuard['recordPublished'];
+  /** The Save's pinned publish (rules 7–8 above). */
+  publish: DraftVersionGuard['publish'];
   /** The conflict dialog; render it once, anywhere in the caller's tree. */
   dialog: React.ReactElement;
 }
@@ -420,6 +611,8 @@ export function useDraftSaveGuard(client: Pick<MetadataClient, 'save'>, onReload
     save: guard.save,
     recordRead: guard.recordRead,
     forget: guard.forget,
+    recordPublished: guard.recordPublished,
+    publish: guard.publish,
     dialog: <DraftConflictDialog conflict={pending?.conflict ?? null} onChoose={choose} />,
   };
 }
@@ -449,6 +642,8 @@ export function DraftConflictDialog({ conflict, onChoose }: DraftConflictDialogP
     type: conflict ? translateMetadataType(conflict.type, locale) : '',
     name: conflict?.name ?? '',
   };
+  // objectstack#36601 — a live change is worded as one; the choices are the same.
+  const live = conflict?.layer === 'published';
   return (
     <AlertDialog
       open={open}
@@ -468,13 +663,17 @@ export function DraftConflictDialog({ conflict, onChoose }: DraftConflictDialogP
             <div className="flex-1">
               <AlertDialogTitle>
                 {confirming
-                  ? t('engine.draftConflict.overwriteTitle', locale)
-                  : t('engine.draftConflict.title', locale)}
+                  ? t(live ? 'engine.draftConflict.publishedOverwriteTitle' : 'engine.draftConflict.overwriteTitle', locale)
+                  : t(live ? 'engine.draftConflict.publishedTitle' : 'engine.draftConflict.title', locale)}
               </AlertDialogTitle>
               <AlertDialogDescription className="mt-1">
                 {confirming
-                  ? tFormat('engine.draftConflict.overwriteDescription', locale, vars)
-                  : tFormat('engine.draftConflict.description', locale, vars)}
+                  ? tFormat(
+                      live ? 'engine.draftConflict.publishedOverwriteDescription' : 'engine.draftConflict.overwriteDescription',
+                      locale,
+                      vars,
+                    )
+                  : tFormat(live ? 'engine.draftConflict.publishedDescription' : 'engine.draftConflict.description', locale, vars)}
               </AlertDialogDescription>
             </div>
           </div>

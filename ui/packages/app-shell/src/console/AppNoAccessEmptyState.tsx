@@ -54,6 +54,7 @@ import { Button, DataEmptyState } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
+import { studioHomePath } from '../views/studio-design/studioAddress.js';
 
 export interface AppNoAccessEmptyStateProps {
   /** The active app, as the console's metadata list carries it (`_packageId` as served). */
@@ -143,11 +144,11 @@ export function AppNoAccessEmptyState({ app, setupPath, reason = 'no-navigation'
             defaultValue: '{{app}} has nothing in its menu yet',
           })}
           description={t('empty.appMenuEmptyDescription', {
-            defaultValue: 'Create objects for this app in Studio and they join its menu, or add entries in design mode.',
+            defaultValue: 'Create objects for this app in Studio and they join its menu, or add entries in Design layout.',
           })}
           action={
             <Button asChild variant="outline">
-              <Link to={`/studio/${encodeURIComponent(packageId)}/data`} data-testid="app-empty-menu-open-studio">
+              <Link to={studioHomePath(packageId)} data-testid="app-empty-menu-open-studio">
                 {t('empty.openInStudio', { defaultValue: 'Open in Studio' })}
               </Link>
             </Button>

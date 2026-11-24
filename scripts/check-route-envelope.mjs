@@ -1145,8 +1145,8 @@ const DISPATCHER_DOMAINS = {
   // its one answer, `newSimilarTargetRefusalAnswer`, goes through `deps.error`.
   'new-similar-target.ts': { handBuilt: 0 },
   'notifications.ts': { handBuilt: 0 },
-  // [#36506] Not a domain: the shared bridge `/personal-views` and
-  // `/attachments` call. The member's own JSON `Response` is handed back as
+  // [#36506] Not a domain: the shared bridge `/personal-views`,
+  // `/attachments` and `/print` call. The member's own JSON `Response` is handed back as
   // `result`, and every answer the bridge makes itself — the ordinary miss,
   // the two 501s, the sanitised 500s — goes through `deps.routeNotFound` /
   // `deps.error`.
@@ -1158,6 +1158,8 @@ const DISPATCHER_DOMAINS = {
   'permission-set-clone.ts': { handBuilt: 0 },
   // [#36506] The `/personal-views` bridge, as `attachments.ts`.
   'personal-views.ts': { handBuilt: 0 },
+  // [#36840] The `/print` bridge, as `attachments.ts`.
+  'print.ts': { handBuilt: 0 },
   'security.ts': { handBuilt: 0 },
   // No `storage.ts` — the `/storage` domain was retired in #4087 (it called
   // the storage contract with the wrong arity and read a Buffer as a

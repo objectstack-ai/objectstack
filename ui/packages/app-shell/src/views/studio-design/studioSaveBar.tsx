@@ -43,6 +43,12 @@ import type { MetadataClient } from '@object-ui/data-objectstack';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import { LINT_DEBOUNCE_MS } from '../metadata-admin/celLintDebounce.js';
+import {
+  publishedPinOf,
+  type BeforeReloadOutcome,
+  type DraftPin,
+  type DraftSaveGuard,
+} from '../metadata-admin/DraftConflictDialog.js';
 
 /** Past the editors' expression check of the last keystroke, and its report. */
 const VERDICT_SETTLE_MS = LINT_DEBOUNCE_MS + 50;
@@ -246,11 +252,77 @@ export function useStudioSaveCoordinator(locale: string): StudioSaveCoordinator 
   return { registry, dirty, saving, save, cancel };
 }
 
-/** What {@link publishSavedItem} did. */
-export type PublishSavedOutcome =
+/** What an unpinned {@link publishSavedItem} did. */
+export type UnpinnedPublishOutcome =
   | { ok: true }
   /** Refused; `draftDiscarded` says the draft the save wrote was taken back. */
   | { ok: false; error: unknown; draftDiscarded: boolean };
+
+/** What {@link publishSavedItem} did; only a pinned publish can answer `reloaded`. */
+export type PublishSavedOutcome =
+  | UnpinnedPublishOutcome
+  /**
+   * objectstack#36601 — the published row moved since the buffer was loaded,
+   * and the author chose to reload it: nothing went live, the draft the save
+   * wrote was taken back first (`draftDiscarded`, as for a refusal), and the
+   * buffer is being re-read.
+   */
+  | { ok: false; reloaded: true; draftDiscarded: boolean };
+
+/**
+ * objectstack#36601 — the buffer's own guarded publish
+ * (`DraftSaveGuard.publish`), pinned to the published version its load read.
+ */
+export type PinnedPublish = DraftSaveGuard['publish'];
+
+/**
+ * objectstack#36726 — a load's `/layers` read at the address its Save's
+ * publish writes, for the published pin alone ({@link publishedPinOf}). Read
+ * it BEFORE the reads the buffer is installed from, as the server reads the
+ * version before the body: a publish landing in between leaves the pin older
+ * than the buffer, and the Save is asked about instead of publishing over it.
+ *
+ * No layer at all at the address (the door's 404, which the client answers as
+ * the empty view) is no published row there: `If-None-Match: *`, so a row
+ * another writer publishes first is refused, never replaced. A read that
+ * fails says nothing about the row and pins nothing; so does a served answer
+ * without `overlayVersion` (a server from before it was served).
+ */
+export async function readPublishedPin(
+  client: Pick<MetadataClient, 'layered'>,
+  type: string,
+  name: string,
+  packageId: string | null | undefined,
+): Promise<DraftPin | null> {
+  let layered: unknown;
+  try {
+    layered = await client.layered(type, name, packageId ? { packageId } : {});
+  } catch {
+    return null;
+  }
+  return publishedPinOfLayers(layered);
+}
+
+/** {@link readPublishedPin}'s reading of an answer the caller already holds. */
+export function publishedPinOfLayers(layered: unknown): DraftPin | null {
+  const pin = publishedPinOf(layered);
+  if (pin) return pin;
+  const l = (layered ?? {}) as { code?: unknown; overlay?: unknown; effective?: unknown; draft?: unknown };
+  const absent = l.code == null && l.overlay == null && l.effective == null && l.draft == null;
+  return absent ? { ifNoneMatch: '*' } : null;
+}
+
+/**
+ * objectstack#36726 — the publish of an item a create has just written, pinned
+ * `If-None-Match: *`: no live row was there when the create checked, so a row
+ * another writer published under the name since is refused `409` instead of
+ * replaced. For a create with no loaded buffer to reload (a new flow), the
+ * refusal is the create's own: no dialog is asked.
+ */
+export const publishCreated: PinnedPublish = async (client, type, name, options = {}) => {
+  await client.publish(type, name, { ...options, ifNoneMatch: '*' });
+  return 'published';
+};
 
 /**
  * Make the draft a Save just wrote live: that one item's publish, at the
@@ -261,26 +333,72 @@ export type PublishSavedOutcome =
  * draft behind and the edits stay on the page, unsaved. A draft that was
  * pending before the save (a copilot's) is kept: it now carries the page's
  * edits too, and is reviewed under Changes. Either way the ledger is told.
+ *
+ * objectstack#36601 — `pinned`, the buffer's guarded publish, sends the
+ * published version the buffer was loaded at, so a Save over a row another
+ * editor published since is refused and asked about (reload or overwrite)
+ * instead of replacing it. Omitted, the publish is unpinned, as before.
+ * objectstack#36726 — every Studio editor that saves this way passes it; a
+ * create passes {@link publishCreated} where no buffer is loaded behind it.
  */
 export async function publishSavedItem(
   client: Pick<MetadataClient, 'publish' | 'reset'>,
   item: { type: string; name: string; packageId: string | null },
   hadDraft: boolean,
+): Promise<UnpinnedPublishOutcome>;
+export async function publishSavedItem(
+  client: Pick<MetadataClient, 'publish' | 'reset'>,
+  item: { type: string; name: string; packageId: string | null },
+  hadDraft: boolean,
+  pinned: PinnedPublish,
+): Promise<PublishSavedOutcome>;
+export async function publishSavedItem(
+  client: Pick<MetadataClient, 'publish' | 'reset'>,
+  item: { type: string; name: string; packageId: string | null },
+  hadDraft: boolean,
+  pinned?: PinnedPublish,
 ): Promise<PublishSavedOutcome> {
   const scope = item.packageId ? { packageId: item.packageId } : {};
-  try {
-    await client.publish(item.type, item.name, scope);
-  } catch (error) {
-    let draftDiscarded = false;
-    if (!hadDraft) {
-      try {
-        await client.reset(item.type, item.name, { state: 'draft', ...scope });
-        draftDiscarded = true;
-      } catch (discardError) {
-        // The draft stays pending, listed under Changes, where it can be discarded.
-        console.error('[studio] a refused publish left the saved draft pending:', discardError);
-      }
+  let draftDiscarded = false;
+  const discardSavedDraft = async (): Promise<void> => {
+    if (hadDraft) return;
+    try {
+      await client.reset(item.type, item.name, { state: 'draft', ...scope });
+      draftDiscarded = true;
+    } catch (discardError) {
+      // The draft stays pending, listed under Changes, where it can be discarded.
+      console.error('[studio] a refused publish left the saved draft pending:', discardError);
     }
+  };
+  // objectstack#36601 (contract review S2) — the reload's discard is NOT
+  // best-effort: a draft that could not be taken back would be re-read as the
+  // buffer and pinned to the fresh published version, so the next Save would
+  // publish the losing copy without a prompt. Its failure throws instead: the
+  // guard does not reload, keeps the published pin the conflict was raised
+  // on, and the Save reads as refused, edits on the page.
+  // objectstack#36726 — a draft pending before the Save is kept, never
+  // discarded: the guard is told so, and the reload that re-reads it stays
+  // pinned to the published version the conflict was raised on.
+  const discardBeforeReload = async (): Promise<BeforeReloadOutcome> => {
+    if (hadDraft) return 'kept';
+    await client.reset(item.type, item.name, { state: 'draft', ...scope });
+    draftDiscarded = true;
+    return 'discarded';
+  };
+  try {
+    if (pinned) {
+      // A reload takes the saved draft back BEFORE the buffer is re-read, so
+      // the re-read installs the live row, never the draft that lost.
+      const outcome = await pinned(client, item.type, item.name, scope, discardBeforeReload);
+      if (outcome === 'reloaded') {
+        emitMetadataRefresh();
+        return { ok: false, reloaded: true, draftDiscarded };
+      }
+    } else {
+      await client.publish(item.type, item.name, scope);
+    }
+  } catch (error) {
+    await discardSavedDraft();
     emitMetadataRefresh();
     return { ok: false, error, draftDiscarded };
   }

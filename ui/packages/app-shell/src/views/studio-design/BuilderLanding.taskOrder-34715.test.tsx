@@ -50,8 +50,9 @@ vi.mock('./packageCustomizations-io', async (importOriginal) => ({
       overrides: Array.from({ length: customized }, (_, i) => ({ type: 'view', name: `view_${i}` })),
       extensions: [],
       switchedOff: Array.from({ length: switchedOff }, (_, i) => ({ type: 'flow', name: `flow_${i}` })),
+      arrangements: [],
       contributions: [],
-      counts: { overrides: customized, extensions: 0, switchedOff, contributions: 0 },
+      counts: { overrides: customized, extensions: 0, switchedOff, arrangements: 0, contributions: 0 },
     };
   }),
 }));

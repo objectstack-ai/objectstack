@@ -279,3 +279,82 @@ export function readChangeOwnerReport(
   unchanged = Math.min(unchanged, report.updated);
   return { moved: report.updated - unchanged, unchanged, failed: report.failed };
 }
+
+/**
+ * [objectstack#35315 phase 2] One relationship the dialog may tick: a child
+ * object whose reference field to this object declares `transferBehavior:
+ * 'cascade'` (`data.changeOwnerCascades`' answer).
+ */
+export interface ChangeOwnerCascadeCandidate {
+  object: string;
+  field: string;
+  label: string;
+  fieldLabel: string;
+}
+
+export type ChangeOwnerCascadeState =
+  | { phase: 'idle' }
+  | { phase: 'loading' }
+  | { phase: 'failed'; message: string }
+  | { phase: 'ready'; candidates: ChangeOwnerCascadeCandidate[] };
+
+/**
+ * The cascades the dialog offers as ticks (ruling 7000907189 point 4): "only
+ * declared candidates whose child object passes point 1".
+ *
+ * - Declared, and the child's object facts (structurally eligible, not a
+ *   `controlled_by_parent` detail, its switch on): the server's answer,
+ *   `GET /data/:object/change-owner/cascades` (`readCascades`), which reads
+ *   the registered definitions — the Console holds no full object list here.
+ * - The caller's transfer verdict on each child: the explain engine's
+ *   `transfer` operation for that OBJECT, asked once per child and principal
+ *   through the same cache the list's bulk action uses, and kept only on a
+ *   definite allow.
+ *
+ * ⛔ No verdict is computed here, and the write judges every cascaded row
+ * again: a ticked relationship whose rows the caller may not move comes back
+ * as refused rows in the report.
+ *
+ * Asked only while `wanted` (the dialog is open on a person target).
+ */
+export function useChangeOwnerCascadeCandidates(
+  objectName: string | undefined,
+  wanted: boolean,
+  readCascades: ((object: string) => Promise<{ cascades?: ChangeOwnerCascadeCandidate[] } | null | undefined>) | undefined,
+): ChangeOwnerCascadeState {
+  const principal = usePermissions().userId;
+  const apiFetch = React.useContext(SchemaRendererContext)?.apiFetch;
+  const [state, setState] = React.useState<ChangeOwnerCascadeState>({ phase: 'idle' });
+  const asks = wanted && !!objectName && !!readCascades;
+  React.useEffect(() => {
+    if (!asks || !objectName || !readCascades) {
+      setState({ phase: 'idle' });
+      return;
+    }
+    let live = true;
+    setState({ phase: 'loading' });
+    void (async () => {
+      try {
+        const answer = await readCascades(objectName);
+        const declared = Array.isArray(answer?.cascades) ? answer!.cascades : [];
+        const verdicts = new Map<string, boolean | undefined>();
+        for (const child of new Set(declared.map((c) => c.object))) {
+          verdicts.set(child, await askObjectTransfer(principal, child, apiFetch));
+        }
+        if (live) setState({ phase: 'ready', candidates: declared.filter((c) => verdicts.get(c.object) === true) });
+      } catch (err) {
+        const message = (err as { message?: unknown } | null)?.message;
+        if (live) setState({ phase: 'failed', message: typeof message === 'string' && message ? message : String(err) });
+      }
+    })();
+    return () => { live = false; };
+    // `readCascades` is a fresh closure each render; the question is keyed by the object and the principal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asks, objectName, principal, apiFetch]);
+  return state;
+}
+
+/** A cascade relationship's key in the dialog's tick set. */
+export function cascadeKey(rel: { object: string; field: string }): string {
+  return `${rel.object}.${rel.field}`;
+}

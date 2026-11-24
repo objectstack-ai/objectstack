@@ -192,6 +192,7 @@ export {
     STORED_VERSION_DOOR_POLICY,
     translateMetaEnvelope,
     translateMetaList,
+    translateMetaTypesListing,
     wantsMetaItemLayers,
     metaCallerPackageQuery,
 } from './meta-item-read-gate.js';

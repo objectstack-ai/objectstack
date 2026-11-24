@@ -29,16 +29,21 @@
  * engines against each other): the expression the runtime builds, from the same
  * function, is compiled with the host engine as a script and never run, and the
  * failure is read through the one {@link judgeBodyCompile}. So the severity
- * split is the action rule's: a regular-expression PATTERN the host refuses is a
- * `warning` (QuickJS's pattern dialect measurably differs from V8's there), and
- * every other compile failure is an `error`.
+ * split is the action rule's: a regular-expression pattern the host refuses for
+ * a measured dialect gap (a duplicate named capture group, a modifier group, a
+ * Unicode property name only QuickJS knows: Node 22's V8 refuses them, QuickJS
+ * runs them) is a
+ * `warning`, and every other compile failure, every other pattern failure
+ * included, is an `error`.
  *
  * ## Two rule ids, one wrapper
  *
  * A hook finding is `hook-body-does-not-compile` and a job finding is
  * `job-body-does-not-compile`: the id names the body kind, as the action rule's
- * does, so `os explain` and a `suppressWarnings` entry address one kind. The
- * walk is one: `hooks[*].body` and `jobs[*].body`, `language: 'js'` only (an L1
+ * does, so `os explain` has a page for each kind and a finding's `rule` field
+ * says which kind it is about. (No per-rule suppression exists for these: the
+ * CLI has none, and `suppressWarnings` is a dashboard widget key.) The walk is
+ * one: `hooks[*].body` and `jobs[*].body`, `language: 'js'` only (an L1
  * expression body is not run in this wrapper).
  */
 
@@ -54,7 +59,7 @@ export const HOOK_BODY_DOES_NOT_COMPILE = 'hook-body-does-not-compile';
 export const JOB_BODY_DOES_NOT_COMPILE = 'job-body-does-not-compile';
 
 export interface HookBodyCompileFinding {
-  /** `error`, except a regular-expression PATTERN the host refuses (`warning`). */
+  /** `error`, except a regular-expression pattern refused for a measured dialect gap (`warning`). */
   severity: 'error' | 'warning';
   rule: string;
   /** e.g. `hook "stamp_owner" › body`, `job "nightly_close" › body`. */
@@ -78,6 +83,11 @@ function scriptSource(body: unknown): string | undefined {
 const OTHER_FIX =
   'Fix body.source so it compiles as the statements of an async function whose parameter is `ctx`';
 
+/** The generic fix for a hook the build lowered from an inline `handler`: the author wrote no body.source. */
+const LOWERED_OTHER_FIX =
+  'Fix the inline handler: the build lowers its function body into the hook\'s body, which must compile as the ' +
+  'statements of an async function whose parameter is `ctx`';
+
 /**
  * Every L2 hook body and job body that does not compile in the runtime's
  * `(ctx)` wrapper. Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or
@@ -99,6 +109,7 @@ export function validateHookAndJobBodyCompiles(
     if (!verdict) return;
     const name = typeof hook.name === 'string' && hook.name ? hook.name : `#${index}`;
     const loc = hookBodyFindingLocation(hook, index, ctx);
+    const lowered = loc.path !== `hooks[${index}].body.source`;
     findings.push({
       severity: verdict.severity,
       rule: HOOK_BODY_DOES_NOT_COMPILE,
@@ -109,7 +120,7 @@ export function validateHookAndJobBodyCompiles(
         redeclared: (parameter) =>
           `\`${parameter}\` is already the parameter of the wrapper: use it as it is (the hook's record is ` +
           `\`ctx.input\`), or give the local another name, e.g. \`const input = ctx.input || {}\``,
-        other: OTHER_FIX,
+        other: lowered ? LOWERED_OTHER_FIX : OTHER_FIX,
       }),
     });
   });

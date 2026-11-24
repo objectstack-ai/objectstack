@@ -39,7 +39,8 @@ import {
 } from './i18n.js';
 import { buildPackageScopeOptions } from './package-scope.js';
 import { diagnosticsHeaderTone, type DiagnosticsHeaderTone } from './diagnostics-tone.js';
-import { ENVIRONMENT_AREA_TYPES, SETUP_DATASOURCES_PATH, useMetadataAreaHost } from './metadataAreaHost.js';
+import { SETUP_DATASOURCES_PATH, useMetadataAreaHost } from './metadataAreaHost.js';
+import { scopeDirectoryEntries } from './directoryScope.js';
 import { WritabilityBadge, typeStateWord } from './PageShell.js';
 import { ENVIRONMENT_SCOPE_QUERY } from './catalog-scope.js';
 import { usePackageCustomizations } from '../studio-design/CustomizationMark.js';
@@ -81,19 +82,6 @@ const DOMAIN_ORDER = [
   'platform',
   'other',
 ];
-
-/**
- * Types intentionally hidden from the directory + list views.
- *
- * `field` is managed in-context via the parent object's edit form
- * (master-detail widget). A flat global list of every field across
- * every object is rarely useful and clutters the admin surface.
- *
- * `package` is the Studio scope container itself. It has a dedicated
- * management surface for create/publish/import/export flows, so exposing it
- * as scoped metadata would mean "view packages inside a package".
- */
-const HIDDEN_TYPES = new Set(['field', 'package']);
 
 export function MetadataDirectoryPage() {
   const client = useMetadataClient();
@@ -184,14 +172,13 @@ export function MetadataDirectoryPage() {
   // Base set: visible (non-hidden) metadata types contributed by the active
   // project package. Fail closed — show nothing until a concrete project
   // package is active, so system-only types never surface.
+  // The area's cross-package leg lists the environment catalog, every package's.
   const scopedEntries = React.useMemo(
     () =>
-      entries.filter((e) => {
-        if (HIDDEN_TYPES.has(e.type)) return false;
-        // The area's cross-package leg: the environment catalog, every package's.
-        if (host && host.packageId === null) return ENVIRONMENT_AREA_TYPES.includes(e.type);
-        if (!activePackage) return false;
-        return (packagesByType[e.type] ?? []).includes(activePackage);
+      scopeDirectoryEntries(entries, {
+        environment: !!host && host.packageId === null,
+        packageId: activePackage,
+        packagesByType,
       }),
     [host, entries, activePackage, packagesByType],
   );

@@ -133,7 +133,12 @@ const manifest = {
   ],
 };
 
-/** Knowledge — RAG vector-store backend configuration. */
+/**
+ * Knowledge — RAG vector-store backend configuration. Not in
+ * `builtinSettingsManifests`: `@objectstack/service-knowledge` registers it
+ * when it is mounted, so a deployment without the knowledge service offers no
+ * Knowledge page (#33933).
+ */
 export const knowledgeSettingsManifest = manifest as unknown as SettingsManifest;
 
 /**
@@ -144,14 +149,14 @@ const FORM_CHECK_ONLY = 'This checks the form only — no connection was attempt
 
 /**
  * Handler for `knowledge/test` ("Test connection"), registered by
- * `SettingsServicePlugin`'s default `actionHandlers` map (#24769).
+ * `@objectstack/service-knowledge` with the manifest it contributes (#33933).
  *
  * It checks form completeness only — a Turso auth token beside a managed
  * `libsql://` URL, a RAGFlow Base URL and API key — and opens NO connection.
  * Nothing in this repository replaces it with a live probe:
- * `@objectstack/service-knowledge`, `@objectstack/knowledge-memory` and
- * `@objectstack/knowledge-ragflow` neither read this namespace nor register
- * `knowledge/test` (a plugin that did would call
+ * `@objectstack/service-knowledge` registers exactly this handler, and
+ * `@objectstack/knowledge-memory` and `@objectstack/knowledge-ragflow` neither
+ * read this namespace nor register `knowledge/test` (a plugin that did would call
  * `SettingsService.registerAction`, which replaces this handler). So every
  * answer on a remote adapter says no connection was attempted, and none names
  * a package whose mounting would make this check live — none does.

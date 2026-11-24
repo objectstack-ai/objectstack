@@ -305,7 +305,23 @@ function settled<S>(
   // Not awaited: the label lookup must not hold the click's outcome (or its
   // refresh), and the reader never rejects.
   if (launch.judged.result.success !== false) void announceFlowDroppedFields(json, droppedFields);
-  return launch;
+  return withRefusal(launch);
+}
+
+/**
+ * A run that ended `refused` answers the refusal on its result
+ * (`ActionResult.refusal`), beside the follow-up that opens the host's notice.
+ * The judged result of that arm is the paused arm's byte for byte, so without
+ * it a caller that counts outcomes (the grid's per-record bulk fan-out) could
+ * not tell a refused run from a completed one, nor show its sentence.
+ */
+function withRefusal<S>(launch: ConsoleFlowLaunch<S>): ConsoleFlowLaunch<S> {
+  const followUp = launch.judged.followUp;
+  if (followUp?.kind !== 'refusal') return launch;
+  return {
+    ...launch,
+    judged: { ...launch.judged, result: { ...launch.judged.result, refusal: { message: followUp.message } } },
+  };
 }
 
 /** Start the flow a click names, through the door {@link findDeclaredFlowAction} picks. */
