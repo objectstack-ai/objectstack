@@ -82,9 +82,9 @@
 - size:XS 一句、常量或标签;S 一文件或一机制连其 pin;M 一模块内多文件,或模块连其测试与文档;
   L 跨模块或包,或需设计裁定。
 - XS/S 合清扫卡准入(`filing-gate.md`)⇒ 首触与日巡写成本车道周清扫卡一行、照折叠关卡;M 留单卡;
-  L 派发前拆分或入专题/决策箱。size 是批次与派发 effort 的参考,认领可改,⛔ 永不改级。
+  L 派发前拆分或入专题/决策箱。size 是批次与派发 effort 的参考;认领改须 Container & model 行带 `size-override: <理由>`,⛔ 永不改级。
 - 分诊开下周清扫卡时把未做到的行移入,旧卡关卡评论点名新卡。
-- 审计评论可另带 `Fold-with: #N` 行提议折叠;采纳与否照 `execution-duties.md` 折叠五门。
+- 审计评论可另带 `Fold-with: #N` 行提议折叠。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
 - ADR/技能文本携带注记 ⛔ 不挂实施卡;技能每实施 PR 一 `domain:skills` 卡,ADR 由落地席合并后追加周 ADR 卡。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
