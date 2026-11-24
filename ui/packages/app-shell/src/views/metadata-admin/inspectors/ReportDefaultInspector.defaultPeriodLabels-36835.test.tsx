@@ -80,6 +80,7 @@ function renderIn(language: string, locale: 'en-US' | 'zh-CN') {
         name="pipeline"
         draft={draft}
         onPatch={vi.fn()}
+        readOnly={false}
         onSelectionChange={vi.fn()}
         datasetCatalogOverride={catalog}
         locale={locale}
