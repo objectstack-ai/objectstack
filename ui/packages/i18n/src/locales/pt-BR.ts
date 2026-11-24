@@ -2650,7 +2650,7 @@ const pt = {
       progress: "{{done}} de {{total}} concluídos",
       dismiss: "Ocultar lista",
       // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
-      hideHere: 'Ocultar neste dispositivo',
+      hideHere: "Ocultar neste dispositivo",
       showDone: "Mostrar concluídos ({{done}})",
       hideDone: "Ocultar concluídos",
       optional: "Opcional",

@@ -34,10 +34,13 @@ export function FirstRunChecklistPill({ where }: { where: SidebarFooterSlotPlace
   const { t } = useObjectTranslation();
   const data = useFirstRunChecklist();
   const location = useLocation();
-  // The popover is open on the page it was opened on: a row's link that opens
-  // another page closes it, with no effect to run.
+  // The popover is open on the page it was opened on. A row's link that opens
+  // another page closes it for good: the record is cleared while rendering
+  // the new page (no effect to run), so coming Back to the page it was opened
+  // on does not open it again by itself.
   const here = `${location.pathname}${location.search}`;
   const [openOn, setOpenOn] = useState<string | null>(null);
+  if (openOn !== null && openOn !== here) setOpenOn(null);
   const open = openOn === here;
   const setOpen = (next: boolean) => setOpenOn(next ? here : null);
 

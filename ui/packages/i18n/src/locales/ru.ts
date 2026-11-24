@@ -2731,7 +2731,7 @@ const ru = {
       progress: "Выполнено {{done}} из {{total}}",
       dismiss: "Скрыть список",
       // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
-      hideHere: 'Скрыть на этом устройстве',
+      hideHere: "Скрыть на этом устройстве",
       showDone: "Показать выполненные ({{done}})",
       hideDone: "Скрыть выполненные",
       optional: "Необязательно",

@@ -21,7 +21,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import {
   MePermissionsProvider,
@@ -236,9 +236,16 @@ function renderChecklist(
 }
 
 /** The sidebar's pill, as an app's sidebar draws it, under the one provider. */
+/** The browser's Back, as a button the test presses. */
+function BackButton() {
+  const navigate = useNavigate();
+  return <button type="button" data-testid="test-history-back" onClick={() => navigate(-1)} />;
+}
+
 function renderPill(systemPermissions: string[] | undefined, language = 'en') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={['/apps/sales']}>
+      <BackButton />
       <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
         <MePermissionsProvider initialPermissions={permissionsPayload(systemPermissions)}>
           <FirstRunChecklistProvider>
@@ -644,6 +651,18 @@ describe('the sidebar pill: 「Get started n/m」 for an administrator, in every
     cleanup();
     renderPill(ADMIN);
     expect(await screen.findByTestId('first-run-checklist-pill')).toBeTruthy();
+  });
+
+  it("a row's link closes the popover, and going Back to the page it was opened on does not open it again", async () => {
+    renderPill(ADMIN);
+    fireEvent.click(await screen.findByTestId('first-run-checklist-pill'));
+    const card = await screen.findByTestId('first-run-checklist');
+    fireEvent.click(within(card).getByTestId('first-run-checklist-link-mail'));
+    await waitFor(() => expect(screen.queryByTestId('first-run-checklist')).toBeNull());
+    fireEvent.click(screen.getByTestId('test-history-back'));
+    await settle();
+    expect(screen.queryByTestId('first-run-checklist')).toBeNull();
+    expect(screen.getByTestId('first-run-checklist-pill')).toBeTruthy();
   });
 
   it('hiding from the popover hides the pill on this device and writes nothing', async () => {

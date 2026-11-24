@@ -2651,7 +2651,7 @@ const fr = {
       progress: "{{done}} sur {{total}} terminés",
       dismiss: "Masquer la liste",
       // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
-      hideHere: 'Masquer sur cet appareil',
+      hideHere: "Masquer sur cet appareil",
       showDone: "Afficher les étapes terminées ({{done}})",
       hideDone: "Masquer les étapes terminées",
       optional: "Facultatif",

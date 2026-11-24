@@ -2581,7 +2581,7 @@ const ko = {
       progress: "{{total}}개 중 {{done}}개 완료",
       dismiss: "체크리스트 숨기기",
       // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
-      hideHere: '이 기기에서 숨기기',
+      hideHere: "이 기기에서 숨기기",
       showDone: "완료된 항목 보기({{done}})",
       hideDone: "완료된 항목 접기",
       optional: "선택 사항",
