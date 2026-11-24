@@ -13508,6 +13508,81 @@ export function containerModelRefusal(body) {
 }
 
 // ---------------------------------------------------------------------------
+// 定档 at claim WRITE time — the line itself, its size, and its `effort:` slot
+// ---------------------------------------------------------------------------
+
+/** Where 定档 lives — the refusals and the dispatch hook point a reader there, and the self-test reads the table from it. */
+export const TIER_SIZING_RULEBOOK = '.claude/skills/pm-dispatch/references/execution-duties.md';
+
+/**
+ * 定档's effort table, keyed by the size token a claim's `Container & model:`
+ * line opens with. ONE copy: the self-test re-reads the rulebook's own row
+ * (`S … medium;M、L、XL high`) and reds when this constant and that row
+ * disagree, so the values are never forked silently. `XS` is triage's size
+ * vocabulary one step under `S`; 定档 names no row for it and it reads as `S`.
+ */
+export const EFFORT_BY_SIZE = Object.freeze({ XS: 'medium', S: 'medium', M: 'high', L: 'high', XL: 'high' });
+
+/**
+ * The one value above the table's top, and the only file surface a CLAIM may
+ * carry it for: 定档's ADR-revision row. Its other use — the adversarial
+ * re-read of a high-severity security fix — is passed to that subagent and by
+ * rule never written in a claim, so no `reason:` unlocks it here.
+ */
+export const EFFORT_ABOVE_TABLE = Object.freeze({ value: 'xhigh', surface: 'docs/adr/' });
+
+const FILE_SURFACE_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?File surface`?(?:\*\*)?[ \t]*:(.*)$/m;
+
+/**
+ * The size and the effort a `Container & model:` line declares: the size is the
+ * FIRST token of the value, the effort the first token after `effort:`, and a
+ * `reason:` counts only inside the effort slot (from its key to the line's end,
+ * or to a `model:` key written after it) — the model slot's citation is its own.
+ *
+ * @returns {{ present: false } | { present: true, line: string, size: string|null, effort: string|null, reasonCited: boolean }}
+ */
+export function readClaimEffort(body) {
+  const m = CONTAINER_MODEL_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return { present: false };
+  const value = String(m[1] ?? '');
+  const size = /^(?:\*\*|`|[ \t])*(XS|XL|S|M|L)(?![A-Za-z0-9])/.exec(value)?.[1] ?? null;
+  const key = /\beffort[ \t]*:[ \t]*(?:\*\*|`|[ \t])*([A-Za-z]+)?/i.exec(value);
+  const slot = key ? value.slice(key.index).split(/\bmodel[ \t]*:/i)[0] : '';
+  return { present: true, line: m[0].trim(), size, effort: key?.[1]?.toLowerCase() ?? null, reasonCited: /\breason[ \t]*:/i.test(slot) };
+}
+
+/**
+ * The refusal a claim BEING WRITTEN earns when its `Container & model:` line
+ * does not carry 定档 — `null` when it does. The row shape is the keyed-line row
+ * `containerModelRefusal` answers with.
+ *
+ * ⛔ WRITE time only. `readContainerModelLine` above stays the tolerant READER:
+ * claims already on the board predate this line and its effort slot, and a
+ * reader that judged them would file rows nobody can repair. A claim about to
+ * be sent has an author who can — so here absence IS the refusal. Scoping to a
+ * comment that OPENS with `Claim:` is the caller's (`post-stamped.mjs`).
+ *
+ * Measured: S cards claimed at `high` and nothing refused it; claims with no
+ * effort at all, whose devs then ran on whatever the session inherited.
+ */
+export function claimTierWriteRefusal(body) {
+  const read = readClaimEffort(body);
+  const row = (why) => ({ key: 'Container & model', line: read.present ? read.line : '(this claim carries no such line)', why: `${why} 定档: ${TIER_SIZING_RULEBOOK}.` });
+  if (!read.present) return row('the claim carries no `Container & model:` line, so the tier and effort its dev runs at were derived from nothing and are whatever the session inherits.');
+  const problems = [];
+  const allowed = [...new Set(Object.values(EFFORT_BY_SIZE)), EFFORT_ABOVE_TABLE.value];
+  const expected = read.size === null ? null : EFFORT_BY_SIZE[read.size];
+  if (read.size === null) problems.push(`the line opens with no size token (${Object.keys(EFFORT_BY_SIZE).join(', ')}), so its effort compares to nothing`);
+  if (read.effort === null) problems.push('the `effort:` slot reads no value — an empty slot is the session-inherited effort');
+  else if (!allowed.includes(read.effort)) problems.push(`\`effort: ${read.effort}\` is no value 定档 gives a card (${allowed.join(', ')})`);
+  else if (read.effort === EFFORT_ABOVE_TABLE.value && !String(FILE_SURFACE_KEY_LINE.exec(String(body ?? ''))?.[1] ?? '').includes(EFFORT_ABOVE_TABLE.surface))
+    problems.push(`\`effort: ${read.effort}\` is the ADR-revision row's alone and this claim's \`File surface:\` names no \`${EFFORT_ABOVE_TABLE.surface}**\` path — the adversarial re-read's value goes to that subagent, never into a claim`);
+  else if (expected !== null && read.effort !== expected && !read.reasonCited)
+    problems.push(`size ${read.size} reads \`effort: ${expected}\` and the line says \`${read.effort}\` with no \`reason:\` inside the effort slot`);
+  return problems.length === 0 ? null : row(`${problems.join('; ')}.`);
+}
+
+// ---------------------------------------------------------------------------
 // A GOVERNED sister repo's tier verdict — from the path globs alone
 // ---------------------------------------------------------------------------
 

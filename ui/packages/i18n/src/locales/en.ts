@@ -200,6 +200,10 @@ const en = {
     // handler for an undoable success toast.
     failed: 'Action failed',
     parallelFailed: 'One or more parallel actions failed',
+    // A `type: 'api'` action whose backing service this deployment does not
+    // run or cannot reach (503 SERVICE_UNAVAILABLE, 501 NOT_IMPLEMENTED, a route
+    // miss), shown instead of the server's operator prose (objectstack#36840).
+    serviceUnavailable: 'This action needs a service that is not available in this environment. Contact your administrator.',
     // The two row-count refusals of a single-record action launched from a
     // list toolbar (`resolveServerActionRecordId` in `@object-ui/core`); the
     // runner asks for them before any confirmation or param dialog opens

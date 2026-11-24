@@ -49,6 +49,7 @@ import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { listedChangedAt, storedEntryChangedAt, storedRowChangedAt, takeListedRowChangedAt, withListedRowChangedAt } from './listed-row-changed-at.js';
 import { packagelessRowWithheld, withServedObjectDecorations } from './protocol-meta-item-face.js';
 import {
     declinesPackageLessRowAt,
@@ -295,6 +296,10 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         if ((records && records.length > 0) || standInRows.length > 0 || overrideRows.length > 0) {
             const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
             const overlays = host.storedOverlayEntries(request, records);
+            // [#36894] Each parsed row's change time, carried into the merge
+            // with its body ({@link storedEntryChangedAt}): the item a slot
+            // serves answers the time of the row whose content it is.
+            const changedAtOf = storedEntryChangedAt(records, overlays);
 
             // ADR-0048 (#1828) — package-aware merge: a package-scoped row
             // overlays ONLY its own package's entry, so two installed
@@ -326,27 +331,34 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             // ({@link servedOverlayRowCandidates}), not by row order.
             // [#31399] …and its row's `name`, which slots a body that states
             // none ({@link mergePackageAwareOverlay}).
-            const placed = mergeable.map(({ name, data, packageId: recPkg, type: recType }) => ({
-                data, packageId: recPkg, stored: { type: recType, name },
+            const placed = mergeable.map((entry) => ({
+                data: entry.data, packageId: entry.packageId, stored: { type: entry.type, name: entry.name },
+                changedAt: changedAtOf(entry),
             }));
             // [#21817] The package-less rows, placed the same way, as
             // stand-ins: the same parse and the same stored-row rule.
             // [epic ruling 6761802819 on #31699] …except one of a name two or
             // more packages hold: it is no holder's own, so no holder's list
             // serves it ({@link packageLessRowWithheld}).
-            const standIns = host.storedOverlayEntries(request, standInRows)
+            const standInEntries = host.storedOverlayEntries(request, standInRows);
+            const standInChangedAtOf = storedEntryChangedAt(standInRows, standInEntries);
+            const standIns = standInEntries
                 .filter((entry) => !host.declinesStoredRow(request.type, (entry.data as { name?: unknown } | null)?.name, storedEntryRow(entry)))
                 .filter((entry) => !packageLessRowWithheld(host, request.type, entry.name ?? (entry.data as { name?: unknown } | null)?.name))
-                .map(({ name, data, type: recType }) => ({
-                    data, packageId: undefined, stored: { type: recType, name }, standIn: true,
+                .map((entry) => ({
+                    data: entry.data, packageId: undefined, stored: { type: entry.type, name: entry.name }, standIn: true,
+                    changedAt: standInChangedAtOf(entry),
                 }));
             // [#28409] The pair's rows, placed the same way and bound to
             // the pair, as stand-ins: the merge serves one only where it
             // declares the override of the slot's package.
-            const overrideStandIns = host.storedOverlayEntries(request, overrideRows)
+            const overrideEntries = host.storedOverlayEntries(request, overrideRows);
+            const overrideChangedAtOf = storedEntryChangedAt(overrideRows, overrideEntries);
+            const overrideStandIns = overrideEntries
                 .filter((entry) => !host.declinesStoredRow(request.type, (entry.data as { name?: unknown } | null)?.name, storedEntryRow(entry)))
-                .map(({ name, data, packageId: recPkg, type: recType }) => ({
-                    data, packageId: recPkg, stored: { type: recType, name }, standIn: true,
+                .map((entry) => ({
+                    data: entry.data, packageId: entry.packageId, stored: { type: entry.type, name: entry.name }, standIn: true,
+                    changedAt: overrideChangedAtOf(entry),
                 }));
             items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns, ...overrideStandIns], (data, prev) => {
                 if (isView && data && typeof data === 'object') {
@@ -663,7 +675,9 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
                         type: String(record.type ?? request.type),
                         ...(typeof record.name === 'string' ? { name: record.name } : {}),
                     };
-                    return { data, packageId: recPkg, stored };
+                    // [#36894] …and the draft row's change time: on the
+                    // preview, the draft is the content its slot serves.
+                    return { data, packageId: recPkg, stored, changedAt: storedRowChangedAt(record) };
                 };
                 const drafts = [
                     ...draftRecords.map(placeDraft),
@@ -998,7 +1012,14 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // this path (not registry.getAllApps), so the merge must happen here too
     // or every contributed group renders empty.
     if (request.type === 'app' || request.type === 'apps') {
-        items = (items as any[]).map((app) => host.engine.registry.applyNavContributions(app));
+        // [#36894] The fold answers a `structuredClone` when the app has
+        // contributions, which drops the symbol-keyed row time: it is taken
+        // off before the fold and put back on what the fold answers
+        // ({@link takeListedRowChangedAt}).
+        items = (items as any[]).map((app) => {
+            const { item, changedAt } = takeListedRowChangedAt(app);
+            return withListedRowChangedAt(host.engine.registry.applyNavContributions(item), changedAt);
+        });
     }
 
     // [#14375 / ADR-0130 Consequences row 6] A package row carries the
@@ -1049,7 +1070,14 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     }
     let shipping: ShippingPackages | undefined;
     const governed: any[] = [];
-    for (const it of items as any[]) {
+    // [#36894] The served effective list's `changedAt`: each listed item's
+    // name and the time of the stored row it serves, taken off the item here
+    // on every face ({@link takeListedRowChangedAt}), so no returned item
+    // carries it.
+    const timed: Array<readonly [string, string]> = [];
+    for (const listed of items as any[]) {
+        const { item: it, changedAt } = takeListedRowChangedAt(listed) as { item: any; changedAt: string | undefined };
+        if (changedAt !== undefined && typeof it?.name === 'string') timed.push([it.name, changedAt]);
         const itemName = (it as any)?.name;
         // ADR-0048 — scope the artifact lookup to THIS item's owning
         // package so a same-name collision grafts each item's own
@@ -1120,5 +1148,10 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
         // activation ledger switches off, per listed object — see
         // {@link disabledActionsOf}.
         ...(audience === 'served' ? host.disabledActionsOf(request.type, governed) : {}),
+        // [#36894] The served EFFECTIVE list only: when the stored row each
+        // listed item serves last changed, by name ({@link listedChangedAt}).
+        // The per-package layer (a package's export, the form doors'
+        // withdrawal layer) and the execution face answer none.
+        ...(audience === 'served' && layer === 'effective' ? listedChangedAt(timed) : {}),
     };
 }

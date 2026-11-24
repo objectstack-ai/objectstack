@@ -75,7 +75,7 @@ export const en: TranslationData = {
 
         // Apps / Marketplace
         nav_marketplace_browse: { label: 'Browse Marketplace' },
-        nav_marketplace_installed: { label: 'Installed Apps' },
+        nav_packages: { label: 'Packages' },
         nav_cloud_connection: { label: 'Cloud Connection' },
 
         // People & Organization

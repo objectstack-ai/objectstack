@@ -159,6 +159,7 @@ const ja = {
     completedNamed: '「{{action}}」が完了しました',
     failed: '操作に失敗しました',
     parallelFailed: '1 つ以上の並列操作が失敗しました',
+    serviceUnavailable: 'この操作に必要なサービスは、この環境では有効になっていません。管理者にお問い合わせください。',
     selectExactlyOneRow: 'この操作は 1 件のレコードに対して実行されます。行を 1 つだけ選択してください。',
     selectRowFirst: 'この操作は 1 件のレコードに対して実行されます。先に行を選択してください。',
     undo: '元に戻す',

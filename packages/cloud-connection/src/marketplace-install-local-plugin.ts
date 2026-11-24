@@ -2023,8 +2023,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // misreading an orphaned marketplace install as user code.
             this.captureBootUserCodeIds(ctx);
 
-            // Plugin-owned Setup nav (cloud ADR-0009): "Installed Apps"
-            // ships WITH the local-install capability.
+            // Plugin-owned Setup UI (cloud ADR-0009). The bundle carries no
+            // nav entry since objectstack#36834 (Setup's own Packages entry
+            // lists what is installed); it is still registered under its id.
             try {
                 const manifest = ctx.getService<{ register(m: any): void }>('manifest');
                 manifest?.register?.(MARKETPLACE_INSTALLED_UI_BUNDLE);

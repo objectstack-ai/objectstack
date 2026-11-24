@@ -161,6 +161,7 @@ const pt = {
     completedNamed: 'Ação concluída: {{action}}',
     failed: 'A ação falhou',
     parallelFailed: 'Uma ou mais ações paralelas falharam',
+    serviceUnavailable: 'Esta ação precisa de um serviço que não está disponível neste ambiente. Entre em contato com o administrador.',
     selectExactlyOneRow: 'Esta ação é executada em um único registro — selecione exatamente uma linha.',
     selectRowFirst: 'Esta ação é executada em um único registro — selecione uma linha primeiro.',
     undo: 'Desfazer',

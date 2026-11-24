@@ -8,6 +8,7 @@
 
 import * as React from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly"
 import remarkGfm from "remark-gfm"
 import { remarkAlert } from "remark-github-blockquote-alert"
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
@@ -95,7 +96,29 @@ function rehypeNormalizeClassName() {
   return (tree: unknown) => visit(tree as { children?: unknown[] })
 }
 
-const remarkPlugins = [remarkGfm, remarkAlert]
+// ─── Emphasis next to CJK full-width punctuation ────────────────────────
+//
+// CommonMark decides whether a `**` run can open or close emphasis from the
+// characters on either side, and counts full-width punctuation (）。：，、
+// 《》「」) as punctuation. A Chinese or Japanese sentence puts no space beside
+// the run, so `**解决耗时（小时）**会被清空` (punctuation before the closer, a
+// CJK letter after it) is not right-flanking and stays literal asterisks.
+//
+// `remark-cjk-friendly` replaces the attention tokenizer with the
+// markdown-cjk-friendly rule, which reads a CJK character beside the run the
+// way it reads the whitespace an English sentence would have there. It is
+// listed first, ahead of remark-gfm, so it owns the emphasis tokenizer; ASCII
+// emphasis, code spans and backslash escapes keep their CommonMark meaning.
+// It changes how `*`/`_` runs tokenize and nothing else, so its output is the
+// same `strong`/`emphasis` nodes rehype-sanitize already allows. The
+// `parseOnly` entry leaves out the markdown serializer half, which this
+// renderer never runs.
+//
+// The chat surface carries the same rule in
+// `@object-ui/plugin-chatbot` (`src/chatMarkdownPlugins.ts`, a streamdown
+// PluginConfig). Neither package depends on the other, so each imports the
+// plugin itself; change the two together.
+const remarkPlugins = [remarkCjkFriendly, remarkGfm, remarkAlert]
 const rehypePlugins = [
   rehypeSlug,
   rehypeNormalizeClassName,

@@ -40,7 +40,7 @@ export const esES: TranslationData = {
         group_overview: { label: 'Resumen' },
         group_apps: { label: 'Aplicaciones' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
-        nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
+        nav_packages: { label: 'Paquetes' },
         nav_cloud_connection: { label: 'Conexión a la nube' },
         group_people_org: { label: 'Personas y Organización' },
         group_access_control: { label: 'Control de Acceso' },
