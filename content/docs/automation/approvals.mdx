@@ -1217,10 +1217,15 @@ in `outcome`, so its step line can answer "what happened next":
 
 `step` is the run's latest request opened after this one (a pending one first),
 and is absent when none was opened; `status` is that request's status, or this
-request's own without a `step`; `ended` says the run has stopped for good.
-`outcome` is left out when nothing past the request is known: no later request
-and the run still going, a run that cannot be read, or several later requests
-pending at once.
+request's own without a `step`; `ended` is `true` only when the record's
+approval is known to have stopped: the request's run is a root run (an approval
+inside a `subflow` or a `map` item runs in a child run, whose end is not the
+approval's) and has stopped for good. `false` means not known to have stopped,
+including a run that cannot be read. `outcome` is left out when nothing past
+the request is known: no later request and the approval not known to have
+ended, or several later requests pending at once. Every reader of the request
+gets it; it names only the later step and its status, never that request's
+approvers, comments or field values.
 
 Approval **notifications deep-link into the request**: `notify()` rewrites the
 inbox action URL to `/system/approvals?request=<id>`, so clicking the bell opens

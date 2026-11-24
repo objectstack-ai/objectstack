@@ -134,8 +134,8 @@ export interface ApprovalRequestLite {
      * approval stands now. `step` is the run's latest request when it is a
      * later one (absent: the approval stands at this request), `status` that
      * request's status (`pending`: waiting on that step), `ended` whether the
-     * run has stopped for good. Absent when the server knows nothing past
-     * this request.
+     * record's approval is known to have stopped (`false`: not known, never
+     * "still going"). Absent when the server knows nothing past this request.
      */
     outcome?: {
       step?: { id: string; label: string };

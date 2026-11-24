@@ -124,8 +124,10 @@ export function stepsAhead(
  * step is where a parallel approval stands, and none is picked.
  *
  * `runRows` is the run's own request rows, as for {@link passedSteps};
- * `runEnded` is whether the run has stopped for good, which the caller reads
- * off the run itself.
+ * `runEnded` is whether the record's approval is KNOWN to have stopped: the
+ * caller answers `true` only for a root run (never a `subflow` or `map`
+ * child, whose end is not the approval's) that the run itself reports
+ * stopped for good, and `false` for anything it cannot tell.
  */
 export function routeOutcome(
   current: { id: string; status?: string; created_at?: string },

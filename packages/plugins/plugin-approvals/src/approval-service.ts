@@ -5124,6 +5124,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
        * the flow's key, the body whose origin {@link flowPackageOf} answers.
        */
       node?: unknown;
+      /**
+       * [#35863] Whether `runId` is a root run (`true`) or a child of another
+       * run, a `subflow` body or a `map` item (`false`), as the approval
+       * executor reads the run's context. Stamped on the config snapshot
+       * (`__runRoot`, precedent: `__round`) for {@link attachFlowRoute}: only
+       * a root run's end is the end of the record's approval. Absent (a
+       * caller that does not say) stamps nothing, which reads as "not known
+       * to be a root run".
+       */
+      runRoot?: boolean;
     },
     context: ExecutionContext,
   ): Promise<ApprovalRequestRow | ApprovalNodeAutoOutcome> {
@@ -5491,6 +5501,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       : undefined;
     if (exclusionNote) configSnapshot[SUBMITTER_EXCLUSION_NOTE_SNAPSHOT_KEY] = exclusionNote;
     if (noApproverNote) configSnapshot[NO_APPROVER_NOTE_SNAPSHOT_KEY] = noApproverNote;
+    // [#35863] Root run or child run, as the executor said; nothing when it
+    // did not say ({@link attachFlowRoute} reads absence as "not known").
+    if (typeof input.runRoot === 'boolean') configSnapshot.__runRoot = input.runRoot;
     // ADR-0044 round numbering: rounds of a revise loop share the run — count
     // this (run, node)'s prior requests; the new one is round N+1. Stamped on
     // the snapshot (precedent: __flowLabel), so no schema migration.
@@ -11612,7 +11625,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       const flow: any = await this.requestFlow(raw, flowName);
       if (!flow?.nodes?.length) return;
       const nodesById = new Map<string, any>(flow.nodes.map((n: any) => [n.id, n]));
-      await this.attachFlowRoute(row, flowName, flow, nodesById, labels);
+      await this.attachFlowRoute(row, flowName, flow, nodesById, labels, raw);
       const steps: Array<{ id: string; label: string }> = [];
       const seen = new Set<string>();
       let cur: any = flow.nodes.find((n: any) => n.type === 'start');
@@ -11654,10 +11667,24 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * label its request stored. Display-only and best-effort.
    *
    * [#35863] A decided request's route carries `outcome`, where the record's
-   * approval stands now: off the same rows, plus whether the run has ended,
-   * asked of the run itself ({@link TERMINAL_RUN_STATUSES}, the dead-run
-   * sweep's own reading). A run that cannot be read is not ended: the outcome
-   * then rests on the rows alone.
+   * approval stands now, off the same system read. So that read now serves
+   * more than the step labels `flow_steps` serves: for the run's latest later
+   * request, its step (node id and label) and its status, and whether the
+   * record's approval has ended. It serves that to every reader of THIS
+   * request, including one who cannot read the later request: within the
+   * request-visibility bound of ruling record 5299823744 (request content
+   * stays behind the read-visibility tier), as the seat ruled for this card,
+   * because it tells only where the same approval went. The later request's
+   * id, approvers, comments and field values are never served here; a reader
+   * gets those only through that request's own read gate.
+   *
+   * "Ended" is asked of the run itself ({@link runHasEnded}, the dead-run
+   * sweep's {@link TERMINAL_RUN_STATUSES}), and only for a request its
+   * snapshot names a root run's (`__runRoot`, stamped at open): a `subflow`
+   * body or a `map` item is a child run, and its end is not the end of the
+   * record's approval, since the parent run goes on. A request opened before
+   * the stamp, a child run's, or a run that cannot be read is never "ended":
+   * `ended: false` means "not known to have stopped".
    */
   private async attachFlowRoute(
     row: ApprovalRequestRow,
@@ -11665,6 +11692,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     flow: RouteFlowGraph,
     nodesById: Map<string, any>,
     labels: ReaderLabels | undefined,
+    raw: any,
   ): Promise<void> {
     try {
       if (!row.flow_run_id || !row.flow_node_id) return;
@@ -11683,7 +11711,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
       const label = (nodeId: string): string =>
         labels?.stepLabel(flowName, nodeId) ?? (nodesById.get(nodeId)?.label || stored.get(nodeId) || nodeId);
-      const route = flowRoute(row, flow, rows, label, row.status !== 'pending' && await this.runHasEnded(row.flow_run_id));
+      const runRoot = parseJson<any>(raw?.node_config_json, undefined)?.__runRoot === true;
+      const ended = row.status !== 'pending' && runRoot && await this.runHasEnded(row.flow_run_id);
+      const route = flowRoute(row, flow, rows, label, ended);
       if (route) (row as any).flow_route = route;
     } catch { /* display-only — never fail the read */ }
   }

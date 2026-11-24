@@ -403,14 +403,28 @@ export interface ApprovalRequestRow {
      * - `status` — that latest request's status (this request's own when
      *   `step` is absent). `pending` with a `step`: the approval went on to
      *   that step and waits on its decision.
-     * - `ended` — the run has stopped and will never resume, so `status` is
-     *   the last decision the record's approval took.
+     * - `ended` — `true` only when the record's approval is known to have
+     *   stopped: the request's run is a root run (not a `subflow` body or a
+     *   `map` item, whose end is not the approval's: the parent run goes on)
+     *   and has stopped for good. When `status` is not `pending`, it is then
+     *   the last decision the record's approval took. `false` means "not
+     *   known to have stopped": the run is still going, is a child run, was
+     *   opened before the platform recorded which runs are root runs, or
+     *   cannot be read.
      *
      * Absent when nothing past this request is known: no later request was
-     * opened and the run has not ended (it is still between steps, or waits
-     * for a resubmit), the run's state cannot be read, or several later
+     * opened and the approval is not known to have ended, or several later
      * requests are pending at once (parallel steps), which no single step
-     * answers.
+     * answers. With a later request it is served even when the run cannot be
+     * read, with `ended: false`.
+     *
+     * Audience: every reader of this request, whether or not they can read
+     * the later request. It says only where the same approval went: the later
+     * step's node id and label, which the route already names for the steps
+     * it lists, and that request's status. It never carries the later
+     * request's id, its approvers, its comments or its field values; those
+     * stay behind that request's own read gate (the read-visibility tier of
+     * ruling record 5299823744).
      */
     outcome?: {
       step?: { id: string; label: string };
