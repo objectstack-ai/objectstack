@@ -30,6 +30,9 @@
  *  - the object label the caller reads, by the same pick;
  *  - the requester name, by the resolver the row's `submitter_name` comes from.
  *
+ * The default caller is the filer's: the security plugin wired (so the gated
+ * snapshot arm is dropped), every field of both objects readable.
+ *
  * Driven through the real `ApprovalService` on a real `ObjectQL` over
  * `SqlDriver` (better-sqlite3, in-memory, real DDL), so `$contains`, `$in` and
  * `$or` are the driver's own.
@@ -163,9 +166,16 @@ describe('the inbox search finds a request by the text its row shows the caller'
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
+  /**
+   * The filer's shape: the security plugin is wired, so the snapshot arm is
+   * dropped for every scope whose readable set is a list, and the approver
+   * reads every field of both objects.
+   */
+  const FULL = { crm_opportunity: ['id', 'name', 'stage'], crm_travel_request: ['id', 'name'] };
+
   beforeEach(() => {
     i18nOn = false;
-    svc.attachFieldVisibility(undefined);
+    svc.attachFieldVisibility(visibility(FULL));
   });
 
   it('serves the labels the terms below are taken from (the fixture is what the row shows)', async () => {
@@ -220,6 +230,12 @@ describe('the inbox search finds a request by the text its row shows the caller'
       expect(await ids('large_opportunity')).toEqual([oppRequest]);
     });
 
+    it('with no field-visibility source wired, titles still match (the snapshot arm stands there)', async () => {
+      svc.attachFieldVisibility(undefined);
+      expect(await ids('Polar')).toEqual([oppRequest]);
+      expect(await ids('上海')).toEqual([travelRequest]);
+    });
+
     it('a term no row shows and no machine column holds finds nothing', async () => {
       expect(await ids('Zanzibar')).toEqual([]);
     });
@@ -227,7 +243,7 @@ describe('the inbox search finds a request by the text its row shows the caller'
 
   describe('a term the caller is not served finds nothing', () => {
     it('a title field the caller may not read: the title does not match (control: readable, it does)', async () => {
-      svc.attachFieldVisibility(visibility({ crm_opportunity: ['id', 'stage'] }));
+      svc.attachFieldVisibility(visibility({ ...FULL, crm_opportunity: ['id', 'stage'] }));
       expect(await ids('Polar')).toEqual([]);
       expect(await ids('Polar', { object: 'crm_opportunity' })).toEqual([]);
       // What the same caller is served for that row carries no such title.
@@ -235,15 +251,12 @@ describe('the inbox search finds a request by the text its row shows the caller'
         .find((r) => r.id === oppRequest);
       expect(String(served.record_title ?? '')).not.toContain('Polar');
 
-      svc.attachFieldVisibility(visibility({ crm_opportunity: ['id', 'name', 'stage'] }));
+      svc.attachFieldVisibility(visibility(FULL));
       expect(await ids('Polar')).toEqual([oppRequest]);
     });
 
     it('a title field the caller reads MASKED: the title does not match', async () => {
-      svc.attachFieldVisibility(visibility(
-        { crm_opportunity: ['id', 'name', 'stage'] },
-        { crm_opportunity: ['id', 'stage'] },
-      ));
+      svc.attachFieldVisibility(visibility(FULL, { ...FULL, crm_opportunity: ['id', 'stage'] }));
       expect(await ids('Polar')).toEqual([]);
       expect(await ids('Polar', { object: 'crm_opportunity' })).toEqual([]);
     });
