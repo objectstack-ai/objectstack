@@ -1088,15 +1088,54 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   seed: {
     label: "Dados iniciais",
-    description: "Dados de fixture / inicialização aplicados na publicação"
+    description: "Dados de fixture / inicialização aplicados na publicação",
+    fields: {
+      object: {
+        label: "Objeto"
+      },
+      mode: {
+        label: "Modo"
+      }
+    }
   },
   picklist: {
     label: "Lista de opções",
-    description: "Lista de opções compartilhada que os campos de seleção referenciam pelo nome"
+    description: "Lista de opções compartilhada que os campos de seleção referenciam pelo nome",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      options: {
+        label: "Opções"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   mapping: {
     label: "Mapeamento de importação",
-    description: "Mapeamento de campos reutilizável para importação/exportação (renomeação + transformações), referenciado pelo nome na importação"
+    description: "Mapeamento de campos reutilizável para importação/exportação (renomeação + transformações), referenciado pelo nome na importação",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      targetObject: {
+        label: "Objeto de destino"
+      },
+      mode: {
+        label: "Modo"
+      },
+      sourceFormat: {
+        label: "Formato de origem"
+      }
+    }
   },
   view: {
     label: "Visualização",
@@ -1420,6 +1459,9 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "sharing.lockedBy": {
         label: "Bloqueado por",
         helpText: "Usuário que bloqueou a configuração da visualização"
+      },
+      object: {
+        label: "Objeto"
       }
     }
   },
@@ -2576,7 +2618,24 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   job: {
-    label: "Tarefa em segundo plano"
+    label: "Tarefa em segundo plano",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      schedule: {
+        label: "Agendamento"
+      },
+      enabled: {
+        label: "Ativado"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   datasource: {
     label: "Fonte de dados"
@@ -2586,10 +2645,41 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "Endpoint de API",
-    description: "Uma URL HTTP estável que outros sistemas chamam para executar um fluxo ou trabalhar com registros no app"
+    description: "Uma URL HTTP estável que outros sistemas chamam para executar um fluxo ou trabalhar com registros no app",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      method: {
+        label: "Método"
+      },
+      path: {
+        label: "Caminho"
+      },
+      type: {
+        label: "Tipo"
+      },
+      "objectParams.object": {
+        label: "Objeto"
+      },
+      "objectParams.operation": {
+        label: "Operação"
+      }
+    }
   },
   translation: {
-    label: "Tradução"
+    label: "Tradução",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      locale: {
+        label: "Idioma"
+      }
+    }
   },
   email_template: {
     label: "Modelo de e-mail",
@@ -2666,11 +2756,45 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "Documentação",
-    description: "Uma página de ajuda escrita em Markdown que um pacote fornece ou que você mesmo escreve"
+    description: "Uma página de ajuda escrita em Markdown que um pacote fornece ou que você mesmo escreve",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      group: {
+        label: "Grupo"
+      },
+      tags: {
+        label: "Marcadores"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   book: {
     label: "Livro de documentação",
-    description: "Um sumário que agrupa páginas de ajuda em seções ordenadas"
+    description: "Um sumário que agrupa páginas de ajuda em seções ordenadas",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      audience: {
+        label: "Público"
+      },
+      groups: {
+        label: "Grupos"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   permission: {
     label: "Conjunto de permissões",
@@ -2774,15 +2898,66 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   sharing_rule: {
     label: "Regra de compartilhamento",
-    description: "Uma regra que um pacote declara para compartilhar registros; as organizações criam as suas na Configuração"
+    description: "Uma regra que um pacote declara para compartilhar registros; as organizações criam as suas na Configuração",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      object: {
+        label: "Objeto"
+      },
+      sharedWith: {
+        label: "Compartilhado com"
+      },
+      accessLevel: {
+        label: "Nível de acesso"
+      }
+    }
   },
   queue: {
     label: "Fila",
-    description: "Um conjunto nomeado de pessoas em que os registros podem ficar até que uma delas assuma o registro; as organizações montam as suas na Configuração"
+    description: "Um conjunto nomeado de pessoas em que os registros podem ficar até que uma delas assuma o registro; as organizações montam as suas na Configuração",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      members: {
+        label: "Membros"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   assignment_rule: {
     label: "Regra de atribuição",
-    description: "Uma regra que um pacote declara para encaminhar novos registros a uma fila ou a uma pessoa"
+    description: "Uma regra que um pacote declara para encaminhar novos registros a uma fila ou a uma pessoa",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      object: {
+        label: "Objeto"
+      },
+      entries: {
+        label: "Entradas"
+      },
+      active: {
+        label: "Ativo"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   agent: {
     label: "Agente de IA",
@@ -2864,6 +3039,9 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       guardrails: {
         label: "Salvaguardas",
         helpText: "Regras de segurança e políticas de conteúdo"
+      },
+      "model.model": {
+        label: "Modelo"
       }
     }
   },

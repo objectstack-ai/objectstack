@@ -1088,15 +1088,54 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   seed: {
     label: "シードデータ",
-    description: "公開時に適用されるフィクスチャ／初期化データ"
+    description: "公開時に適用されるフィクスチャ／初期化データ",
+    fields: {
+      object: {
+        label: "オブジェクト"
+      },
+      mode: {
+        label: "モード"
+      }
+    }
   },
   picklist: {
     label: "選択リスト",
-    description: "選択フィールドが名前で参照する共有の選択肢リスト"
+    description: "選択フィールドが名前で参照する共有の選択肢リスト",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      options: {
+        label: "選択肢"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   mapping: {
     label: "インポートマッピング",
-    description: "再利用可能なインポート／エクスポートのフィールドマッピング（リネーム + 変換）。インポート時に名前で参照します"
+    description: "再利用可能なインポート／エクスポートのフィールドマッピング（リネーム + 変換）。インポート時に名前で参照します",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      targetObject: {
+        label: "対象オブジェクト"
+      },
+      mode: {
+        label: "モード"
+      },
+      sourceFormat: {
+        label: "ソース形式"
+      }
+    }
   },
   view: {
     label: "ビュー",
@@ -1420,6 +1459,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "sharing.lockedBy": {
         label: "ロックしたユーザー",
         helpText: "ビューの設定をロックしたユーザー"
+      },
+      object: {
+        label: "オブジェクト"
       }
     }
   },
@@ -2576,7 +2618,24 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   job: {
-    label: "バックグラウンドジョブ"
+    label: "バックグラウンドジョブ",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      schedule: {
+        label: "スケジュール"
+      },
+      enabled: {
+        label: "有効"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   datasource: {
     label: "データソース"
@@ -2586,10 +2645,41 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API エンドポイント",
-    description: "他のシステムが呼び出す固定の HTTP URL。フローを実行したり、アプリのレコードを操作したりします"
+    description: "他のシステムが呼び出す固定の HTTP URL。フローを実行したり、アプリのレコードを操作したりします",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      method: {
+        label: "メソッド"
+      },
+      path: {
+        label: "パス"
+      },
+      type: {
+        label: "型"
+      },
+      "objectParams.object": {
+        label: "オブジェクト"
+      },
+      "objectParams.operation": {
+        label: "操作"
+      }
+    }
   },
   translation: {
-    label: "翻訳"
+    label: "翻訳",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      locale: {
+        label: "ロケール"
+      }
+    }
   },
   email_template: {
     label: "メールテンプレート",
@@ -2666,11 +2756,45 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "ドキュメント",
-    description: "Markdown で書かれたヘルプページ。パッケージに同梱されるほか、自分で作成することもできます"
+    description: "Markdown で書かれたヘルプページ。パッケージに同梱されるほか、自分で作成することもできます",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      group: {
+        label: "グループ"
+      },
+      tags: {
+        label: "タグ"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   book: {
     label: "ドキュメントブック",
-    description: "ヘルプページを順序付きのセクションにまとめた目次"
+    description: "ヘルプページを順序付きのセクションにまとめた目次",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      audience: {
+        label: "対象者"
+      },
+      groups: {
+        label: "グループ"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   permission: {
     label: "権限セット",
@@ -2774,15 +2898,66 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   sharing_rule: {
     label: "共有ルール",
-    description: "パッケージが宣言するレコード共有ルール。組織は自身のルールを設定で作成します"
+    description: "パッケージが宣言するレコード共有ルール。組織は自身のルールを設定で作成します",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      object: {
+        label: "オブジェクト"
+      },
+      sharedWith: {
+        label: "共有先"
+      },
+      accessLevel: {
+        label: "アクセスレベル"
+      }
+    }
   },
   queue: {
     label: "キュー",
-    description: "名前付きの担当者の集まり。レコードはその中の誰かが引き受けるまでここに置かれます。組織は自身のキューを設定で用意します"
+    description: "名前付きの担当者の集まり。レコードはその中の誰かが引き受けるまでここに置かれます。組織は自身のキューを設定で用意します",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      members: {
+        label: "メンバー"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   assignment_rule: {
     label: "割り当てルール",
-    description: "パッケージが宣言するルール。新しいレコードをキューまたは担当者に振り分けます"
+    description: "パッケージが宣言するルール。新しいレコードをキューまたは担当者に振り分けます",
+    fields: {
+      name: {
+        label: "名前"
+      },
+      label: {
+        label: "表示名"
+      },
+      object: {
+        label: "オブジェクト"
+      },
+      entries: {
+        label: "エントリ"
+      },
+      active: {
+        label: "有効"
+      },
+      description: {
+        label: "説明"
+      }
+    }
   },
   agent: {
     label: "AI エージェント",
@@ -2864,6 +3039,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       guardrails: {
         label: "ガードレール",
         helpText: "安全ルールとコンテンツポリシー"
+      },
+      "model.model": {
+        label: "モデル"
       }
     }
   },

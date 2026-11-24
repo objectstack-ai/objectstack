@@ -1088,15 +1088,54 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   seed: {
     label: "种子数据",
-    description: "发布时应用的预置/初始化数据"
+    description: "发布时应用的预置/初始化数据",
+    fields: {
+      object: {
+        label: "对象"
+      },
+      mode: {
+        label: "模式"
+      }
+    }
   },
   picklist: {
     label: "共享选项集",
-    description: "选择字段按名称引用的共享选项列表"
+    description: "选择字段按名称引用的共享选项列表",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      options: {
+        label: "选项"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   mapping: {
     label: "导入映射",
-    description: "可复用的导入/导出字段映射（重命名 + 转换），在导入时按名称引用"
+    description: "可复用的导入/导出字段映射（重命名 + 转换），在导入时按名称引用",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      targetObject: {
+        label: "目标对象"
+      },
+      mode: {
+        label: "模式"
+      },
+      sourceFormat: {
+        label: "源格式"
+      }
+    }
   },
   view: {
     label: "视图",
@@ -1420,6 +1459,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "sharing.lockedBy": {
         label: "锁定者",
         helpText: "锁定该视图配置的用户"
+      },
+      object: {
+        label: "对象"
       }
     }
   },
@@ -2576,7 +2618,24 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   job: {
-    label: "后台作业"
+    label: "后台作业",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      schedule: {
+        label: "调度计划"
+      },
+      enabled: {
+        label: "已启用"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   datasource: {
     label: "数据源"
@@ -2586,10 +2645,41 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API 端点",
-    description: "其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录"
+    description: "其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      method: {
+        label: "方法"
+      },
+      path: {
+        label: "路径"
+      },
+      type: {
+        label: "类型"
+      },
+      "objectParams.object": {
+        label: "对象"
+      },
+      "objectParams.operation": {
+        label: "操作"
+      }
+    }
   },
   translation: {
-    label: "翻译"
+    label: "翻译",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      locale: {
+        label: "语言区域"
+      }
+    }
   },
   email_template: {
     label: "邮件模板",
@@ -2666,11 +2756,45 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "文档",
-    description: "以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写"
+    description: "以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      group: {
+        label: "分组"
+      },
+      tags: {
+        label: "标签"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   book: {
     label: "文档手册",
-    description: "将帮助页面按顺序分节组织的目录"
+    description: "将帮助页面按顺序分节组织的目录",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      audience: {
+        label: "受众"
+      },
+      groups: {
+        label: "分组"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   permission: {
     label: "权限集",
@@ -2774,15 +2898,66 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   sharing_rule: {
     label: "共享规则",
-    description: "软件包声明的记录共享规则；组织在设置中编写自己的规则"
+    description: "软件包声明的记录共享规则；组织在设置中编写自己的规则",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      object: {
+        label: "对象"
+      },
+      sharedWith: {
+        label: "共享给"
+      },
+      accessLevel: {
+        label: "访问级别"
+      }
+    }
   },
   queue: {
     label: "队列",
-    description: "一组具名的人员，记录可停留其中，直到其中一人认领；组织在设置中配置自己的队列"
+    description: "一组具名的人员，记录可停留其中，直到其中一人认领；组织在设置中配置自己的队列",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      members: {
+        label: "成员"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   assignment_rule: {
     label: "分配规则",
-    description: "软件包声明的规则，把新记录分配到某个队列或某个人"
+    description: "软件包声明的规则，把新记录分配到某个队列或某个人",
+    fields: {
+      name: {
+        label: "名称"
+      },
+      label: {
+        label: "显示名称"
+      },
+      object: {
+        label: "对象"
+      },
+      entries: {
+        label: "条目"
+      },
+      active: {
+        label: "启用"
+      },
+      description: {
+        label: "描述"
+      }
+    }
   },
   agent: {
     label: "AI 代理",
@@ -2864,6 +3039,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       guardrails: {
         label: "护栏",
         helpText: "安全规则与内容策略"
+      },
+      "model.model": {
+        label: "模型"
       }
     }
   },

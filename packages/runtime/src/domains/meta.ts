@@ -104,6 +104,7 @@ import {
     STORED_VERSION_DOOR_POLICY,
     translateMetaEnvelope,
     translateMetaList,
+    translateMetaTypesListing,
     wantsMetaItemLayers,
     type MetaHolderItemReader,
     type MetaItemAnswer,
@@ -1388,7 +1389,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (protocol && typeof protocol.getMetaTypes === 'function') {
             try {
                 const result = await protocol.getMetaTypes({});
-                return { handled: true, response: deps.success(result) };
+                // [#36886] In the reader's language, through the one
+                // translation `RestServer`'s `/meta/types` runs.
+                const translated = await translateMetaTypesListing(
+                    metaTranslationSources(deps, _context, protocol, (i18n) =>
+                        metaRequestLocale({ headers: _context.request?.headers, query }, i18n)),
+                    result,
+                );
+                return { handled: true, response: deps.success(translated) };
             } catch (e: any) {
                 console.warn('[HttpDispatcher] protocol.getMetaTypes() failed:', e?.message);
             }
@@ -2885,7 +2893,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (protocol && typeof protocol.getMetaTypes === 'function') {
             try {
                 const result = await protocol.getMetaTypes({});
-                return { handled: true, response: deps.success(result) };
+                // [#36886] In the reader's language, through the one
+                // translation `RestServer`'s `/meta/types` runs.
+                const translated = await translateMetaTypesListing(
+                    metaTranslationSources(deps, _context, protocol, (i18n) =>
+                        metaRequestLocale({ headers: _context.request?.headers, query }, i18n)),
+                    result,
+                );
+                return { handled: true, response: deps.success(translated) };
             } catch { /* fall through */ }
         }
         const metadataService = await deps.resolveService(_context, 'metadata', _context.environmentId);
