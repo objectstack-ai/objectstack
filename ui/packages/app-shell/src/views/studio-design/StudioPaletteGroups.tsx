@@ -175,16 +175,12 @@ export function StudioPaletteGroups({
     'error',
     packageId ?? undefined,
   );
-  const types = React.useMemo(
-    () =>
-      scopeDirectoryEntries(entries, {
-        environment,
-        packageId,
-        packagesByType,
-        always: STUDIO_MENU_DESIGNER_TYPES,
-      }),
-    [entries, environment, packageId, packagesByType],
-  );
+  const types = scopeDirectoryEntries(entries, {
+    environment,
+    packageId,
+    packagesByType,
+    always: STUDIO_MENU_DESIGNER_TYPES,
+  });
   const settled = !typesLoading && !sweepLoading;
   const { items, loading: itemsLoading } = useStudioPaletteItems(client, packageId, settled ? types : null);
 

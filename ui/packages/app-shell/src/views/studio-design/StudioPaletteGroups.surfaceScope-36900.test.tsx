@@ -91,6 +91,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'u1' }, activeOrganization: null }),
 }));
 
+// The palette reaches the record preview's `lazy()` detail entry: load it at
+// module scope, so its cost is paid at import (ui/AGENTS.md, lazy boundaries).
+import '@object-ui/plugin-detail';
 import { CommandPalette, type StudioPaletteSurface } from '../../chrome/CommandPalette';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 import { StudioPaletteGroups } from './StudioPaletteGroups';
