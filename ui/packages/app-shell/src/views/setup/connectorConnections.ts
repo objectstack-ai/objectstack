@@ -38,6 +38,7 @@
 import type { ConnectorConnectionState } from '@objectstack/spec/contracts';
 import type { ConnectorDescriptor } from '@objectstack/spec/integration';
 import { actionErrorDetail } from '@object-ui/core';
+import { createAuthenticatedFetch } from '@object-ui/auth';
 import { apiBase } from '../../utils/apiBase.js';
 import { componentRefToUrlSegments } from '../../services/componentRegistry.js';
 import { readMetadataItems } from './packagedFlows.js';
@@ -98,6 +99,9 @@ export type ConnectionListing =
   | { kind: 'failed'; message: string };
 
 const JSON_HEADERS = { Accept: 'application/json' } as const;
+
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+const authFetch = createAuthenticatedFetch();
 const STATUSES = new Set(['not_connected', 'connected', 'reconnect_required']);
 
 function dataOf(payload: unknown): Record<string, unknown> | undefined {
@@ -178,7 +182,7 @@ async function bodyOf(res: Response): Promise<unknown> {
 
 async function call(url: string, init: RequestInit): Promise<{ status: number; body: unknown }> {
   try {
-    const res = await fetch(url, { credentials: 'include', headers: JSON_HEADERS, cache: 'no-store', ...init });
+    const res = await authFetch(url, { credentials: 'include', headers: JSON_HEADERS, cache: 'no-store', ...init });
     return { status: res.status, body: await bodyOf(res) };
   } catch (err) {
     if ((err as { name?: unknown })?.name === 'AbortError') throw err;

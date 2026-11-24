@@ -15,10 +15,20 @@
 
 import { getCloudBase } from '../../runtime-config.js';
 import { forgetPackageListReads } from '../../views/studio-design/packages-io.js';
-import { TokenStorage } from '@object-ui/auth';
+import { TokenStorage, createAuthenticatedFetch } from '@object-ui/auth';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 const API_BASE = `${SERVER_URL}/api/v1/marketplace`;
+
+/**
+ * The console's authenticated fetch — the stored bearer token beside the
+ * session cookie — for the calls to THIS runtime's own server: the local
+ * install ledger (`/marketplace/install-local*`) and the cloud-connection
+ * reads the Packages page makes. ⛔ Never for a request to the cloud control
+ * plane's own origin (`getCloudBase()`), which must not see this runtime's
+ * bearer; the browse calls keep `credentials: 'omit'` in {@link call}.
+ */
+const serverFetch = createAuthenticatedFetch();
 
 /**
  * Attach the Bearer token to same-origin `/api/v1/cloud-connection/*` calls.
@@ -1087,7 +1097,7 @@ export interface OrgPackagesResult {
 }
 export async function listOrgPackages(): Promise<OrgPackagesResult> {
   try {
-    const res = await fetch(`${SERVER_URL}/api/v1/cloud-connection/org-packages`, {
+    const res = await serverFetch(`${SERVER_URL}/api/v1/cloud-connection/org-packages`, {
       credentials: 'include',
       headers: { Accept: 'application/json' },
     });
@@ -1129,7 +1139,7 @@ export async function installLocal(input: {
   installMode?: LocalInstallMode;
 }): Promise<LocalInstallResult> {
   // objectstack#29119 — an install changes this environment's package list.
-  const res = await fetch(`${API_BASE}/install-local`, {
+  const res = await serverFetch(`${API_BASE}/install-local`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
@@ -1164,7 +1174,7 @@ export async function installLocal(input: {
  * each row's served `source`.
  */
 export async function fetchLocalInstalls(): Promise<LocalInstallEntry[]> {
-  const res = await fetch(`${API_BASE}/install-local`, {
+  const res = await serverFetch(`${API_BASE}/install-local`, {
     credentials: 'include',
     headers: { 'Accept': 'application/json' },
   });
@@ -1210,7 +1220,7 @@ export interface InstalledPackagesResult {
 
 export async function listInstalledPackages(): Promise<InstalledPackagesResult> {
   try {
-    const res = await fetch(`${SERVER_URL}/api/v1/cloud-connection/installed`, {
+    const res = await serverFetch(`${SERVER_URL}/api/v1/cloud-connection/installed`, {
       credentials: 'include',
       headers: { Accept: 'application/json' },
     });
@@ -1259,7 +1269,7 @@ export async function readMarketplaceInstalls(): Promise<{ source: 'cloud' | 'lo
 
 export async function uninstallLocal(manifestId: string): Promise<void> {
   // objectstack#29119 — an uninstall changes this environment's package list.
-  const res = await fetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}`, {
+  const res = await serverFetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: { 'Accept': 'application/json' },
@@ -1282,7 +1292,7 @@ export interface LocalSampleDataResult {
 
 async function postLocalSampleAction(manifestId: string, action: 'reseed' | 'purge'): Promise<LocalSampleDataResult> {
   const path = action === 'reseed' ? 'reseed-sample-data' : 'purge-sample-data';
-  const res = await fetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}/${path}`, {
+  const res = await serverFetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}/${path}`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Accept': 'application/json' },
@@ -1321,7 +1331,7 @@ export interface LocalSampleDataCount {
 /** {@link LocalSampleDataCount}, or `null` when the count could not be read (refused, failed, or no count in the answer). */
 export async function countLocalSampleData(manifestId: string): Promise<LocalSampleDataCount | null> {
   try {
-    const res = await fetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}/sample-data`, {
+    const res = await serverFetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}/sample-data`, {
       credentials: 'include',
       headers: { 'Accept': 'application/json' },
     });
