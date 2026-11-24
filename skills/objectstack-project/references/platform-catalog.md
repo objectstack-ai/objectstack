@@ -30,10 +30,17 @@ a seed) without declaring it.
 |:--|:--|:--|:--|
 | `sys_file` | every boot (`storage`) | a file-storage table | `file` and `image` fields store its rows; uploads go through `/api/v1/storage` |
 | `sys_attachment` | every boot | an attachments table per object | `enable.files: true` on the object opens the Attachments panel; data API |
-| `sys_comment` | `requires: ['audit']` | a comments or notes table | `enable.feeds` (default on) gives every object a discussion thread; data API |
+| `sys_comment` | `requires: ['audit']` | a comments table | `enable.feeds` (default on) gives every object a discussion thread; data API |
 | `sys_activity` | `requires: ['audit']` | a record timeline or history table | `enable.activities` (default on) mirrors every write; data API read |
 | `sys_audit_log` | `requires: ['audit']` | a change-log or audit table | written on every write; data API read, `view_all_audit_log` for rows the caller cannot open |
 | `sys_recycle_bin` | every boot | an `is_deleted` flag with a restore | a by-id delete lands here; `POST /api/v1/data/OBJECT/recycle-bin/ENTRY/restore`; no data API |
+
+### Tasks and notes
+
+| Object | Mounted by | What you would otherwise build | How the app reaches it |
+|:--|:--|:--|:--|
+| `sys_task` | every boot | a task or to-do object | a `type: 'object'` navigation entry names it. Title, status, due time, assignee, platform-written `completed_at`; no link to another record. Views `assigned_to_me`, `created_by_me`, `all`. Private: creator and assignee read a task; `member_default` grants read, create and edit without widening that; data API |
+| `sys_note` | every boot | a notes object | as `sys_task`. Title and rich-text body; no link to another record. Views `mine`, `all`. Private to its creator, under the same `member_default` grant; data API |
 
 ### Notifications and mail
 

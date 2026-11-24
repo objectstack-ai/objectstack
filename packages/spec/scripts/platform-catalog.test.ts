@@ -181,7 +181,11 @@ describe('pricing — the hand-written text is ratcheted, shrink-only', () => {
   //   6331 bytes -> ceil(6331 / 4) = 1583 (2026-11-19, the PR that adds the page)
   //   6321 bytes -> 1581 (the same PR's second review round: the Planned paragraph
   //   gained the unit-code clause, paid by four cuts in PROSE; lowered to the measurement)
-  const HAND_WRITTEN_CEILING_TOKENS = 1581;
+  //   6831 bytes -> ceil(6831 / 4) = 1708 (the PR that adds the `sys_task` and `sys_note`
+  //   rows: 6320 on its base, 9 bytes cut first — `sys_comment` no longer reads as the
+  //   notes table, which the new row is — then 520 added; raised by the measured
+  //   remainder under the ratchet header's standing ruling, 「A:先削重复,余额按实测提高」)
+  const HAND_WRITTEN_CEILING_TOKENS = 1708;
 
   it('measures every hand-written string the page carries and nothing derived', () => {
     const page = renderPlatformCatalog();

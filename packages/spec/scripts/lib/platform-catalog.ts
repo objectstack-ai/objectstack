@@ -98,10 +98,17 @@ export const APP_FACING_OBJECT_GROUPS: readonly { readonly title: string; readon
     rows: [
       { name: 'sys_file', builds: 'a file-storage table', reach: '`file` and `image` fields store its rows; uploads go through `/api/v1/storage`' },
       { name: 'sys_attachment', builds: 'an attachments table per object', reach: '`enable.files: true` on the object opens the Attachments panel; data API' },
-      { name: 'sys_comment', builds: 'a comments or notes table', reach: '`enable.feeds` (default on) gives every object a discussion thread; data API' },
+      { name: 'sys_comment', builds: 'a comments table', reach: '`enable.feeds` (default on) gives every object a discussion thread; data API' },
       { name: 'sys_activity', builds: 'a record timeline or history table', reach: '`enable.activities` (default on) mirrors every write; data API read' },
       { name: 'sys_audit_log', builds: 'a change-log or audit table', reach: 'written on every write; data API read, `view_all_audit_log` for rows the caller cannot open' },
       { name: 'sys_recycle_bin', builds: 'an `is_deleted` flag with a restore', reach: 'a by-id delete lands here; `POST /api/v1/data/OBJECT/recycle-bin/ENTRY/restore`; no data API' },
+    ],
+  },
+  {
+    title: 'Tasks and notes',
+    rows: [
+      { name: 'sys_task', builds: 'a task or to-do object', reach: 'a `type: \'object\'` navigation entry names it. Title, status, due time, assignee, platform-written `completed_at`; no link to another record. Views `assigned_to_me`, `created_by_me`, `all`. Private: creator and assignee read a task; `member_default` grants read, create and edit without widening that; data API' },
+      { name: 'sys_note', builds: 'a notes object', reach: 'as `sys_task`. Title and rich-text body; no link to another record. Views `mine`, `all`. Private to its creator, under the same `member_default` grant; data API' },
     ],
   },
   {
