@@ -117,6 +117,9 @@ import {
   type MetadataListState,
 } from './metadataListState.js';
 import { useListScrollRestore } from './useListScrollRestore.js';
+import { useListChangedAt } from './listChangedAt.js';
+import { useListDraftMarks } from './listDraftMarks.js';
+import { ListChangedCell } from './ListChangedCell.js';
 
 /**
  * objectui#12982 — the Clone dialog of a declaration-only catalog
@@ -625,6 +628,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       cancelled = true;
     };
   }, [client, type, refreshKey, listInclude]);
+  // objectstack#36898 — each item's change time and its pending-draft mark.
+  const changedAt = useListChangedAt(client, type, listInclude ? { include: listInclude } : undefined, refreshKey);
+  const draftMarkOf = useListDraftMarks(client, type);
 
   const searchableFields = config.searchableFields ?? ['name', 'label', 'description'];
   // Structural scope — every row this package could ever show for this
@@ -701,6 +707,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // one implementation the detail's ‹ › order reads too (`metadataListState.ts`).
   const rowReader: ListRowReader<ItemRow> = {
     name: (row) => String(row.item[config.primaryKey ?? 'name'] ?? ''),
+    changedAt: (row) => changedAt?.[String(row.item[config.primaryKey ?? 'name'] ?? '')],
     label: (row) => (typeof row.item.label === 'string' ? row.item.label : undefined),
     matches: (row, q) => matchesQuery(row.item, q, searchableFields),
     source: (row) => row.source,
@@ -1080,6 +1087,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                       {localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c)}
                     </th>
                   ))}
+                  <th className={cn('px-3 text-left font-medium', inSetup ? 'h-9 py-0' : 'py-2')}>{t('engine.list.col.changedAt', locale)}</th>
                   <th className={cn('px-3 text-right font-medium w-[80px]', inSetup ? 'h-9 py-0' : 'py-2')}>{t('engine.list.col.source', locale)}</th>
                   {activation && (
                     <th className={cn('px-3 text-left font-medium w-[90px]', inSetup ? 'h-9 py-0' : 'py-2', activeCellPin)}>
@@ -1241,6 +1249,13 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                           </td>
                         );
                       })}
+                      <td className={cellClass}>
+                        <ListChangedCell
+                          changedAt={changedAt?.[name]}
+                          draft={draftMarkOf({ name, packageId: rowPkg, member: rowMember })}
+                          locale={locale}
+                        />
+                      </td>
                       <td className={cn(cellClass, 'text-right')}>
                         {(row.item._lock as string | undefined) && row.item._lock !== 'none' && (
                           <span
