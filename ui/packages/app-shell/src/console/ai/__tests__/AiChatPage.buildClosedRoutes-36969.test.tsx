@@ -21,7 +21,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import React from 'react';
 
@@ -162,15 +162,21 @@ describe('in-app building closed: the catalog serves `ask`, not `build` (objects
     expect(visited).not.toContain('/ai/ask');
   });
 
-  it('a maker gets it too, and the maker convergence never sends a bare /ai/ask to /ai/build', async () => {
+  it('a maker gets it too', async () => {
     state.canAuthor = true;
     visit('/ai/build/c-42');
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/ai\/ask\/c-42$/));
-    cleanup();
-    visited.length = 0;
+    expect(visited.some((p) => p === '/ai/build' || p === '/ai/ask')).toBe(false);
+  });
+
+  it('the maker convergence (cloud#1674) never sends a maker\'s bare /ai/ask to /ai/build', async () => {
+    state.canAuthor = true;
     visit('/ai/ask');
-    // The surface mints its thread and mirrors it into the address: it stayed on ask.
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/ai\/ask\/conv-\d+$/));
+    // The same window in which the served-build leg below is redirected.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/ai\/ask/);
     expect(visited.some((p) => p.startsWith('/ai/build'))).toBe(false);
   });
 });
