@@ -35,11 +35,12 @@ import {
   saveSettingsNamespace,
 } from './api';
 
-/** A `Response` double — only the three members this client touches. */
+/** A `Response` double — only the members this client and the authenticated fetch touch. */
 function jsonResponse(body: unknown, status = 200, statusText?: string): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(),
     statusText: statusText ?? (status === 200 ? 'OK' : 'Bad Request'),
     json: async () => body,
   } as unknown as Response;
@@ -51,6 +52,7 @@ function brokenResponse(status = 502, statusText = 'Bad Gateway'): Response {
     ok: false,
     status,
     statusText,
+    headers: new Headers(),
     json: async () => {
       throw new SyntaxError('Unexpected token < in JSON at position 0');
     },

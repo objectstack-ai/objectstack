@@ -161,7 +161,7 @@ describe('ObjectFieldInspector — the related list on the parent (relatedList /
 
   it.each([
     ['a plain master_detail', {}],
-    ['an inline-edited master_detail', { inlineEdit: true }],
+    ['an inline-edited master_detail', { inlineEdit: 'grid' }],
   ])('%s with no relatedList reads as shown, and 「主要」 writes primary, 「显示」 clears it (objectstack#35889)', (_name, keys) => {
     // The record page's default since objectstack#35889: a `master_detail` FK
     // that declares no `relatedList` is a tab, `inlineEdit` or not; only a

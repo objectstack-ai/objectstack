@@ -38,6 +38,7 @@ import { datasourceDriverMongoToMongodb } from './entries/17/datasource-driver-m
 import { retryPolicyConverged } from './entries/17/retry-policy-converged.js';
 import { pageHeaderSubtitleAlias } from './entries/17/page-header-subtitle-alias.js';
 import { inlineActionApiParamsToBodyExtra } from './entries/17/inline-action-api-params-to-body-extra.js';
+import { fieldInlineEditBooleanRemoved } from './entries/18/field-inline-edit-boolean-removed.js';
 import { fieldMalformedScalePrecisionRemoved } from './entries/18/field-malformed-scale-precision-removed.js';
 import { permissionSetManagedByRemoved } from './entries/18/permission-set-managed-by-removed.js';
 import { personalViewDeclarationsRemoved } from './entries/18/view-personal-declarations-removed.js';
@@ -230,6 +231,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: elementTextVariantHeadingLevels, order: 59 },
   { conversion: emailTemplateCategoryIsSystemRemoved, order: 62 },
   { conversion: fieldColumnListsCanonicalized, order: 6 },
+  { conversion: fieldInlineEditBooleanRemoved, order: 84 },
   { conversion: fieldMalformedScalePrecisionRemoved, order: 1 },
   { conversion: fieldReferenceToAlias, order: 18 },
   { conversion: flowDecisionModeInclusiveExplicit, order: 45 },
