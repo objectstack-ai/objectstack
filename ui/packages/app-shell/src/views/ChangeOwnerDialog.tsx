@@ -41,9 +41,23 @@
  * an organization with more than one page of them can still find and pick any
  * one. The widget commits the queue's `name` (`idField: 'name'`), the value
  * the endpoint's `queue` takes; it shows the queue's label.
+ *
+ * ## The queues an app declares (objectstack#36807)
+ *
+ * A queue lives in two places (ADR-0142 D1): an organization's `sys_queue`
+ * rows, and the `queue` items an installed package declares
+ * (`GET /api/v1/meta/queue`, read through the console's metadata store). The
+ * lookup pages `sys_queue` alone, so the declared queues — few, and read
+ * whole — are offered beside it as their own choices, built by
+ * `mergeQueueCandidates`, the merge every other queue picker uses. The server
+ * resolves a name registry-first, so a declared queue wins a name a
+ * `sys_queue` row shares: the lookup is told to leave those names out
+ * (`notIn` on `name`), and each queue is offered once. Either choice commits
+ * the queue's `name`. A declared read that fails offers no declared queue;
+ * the lookup is untouched by it.
  */
 
-import { Suspense, useEffect, useId, useMemo, useState } from 'react';
+import { Suspense, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -59,8 +73,8 @@ import {
 } from '@object-ui/components';
 import { Loader2 } from 'lucide-react';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
-import { notifyDataChanged, useAdapter } from '@object-ui/react';
-import { getLazyFieldWidget } from '@object-ui/fields';
+import { MetadataCtx, notifyDataChanged, useAdapter } from '@object-ui/react';
+import { getLazyFieldWidget, mergeQueueCandidates, queueCandidateLabel, type QueueCandidate } from '@object-ui/fields';
 import type { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
 import {
@@ -91,6 +105,33 @@ export type ChangeOwnerCascadeOutcomeView = NonNullable<ChangeOwnerBulkReport['c
 function failureText(err: unknown): string {
   const message = (err as { message?: unknown } | null | undefined)?.message;
   return typeof message === 'string' && message ? message : String(err);
+}
+
+/**
+ * The queues installed packages declare (the `queue` metadata type), read from
+ * the console's metadata store once `enabled` turns on. The store answers a
+ * failed read with no items, so a failure offers nothing; outside a
+ * `<MetadataProvider>` nothing is read. The store's context value is rebuilt
+ * whenever any type it caches settles, so it is read through a ref and the
+ * effect keys on its presence alone.
+ */
+function useDeclaredQueues(enabled: boolean): QueueCandidate[] {
+  const store = useContext(MetadataCtx);
+  const storeRef = useRef(store);
+  storeRef.current = store;
+  const present = !!store;
+  const [declared, setDeclared] = useState<QueueCandidate[]>([]);
+  useEffect(() => {
+    const current = storeRef.current;
+    if (!enabled || !current) return;
+    let cancelled = false;
+    current.ensureType('queue').then(
+      (items) => { if (!cancelled) setDeclared(mergeQueueCandidates(items, [])); },
+      () => { if (!cancelled) setDeclared([]); },
+    );
+    return () => { cancelled = true; };
+  }, [enabled, present]);
+  return declared;
 }
 
 type RunState =
@@ -169,6 +210,11 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
     ...(currentOwner ? { lookupFilters: [{ field: 'id', operator: 'ne', value: currentOwner }] } : {}),
   }), [ownerLabel, currentOwner]);
 
+  // The declared queues, read once the queue target is shown; a name one of
+  // them takes is the declared queue's, so the lookup leaves it out.
+  const declaredQueues = useDeclaredQueues(open && queueOffered && kind === 'queue');
+  const declaredPicked = queue !== '' && declaredQueues.some((c) => c.name === queue);
+
   // The queue picker reads `sys_queue` only when it is opened, one page at a
   // time, with the typed term sent to the server as its search.
   const queueLabel = t('console.changeOwner.queue');
@@ -182,7 +228,10 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
     displayField: 'label',
     allowCreate: false,
     placeholder: queuePlaceholder,
-  }), [queueLabel, queuePlaceholder]);
+    ...(declaredQueues.length > 0
+      ? { lookupFilters: [{ field: 'name', operator: 'notIn', value: declaredQueues.map((c) => c.name) }] }
+      : {}),
+  }), [queueLabel, queuePlaceholder, declaredQueues]);
 
   const submit = async () => {
     if (!adapter || !target || ids.length === 0) return;
@@ -327,12 +376,30 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
               <Suspense fallback={<div className="h-10 animate-pulse rounded-md bg-muted" aria-hidden="true" />}>
                 <LookupWidget
                   id="change_owner_queue"
-                  value={queue || null}
+                  value={queue && !declaredPicked ? queue : null}
                   onChange={(v: unknown) => { setQueue(typeof v === 'string' ? v : ''); setRun({ phase: 'idle' }); }}
                   field={queueField}
                   disabled={done}
                 />
               </Suspense>
+              {declaredQueues.length > 0 && (
+                <fieldset className="grid gap-1.5" data-testid="change-owner-declared-queues">
+                  <legend className="text-sm font-medium">{t('console.changeOwner.declaredQueues')}</legend>
+                  <RadioGroup
+                    value={declaredPicked ? queue : ''}
+                    onValueChange={(value) => { setQueue(value); setRun({ phase: 'idle' }); }}
+                    className="grid max-h-40 gap-1.5 overflow-y-auto"
+                    disabled={done}
+                  >
+                    {declaredQueues.map((c) => (
+                      <label key={c.name} className="flex items-center gap-2 text-sm">
+                        <RadioGroupItem value={c.name} data-testid={`change-owner-declared-queue-${c.name}`} />
+                        {queueCandidateLabel(c)}
+                      </label>
+                    ))}
+                  </RadioGroup>
+                </fieldset>
+              )}
             </div>
           )}
 

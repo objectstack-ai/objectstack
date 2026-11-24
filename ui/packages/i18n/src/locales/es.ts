@@ -2871,6 +2871,7 @@ const es = {
       targetQueue: 'Una cola',
       queue: 'Cola',
       queuePlaceholder: 'Elige una cola',
+      declaredQueues: 'O una cola que declara una aplicación instalada',
       notify: 'Notificar al nuevo propietario',
       alreadyOwner: 'Esta persona ya es propietaria de este registro.',
       submit: 'Cambiar propietario',
