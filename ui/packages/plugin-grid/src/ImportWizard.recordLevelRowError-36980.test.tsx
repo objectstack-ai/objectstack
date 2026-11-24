@@ -104,7 +104,7 @@ describe('ImportWizard: a record-level row error shows no `_record:` prefix (obj
     fireEvent.click(screen.getByTestId('import-download-failed'));
 
     expect(written).toHaveLength(1);
-    const csv = written[0]!.replace(/^﻿/, '');
+    const csv = written[0]!.replace(/^\uFEFF/, '');
     expect(csv).not.toContain('_record');
     const lines = csv.split(/\r?\n/).filter(Boolean);
     expect(lines[0]).toBe('Title,Lead Status,_error');
