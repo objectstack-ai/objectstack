@@ -233,6 +233,8 @@ export function ChatDockConversation({
   );
   const requestedConversationId = legacyConversationId ? undefined : target?.conversationId;
   const forceNew = Boolean(target?.fresh) && !requestedConversationId;
+  // The user the conversation resolves for (none until the agent is known).
+  const conversationUserId = activeAgent && !legacyConversationId ? userId : undefined;
   const {
     conversationId,
     conversationScope,
@@ -241,7 +243,7 @@ export function ChatDockConversation({
     createError,
     rekeyScope,
   } = useChatConversation({
-    userId: activeAgent && !legacyConversationId ? userId : undefined,
+    userId: conversationUserId,
     scope,
     apiBase,
     activeId: requestedConversationId,
@@ -311,14 +313,16 @@ export function ChatDockConversation({
   // held here for the same reason. It rides on the thread the scope resolved
   // and never re-keys it: a focus does not change which conversation the
   // drawer shows (ADR-0057 as amended for objectui#10926).
-  const conversationFocus = useConversationFocus(paneConversationId);
+  const conversationFocus = useConversationFocus(paneConversationId, createError);
   // A first send creates the conversation: the id it mints takes the focus
   // pinned before it (and no other arriving id does).
   const { markSending: markFocusSending } = conversationFocus;
   const ensureConversationForSend = React.useCallback(() => {
-    markFocusSending();
+    // With no user there is nothing to create: no mark, so no id that
+    // arrives later takes the focus as this send's.
+    if (conversationUserId) markFocusSending();
     return ensureConversation();
-  }, [markFocusSending, ensureConversation]);
+  }, [conversationUserId, markFocusSending, ensureConversation]);
 
   // ── The drawer's own controls over its thread ───────────────────────────
   // The launcher, the app switcher and the handoff in the pane open targets

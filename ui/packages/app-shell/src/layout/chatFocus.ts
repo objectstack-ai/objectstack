@@ -141,8 +141,10 @@ export interface ConversationFocus extends ChatFocusEntry {
   decline: () => void;
   /**
    * The host is creating the conversation for a first send (it calls this
-   * beside `ensureConversation`): the id that arrives next is the one that
-   * send goes to, so a focus pinned before it is carried onto it.
+   * beside `ensureConversation`, and only while it has a user to create it
+   * for): the id that arrives next is the one that send goes to, so a focus
+   * pinned before it is carried onto it. A create that fails spends the mark
+   * (see the hook's `createError`).
    */
   markSending: () => void;
 }
@@ -156,7 +158,8 @@ interface FocusState {
    * open the drawer"); a first send says the same through `markSending`. Any
    * other arrival of an id — a resumed thread resolving, a history row, the
    * scope blanking the id between apps — reads that conversation's own stored
-   * focus instead.
+   * focus instead. Only the hand-off's own focus is carried: the chip's pin,
+   * remove or decline drops the flag.
    */
   carry: boolean;
 }
@@ -170,7 +173,11 @@ interface FocusState {
  * already carries it. Every other move to a conversation restores that one's
  * chip from storage.
  */
-export function useConversationFocus(conversationId: string | undefined): ConversationFocus {
+export function useConversationFocus(
+  conversationId: string | undefined,
+  /** The host's `createError`: a first send whose create failed minted nothing. */
+  createError?: unknown,
+): ConversationFocus {
   const [state, setState] = React.useState<FocusState>(() => ({
     key: conversationId,
     entry: readStoredChatFocus(conversationId),
@@ -204,14 +211,27 @@ export function useConversationFocus(conversationId: string | undefined): Conver
   React.useEffect(() => {
     if (key !== undefined) sendingRef.current = false;
   }, [key]);
+  // The send's create failed: no id is coming for it, so the mark is spent
+  // and the next id to arrive (a history row) reads its own focus. A send
+  // made while the host is still resolving is not spent: the resolve fulfils
+  // it, and the id that arrives is the one that send goes to.
+  React.useEffect(() => {
+    if (createError) sendingRef.current = false;
+  }, [createError]);
 
+  // The chip's own moves drop a hand-off's carry: what the user pins (or
+  // keeps) here is this conversation's, and follows no other one.
   const setFocus = React.useCallback((focus: ChatFocus | null) => {
     setState((s) =>
-      sameChatFocus(s.entry.focus, focus) ? s : { ...s, entry: { focus, declined: false } },
+      sameChatFocus(s.entry.focus, focus)
+        ? s
+        : { ...s, entry: { focus, declined: false }, carry: false },
     );
   }, []);
   const decline = React.useCallback(() => {
-    setState((s) => (s.entry.declined ? s : { ...s, entry: { ...s.entry, declined: true } }));
+    setState((s) =>
+      s.entry.declined && !s.carry ? s : { ...s, entry: { ...s.entry, declined: true }, carry: false },
+    );
   }, []);
   const markSending = React.useCallback(() => {
     sendingRef.current = true;

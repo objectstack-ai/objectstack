@@ -40,6 +40,10 @@ const state = {
   /** The JSON body of every chat POST, in order. */
   sent: [] as Array<{ context?: Record<string, unknown> }>,
   minted: 0,
+  /** Every POST that tries to create a conversation, failed ones included. */
+  createAttempts: 0,
+  /** The next creates fail (the server answers 500). */
+  failCreate: false,
 };
 
 vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
@@ -123,6 +127,13 @@ function installFetch(): void {
         return dataStreamResponse();
       }
       if (/\/conversations$/.test(url) && method === 'POST') {
+        state.createAttempts += 1;
+        if (state.failCreate) {
+          return new Response(JSON.stringify({ error: 'down' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         state.minted += 1;
         return json({ id: `conv-${state.minted}`, messages: [] });
       }
@@ -209,6 +220,8 @@ beforeEach(() => {
   state.pane = undefined;
   state.sent = [];
   state.minted = 0;
+  state.createAttempts = 0;
+  state.failCreate = false;
   window.localStorage.clear();
   window.sessionStorage.clear();
   resetChatFocusForTests();
@@ -326,6 +339,59 @@ describe('the console dock — conversation focus (objectstack#36999)', () => {
     await waitFor(() => expect(screen.queryByTestId('chat-focus-chip')).toBeNull());
     await composerReady();
     expect(await send('anything?')).not.toHaveProperty('focus');
+    expect(state.minted).toBe(0);
+  });
+
+  it('a first send whose create fails hands its focus to no conversation opened after it', async () => {
+    window.sessionStorage.setItem(
+      'ai-chat-focus:conv-old',
+      JSON.stringify({ focus: { object: 'account', id: 'rec_9' }, declined: false }),
+    );
+    mountDock();
+    await composerReady();
+    fireEvent.click(screen.getByTestId('chat-focus-pin'));
+    expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1');
+
+    // The first send's create fails: no conversation, no turn.
+    state.failCreate = true;
+    await act(async () => {
+      state.pane!.onSendMessage!('lost?');
+    });
+    await waitFor(() => expect(state.createAttempts).toBe(1), { timeout: 4000 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(state.minted).toBe(0);
+    state.failCreate = false;
+
+    // A history row opened next keeps ITS focus: the failed send minted nothing to carry onto.
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_9'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(readStoredChatFocus('conv-old').focus).toEqual({ object: 'account', id: 'rec_9' });
+  });
+
+  it('a chip pin after a setter hand-off is the conversation\'s own: it does not follow the user into an existing one', async () => {
+    window.sessionStorage.setItem(
+      'ai-chat-focus:conv-old',
+      JSON.stringify({ focus: { object: 'account', id: 'rec_9' }, declined: false }),
+    );
+    mountDock(record('rec_2'));
+    await composerReady();
+    // The setter lands on the fresh conversation (no id yet), then the user
+    // moves the focus through the chip to the record in view.
+    act(() => setChatFocus(ACCOUNT_1));
+    expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1');
+    fireEvent.click(screen.getByTestId('chat-focus-switch-accept'));
+    expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_2');
+
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_9'));
+    await composerReady();
+    expect((await send('and now?')).focus).toEqual([{ object: 'account', id: 'rec_9' }]);
+    expect(readStoredChatFocus('conv-old').focus).toEqual({ object: 'account', id: 'rec_9' });
     expect(state.minted).toBe(0);
   });
 

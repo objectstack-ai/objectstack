@@ -1203,6 +1203,8 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     [editPackageId],
   );
 
+  // The user the conversation resolves for (none until the agent is known).
+  const conversationUserId = activeAgent ? userId : undefined;
   const {
     conversationId,
     conversationScope,
@@ -1216,7 +1218,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     // that the per-(user,scope) guard then sticks with — so the agent surface
     // would resume some other agent's last chat. Waiting one tick keys the
     // conversation to the right scope from the first resolve.
-    userId: activeAgent ? userId : undefined,
+    userId: conversationUserId,
     scope: chatScope,
     apiBase,
     activeId: urlConversationId ?? legacyConversationId,
@@ -1250,14 +1252,16 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   // objectstack#36999 — the conversation's focus, held here for the same
   // reason: the keyed pane remounts when the first send mints the id, and that
   // first turn must still carry the record the user pinned.
-  const conversationFocus = useConversationFocus(paneConversationId);
+  const conversationFocus = useConversationFocus(paneConversationId, conversationCreateError);
   // A first send creates the conversation: the id it mints takes the focus
   // pinned before it (and no other arriving id does).
   const { markSending: markFocusSending } = conversationFocus;
   const ensureConversationForSend = useCallback(() => {
-    markFocusSending();
+    // With no user there is nothing to create: no mark, so no id that
+    // arrives later takes the focus as this send's.
+    if (conversationUserId) markFocusSending();
     return ensureConversation();
-  }, [markFocusSending, ensureConversation]);
+  }, [conversationUserId, markFocusSending, ensureConversation]);
   // Bumped whenever the pending ref is set OUT OF BAND (the handoff seed below).
   // ChatPane's deferred-send replay lists this in its deps, so it re-runs and
   // fires the seed even when the conversation id was ALREADY minted. Without it a
