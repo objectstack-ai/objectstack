@@ -213,11 +213,14 @@ describe('AppHeader `studio` variant: the /studio frame (objectui#11863)', () =>
     expect(brandLink()).toHaveAttribute('href', '/home');
   });
 
-  it('links the brand to the declared landing, the home the post-login redirect names', () => {
+  it('links the brand to /home even where an app declares a landing: Studio cannot tell which apps a set hides (objectstack#36732)', () => {
+    // Studio sits outside the `/me/apps` provider, so from 768 px up the brand
+    // names `/home`, the route that lands in the declared app once it knows
+    // the member's permission sets do not hide it.
     apps = [{ name: 'crm' }, { name: 'helpdesk', isDefault: true }];
     renderHeader('studio');
 
-    expect(brandLink()).toHaveAttribute('href', '/apps/helpdesk');
+    expect(brandLink()).toHaveAttribute('href', '/home');
   });
 
   it("carries the console's right-hand cluster: inbox, help and the account menu", () => {

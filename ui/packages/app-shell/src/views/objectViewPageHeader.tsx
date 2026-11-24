@@ -42,7 +42,7 @@ import { EnvironmentListToolbar } from '../environment/EnvironmentListToolbar.js
 import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
 import { arrangedHeaderActions, readActionLayoutArm, type ActionBarSchema, type ActionLayoutArm } from '@object-ui/types';
 import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
-import type { PinCandidate } from '../layout/designModeHeaderPins.js';
+import type { PinCandidate } from '../layout/designModeHeaderPinsModel.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 import type { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';

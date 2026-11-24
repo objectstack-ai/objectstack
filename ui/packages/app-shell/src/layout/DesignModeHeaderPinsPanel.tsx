@@ -45,7 +45,7 @@ import {
   togglePin,
   type ObjectPins,
   type ShownArrangement,
-} from './designModeHeaderPins.js';
+} from './designModeHeaderPinsModel.js';
 import { consoleObjectPinsDoors, saveObjectPins } from './designModeHeaderPinsSave.js';
 import type { DesignModeHeaderPinsProps } from './DesignModeHeaderPins.js';
 

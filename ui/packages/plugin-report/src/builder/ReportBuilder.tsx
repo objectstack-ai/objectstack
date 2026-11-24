@@ -5,7 +5,8 @@
  * (objectstack#36374, board 49 figure 3).
  *
  * Left: the report drawn live. Right: five settings, top to bottom — report
- * type, data source, measure, grouping, chart. There is no "Generate" button:
+ * type, data source (with 「+ Filter」 under it, objectstack#36645), measure,
+ * grouping, chart. There is no "Generate" button:
  * every pick rewrites the report document (`reportBuilderModel.ts`) and the
  * preview draws it again. Picking a data source draws a number at once (the
  * dataset's count measure, no grouping). While a required piece is missing the
@@ -89,6 +90,15 @@ export interface ReportBuilderProps {
   membersLoading?: boolean;
   /** A line the host could not read the catalog or the members with. */
   catalogError?: string;
+  /**
+   * The report filter under the data source (「+ Filter」, objectstack#36645):
+   * the report's `runtimeFilter` on the bound dataset. Host-controlled like
+   * the name box — the filterable fields are the dataset object's, and the
+   * filter's conversion to and from the spec's `FilterCondition` is the
+   * console's one shared bridge, so neither is read in this package. Drawn
+   * only while a data source is bound; absent, the builder offers no filter.
+   */
+  filter?: React.ReactNode;
   /** Save: resolves once the host has written (or refused) the report. */
   onSave: () => void | Promise<unknown>;
   /** Discard: put the report back as it was when the builder opened. */
@@ -144,6 +154,7 @@ export function ReportBuilder({
   members,
   membersLoading,
   catalogError,
+  filter,
   onSave,
   onDiscard,
   onClose,
@@ -346,6 +357,7 @@ export function ReportBuilder({
               </SelectContent>
             </Select>
             {catalogError ? <p className="text-xs text-destructive">{catalogError}</p> : null}
+            {dataset && filter ? <div data-testid="report-builder-filter">{filter}</div> : null}
           </Section>
 
           <Section title={tt('report.builder.measure.label', 'Measure')} testId="report-builder-measure">

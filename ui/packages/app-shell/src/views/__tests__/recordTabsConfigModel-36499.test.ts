@@ -25,7 +25,7 @@ import {
   recordTabsEntries,
   sameRecordTabsDraft,
   type RecordTabsDraft,
-} from '../recordTabsConfig';
+} from '../recordTabsConfigModel';
 
 const PKG = 'app.crm';
 const lookup = (reference: string, extra: Record<string, unknown> = {}) => ({ type: 'lookup', reference, ...extra });

@@ -1407,7 +1407,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.size": {
         label: "Size",
-        helpText: "Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."
+        helpText: "Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it."
       },
       "navigation.width": {
         label: "Width",

@@ -463,6 +463,10 @@ write path: the caller needs edit on the record **and** the transfer grant
 (`allowTransfer` on the object, or `modifyAllRecords`). Without the grant the
 record keeps its owner and the answer is the data door's own
 `403 PERMISSION_DENIED`, exactly as a `PATCH` of `owner_id` would answer.
+A record whose `owner_id` or `queue` is locked (read-only, or under a
+`readonlyWhen` condition that holds for the record) is refused
+`403 FIELD_NOT_ACCESSIBLE`, naming the locked column, and nothing is written;
+a queue move writes both columns, so a lock on either leaves both as they were.
 
 Offered only on an object the platform gives a reassignable owner and whose
 `userActions.transfer` switch is on. The switch defaults to on, and to off on a
@@ -489,6 +493,8 @@ import, a hook, a `PATCH`) still needs the transfer grant and nothing else.
 - `notify` (default `false`): send the new owner one notification under the
   `record.owner_changed` topic, in their own language. Not allowed with
   `queue`. A notification that cannot be sent never fails the transfer.
+  `notified` is `true` only when the notification was delivered or taken by
+  the outbox; a muted topic or an unavailable channel answers `false`.
 
 **Response** `200`:
 
@@ -510,7 +516,8 @@ written. An object that does not offer Change Owner is refused as a whole,
 (or `queue` in place of `ownerId`).
 
 **Response** `200`, with a report: every record that did not move is listed
-with the code and sentence its own update was refused with. None is skipped.
+with the code and sentence its own update was refused with (a locked owner or
+queue as `FIELD_NOT_ACCESSIBLE`). None is skipped.
 
 ```json
 {

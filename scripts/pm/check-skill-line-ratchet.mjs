@@ -126,7 +126,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 3990],
   ['.claude/skills/pm-dispatch/references/lanes/security.md', 4194],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 6958],
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 2526], // lowered 2530 → 2526 by the fold/sweep/size rule PR's own edit
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 2637], // lowered 2530 → 2526 by the fold/sweep/size rule PR's own edit; raised 2526 → 2637 (+111) by ruling record 7107018094 (the topic board in the repo: 「看板代码要放进仓库，立卡派发」, 「接，按普通顺序派」): the 3-hourly board rebuild line
   ['.claude/skills/pm-dispatch/references/lanes/l2-review.md', 1460],
   ['.claude/skills/pm-dispatch/references/lanes/review.md', 120],
   ['.claude/skills/pm-dispatch/references/lanes/qa.md', 2235],

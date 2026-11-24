@@ -121,23 +121,16 @@ function recorded<T extends object>(target: T, via: 'entry' | 'props'): T {
 
 /* ── every field widget, re-registered with recorded props ───────────────── */
 
-interface LazyInternals {
-  _init: (payload: unknown) => unknown;
-  _payload: unknown;
-}
 type WidgetFn = (props: Record<string, unknown>) => React.ReactNode;
 
-/** The component a `React.lazy` resolves to. Module loading, not rendering. */
+/**
+ * The component a lazily loaded field widget resolves to. Module loading, not
+ * rendering: `getLazyFieldWidget` hands back the fields package's recoverable
+ * lazy component, whose `load()` resolves to the widget itself
+ * (objectstack#36608).
+ */
 async function resolveLazy(lazy: unknown): Promise<unknown> {
-  const internals = lazy as LazyInternals;
-  for (;;) {
-    try {
-      return internals._init(internals._payload);
-    } catch (pending) {
-      if (pending && typeof (pending as PromiseLike<unknown>).then === 'function') await pending;
-      else throw pending;
-    }
-  }
+  return (lazy as { load(): Promise<unknown> }).load();
 }
 
 const MEMO = Symbol.for('react.memo');

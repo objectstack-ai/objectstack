@@ -1407,7 +1407,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "尺寸",
-        helpText: "抽屉详情的浮层尺寸档位：'auto'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。"
+        helpText: "记录抽屉的宽度档位：'auto'（默认）沿用宿主固定的默认宽度，每个对象都一样，与字段数无关（控制台的记录侧边面板以 460px 打开）；或粗粒度覆盖 sm/md/lg/xl/full（上限分别为 480/720/960/1200/1600px，始终受视口限制）。读者拖动出的宽度优先于两者。优先使用它而非像素 `width`；记录以整页打开时它不起作用（控制台在手机上一律以整页打开记录），在手机宽度的屏幕上也不起作用，那里抽屉占满屏幕。"
       },
       "navigation.width": {
         label: "宽度",

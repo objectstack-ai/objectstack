@@ -1985,12 +1985,26 @@ export class MetadataClient {
    * objectstack#26649 — `member` promotes one bundle member's draft, sent as
    * `?member=` under the same rule as {@link publishDraft}'s; omitted, the
    * canonical member's draft.
+   *
+   * objectstack#36601 — `ifMatch` pins the PUBLISHED layer: the publish lands
+   * only over the active row whose version the caller loaded (the `/layers`
+   * read's `overlayVersion`, a publish receipt's `version`), sent as
+   * `If-Match`; `ifNoneMatch: '*'` lands only where no active row is stored.
+   * A stale pin is refused `409 METADATA_CONFLICT` with the current version as
+   * `currentVersion`, and nothing is promoted. Neither, the publish is
+   * unpinned, as before. ⛔ Never both: refused before any request.
    */
   async publish<T = unknown>(
     type: string,
     name: string,
-    options: { message?: string; packageId?: string; member?: string } = {},
+    options: { message?: string; packageId?: string; member?: string; ifMatch?: string; ifNoneMatch?: '*' } = {},
   ): Promise<T> {
+    if (options.ifMatch && options.ifNoneMatch) {
+      throw new Error(
+        `MetadataClient.publish: ifMatch and ifNoneMatch are mutually exclusive (type="${type}", name="${name}").` +
+          ' Send ifMatch with the published version you read, or ifNoneMatch: "*" when no published row is there.',
+      );
+    }
     // objectstack `9e04c3e35` (`@objectstack/rest` 17.2.0) — this door accepts
     // `?package=<id>` and forwards it as the promotion's package binding, so
     // objectstack-ai/objectstack#9612's package-closure narrowing at the runtime publish gate is
@@ -2013,6 +2027,8 @@ export class MetadataClient {
       ...this.headers,
       'Content-Type': 'application/json',
     };
+    if (options.ifMatch) headers['If-Match'] = options.ifMatch;
+    if (options.ifNoneMatch) headers['If-None-Match'] = options.ifNoneMatch;
     const res = await this.sendWrite(url, {
       method: 'POST',
       headers,
