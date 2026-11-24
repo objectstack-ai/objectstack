@@ -91,6 +91,7 @@ describe('calendar.initialDate — refused values', () => {
     ['a bare known period token', 'next_month_start'],
     ['an unknown wrapped token', '{next_moon}'],
     ['a malformed parameterised token', '{3_fortnights_from_now}'],
+    ['a period-key token, which names a week key and not a date', '{current_iso_week}'],
     ['a near-miss anchor spelling', 'first'],
     ['the camelCase spelling of an anchor', 'firstRecord'],
     ['an upper-cased anchor', 'NEXT_RECORD'],

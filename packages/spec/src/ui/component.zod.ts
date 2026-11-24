@@ -51,6 +51,7 @@ import {
   // `ListViewPageProps`.
   checkListViewCalendarVisualization,
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
   VIEW_METADATA_MEMBERS,
 } from './view.zod';
 // [#22444] The one prescription both tiers refuse a list view's retired
@@ -778,8 +779,8 @@ export const PageHeaderProps = strictObject({
    *
    * ON (the default) the header carries the **record chrome**: the title
    * renders as a record chip with the copy-record-id button beside it (the
-   * follow star draws there only where a host wires a favorites toggle; the
-   * reference console's favorites entry is the header's ⋯ menu). OFF it falls back to a bare heading — one title line and
+   * follow star draws there only where a host wires a favorites toggle, as the
+   * reference console does on its record pages). OFF it falls back to a bare heading — one title line and
    * nothing record-shaped — which is what a dashboard or a landing page wants,
    * since there is no record for the chip to describe.
    *
@@ -800,11 +801,12 @@ export const PageHeaderProps = strictObject({
    * the way `breadcrumb` above left this row; ruling record 6203775759,
    * letter A).
    *
-   * A switch for a star the reference console no longer draws. Since
-   * objectui#12427 the record chip draws the follow star only where the HOST
-   * wires a favorites toggle into the record context (`onToggleFavorite`),
-   * and no reference host does: the record's favorites entry is the header's
-   * ⋯ overflow menu. So `showStar: true` (the default) drew nothing and
+   * A switch metadata never had a say in. Since objectui#12427 the record chip
+   * draws the follow star only where the HOST wires a favorites toggle into
+   * the record context (`onToggleFavorite`); when the key was retired no
+   * reference host did, and since #36246 the reference console wires it on
+   * its record pages, beside the record's name. Either way the star follows
+   * the host's toggle, so `showStar: true` (the default) drew nothing and
    * `showStar: false` hid nothing. No example app, skill or doc authored it.
    *
    * The host hook stays: objectui's `RecordContextValue.onToggleFavorite` is a
@@ -816,9 +818,8 @@ export const PageHeaderProps = strictObject({
    */
   showStar: retiredKey(
     '`page:header` property `showStar` was removed in @objectstack/spec 18 (ADR-0087 D2) — '
-    + 'the reference console draws no star beside the record title, so the key switched nothing: '
-    + 'the record\'s favorites entry is the header\'s ⋯ menu, and metadata does not control it. '
-    + 'Delete the key, whether it was `true` or `false`; the ⋯ menu\'s favorites entry is unchanged. '
+    + 'the console draws the record\'s star from the host\'s favorites toggle, never from metadata, so the key switched nothing. '
+    + 'Delete the key, whether it was `true` or `false`; the page draws the same star without it. '
     + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
@@ -838,22 +839,24 @@ export const PageHeaderProps = strictObject({
    * evidence: the renderer has always read them and the schema had not caught
    * up. The header renderer (read points recorded in `liveness/page.json`, row `regions`) resolves
    * `schema?.maxVisible ?? schema?.properties?.maxVisible` (and the `mobile*`
-   * twin), the `?? 3` / `?? 1` are its own fallbacks, and its comment says out
-   * loud that both are "overridable on the page:header". Closing this shape
+   * twin), the fallbacks for an unset key are its own (3 on desktop, folded
+   * by width in a record page's header bar since #35853; the mobile one
+   * differs by host — as the two `.describe()` strings below state), and its comment says out loud
+   * that both are "overridable on the page:header". Closing this shape
    * without declaring them would turn an invited affordance into a hard
    * rejection — the lesson of commit 78f0be872, which is to enumerate by the RENDERER'S read
    * pattern rather than by the key list a previous ruling happened to quote.
    *
-   * Optional with NO schema default, deliberately: 3 and 1 are the renderer's
-   * fallbacks, and declaring them here would materialize a `maxVisible` on
+   * Optional with NO schema default, deliberately: the per-host numbers are the
+   * renderer's fallbacks, and declaring one here would materialize a `maxVisible` on
    * every parsed header — turning an unset key into an authored one, exactly
    * as the record picker's `limit` docblock records for its own 50.
    */
   maxVisible: z.number().int().positive().optional().describe(
-    'How many header actions render as inline buttons before the rest fold into the overflow menu (renderer default 3).',
+    'How many header actions render as inline buttons before the rest fold into the overflow menu. Renderer default when unset: 3 on every header. In a record page\'s header bar the number, authored or not, is an upper bound: actions that do not fit the bar\'s width fold as well, so a narrow drawer shows fewer.',
   ),
   mobileMaxVisible: z.number().int().positive().optional().describe(
-    'The `maxVisible` budget on mobile viewports (renderer default 1).',
+    'The `maxVisible` budget on mobile viewports. Renderer default when unset: 2 in a record page\'s bottom action bar on a phone, 1 on any other header. The phone bar holds the page\'s own actions: the record\'s Edit is not one of them, it is in the overflow menu at the top bar\'s right end.',
   ),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
@@ -1411,12 +1414,15 @@ export const RecordDetailsProps = strictObject({
      * fold a partly-filled section uses — instead of a column of empty rows;
      * edit mode is unchanged and renders every row, editable. No key, shape or
      * default changed, and the describe() states the ruled rendering, which
-     * objectui's `DetailSection` follows. The key governs only the ALL-empty
+     * objectui's `DetailSection` follows. Read-only, the details body first
+     * names every such section in the one line that closes it, and expanding
+     * that line draws them so — one line for all the empty groups instead of a
+     * card for each (objectstack#35019). The key governs only the ALL-empty
      * case: a partly-filled section's empty rows follow the renderer's own
      * fold (objectui#7129 Q2-C) in either polarity, so the old lead "hide this
      * section's empty fields" no longer told the two values apart.
      */
-    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode it renders its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
+    hideEmpty: z.boolean().optional().describe('Whether this section disappears when ALL its fields are empty (renderer default: on — it then renders nothing at all: no heading, no skeleton). Set `false` to keep it on an all-empty record (e.g. a brand-new one): in read-only mode the details body names it in the one line that closes the body, beside every other all-empty section kept this way, and expanding that line renders each in its place as its heading plus one fold row that counts the empty fields and reveals them on request — the same fold a partly-filled section uses; in edit mode it renders every field as an editable row.'),
     /** Collapsible card. Initial state is expanded; the toggle is the heading. */
     collapsible: z.boolean().optional().describe('Render this section as a collapsible card — the heading becomes a chevron toggle, initially expanded (renderer default: off).'),
     /** Card chrome; the renderer derives it from the presence of a title. */
@@ -1857,6 +1863,19 @@ export const RecordRelatedListProps = strictObject({
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
+
+/**
+ * How many of an object's declared `highlightFields` (ADR-0085), after the
+ * record's title field leaves the list, a SYNTHESIZED key-field strip draws.
+ * The default record page draws no such strip and leaves every highlighted
+ * field in its group; the strip is built only for a page that places one in
+ * its `highlights` slot, by the record page synthesizer in
+ * `@object-ui/plugin-detail`, which cuts the list with this count.
+ *
+ * Not the bound of an authored `record:highlights` block's `fields`
+ * ({@link RecordHighlightsProps}): an authored page writes its own strip.
+ */
+export const RECORD_HIGHLIGHTS_MAX = 6;
 
 /**
  * ⚠️ The object arm is CLOSED, and closing a union arm is a different act from
@@ -2563,7 +2582,7 @@ const RECORD_LINE_ITEMS_HISTORY =
  * field's `inlineColumns`, a form view's `subforms[].columns` and an
  * `object-master-detail-form` detail entry's `columns` take, not a copy: the
  * panel hands its columns to the same objectui grid (`GridField`, whose
- * `GridColumn` declares exactly that schema's twenty keys and IS the spec's
+ * `GridColumn` declares exactly that schema's twenty-one keys and IS the spec's
  * type by reference). The column also means here what it means on those
  * carriers (#24140, route B), because the column schema's own `label` describe
  * — "defaults to the child field's label via hydration" — governs every
@@ -4987,7 +5006,7 @@ const GridOperationsSchema = lazySchema(() => strictObject({
  * `searchableFields`/`showSearch`, `rowHeight`, `grouping`/`aggregations`,
  * `rowColor`, `conditionalFormatting`, `selection`/`selectable`,
  * `rowActions`, `batchActions`/`bulkActions`, `bulkActionDefs`, `navigation`,
- * `editable`/`singleClickEdit`, `resizable`/`resizableColumns`,
+ * `editable` (`singleClickEdit` RETIRED #36270, tombstoned below), `resizable`/`resizableColumns`,
  * `reorderableColumns`, `frozenColumns`, `showColumnTypeIcons`,
  * `exportOptions`/`operations`, `label`/`title`, `data`/`staticData`.
  *
@@ -5426,7 +5445,28 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
   navigation: NavigationConfigSchema.optional()
     .describe('Row-click navigation config — the same block `ListViewSchema.navigation` declares ({ mode, size, openNewTab, preventNavigation })'),
   editable: z.boolean().optional().describe('Enable inline cell editing'),
-  singleClickEdit: z.boolean().optional().describe('Enter cell edit on single click (default true when editable)'),
+  /**
+   * REMOVED (#36270, ADR-0049 enforce-or-remove; the maintainer's ruling A,
+   * one editing model). A grid that renders editable — `editable` set and the
+   * viewer allowed to edit — now selects a cell first: a click selects it,
+   * and double-click, Enter, F2 or typing opens its editor. That model has no
+   * single-click entry, so neither value of this key could be honoured any
+   * longer: `true` (the renderer's default) would open the editor on the
+   * selecting click, and `false` named the double-click entry the model
+   * already has. A grid that renders read-only edits nothing, so the key
+   * never had an effect there.
+   *
+   * The live mechanism is `editable` (with the viewer's write verdict). The
+   * protocol-18 conversion `object-grid-single-click-edit-removed` deletes the
+   * key from authored grids.
+   */
+  singleClickEdit: retiredKey(
+    '`object-grid` property `singleClickEdit` was removed in @objectstack/spec 18.7.0 (ADR-0049) — '
+    + 'a grid that renders editable now selects a cell on a click and opens its editor on double-click, '
+    + 'Enter, F2 or typing, so a single-click entry no longer exists for this key to switch. '
+    + 'Delete the key; `editable` (with the viewer\'s write verdict) decides whether the grid edits. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+  ),
   /**
    * [#20694] Declared AHEAD of its reader, deliberately: objectui#11068 chose
    * to BUILD arrow-key cell navigation for the grid, and this row is the spec
@@ -5444,9 +5484,12 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * objectui `154075ab1`, objectui#11068): the grid hands the data table
    * `keyboardNavigation: schema.keyboardNavigation ?? inlineEditable`, where
    * `inlineEditable` is the authored `editable` AND the viewer's write verdict
-   * — so an absent key follows whether the grid RENDERS editable, `true` turns
-   * the navigation on for a read-only grid, and `false` turns it off on an
-   * editable one. The data table (`keyboardNavigation = false` by default)
+   * — so an absent key follows whether the grid RENDERS editable and `true`
+   * turns the navigation on for a read-only grid. Since #36270 a grid that
+   * renders editable selects a cell first, and that model moves its selection
+   * with these keys, so the data table forces the navigation on there and
+   * `false` is no longer honoured on an editable grid (ruling A narrowed the
+   * describe to what is enforced). The data table (`keyboardNavigation = false` by default)
    * then gives the table `role="grid"` and makes the data cells one roving
    * Tab stop (`tabIndex` 0 on one cell and -1 on the rest) that the arrow
    * keys, Home / End and Ctrl+Home / Ctrl+End move (`navigationTarget`;
@@ -5454,7 +5497,7 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * every data cell is its own Tab stop, as before.
    */
   keyboardNavigation: z.boolean().optional()
-    .describe('Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Defaults to on when the grid renders editable — `editable` set and the viewer allowed to edit; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid'),
+    .describe('Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells become one Tab stop that the arrow keys, Home / End and Ctrl+Home / Ctrl+End move between. Always on when the grid renders editable — `editable` set and the viewer allowed to edit — because that grid selects a cell first and moves the selection with these keys; a grid that renders read-only keeps every cell its own Tab stop unless this is `true`'),
   resizable: z.boolean().optional().describe('Allow column resize (the renderer default is on)'),
   /**
    * REMOVED (#21445, ADR-0049 enforce-or-remove; objectui#6152 ruling A,
@@ -6953,7 +6996,7 @@ function buildObjectFormRuntimeField() {
     minLength: FieldSchema.shape.minLength.describe('Minimum character count — the native control\'s `minlength`'),
     maxLength: FieldSchema.shape.maxLength.describe('Maximum character count — the control\'s ceiling (a textarea also draws its counter)'),
     pattern: z.string().optional().describe('Regular expression the value must match, as a string — the native control\'s `pattern`, enforced by the browser at submit'),
-    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency)'),
+    returnType: FieldSchema.shape.returnType.describe('The value type a formula field displays (number / text / boolean / date / currency / percent)'),
     summaryOperations: FieldSchema.shape.summaryOperations.describe('The roll-up a summary field displays — the object field\'s own `{ object, field, function, … }`'),
     columns: FieldSchema.shape.inlineColumns.describe('The columns of a `grid` field — the strict, name-keyed inline grid column a relationship field\'s `inlineColumns` takes'),
     // [#21768] The `grid` widget's eight field-level keys, camelCase since
@@ -8552,8 +8595,9 @@ const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', 
  * ## Built from the list view, by reference
  *
  * Every member is {@link ListViewSchema}'s own schema object (its `shape`
- * spread), and both of its object-level checks are attached
- * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding}),
+ * spread), and each of its object-level checks is attached
+ * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding},
+ * {@link checkListViewTimesheetBinding}),
  * so a key or value the authoring door refuses on a list view is refused here
  * with the same issue. So `kanban.groupField` is an unknown key of the kanban
  * block, and the list kind is the bag's own `type` (the node's `type` is the
@@ -8605,7 +8649,7 @@ const ListViewPageProps = lazySchema(() => strictObject({
   ...ListViewSchema.shape,
   columns: ListViewSchema.shape.columns.optional(),
   options: VIEW_METADATA_MEMBERS.listOverlay.shape.options,
-}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding));
+}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding).superRefine(checkListViewTimesheetBinding));
 
 /**
  * ----------------------------------------------------------------------

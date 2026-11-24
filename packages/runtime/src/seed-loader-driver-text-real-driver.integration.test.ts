@@ -72,7 +72,7 @@ const ACCT = {
 
 const SEED_CONFIG = {
   dryRun: false, haltOnError: false, multiPass: true,
-  defaultMode: 'insert', batchSize: 1000, transaction: false,
+  defaultMode: 'ignore', batchSize: 1000, transaction: false,
 } as any;
 
 function metadataFor(objects: any[]) {
@@ -162,7 +162,7 @@ describe('[#8442] a REAL driver constraint violation is withheld from the seed r
       seeds: [{
         object: 'dt_acct',
         externalId: 'name',
-        mode: 'insert',
+        mode: 'ignore',
         env: ['prod', 'dev', 'test'],
         records: [
           { name: 'first', email: 'dup@example.com' },

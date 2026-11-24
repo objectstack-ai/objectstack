@@ -23,6 +23,8 @@
 import type { ComponentType } from 'react';
 import type { SupportedLocale } from './i18n.js';
 import { createObservableTypeRegistry, type MetadataSelection } from './preview-registry.js';
+import type { SchemaFormIssue } from './SchemaForm.js';
+import type { FormViewSpec } from './form-spec.js';
 
 export interface MetadataDefaultInspectorProps {
   /** Metadata type, e.g. 'view'. */
@@ -72,6 +74,44 @@ export interface MetadataDefaultInspectorProps {
    * server schema is available (offline / older server).
    */
   serverSchema?: Record<string, unknown>;
+  /**
+   * The served FormView layout for this type (`RichMetadataTypeEntry.form`,
+   * from `/meta/types`), the form a generic host hands `SchemaForm` beside
+   * {@link serverSchema}. A curated inspector reads the rows it names from it,
+   * so a row the server declares a face for (a widget, help text, a
+   * visibility predicate) is drawn with that face rather than the one the
+   * bare schema implies (objectstack#35650). Undefined when the host has no
+   * served form: such an inspector draws those keys as it did without one.
+   */
+  serverForm?: FormViewSpec;
+  /**
+   * The host's issues on the draft (a refused save, the live pass), paths
+   * relative to the draft — what the host's fallback form is handed. An
+   * inspector draws each on the row that edits its path (objectstack#35628).
+   * Optional: a host that passes none gets the inspector it got before.
+   */
+  issues?: SchemaFormIssue[];
+  /** The host's Save was attempted: no deferred issue line stays hidden, as `SchemaForm`'s `revealIssues`. */
+  revealIssues?: boolean;
+  /**
+   * Told the PATH PREFIXES whose issues the inspector draws on a row, mounted
+   * and shown: a whole-draft form's row keys, a slice form's keys under the
+   * slice's path, a curated row's own path. The host's banner and refusal
+   * line leave an issue out only when one of them is the issue's path or a
+   * segment-wise prefix of it (objectstack#27865).
+   */
+  onInlineIssueFieldsChange?: (prefixes: ReadonlySet<string>) => void;
+  /**
+   * Draw one half of the panel, for a host that lays the two halves out apart
+   * (objectstack#36512: the object Settings tab puts the rows a developer
+   * reads — internal name, access — in a section of their own, below the
+   * business rows). `keysOnHover` puts the metadata key a row writes into its
+   * title's hover text (objectstack#36746). Omitted: the whole panel, as
+   * every other host gets it.
+   * Only an inspector that splits reads it (today: `object`); one that does
+   * not draws its whole panel on each mount.
+   */
+  split?: { part: 'business' | 'developer'; keysOnHover?: boolean };
 }
 
 export type MetadataDefaultInspector = ComponentType<MetadataDefaultInspectorProps>;

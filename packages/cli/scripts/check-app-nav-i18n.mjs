@@ -466,6 +466,17 @@ const CONTRIBUTORS = [
     },
   },
   {
+    // `nav_slack` (Setup → Integrations). Registered by `MessagingServicePlugin`
+    // at `kernel:ready`, and only where connector-slack's `slack` service
+    // resolves, so the bundle is read directly — the row above's shape.
+    source: '@objectstack/service-messaging (SLACK_SETUP_UI_BUNDLE)',
+    apps: ['setup'],
+    async load() {
+      const { SLACK_SETUP_UI_BUNDLE } = await import('@objectstack/service-messaging');
+      return { manifests: [SLACK_SETUP_UI_BUNDLE] };
+    },
+  },
+  {
     source: '@objectstack/cloud-connection (cloud + marketplace UI bundles)',
     apps: ['setup'],
     async load() {

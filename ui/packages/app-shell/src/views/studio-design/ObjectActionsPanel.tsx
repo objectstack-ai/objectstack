@@ -58,14 +58,29 @@
  * (`pairObjectActions.ts`). Each such action is listed after the vendor's
  * with the customization mark, opens editable and has Delete; "only
  * customizations" narrows the list to them. The object draft is not touched.
+ *
+ * ## A vendor action's switch for this deployment (objectstack#34724)
+ *
+ * On a read-only APP package, each vendor action opens with the activation
+ * ledger's switch in its header: on or off for this deployment, the flow
+ * switch's control and words (`FlowLedgerSwitch`, ADR-0146 D4 as amended
+ * 2026-11-17), over the action's own doors (`setup/packagedActionLedger.ts`).
+ * A refusal is the server's sentence, shown as sent under the switch; a caller
+ * the door walls off sees it disabled with the console's reason. A switched-off
+ * action says so in the list, so it is found from there. ⛔ A platform
+ * package's actions (a kernel package's, on `sys_user` and the like) carry no
+ * switch: the hook offers none for a package the list does not serve as an
+ * app package. Setup's Packaged Actions page, which held the switch, retired.
  */
 
 import React from 'react';
-import { Ban, Zap, Plus, Trash2, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
-import { useDisplayLocale } from '@object-ui/i18n';
+import { useParams } from 'react-router-dom';
+import { toast } from 'sonner';
+import { Ban, Zap, Plus, Trash2, ChevronDown, ChevronRight, Loader2, Power } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@object-ui/components';
 import { getIcon } from '../../utils/getIcon.js';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
+import type { FormViewSpec } from '../metadata-admin/form-spec.js';
 import type { I18nLabel } from '@objectstack/spec/ui';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { readFields } from '../metadata-admin/previews/object-fields-io.js';
@@ -78,8 +93,11 @@ import {
   type ActionPresetFieldOpt,
 } from './actionPresets.js';
 import { StudioEmptyState, StudioEmptyStateAction } from './StudioEmptyState.js';
-import { usePairObjectActions, type PairActionsDoor } from './pairObjectActions.js';
+import type { PairActionsDoor, PairObjectActions } from './pairObjectActions.js';
 import { RailCustomizationFilter, RailCustomizationMark, useRailCustomizationsOnly } from './StudioRailCustomizations.js';
+import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
+import { isStudioOrgScope } from './studioScope.js';
+import { useActionLedger } from '../setup/packagedActionLedger.js';
 
 interface ActionItem {
   name?: string;
@@ -130,15 +148,32 @@ function labelText(label: I18nLabel | undefined, fallback: string, locale: strin
   return label == null ? fallback : navItemLabelText(label, locale);
 }
 
+/** The pair's actions where there is no pair: nothing listed, nothing offered. */
+const NO_PAIR_ACTIONS: PairObjectActions = {
+  rows: [],
+  pairId: null,
+  error: null,
+  saving: false,
+  dirty: false,
+  renamedFrom: () => null,
+  create: async () => false,
+  patch: () => undefined,
+  remove: async () => undefined,
+  reportBlocking: () => undefined,
+  dialog: <></>,
+};
+
 export function ObjectActionsPanel({
   draft,
   onPatch,
   disabled,
   actionSchema,
+  actionForm,
   onBlockingIssuesChange,
   onCelVerdictsChange,
   focus,
   pair = null,
+  pairActions = null,
 }: {
   draft: Record<string, unknown>;
   onPatch: (patch: Record<string, unknown>) => void;
@@ -170,23 +205,36 @@ export function ObjectActionsPanel({
    */
   actionSchema?: Record<string, unknown>;
   /**
+   * The served FormView layout for the `action` type (`/meta/types`), handed
+   * to ActionDefaultInspector as `serverForm` so the rows it draws from the
+   * served form (the refusal catalogue and declared texts) take their served
+   * face, not the raw JSON editor (objectstack#35650).
+   */
+  actionForm?: FormViewSpec;
+  /**
    * objectstack#30088 — on a read-only base's object, its pair: New saves the
    * action as an `action` item there (see the header). Absent, every action is
    * the object draft's.
    */
   pair?: PairActionsDoor | null;
+  /** objectstack#36511 — the pair's actions on this object, the Data pillar's buffer (`usePairObjectActions`). */
+  pairActions?: PairObjectActions | null;
 }) {
   const locale = useMetadataLocale();
   // The last-saved time reads the DISPLAY locale (objectui#10232).
-  const displayLocale = useDisplayLocale();
   const objectName = typeof draft.name === 'string' ? draft.name : '';
   // objectui#4527 — each action's blocking CEL verdict, by name (see below).
   const [celErrors, setCelErrors] = React.useState<Record<string, number>>({});
-  const blockingOf = React.useCallback((name: string) => celErrors[name] ?? 0, [celErrors]);
   // objectstack#30088 — the pair's actions on this object, and the vendor's:
   // the object's served actions less any the pair holds (a published one is
   // served folded into the object too).
-  const added = usePairObjectActions(pair, objectName, blockingOf);
+  // objectstack#36511 — read and buffered by the Data pillar, so an unsaved
+  // edit outlives this view.
+  const added = pairActions ?? NO_PAIR_ACTIONS;
+  const reportPairBlockingRef = React.useRef(added.reportBlocking);
+  React.useLayoutEffect(() => {
+    reportPairBlockingRef.current = added.reportBlocking;
+  });
   const addedNames = React.useMemo(() => new Set(added.rows.map((r) => r.name)), [added.rows]);
   const actions = React.useMemo(
     () =>
@@ -198,6 +246,29 @@ export function ObjectActionsPanel({
   // New is offered where an action can be saved: the object draft, or the pair.
   const canAdd = pair ? !pair.walled : !disabled;
   const [onlyAdded, toggleOnlyAdded] = useRailCustomizationsOnly();
+  // objectstack#34724 — the ledger switch of a read-only package's vendor
+  // actions. The package is the route's: on a read-only package's object the
+  // vendor actions are that package's own. A writable package's actions are
+  // the draft's: the console draws no ledger switch there (the card's item 1
+  // offers it on a read-only app's vendor actions only), so nothing is read.
+  const routePackage = useParams<{ packageId?: string }>().packageId ?? null;
+  const ledgerPackage =
+    disabled && routePackage && !isStudioOrgScope(routePackage) ? routePackage : null;
+  const ledger = useActionLedger(ledgerPackage);
+  const vendorNames = React.useMemo(() => new Set(actions.map((a) => String(a.name ?? ''))), [actions]);
+  // A listed action the switch is for: one of the vendor's, once the ledger answered.
+  const switchable = (name: string | null | undefined): boolean =>
+    ledger.offered && !!name && vendorNames.has(String(name));
+  const toggleLedger = async (name: string, label: string) => {
+    const now = await ledger.toggle(objectName, name, {
+      http: (status) => tFormat('engine.studio.auto.ledger.toggleFailedHttp', locale, { status }),
+      network: t('engine.studio.auto.ledger.toggleFailed', locale),
+    });
+    if (now === null) return;
+    toast.success(
+      tFormat(now ? 'engine.studio.auto.ledger.switchedOn' : 'engine.studio.auto.ledger.switchedOff', locale, { label }),
+    );
+  };
   // objectui#11861 — new actions still waiting for their target: listed and
   // edited here, and NOT in the draft (see "A new action waits for its target"
   // above). Each is kept with the object it was started on (`on`, not the
@@ -320,6 +391,7 @@ export function ObjectActionsPanel({
    * DERIVED against the live action-name set rather than repaired by an effect.
    */
   const reportCel = React.useCallback((actionName: string, count: number) => {
+    reportPairBlockingRef.current(actionName, count);
     setCelErrors((prev) => (prev[actionName] === count ? prev : { ...prev, [actionName]: count }));
   }, []);
   const liveActionNames = React.useMemo(
@@ -569,7 +641,6 @@ export function ObjectActionsPanel({
   if (allListed.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        {added.dialog}
         {pairError}
         <StudioEmptyState
           testId="actions-empty"
@@ -587,7 +658,6 @@ export function ObjectActionsPanel({
 
   return (
     <div className="flex min-h-0 flex-1 gap-4">
-      {added.dialog}
       {/* action list */}
       <div data-testid="actions-list" className="flex w-72 shrink-0 flex-col rounded-lg border">
         <header className="flex items-center gap-2 border-b px-3 py-2">
@@ -632,6 +702,18 @@ export function ObjectActionsPanel({
                     </span>
                   )}
                 </span>
+                {/* objectstack#34724 — a vendor action switched off for this
+                    deployment says so in the list, where it is found. */}
+                {switchable(a.name) && !ledger.enabledOf(String(a.name)) && (
+                  <span
+                    data-testid="action-ledger-off-mark"
+                    title={t('engine.studio.auto.ledger.off', locale)}
+                    className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
+                  >
+                    <Power className="h-3 w-3" aria-hidden="true" />
+                    {t('engine.studio.actions.ledger.offMark', locale)}
+                  </span>
+                )}
                 {type && (
                   <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
                     {type}
@@ -671,21 +753,53 @@ export function ObjectActionsPanel({
         {/* The list always selects an action, so this pane is never blank for
             want of a pick (objectui#12514 retired that sentence). */}
         {pairError}
+        {/* objectstack#34724 — a vendor action's switch for this
+            deployment, and what the server answered a flip, verbatim. */}
+        {sel && !editable(sel.name) && switchable(sel.name) && (
+          <div data-testid="action-ledger-bar" className="flex shrink-0 flex-col gap-1 border-b px-2 py-1">
+            <div className="flex items-center justify-end gap-2">
+              <FlowLedgerSwitch
+                checked={ledger.enabledOf(String(sel.name))}
+                reading={ledger.enabledOf(String(sel.name)) ? 'on' : 'off'}
+                busy={ledger.busyKey === `${objectName}:${String(sel.name)}`}
+                walledReason={ledger.walled ? t('engine.studio.actions.ledger.walled', locale) : undefined}
+                hint={t('engine.studio.actions.ledger.hint', locale)}
+                testId="action-ledger-switch"
+                locale={locale}
+                onToggle={() =>
+                  void toggleLedger(String(sel.name), labelText(sel.label, String(sel.name ?? ''), locale))
+                }
+              />
+            </div>
+            {ledger.refusalOf(objectName, String(sel.name)) && (
+              <p
+                role="alert"
+                data-testid="action-ledger-refusal"
+                className="whitespace-pre-line text-[11px] text-destructive"
+              >
+                {ledger.refusalOf(objectName, String(sel.name))}
+              </p>
+            )}
+          </div>
+        )}
+        {sel && !editable(sel.name) && ledger.loadError && vendorNames.has(String(sel.name ?? '')) && (
+          <p
+            role="alert"
+            data-testid="action-ledger-load-error"
+            className="shrink-0 border-b px-3 py-1.5 text-[11px] text-muted-foreground"
+          >
+            {tFormat('engine.studio.actions.ledger.loadFailed', locale, { message: ledger.loadError })}
+          </p>
+        )}
         {!sel ? null : Inspector ? (
           <>
             {editable(sel.name) && (
               <div className="flex shrink-0 items-center justify-end gap-2 border-b px-2 py-1">
-                {/* objectstack#30088 — a pair action autosaves on its own: its status line. */}
+                {/* objectstack#36511 — a pair action is sent by the top bar's Save. */}
                 {selAdded && added.saving ? (
                   <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground" data-testid="actions-pair-saving">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t('engine.studio.autoSaving', locale)}
-                  </span>
-                ) : selAdded && added.savedAt !== null && added.savedAt.name === sel.name && added.dirty !== sel.name ? (
-                  <span className="text-[11px] text-muted-foreground" data-testid="actions-pair-saved-at">
-                    {tFormat('engine.studio.data.lastSaved', locale, {
-                      time: added.savedAt.at.toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' }),
-                    })}
                   </span>
                 ) : null}
                 <button
@@ -715,6 +829,7 @@ export function ObjectActionsPanel({
               readOnly={!editable(sel.name)}
               locale={locale}
               serverSchema={actionSchema}
+              serverForm={actionForm}
               onBlockingIssuesChange={(count) => reportCel(String(sel.name ?? ''), count)}
             />
           </>

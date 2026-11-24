@@ -23,9 +23,9 @@ import { resolveBookTree, bookSlug, firstDoc } from './book-nav';
  * beneath the heading. Shared by `DocsSlug` (a segment the member's lists do not
  * answer) and `DocPage` (the reader).
  */
-export function DocRefusal({ name, message }: { name?: string; message?: string }) {
+export function DocRefusal({ message }: { message?: string }) {
   return (
-    <DocShell breadcrumb={name}>
+    <DocShell>
       <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
         <Lock className="h-10 w-10 text-muted-foreground" />
         <h1 className="text-lg font-semibold">You do not have access to this documentation</h1>
@@ -68,7 +68,7 @@ export default function BookPage() {
 
   // Unknown book, or a book with no readable docs yet.
   return (
-    <DocShell breadcrumb={found ? (found.label ?? slug) : slug}>
+    <DocShell>
       <div className="mx-auto flex max-w-3xl flex-col items-center gap-3 p-10 text-center">
         {found ? (
           <>

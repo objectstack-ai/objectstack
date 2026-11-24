@@ -14,24 +14,24 @@ a row or a number here — fix the code, or the census, and regenerate.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 22 |
-| Object name statically decidable | 7 |
-| Object name chosen at run time | 15 |
+| Write call sites | 25 |
+| Object name statically decidable | 8 |
+| Object name chosen at run time | 17 |
 | Object name spelled inline | 0 |
-| Object name spelled through a `const` | 7 |
+| Object name spelled through a `const` | 8 |
 | Object name is an `object: string` parameter | 0 |
-| Object name is some other run-time expression | 15 |
-| Against a tenancy-enabled object | 2 |
+| Object name is some other run-time expression | 17 |
+| Against a tenancy-enabled object | 3 |
 | Against an object declaring tenancy off | 5 |
-| Threading a tenant context | 15 |
+| Threading a tenant context | 18 |
 | Provably carrying none (options read, no context key) | 0 |
 | …and decidably tenancy-enabled | 0 |
 | Options argument unreadable | 7 |
 | …and decidably tenancy-enabled | 0 |
-| Threading a decidably elevated (`isSystem`) context | 1 |
+| Threading a decidably elevated (`isSystem`) context | 4 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 21 |
-| Receiver carried a readable engine type | 22 |
+| Receiver carried a readable engine type | 25 |
 | Receiver erased, placed by the object NAME | 0 |
 | Receiver erased, placed by an `object: string` PARAMETER | 0 |
 | Receiver erased, placed by an `UNTYPED_RECEIVERS` row | 0 |
@@ -55,6 +55,9 @@ a row or a number here — fix the code, or the census, and regenerate.
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `RECEIPT_OBJECT` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `update` | `RECEIPT_OBJECT` | undecidable | options unreadable | 1 |
 | `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `sys_notification` | enabled | context, elevation undecidable | 1 |
+| `packages/services/service-messaging/src/preference-digest-conversion.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
+| `packages/services/service-messaging/src/preference-digest-conversion.ts` | `update` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
+| `packages/services/service-messaging/src/preference-digest-conversion.ts` | `update` | `sys_notification_preference` | enabled | elevated | 1 |
 | `packages/services/service-messaging/src/preference-user-conversion.ts` | `update` | `sys_notification_preference` | enabled | elevated | 1 |
 | `packages/services/service-messaging/src/sql-http-outbox.ts` | `insert` | `this.objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | context, elevation undecidable | 4 |

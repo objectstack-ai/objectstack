@@ -26,7 +26,7 @@
       "files": [],
       "assertions": {
         "must_contain": [
-          "React Testing Library",
+          "@testing-library/react",
           "SchemaRendererProvider"
         ],
         "must_not_contain": []

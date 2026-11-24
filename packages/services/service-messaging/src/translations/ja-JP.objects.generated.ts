@@ -226,7 +226,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "これらの通知を 1 件ずつ送らず、1 通のまとめにします。daily は深夜 0 時、weekly は月曜の深夜 0 時に送信し、none は 1 件ずつすぐに送信します。緊急の通知は常にすぐに送信されます。チャネルが *（すべてのチャネル）の設定でのみ有効です。",
+        help: "これらの通知を 1 件ずつ送らず、1 通のまとめにします。daily は深夜 0 時、weekly は月曜の深夜 0 時に送信し、none は 1 件ずつすぐに送信します。緊急の通知は常にすぐに送信されます。チャネルが *（すべてのチャネル）の設定でのみ有効です。空のままにすると、次の設定が決めます（全ユーザーの既定、その次は none）。",
         options: {
           none: "none",
           daily: "daily",
@@ -235,7 +235,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "通知を保留し、終了時にまとめて配信する毎日の時間帯。例: { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時刻はそのタイムゾーンの HH:MM で指定します（tz を省略した場合は UTC）。時間帯は深夜 0 時をまたいでもかまいません。緊急の通知は保留されません。チャネルが *（すべてのチャネル）の設定でのみ有効です。"
+        help: "通知を保留し、終了時にまとめて配信する毎日の時間帯。例: { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }。時刻はそのタイムゾーンの HH:MM で指定します（tz を省略した場合は UTC）。時間帯は深夜 0 時をまたいでもかまいません。緊急の通知は保留されません。チャネルが *（すべてのチャネル）の設定でのみ有効です。{ \"off\": true } はおやすみ時間なしを意味します。空のままにすると、次の設定が決めます（全ユーザーの既定、その次はなし）。"
       },
       created_at: {
         label: "Created At"
@@ -487,6 +487,64 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "作成日時"
+      }
+    }
+  },
+  sys_channel_account: {
+    label: "チャネルアカウント",
+    pluralLabel: "チャネルアカウント",
+    description: "組織がインストールしたチャットアプリ（組織独自の Slack アプリなど）と、発行されたボットトークン。",
+    fields: {
+      channel_id: {
+        label: "チャネル"
+      },
+      display_name: {
+        label: "ワークスペース"
+      },
+      external_id: {
+        label: "ワークスペース ID"
+      },
+      bot_token: {
+        label: "ボットトークン"
+      },
+      status: {
+        label: "ステータス",
+        options: {
+          active: "有効",
+          revoked: "取り消し済み"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "チャネルユーザーリンク",
+    pluralLabel: "チャネルユーザーリンク",
+    description: "チャットワークスペース内の本人のユーザーとのリンク。メールアドレスの一致で提案され、本人が確認すると配信が始まります。",
+    fields: {
+      account_id: {
+        label: "アカウント"
+      },
+      user_id: {
+        label: "ユーザー"
+      },
+      external_user_id: {
+        label: "チャットユーザー ID"
+      },
+      external_display_name: {
+        label: "チャットユーザー名"
+      },
+      state: {
+        label: "状態",
+        options: {
+          proposed: "提案済み",
+          confirmed: "確認済み"
+        }
+      },
+      confirmed_at: {
+        label: "確認日時"
+      },
+      proposal_email_hash: {
+        label: "提案時のメールアドレスのハッシュ"
       }
     }
   }

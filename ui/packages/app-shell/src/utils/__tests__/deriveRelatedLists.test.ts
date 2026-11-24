@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveRelatedLists } from '../deriveRelatedLists';
+import { authoredBodyTableIds, deriveRelatedLists } from '../deriveRelatedLists';
 import { normalizeSchemaReferenceKeys } from '@object-ui/core';
 
 const project = { name: 'project', label: 'Project', fields: { name: { type: 'text' } } };
@@ -11,7 +11,7 @@ describe('deriveRelatedLists', () => {
     expect(deriveRelatedLists(project, null as any)).toEqual([]);
   });
 
-  it('derives a related list from a master_detail child (owned)', () => {
+  it('derives a related list from a master_detail child (owned) — a tab by default, placeable by a field group (objectstack#35889)', () => {
     const task = {
       name: 'task',
       label: 'Task',
@@ -25,8 +25,35 @@ describe('deriveRelatedLists', () => {
         referenceField: 'project',
         isOwned: true,
         isPrimary: false,
+        isPlaceable: true,
       },
     ]);
+  });
+
+  it('a parent field group naming the master_detail child makes it a body table (objectstack#35889)', () => {
+    const task = {
+      name: 'task',
+      label: 'Task',
+      fields: { project: { type: 'master_detail', reference: 'project' } },
+    };
+    const placing = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task' }] };
+    expect(deriveRelatedLists(placing, [placing, task])[0]).toMatchObject({ isPrimary: true, isPlaceable: true, keepsTab: true });
+    const byField = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task.project' }] };
+    expect(deriveRelatedLists(byField, [byField, task])[0]).toMatchObject({ isPrimary: true, keepsTab: true });
+  });
+
+  it("a 'primary' FK is a body table with or without a group, and keeps no tab (objectstack#35889 item 4)", () => {
+    const task = {
+      name: 'task',
+      label: 'Task',
+      fields: { project: { type: 'master_detail', reference: 'project', relatedList: 'primary' } },
+    };
+    const placing = { ...project, fieldGroups: [{ key: 'tasks', relatedList: 'task' }] };
+    for (const parent of [project, placing]) {
+      const [list] = deriveRelatedLists(parent, [parent, task]);
+      expect(list).toMatchObject({ isPrimary: true, isPlaceable: true });
+      expect(list.keepsTab).toBeUndefined();
+    }
   });
 
   it('derives a related list from a lookup child', () => {
@@ -289,5 +316,55 @@ describe('deriveRelatedLists — a child the data API does not expose', () => {
     const out = deriveRelatedLists(user, [user, device, session], { includeHidden: true });
     expect(out.find((r) => r.childObject === 'sys_user_device')).toMatchObject({ referenceField: 'user_id', isHidden: true });
     expect(out.find((r) => r.childObject === 'sys_session')?.isHidden).toBeUndefined();
+  });
+});
+
+/**
+ * objectstack#35597 — an AUTHORED record page gives a master-detail list it
+ * places the body-table treatment: its body tables are the related lists it
+ * places, anywhere in its tree, whose relationship the record page counts as a
+ * body table (the derived list's `isPrimary`).
+ */
+describe('authoredBodyTableIds (objectstack#35597)', () => {
+  // objectstack#35889: a master-detail child is a body table only where a field
+  // group of the parent names it, so the quote's group places its lines.
+  const quote = {
+    name: 'quote',
+    label: 'Quote',
+    fields: { name: { type: 'text' } },
+    fieldGroups: [{ key: 'lines', relatedList: 'quote_line' }],
+  };
+  const line = { name: 'quote_line', label: 'Line', fields: { quote: { type: 'master_detail', reference: 'quote' } } };
+  const note = { name: 'note', label: 'Note', fields: { quote: { type: 'lookup', reference: 'quote' } } };
+  const sideLine = { name: 'quote_term', label: 'Term', fields: { quote: { type: 'master_detail', reference: 'quote', relatedList: true } } };
+  const relations = deriveRelatedLists(quote, [quote, line, note, sideLine]);
+  const list = (objectName: string, inBag = false) =>
+    inBag
+      ? { type: 'record:related_list', properties: { objectName, relationshipField: 'quote' } }
+      : { type: 'record:related_list', objectName, relationshipField: 'quote' };
+  const page = {
+    type: 'record',
+    regions: [{
+      name: 'main',
+      components: [
+        { type: 'page:tabs', properties: { items: [{ label: 'Lines', children: [list('quote_line', true)] }] } },
+        list('note'),
+        list('quote_term'),
+      ],
+    }],
+  };
+
+  it('names the master-detail list the page places, in either prop spelling; not a lookup or a side master-detail', () => {
+    expect([...authoredBodyTableIds(page, relations)]).toEqual(['quote_line.quote']);
+  });
+
+  it("CONTROL — 'primary' on a lookup makes its placed list a body table too", () => {
+    const primaryNote = { ...note, fields: { quote: { type: 'lookup', reference: 'quote', relatedList: 'primary' } } };
+    const ids = authoredBodyTableIds(page, deriveRelatedLists(quote, [quote, line, primaryNote]));
+    expect([...ids].sort()).toEqual(['note.quote', 'quote_line.quote']);
+  });
+
+  it('a page placing no related list has no body table', () => {
+    expect(authoredBodyTableIds({ type: 'record', regions: [] }, relations).size).toBe(0);
   });
 });

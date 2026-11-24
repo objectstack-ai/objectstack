@@ -24,6 +24,7 @@
 import { describe, it, expect } from 'vitest';
 import { templateSlotSource } from '@objectstack/spec/automation';
 import { isAiReadExposed } from '@objectstack/spec/data';
+import { validateActionParams, type ResolvedActionParam } from '@objectstack/spec/ui';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 
@@ -106,16 +107,23 @@ describe('sys_approval_request declared actions', () => {
       'exactly these levers OR in the #3424 override',
     ).toEqual(['approval_approve', 'approval_reassign', 'approval_recall', 'approval_reject']);
 
-    // ONE spelling of the arm, not four. This file has a spelling-drift history,
-    // and a fourth wording of the same idea is its own defect — `toContain` on
+    // ONE spelling of the arm, not three. This file has a spelling-drift history,
+    // and another wording of the same idea is its own defect — `toContain` on
     // the whole arm (leading ` || ` included) is what makes drift fail here
     // rather than in review.
     const OVERRIDE_ARM =
       ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true';
-    for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_recall']) {
+    for (const name of ['approval_reject', 'approval_reassign', 'approval_recall']) {
       expect(vis(name), `${name} must spell the override arm exactly as its siblings do`)
         .toContain(OVERRIDE_ARM);
     }
+    // [Maintainer ruling 2026-11-17, option B] Approve's override arm reads the
+    // flag that excludes the viewer's own request, which the override never
+    // approves, and never the bare `can_override`.
+    expect(vis('approval_approve')).toContain(
+      ' || has(record.viewer) && has(record.viewer.can_override_approve) && record.viewer.can_override_approve == true',
+    );
+    expect(vis('approval_approve')).not.toContain(OVERRIDE_ARM);
   });
 
   it('recall stays available while a returned request is still the submitter\'s to abandon', () => {
@@ -312,5 +320,37 @@ describe('[#32442, ruling A] the AI read declaration', () => {
     // the decide actions.
     expect(SysApprovalRequest.enable?.apiMethods).toEqual(['get', 'list']);
     expect(isAiReadExposed(SysApprovalAction)).toBe(false);
+  });
+});
+
+/**
+ * A reject through `approval_reject` always carries its reason. It declares its
+ * `comment` required, and the declared param contract (ADR-0104 D2) is what
+ * every action door judges a call by before the target route runs: the REST
+ * action door, MCP `run_action` and the console's param dialog. This runs the
+ * spec's own validator over the declaration, resolved the way the runtime
+ * resolves an inline param, so a missing, empty or whitespace-only reason is
+ * the `required` refusal and a reason passes.
+ */
+describe('approval_reject requires a reason', () => {
+  const resolved = (name: string): ResolvedActionParam[] =>
+    byName(name).params.map((p: any) => ({
+      name: p.name, type: p.type, multiple: p.multiple, required: Boolean(p.required ?? false), options: p.options,
+    }));
+
+  it('refuses a reject with no comment, an empty one or a whitespace-only one', () => {
+    for (const bag of [{}, { comment: '' }, { comment: '  \n\t ' }, { comment: null }]) {
+      const issues = validateActionParams(resolved('approval_reject'), bag);
+      expect(issues.map((i) => [i.param, i.code]), JSON.stringify(bag)).toEqual([['comment', 'required']]);
+    }
+  });
+
+  it('CONTROL: a reject with a reason passes, with or without attachments', () => {
+    expect(validateActionParams(resolved('approval_reject'), { comment: 'Over budget.' })).toEqual([]);
+    expect(validateActionParams(resolved('approval_reject'), { comment: 'Over budget.', attachments: ['file_a'] })).toEqual([]);
+  });
+
+  it('CONTROL: approve keeps its comment optional', () => {
+    expect(validateActionParams(resolved('approval_approve'), {})).toEqual([]);
   });
 });

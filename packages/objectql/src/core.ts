@@ -68,6 +68,9 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 // Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
 export type { HookHandler, HookEntry, OperationContext, EngineMiddleware } from './engine.js';
+// The platform's own system api over a hook's api: the context elevated, with
+// no app-automation provenance. Read by plugin-audit's ledger writer.
+export { platformSystemApi } from './platform-system-api.js';
 
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Embedders that boot the engine themselves can catch
@@ -96,6 +99,10 @@ export type { WrapDeclarativeOptions } from './hook-wrappers.js';
 // Validation
 export { ValidationError, validateRecord } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
+// #34030 — the labels a refusal names are read through `messages.labelTranslation`
+// (a translation bundle and its resolve options), no longer through `translate`;
+// a direct caller of the validators writes against this type.
+export type { ValidationLabelTranslation } from './validation/record-validator.js';
 export { evaluateValidationRules, needsPriorRecord, legalNextStates } from './validation/rule-validator.js';
 // #18682 — the engine asks which reference fields an object's predicate rules
 // read through, then hands the rows back as `EvaluateRulesOptions.related`.

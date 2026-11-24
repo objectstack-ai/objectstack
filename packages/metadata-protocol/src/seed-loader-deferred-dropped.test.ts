@@ -124,28 +124,43 @@ const CONFIG = {
   dryRun: false,
   haltOnError: false,
   multiPass: true,
-  defaultMode: 'insert',
+  defaultMode: 'ignore',
   batchSize: 1000,
   transaction: false,
 } as any;
 
-/** Composite-keyed department seed; `region` decides whether its key registers. */
-const compositeSeeds = (region: string) => [
+/**
+ * Composite-keyed department seed; `region` decides whether its key registers.
+ *
+ * A KEYED load refuses a record that leaves a key component blank, before
+ * anything of it is written (#34857), so the keyless device — a WRITTEN row
+ * whose natural key is `''` — is a department dataset that names no mode, read
+ * by a load whose config names no default either ({@link KEYLESS_CONFIG}): a
+ * request built without the parse's defaults, the one load that still writes
+ * such a row. The worker dataset stays keyed (`ignore`).
+ */
+const compositeSeeds = (region: string, mode: 'ignore' | null = 'ignore') => [
   {
     object: 'drop_department',
     externalId: ['name', 'region'],
-    mode: 'insert',
+    ...(mode === null ? {} : { mode }),
     env: ['prod', 'dev', 'test'],
     records: [{ name: 'Engineering', region, head_id: 'Alice' }],
   },
   {
     object: 'drop_worker',
     externalId: 'name',
-    mode: 'insert',
+    mode: 'ignore',
     env: ['prod', 'dev', 'test'],
     records: [{ name: 'Alice', department_id: 'Engineering' }],
   },
 ] as any[];
+
+/** The keyless device's seeds: `region` blank, the department dataset mode-less. */
+const keylessSeeds = () => compositeSeeds('', null);
+
+/** A load config with no default mode, so a dataset naming none is not keyed. */
+const KEYLESS_CONFIG = { ...CONFIG, defaultMode: undefined } as any;
 
 const deferredDropLines = (logger: ReturnType<typeof createLogger>) =>
   logger.error.mock.calls.filter((c: unknown[]) => String(c[0]).includes('Deferred reference DROPPED'));
@@ -171,8 +186,8 @@ describe('pass 2 heals a row whose natural key evaluated empty (#5127 → #11674
     const logger = createLogger();
 
     const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
-      seeds: compositeSeeds(''),
-      config: CONFIG,
+      seeds: keylessSeeds(),
+      config: KEYLESS_CONFIG,
     });
 
     // The row is there AND carries its association.
@@ -200,12 +215,35 @@ describe('pass 2 heals a row whose natural key evaluated empty (#5127 → #11674
     const logger = createLogger();
 
     await new SeedLoaderService(engine, createMetadata(), logger).load({
-      seeds: compositeSeeds(''),
-      config: CONFIG,
+      seeds: keylessSeeds(),
+      config: KEYLESS_CONFIG,
     });
 
     expect(logger.error).not.toHaveBeenCalled();
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  /**
+   * [#34857] Why the device above is mode-less: the same department record
+   * in a KEYED dataset is refused at load for its blank `region`, before
+   * anything of it is written or deferred — no row, so no back-fill to heal
+   * and no pass-2 drop to report.
+   */
+  it('a KEYED dataset refuses the blank-component record before it writes or defers anything', async () => {
+    const { engine, store } = createFaithfulEngine();
+    const logger = createLogger();
+
+    const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
+      seeds: compositeSeeds(''),
+      config: CONFIG,
+    });
+
+    expect(store.drop_department ?? []).toHaveLength(0);
+    const deptResult = result.results.find((r: { object: string }) => r.object === 'drop_department')!;
+    expect(deptResult).toMatchObject({ inserted: 0, errored: 1, referencesDeferred: 0 });
+    expect(deptResult.errors).toHaveLength(1);
+    expect(deptResult.errors[0]).toMatchObject({ field: 'region', recordIndex: 0 });
+    expect(deferredDropLines(logger)).toHaveLength(0);
   });
 
   /**
@@ -220,8 +258,8 @@ describe('pass 2 heals a row whose natural key evaluated empty (#5127 → #11674
     const { engine } = createFaithfulEngine();
 
     const result = await new SeedLoaderService(engine, createMetadata(), createLogger()).load({
-      seeds: compositeSeeds(''),
-      config: CONFIG,
+      seeds: keylessSeeds(),
+      config: KEYLESS_CONFIG,
     });
 
     const deptResult = result.results.find((r: { object: string }) => r.object === 'drop_department')!;
@@ -281,7 +319,7 @@ describe('pass 2 finds no id because the source row failed in pass 1 (#5127)', (
     {
       object: 'drop_department',
       externalId: 'name',
-      mode: 'insert',
+      mode: 'ignore',
       env: ['prod', 'dev', 'test'],
       records: [{ name: 'Engineering', region: 'APAC', head_id: 'Alice' }],
     },
@@ -291,7 +329,7 @@ describe('pass 2 finds no id because the source row failed in pass 1 (#5127)', (
       // deferred update that would muddy the assertions below.
       object: 'drop_worker',
       externalId: 'name',
-      mode: 'insert',
+      mode: 'ignore',
       env: ['prod', 'dev', 'test'],
       records: [{ name: 'Alice' }],
     },
@@ -394,8 +432,8 @@ describe('pass 2 finds no id because a KEYLESS record failed in pass 1 (#11674)'
     const { engine, store, logger } = loadWithFailingKeylessDepartment();
 
     const result = await new SeedLoaderService(engine, createMetadata(), logger).load({
-      seeds: compositeSeeds(''), // region '' → externalIdKey '' → no natural key
-      config: CONFIG,
+      seeds: keylessSeeds(), // region '' → externalIdKey '' → no natural key
+      config: KEYLESS_CONFIG,
     });
 
     // The row really is absent — nothing to back-fill onto.

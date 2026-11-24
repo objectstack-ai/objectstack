@@ -231,7 +231,7 @@ function mount(nodes: Array<Record<string, unknown>>) {
 const location = () => new URL(screen.getByTestId('location').textContent ?? '', 'http://x');
 const addButtons = () => screen.queryAllByTestId('add-record-button');
 /** The list's toolbar is up: the Add button, when offered, is drawn in it. */
-const listDrawn = () => screen.findByTestId('toolbar-filter-trigger', undefined, { timeout: 5000 });
+const listDrawn = () => screen.findByTestId('condition-add-filter', undefined, { timeout: 5000 });
 
 beforeAll(() => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });

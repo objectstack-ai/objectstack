@@ -93,7 +93,8 @@ describe('objectui#7363 — the two objectui#6576 schemas are arms of the Object
     // (`object-grid-properties-bag-11276.test.ts`), and `list-view`, whose
     // authored page arm left in objectui#12670
     // (`list-view-properties-bag-12670.test.ts`).
-    expect(literals).toHaveLength(6);
+    // Seven since objectstack#34382 armed `object-timesheet`.
+    expect(literals).toHaveLength(7);
     expect(literals).not.toContain('list-view');
     expect(literals).not.toContain('object-grid');
     expect(literals).not.toContain('object-form');

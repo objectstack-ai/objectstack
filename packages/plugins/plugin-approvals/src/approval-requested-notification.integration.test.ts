@@ -257,10 +257,11 @@ describe('opening an approval step tells each resolved approver, once (approval.
   describe('control — a step whose approvers resolve to nobody notifies no one; onEmptyApprovers decides it', () => {
     const UNSTAFFED = [{ type: 'position', value: 'treasury' }];
 
-    it('admin_rescue (the default), with no organization administrator, opens on the literal and tells nobody', async () => {
+    it('admin_rescue (the default), with no organization administrator, opens on the literal and tells no approver', async () => {
       const row = await open('rescue', UNSTAFFED);
       expect([row.status, row.pending_approvers]).toEqual(['pending', ['position:treasury']]);
-      expect(messagesAbout(row.id)).toEqual([]);
+      // Only its submitter, that no one can approve it yet (`no-approver-note.ts`).
+      expect(messagesAbout(row.id)).toEqual(['approval.comment>u_sub']);
     });
 
     it('auto_approve opens no request, so there is no one to tell', async () => {

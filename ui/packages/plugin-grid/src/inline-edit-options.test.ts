@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { stateMachineNextValues, isFieldInlineEditable } from './inline-edit-options';
+import { stateMachineNextValues, isFieldInlineEditable, fieldInlineReadOnlyKind } from './inline-edit-options';
 
 // Mirrors examples/app-showcase task.object.ts — the state machine that rejected
 // done → in_review live (done only transitions to in_progress).
@@ -102,10 +102,20 @@ describe('isFieldInlineEditable', () => {
     }
   });
 
-  it('keeps a markdown cell read-only — the detail row editor (objectui#11541) is not a grid one', () => {
-    // The detail page routes `markdown` to a multi-line textarea through its own
-    // carve-out from the shared exclusion; the cell has no room for one.
-    expect(isFieldInlineEditable({ type: 'markdown' })).toBe(false);
+  it('edits the rich-content types in a cell, in a panel under it (objectstack#36023)', () => {
+    // They stay in the fields package's shared exclusion (the record page and
+    // the required-fields dialogs keep them out); the cell's panel is the
+    // grid's own carve-out from it.
+    for (const type of ['markdown', 'html', 'richtext']) {
+      expect(fieldInlineReadOnlyKind({ type }), type).toBeNull();
+      expect(isFieldInlineEditable({ type }), type).toBe(true);
+    }
+    // CONTROL: a declared read-only rich-content field stays read-only, and the
+    // carve-out lets no other excluded type through.
+    expect(fieldInlineReadOnlyKind({ type: 'richtext', readonly: true })).toBe('readonly');
+    for (const type of ['password', 'secret', 'object', 'file']) {
+      expect(fieldInlineReadOnlyKind({ type }), type).toBe('notInline');
+    }
   });
 
   it('blocks an explicitly readonly field regardless of type', () => {

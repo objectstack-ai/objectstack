@@ -37,6 +37,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { readFieldGroupMembership } from '@objectstack/spec/data';
 import { ObjectFormDesigner } from './ObjectFormDesigner';
 
 type Field = { name: string; type: string; label: string; group?: string };
@@ -191,18 +192,37 @@ afterEach(() => {
   Element.prototype.getBoundingClientRect = originalRect;
 });
 
-/** Every `fields` the designer committed, in order. */
+/** Every layout the designer committed, in order (see `resolvedLayout`). */
 let commits: Field[][] = [];
+/** The draft as the last commit left it. */
+let latest: Record<string, unknown> = {};
+
+/**
+ * objectstack#35900 — a move lands on the groups' `fields` lists, not on the
+ * fields array, so a commit is read as the layout the whole draft now
+ * resolves to: each field with the group it sits in, groups in order, then
+ * the ungrouped ones (no `group`).
+ */
+function resolvedLayout(d: Record<string, unknown>): Field[] {
+  const list = d.fields as Field[];
+  const { members, groupOf } = readFieldGroupMembership({ ...d, fields: Object.fromEntries(list.map((f) => [f.name, f])) });
+  const byName = new Map(list.map((f) => [f.name, f]));
+  const out: Field[] = [];
+  for (const [key, names] of members) for (const n of names) out.push({ ...byName.get(n)!, group: key });
+  for (const f of list) if (!groupOf.has(f.name)) out.push({ name: f.name, type: f.type, label: f.label });
+  return out;
+}
 
 function Host({ draft: initial }: { draft: Draft }): React.ReactElement {
-  const [draft, setDraft] = React.useState<Record<string, unknown>>(initial);
+  const [draft, setDraft] = React.useState<Record<string, unknown>>(() => (latest = initial));
   return (
     <ObjectFormDesigner
       draft={draft}
       systemFieldNames={new Set()}
       onChange={(patch) => {
-        if (patch.fields) commits.push(patch.fields as Field[]);
-        setDraft((d) => ({ ...d, ...patch }));
+        latest = { ...latest, ...patch };
+        commits.push(resolvedLayout(latest));
+        setDraft(latest);
       }}
       onSelectField={() => {}}
     />
@@ -241,16 +261,20 @@ async function keyboardMove(label: string, arrows: string[]): Promise<string[]> 
   return heard;
 }
 
-/** The last commit, as group key → field names in order (`''` = ungrouped). */
+/**
+ * The last commit, as group key → field names in order (`''` = ungrouped).
+ * A drop that changes nothing writes nothing (objectstack#35900), so with no
+ * commit this reads the draft as it stands.
+ */
 function layoutOfLastCommit(): Record<string, string[]> {
   const out: Record<string, string[]> = {};
-  for (const f of commits.at(-1) ?? []) (out[f.group ?? ''] ??= []).push(f.name);
+  for (const f of commits.at(-1) ?? resolvedLayout(latest)) (out[f.group ?? ''] ??= []).push(f.name);
   return out;
 }
 
 /** The place the last commit gives a field, in the live region's words: "Group, position N of M". */
 function committedPlace(name: string): string {
-  const fields = commits.at(-1) ?? [];
+  const fields = commits.at(-1) ?? resolvedLayout(latest);
   const group = fields.find((f) => f.name === name)?.group;
   const members = fields.filter((f) => f.group === group).map((f) => f.name);
   const label = GROUPS.find((g) => g.key === group)?.label ?? 'Ungrouped';

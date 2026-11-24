@@ -9,7 +9,7 @@ import { toHostGroupProps } from './toHostGroupProps.js';
  * Rating field widget - provides a star rating input
  * Supports numeric values from 0 to max (default 5)
  */
-export function RatingField({ value, onChange, field, readonly, className, error, ...props }: FieldWidgetComponentProps<number>) {
+export function RatingField({ value, onChange, field, readonly, className, error, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<number>) {
   // Get rating-specific configuration from field metadata
   const ratingField = field as any;
   const max = ratingField?.max ?? 5;
@@ -69,7 +69,7 @@ export function RatingField({ value, onChange, field, readonly, className, error
     <div
       {...groupDomProps}
       role={isLabelledGroup ? 'group' : undefined}
-      className={cn("flex items-center gap-1", className)}
+      className={cn("flex items-center", inCell ? 'h-7 gap-0.5 px-1.5' : 'gap-1', className)}
     >
       {Array.from({ length: max }, (_, i) => (
         <button
@@ -83,7 +83,8 @@ export function RatingField({ value, onChange, field, readonly, className, error
           aria-invalid={!!error}
         >
           <Star
-            className={`w-5 h-5 transition-colors ${
+            // objectstack#36023 — in a list cell the stars keep the cell's size.
+            className={`${inCell ? 'w-3.5 h-3.5' : 'w-5 h-5'} transition-colors ${
               i < displayValue
                 ? 'fill-yellow-400 text-yellow-400 hover:fill-yellow-500 hover:text-yellow-500'
                 : 'text-muted-foreground hover:text-yellow-400'
@@ -91,9 +92,11 @@ export function RatingField({ value, onChange, field, readonly, className, error
           />
         </button>
       ))}
-      <span className="ml-2 text-sm text-muted-foreground">
-        {currentValue} / {max}
-      </span>
+      {!inCell && (
+        <span className="ml-2 text-sm text-muted-foreground">
+          {currentValue} / {max}
+        </span>
+      )}
     </div>
   );
 }

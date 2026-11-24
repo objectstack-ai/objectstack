@@ -12,6 +12,7 @@ import {
   deriveTitleField,
   isTitleEligibleField,
   formatTitleTemplate,
+  referencedRecordTitle,
 } from '../record-title';
 
 describe('getRecordDisplayName — ADR-0079 repro', () => {
@@ -517,5 +518,31 @@ describe('formatTitleTemplate — the empty-placeholder sentinel', () => {
     const out = formatTitleTemplate('{missing}·{kept}', { kept: 'Kept' });
     expect(out).toBe('Kept');
     expect(isPrintable(out)).toBe(true);
+  });
+});
+
+describe('referencedRecordTitle — a lookup target named by its nameField (objectstack#35053)', () => {
+  const target = {
+    nameField: 'deal_number',
+    fields: { deal_number: { type: 'autonumber' }, code: { type: 'text' } },
+  };
+  const deal = { id: 'T1lF9T1kq45KAN06', deal_number: 'DEAL-2026-0001', code: 'C-1' };
+
+  it('reads the target nameField when the lookup declares no displayField', () => {
+    expect(referencedRecordTitle(target, deal)).toBe('DEAL-2026-0001');
+  });
+
+  it('an explicit displayField wins over the nameField', () => {
+    expect(referencedRecordTitle(target, deal, 'code')).toBe('C-1');
+  });
+
+  it('answers undefined where getRecordDisplayName would fall to its floor', () => {
+    expect(referencedRecordTitle(target, { id: 'x1' })).toBeUndefined();
+    expect(getRecordDisplayName(target, { id: 'x1' })).toBe('Record #x1');
+    expect(referencedRecordTitle(target, 'x1')).toBeUndefined();
+  });
+
+  it('with no target definition, reads the record alone', () => {
+    expect(referencedRecordTitle(undefined, { id: 'a', name: 'Acme' })).toBe('Acme');
   });
 });

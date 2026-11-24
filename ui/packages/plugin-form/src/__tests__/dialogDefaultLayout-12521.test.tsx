@@ -155,7 +155,9 @@ describe('a dialog with no authored layout (objectui#12521)', () => {
   it('a short form gets the lg bound, not a dialog wider than its fields', async () => {
     const { dialog, grid } = await openDialog(TWO);
     expect(dialog.className).toContain('sm:max-w-2xl');
-    expect(grid?.className).toBe(DEFAULT_GRID);
+    // objectstack-ai/objectstack#35980: at most eight fields and nothing
+    // declared is one column — no grid tiers (it was DEFAULT_GRID before).
+    expect(grid).toBeNull();
   });
 
   it('below sm the grid is one column, and the dialog is still the phone sheet', async () => {
@@ -213,10 +215,16 @@ describe('an authored layout is used as written (objectui#12521)', () => {
   });
 
   it("a field's authored span: 'full' takes the row in the default grid", async () => {
+    // Nine fields: past the one-column dialog (objectstack-ai/objectstack#35980),
+    // so the undeclared grid is drawn, three wide.
     const { spanOf } = await openDialog(TWELVE, {
-      sections: [{ name: 'a', label: 'A', fields: [{ field: 'name', span: 'full' }, 'code', 'email'] }],
+      sections: [{
+        name: 'a',
+        label: 'A',
+        fields: [{ field: 'name', span: 'full' }, 'code', 'email', 'phone', 'website', 'status', 'stage', 'source', 'amount'],
+      }],
     });
-    expect(spanOf('name')).toEqual(['@md:col-span-2']);
+    expect(spanOf('name')).toEqual(WIDE_ON_THREE);
     expect(spanOf('code')).toEqual([]);
   });
 

@@ -41,6 +41,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { t } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 /** Pick a dial's option by its label, through the trigger, as a user does; the dials are the shared Select (objectui#11865). */
 async function pickOwd(testId: string, label: string): Promise<void> {
@@ -82,6 +83,8 @@ function makeClient() {
       code: null,
     }),
     // The decorated envelope, on BOTH the load read and the save-time re-read.
+    publish: async () => ({}),
+    reset: async () => ({}),
     getDraft: async () => ({ type: 'object', name: 'crm_contact', item: SERVED_DRAFT }),
     save: async (_t: string, name: string, body: Record<string, unknown>) => {
       saved.push({ name, body });
@@ -102,16 +105,16 @@ afterEach(() => {
 describe('PackageOwdOverviewPanel — read decorations never reach the save (objectui#8181)', () => {
   it('writes the authored body without `_diagnostics` / `_draft`', async () => {
     render(
-      <PackageOwdOverviewPanel
+      <StudioSaveHarness><PackageOwdOverviewPanel
         client={makeClient()}
         packageId="com.example.showcase"
         locale="en-US"
-      />,
+      /></StudioSaveHarness>,
     );
     await screen.findByTestId('owd-row-crm_contact');
 
     await pickOwd('owd-internal-crm_contact', t('engine.studio.settings.sharingPublicRead', 'en-US'));
-    fireEvent.click(screen.getByTestId('owd-save'));
+    fireEvent.click(await screen.findByTestId('studio-save'));
 
     // CONTROL: the save really happened, and really carried the edit. Every
     // absence assertion below is meaningless without this.

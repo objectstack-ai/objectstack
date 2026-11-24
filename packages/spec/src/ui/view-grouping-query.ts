@@ -61,6 +61,10 @@
  *     ONE column per summarised field, `count_<field>` — `COUNT(field)`, the
  *     non-null count — from which all four are DERIVED on the header row by
  *     {@link deriveColumnSummary} (see the mapping table).
+ *   * for `count_true` ONE column per summarised field, `sum_<field>` —
+ *     `SUM(field)`, the true count of a boolean column — and for
+ *     `count_false` that column and `count_<field>` beside it; both members
+ *     are DERIVED from them by {@link deriveColumnSummary}.
  *
  * A summary alias that would land on a grouped field's own column
  * (`sum_amount` while grouping by a field named `sum_amount`) is refused, not
@@ -80,6 +84,21 @@
  * | `count_empty` | the same node | derived: `count − count_<field>` |
  * | `percent_filled` | the same node | derived: `count_<field> / count` (0 when `count` is 0) |
  * | `percent_empty` | the same node | derived: `1 − percent_filled` |
+ * | `count_true` | `{ function: 'sum', field }` | derived: `sum_<field>` — `SUM(field)`, the true count (`0` when it answers no value) |
+ * | `count_false` | that node and `{ function: 'count', field }` | derived: `count_<field> − sum_<field>` — the non-null cells that are not true |
+ *
+ * `count_true` / `count_false` (#35702) are the boolean column's yes / no
+ * counts, on the fork-i ground above: no new `AggregationFunction`, two
+ * nodes the vocabulary already has. Booleans aggregate as NUMBERS on every
+ * backend (ruling #11152, `aggregation-conformance`'s `sum(flag)` row
+ * enrolled on six of them), so `SUM(field)` is the count of true cells; a
+ * null cell is in neither count — it is `count_empty`'s — so
+ * `count_true + count_false = count_filled`. The pair applies to the boolean
+ * class only ({@link COLUMN_SUMMARY_FIELD_TYPES}): over a number the same
+ * `SUM(field)` is a total, not a count, so the authoring leg refuses the
+ * member on any other field type. This module reads no field types, so the
+ * refusal is the consumer's that has the catalogue, exactly as for the
+ * aggregate × field-type pairs.
  *
  * The seat ruling on fork (i) (contract review on the card, 2026-09-04): the
  * four `*_filled` / `*_empty` members map by DERIVATION from two exact
@@ -106,7 +125,8 @@
  * answers one row per LEAF combination. An outer level's header is derived
  * from the leaf rows sharing its prefix: `count`, `sum`, `min`, `max` and
  * the `count_<field>` column (hence `count_filled` / `count_empty`, and the
- * two percents recomputed from the folded counts) fold exactly; `avg` and
+ * two percents recomputed from the folded counts, and `count_true` /
+ * `count_false` from the folded `sum_<field>`) fold exactly; `avg` and
  * `count_distinct` do NOT — an average of averages weights the groups, not
  * the rows, and the same value can be distinct in several leaves at once, so
  * per-leaf distinct counts over-count the union. When an outer level must
@@ -200,6 +220,7 @@
 import type { FilterCondition } from '../data/filter.zod';
 import type { AggregationFunction, AggregationNode } from '../data/query.zod';
 import type { EngineAggregateOptions, EngineQueryOptions } from '../data/data-engine.zod';
+import type { FieldType } from '../data/field.zod';
 import type { ColumnSummary, ColumnSummaryConfig, GroupingConfig, ListColumn, ListView } from './view.zod';
 
 /**
@@ -214,16 +235,30 @@ export const LIST_VIEW_GROUP_COUNT_ALIAS = 'count';
  *
  *   * `aggregate` — a node with this `function`; `fieldless` says whether the
  *     node names the summarised field (`COUNT(*)` does not).
- *   * `derived` — a `count` node over the summarised field (`COUNT(field)`,
- *     the non-null count, column `count_<field>`), from which the member is
- *     computed on the header row by {@link deriveColumnSummary}.
+ *   * `derived` — nodes over the summarised field, from which the member is
+ *     computed on the header row by {@link deriveColumnSummary}. `reads`
+ *     lists every node's function, in order; `from` is its first. The
+ *     `*_filled` / `*_empty` members read one `count` node (`COUNT(field)`,
+ *     the non-null count, column `count_<field>`); `count_true` reads one
+ *     `sum` node (`SUM(field)`, column `sum_<field>`); `count_false` reads
+ *     that `sum` node and the `count` node.
  *   * `none` — the member means "no summary"; no node.
  *   * `unmapped` — no counterpart in the vocabulary; the compiler refuses it
  *     loudly (`NOT_IMPLEMENTED` / 501). No member is in this state today.
  */
+/** The aggregation functions a derived column summary reads its nodes with. */
+export type ColumnSummaryDerivedSource = Extract<AggregationFunction, 'count' | 'sum'>;
+
 export type ColumnSummaryAggregation =
   | { readonly kind: 'aggregate'; readonly function: AggregationFunction; readonly fieldless: boolean }
-  | { readonly kind: 'derived'; readonly from: 'count'; readonly fieldless: false }
+  | {
+    readonly kind: 'derived';
+    /** The first of {@link reads}. */
+    readonly from: ColumnSummaryDerivedSource;
+    /** Every node the derivation reads over the summarised field, `from` first. */
+    readonly reads: readonly [ColumnSummaryDerivedSource, ...ColumnSummaryDerivedSource[]];
+    readonly fieldless: false;
+  }
   | { readonly kind: 'none' }
   | { readonly kind: 'unmapped' };
 
@@ -240,11 +275,59 @@ export const COLUMN_SUMMARY_AGGREGATION: Readonly<Record<ColumnSummary, ColumnSu
   avg: { kind: 'aggregate', function: 'avg', fieldless: false },
   min: { kind: 'aggregate', function: 'min', fieldless: false },
   max: { kind: 'aggregate', function: 'max', fieldless: false },
-  count_filled: { kind: 'derived', from: 'count', fieldless: false },
-  count_empty: { kind: 'derived', from: 'count', fieldless: false },
-  percent_filled: { kind: 'derived', from: 'count', fieldless: false },
-  percent_empty: { kind: 'derived', from: 'count', fieldless: false },
+  count_filled: { kind: 'derived', from: 'count', reads: ['count'], fieldless: false },
+  count_empty: { kind: 'derived', from: 'count', reads: ['count'], fieldless: false },
+  percent_filled: { kind: 'derived', from: 'count', reads: ['count'], fieldless: false },
+  percent_empty: { kind: 'derived', from: 'count', reads: ['count'], fieldless: false },
+  count_true: { kind: 'derived', from: 'sum', reads: ['sum'], fieldless: false },
+  count_false: { kind: 'derived', from: 'sum', reads: ['sum', 'count'], fieldless: false },
 } as const);
+
+/**
+ * The aggregation functions one mapping row asks of the summarised field, in
+ * order — the aggregate's own function, or every node a derived member reads;
+ * none for `none` / `unmapped`. The ONE reading of a row's nodes, so the
+ * group header compiler, the footer's whole-set question and the authoring
+ * lint cannot ask a derived member for different nodes.
+ */
+export function columnSummaryNodeFunctions(mapping: ColumnSummaryAggregation): readonly AggregationFunction[] {
+  if (mapping.kind === 'aggregate') return [mapping.function];
+  if (mapping.kind === 'derived') return mapping.reads;
+  return [];
+}
+
+/**
+ * The boolean class — `field-value.zod`'s `BOOLEAN_VALUE_TYPES`, spelled out
+ * so a type joining that class elsewhere is a DECISION here (the pin test
+ * holds the two equal).
+ */
+const BOOLEAN_SUMMARY_FIELD_TYPES = ['boolean', 'toggle'] as const satisfies readonly FieldType[];
+
+/**
+ * The `ColumnSummary` members that apply to some field types only, with the
+ * types they apply to. A member absent here is judged by its aggregation
+ * nodes alone (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`). `count_true` /
+ * `count_false` read `SUM(field)` as a count of true cells, which holds on
+ * the boolean class only — over a number the same node is a total — so they
+ * are the boolean class's. Read through {@link isColumnSummaryCompatibleWithFieldType}.
+ */
+export const COLUMN_SUMMARY_FIELD_TYPES: Readonly<Partial<Record<ColumnSummary, readonly FieldType[]>>> = Object.freeze({
+  count_true: BOOLEAN_SUMMARY_FIELD_TYPES,
+  count_false: BOOLEAN_SUMMARY_FIELD_TYPES,
+});
+
+/**
+ * May the column summary `member` be declared over a field of `fieldType`,
+ * as far as {@link COLUMN_SUMMARY_FIELD_TYPES} says? `true` for a member the
+ * table does not restrict (its aggregation nodes are judged on their own
+ * table). Fail-closed on shape: a non-string answers `false`.
+ */
+export function isColumnSummaryCompatibleWithFieldType(member: string, fieldType: string): boolean {
+  if (typeof member !== 'string' || typeof fieldType !== 'string') return false;
+  if (!Object.prototype.hasOwnProperty.call(COLUMN_SUMMARY_FIELD_TYPES, member)) return true;
+  const row: readonly string[] | undefined = COLUMN_SUMMARY_FIELD_TYPES[member as ColumnSummary];
+  return row === undefined || row.includes(fieldType);
+}
 
 /**
  * The `ColumnSummary` members with no `AggregationFunction` counterpart — the
@@ -506,25 +589,26 @@ function summaryAggregationNodes(
     const mapping = columnSummaryMapping(member, path, `columns[${index}] (field "${field}")`);
     if (mapping.kind === 'none') return;
 
-    const fn: AggregationFunction = mapping.kind === 'derived' ? mapping.from : mapping.function;
     const aggregatedField = mapping.fieldless ? undefined : field;
-    const alias = columnSummaryAlias(fn, aggregatedField);
-    // The collision check comes FIRST: a grouped field named `count` would
-    // share its column with the group count, whether or not a summary is
-    // declared, and `compileListViewGroupQuery` refuses that up front — this
-    // ordering keeps the two answers identical for a `count` summary too.
-    if (grouped.has(alias)) {
-      throw new ListViewGroupQueryError(
-        'alias_collision',
-        path,
-        `Column summary "${member}" on columns[${index}] would land under "${alias}", which is also a `
-          + 'grouped field\'s own column on the header row — one column cannot carry both the group key '
-          + 'and the summary. Rename the field or drop one of the two declarations.',
-      );
-    }
-    if (alias === LIST_VIEW_GROUP_COUNT_ALIAS) return; // the group count column already carries it
-    if (!nodes.has(alias)) {
-      nodes.set(alias, { function: fn, field: aggregatedField, alias });
+    for (const fn of columnSummaryNodeFunctions(mapping)) {
+      const alias = columnSummaryAlias(fn, aggregatedField);
+      // The collision check comes FIRST: a grouped field named `count` would
+      // share its column with the group count, whether or not a summary is
+      // declared, and `compileListViewGroupQuery` refuses that up front — this
+      // ordering keeps the two answers identical for a `count` summary too.
+      if (grouped.has(alias)) {
+        throw new ListViewGroupQueryError(
+          'alias_collision',
+          path,
+          `Column summary "${member}" on columns[${index}] would land under "${alias}", which is also a `
+            + 'grouped field\'s own column on the header row — one column cannot carry both the group key '
+            + 'and the summary. Rename the field or drop one of the two declarations.',
+        );
+      }
+      if (alias === LIST_VIEW_GROUP_COUNT_ALIAS) continue; // the group count column already carries it
+      if (!nodes.has(alias)) {
+        nodes.set(alias, { function: fn, field: aggregatedField, alias });
+      }
     }
   });
 
@@ -549,7 +633,8 @@ type ColumnSummaryMemberValue<M> = M extends 'none' ? never : M extends ColumnSu
  * `null` (the aggregate answered no value) and `undefined` (no column / `none`):
  *
  *   * `count`, `count_unique`, `sum`, `avg`, `count_filled`, `count_empty`,
- *     `percent_filled`, `percent_empty` — a `number`;
+ *     `percent_filled`, `percent_empty`, `count_true`, `count_false` — a
+ *     `number`;
  *   * `min`, `max` — `unknown`: the aggregated field's stored value, as the
  *     header row carries it (text for a date-family field, a number for a
  *     numeric one), never converted;
@@ -609,6 +694,10 @@ function columnSummaryMapping(
  *   * `percent_filled` = `count_<field> / count` — a ratio in `0..1`, and `0`
  *     when `count` is `0` (no division)
  *   * `percent_empty`  = `1 − percent_filled` — so an empty group reads `1`
+ *   * `count_true`     = `sum_<field>` (`SUM(field)` over a boolean), and `0`
+ *     when the sum answered no value (no non-null cell to add)
+ *   * `count_false`    = `count_<field> − sum_<field>` — the non-null cells
+ *     that are not true; a null cell is neither true nor false
  *
  * `undefined` when the row carries no column for the summary (the header
  * query was compiled without it) and for `none`; `null` is what the
@@ -645,6 +734,16 @@ export function deriveColumnSummary(
     // `count` / `count_distinct` / `sum` / `avg` answer a number, `min` /
     // `max` the field's stored value: either way, the row's own value.
     return row[columnSummaryAlias(mapping.function, mapping.fieldless ? undefined : aggregatedField)];
+  }
+  if (member === 'count_true' || member === 'count_false') {
+    const sum = row[columnSummaryAlias('sum', aggregatedField)];
+    if (sum === undefined) return undefined;
+    // `SUM` over no non-null cell answers no value: there is no true cell.
+    const trues = sum === null ? 0 : Number(sum);
+    if (member === 'count_true') return trues;
+    const nonNull = row[columnSummaryAlias('count', aggregatedField)];
+    if (nonNull === undefined || nonNull === null) return undefined;
+    return Number(nonNull) - trues;
   }
   const raw = row[columnSummaryAlias(mapping.from, aggregatedField)];
   if (raw === undefined || raw === null) return undefined;

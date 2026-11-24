@@ -316,7 +316,7 @@ export function ConversationsSidebar({
           <div className="flex flex-col py-1">
             {groupConversationsByDate(visible).map((group) => (
               <section key={group.key} data-testid={`ai-conversation-group-${group.key}`}>
-                <h3 className="px-3 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <h3 className="px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t(`console.ai.group.${group.key}`, { defaultValue: CONVERSATION_GROUP_LABELS[group.key] })}
                 </h3>
                 <ul className="flex flex-col">
@@ -492,7 +492,7 @@ function ConversationRow({
             </span>
           ) : null}
           <span
-            className="mt-0.5 block text-[10px] text-muted-foreground"
+            className="mt-0.5 block text-xs text-muted-foreground"
             title={absoluteTimestamp(conversation.updatedAt ?? conversation.createdAt, displayLocale)}
           >
             {formatTimestamp(conversation.updatedAt ?? conversation.createdAt, t, displayLocale)}

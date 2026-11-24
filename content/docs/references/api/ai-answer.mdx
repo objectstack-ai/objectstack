@@ -1,0 +1,542 @@
+---
+title: Ai Answer schema — API Protocol reference
+navTitle: Ai Answer
+description: "The AI answer follow-up routes: saved questions, an answer turned into an artifact, and an answer's rating."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+The AI answer follow-up routes: saved questions, an answer turned into an
+artifact, and an answer's rating.
+
+| Method | Path | Request | `data` on success |
+|:--|:--|:--|:--|
+| GET    | `/api/v1/ai/saved-questions` | none | `ListAiSavedQuestionsResponseSchema` |
+| POST   | `/api/v1/ai/saved-questions` | [`CreateAiSavedQuestionResponseSchema](CreateAiSavedQuestionRequestSchema`) (201) |
+| DELETE | `/api/v1/ai/saved-questions/:id` | none | no body (204) |
+| POST   | `/api/v1/ai/saved-questions/:id/run` | none | `RunAiSavedQuestionResponseSchema` |
+| POST   | `/api/v1/ai/conversations/:id/turns/:turnId/artifact` | [`CreateAiAnswerArtifactResponseSchema](CreateAiAnswerArtifactRequestSchema`) (201) |
+| GET    | `/api/v1/ai/conversations/:id/turns/:turnId/feedback` | none | `GetAiAnswerFeedbackResponseSchema` |
+| POST   | `/api/v1/ai/conversations/:id/turns/:turnId/feedback` | [`SetAiAnswerFeedbackResponseSchema](SetAiAnswerFeedbackRequestSchema`) |
+| DELETE | `/api/v1/ai/conversations/:id/turns/:turnId/feedback` | none | no body (204), also when no rating was there |
+
+Like the other `/api/v1/ai/**` shapes in `protocol.zod.ts`, these describe
+the wire, not a protocol this repo serves: the producer is the cloud AI
+service (`service-ai`: `routes/saved-question-routes.ts`,
+`routes/feedback-routes.ts`, `saved/saved-question-store.ts`,
+`saved/source-artifact.ts`, `feedback/answer-feedback-store.ts`). Every
+success body is the platform envelope `{ success: true, data }` and each
+response schema here is the `data` payload. A failure body is
+`{ success: false, error }` with `error` one of the three route errors below,
+whose `code` lists hold both the route handler's codes and the framework
+door's. The door answers ahead of the handler, with no `details`: 401
+UNAUTHENTICATED for a caller with no session (`packages/runtime`
+`domains/ai.ts`; a route mounted on the HTTP server answers the flat
+`{ error, code, message }` body instead, `dispatcher-plugin.ts`, ADR-0112),
+501 NOT_IMPLEMENTED when the deployment serves no AI, and 503
+SERVICE_UNAVAILABLE before the AI routes are published.
+
+Every route is the signed-in caller's own: a saved question that is not the
+caller's answers 404, and a conversation that is not the caller's answers 403
+when a question is saved from one of its answers, and on the artifact and
+feedback routes.
+
+<Callout type="info">
+**Source:** `packages/spec/src/api/ai-answer.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AiAnswerArtifactDraftSchema, AiAnswerArtifactErrorSchema, AiAnswerArtifactErrorCodeSchema, AiAnswerArtifactKindSchema, AiAnswerArtifactRefusalReasonSchema, AiAnswerFeedbackSchema, AiAnswerFeedbackErrorSchema, AiAnswerFeedbackErrorCodeSchema, AiAnswerRatingSchema, AiSavedQuestionSchema, AiSavedQuestionErrorSchema, AiSavedQuestionErrorCodeSchema, AiSavedQuestionRefusalReasonSchema, CreateAiAnswerArtifactRequestSchema, CreateAiAnswerArtifactResponseSchema, CreateAiSavedQuestionRequestSchema, CreateAiSavedQuestionResponseSchema, GetAiAnswerFeedbackResponseSchema, ListAiSavedQuestionsResponseSchema, RunAiSavedQuestionResponseSchema, SetAiAnswerFeedbackRequestSchema, SetAiAnswerFeedbackResponseSchema } from '@objectstack/spec/api';
+import type { AiAnswerArtifactDraft, AiAnswerArtifactError, AiAnswerArtifactErrorCode, AiAnswerArtifactKind, AiAnswerArtifactRefusalReason, AiAnswerFeedback, AiAnswerFeedbackError, AiAnswerFeedbackErrorCode, AiAnswerRating, AiSavedQuestion, AiSavedQuestionError, AiSavedQuestionErrorCode, AiSavedQuestionRefusalReason, CreateAiAnswerArtifactRequest, CreateAiAnswerArtifactResponse, CreateAiSavedQuestionRequest, CreateAiSavedQuestionResponse, GetAiAnswerFeedbackResponse, ListAiSavedQuestionsResponse, RunAiSavedQuestionResponse, SetAiAnswerFeedbackRequest, SetAiAnswerFeedbackResponse } from '@objectstack/spec/api';
+
+// Validate data
+const result = AiAnswerArtifactDraftSchema.parse(data);
+```
+
+---
+
+## AiAnswerArtifactDraft
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'dataset' \| 'report' \| 'dashboard'>` | ✅ | Metadata type of the draft |
+| **name** | `string` | ✅ | Metadata item name of the draft |
+
+
+---
+
+## AiAnswerArtifactError
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'UNAUTHENTICATED' \| 'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'RESOURCE_NOT_FOUND' \| 'NOT_IMPLEMENTED' \| 'INTERNAL_ERROR' \| … +1 more>` | ✅ | Error code |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `{ reason: Enum<'report_authoring_requires_manage_metadata' \| 'report_authoring_walled' \| …>; issues?: any }` | optional | Present on a named refusal |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Allowed Values: `AiAnswerArtifactError.code`
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `RESOURCE_NOT_FOUND`
+* `NOT_IMPLEMENTED`
+* `INTERNAL_ERROR`
+* `SERVICE_UNAVAILABLE`
+
+### Nested Shape: `AiAnswerArtifactError.details`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **reason** | `Enum<'report_authoring_requires_manage_metadata' \| 'report_authoring_walled' \| …>` | ✅ | The named refusal |
+| **issues** | `any` | optional | The schema issues, on spec_refused |
+
+
+---
+
+## AiAnswerArtifactErrorCode
+
+### Allowed Values
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `RESOURCE_NOT_FOUND`
+* `NOT_IMPLEMENTED`
+* `INTERNAL_ERROR`
+* `SERVICE_UNAVAILABLE`
+
+
+---
+
+## AiAnswerArtifactKind
+
+### Allowed Values
+
+* `view`
+* `report`
+* `widget`
+
+
+---
+
+## AiAnswerArtifactRefusalReason
+
+### Allowed Values
+
+* `report_authoring_requires_manage_metadata`
+* `report_authoring_walled`
+* `answer_has_no_query`
+* `not_an_aggregate`
+* `not_a_record_list`
+* `filter_not_expressible`
+* `sort_not_expressible`
+* `limit_not_expressible`
+* `latest_per_not_expressible`
+* `member_not_expressible`
+* `spec_refused`
+
+
+---
+
+## AiAnswerFeedback
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **conversationId** | `string` | ✅ | The conversation of the rated answer |
+| **turnId** | `string` | ✅ | The turn of the rated answer |
+| **rating** | `Enum<'up' \| 'down'>` | ✅ | The rating |
+| **note** | `string \| null` | ✅ | The caller's note; null when none |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
+| **updatedAt** | `string \| null` | ✅ | Last change timestamp (ISO 8601); null when never set |
+
+
+---
+
+## AiAnswerFeedbackError
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'UNAUTHENTICATED' \| 'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'VALUE_TOO_LONG' \| 'RESOURCE_NOT_FOUND' \| 'INTERNAL_ERROR' \| … +2 more>` | ✅ | Error code |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `any` | optional | Additional error context (e.g. field validation errors) |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Allowed Values: `AiAnswerFeedbackError.code`
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `VALUE_TOO_LONG`
+* `RESOURCE_NOT_FOUND`
+* `INTERNAL_ERROR`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
+
+
+---
+
+## AiAnswerFeedbackErrorCode
+
+### Allowed Values
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `VALUE_TOO_LONG`
+* `RESOURCE_NOT_FOUND`
+* `INTERNAL_ERROR`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
+
+
+---
+
+## AiAnswerRating
+
+### Allowed Values
+
+* `up`
+* `down`
+
+
+---
+
+## AiSavedQuestion
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Saved question id |
+| **question** | `string` | ✅ | The question text |
+| **source** | `{ object: string; label?: string; filter?: any; scope: Enum<'visible_to_you' \| 'all_records'>; … } \| null` | ✅ | The query the answer ran, read off the caller's stored turn when the question was saved from an answer; null for a typed question, or when the answer ran no query |
+| **agentId** | `string \| null` | ✅ | The agent of the conversation it was saved from; null for a typed question |
+| **conversationId** | `string \| null` | ✅ | The conversation it was saved from; null for a typed question |
+| **turnId** | `string \| null` | ✅ | The turn it was saved from; null for a typed question |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
+
+### Nested Shape: `AiSavedQuestion.source`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The machine name of the object the figures were read from |
+| **label** | `string` | optional | The object's plural label, or its label when it declares no plural. Translated only when the request is in Chinese and a `zh*` translation pack names the object; otherwise the authored label, not the caller's UI locale. Absent when the producer sets none: a reader falls back to `object` |
+| **filter** | `any` | optional | The caller's `where`, in the `$` query dialect, exactly as the engine accepted it: machine names only, no field labels, date placeholders such as `{today}` as written. Absent when no condition applied |
+| **scope** | `Enum<'visible_to_you' \| 'all_records'>` | ✅ | The row scope the figures cover, judged by the producer per call from `ISecurityService.getReadFilter(object, ctx)` for this caller and `object`, under the same context the read ran under. `visible_to_you`: a row restriction applied, so the figures cover only the records the caller may read. The organization wall is a row restriction: under the `isolated` and `group` tenancy postures `getReadFilter` answers an `organization_id` predicate on every object that carries the column, for every caller but a platform admin whose object's posture lets them cross the wall, so an organization owner there reads `visible_to_you`. `all_records`: stated only when that call RESOLVED to `undefined`, so no row restriction applied; for a caller no row rule or sharing narrows, that is the `single` posture, an object outside tenancy, a platform admin crossing the wall, or a system context. An absent security service, an absent `getReadFilter`, a call that throws or rejects, or a call made under any other context than the read's own states `visible_to_you`. A restriction applied is the fact stated, not a count of rows excluded. The value speaks for `object` only, not for the objects behind `related` lookup paths. Always present, one of these two values |
+| **groupBy** | `string[]` | optional | The field names the figures were grouped by, in order |
+| **aggregations** | `{ function: Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>; field?: string }[]` | optional | The aggregations computed, in order |
+| **orderBy** | `{ field: string; order?: Enum<'asc' \| 'desc'> }[]` | optional | The ordering applied, in order of precedence |
+| **limit** | `integer` | optional | The row or group cut applied (a top-N read or a group cut). Present only together with `orderBy` |
+| **related** | `string[]` | optional | The lookup paths read in the same call, dotted from the object (for example `client.relationship_manager`) |
+| **latestPer** | `{ groupBy: string; orderField: string }` | optional | Present when the answer keeps only the latest row per group |
+| **records** | `integer` | optional | How many records the figures cover — a count, never a list: the match total for a page read, the summed group counts for an aggregate or a chart, 1 for `get_record`. Absent when unknown, never guessed |
+| **line** | `string` | ✅ | The finished one-line citation, in the request language. The producer keeps it to at most 280 characters; a reader does not refuse a longer one |
+
+
+---
+
+## AiSavedQuestionError
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **code** | `Enum<'UNAUTHENTICATED' \| 'PERMISSION_DENIED' \| 'MISSING_REQUIRED_FIELD' \| 'VALIDATION_ERROR' \| 'VALUE_TOO_LONG' \| 'RESOURCE_NOT_FOUND' \| 'RESOURCE_CONFLICT' \| … +3 more>` | ✅ | Error code |
+| **declaredCode** | `string` | optional | The producer-declared code, verbatim, when it is not a member of the closed `code` vocabulary — the open, author-authored channel (app-specific spellings; ADR-0112) |
+| **message** | `string` | ✅ | Readable error message |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale: platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its declared wording. Present exactly when the producer opted in at throw time; consumers render it to end users as received and keep their generic substitution for anything unmarked. Status-agnostic; never replaces `message`. |
+| **refusal** | `true` | optional | Producer-declared: the 5xx this envelope carries is a deliberate refusal whose `message` is authored for the caller, so a boundary that reads the declaration keeps it verbatim (until the withhold arms read it, a declared refusal is still withheld). Absent (the default) on a declared fault, whose `message` is withheld from the body and logged for the operator; redundant on a 4xx. Presence is the declaration — `true` is the only value. |
+| **category** | `string` | optional | Error category (e.g. validation, authorization) |
+| **httpStatus** | `integer` | optional | HTTP status of the response carrying this error |
+| **details** | `{ reason: Enum<'saved_question_has_no_query' \| 'saved_question_run_failed'>; question?: string }` | optional | Present on a run refusal |
+| **requestId** | `string` | optional | Request ID for tracking |
+
+### Allowed Values: `AiSavedQuestionError.code`
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `VALUE_TOO_LONG`
+* `RESOURCE_NOT_FOUND`
+* `RESOURCE_CONFLICT`
+* `INTERNAL_ERROR`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
+
+### Nested Shape: `AiSavedQuestionError.details`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **reason** | `Enum<'saved_question_has_no_query' \| 'saved_question_run_failed'>` | ✅ | The named refusal |
+| **question** | `string` | optional | The saved question text, on saved_question_has_no_query |
+
+
+---
+
+## AiSavedQuestionErrorCode
+
+### Allowed Values
+
+* `UNAUTHENTICATED`
+* `PERMISSION_DENIED`
+* `MISSING_REQUIRED_FIELD`
+* `VALIDATION_ERROR`
+* `VALUE_TOO_LONG`
+* `RESOURCE_NOT_FOUND`
+* `RESOURCE_CONFLICT`
+* `INTERNAL_ERROR`
+* `NOT_IMPLEMENTED`
+* `SERVICE_UNAVAILABLE`
+
+
+---
+
+## AiSavedQuestionRefusalReason
+
+### Allowed Values
+
+* `saved_question_has_no_query`
+* `saved_question_run_failed`
+
+
+---
+
+## CreateAiAnswerArtifactRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `Enum<'view' \| 'report' \| 'widget'>` | ✅ | view: the caller's own list view; report: a dataset and a report draft; widget: a dataset and a new one-widget dashboard draft. report and widget need the manage_metadata capability |
+| **toolCallId** | `string` | optional | The tool call of the turn to build from; the turn's last query when omitted |
+| **label** | `string` | optional | The artifact label; the turn's question when omitted. Cut to 120 characters |
+
+
+---
+
+## CreateAiAnswerArtifactResponse
+
+### Union Options
+
+This schema accepts one of the following structures:
+
+#### Option 1
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'view'` | ✅ | The artifact kind |
+| **view** | `{ id?: string; object_name: string; label: string; config: Record<string, any> }` | ✅ | The saved personal view |
+
+### Nested Shape: `CreateAiAnswerArtifactResponse[kind='view'].view`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | optional | The personal view row id, when the engine answered one |
+| **object_name** | `string` | ✅ | The object the view lists |
+| **label** | `string` | ✅ | The view label |
+| **config** | `Record<string, any>` | ✅ | The list view configuration, a ListView |
+
+---
+
+#### Option 2
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'report'` | ✅ | The artifact kind |
+| **published** | `false` | ✅ | Always false: the drafts are not published |
+| **drafts** | `{ type: Enum<'dataset' \| 'report' \| 'dashboard'>; name: string }[]` | ✅ | The drafts staged: the dataset, then the report |
+| **dataset** | `Record<string, any>` | ✅ | The dataset draft body |
+| **report** | `Record<string, any>` | ✅ | The report draft body |
+
+### Nested Shape: `CreateAiAnswerArtifactResponse[kind='report'].drafts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'dataset' \| 'report' \| 'dashboard'>` | ✅ | Metadata type of the draft |
+| **name** | `string` | ✅ | Metadata item name of the draft |
+
+---
+
+#### Option 3
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **kind** | `'widget'` | ✅ | The artifact kind |
+| **published** | `false` | ✅ | Always false: the drafts are not published |
+| **drafts** | `{ type: Enum<'dataset' \| 'report' \| 'dashboard'>; name: string }[]` | ✅ | The drafts staged: the dataset, then the dashboard |
+| **dataset** | `Record<string, any>` | ✅ | The dataset draft body |
+| **dashboard** | `Record<string, any>` | ✅ | The dashboard draft body |
+
+### Nested Shape: `CreateAiAnswerArtifactResponse[kind='widget'].drafts[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `Enum<'dataset' \| 'report' \| 'dashboard'>` | ✅ | Metadata type of the draft |
+| **name** | `string` | ✅ | Metadata item name of the draft |
+
+---
+
+
+---
+
+## CreateAiSavedQuestionRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **question** | `string` | optional | The question text. Required without `conversationId`; from an answer it replaces the turn's own question. A question longer than 2000 characters is refused (413 VALUE_TOO_LONG) |
+| **conversationId** | `string` | optional | The caller's conversation the answer is in; sent with `turnId` |
+| **turnId** | `string` | optional | The turn of that conversation; sent with `conversationId` |
+| **toolCallId** | `string` | optional | The tool call of the turn whose query is saved; the turn's last query when omitted |
+
+
+---
+
+## CreateAiSavedQuestionResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **question** | `{ id: string; question: string; source: object \| null; agentId: string \| null; … }` | ✅ | The saved question |
+
+### Nested Shape: `CreateAiSavedQuestionResponse.question`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Saved question id |
+| **question** | `string` | ✅ | The question text |
+| **source** | `{ object: string; label?: string; filter?: any; scope: Enum<'visible_to_you' \| 'all_records'>; … } \| null` | ✅ | The query the answer ran, read off the caller's stored turn when the question was saved from an answer; null for a typed question, or when the answer ran no query |
+| **agentId** | `string \| null` | ✅ | The agent of the conversation it was saved from; null for a typed question |
+| **conversationId** | `string \| null` | ✅ | The conversation it was saved from; null for a typed question |
+| **turnId** | `string \| null` | ✅ | The turn it was saved from; null for a typed question |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
+
+
+---
+
+## GetAiAnswerFeedbackResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **feedback** | `{ conversationId: string; turnId: string; rating: Enum<'up' \| 'down'>; note: string \| null; … } \| null` | ✅ | The caller's rating of the answer; null when unrated |
+
+### Nested Shape: `GetAiAnswerFeedbackResponse.feedback`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **conversationId** | `string` | ✅ | The conversation of the rated answer |
+| **turnId** | `string` | ✅ | The turn of the rated answer |
+| **rating** | `Enum<'up' \| 'down'>` | ✅ | The rating |
+| **note** | `string \| null` | ✅ | The caller's note; null when none |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
+| **updatedAt** | `string \| null` | ✅ | Last change timestamp (ISO 8601); null when never set |
+
+
+---
+
+## ListAiSavedQuestionsResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **questions** | `{ id: string; question: string; source: object \| null; agentId: string \| null; … }[]` | ✅ | The caller's saved questions in the session's organization, newest first, at most 200 |
+
+### Nested Shape: `ListAiSavedQuestionsResponse.questions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **id** | `string` | ✅ | Saved question id |
+| **question** | `string` | ✅ | The question text |
+| **source** | `{ object: string; label?: string; filter?: any; scope: Enum<'visible_to_you' \| 'all_records'>; … } \| null` | ✅ | The query the answer ran, read off the caller's stored turn when the question was saved from an answer; null for a typed question, or when the answer ran no query |
+| **agentId** | `string \| null` | ✅ | The agent of the conversation it was saved from; null for a typed question |
+| **conversationId** | `string \| null` | ✅ | The conversation it was saved from; null for a typed question |
+| **turnId** | `string \| null` | ✅ | The turn it was saved from; null for a typed question |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
+
+
+---
+
+## RunAiSavedQuestionResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **question** | `string` | ✅ | The saved question text |
+| **toolName** | `Enum<'aggregate_data' \| 'query_records'>` | ✅ | The data tool that ran the query: aggregate_data for an aggregate, query_records for a record read |
+| **result** | `any` | ✅ | The data tool's result, parsed from its JSON text |
+
+
+---
+
+## SetAiAnswerFeedbackRequest
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rating** | `Enum<'up' \| 'down'>` | ✅ | The rating |
+| **note** | `string \| null` | optional | A note on the answer. Trimmed; blank or null stores none. A note longer than 500 characters is refused (413 VALUE_TOO_LONG) |
+
+
+---
+
+## SetAiAnswerFeedbackResponse
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **feedback** | `{ conversationId: string; turnId: string; rating: Enum<'up' \| 'down'>; note: string \| null; … }` | ✅ | The stored rating |
+
+### Nested Shape: `SetAiAnswerFeedbackResponse.feedback`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **conversationId** | `string` | ✅ | The conversation of the rated answer |
+| **turnId** | `string` | ✅ | The turn of the rated answer |
+| **rating** | `Enum<'up' \| 'down'>` | ✅ | The rating |
+| **note** | `string \| null` | ✅ | The caller's note; null when none |
+| **createdAt** | `string` | ✅ | Creation timestamp (ISO 8601) |
+| **updatedAt** | `string \| null` | ✅ | Last change timestamp (ISO 8601); null when never set |
+
+
+---
+

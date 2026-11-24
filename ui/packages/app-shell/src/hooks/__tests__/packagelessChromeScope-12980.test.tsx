@@ -112,9 +112,10 @@ describe('package-less app: the chrome readers read the names-only scope (object
 
     expect(read().presence.presence).toBe('present');
     expect(objectCalls(calls)).not.toContain('object');
-    // objectstack#34244 — `note` is the entry's `requiresObject`: asked by name
-    // once the `?names=` presence read has answered it served.
-    expect([...objectCalls(calls)].sort()).toEqual(['object/note', 'object/sys_activity', 'object?names=note'].sort());
+    // objectstack#34244 — `note` is the entry's `requiresObject`: asked in the
+    // `?names=` presence read, whose served answer is its definition
+    // (objectstack#35306), so it is not asked again by name.
+    expect([...objectCalls(calls)].sort()).toEqual(['object/sys_activity', 'object?names=note'].sort());
   });
 
   it('(a) an object the deployment does not have reads absent, by name, with no whole-registry read', async () => {
@@ -180,14 +181,15 @@ describe('objectstack#34244 — the served view items ask no required object the
     ],
   };
 
-  it('asks both in the presence read, and by name only the one it serves', async () => {
+  it('asks both in the presence read, and by name neither: the one it serves is answered by that read', async () => {
     const calls: string[] = [];
     const read = mount(GATED_APP, calls);
     await waitFor(() => expect(isServedView(read().served, 'note', 'note.recent')).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(objectCalls(calls)).toContain('object?names=note,gone_obj');
-    expect(objectCalls(calls)).toContain('object/note');
+    // objectstack#35306 — the served `note` is answered by the presence read.
+    expect(objectCalls(calls)).not.toContain('object/note');
     expect(objectCalls(calls)).not.toContain('object/gone_obj');
   });
 });

@@ -9,8 +9,7 @@
  * operator opts in, none of this renders and the FAB stays the canonical entry.
  *
  * It reuses the shared {@link ChatPane} engine over the P1 `(user, app, product)`
- * conversation, so the dock is a VIEW, not a new conversation. P3c auto-maximizes
- * the rail while the ADR-0037 Live Canvas is open. (P3c also reused the panel
+ * conversation, so the dock is a VIEW, not a new conversation. (P3c also reused the panel
  * under Studio; objectui#12725 moved the Studio copilot into that surface's own
  * right slot, `StudioRightSlot`, so the console is this panel's one host.)
  *
@@ -20,32 +19,45 @@
  * page stays mounted under it and the address does not change) and the same
  * button restores the rail; the conversation history sits beside the chat in
  * the full window and behind a History button in the rail.
+ *
+ * objectstack#34610 — there is no Live Canvas pane any more (the build's app
+ * shows in the main area beside the drawer), so P3c's auto-maximize latch
+ * (`maximize` / `restore`, the rail widened while the canvas was open) is gone.
  */
 import * as React from 'react';
 import {
   cn,
   Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from '@object-ui/components';
-import { History, Maximize2, MessagesSquare, Minimize2, PanelRightClose, X } from 'lucide-react';
-import { useObjectTranslation } from '@object-ui/i18n';
+import { Bug, History, Maximize2, MessagesSquare, Minimize2, MoreHorizontal, Share2, X } from 'lucide-react';
+import { formatNumber, useObjectTranslation } from '@object-ui/i18n';
+import { useAgents } from '@object-ui/plugin-chatbot/core';
 import { resolveApiBase } from '../console/ai/resolveApiBase.js';
-import { AiUsageIndicator } from './AiUsageIndicator.js';
+import { NEAR_FULL } from './AiUsageIndicator.js';
+import { useAiUsage } from '../hooks/useAiUsage.js';
+import { cloudConsoleUrl } from '../console/marketplace/marketplaceApi.js';
+import { getUpgradeUrl } from '../runtime-config.js';
 import { usePlanApprovalPending } from '../assistant/assistantBus.js';
 import type { ChatSurfaceContext } from './chatSurfaceContext.js';
 import {
   readStoredDockFullWindow,
   writeStoredDockFullWindow,
+  type ChatDockConversationActions,
   type ChatDockHandoff,
   type ChatDockTarget,
 } from './chatDockTarget.js';
 import {
   clampDockWidth,
-  maximizedDockWidth,
   readStoredDockExpanded,
   writeStoredDockExpanded,
   DOCK_DEFAULT_WIDTH,
@@ -95,22 +107,11 @@ export interface ChatDockState {
   expanded: boolean;
   width: number;
   dragging: boolean;
-  /** ADR-0037/P3c — true while the rail is canvas-maximized (see `maximize`). */
-  maximized: boolean;
   toggle: () => void;
   expand: () => void;
   collapse: () => void;
   /**
-   * Grow the rail to its widest legal width (Live Canvas needs room for the
-   * chat + preview split). Transient: the pre-maximize width is remembered and
-   * NEVER persisted over the user's chosen width.
-   */
-  maximize: () => void;
-  /** Undo `maximize` — a no-op unless currently maximized (see doc below). */
-  restore: () => void;
-  /**
-   * objectstack#34608 — true while the drawer fills the window in place. Not
-   * the canvas latch above: that one widens the rail beside the page, this one
+   * objectstack#34608 — true while the drawer fills the window in place. It
    * covers the page, which stays mounted under it.
    */
   fullWindow: boolean;
@@ -126,19 +127,10 @@ export interface ChatDockState {
  * data grids). Width persists to localStorage; the drag anchors the rail's LEFT
  * edge (dragging left widens it). All DOM reads happen in handlers, never render.
  *
- * P3c adds two orthogonal behaviors, both opt-in and both preserving the bare
- * `useChatDockState()` call unchanged:
- *  - `persistExpandedKey` round-trips expanded/collapsed through sessionStorage
- *    so the console rail survives in-tab navigation and the `/ai` page can arm
- *    it before navigating back ({@link armChatDockExpanded}).
- *  - `maximize`/`restore` implement the Live-Canvas "auto-maximize on canvas
- *    open, tuck on close" (ADR-0037 beside-the-chat preview needs width the
- *    rail doesn't have). `restore` is a NO-OP unless a maximize is actually
- *    latched: ChatPane reports `onCanvasOpenChange(false)` on mount (twice
- *    under StrictMode), and an unguarded restore would clobber the width on
- *    every dock open. A manual resize drag clears the latch — the user taking
- *    the handle wins over the automation, so the later canvas-close restore
- *    does nothing.
+ * P3c's `persistExpandedKey` (opt-in, the bare `useChatDockState()` call is
+ * unchanged) round-trips expanded/collapsed through sessionStorage so the
+ * console rail survives in-tab navigation and the `/ai` addresses can arm it
+ * ({@link armChatDockExpanded}).
  */
 export function useChatDockState(options?: ChatDockOptions): ChatDockState {
   const {
@@ -152,24 +144,9 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
   );
   const [width, setWidth] = React.useState<number>(() => readStoredWidth(persistWidthKey));
   const [dragging, setDragging] = React.useState(false);
-  const [maximized, setMaximized] = React.useState(false);
   const [fullWindow, setFullWindowState] = React.useState<boolean>(() =>
     persistFullWindow ? readStoredDockFullWindow() : false,
   );
-  // The latch and the width to return to when the canvas closes. Refs, not
-  // state: they are only read inside handlers (never rendered), and the latch
-  // must be checkable synchronously so a double-fired maximize/restore (React
-  // StrictMode re-runs effects) can bail before touching the width.
-  const maximizedRef = React.useRef(false);
-  const prevWidthRef = React.useRef<number | null>(null);
-  // Latest width, readable from the IDENTITY-STABLE maximize below. If
-  // `maximize` closed over `width` (a [width] dep) its identity would change on
-  // every drag move — and consumers key their canvas-open effect on the handler
-  // identity, so each change would re-fire maximize mid-drag and snap the width
-  // back to max, fighting the user. Render-phase ref sync keeps it current.
-  const widthRef = React.useRef(width);
-  widthRef.current = width;
-
   const setExpanded = React.useCallback(
     (update: (prev: boolean) => boolean) => {
       setExpandedState((prev) => {
@@ -184,12 +161,6 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
   const onResizePointerDown = React.useCallback(
     (e: React.PointerEvent) => {
       e.preventDefault();
-      // Grabbing the handle is the user taking control of the width — drop the
-      // canvas-maximize latch so the eventual canvas-close restore won't fight
-      // them (their drag result stays, and gets persisted below as usual).
-      maximizedRef.current = false;
-      prevWidthRef.current = null;
-      setMaximized(false);
       const startX = e.clientX;
       const startWidth = width;
       setDragging(true);
@@ -216,25 +187,6 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
     [width],
   );
 
-  const maximize = React.useCallback(() => {
-    if (maximizedRef.current) return; // already maximized — keep the original return width
-    maximizedRef.current = true;
-    prevWidthRef.current = widthRef.current;
-    setWidth(maximizedDockWidth(window.innerWidth));
-    setMaximized(true);
-  }, []);
-
-  const restore = React.useCallback(() => {
-    // Not latched → nothing to undo. This guard is what makes ChatPane's
-    // mount-time onCanvasOpenChange(false) (and StrictMode's double fire, and
-    // a restore after a manual drag took the width over) harmless.
-    if (!maximizedRef.current) return;
-    maximizedRef.current = false;
-    setWidth(prevWidthRef.current ?? readStoredWidth(persistWidthKey));
-    prevWidthRef.current = null;
-    setMaximized(false);
-  }, [persistWidthKey]);
-
   const setFullWindow = React.useCallback(
     (next: boolean) => {
       setFullWindowState(next);
@@ -260,12 +212,9 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
     expanded,
     width,
     dragging,
-    maximized,
     toggle,
     expand,
     collapse,
-    maximize,
-    restore,
     fullWindow,
     setFullWindow,
     onResizePointerDown,
@@ -283,6 +232,150 @@ export function useChatDockState(options?: ChatDockOptions): ChatDockState {
 const ChatDockConversation = React.lazy(() =>
   import('./ChatDockConversation.js').then((m) => ({ default: m.ChatDockConversation })),
 );
+
+interface ChatDockMenuProps {
+  apiBase: string;
+  /** What the body reported for its thread; absent with a `children` body or before the body loads. */
+  actions: ChatDockConversationActions | undefined;
+  onShare: () => void;
+  onDebug: () => void;
+  /** The rail and the full window offer filling the window (or going back); the phone sheet does not. */
+  fill?: { full: boolean; onToggle: () => void };
+}
+
+/**
+ * objectstack#35445 — the drawer's 「···」 menu: AI usage, Share, filling the
+ * window and the Build Doctor, which used to stand as icons across two header
+ * rows. The usage reading is the one {@link AiUsageIndicator} draws (the same
+ * hook and the same words); while the pool is running low the trigger carries a
+ * marker, so the warning is still seen before a send hits the limit. The Build
+ * Doctor is listed only when the body says so (a user who may build).
+ */
+function ChatDockMenu({ apiBase, actions, onShare, onDebug, fill }: ChatDockMenuProps) {
+  const { t, language } = useObjectTranslation();
+  // Same gate as the indicator: no usage read until the catalog lists an agent.
+  const { agents } = useAgents({ apiBase });
+  const { usage } = useAiUsage({ apiBase, enabled: agents.length > 0 });
+  const pool = usage?.pool;
+  const fraction = pool && !pool.unmetered && pool.fraction !== null ? pool.fraction : null;
+  const tone = fraction === null ? undefined : fraction >= 1 ? 'full' : fraction >= NEAR_FULL ? 'low' : 'ok';
+  const status =
+    tone === 'full'
+      ? t('console.ai.usage.statusFull', { defaultValue: 'Limit reached' })
+      : tone === 'low'
+        ? t('console.ai.usage.statusLow', { defaultValue: 'Running low' })
+        : t('console.ai.usage.statusOk', { defaultValue: 'Plenty left' });
+  const ctaUrl = getUpgradeUrl() ?? cloudConsoleUrl();
+  const showCta = tone !== undefined && tone !== 'ok' && Boolean(pool && (pool.upgrade || pool.topUp)) && !!ctaUrl;
+  const conversationId = actions?.conversationId;
+  if (tone === undefined && !actions && !fill) return null;
+  const moreLabel = t('console.ai.dock.more', { defaultValue: 'More actions' });
+  const fillLabel = fill?.full
+    ? t('console.ai.dock.restore', { defaultValue: 'Restore side panel' })
+    : t('console.ai.dock.expand', { defaultValue: 'Expand' });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative h-7 w-7 text-muted-foreground hover:text-foreground"
+          aria-label={moreLabel}
+          title={moreLabel}
+          data-testid="chat-dock-more"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+          {tone === 'low' || tone === 'full' ? (
+            <span className="absolute right-1 top-1 flex size-2" data-testid="chat-dock-more-usage-alert">
+              <span
+                aria-hidden="true"
+                className={cn('size-2 rounded-full ring-2 ring-background', tone === 'full' ? 'bg-destructive' : 'bg-amber-500')}
+              />
+              <span className="sr-only">
+                {t('console.ai.usage.ariaLabel', { defaultValue: 'AI usage: {{status}}', status })}
+              </span>
+            </span>
+          ) : null}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60" data-testid="chat-dock-menu">
+        {tone !== undefined && fraction !== null ? (
+          <>
+            <div className="px-2 py-1.5 text-xs" data-testid="chat-dock-usage">
+              <div className="font-medium text-foreground/80">
+                {t('console.ai.usage.title', { defaultValue: 'AI usage' })}
+              </div>
+              <div
+                className={cn(
+                  'tabular-nums',
+                  tone === 'full' ? 'text-destructive' : tone === 'low' ? 'text-amber-600 dark:text-amber-500' : 'text-muted-foreground',
+                )}
+              >
+                {status}
+                {' · '}
+                {t('console.ai.usage.poolUsed', {
+                  percent: formatNumber(fraction, { locale: language, style: 'percent', maximumFractionDigits: 0 }),
+                  defaultValue: '{{percent}} used',
+                })}
+              </div>
+            </div>
+            {showCta ? (
+              <DropdownMenuItem
+                className="text-xs"
+                data-testid="chat-dock-usage-cta"
+                onSelect={() => window.open(ctaUrl, '_blank', 'noopener,noreferrer')}
+              >
+                {pool?.upgrade
+                  ? t('console.ai.usage.ctaUpgrade', { defaultValue: 'Upgrade to keep going' })
+                  : t('console.ai.usage.ctaTopUp', { defaultValue: 'Add credits to continue' })}
+              </DropdownMenuItem>
+            ) : null}
+            {actions || fill ? <DropdownMenuSeparator /> : null}
+          </>
+        ) : null}
+        {actions ? (
+          <DropdownMenuItem
+            disabled={!conversationId}
+            onSelect={onShare}
+            title={conversationId ? t('console.ai.shareTitle') : t('console.ai.shareDisabledTitle')}
+            data-testid="chat-dock-share"
+          >
+            <Share2 className="mr-2 h-3.5 w-3.5" />
+            {t('console.ai.share', { defaultValue: 'Share' })}
+          </DropdownMenuItem>
+        ) : null}
+        {fill ? (
+          <DropdownMenuItem onSelect={fill.onToggle} data-testid="chat-dock-maximize">
+            {fill.full ? <Minimize2 className="mr-2 h-3.5 w-3.5" /> : <Maximize2 className="mr-2 h-3.5 w-3.5" />}
+            {fillLabel}
+          </DropdownMenuItem>
+        ) : null}
+        {actions?.showDebug ? (
+          <DropdownMenuItem
+            disabled={!conversationId}
+            onSelect={onDebug}
+            title={conversationId ? t('console.ai.buildDoctorTitle') : t('console.ai.buildDoctorDisabledTitle')}
+            data-testid="chat-dock-build-doctor"
+          >
+            <Bug className="mr-2 h-3.5 w-3.5" />
+            {t('console.ai.buildDoctor', { defaultValue: 'Build Doctor' })}
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The body's Share / Build Doctor state, lifted to the chrome that offers them
+ * in its menu (objectstack#35445). The dialogs themselves stay in the body.
+ */
+function useDockBodyActions() {
+  const [actions, setActions] = React.useState<ChatDockConversationActions | undefined>(undefined);
+  const [shareOpen, setShareOpen] = React.useState(false);
+  const [debugOpen, setDebugOpen] = React.useState(false);
+  return { actions, setActions, shareOpen, setShareOpen, debugOpen, setDebugOpen };
+}
 
 /** objectstack#34608 — what the drawer shows, and the handoff it seeds (see `chatDockTarget.ts`). */
 export interface ChatDockThreadProps {
@@ -354,16 +447,8 @@ export function ChatDockPanel({
   const apiBase = React.useMemo(() => resolveApiBase(apiBaseProp), [apiBaseProp]);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const full = dock.fullWindow;
-  // ADR-0037/P3c — the default body auto-maximizes the rail while the Live
-  // Canvas is open and tucks back when it closes (restore self-guards against
-  // the mount-time false, StrictMode, and user-drag takeover).
-  const handleCanvasOpenChange = React.useCallback(
-    (open: boolean) => (open ? dock.maximize() : dock.restore()),
-    [dock.maximize, dock.restore],
-  );
-  const expandLabel = full
-    ? t('console.ai.dock.restore', { defaultValue: 'Restore side panel' })
-    : t('console.ai.dock.expand', { defaultValue: 'Expand' });
+  const closeLabel = t('console.ai.dock.close', { defaultValue: 'Close' });
+  const body = useDockBodyActions();
   return (
     <aside
       data-testid="chat-dock-panel"
@@ -373,9 +458,7 @@ export function ChatDockPanel({
         full
           ? 'fixed inset-0 z-40 flex flex-col bg-background'
           : 'relative hidden h-full shrink-0 flex-col border-l bg-background md:flex',
-        // ADR-0037/P3c — animate the canvas auto-maximize / tuck so the rail
-        // eases to its new width instead of snapping (issue #2477 item 4).
-        // NOT while dragging: the width must track the pointer 1:1, so the
+        // Ease width changes (issue #2477 item 4). NOT while dragging: the width must track the pointer 1:1, so the
         // transition is suppressed for the duration of a resize drag.
         !full && !dock.dragging && 'transition-[width] duration-200 ease-out',
       )}
@@ -393,15 +476,16 @@ export function ChatDockPanel({
           )}
         />
       )}
-      <div className="flex h-11 shrink-0 items-center justify-between border-b px-3">
-        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground/80">
+      {/* objectstack#35445 — ONE title row: History, 「···」, Close. Usage,
+          Share, filling the window and the Build Doctor are in the menu; the
+          close is the drawer's 「×」 in both presentations, and the
+          conversation is kept for the next open. */}
+      <div className="flex h-11 shrink-0 items-center justify-between border-b px-3" data-testid="chat-dock-header">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
           <MessagesSquare className="size-3.5" />
-          {title ?? t('console.ai.dock.title', { defaultValue: 'Assistant' })}
+          {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
         </span>
         <span className="flex items-center gap-0.5">
-          {/* ADR-0057 #8 — proactive AI usage indicator (hides itself when the
-              usage endpoint is absent / returns nothing to show). */}
-          <AiUsageIndicator apiBase={apiBase} />
           {/* The rail keeps the history behind this button; the full window
               shows it beside the chat. */}
           {!full && !children ? (
@@ -420,30 +504,29 @@ export function ChatDockPanel({
               {t('console.ai.dock.history', { defaultValue: 'History' })}
             </Button>
           ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              setHistoryOpen(false);
-              dock.setFullWindow(!full);
+          <ChatDockMenu
+            apiBase={apiBase}
+            actions={children ? undefined : body.actions}
+            onShare={() => body.setShareOpen(true)}
+            onDebug={() => body.setDebugOpen(true)}
+            fill={{
+              full,
+              onToggle: () => {
+                setHistoryOpen(false);
+                dock.setFullWindow(!full);
+              },
             }}
-            aria-label={expandLabel}
-            title={expandLabel}
-            aria-pressed={full}
-            data-testid="chat-dock-maximize"
-          >
-            {full ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-          </Button>
+          />
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-muted-foreground hover:text-foreground"
             onClick={dock.collapse}
-            aria-label={t('console.ai.dock.collapse', { defaultValue: 'Collapse chat' })}
+            aria-label={closeLabel}
+            title={closeLabel}
             data-testid="chat-dock-collapse"
           >
-            {full ? <X className="h-4 w-4" /> : <PanelRightClose className="h-4 w-4" />}
+            <X className="h-4 w-4" />
           </Button>
         </span>
       </div>
@@ -462,13 +545,17 @@ export function ChatDockPanel({
               appPackageId={appPackageId}
               surfaceContext={surfaceContext}
               surfaceArtifactLabel={surfaceArtifactLabel}
-              onCanvasOpenChange={handleCanvasOpenChange}
               target={target}
               onTargetChange={onTargetChange}
               handoff={handoff}
               presentation={full ? 'full' : 'rail'}
               historyOpen={historyOpen}
               onHistoryOpenChange={setHistoryOpen}
+              onActionsChange={body.setActions}
+              shareOpen={body.shareOpen}
+              onShareOpenChange={body.setShareOpen}
+              debugOpen={body.debugOpen}
+              onDebugOpenChange={body.setDebugOpen}
             />
           </React.Suspense>
         )}
@@ -527,6 +614,7 @@ export function ChatDockMobileSheet({
   const { t } = useObjectTranslation();
   const apiBase = React.useMemo(() => resolveApiBase(apiBaseProp), [apiBaseProp]);
   const [historyOpen, setHistoryOpen] = React.useState(false);
+  const body = useDockBodyActions();
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -539,12 +627,10 @@ export function ChatDockMobileSheet({
               SheetContent's built-in close ✕ (absolute right-4) so a thumb can't
               confuse the two. `pr-8` still reserves room for that ✕. */}
           <div className="flex items-center gap-1 pr-8">
-            <SheetTitle className="inline-flex items-center gap-1.5 text-sm font-semibold">
+            <SheetTitle className="inline-flex items-center gap-1.5 text-sm font-medium">
               <MessagesSquare className="size-4" />
-              {title ?? t('console.ai.dock.title', { defaultValue: 'Assistant' })}
+              {title ?? t('console.ai.dock.title', { defaultValue: 'AI Assistant' })}
             </SheetTitle>
-            {/* ADR-0057 #8 — usage indicator, mirrored on the mobile sheet header. */}
-            <AiUsageIndicator apiBase={apiBase} />
             {!children ? (
               <Button
                 variant="ghost"
@@ -561,6 +647,14 @@ export function ChatDockMobileSheet({
                 {t('console.ai.dock.history', { defaultValue: 'History' })}
               </Button>
             ) : null}
+            {/* objectstack#35445 — the same 「···」 as the rail, less filling the
+                window (the sheet already takes the screen). */}
+            <ChatDockMenu
+              apiBase={apiBase}
+              actions={children ? undefined : body.actions}
+              onShare={() => body.setShareOpen(true)}
+              onDebug={() => body.setDebugOpen(true)}
+            />
           </div>
           <SheetDescription className="sr-only">
             {t('console.ai.dock.description', { defaultValue: 'AI assistant chat' })}
@@ -583,6 +677,11 @@ export function ChatDockMobileSheet({
                 presentation="sheet"
                 historyOpen={historyOpen}
                 onHistoryOpenChange={setHistoryOpen}
+                onActionsChange={body.setActions}
+                shareOpen={body.shareOpen}
+                onShareOpenChange={body.setShareOpen}
+                debugOpen={body.debugOpen}
+                onDebugOpenChange={body.setDebugOpen}
               />
             </React.Suspense>
           )}

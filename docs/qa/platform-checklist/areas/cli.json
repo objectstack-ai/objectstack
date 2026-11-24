@@ -1,7 +1,7 @@
 {
   "$comment": "Standing platform test checklist — area ledger. Hand-edited, append-only; validated by scripts/check-platform-checklist.mjs (pnpm check:platform-checklist). Authoring rules: docs/qa/platform-checklist/README.md · execution protocol: RUNNER.md.",
   "area": "cli",
-  "axis": "devpath",
+  "axis": "build",
   "title": "CLI — os dev/build/migrate/verify/test boot, load, execution & exit-code contracts, scaffold first-run, flag/command error UX",
   "fixtures": {
     "$comment": "AREA-LEVEL standing fixtures (README \"Area-level `fixtures`\"; shape copied from qa-scratch-authz in areas/attachments-storage.json). An item opts in with fixtures.provisioning = { use: KEY, why: … }. This area's one recipe is not runtime-provisioned like the others: it RESTORES a committed database into two new files, so nothing in the repo or on a live boot is touched and the teardown line is the whole cleanup. Every call cites the file and symbol that grounds it; replay the calls literally, and if one answers differently re-read the citation before assuming the recipe rotted.",
@@ -143,7 +143,7 @@
         "OS_DATABASE_URL / DATABASE_URL / TURSO_DATABASE_URL env (env wins over the default)",
         "-d :memory: (SQLite's own in-memory database — the replacement for the retired in-memory engine; nothing persists across restarts)",
         "--database-driver memory / OS_DATABASE_DRIVER=memory|mingo|in-memory / -d memory:// or mingo:// → REFUSED (the retired in-memory engine; see the negative for where each is refused and what it names)",
-        "config-declared default datasource (the project config's default home wins over the unified default) — authored as a NAMED datasource plus a datasourceMapping rule { default: true, datasource: NAME } (readConfigDeclaredDefault); a datasource literally named `default` is refused by defineStack as reserved for the host's primary, and a mapping rule naming 'default' is declined, so neither can stand for this variant. The scratch stack's object must declare sharingModel (e.g. 'private'): without one the boot's compile refuses the stack on the error rule security-owd-unset (packages/lint/src/validate-security-posture.ts#SECURITY_OWD_UNSET) and `os dev` exits 1 with 'Compile failed — fix errors above before starting dev server' (packages/cli/src/commands/dev.ts)",
+        "config-declared default datasource (the project config's default home wins over the unified default) — authored as a NAMED datasource plus a datasourceMapping rule { default: true, datasource: NAME } (readConfigDeclaredDefault); a datasource literally named `default` is refused by defineStack as reserved for the host's primary, and a mapping rule naming 'default' is declined, so neither can stand for this variant. The scratch stack's object must declare sharingModel (e.g. 'private'): without one the boot's compile refuses the stack on the error rule security-owd-unset (packages/lint/src/validate-security-posture.ts#SECURITY_OWD_UNSET) and `os dev` exits 1 with 'objectstack.config did not load or compile — the reason is printed above; fix it before starting dev server' (packages/cli/src/commands/dev.ts)",
         "legacy compat-read: an existing dev.db / standalone.db when no objectstack.db exists (resolved WITH one loud notice line; probe order objectstack.db → dev.db → standalone.db)"
       ],
       "traps": ["stale-dist", "stale-console-bundle", "shared-browser-tab"],

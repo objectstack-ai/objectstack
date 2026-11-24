@@ -30,7 +30,7 @@ import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { ListView } from '@object-ui/plugin-list';
 import { useAdapter, SchemaRenderer, useNavigationOverlay } from '@object-ui/react';
 import { Empty, EmptyTitle, EmptyDescription, NavigationOverlay } from '@object-ui/components';
-import { Database } from 'lucide-react';
+import { Database, FileText } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { isSystemManagedField } from '@object-ui/types';
 import { leadWithNameField } from '@object-ui/core';
@@ -38,6 +38,8 @@ import { usePermissions } from '@object-ui/permissions';
 import type { ActionBarSchema, ListViewSchema } from '@object-ui/types';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
+import { PageHeader } from '../layout/PageHeader.js';
+import { usePreviewListDataSource } from '../preview/unpublishedObjectReads.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -56,6 +58,14 @@ interface InterfaceListPageProps {
    * top-right (PageView's pencil), reserve right padding on the header so the
    * toolbar buttons don't sit under it. */
   reserveEditAffordance?: boolean;
+  /**
+   * objectstack#36111 — draw the console page header (`PageHeader`) for the
+   * page's title, description and buttons, as the app's lists and dashboards
+   * do; its right end holds the shell's button group. The console's page
+   * route sets it from the phone breakpoint up; Studio's preview and the
+   * phone keep the page's own title row.
+   */
+  consoleHeader?: boolean;
 }
 
 /**
@@ -273,7 +283,7 @@ export function defaultMapFromObject(objectDef: any): { locationField: string } 
   return { locationField: field };
 }
 
-export function InterfaceListPage({ page, className, onConfigChange, reserveEditAffordance }: InterfaceListPageProps) {
+export function InterfaceListPage({ page, className, onConfigChange, reserveEditAffordance, consoleHeader }: InterfaceListPageProps) {
   const { t, language } = useObjectTranslation();
   // objectui#12980 — the source object, read by name, not the whole registry:
   // reading `objects` would load every object to find one. Inside an app that
@@ -318,6 +328,10 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       : metadata.objects || [];
   // Not memoised: the scope's list is read afresh each render, as `objects` was.
   const objectDef = sourceObjects.find((o: any) => o?.name === cfg.source);
+  // objectstack#34807 — in the draft preview the list reads its object
+  // definition with the draft-only fields marked, so a column on one is drawn
+  // empty instead of refusing the whole list query; outside it, the adapter.
+  const listDataSource = usePreviewListDataSource(dataSource, objectDef);
   const resolvedView = React.useMemo(
     () => resolveSourceView(objectDef, cfg.sourceView),
     [objectDef, cfg.sourceView],
@@ -558,6 +572,12 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       // is relayed: the spec retired it (#25923) and `ListView` reads none.
       ...(view.tree !== undefined ? { tree: view.tree } : {}),
       ...(view.chart !== undefined ? { chart: view.chart } : {}),
+      // #34382 — a `type: 'timesheet'` view's `timesheet` block
+      // (`{ rowFields, dateField, valueField }`), carried whole like the two
+      // above for the same reason: `ListView`'s timesheet branch draws nothing
+      // but its configuration notice without it, and no page-derived default
+      // can guess which fields make the rows, the day and the value.
+      ...(view.timesheet !== undefined ? { timesheet: view.timesheet } : {}),
 
       // Presentation policy — the page layer (ADR-0047).
       userFilters: cfg.userFilters ?? view.userFilters,
@@ -607,17 +627,16 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
         group: userActions.group !== false,
         hideFields: userActions.hideFields !== false,
         rowColor: userActions.rowColor === true,
+        // Inline record editing is a page-authored property, on by default
+        // (the v18 protocol default, objectstack#22605): a page opts out with
+        // `editInline: false`. A cell edits in place with the dedicated field
+        // widgets, same as the object views, and only where `ListView`'s
+        // permission gate admits the principal (the object editable in place,
+        // and the `update` grant). Written as the canonical key since the list
+        // has no edit mode for a legacy `inlineEdit` to start (objectstack#35684).
+        editInline: userActions.editInline !== false,
       },
       allowExport: false,
-      // Inline record editing is a page-authored property read from
-      // `userActions.editInline`, on by default (the v18 protocol default,
-      // objectstack#22605): a page opts out with `editInline: false`. This page
-      // wires no inline-edit toggle, so the value is the grid's edit mode
-      // itself. When on, a cell edits in place with the dedicated field
-      // widgets, same as the object views, and only where `ListView`'s
-      // permission gate admits the principal (the object editable in place, and
-      // the `update` grant).
-      inlineEdit: userActions.editInline !== false,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [objectDefName, viewDefJson, cfg, orgAttribution]);
@@ -666,25 +685,38 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
 
   return (
     <div className={className ?? 'h-full flex flex-col'} data-testid="interface-list-page">
-      <div className={`pl-4 pt-4 pb-2 shrink-0 flex items-start justify-between gap-3 ${reserveEditAffordance ? 'pr-12' : 'pr-4'}`}>
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold leading-tight">
-            {pageLabel ?? page.name}
-          </h1>
-          {pageDescription && (
-            <p className="text-sm text-muted-foreground mt-0.5">{pageDescription}</p>
+      {consoleHeader ? (
+        <PageHeader
+          title={pageLabel ?? page.name}
+          subtitle={pageDescription || undefined}
+          icon={<FileText className="h-4 w-4" />}
+          actions={buttonActions.length > 0 ? (
+            <div className="shrink-0" data-testid="interface-page-buttons">
+              <SchemaRenderer schema={buttonBar} />
+            </div>
+          ) : undefined}
+        />
+      ) : (
+        <div className={`pl-4 pt-4 pb-2 shrink-0 flex items-start justify-between gap-3 ${reserveEditAffordance ? 'pr-12' : 'pr-4'}`}>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold leading-tight">
+              {pageLabel ?? page.name}
+            </h1>
+            {pageDescription && (
+              <p className="text-sm text-muted-foreground mt-0.5">{pageDescription}</p>
+            )}
+          </div>
+          {buttonActions.length > 0 && (
+            <div className="shrink-0" data-testid="interface-page-buttons">
+              <SchemaRenderer schema={buttonBar} />
+            </div>
           )}
         </div>
-        {buttonActions.length > 0 && (
-          <div className="shrink-0" data-testid="interface-page-buttons">
-            <SchemaRenderer schema={buttonBar} />
-          </div>
-        )}
-      </div>
+      )}
       <div className="flex-1 min-h-0 overflow-auto">
         <ListView
           schema={schema}
-          dataSource={dataSource}
+          dataSource={listDataSource}
           userFilterSelections={initialUfSelections}
           onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
           onSortChange={onConfigChange ? (sort: any) => onConfigChange({ sort }) : undefined}

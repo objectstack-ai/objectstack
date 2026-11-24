@@ -12,7 +12,16 @@
  *   1. the stack's own `stack.tools[]` names (the optional refinement layer);
  *   2. `PLATFORM_PROVIDED_TOOL_NAMES` — the curated registry of tools the
  *      cloud AI runtime registers at boot (spec owns the list; the owning
- *      cloud packages carry the conformance tests);
+ *      cloud packages carry the conformance tests) — and, only for a skill
+ *      offered over MCP (`mcpPrompt` is not `false`), `MCP_DOOR_TOOL_NAMES`:
+ *      every tool the MCP door registers (`@objectstack/mcp` carries the
+ *      conformance test holding the list equal to `wireBridgeTools`), kept
+ *      out of the cloud registry so each of its groups stays the exact set
+ *      one cloud package registers. A door name no cloud package registers
+ *      (`run_action`, `read_file`, `aggregate_records`, …) is absent from an
+ *      in-product turn: a skill whose owner keeps it out of MCP
+ *      (`mcpPrompt: false`) runs only there, so naming one in it is still
+ *      reported, by a verdict that says the name resolves over MCP only;
  *   3. the materialised `action_<name>` family — one tool per declarative
  *      action (`stack.actions` ∪ every object's `actions`), the mechanism the
  *      built-in `actions_executor` subscribes to with `action_*`.
@@ -32,7 +41,11 @@
  * positives (6 references resolve via the registry).
  */
 
-import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
+import {
+  MCP_DOOR_TOOL_NAMES,
+  PLATFORM_PROVIDED_TOOL_NAMES,
+  PLATFORM_TOOL_FAMILY_PREFIXES,
+} from '@objectstack/spec/system';
 
 import { recordsOf, suggestName } from './object-graph.js';
 
@@ -138,8 +151,9 @@ function materialisesAsTool(action: AnyRec): boolean {
 }
 
 /**
- * The full set of tool names resolvable from this stack: declared tool
- * records ∪ the platform registry ∪ the materialised action family.
+ * The set of tool names resolvable from this stack for EVERY skill: declared
+ * tool records ∪ the platform registry ∪ the materialised action family. The
+ * MCP door's tools join it per skill ({@link offeredOverMcp}).
  */
 function collectToolUniverse(stack: AnyRec): Set<string> {
   const universe = new Set<string>(PLATFORM_PROVIDED_TOOL_NAMES);
@@ -182,6 +196,19 @@ function collectUnexposedActionNames(stack: AnyRec): Set<string> {
 }
 
 /**
+ * Can this skill be offered over MCP, where the door's tools are served?
+ * `mcpPrompt: false` keeps a skill off every MCP connection whatever its
+ * binding (`SkillSchema.mcpPrompt`), so it runs only in the in-product agents,
+ * which have none of the door's tools that no cloud AI package registers
+ * (`run_action`, `read_file`, …). Seat ruling on the contract review of this
+ * rule's MCP widening: `mcpPrompt !== false` is the whole condition (no
+ * `instructions` test).
+ */
+function offeredOverMcp(skill: AnyRec): boolean {
+  return skill.mcpPrompt !== false;
+}
+
+/**
  * Validate every `skill.tools[]` reference in a stack. Returns findings
  * (empty = clean).
  */
@@ -189,10 +216,11 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
   const findings: AiToolRefFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const universe = collectToolUniverse(stack);
+  const shared = collectToolUniverse(stack);
+  const withMcpDoorTools = new Set<string>([...shared, ...MCP_DOOR_TOOL_NAMES]);
   const unexposedActions = collectUnexposedActionNames(stack);
 
-  const resolves = (ref: string): boolean => {
+  const resolves = (ref: string, universe: ReadonlySet<string>): boolean => {
     if (ref.endsWith('*')) {
       const prefix = ref.slice(0, -1);
       for (const name of universe) {
@@ -208,12 +236,18 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
     const skill = skills[si];
     const skillName = strName(skill.name) ?? `#${si}`;
     const refs = Array.isArray(skill.tools) ? skill.tools : [];
+    const overMcp = offeredOverMcp(skill);
+    const universe = overMcp ? withMcpDoorTools : shared;
 
     for (let ti = 0; ti < refs.length; ti++) {
       const ref = strName(refs[ti]);
-      if (!ref || resolves(ref)) continue;
+      if (!ref || resolves(ref, universe)) continue;
 
       const isPattern = ref.endsWith('*');
+      // A name (or family) the MCP door serves, on a skill its owner keeps out
+      // of MCP: it would resolve for the same skill offered there, so the
+      // verdict says that instead of calling the name fictional.
+      const mcpOnly = !overMcp && resolves(ref, withMcpDoorTools);
       // The distinct, high-frequency case: the action EXISTS but never
       // materialises. "Fictional name" and "real action that isn't exposed"
       // need different fixes, so they get different messages.
@@ -230,25 +264,31 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
         // [#22161] One verdict sentence per arm, opening on the tool (`where`
         // names the skill); the resolution ladder, when an action materialises
         // as a tool and why it only warns are `os explain ai-skill-tool-unresolved`.
-        message: isPattern
-          ? `Tool family "${ref}" matches no tool this stack can resolve, so the subscription ` +
-            `contributes zero tools at runtime`
-          : unexposed
-            ? `Tool "${ref}" names action "${unexposed}", which does not become an AI tool (it needs ` +
-              `\`ai.exposed\` and a headless path), so the runtime drops the reference`
-            : `Tool "${ref}" resolves to no stack, platform or materialised action tool, so the ` +
-              `runtime drops it and the agent cannot call it.` +
-              suggest(ref, universe),
+        message: mcpOnly
+          ? `${isPattern ? 'Tool family' : 'Tool'} "${ref}" resolves only for a skill offered over MCP, and ` +
+            `this skill sets \`mcpPrompt: false\`, so the in-product agents it runs in have no such tool`
+          : isPattern
+            ? `Tool family "${ref}" matches no tool this stack can resolve, so the subscription ` +
+              `contributes zero tools at runtime`
+            : unexposed
+              ? `Tool "${ref}" names action "${unexposed}", which does not become an AI tool (it needs ` +
+                `\`ai.exposed\` and a headless path), so the runtime drops the reference`
+              : `Tool "${ref}" resolves to no stack, platform or materialised action tool, so the ` +
+                `runtime drops it and the agent cannot call it.` +
+                suggest(ref, universe),
         // [#22161] One remedy line per arm. That a UI-only action stays
         // human-driven by design, the ADR-0109 default path, the family
         // prefixes the runtime materialises (written out there and held to
         // `PLATFORM_TOOL_FAMILY_PREFIXES` by this rule's test) and the
         // runtime-plugin exception are `os explain ai-skill-tool-unresolved`.
-        hint: unexposed
-          ? `Opt "${unexposed}" in with \`ai: { exposed: true, description: '…' }\` and a headless type, or ` +
-            `drop the reference and have the instructions recommend the UI action`
-          : `Back "${ref}" with an opted-in action (\`ai.exposed: true\`, tool \`action_<name>\`) or a ` +
-            `registered platform tool, or remove it and the instructions that mention it`,
+        hint: mcpOnly
+          ? `Drop \`mcpPrompt: false\` if the skill is written for MCP clients, or remove "${ref}" and ` +
+            `the instructions that mention it`
+          : unexposed
+            ? `Opt "${unexposed}" in with \`ai: { exposed: true, description: '…' }\` and a headless type, or ` +
+              `drop the reference and have the instructions recommend the UI action`
+            : `Back "${ref}" with an opted-in action (\`ai.exposed: true\`, tool \`action_<name>\`) or a ` +
+              `registered platform tool, or remove it and the instructions that mention it`,
       });
     }
   }

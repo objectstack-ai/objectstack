@@ -59,6 +59,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -112,8 +115,9 @@ describe('Data pillar Field properties on a read-only package — the reason rea
 
     const apiName = within(body).getByDisplayValue('priority');
     expect(apiName).toBeDisabled();
-    const remove = within(body).getByRole('button', { name: /^Remove/ });
-    expect(remove).toBeDisabled();
+    // objectstack#34794 — Remove is the header ⋯ menu's entry; the menu is disabled.
+    // objectstack#35018 — that menu sits in the rail's one header row now.
+    expect(within(rail.querySelector('header') as HTMLElement).getByTestId('field-more-menu')).toBeDisabled();
   });
 
   it('hovering the disabled controls opens a tooltip with the reason', async () => {
@@ -128,7 +132,7 @@ describe('Data pillar Field properties on a read-only package — the reason rea
     const user = userEvent.setup();
     const rail = await openRail(true);
     const body = rail.querySelector('[data-disabled-reason]') as HTMLElement;
-    // The rail header's own close button (the inspector inside has one too).
+    // The rail header's close button, the rail's only one (objectstack#35018).
     within(rail.querySelector('header') as HTMLElement).getByRole('button', { name: L('engine.studio.close') }).focus();
     await user.tab();
     expect(body).toHaveFocus();
@@ -141,5 +145,47 @@ describe('Data pillar Field properties on a read-only package — the reason rea
     expect(rail.querySelector('[data-disabled-reason]')).toBeNull();
     expect(within(rail).getByDisplayValue('priority')).toBeEnabled();
     expect(screen.queryByText(REASON)).toBeNull();
+  });
+});
+
+/** The text a reader sees in `root`: text in a `hidden` subtree (a collapsed section) is left out. */
+function visibleText(root: HTMLElement): string {
+  const parts: string[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => (node.parentElement?.closest('[hidden]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) parts.push(node.textContent ?? '');
+  return parts.join('');
+}
+
+// objectstack#35018 — the Field properties rail draws ONE header row: the
+// field's label as its title and ONE close button; the field's machine name is
+// not on show until 开发者信息 is opened.
+describe('Data pillar Field properties: one header row (objectstack#35018)', () => {
+  it('one header, one close button, titled by the field label', async () => {
+    const rail = await openRail(false);
+    const closes = within(rail).getAllByRole('button', { name: /^close$/i });
+    expect(closes).toHaveLength(1);
+    expect(rail.querySelectorAll('header')).toHaveLength(1);
+    const header = rail.querySelector('header') as HTMLElement;
+    expect(header).toContainElement(closes[0]);
+    expect(header).toHaveTextContent(L('engine.studio.data.fieldProps'));
+    expect(header).toHaveTextContent('Priority');
+    // The inspector draws no header strip of its own inside the rail.
+    expect(within(rail).getByTestId('inspector-shell-hosted')).toBeInTheDocument();
+    // Its actions (the ⋯ menu) are in the one header row.
+    expect(within(header).getByTestId('field-more-menu')).toBeInTheDocument();
+  });
+
+  it('the machine name is not on show by default; 开发者信息 holds it', async () => {
+    const rail = await openRail(false);
+    expect(visibleText(rail)).not.toContain('priority');
+    // CONTROL: the scan reads the rendered rail — the label is in it, and the
+    // collapsed developer section holds the API name input.
+    expect(visibleText(rail)).toContain('Priority');
+    const developer = within(rail).getByTestId('field-developer-section');
+    expect(within(developer).getByDisplayValue('priority')).not.toBeVisible();
+    fireEvent.click(within(developer).getByTestId('field-developer-toggle'));
+    expect(within(developer).getByDisplayValue('priority')).toBeVisible();
   });
 });

@@ -17,10 +17,44 @@
 //
 // Posture: development / in-memory. `NODE_ENV` is forced to `development` so the
 // auth plugin's dev-admin bootstrap provisions a known, loginable admin (mirrors
-// `objectstack dev`). This is a verification harness — it never touches a real
-// database or production data, and it never touches the host's key custody
+// `objectstack dev`). This is a verification harness: its own database is the
+// in-memory one it creates here, and it never touches the host's key custody
 // either: it seals under a data key held in this process's memory only (see
 // `harnessCryptoProvider`).
+//
+// Datasources the app DECLARES are connected the way `objectstack dev`
+// connects them (ADR-0062 D1/D2, the datasource-connection service below), so
+// a read of an object bound to one reaches that datasource, and so does a
+// write the APP makes there: its seed, or a hook or flow of its own that
+// writes such an object when one of verify's writes fires it. Verify's own
+// writes never reach an object on an EXTERNAL datasource: every derived write
+// family leaves it out and reports it "not exercised", whatever its write gate
+// says (`deriveCrudCases`, `derive.ts`).
+//
+// A declared MANAGED datasource (or one that declares no `schemaMode`) is NOT
+// connected to the database it names. Ruling A of the composition rule
+// (`bootStack`, #22301) already swaps the app's own default store for an
+// ephemeral one; the same swap covers every declared managed store on an
+// engine the platform ships, `mongodb` included: verify's driver factory
+// builds it as a fresh in-memory store (`managed-datasource-stand-in.ts`), so
+// every write that reaches it — verify's derived writes, a REST create, the
+// app's seed, hooks and flows — lands in memory and dies with the kernel, and
+// its objects are exercised by every derived family. A managed datasource on a
+// driver id the platform does not ship (a plugin's) cannot be stood in: the
+// plugin registers its own driver, which the boot would then write through, so
+// `bootStack` refuses to boot while one is declared, naming the datasource and
+// the driver id, before it composes anything. The same holds by NAME: a
+// plugin that registers a driver under a managed datasource's name would be
+// kept by the connection service whatever driver id the datasource declares,
+// so a guard started before every other plugin refuses that boot too, and,
+// for a driver registered after that, the engine's `registerDriver` refuses
+// any driver under that name verify's factory did not build while verify's
+// stand-in does not hold the name (once it does, the engine keeps it and
+// discards the newcomer, and the boot runs on the stand-in). There is no
+// switch around either refusal. Only the local flow run refuses a write to any object routed away
+// from the default store (`flow-run.ts`).
+// `verify.external-datasource-no-writes.test.ts` pins the external half and
+// `verify.managed-datasource-stand-in.test.ts` the managed one.
 
 import { randomBytes } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
@@ -35,7 +69,7 @@ import {
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
-import { AuthPlugin } from '@objectstack/plugin-auth';
+import { AuthManager, AuthPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { SettingsServicePlugin, LocalCryptoProvider } from '@objectstack/service-settings';
@@ -48,6 +82,13 @@ import { MetadataPlugin } from '@objectstack/metadata';
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 import { materializeStackPlugin, resolveCapabilityArgument } from '@objectstack/core';
 import { createHandle, type VerifyHandle } from './handle.js';
+import {
+  createManagedDatasourceDriverGuard,
+  createManagedStandInLedger,
+  createVerifyDatasourceDriverFactory,
+  unstandableManagedDatasourceRefusal,
+  unstandableManagedDatasources,
+} from './managed-datasource-stand-in.js';
 import { constructServedProviders } from './required-providers.js';
 import { registryLevelFor, resolveBootLogLevel, scopeRegistryLogLevel } from './boot-log-level.js';
 
@@ -961,6 +1002,12 @@ async function bootClaimed(
   opts: BootOptions,
   claim: ConfigurationClaim,
 ): Promise<VerifyStack> {
+  // A declared managed datasource on a driver id the platform does not ship
+  // (a plugin's) cannot be stood in, so the boot is refused before anything is
+  // composed, naming each one (`./managed-datasource-stand-in.ts`). No switch.
+  const unstandable = unstandableManagedDatasources(config);
+  if (unstandable.length > 0) throw new Error(unstandableManagedDatasourceRefusal(unstandable));
+
   process.env.NODE_ENV = 'development';
 
   // [#7762] `orgContext` and `multiTenant` are two owners of one invariant —
@@ -1043,6 +1090,16 @@ async function bootClaimed(
   // so the dogfood gate exercises the real declared-default connect path (the
   // §Risk mitigation the ADR promised), not the legacy pre-built DriverPlugin
   // escape hatch.
+  // Mounted FIRST so its start() runs before any other plugin's: it refuses
+  // the boot when a plugin registered a driver under a declared managed
+  // datasource's name, which the connection service would keep in place of
+  // verify's stand-in, and from then on refuses any registration under such a
+  // name of a driver verify's factory did not build while the stand-in does
+  // not hold that name — the ledger below, shared with that factory
+  // (`./managed-datasource-stand-in.ts`). No switch.
+  const managedStandIns = createManagedStandInLedger();
+  const managedDriverGuard = createManagedDatasourceDriverGuard(config, managedStandIns);
+  if (managedDriverGuard) await kernel.use(managedDriverGuard as never);
   await kernel.use(new ObjectQLPlugin());
   const databaseDriver = opts.databaseDriver ?? 'sqlite-wasm';
   await kernel.use(new DefaultDatasourcePlugin({
@@ -1155,7 +1212,17 @@ async function bootClaimed(
       const { DatasourceAdminServicePlugin, createDefaultDatasourceDriverFactory } = await import(
         '@objectstack/service-datasource'
       );
-      await kernel.use(new DatasourceAdminServicePlugin({ driverFactory: createDefaultDatasourceDriverFactory() }));
+      // Verify's own factory over the one `objectstack dev` uses: a declared
+      // MANAGED datasource is built as an ephemeral store of the default
+      // store's engine instead of its real connection, the same swap ruling A
+      // makes for `default` (`./managed-datasource-stand-in.ts`).
+      await kernel.use(new DatasourceAdminServicePlugin({
+        driverFactory: createVerifyDatasourceDriverFactory({
+          real: createDefaultDatasourceDriverFactory(),
+          defaultStore: databaseDriver,
+          standIns: managedStandIns,
+        }),
+      }));
     }
   }
 
@@ -1378,8 +1445,32 @@ async function bootClaimed(
   const restoreRegistryLogLevel = scopeRegistryLogLevel(registryLevelFor(bootLogLevel));
   try {
     await kernel.bootstrap();
+  } catch (e) {
+    // The kernel wraps a failed start() in its rollback message, and names the
+    // plugin whose code made the call: ObjectQL's, for a registration the guard
+    // refused inside its start(). When the guard's refusal is what failed the
+    // boot, its own sentence is the answer; any other failure keeps its error.
+    const refusal = managedDriverGuard?.refusalIn(e);
+    if (refusal !== undefined) throw Object.assign(new Error(refusal), { cause: e });
+    throw e;
   } finally {
     restoreRegistryLogLevel();
+  }
+  // A refusal the caller of `registerDriver` caught and carried on from: the
+  // driver never took the name, and the boot is refused all the same.
+  if (managedDriverGuard?.refusal !== undefined) {
+    try {
+      await (await kernel.getServiceAsync<{ close?(): Promise<void> }>('http-server')).close?.();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      await (kernel as any).shutdown?.();
+    } catch {
+      /* best-effort */
+    }
+    restoreTenancyPosture();
+    throw new Error(managedDriverGuard.refusal);
   }
 
   // Secret fields (Field.secret) refuse to persist without a crypto provider —
@@ -1482,7 +1573,10 @@ async function bootClaimed(
    *
    * Under `invite_only` a sign-up is admitted only by the invitation it
    * presents, so the helper answers the row's id and `signUp` sends it as
-   * `invitationId`, the way a real invitee's accept link carries it.
+   * `invitationId`, the way a real invitee's accept link carries it. That is
+   * now `signUp`'s fallback lane only, for a stack whose auth service offers no
+   * operator door: an account it admits joins no organization until it
+   * verifies its address and accepts (see `signUp`).
    *
    * Best-effort: a stack whose engine or `sys_invitation` object is not
    * reachable simply signs up without the row and lets the gate answer.
@@ -1558,25 +1652,51 @@ async function bootClaimed(
       // in this function.)
       //
       // Posture, load-bearing for all of the above: `@objectstack/verify`
-      // boots in-process against in-memory SQLite and "never touches a real
-      // database or production data" (this file's header). There is no
+      // boots in-process against in-memory SQLite, and "its own database is
+      // the in-memory one it creates" (this file's header): a sign-up's rows
+      // land there, not in any datasource the app declares. There is no
       // deployed plane here that could go on looking healthy while something
       // it claims is persisted did not land.
     }
     return id;
   };
 
+  /**
+   * Mint a fixture MEMBER: a signed-in account bound to the deployment's
+   * organization at creation, as the membership reconciler binds every
+   * account it may bind.
+   *
+   * It enters through the operator door — the ticket the stack's own
+   * `AuthManager` stages for exactly this address
+   * (`stageOperatorProvisioning`, the door the deployment's boot command and
+   * the demo staff use), cleared whatever the sign-up answers. Not the
+   * invitation lane: a sign-up admitted by the invitation it presents joins no
+   * organization while its address is unverified, and joins by accepting the
+   * invitation once verified, so it would mint an invitee, not a member. A
+   * stack whose auth service offers no operator door falls back to that lane
+   * ({@link inviteForAudienceGate}).
+   */
   const signUp = async (
     email: string,
     password = 'Member-Pass-123',
     name?: string,
   ): Promise<string> => {
-    const invitationId = await inviteForAudienceGate(email);
-    const res = await api('/auth/sign-up/email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name: name ?? email.split('@')[0], invitationId }),
-    });
+    const auth = await kernel.getServiceAsync<any>('auth').catch(() => undefined);
+    const canProvision =
+      typeof auth?.stageOperatorProvisioning === 'function' && typeof auth?.clearOperatorProvisioning === 'function';
+    const admission: Record<string, string> = canProvision
+      ? { [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: auth.stageOperatorProvisioning(email) }
+      : { invitationId: await inviteForAudienceGate(email) };
+    let res: Response;
+    try {
+      res = await api('/auth/sign-up/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name: name ?? email.split('@')[0], ...admission }),
+      });
+    } finally {
+      if (canProvision) auth.clearOperatorProvisioning(email);
+    }
     if (!res.ok) {
       throw new Error(`verify signUp failed: ${res.status} ${await res.text()}`);
     }

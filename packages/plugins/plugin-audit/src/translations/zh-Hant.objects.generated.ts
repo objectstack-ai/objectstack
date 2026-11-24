@@ -266,6 +266,18 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       edited_at: {
         label: "編輯時間"
       },
+      is_resolved: {
+        label: "已解決",
+        help: "這則第一層留言開始的討論串是否已解決；回覆上不能設定"
+      },
+      resolved_by: {
+        label: "解決人",
+        help: "解決這一串的人——由平台記錄，作者不能填寫"
+      },
+      resolved_at: {
+        label: "解決時間",
+        help: "這一串被解決的時間——由平台記錄，作者不能填寫"
+      },
       created_at: {
         label: "建立時間"
       },

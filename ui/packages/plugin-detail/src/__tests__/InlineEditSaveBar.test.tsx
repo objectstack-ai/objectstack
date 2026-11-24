@@ -6,9 +6,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import * as React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { InlineEditProvider, useInlineEdit } from '@object-ui/react';
+import { NavigationOverlay, Popover, PopoverTrigger, PopoverContent } from '@object-ui/components';
 import { InlineEditSaveBar } from '../InlineEditSaveBar';
 
 /**
@@ -243,5 +245,228 @@ describe('InlineEditSaveBar — Cancel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe('InlineEditSaveBar — the record changed elsewhere during the edit (objectstack#35685)', () => {
+  function renderBar(data: Record<string, unknown>, update = vi.fn().mockResolvedValue({})) {
+    const bar = (record: Record<string, unknown>) => (
+      <InlineEditProvider canEdit>
+        <Harness />
+        <InlineEditSaveBar
+          dataSource={{ update }}
+          objectName="proj"
+          recordId="p1"
+          data={record}
+          refresh={vi.fn()}
+        />
+      </InlineEditProvider>
+    );
+    const utils = render(bar(data));
+    return { ...utils, update, reread: (record: Record<string, unknown>) => utils.rerender(bar(record)) };
+  }
+  const notice = () => document.querySelector('[data-inline-record-changed]');
+
+  it('keeps the draft, says so, and Save writes the draft over the version now read', async () => {
+    const t = renderBar({ updated_at: 'v1', status: 'draft' });
+    stageTwoFields();
+    expect(notice()).toBeNull();
+    // A list cell beside the drawer saved the record; the drawer read it again.
+    t.reread({ updated_at: 'v2', status: 'review' });
+    expect(notice()).toHaveTextContent('This record was changed elsewhere while you were editing.');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(t.update).toHaveBeenCalledTimes(1));
+    expect(t.update).toHaveBeenCalledWith('proj', 'p1', { status: 'active', budget: 100 }, { ifMatch: 'v2' });
+  });
+
+  it('says nothing while the record is the one the edit began on, nor in the next session', () => {
+    const t = renderBar({ updated_at: 'v1' });
+    stageTwoFields();
+    t.reread({ updated_at: 'v1' });
+    expect(notice()).toBeNull();
+    t.reread({ updated_at: 'v2' });
+    expect(notice()).not.toBeNull();
+    // Cancel ends the session; the next one begins on v2.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    stageTwoFields();
+    expect(notice()).toBeNull();
+  });
+});
+
+/**
+ * objectstack#36472 — the record's side preview (the drawer `NavigationOverlay`
+ * draws) holds an edit session the same way the full page does: the first Esc
+ * ends the edit and the preview stays open; the next Esc closes the preview. A
+ * layer over the record (a lookup or select popover) still closes first. Driven
+ * through the real drawer and its Radix sheet: what is measured is who answers
+ * the key.
+ */
+describe('InlineEditSaveBar — Esc inside the record\'s side preview (objectstack#36472)', () => {
+  /** The preview, opened on one record; ✕/Esc closes it for real. */
+  function Preview({
+    update = vi.fn(),
+    onBack,
+    overList = true,
+    children,
+  }: {
+    update?: ReturnType<typeof vi.fn>;
+    onBack?: () => void;
+    overList?: boolean;
+    children?: React.ReactNode;
+  }) {
+    const [open, setOpen] = React.useState(true);
+    return (
+      <NavigationOverlay
+        isOpen={open}
+        isOverlay
+        selectedRecord={{ id: 'p1' }}
+        mode="drawer"
+        close={() => setOpen(false)}
+        setIsOpen={setOpen}
+        onBack={onBack}
+        title="Project"
+        width="460px"
+        mainContent={overList ? <div>list</div> : undefined}
+      >
+        {() => (
+          <InlineEditProvider canEdit>
+            <Harness />
+            <input aria-label="status-field" />
+            {children}
+            <InlineEditSaveBar dataSource={{ update }} objectName="proj" recordId="p1" data={{ updated_at: 'v1' }} refresh={vi.fn()} />
+          </InlineEditProvider>
+        )}
+      </NavigationOverlay>
+    );
+  }
+
+  const pane = () => document.querySelector('[data-record-drawer-card]');
+  const field = () => screen.getByLabelText('status-field');
+  const editing = () => screen.queryByRole('button', { name: 'Save' }) !== null;
+  const escape = (target: Element) => fireEvent.keyDown(target, { key: 'Escape', code: 'Escape', bubbles: true });
+
+  it('no change: the first Esc ends the edit and the preview stays; the next Esc closes the preview', () => {
+    const update = vi.fn();
+    render(<Preview update={update} />);
+    fireEvent.click(screen.getByText('edit-enter'));
+    expect(editing()).toBe(true);
+    expect(pane()?.contains(screen.getByRole('button', { name: 'Save' }))).toBe(true);
+
+    escape(field());
+    expect(editing()).toBe(false);
+    expect(pane()).not.toBeNull();
+
+    escape(field());
+    expect(pane()).toBeNull();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('a changed field: Esc discards the draft with no write, as on the full page, and the preview stays', () => {
+    const update = vi.fn();
+    render(<Preview update={update} />);
+    stageTwoFields();
+    // Pressed on the drawer itself, not in a field: the session still owns it.
+    escape(pane()!);
+    expect(editing()).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    expect(pane()).not.toBeNull();
+    // The draft is gone: entering again starts clean, and Save writes nothing changed.
+    fireEvent.click(screen.getByText('edit-enter'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(update).not.toHaveBeenCalledWith('proj', 'p1', expect.objectContaining({ status: 'active' }), expect.anything());
+  });
+
+  it('the modal preview with no list behind it behaves the same', () => {
+    render(<Preview overList={false} />);
+    fireEvent.click(screen.getByText('edit-enter'));
+    escape(field());
+    expect(editing()).toBe(false);
+    expect(pane()).not.toBeNull();
+    escape(field());
+    expect(pane()).toBeNull();
+  });
+
+  it('a level below the preview\'s root: Esc ends the edit and does not go back; the next Esc goes back', () => {
+    const onBack = vi.fn();
+    render(<Preview onBack={onBack} />);
+    fireEvent.click(screen.getByText('edit-enter'));
+    escape(pane()!);
+    expect(editing()).toBe(false);
+    expect(onBack).not.toHaveBeenCalled();
+    escape(pane()!);
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('a popover open over the record closes on Esc alone: the edit and the preview stay', () => {
+    render(
+      <Preview>
+        <Popover defaultOpen>
+          <PopoverTrigger>lookup</PopoverTrigger>
+          <PopoverContent>
+            <input aria-label="lookup-search" />
+          </PopoverContent>
+        </Popover>
+      </Preview>,
+    );
+    fireEvent.click(screen.getByText('edit-enter'));
+    const search = screen.getByLabelText('lookup-search');
+    expect(pane()?.contains(search)).toBe(false); // portaled over the preview
+
+    escape(search);
+    expect(screen.queryByLabelText('lookup-search')).toBeNull();
+    expect(editing()).toBe(true);
+    expect(pane()).not.toBeNull();
+
+    escape(field());
+    expect(editing()).toBe(false);
+    expect(pane()).not.toBeNull();
+  });
+
+  it('a layer open when Esc was pressed owns it, even when it is gone by the time the session hears the key', () => {
+    render(<Preview />);
+    fireEvent.click(screen.getByText('edit-enter'));
+    // A floating layer that closes on the key before it bubbles: its node is
+    // removed in the capture phase, as a layer whose close the browser flushes
+    // between listeners is.
+    const popper = document.createElement('div');
+    popper.setAttribute('data-radix-popper-content-wrapper', '');
+    document.body.appendChild(popper);
+    const closeOnEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      popper.remove();
+    };
+    document.addEventListener('keydown', closeOnEsc, true);
+    try {
+      escape(field());
+      expect(document.body.contains(popper)).toBe(false);
+      expect(editing()).toBe(true);
+      expect(pane()).not.toBeNull();
+    } finally {
+      document.removeEventListener('keydown', closeOnEsc, true);
+    }
+    escape(field());
+    expect(editing()).toBe(false);
+  });
+
+  it('CONTROL: not editing, Esc closes the preview as before', () => {
+    render(<Preview />);
+    escape(field());
+    expect(pane()).toBeNull();
+  });
+
+  it('the full page is unchanged: a key a field already handled is not the session\'s', () => {
+    render(
+      <InlineEditProvider canEdit>
+        <Harness />
+        <input aria-label="own-esc" onKeyDown={(e) => e.key === 'Escape' && e.preventDefault()} />
+        <InlineEditSaveBar dataSource={{ update: vi.fn() }} objectName="proj" recordId="p1" data={{}} refresh={vi.fn()} />
+      </InlineEditProvider>,
+    );
+    fireEvent.click(screen.getByText('edit-enter'));
+    escape(screen.getByLabelText('own-esc'));
+    expect(editing()).toBe(true);
+    escape(document.body);
+    expect(editing()).toBe(false);
   });
 });

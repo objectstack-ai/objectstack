@@ -22,7 +22,7 @@ export function getOrgInitials(name: string): string {
 
 export function OrgBadge({ name }: { name: string }) {
   return (
-    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold text-muted-foreground">
+    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-muted-foreground">
       {getOrgInitials(name)}
     </span>
   );

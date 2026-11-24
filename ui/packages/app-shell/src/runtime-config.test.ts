@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { initRuntimeConfig, getRuntimeConfig, getPlatformStage, getProductName, isDefaultProductName, isAiStudioEnabled, isMarketplaceEnabled, isStorageUsageServed, isSingleAppSwitcherHidden, getClientErrorReporting, resetRuntimeConfigForTesting } from './runtime-config.js';
+import { initRuntimeConfig, getRuntimeConfig, getPlatformStage, getProductName, isDefaultProductName, isAiStudioEnabled, isMarketplaceEnabled, isStorageUsageServed, isSingleAppSwitcherHidden, getClientErrorReporting, getUpgradeUrl, getCloudHomeUrl, resetRuntimeConfigForTesting } from './runtime-config.js';
 
 function mockConfig(features: Record<string, unknown>) {
     vi.stubGlobal('fetch', vi.fn(async () => ({
@@ -314,6 +314,93 @@ describe('runtime-config mapStyleUrl (objectstack#26163)', () => {
         mockPayload({ singleEnvironment: false });
         await initRuntimeConfig();
         expect(getRuntimeConfig().mapStyleUrl).toBeUndefined();
+    });
+});
+
+// objectstack#34622 — the top-level `upgradeUrl` RuntimeConfigPlugin serves
+// when the host declares one (objectstack#14514, ruling cloud#1850 option A).
+describe('runtime-config upgradeUrl (objectstack#34622)', () => {
+    // A deep address with a query and a trailing slash: verbatim means neither
+    // is trimmed nor rewritten.
+    const UPGRADE = 'https://cloud.example.test/_console/billing/plan/?org=acme';
+
+    it('is absent before init', () => {
+        resetRuntimeConfigForTesting();
+        expect(getUpgradeUrl()).toBeUndefined();
+        expect('upgradeUrl' in getRuntimeConfig()).toBe(false);
+    });
+
+    it('takes the served upgradeUrl verbatim', async () => {
+        mockPayload({ cloudUrl: 'https://cloud.example.test/', upgradeUrl: UPGRADE });
+        await initRuntimeConfig();
+        expect(getUpgradeUrl()).toBe(UPGRADE);
+        expect(getRuntimeConfig().upgradeUrl).toBe(UPGRADE);
+    });
+
+    it.each([
+        ['absent (the host declared none)', { cloudUrl: 'https://cloud.example.test' }],
+        ['empty', { upgradeUrl: '' }],
+        ['whitespace', { upgradeUrl: '   ' }],
+        ['not a string', { upgradeUrl: 42 }],
+        ['an object', { upgradeUrl: { href: UPGRADE } }],
+        ['nested under features, where it is not read', { features: { upgradeUrl: UPGRADE } }],
+    ])('is absent when the key is %s — never a default composed from cloudUrl', async (_label, payload) => {
+        mockPayload(payload);
+        await initRuntimeConfig();
+        expect(getUpgradeUrl()).toBeUndefined();
+    });
+
+    it('withdraws it when a later fetch no longer serves it', async () => {
+        mockPayload({ upgradeUrl: UPGRADE });
+        await initRuntimeConfig();
+        expect(getUpgradeUrl()).toBe(UPGRADE);
+
+        mockPayload({ singleEnvironment: false });
+        await initRuntimeConfig();
+        expect(getUpgradeUrl()).toBeUndefined();
+    });
+});
+
+// objectstack#34622 — the top-level `cloudHomeUrl` RuntimeConfigPlugin serves
+// when the host declares the control plane's console home page.
+describe('runtime-config cloudHomeUrl (objectstack#34622)', () => {
+    // A trailing slash and a fragment: verbatim means neither is trimmed.
+    const HOME = 'https://cloud.example.test/_console/#home';
+
+    it('is absent before init', () => {
+        resetRuntimeConfigForTesting();
+        expect(getCloudHomeUrl()).toBeUndefined();
+        expect('cloudHomeUrl' in getRuntimeConfig()).toBe(false);
+    });
+
+    it('takes the served cloudHomeUrl verbatim, independently of upgradeUrl', async () => {
+        mockPayload({ cloudUrl: 'https://cloud.example.test/', cloudHomeUrl: HOME });
+        await initRuntimeConfig();
+        expect(getCloudHomeUrl()).toBe(HOME);
+        expect(getRuntimeConfig().cloudHomeUrl).toBe(HOME);
+        expect(getUpgradeUrl()).toBeUndefined();
+    });
+
+    it.each([
+        ['absent (the host declared none)', { cloudUrl: 'https://cloud.example.test', upgradeUrl: 'https://cloud.example.test/billing' }],
+        ['empty', { cloudHomeUrl: '' }],
+        ['whitespace', { cloudHomeUrl: '   ' }],
+        ['not a string', { cloudHomeUrl: 42 }],
+        ['nested under features, where it is not read', { features: { cloudHomeUrl: HOME } }],
+    ])('is absent when the key is %s — never a default composed from cloudUrl', async (_label, payload) => {
+        mockPayload(payload);
+        await initRuntimeConfig();
+        expect(getCloudHomeUrl()).toBeUndefined();
+    });
+
+    it('withdraws it when a later fetch no longer serves it', async () => {
+        mockPayload({ cloudHomeUrl: HOME });
+        await initRuntimeConfig();
+        expect(getCloudHomeUrl()).toBe(HOME);
+
+        mockPayload({ singleEnvironment: false });
+        await initRuntimeConfig();
+        expect(getCloudHomeUrl()).toBeUndefined();
     });
 });
 

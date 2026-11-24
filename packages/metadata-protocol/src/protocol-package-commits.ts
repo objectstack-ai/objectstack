@@ -330,6 +330,8 @@ export class ProtocolPackageCommitsFacet {
                 return { type: row?.type, name: row?.name, body };
             }),
             retryVerb: 'duplicate',
+            // [#35157] The source base stays installed beside its duplicate.
+            sourceStaysInstalled: true,
         });
 
         // [ADR-0146 D10, #28564] ⭐ THE `__c` RESERVATION, JUDGED AGAINST THE
@@ -2019,7 +2021,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'findServedOverlayRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessAddress' | 'packagelessOverlayWriteRefusal' | 'packagelessReadAddress' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector' | 'shippedArtifactsOf' | 'uninstalledNamedBaseRefusal'>, request: RollbackMetaItemRequest): Promise<{
+    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'declinesStoredRow' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'findServedOverlayRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessAddress' | 'packagelessOverlayWriteRefusal' | 'packagelessReadAddress' | 'readItemActiveRows' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'runMutationProjector' | 'shippedArtifactsOf' | 'uninstalledNamedBaseRefusal'>, request: RollbackMetaItemRequest): Promise<{
             success: boolean;
             version: string;
             seq: number;
@@ -2352,7 +2354,9 @@ export class ProtocolPackageCommitsFacet {
                 version: await host.receiptVersion(result.version),
                 seq: result.seq,
                 restoredFromVersion: request.toVersion,
-                message: `Reverted to version ${request.toVersion} — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
+                // [#34681 rider 1] Naming the package of the row it restored,
+                // as the delete's receipt names the row it removed.
+                message: `Reverted to version ${request.toVersion}${rollbackPackageId !== null ? ` (package=${rollbackPackageId})` : ''} — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
                 // Omitted, never `[]`, when there is nothing to report: a clean
                 // rollback's answer bytes are unchanged.
                 ...(advisories.length > 0 ? { advisories } : {}),

@@ -1438,6 +1438,13 @@ export function runRuntimeAuthoringRules(args: {
    * folds the written entry over the target as served, as before.
    */
   storedObjectExtensions?: readonly StoredObjectExtension[];
+  /**
+   * The node types the host's automation engine runs, stated only once the host
+   * has SEALED that vocabulary (`AutomationEngine.getSealedNodeTypeVocabulary()`).
+   * Handed to the rules as `AuthoringRuleContext.flowNodeTypeVocabulary`, the
+   * same value in every pass. Omitted, a flow node's type is not judged.
+   */
+  flowNodeTypeVocabulary?: readonly string[];
 }): RuntimeGateResult {
   const rules = runtimeAuthoringRulesFor(args.type);
   const empty: RuntimeGateResult = { errors: [], advisories: [], rulesRun: [] };
@@ -1504,6 +1511,11 @@ export function runRuntimeAuthoringRules(args: {
     // pass, so it moves no baseline (the baseline carries no written entry).
     ...(args.type === 'object_extension' && args.storedObjectExtensions !== undefined
       ? { storedObjectExtensions: args.storedObjectExtensions }
+      : {}),
+    // The sealed vocabulary, stated by the host; the same value in every pass,
+    // so it moves no baseline.
+    ...(args.flowNodeTypeVocabulary !== undefined && args.flowNodeTypeVocabulary.length > 0
+      ? { flowNodeTypeVocabulary: new Set(args.flowNodeTypeVocabulary) }
       : {}),
   };
   const added = addedFindings(rules, snapshots, ctx, args.type, args.item);

@@ -43,3 +43,20 @@ describe('recentLookups', () => {
     expect(getRecentLookupIds('acc')).toEqual([]);
   });
 });
+
+describe('recentLookups per user (objectstack#35688)', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('keeps one ring per user, so two accounts in one browser never share picks', () => {
+    pushRecentLookupId('acc', 'a', 'u1');
+    pushRecentLookupId('acc', 'b', 'u2');
+    expect(getRecentLookupIds('acc', 'u1')).toEqual(['a']);
+    expect(getRecentLookupIds('acc', 'u2')).toEqual(['b']);
+  });
+
+  it('without a known user the ring is the object\'s alone, as before', () => {
+    pushRecentLookupId('acc', 'a');
+    expect(getRecentLookupIds('acc')).toEqual(['a']);
+    expect(getRecentLookupIds('acc', 'u1')).toEqual([]);
+  });
+});

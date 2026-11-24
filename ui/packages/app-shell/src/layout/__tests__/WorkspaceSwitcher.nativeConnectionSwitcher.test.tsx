@@ -4,11 +4,12 @@
  * WorkspaceSwitcher inside the ObjectStack mobile shell.
  *
  * When the shell's bridge (`window.ObjectStackNative`, read through
- * `@object-ui/mobile`) announces `showConnectionSwitcher`, the header's
- * organization button opens the shell's native switcher and the web menu does
- * not open. With no bridge, or a bridge without that capability, the web menu
- * opens exactly as before. The dropdown is the real one, opened by a real
- * click, so "the web menu opens" is observed, not assumed.
+ * `@object-ui/mobile`) announces `showConnectionSwitcher`, the top bar keeps an
+ * organization button that opens the shell's native switcher, and no web menu
+ * opens. With no bridge, or a bridge without that capability, the top bar
+ * draws no organization button at all: the web switcher is the avatar menu's
+ * (objectstack-ai/objectstack#34591, pinned in `WorkspaceSwitcher.test.tsx`
+ * and the AppHeader harness).
  *
  * In the shell the button renders at ONE membership too: the sheet lists the
  * shell's connections across servers, which this server's membership count
@@ -105,30 +106,18 @@ describe('WorkspaceSwitcher in the mobile shell', () => {
     expect(authState.switchOrganization).not.toHaveBeenCalled();
   });
 
-  it('control: with no bridge, the button opens the web organization menu', async () => {
+  it('control: with no bridge, the top bar draws no organization button (the switcher is in the avatar menu)', () => {
     render(<WorkspaceSwitcher />);
 
-    const button = screen.getByTestId('workspace-switcher');
-    expect(button).not.toHaveAttribute('data-native-switcher');
-
-    await userEvent.click(button);
-
-    expect(await screen.findByRole('menu')).toBeInTheDocument();
-    expect(screen.getByText('Switch organization')).toBeInTheDocument();
-    expect(screen.getByText('Plant B')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-switcher')).not.toBeInTheDocument();
+    expect(screen.queryByText('Plant A')).not.toBeInTheDocument();
   });
 
-  it('control: a shell without the capability keeps the web menu and never calls the native switcher', async () => {
+  it('control: a shell without the capability draws no button and never calls the native switcher', () => {
     const showConnectionSwitcher = installBridge(BASE_METHODS);
     render(<WorkspaceSwitcher />);
 
-    const button = screen.getByTestId('workspace-switcher');
-    expect(button).not.toHaveAttribute('data-native-switcher');
-
-    await userEvent.click(button);
-
-    expect(await screen.findByRole('menu')).toBeInTheDocument();
-    expect(screen.getByText('Plant B')).toBeInTheDocument();
+    expect(screen.queryByTestId('workspace-switcher')).not.toBeInTheDocument();
     expect(showConnectionSwitcher).not.toHaveBeenCalled();
   });
 });

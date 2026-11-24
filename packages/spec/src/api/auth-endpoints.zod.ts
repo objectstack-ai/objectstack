@@ -297,6 +297,12 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
     + 'hidden keeps the sign-in form at /login?local=1, off means the sign-in form offers no local way in. '
     + 'It changes no server door: password sign-in answers the same either way',
   ),
+  afterSignOut: z.enum(['hold', 'identity-provider']).optional().describe(
+    'Where an explicit sign-out returns when the identity provider ends its own session, served on the same terms as localSignIn: '
+    + 'hold sends the browser back to the sign-in page, which holds with a button to sign in again; '
+    + 'identity-provider sends it back through GET /auth/sign-in/direct, so the identity provider shows its own sign-in page. '
+    + 'The sign-in page reads identity-provider only while directSignIn reads true; absent means hold',
+  ),
   phoneNumber: z.boolean().optional().describe(
     'Phone-number sign-in enabled (phone + password, V1.5)',
   ),

@@ -124,11 +124,8 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * The per-row outcome an `execution: 'aggregate'` handler MAY resolve with
  * (#34216, seat ruling 6905490575, option A).
  *
- * **[PLANNED — not enforced]** Declared ahead of its reader. The console does
- * NOT read this value yet: the grid's bulk reader is #34269. Until that lands
- * the grid counts a resolved aggregate call as covering the whole selection,
- * so a handler that cannot cover the whole selection must still REJECT. A
- * handler that resolves with `failed` rows today is reported as full success.
+ * Read by the grid's aggregate reader in `@object-ui/plugin-grid` on every
+ * `execution: 'aggregate'` dispatch, by the rules below.
  *
  * An aggregate dispatch is ONE call carrying the whole selection in
  * `params._selectedIds`, so the call's own success or failure is one outcome
@@ -137,8 +134,8 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * completed", never which rows changed. This is that answer.
  *
  * **Resolve value only — never a rejection.** The object IS the handler's
- * whole resolve value (no wrapper key). Once the reader (#34269) lands, a run
- * that moved some rows and refused others resolves with it, a non-empty
+ * whole resolve value (no wrapper key). A run that moved some rows and
+ * refused others resolves with it, a non-empty
  * `failed` being a legal success answer. A rejection keeps meaning "the
  * handler could not produce an outcome" and stays the one-outcome report: the
  * `/actions` door carries no structured body on a script or flow arm's throw
@@ -153,7 +150,7 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  * `succeeded` and `failed` are the row LISTS themselves and a failure's reason
  * is `message`. A value shaped like either neighbour does not parse.
  *
- * **How the reader (#34269) will read it** — only on an
+ * **How the reader reads it** — only on an
  * `execution: 'aggregate'` dispatch:
  *  - A value with NEITHER a `succeeded` nor a `failed` member (nothing, a
  *    summary, an artifact link) keeps the one-outcome report: the shape is
@@ -164,36 +161,37 @@ export type BulkActionExecution = z.input<typeof BulkActionExecutionSchema>;
  *    written by a handler, not by an author) and carry no meaning, so a
  *    handler may return a summary beside them.
  *
- * **How the reader (#34269) will count ids.** Every id must be one of the
+ * **How the reader counts ids.** Every id must be one of the
  * dispatched `params._selectedIds`:
  *  - an id outside the selection is a handler bug: dropped, counted nowhere;
  *  - a duplicate id counts once;
  *  - an id in BOTH lists counts as failed;
+ *  - an id in `failed` twice is reported with its FIRST entry's `message`;
  *  - a selected id in NEITHER list is reported as not confirmed, never as
  *    succeeded.
  */
 export const BulkActionResultSchema = lazySchema(() => z.looseObject({
   succeeded: z.array(z.string()).describe(
-    'Ids of the selected rows the handler wrote. Each must be one of the dispatched `params._selectedIds`. The planned '
-    + 'reader will drop an id outside the selection, count a duplicate once, and count an id that is also in `failed` as failed.',
+    'Ids of the selected rows the handler wrote. Each must be one of the dispatched `params._selectedIds`. The '
+    + 'reader drops an id outside the selection, counts a duplicate once, and counts an id that is also in `failed` as failed.',
   ),
   failed: z.array(z.looseObject({
     id: z.string().describe('Id of a selected row the handler did not write: one of the dispatched `params._selectedIds`.'),
     message: z.string().describe('Why this row was not written, as the person running the action should read it.'),
   })).describe(
-    'One entry per selected row the handler did not write, each with its own reason (`message`, not `error`). The planned '
-    + 'reader will drop an id outside `params._selectedIds` and count a duplicate once.',
+    'One entry per selected row the handler did not write, each with its own reason (`message`, not `error`). The '
+    + 'reader drops an id outside `params._selectedIds` and counts a duplicate once; an id listed twice keeps its first `message`.',
   ),
 }).describe(
-  '[PLANNED — not enforced] The per-row outcome an `execution: \'aggregate\'` bulk action handler MAY resolve with: '
+  'The per-row outcome an `execution: \'aggregate\'` bulk action handler MAY resolve with: '
   + '`{ succeeded: [ids], failed: [{ id, message }] }` as its whole resolve value, never attached to a rejection (a '
-  + 'rejection stays one outcome for the selection). The console does not read it yet, so until its reader lands a '
-  + 'handler that cannot cover the whole selection must still reject: a resolved aggregate call is counted as covering '
-  + 'every selected row. Not the data plane\'s batch answer: here `succeeded` and `failed` are row lists, not counts. '
-  + 'Once read: a value with neither member keeps the one-outcome report; a value with either member that does not '
+  + 'rejection stays one outcome for the selection). The console reads it on every aggregate dispatch. Not the data '
+  + 'plane\'s batch answer: here `succeeded` and `failed` are row lists, not counts. '
+  + 'A value with neither member keeps the one-outcome report; a value with either member that does not '
   + 'parse is reported as unreadable, never as full success; members beyond the two lists carry no meaning. Ids must be '
   + 'dispatched `params._selectedIds`: an id outside the selection is dropped, a duplicate counts once, an id in both '
-  + 'lists counts as failed, and a selected id in neither list is reported as not confirmed, never as succeeded.',
+  + 'lists counts as failed, an id in `failed` twice keeps its first message, and a selected id in neither list is '
+  + 'reported as not confirmed, never as succeeded.',
 ));
 export type BulkActionResult = z.input<typeof BulkActionResultSchema>;
 /** Post-parse shape of {@link BulkActionResult} — defaults applied, transforms run (ADR-0122). */

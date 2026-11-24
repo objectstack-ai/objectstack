@@ -10,12 +10,16 @@
  * bridge's definitions carry, never a copy in this package; the arguments reach
  * the bridge as sent, with the tool's page cap beside them; an undeclared key is
  * refused before the bridge is asked, in the spec's words; a refusal the bridge
- * throws comes back as the coded tool error.
+ * throws comes back as the coded tool error; `list_datasets.candidates` comes
+ * back exactly as the executor answered it (#34763); `list_datasets.nextStep`
+ * and `query_dataset.sourceLine` reach the client as the executor wrote them,
+ * one sentence for one caller on HTTP and on stdio (#34919).
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   LIST_DATASETS_TOOL_NAME,
+  ListDatasetsOutputSchema,
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
   QUERY_DATASET_TOOL_NAME,
@@ -26,7 +30,8 @@ import { RETIRED_KEY_UPGRADE_GUIDE_SENTENCE } from '@objectstack/spec/shared';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import { hasDatasetTools, type McpDataBridge } from './mcp-http-tools.js';
 import { createStdioDataBridge, type StdioDatasetToolsService } from './stdio-data-bridge.js';
-import { renderSkillMarkdown } from './skill-md.js';
+import { ASK_SECTION_HEADING, renderSkillMarkdown } from './skill-md.js';
+import { AnalyticsServicePlugin, type AnalyticsService } from '@objectstack/service-analytics';
 
 const DATASET_TOOLS = [LIST_DATASETS_TOOL_NAME, QUERY_DATASET_TOOL_NAME].sort();
 
@@ -273,23 +278,22 @@ describe('[ADR-0149 D2] dataset tools on MCP — calls', () => {
 });
 
 describe('[ADR-0149 D3] the SKILL.md teaches the selection rule where the pair registers', () => {
-  it('renders both tools and the rule for a host whose bridge carries them', () => {
+  it('renders both tools and the ask-data data loop for a host whose bridge carries them', () => {
     const md = renderSkillMarkdown({ datasetTools: true });
     for (const name of DATASET_TOOLS) expect(md).toContain(`**${name}(`);
-    expect(md).toContain('Choosing between a metric and an object query');
+    expect(md).toContain(`\n${ASK_SECTION_HEADING}\n`);
   });
 
-  it('renders the rule for a question the data cannot answer beside the selection rule', () => {
+  // [#34686] The data loop's words (the selection rule, the fallback, and a
+  // question the data cannot answer) are the published ask-data skill's, and
+  // skill-single-source-34686.test.ts pins the served section byte-equal to
+  // it. What stays here is where the section sits and when it is absent.
+  it('renders the data loop after the tool entries, and not without the pair', () => {
     const md = renderSkillMarkdown({ datasetTools: true });
-    const rule = md.indexOf('**When the data cannot answer.**');
-    expect(rule).toBeGreaterThan(md.indexOf('Choosing between a metric and an object query'));
-    const text = md.slice(rule, md.indexOf('\n- ', rule) === -1 ? undefined : md.indexOf('\n- ', rule));
-    expect(text).toContain('say the data you can read does not record it');
-    expect(text).toContain('offer the computation');
-    expect(text).toContain('Never fill the gap with an assumed value');
-    expect(text).toContain('nor draw a conclusion from one');
-    expect(text).toContain('Any figure you add comes from a tool answer; cite it.');
-    expect(renderSkillMarkdown({})).not.toContain('When the data cannot answer');
+    const section = md.indexOf(`\n${ASK_SECTION_HEADING}\n`);
+    expect(section).toBeGreaterThan(md.indexOf('**query_dataset('));
+    expect(section).toBeLessThan(md.indexOf('\n## Conventions & gotchas'));
+    expect(renderSkillMarkdown({})).not.toContain(ASK_SECTION_HEADING);
   });
 
   it('renders them for a data:read grant, and not without one or without the pair', () => {
@@ -368,5 +372,172 @@ describe('[ADR-0149 D2] dataset tools on MCP — the spec refusal is kept whole'
     expect(text).toContain('`zzUndeclaredProbeKey`');
     expect(text).toContain(RETIRED_KEY_UPGRADE_GUIDE_SENTENCE);
     expect(bridge.calls.filter((c) => c[0] === 'listDatasets')).toEqual([]);
+  });
+});
+
+/**
+ * [#34763, ADR-0149 D3 amendment note] `list_datasets.candidates` reaches an
+ * MCP client exactly as the executor answered it. The members offered for a
+ * term that matched nothing are chosen by the service-analytics executor
+ * (`findDatasetTermCandidates`, pinned there); the MCP tool layer holds no copy
+ * of that rule and must neither drop the key, reorder its entries nor add one.
+ */
+describe('[#34763] list_datasets candidates pass through MCP unchanged', () => {
+  const WITH_CANDIDATES: ListDatasetsOutput = {
+    datasets: [
+      {
+        name: 'showcase_invoice_metrics',
+        label: 'Invoice Metrics',
+        object: 'showcase_invoice',
+        dimensions: [{ name: 'status', label: 'Status', type: 'string' }],
+        measures: [
+          { name: 'invoice_count', label: 'Invoices', aggregate: 'count' },
+          { name: 'paid_count', label: 'Paid Invoices', aggregate: 'count' },
+        ],
+        matches: [],
+      },
+    ],
+    candidates: [
+      { term: 'invoice', dataset: 'showcase_invoice_metrics', member: 'measures.invoice_count' },
+      { term: 'invoice', dataset: 'showcase_invoice_metrics', member: 'measures.paid_count' },
+    ],
+  };
+  const WITHOUT_CANDIDATES: ListDatasetsOutput = {
+    datasets: [{
+      ...WITH_CANDIDATES.datasets[0],
+      matches: [{ term: 'invoices', member: 'measures.invoice_count', matchedOn: 'label' }],
+    }],
+  };
+
+  function bridgeAnswering(answer: ListDatasetsOutput) {
+    const bridge = makeBridge();
+    bridge.listDatasets = async (input) => {
+      bridge.calls.push(['listDatasets', input]);
+      return answer;
+    };
+    return bridge;
+  }
+
+  let runtime: MCPServerRuntime;
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+  });
+
+  it('the fixtures are answers the spec accepts', () => {
+    expect(ListDatasetsOutputSchema.safeParse(WITH_CANDIDATES).success).toBe(true);
+    expect(ListDatasetsOutputSchema.safeParse(WITHOUT_CANDIDATES).success).toBe(true);
+  });
+
+  it('passes the executor\'s candidates through unchanged: same entries, same order, nothing added', async () => {
+    const bridge = bridgeAnswering(WITH_CANDIDATES);
+    const json = await callTool(runtime, bridge, LIST_DATASETS_TOOL_NAME, { terms: ['invoice'] });
+    expect(json.result?.isError).toBeFalsy();
+    const answer = JSON.parse(json.result!.content[0].text) as ListDatasetsOutput;
+    expect(answer).toEqual(WITH_CANDIDATES);
+    expect(answer.candidates).toEqual(WITH_CANDIDATES.candidates);
+    expect(bridge.calls.filter((c) => c[0] === 'listDatasets')).toEqual([['listDatasets', { terms: ['invoice'] }]]);
+  });
+
+  it('an answer without candidates comes back without the key', async () => {
+    const json = await callTool(runtime, bridgeAnswering(WITHOUT_CANDIDATES), LIST_DATASETS_TOOL_NAME, { terms: ['invoices'] });
+    expect(json.result?.isError).toBeFalsy();
+    const answer = JSON.parse(json.result!.content[0].text) as ListDatasetsOutput;
+    expect(answer).toEqual(WITHOUT_CANDIDATES);
+    expect('candidates' in answer).toBe(false);
+  });
+});
+
+/**
+ * [#34919, ADR-0149 M1 note] `list_datasets.nextStep` and
+ * `query_dataset.sourceLine` are written by the service-analytics executor
+ * (`dataset-next-step.ts`, pinned there); the MCP door holds no copy of either
+ * sentence. Here the REAL executor, over a service `AnalyticsServicePlugin`
+ * wires, answers one caller through the HTTP tool layer and through the stdio
+ * bridge: both doors serve the executor's answer unchanged, so the caller reads
+ * the same decision and the same sentence, in its locale, on either transport.
+ */
+describe('[#34919] nextStep and sourceLine reach the client unchanged, one sentence on HTTP and stdio', () => {
+  const PRINCIPAL = { userId: 'u_key', tenantId: 'org_1', locale: 'zh-CN' };
+  const OBJECTS: Record<string, { fields: Record<string, { type: string }> }> = {
+    crm_opportunity: { fields: { id: { type: 'text' }, stage: { type: 'text' }, amount: { type: 'number' } } },
+  };
+  const METRICS = {
+    name: 'crm_opportunity_metrics',
+    label: 'Opportunity Metrics',
+    object: 'crm_opportunity',
+    dimensions: [{ name: 'stage', label: 'Stage', field: 'stage', type: 'string', synonyms: ['销售阶段'] }],
+    measures: [
+      { name: 'opp_count', label: 'Opportunities', aggregate: 'count', synonyms: ['商机数'] },
+      { name: 'total_amount', label: 'Total Amount', aggregate: 'sum', field: 'amount', synonyms: ['商机金额'] },
+    ],
+  };
+
+  async function wiredService(): Promise<AnalyticsService> {
+    const registered: Record<string, unknown> = {};
+    const engine = {
+      execute: async () => ({ rows: [{ stage: 'won', opp_count: 3 }] }),
+      hasObjectMiddleware: () => false,
+      getObject: (name: string) => OBJECTS[name],
+      resolveEffectiveDatasource: () => undefined,
+    };
+    const allFields = async (object: string) => Object.keys(OBJECTS[object]?.fields ?? {});
+    const security = { getReadFilter: async () => undefined, canReadObject: () => true, getReadableFields: allFields, getQueryableFields: allFields };
+    const ctx = {
+      getService: (name: string) => (name === 'security' ? security : name === 'data' ? engine : registered[name]),
+      registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+      replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+      logger: { info() {}, warn() {}, error() {}, debug() {} },
+    };
+    await new AnalyticsServicePlugin({ queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }) })
+      .init(ctx as never);
+    return registered.analytics as AnalyticsService;
+  }
+
+  /** The HTTP door's bridge members over the executor, as the runtime binds them to the request's principal. */
+  function httpBridge(service: AnalyticsService): McpDataBridge {
+    const executor = () => service.datasetTools({ loadDatasets: async () => [METRICS] });
+    const bridge = makeBridge();
+    bridge.listDatasets = (input) => executor().listDatasets(input, PRINCIPAL as never);
+    bridge.queryDataset = (input) => executor().queryDataset(input, PRINCIPAL as never);
+    bridge.datasetToolDefinitions = () => executor().definitions;
+    return bridge;
+  }
+
+  function stdioBridge(service: AnalyticsService) {
+    return createStdioDataBridge({
+      engine: {} as any,
+      metadataService: { list: async () => [] } as any,
+      protocol: () => ({ getMetaItems: async () => ({ items: [METRICS] }) }) as any,
+      resolvePrincipal: async () => PRINCIPAL as any,
+      datasetTools: service as unknown as StdioDatasetToolsService,
+    });
+  }
+
+  it('list_datasets: the same nextStep on both doors, the executor\'s answer unchanged', async () => {
+    const service = await wiredService();
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const input = { terms: ['商机金额', '销售阶段'] };
+    const direct = await service.datasetTools({ loadDatasets: async () => [METRICS] }).listDatasets(input, PRINCIPAL as never);
+    const json = await callTool(runtime, httpBridge(service), LIST_DATASETS_TOOL_NAME, input);
+    expect(json.result?.isError).toBeFalsy();
+    const viaHttp = JSON.parse(json.result!.content[0].text) as ListDatasetsOutput;
+    const viaStdio = await stdioBridge(service).listDatasets!(input);
+    expect(viaHttp).toEqual(direct);
+    expect(direct.nextStep).toMatchObject({ decision: 'one_measure', terms: ['商机金额'] });
+    expect(viaStdio.nextStep).toEqual(viaHttp.nextStep);
+    expect(ListDatasetsOutputSchema.safeParse(viaHttp).success).toBe(true);
+  });
+
+  it('query_dataset: the same sourceLine on both doors, the executor\'s answer unchanged', async () => {
+    const service = await wiredService();
+    const runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    const input = { datasetName: 'crm_opportunity_metrics', selection: { measures: ['opp_count'], dimensions: ['stage'] } };
+    const json = await callTool(runtime, httpBridge(service), QUERY_DATASET_TOOL_NAME, input);
+    expect(json.result?.isError).toBeFalsy();
+    const viaHttp = JSON.parse(json.result!.content[0].text) as QueryDatasetOutput;
+    const viaStdio = await stdioBridge(service).queryDataset!(input, { maxRows: 50 });
+    expect(viaHttp.sourceLine).toEqual(expect.any(String));
+    for (const label of ['Opportunities', 'Opportunity Metrics', 'Stage']) expect(viaHttp.sourceLine).toContain(label);
+    expect(viaStdio.sourceLine).toBe(viaHttp.sourceLine);
   });
 });

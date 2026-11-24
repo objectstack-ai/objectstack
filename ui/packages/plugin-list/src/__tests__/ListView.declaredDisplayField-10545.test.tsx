@@ -56,6 +56,7 @@ vi.mock('@object-ui/components', async (importOriginal) => {
 });
 
 import { ListView } from '../ListView';
+import { openAdvancedFilter } from './conditionPanels';
 
 /** The lookup def with no display spelling at all. */
 const BARE_LOOKUP = { type: 'lookup', label: 'Account', reference: 'crm_account' } as const;
@@ -103,7 +104,7 @@ async function lookupCandidateFor(accountDef: Record<string, unknown>): Promise<
     </SchemaRendererProvider>,
   );
   fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-  await screen.findByText('Filter Records');
+  await openAdvancedFilter();
   // `referenceTo` is read off the definition only (objectui#7531), so seeing
   // it proves the candidate below came from the `objectDef.fields` branch.
   await waitFor(() => {

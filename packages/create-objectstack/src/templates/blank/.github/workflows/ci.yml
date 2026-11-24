@@ -65,3 +65,8 @@ jobs:
       - run: pnpm lint
 
       - run: pnpm typecheck
+
+      # The app's own tests: business facts the platform cannot derive, pinned
+      # against the real engine with `bootStack` (`note.test.ts` is the shape).
+      # The three gates above check consistency; this checks intent.
+      - run: pnpm test

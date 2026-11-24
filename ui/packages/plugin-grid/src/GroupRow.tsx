@@ -14,7 +14,10 @@ import type { AggregationResult } from './useGroupedData';
 export interface GroupRowProps {
   /** Unique key identifying this group */
   groupKey: string;
-  /** Display label for the group (field value or "(empty)") */
+  /**
+   * Display label for the group: the field value, or for an empty key the
+   * grid's empty-value string `grid.empty` ("Empty" in English).
+   */
   label: string;
   /**
    * The group's size. On a server-grouped grid this is the header query's
@@ -116,7 +119,7 @@ export const GroupRow: React.FC<GroupRowProps> = ({
           ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
         {fieldLabel && (
-          <span className="text-[11px] font-medium text-muted-foreground tracking-wide group-label-caption">
+          <span className="text-xs font-medium text-muted-foreground tracking-wide group-label-caption">
             {fieldLabel}
           </span>
         )}

@@ -204,6 +204,69 @@ export function oracleUuidRawBinding(
   throw err;
 }
 
+/**
+ * {@link UUID_TEXT} as an Oracle regular expression, for `REGEXP_LIKE` with
+ * the match parameter {@link ORACLE_UUID_TEXT_MATCH}: derived from the one
+ * constant, never restated, so the subquery's gate and the list's gate cannot
+ * drift. Oracle's POSIX syntax has no `(?:…)`, so each non-capturing group is
+ * written as a plain one (the same language). A pattern this derivation cannot
+ * carry (a flag other than `i`, a `?` knex would read as a binding, a quote
+ * that would end the SQL literal, a construct still Perl-only) throws at load.
+ */
+export const ORACLE_UUID_TEXT_PATTERN = oracleRegexFrom(UUID_TEXT, 'i');
+
+/** `REGEXP_LIKE`'s match parameter for {@link ORACLE_UUID_TEXT_PATTERN}: {@link UUID_TEXT}'s `i` flag. */
+export const ORACLE_UUID_TEXT_MATCH = 'i';
+
+function oracleRegexFrom(re: RegExp, flags: string): string {
+  const pattern = re.source.replace(/\(\?:/g, '(');
+  if (re.flags !== flags || /[?'\\]/.test(pattern)) {
+    throw new Error(`[driver-sql] UUID_TEXT (/${re.source}/${re.flags}) has no Oracle REGEXP_LIKE spelling here: extend oracleRegexFrom.`);
+  }
+  return pattern;
+}
+
+/**
+ * [ADR-0155 O2, ruling A carried to Oracle] {@link oracleUuidRawBinding}'s
+ * conversion written over a text COLUMN instead of a bound value: the
+ * projection of a fixed-read leaf's inner read (`record_id`, `VARCHAR2`) when
+ * the outer column it is compared with is a `RAW(16)` uuid column, as the
+ * catalog reports it (`SqlDriver#primeOracleRawUuidColumns`, the prime the
+ * list's binding reads).
+ *
+ * ```sql
+ * "ID" IN (SELECT HEXTORAW(CASE WHEN REGEXP_LIKE("record_id", '<UUID_TEXT>', 'i')
+ *                               THEN REPLACE("record_id", '-', '')
+ *                               ELSE 'not-a-uuid' END)
+ *            FROM "sys_record_share" WHERE …)
+ * ```
+ *
+ * - **Uuid text converts as the list binds it.** A grant {@link UUID_TEXT}
+ *   admits (8-4-4-4-12 or 32 undashed hex digits, either case) is the same 16
+ *   bytes `HEXTORAW(?)` binds for it in the list, so the leaf answers the
+ *   list's rows.
+ * - **Anything else fails the statement, loudly.** Every grant the list
+ *   refuses before SQL (`INVALID_FILTER` / 400) projects `'not-a-uuid'`, which
+ *   `HEXTORAW` refuses: ORA-01465, `DATABASE_ERROR` / 500, the statement's
+ *   failure in place of the list's (ADR-0155 Consequences; option A: "a
+ *   malformed grant id fails the statement"). ⛔ Never a bare
+ *   `HEXTORAW(REPLACE(…))`: measured on Oracle Free 23ai, it converts 32
+ *   digits with misplaced dashes to a full key (a row the list refuses), left
+ *   pads 31 digits to 16 bytes (a row the list refuses), and turns a dash-only
+ *   grant into NULL, under which the negation answers no row.
+ *
+ * Without any projection Oracle compares the `RAW` column as its upper-case
+ * hex text, which no dashed or lower-case grant equals: the leaf answers no row
+ * and its negation every row, with no error.
+ */
+export function oracleUuidRawProjection(knexInstance: Knex, column: string): Knex.Raw {
+  return knexInstance.raw(
+    `HEXTORAW(CASE WHEN REGEXP_LIKE(??, '${ORACLE_UUID_TEXT_PATTERN}', '${ORACLE_UUID_TEXT_MATCH}') ` +
+      `THEN REPLACE(??, '-', '') ELSE 'not-a-uuid' END)`,
+    [column, column],
+  );
+}
+
 /** Whether `value` is uuid text a `RAW(16)` column can be bound to — see {@link UUID_TEXT}. */
 export function isOracleUuidText(value: unknown): value is string {
   return typeof value === 'string' && UUID_TEXT.test(value);

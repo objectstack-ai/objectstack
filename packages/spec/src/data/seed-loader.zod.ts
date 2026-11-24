@@ -418,8 +418,8 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
    * and left as it was. Each id appears once, in record order. Empty on a
    * dry run, which writes nothing and matches nothing.
    *
-   * [#30348] Exactly what the loader fills, per mode: `insert` / `replace` —
-   * each row an insert created; `ignore` (the default since #30081) — each row
+   * [#30348] Exactly what the loader fills, per mode: `ignore` (the default
+   * since #30081; the unkeyed `insert` / `replace` modes are retired, #34613) — each row
    * an insert created AND each existing row a record's key matched, which the
    * mode then leaves as it was; `upsert` — created, updated, and matched-but-
    * unchanged rows; `update` — updated and matched-but-unchanged rows (an

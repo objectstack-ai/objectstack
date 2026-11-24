@@ -12,10 +12,11 @@
  * stage on demand; two sessions on one live Postgres are the CLI's live file.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import {
   acquireDatabaseSessionLock,
+  DATABASE_SESSION_LOCK_ANSWER_MS,
   databaseSessionLockPgKey,
   tryDatabaseSessionLock,
 } from './database-session-lock.js';
@@ -233,5 +234,111 @@ describe('ownLocks: a run that locks several datasources never contends with its
     ]);
     expect(onWait).not.toHaveBeenCalled();
     expect(second.destroyed).toEqual([second.connection]);
+  });
+});
+
+describe('a stalled session never hangs its holder: the probe, the release and the close each time out (ADR-0154 D3 amended)', () => {
+  // A connection stalled half-open — no reply and no reset — never fails a statement: it never answers at all.
+  const NEVER = () => new Promise<never>(() => {});
+
+  /** A fake Knex whose session answers until `stall` names a step, and then never answers that step again. */
+  function stallingDriver(dialect: 'postgres' | 'mysql') {
+    const stall = { probe: false, unlock: false, close: false };
+    const statements: string[] = [];
+    const closes: unknown[] = [];
+    const connection = { id: 'raw-stall' };
+    const shape = (row: unknown) => (dialect === 'mysql' ? [[row], []] : { rows: [row] });
+    const knex = {
+      client: {
+        acquireRawConnection: async () => connection,
+        destroyRawConnection: (c: unknown) => { closes.push(c); return stall.close ? NEVER() : Promise.resolve(); },
+      },
+      raw: (sql: string) => ({
+        connection: (): Promise<unknown> => {
+          statements.push(sql);
+          if (sql === 'select 1 as held' && stall.probe) return NEVER();
+          if (/unlock|RELEASE_LOCK/.test(sql) && stall.unlock) return NEVER();
+          return Promise.resolve(shape({ locked: dialect === 'mysql' ? 1 : true, held: 1 }));
+        },
+      }),
+    };
+    return { driver: { dialectName: dialect, getKnex: () => knex }, stall, statements, closes, connection };
+  }
+
+  /** Settle `step` on a fake clock: what it answered by `ms` from now, or the string 'still waiting'. */
+  async function answerWithin<T>(step: Promise<T>, ms: number): Promise<T | 'still waiting'> {
+    let answer: T | 'still waiting' = 'still waiting';
+    void step.then((value) => { answer = value; });
+    await vi.advanceTimersByTimeAsync(ms);
+    return answer;
+  }
+
+  async function heldLock(dialect: 'postgres' | 'mysql') {
+    const f = stallingDriver(dialect);
+    const lock = await tryDatabaseSessionLock(f.driver, NAME);
+    if (lock === null || lock === 'held') throw new Error('expected a lock');
+    return { ...f, lock };
+  }
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('the bound is a few seconds: three orders of magnitude over a live session\'s answer, far short of a hang', () => {
+    expect(DATABASE_SESSION_LOCK_ANSWER_MS).toBe(10_000);
+  });
+
+  for (const dialect of ['postgres', 'mysql'] as const) {
+    it(`${dialect}: a probe the session never answers reads false — the lock is lost — once the bound runs out, and is never sent again`, async () => {
+      const f = await heldLock(dialect);
+      f.stall.probe = true;
+      const probe = f.lock.isHeld();
+      expect(await answerWithin(probe, DATABASE_SESSION_LOCK_ANSWER_MS - 1)).toBe('still waiting');
+      expect(await answerWithin(probe, 1)).toBe(false);
+      const sent = f.statements.length;
+      expect(await answerWithin(f.lock.isHeld(), 0)).toBe(false);
+      expect(f.statements).toHaveLength(sent);
+    });
+  }
+
+  it('a release after a probe that timed out sends no unlock to the stalled session: it closes it, and that close is bounded too', async () => {
+    const f = await heldLock('postgres');
+    f.stall.probe = true;
+    f.stall.close = true;
+    expect(await answerWithin(f.lock.isHeld(), DATABASE_SESSION_LOCK_ANSWER_MS)).toBe(false);
+    expect(await answerWithin(f.lock.release(), DATABASE_SESSION_LOCK_ANSWER_MS)).toBeUndefined();
+    expect(f.statements.filter((sql) => /unlock/.test(sql))).toEqual([]);
+    expect(f.closes).toEqual([f.connection]);
+  });
+
+  for (const dialect of ['postgres', 'mysql'] as const) {
+    it(`${dialect}: an unlock the session never answers gives up once the bound runs out, and the session is closed — closing releases the lock`, async () => {
+      const f = await heldLock(dialect);
+      f.stall.unlock = true;
+      const release = f.lock.release();
+      expect(await answerWithin(release, DATABASE_SESSION_LOCK_ANSWER_MS - 1)).toBe('still waiting');
+      expect(f.closes).toEqual([]);
+      expect(await answerWithin(release, 1)).toBeUndefined();
+      expect(f.statements.at(-1)).toBe(dialect === 'postgres' ? 'select pg_advisory_unlock(?::bigint)' : 'select RELEASE_LOCK(?)');
+      expect(f.closes).toEqual([f.connection]);
+      await expect(f.lock.isHeld()).resolves.toBe(false);
+    });
+  }
+
+  it('a close the connection never finishes gives up once the bound runs out: release resolves, and never throws', async () => {
+    const f = await heldLock('postgres');
+    f.stall.close = true;
+    const release = f.lock.release();
+    expect(await answerWithin(release, DATABASE_SESSION_LOCK_ANSWER_MS - 1)).toBe('still waiting');
+    expect(f.closes).toEqual([f.connection]);
+    expect(await answerWithin(release, 1)).toBeUndefined();
+  });
+
+  it('a live session is unchanged: the probe reads true, the release unlocks and closes, with no time passing', async () => {
+    const f = await heldLock('postgres');
+    expect(await answerWithin(f.lock.isHeld(), 0)).toBe(true);
+    expect(await answerWithin(f.lock.release(), 0)).toBeUndefined();
+    expect(f.statements).toEqual(['select pg_try_advisory_lock(?::bigint) as locked', 'select 1 as held', 'select pg_advisory_unlock(?::bigint)']);
+    expect(f.closes).toEqual([f.connection]);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

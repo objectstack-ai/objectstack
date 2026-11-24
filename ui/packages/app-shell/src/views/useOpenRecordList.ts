@@ -7,14 +7,14 @@
  */
 
 import { useCallback, useMemo } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   convertFiltersToAST,
   resolveFilterPlaceholders,
   toFilterNodeSafely,
   type FilterTokenScope,
 } from '@object-ui/core';
-import { useFilterScope } from '@object-ui/react';
+import { useFilterScope, type DrillRecordOrigin } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { parseFilterAST } from '@objectstack/spec/data';
 import {
@@ -248,6 +248,8 @@ export interface RecordListDrillNavigation {
   openRecordList: (objectName: string, filter?: Record<string, unknown>) => void;
   /** Whether the list route can say this drill's filter exactly. */
   canOpenRecordList: (objectName: string, filter?: Record<string, unknown>) => boolean;
+  /** Open a drilled record's page, this page as its way back (objectstack-ai/objectstack#36256). */
+  openRecord: (objectName: string, recordId: string, origin?: DrillRecordOrigin) => void;
 }
 
 /**
@@ -308,8 +310,9 @@ export interface RecordListDrillNavigation {
  * everything else through untouched, so a placeholder-free drill produces a
  * byte-identical URL.
  */
-export function useRecordListDrillNavigation(): RecordListDrillNavigation {
+export function useRecordListDrillNavigation(originLabel?: string): RecordListDrillNavigation {
   const navigate = useNavigate();
+  const location = useLocation();
   const { appName } = useParams<{ appName?: string }>();
   // Session scope for `{current_user_id}` / `{current_org_id}`. Read at hook
   // level — the returned handlers are callbacks, and hooks cannot be called
@@ -337,7 +340,31 @@ export function useRecordListDrillNavigation(): RecordListDrillNavigation {
     },
     [navigate, appName, filterScope, canRead],
   );
-  return useMemo(() => ({ openRecordList, canOpenRecordList }), [openRecordList, canOpenRecordList]);
+  // objectstack-ai/objectstack#36256 — a drilled record opens as its page,
+  // with the history-state `from` a list hands the page it opens
+  // (`listOriginOf`): this page as the way back, the drill list's rows as the
+  // ↑ ↓ set and the count it matched for 「N of M」.
+  const openRecord = useCallback(
+    (objectName: string, recordId: string, origin?: DrillRecordOrigin) => {
+      const base = appName ? `/apps/${appName}` : '';
+      const siblings = origin?.siblings?.length ? [...origin.siblings] : undefined;
+      navigate(`${base}/${objectName}/record/${encodeURIComponent(recordId)}`, {
+        state: {
+          from: {
+            pathname: location.pathname + location.search,
+            label: originLabel ?? '',
+            ...(siblings ? { siblings } : {}),
+            ...(siblings && origin?.total != null && origin.total >= siblings.length ? { total: origin.total } : {}),
+          },
+        },
+      });
+    },
+    [navigate, appName, location.pathname, location.search, originLabel],
+  );
+  return useMemo(
+    () => ({ openRecordList, canOpenRecordList, openRecord }),
+    [openRecordList, canOpenRecordList, openRecord],
+  );
 }
 
 /** The navigate half of {@link useRecordListDrillNavigation}. */

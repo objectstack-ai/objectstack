@@ -44,6 +44,7 @@ import { API_BILLING_ENV, DEFAULT_AUTHOR_TIMEOUT_MIN, snapshotSources, type Agen
 import { toolNameOf, type ParsedTurn, type RunnerToolCall } from '../transcript.js';
 import { CODEX_API_BILLING_ENV } from './codex.js';
 import { noResult, runTurnProcess } from './process.js';
+import { doorModeRefusal } from '../door.js';
 
 /** The contract's name and version, the first key of every input. A command checks it and refuses one it does not know. */
 export const EXTERNAL_DRIVER_CONTRACT = 'objectstack-scenario-driver/1';
@@ -302,6 +303,8 @@ export class ExternalDriver implements AgentDriver {
   }
 
   async author(task: AuthorTask): Promise<AuthorResult> {
+    // Door mode hands the client an MCP door and no project; only the `claude` driver is given one (`doorMode` in `orchestrate.ts`).
+    if (task.door) throw new Error(doorModeRefusal('an external driver'));
     const input: ExternalAuthorInput = {
       contract: EXTERNAL_DRIVER_CONTRACT,
       kind: 'author',

@@ -106,6 +106,7 @@ export const SysSeedLandedKey = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     // Internal state — no data API at all. The seed loader reads and writes
     // it in process, under the seed write context.

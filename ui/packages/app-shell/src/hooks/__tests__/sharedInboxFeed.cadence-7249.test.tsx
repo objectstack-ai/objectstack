@@ -79,6 +79,13 @@
  * read is due. The equality is unchanged; what changed is that it is now
  * exercised on a window that has something to join, with the empty window
  * pinned separately below.
+ *
+ * objectstack#35410 then moved the receipt read beside the message read (the
+ * newest receipts, in parallel), keeping the id-scoped read for listed ids
+ * that read missed. The fake below therefore answers each listed message's
+ * receipt, so one receipt read per tick is still the whole join; and an empty
+ * window still costs no receipt read per tick — only the attach read, which
+ * cannot know the window is empty before it answers.
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -121,11 +128,22 @@ const INBOX_ROWS: Array<Record<string, unknown>> = [
 /** What the fake inbox answers with — emptied by the case that pins that path. */
 let inboxRows: Array<Record<string, unknown>> = INBOX_ROWS;
 
+/** One `delivered` receipt per fixture message, written with it (ADR-0030). */
+const RECEIPT_ROWS: Array<Record<string, unknown>> = INBOX_ROWS.map((m, i) => ({
+  id: `rcp_${i + 1}`,
+  notification_id: m.notification_id,
+  user_id: 'u1',
+  channel: 'inbox',
+  state: 'delivered',
+  created_at: m.created_at,
+}));
+
 const findCalls: Array<{ object: string }> = [];
 const fakeAdapter = {
   find: (object: string) => {
     findCalls.push({ object });
     if (object === 'sys_inbox_message') return Promise.resolve({ data: inboxRows });
+    if (object === 'sys_notification_receipt') return Promise.resolve({ data: RECEIPT_ROWS });
     return Promise.resolve({ data: [] });
   },
   // objectui#13044 — the real MetadataProvider reads an object by name through
@@ -220,12 +238,13 @@ describe('objectui#7249 — the inbox feed holds ONE declared cadence', () => {
     expect(receiptReads()).toBe(inboxReads());
   });
 
-  it('issues NO receipt read on a window with nothing to join (objectui#7392)', async () => {
+  it('issues NO receipt read per tick on a window with nothing to join (objectui#7392)', async () => {
     // The other half of the equality above. The receipt read exists to decorate
     // the listed messages with read-state; with no messages listed there is
     // nothing it could decorate, and every row it would return is one
-    // `mergeInboxRows` drops. So the correct count here is zero, per tick,
-    // forever — not "as frequent as the message read".
+    // `mergeInboxRows` drops. So the correct count per tick is zero, forever —
+    // not "as frequent as the message read". The attach read alone goes out,
+    // beside the message read, before either has answered (objectstack#35410).
     inboxRows = [];
 
     renderHook(() => useSharedInboxFeed());
@@ -234,8 +253,8 @@ describe('objectui#7249 — the inbox feed holds ONE declared cadence', () => {
 
     // Same window, same cadence — the message read is untouched …
     expect(inboxReads()).toBe(READS_IN_WINDOW);
-    // … and not one receipt read went out behind it.
-    expect(receiptReads()).toBe(0);
+    // … and not one receipt read went out behind it: the attach read only.
+    expect(receiptReads()).toBe(1);
   });
 
   it('is one FEED cadence, not one per consumer', async () => {

@@ -7,6 +7,7 @@
  */
 
 import type React from 'react';
+import { getPersonInitials } from '@object-ui/types';
 import type {
   AuthUser as SpecAuthUser,
   DelegableScope,
@@ -83,19 +84,13 @@ export interface AuthUser extends SpecAuthUser {
 }
 
 /**
- * Get user initials from their name or email.
- * Returns up to 2 uppercase characters.
+ * Get user initials from their name or email: the name by the shared
+ * letters-only rule (`getPersonInitials`, objectstack#36346), else the email's
+ * first character. Returns up to 2 characters.
  */
 export function getUserInitials(user: Pick<AuthUser, 'name' | 'email'> | null | undefined): string {
   if (!user) return '?';
-  if (user.name) {
-    return user.name
-      .split(' ')
-      .map((n) => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-  }
+  if (user.name) return getPersonInitials(user.name);
   return user.email?.[0]?.toUpperCase() ?? '?';
 }
 
@@ -327,6 +322,15 @@ export interface AuthPublicConfig {
      * `/login?local=1`, `off` means the sign-in form offers no local way in.
      */
     localSignIn?: 'hidden' | 'off';
+    /**
+     * Where an explicit sign-out returns when the identity provider ends its
+     * own session, served on the same terms as `localSignIn`: `hold` returns
+     * to the sign-in page, which holds with a button to sign in again;
+     * `identity-provider` returns through the direct sign-in start door, so
+     * the identity provider's own sign-in page is shown. Read only while
+     * `directSignIn` is `true` (the door exists); absent means `hold`.
+     */
+    afterSignOut?: 'hold' | 'identity-provider';
     /**
      * The managed (cloud-hosted) mode: `true` when the cloud's control plane
      * runs this environment (`isCloudManaged()` server-side; declared as

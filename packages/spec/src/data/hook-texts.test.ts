@@ -105,9 +105,100 @@ describe('Hook.texts — a key the source asks for literally is refused at save 
     expect(hookTextKeysAskedIn(source)).toEqual(['follow_up_subject']);
   });
 
+  // The optional-call shape is a literal ask too: strict TypeScript reaches for
+  // it once `HookContext.text` is optional.
+  const SHAPES = [
+    ['ctx.text?.(', (k: string) => `ctx.text?.('${k}')`],
+    ['await ctx.text?.(', (k: string) => `await ctx.text?.('${k}', { lead: ctx.input.name })`],
+  ] as const;
+
+  it.each(SHAPES)('refuses an undeclared key asked for as %s at save, with the same sentence', (_shape, ask) => {
+    const r = HookSchema.safeParse({ ...base, body: body(`const s = ${ask('follow_up_title')};`), texts });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredHookTextKeyAtSave('follow_up_title', ['follow_up_subject'], 'body.source'));
+  });
+
+  it.each(SHAPES)('CONTROL: a declared key asked for as %s, and a computed key in that shape, pass the save', (_shape, ask) => {
+    const computed = ask('follow_up_subject').replace("'follow_up_subject'", 'k');
+    const source = `${ask('follow_up_subject')};\nconst k = pick(); ${computed};`;
+    expect(HookSchema.safeParse({ ...base, body: body(source), texts }).success).toBe(true);
+    expect(hookTextKeysAskedIn(source)).toEqual(['follow_up_subject']);
+  });
+
+  it('reads the optional call with whitespace or a line break around the operator', () => {
+    expect(hookTextKeysAskedIn("ctx.text ?. ('a_key'); ctx.text\n  ?.('b_key');")).toEqual(['a_key', 'b_key']);
+  });
+
+  it('refuses an inline handler asking ctx.text?.() for an undeclared key, at handler (the strict-TypeScript case)', () => {
+    const handler = async (ctx: any) => { await ctx.text?.('follow_up_title'); };
+    const r = HookSchema.safeParse({ ...base, handler, texts });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'handler')!;
+    expect(issue.message).toBe(undeclaredHookTextKeyAtSave('follow_up_title', ['follow_up_subject'], 'handler'));
+  });
+
+  it('does not read a non-null ctx.text!() — TypeScript only: a handler reaches the save with the `!` erased, and a js body holding it never compiles', () => {
+    expect(hookTextKeysAskedIn("ctx.text!('a_key');")).toEqual([]);
+  });
+
   it('a hook that declares no texts is not read for ctx.text calls (the run-time fault names it)', () => {
     expect(HookSchema.safeParse({ ...base, body: body("await ctx.text('anything');") }).success).toBe(true);
     expect(undeclaredHookTextAtRun('lead_follow_up', 'anything', [])).toMatch(/hook 'lead_follow_up' asked for text 'anything'.*declared: none/);
+  });
+});
+
+// A key is literal only when its closing quote ends the argument: `,` or `)`
+// follows, after optional whitespace. Anything else after the quote (`+`, a
+// member access) makes the argument a computed key, which the run-time refusal
+// decides; a template with a `${}` hole is never a literal at all.
+describe('Hook.texts — a literal ask ends at its closing quote; a key built from a literal is computed', () => {
+  const texts = { follow_up_subject: { message: 'Follow up', params: ['lead'] } };
+
+  const LITERAL = [
+    ['a lone argument', "await ctx.text('follow_up');"],
+    ['a first argument', "await ctx.text('follow_up', { lead: ctx.input.name });"],
+    ['whitespace before the comma', "await ctx.text('follow_up' , { lead: ctx.input.name });"],
+    ['a line break before the close', "await ctx.text(\n  'follow_up'\n);"],
+    ['a comment before the close', "await ctx.text('follow_up' /* the task subject */);"],
+    ['a backtick with no hole', 'await ctx.text(`follow_up`);'],
+    ['the optional call', "await ctx.text?.('follow_up', { lead: ctx.input.name });"],
+  ] as const;
+
+  it.each(LITERAL)('lit: refuses an undeclared literal key asked for as %s, at body.source', (_shape, source) => {
+    expect(hookTextKeysAskedIn(source)).toEqual(['follow_up']);
+    const r = HookSchema.safeParse({ ...base, body: body(source), texts });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredHookTextKeyAtSave('follow_up', ['follow_up_subject'], 'body.source'));
+  });
+
+  const COMPUTED = [
+    ['a concatenation', "await ctx.text('follow_up' + suffix);"],
+    ['a concatenation on the next line', "await ctx.text('follow_up'\n  + suffix, { lead: ctx.input.name });"],
+    ['a concatenation in the optional call', "await ctx.text?.('follow_up' + suffix);"],
+    ['a backtick concatenation', 'await ctx.text(`follow_up` + suffix);'],
+    ['a member access', "await ctx.text('follow_up'.concat(suffix));"],
+    ['a template hole', 'await ctx.text(`follow_up_${suffix}`);'],
+    ['a template hole in the optional call', 'await ctx.text?.(`follow_up_${suffix}`, { lead: ctx.input.name });'],
+  ] as const;
+
+  it.each(COMPUTED)('dark: passes the save for a key built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(hookTextKeysAskedIn(source)).toEqual([]);
+    expect(HookSchema.safeParse({ ...base, body: body(`const suffix = '_subject';\n${source}`), texts }).success).toBe(true);
+  });
+
+  it('dark: an inline handler building its key by concatenation passes the save, at handler', () => {
+    const handler = async (ctx: any) => { const suffix = '_subject'; await ctx.text?.('follow_up' + suffix); };
+    expect(HookSchema.safeParse({ ...base, handler, texts }).success).toBe(true);
+  });
+
+  it('CONTROL: a literal ask beside a computed one in the same body is still refused, once', () => {
+    const source = "await ctx.text('follow_up' + suffix);\nawait ctx.text('follow_up');";
+    expect(hookTextKeysAskedIn(source)).toEqual(['follow_up']);
+    const r = HookSchema.safeParse({ ...base, body: body(source), texts });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.filter((i) => i.path.join('.') === 'body.source')).toHaveLength(1);
   });
 });
 

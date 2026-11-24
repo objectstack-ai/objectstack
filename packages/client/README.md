@@ -230,6 +230,7 @@ await client.connect();
 // Discovery & Metadata
 await client.meta.getTypes();                    // List metadata types
 await client.meta.getItems('object');            // List all objects
+await client.meta.getItems('doc', { include: 'content' }); // List docs WITH their bodies (the list omits them by default)
 await client.meta.getItem('object', 'contact');  // Get specific object
 
 // Data Operations

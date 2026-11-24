@@ -493,6 +493,16 @@ Notes:
   query time, so widgets resolve them exactly like hand-authored filters.
 - Dataset-bound widgets receive the merged filter through the dataset
   query's `runtimeFilter`.
+- A `select` / `lookup` filter bound to a field that holds several values
+  (`multiple: true`, or a `multiselect` / `checkboxes` / `tags` field) is sent
+  as `$contains`, one member per condition and `$or` for any of several,
+  because the server refuses `=` / `$in` on such a field. The dashboard reads
+  the field's definition first: a dataset-bound widget's base object through
+  the data source's optional `getDataset`, a `provider: 'object'` widget's own
+  object, each through `getObjectSchema`. The widget's query waits for that
+  answer. When the definition cannot be read (a data source without
+  `getDataset`, a dataset the server does not serve), the filter is sent as
+  `=` / `$in` and a console warning names it.
 - Filter values are also readable in widget expressions as `page.<name>`
   (e.g. `page.region`), since they are hosted as dashboard variables.
 - `optionsFrom` resolves distinct option values server-side (a dataset
@@ -502,6 +512,37 @@ Notes:
   field that doesn't exist on the widget's object is skipped with a console
   warning instead of emitting a query that matches nothing. Explicit
   `filterBindings` strings are always honoured as written.
+
+## Filters a widget does not follow
+
+Every widget, in every mode, carries a small mark naming the dashboard
+filters that do not reach it, for example "Not filtered by Region": a filter
+it opts out of (`filterBindings[name]: false`) or one whose `targetWidgets`
+leaves it out. An explicit string binding (`filterBindings[name]: 'field'`)
+wins over `targetWidgets`, so a widget that names its field is reached even
+when the list leaves it out. A widget every filter reaches carries none. The list is
+`dashboardFiltersNotApplied(widget, defs)` from `@object-ui/core`, which asks
+`resolveBoundField`, the binding the widget's query is built from, so the
+mark and the data cannot disagree.
+
+## Design mode: resizing and "Add filter"
+
+In `designMode` two more affordances are drawn when the host hands their
+handler:
+
+- `onWidgetResize(widgetId, { w, h })`: a corner handle on each widget
+  resizes it by whole grid tracks (it snaps as the pointer crosses half a
+  track; the arrow keys on the handle grow or shrink it by one). Width stays
+  within the grid's columns. The host writes the span into the widget's
+  `layout`. Not drawn below the phone breakpoint.
+- `onAddFilter()`: an "Add filter" button at the end of the filter bar, which
+  is drawn for it even before any filter is declared.
+
+The console's dashboard page uses both in its in-page edit state: an admin
+who may design the dashboard's package opens it with **Edit**, changes it with
+Studio's own dashboard panels at the right, and **Save** publishes that one
+dashboard (into the package, or into the app's customization package for an
+installed app), so everyone sees it at once.
 
 ## Widget accent colour (`colorVariant`)
 

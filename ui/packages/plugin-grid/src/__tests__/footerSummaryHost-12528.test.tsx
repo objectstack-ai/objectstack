@@ -88,7 +88,7 @@ describe('ObjectGrid — a host draws the column summaries (objectui#12528)', ()
     await waitFor(() =>
       expect(report).toHaveBeenLastCalledWith([{ key: 'amount', header: 'Amount', label: 'Sum: 350' }]),
     );
-    expect(screen.queryByTestId('column-summary-footer')).toBeNull();
+    expect(screen.queryByTestId('data-table-summary-row')).toBeNull();
   });
 
   it('reports null when it unmounts', async () => {
@@ -103,7 +103,8 @@ describe('ObjectGrid — a host draws the column summaries (objectui#12528)', ()
   it('CONTROL: with no host callback the grid keeps its own summary row', async () => {
     renderGrid();
 
-    await waitFor(() => expect(screen.getByTestId('summary-amount')).toHaveTextContent('Amount: Sum: 350'));
-    expect(screen.getByTestId('column-summary-footer')).toBeInTheDocument();
+    // objectstack#35548 — the table's own last row, the figure under its column.
+    await waitFor(() => expect(screen.getByTestId('data-table-summary-amount')).toHaveTextContent(/^Sum: 350$/));
+    expect(screen.getByTestId('data-table-summary-row')).toBeInTheDocument();
   });
 });

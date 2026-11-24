@@ -58,6 +58,8 @@ const HOST_SYSTEM_NAMES = new Set(['organization_id', 'created_at', 'created_by'
 
 /** Every `fields` the designer committed, in order. */
 let commits: Fields[] = [];
+/** Every `fieldGroups` the designer committed, in order (objectstack#35900). */
+let groupCommits: Array<Array<Record<string, unknown>>> = [];
 
 function Host({ initial }: { initial: Record<string, unknown> }): React.ReactElement {
   const [draft, setDraft] = React.useState<Record<string, unknown>>(initial);
@@ -67,6 +69,7 @@ function Host({ initial }: { initial: Record<string, unknown> }): React.ReactEle
       systemFieldNames={HOST_SYSTEM_NAMES}
       onChange={(patch) => {
         if (patch.fields) commits.push(patch.fields as Fields);
+        if (patch.fieldGroups) groupCommits.push(patch.fieldGroups as Array<Record<string, unknown>>);
         setDraft((d) => ({ ...d, ...patch }));
       }}
       onSelectField={() => {}}
@@ -76,6 +79,7 @@ function Host({ initial }: { initial: Record<string, unknown> }): React.ReactEle
 
 function renderDesigner(draft: Record<string, unknown>) {
   commits = [];
+  groupCommits = [];
   return render(<Host initial={draft} />);
 }
 
@@ -125,15 +129,13 @@ describe('the form canvas settles the platform’s pinned fields first (objectst
     expect(said()).toBe('Condition moved to Ungrouped, position 2 of 3.');
     const shown = ungroupedCards();
     expect(shown).toEqual(['Owner', 'Condition', 'Notes']);
-    expect(Object.keys(commits.at(-1)!).filter((n) => !HOST_SYSTEM_NAMES.has(n))).toEqual([
-      'owner_id',
-      'condition',
-      'notes',
-    ]);
+    // The settled order is the one the canvas started from, so the drop has
+    // nothing to write (objectstack#35900: only a change is written) …
+    expect(commits).toHaveLength(0);
 
-    // After the round trip the canvas shows the same order.
+    // … and the reload of the untouched draft shows the same order.
     cleanup();
-    renderDesigner(served(reload(commits.at(-1)!)));
+    renderDesigner(served(reload({ owner_id: { ...OWNER_FIELD_DEF }, condition, notes })));
     expect(ungroupedCards()).toEqual(shown);
   });
 
@@ -160,13 +162,17 @@ describe('the form canvas settles the platform’s pinned fields first (objectst
     expect(ungroupedCards()).toEqual(['Condition', 'Account manager', 'Notes']);
   });
 
-  it('Owner moved into a section carries the section and keeps its place there', () => {
+  it('Owner moved into a section joins its fields list and keeps its place there', () => {
     renderDesigner(served({ owner_id: { ...OWNER_FIELD_DEF }, condition: { ...condition, group: 'details' }, notes }));
     pointerDrag(card('Owner'), ['f:condition']);
-    const committed = commits.at(-1)!;
-    expect(committed.owner_id.group).toBe('details');
-    const authored = (fields: Fields) => Object.keys(fields).filter((n) => ['owner_id', 'condition', 'notes'].includes(n));
-    // The section's order is the author's, so the round trip keeps it.
-    expect(authored(reload(committed))).toEqual(authored(committed));
+    // objectstack#35900: the section lists Owner where it was dropped (after Condition), and the
+    // column stays exactly the platform's, so the write may still strip it and
+    // the read put it back: the list keeps its place either way.
+    expect(commits).toHaveLength(0);
+    expect(groupCommits.at(-1)).toEqual([{ key: 'details', label: 'Details', fields: ['condition', 'owner_id'] }]);
+    cleanup();
+    renderDesigner({ ...served(reload({ condition: { ...condition, group: 'details' }, notes })), fieldGroups: groupCommits.at(-1) });
+    const cards = ([...document.querySelectorAll('.cursor-grab')] as HTMLElement[]).map((c) => c.querySelector('.truncate')?.textContent ?? '');
+    expect(cards).toEqual(['Condition', 'Owner', 'Notes']);
   });
 });

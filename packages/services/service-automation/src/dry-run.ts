@@ -76,6 +76,7 @@ import {
     type StepLogEntry,
 } from './engine.js';
 import { renderTextSlot } from './builtin/template.js';
+import { isSkippedScopeKey } from './scope-key-segments.js';
 import { renderSaveNoticeMessage } from './builtin/save-notice-node.js';
 import {
     engineUpdateDispatchRejectError,
@@ -602,7 +603,16 @@ function annotate(state: DryRunState, segment: Segment, node: FlowNodeParsed, re
     }
 }
 
-/** Write the value at a ledger path (`a.b`, `list[1]`, `input.key`) into `root`. */
+/**
+ * Write the value at a ledger path (`a.b`, `list[1]`, `input.key`) into `root`.
+ *
+ * No authored key reaches a prototype (the rule `./scope-key-segments.ts`
+ * states): a path with a skipped segment is written nowhere, and the walk
+ * descends through own properties only, so a segment the path's re-split
+ * produced that `root` does not hold ends the write instead of resolving
+ * through an inherited slot. A slot left unwritten keeps its authored value in
+ * the payload.
+ */
 function setAtPath(root: Record<string, unknown>, path: string, value: unknown): void {
     const parts: Array<string | number> = [];
     for (const segment of path.split('.')) {
@@ -610,9 +620,11 @@ function setAtPath(root: Record<string, unknown>, path: string, value: unknown):
         if (match?.[1]) parts.push(match[1]);
         for (const idx of match?.[2]?.matchAll(/\[(\d+)\]/g) ?? []) parts.push(Number(idx[1]));
     }
+    if (isSkippedScopeKey(parts.filter((part): part is string => typeof part === 'string'))) return;
     let cursor: unknown = root;
     for (let i = 0; i < parts.length - 1; i++) {
-        cursor = (cursor as Record<string | number, unknown> | undefined)?.[parts[i]];
+        if (!Object.prototype.hasOwnProperty.call(cursor, parts[i])) return;
+        cursor = (cursor as Record<string | number, unknown>)[parts[i]];
         if (cursor === null || typeof cursor !== 'object') return;
     }
     (cursor as Record<string | number, unknown>)[parts[parts.length - 1]] = value;

@@ -226,7 +226,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Resumo",
-        help: "Reúne estas notificações em um único resumo em vez de enviar cada uma ao chegar: daily envia à meia-noite, weekly na segunda-feira à meia-noite e none envia cada uma na hora. Notificações críticas são sempre enviadas na hora. Vale para uma preferência cujo canal é * (todos os canais).",
+        help: "Reúne estas notificações em um único resumo em vez de enviar cada uma ao chegar: daily envia à meia-noite, weekly na segunda-feira à meia-noite e none envia cada uma na hora. Notificações críticas são sempre enviadas na hora. Vale para uma preferência cujo canal é * (todos os canais). Se ficar vazio, a próxima preferência decide: o padrão para todos os usuários e, depois, none.",
         options: {
           none: "nenhum",
           daily: "diário",
@@ -235,7 +235,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Horário silencioso",
-        help: "Uma janela diária em que as notificações ficam retidas e são entregues quando ela termina, por exemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Os horários são HH:MM nesse fuso (UTC quando tz é omitido), e a janela pode passar da meia-noite. Notificações críticas não ficam retidas. Vale para uma preferência cujo canal é * (todos os canais)."
+        help: "Uma janela diária em que as notificações ficam retidas e são entregues quando ela termina, por exemplo { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Os horários são HH:MM nesse fuso (UTC quando tz é omitido), e a janela pode passar da meia-noite. Notificações críticas não ficam retidas. Vale para uma preferência cujo canal é * (todos os canais). { \"off\": true } significa sem horário de silêncio; se ficar vazio, a próxima preferência decide: o padrão para todos os usuários e, depois, nenhum."
       },
       created_at: {
         label: "Criado em"
@@ -487,6 +487,64 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Criado em"
+      }
+    }
+  },
+  sys_channel_account: {
+    label: "Conta de canal",
+    pluralLabel: "Contas de canal",
+    description: "A instalação de um app de chat por uma organização, como o próprio app do Slack, com o token de bot emitido para ela.",
+    fields: {
+      channel_id: {
+        label: "Canal"
+      },
+      display_name: {
+        label: "Espaço de trabalho"
+      },
+      external_id: {
+        label: "ID do espaço de trabalho"
+      },
+      bot_token: {
+        label: "Token do bot"
+      },
+      status: {
+        label: "Status",
+        options: {
+          active: "Ativa",
+          revoked: "Revogada"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Vínculo de usuário do canal",
+    pluralLabel: "Vínculos de usuário do canal",
+    description: "O vínculo de uma pessoa com o próprio usuário em um espaço de trabalho de chat: proposto pela correspondência de e-mail, passa a entregar quando a pessoa o confirma.",
+    fields: {
+      account_id: {
+        label: "Conta"
+      },
+      user_id: {
+        label: "Usuário"
+      },
+      external_user_id: {
+        label: "ID do usuário no chat"
+      },
+      external_display_name: {
+        label: "Nome do usuário no chat"
+      },
+      state: {
+        label: "Estado",
+        options: {
+          proposed: "Proposto",
+          confirmed: "Confirmado"
+        }
+      },
+      confirmed_at: {
+        label: "Confirmado em"
+      },
+      proposal_email_hash: {
+        label: "Hash do e-mail da proposta"
       }
     }
   }

@@ -83,5 +83,41 @@
         "2257": [{ "body": "The latest updates on your projects." }]
       }
     }
+  },
+  "health": {
+    "now": "2026-10-23T14:00:00Z",
+    "repos": {
+      "objectstack-ai/objectstack": {
+        "issues": [
+          { "number": 101, "labels": [{ "name": "pm:queue" }, { "name": "area:fleet" }, { "name": "priority:p2" }], "assignees": [], "body": "", "created_at": "2026-10-20T14:00:00Z", "updated_at": "2026-10-22T10:00:00Z" },
+          { "number": 102, "labels": [{ "name": "pm:queue" }, { "name": "area:ux" }, { "name": "priority:p1" }], "assignees": [{ "login": "os-sales" }], "body": "", "created_at": "2026-10-20T14:00:00Z", "updated_at": "2026-10-22T10:00:00Z" },
+          { "number": 103, "labels": [{ "name": "pm:queue" }, { "name": "area:fleet" }], "assignees": [], "body": "", "created_at": "2026-10-21T14:00:00Z", "updated_at": "2026-10-22T10:00:00Z" },
+          { "number": 104, "labels": [{ "name": "needs-user-decision" }, { "name": "area:fleet" }], "assignees": [], "body": "Which way?", "created_at": "2026-10-19T14:00:00Z", "updated_at": "2026-10-22T10:00:00Z" },
+          { "number": 105, "labels": [{ "name": "pm:blocked" }, { "name": "area:fleet" }, { "name": "priority:p2" }], "assignees": [], "body": "Blocked-by: #104", "created_at": "2026-10-19T15:00:00Z", "updated_at": "2026-10-22T10:00:00Z" },
+          { "number": 106, "labels": [{ "name": "pm:blocked" }, { "name": "area:ui" }, { "name": "priority:p2" }], "assignees": [], "body": "Waits on a ruling.", "created_at": "2026-10-19T16:00:00Z", "updated_at": "2026-10-22T10:00:00Z" },
+          { "number": 107, "labels": [{ "name": "needs-user-decision" }, { "name": "area:ui" }], "assignees": [], "body": "", "created_at": "2026-10-19T17:00:00Z", "updated_at": "2026-10-22T10:00:00Z" },
+          { "number": 108, "labels": [{ "name": "finding" }], "assignees": [], "body": "", "created_at": "2026-10-21T14:00:00Z", "updated_at": "2026-10-21T14:00:00Z" },
+          { "number": 109, "labels": [{ "name": "finding" }, { "name": "domain:skills" }], "assignees": [], "body": "", "created_at": "2026-10-22T14:00:00Z", "updated_at": "2026-10-22T14:00:00Z" },
+          { "number": 110, "labels": [], "assignees": [], "body": "", "created_at": "2026-10-23T08:00:00Z", "updated_at": "2026-10-23T08:00:00Z" },
+          { "number": 111, "labels": [{ "name": "priority:p0" }, { "name": "pm:queue" }, { "name": "area:fleet" }], "assignees": [{ "login": "os-bill" }], "body": "", "created_at": "2026-10-23T09:00:00Z", "updated_at": "2026-10-23T09:00:00Z" },
+          { "number": 112, "labels": [{ "name": "tracking" }], "assignees": [], "body": "", "created_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z" },
+          { "number": 113, "labels": [{ "name": "pm:on-hold" }, { "name": "area:fleet" }], "assignees": [], "body": "A held finding.", "created_at": "2026-10-10T00:00:00Z", "updated_at": "2026-10-20T00:00:00Z" }
+        ],
+        "pulls": [
+          { "number": 201, "state": "open", "labels": [{ "name": "pm:awaiting-merge" }] }
+        ],
+        "comments": { "105": [], "106": ["Parked.", "Blocked-by: #107"] }
+      },
+      "objectstack-ai/hotcrm": {
+        "issues": [
+          { "number": 11, "labels": [{ "name": "needs-user-decision" }], "assignees": [], "body": "", "created_at": "2026-10-20T00:00:00Z", "updated_at": "2026-10-20T00:00:00Z" },
+          { "number": 12, "labels": [{ "name": "pm:blocked" }, { "name": "area:crm" }, { "name": "priority:p2" }], "assignees": [], "body": "Blocked-by: objectstack-ai/objectstack#104", "created_at": "2026-10-20T00:00:00Z", "updated_at": "2026-10-20T00:00:00Z" },
+          { "number": 13, "labels": [{ "name": "priority:p0" }, { "name": "pm:queue" }, { "name": "area:crm" }], "assignees": [], "body": "", "created_at": "2026-10-22T00:00:00Z", "updated_at": "2026-10-22T00:00:00Z" }
+        ],
+        "pulls": [],
+        "comments": { "12": [] }
+      },
+      "objectstack-ai/objectui": null
+    }
   }
 }

@@ -185,6 +185,22 @@ concurrency:
 # main-only job reads the probe. The 4-hourly `schedule` run is untouched: it
 # is the full battery.
 
+# ⭐ EVERY GIT TRANSFER IN THIS FILE IS BOUNDED BY ITS BYTE RATE (#34994).
+# A git HTTP request that moves under 1000 bytes/s for 120 s is aborted by curl
+# (exit 128, "curl 28 Operation too slow"), so the retry around it runs:
+# actions/checkout's own fetch retry (3 attempts) and the "Fetch this commit's
+# history" step's (scripts/ci/fetch-history.sh, 3 attempts). On 2026-11-16/17,
+# 48 checkout or fetch steps here and in lint.yml ran to their 8-25 minute
+# budget with no index-pack running: the server never started the pack, while
+# its `remote:` progress kept the log moving, and siblings in the same run
+# took 51-65 s. The slowest healthy wait for the pack is ~15 s and a healthy
+# receive runs at MiB/s, so neither number cuts a slow transfer that moves.
+# The step budgets stay the outer wall. Same block in lint.yml; the script
+# sets the same defaults for a local run.
+env:
+  GIT_HTTP_LOW_SPEED_LIMIT: '1000'
+  GIT_HTTP_LOW_SPEED_TIME: '120'
+
 jobs:
   queue-verdict:
     name: Queue verdict
@@ -1105,6 +1121,11 @@ jobs:
       # group and retried (#34561): on 2026-11-16/17 a stalled transfer held
       # attempt 1 silent until this budget killed it, four times, so the retry
       # never ran, while sibling shards fetched the same history in 47-96 s.
+      # That bound missed the next stalls: a server that never starts the pack
+      # keeps printing `remote:` progress, so the log never went silent. Each
+      # attempt is now also cut by its byte rate, under 1000 bytes/s for 120 s
+      # (the workflow `env:` block above, #34994), and the script prints each
+      # phase as it starts, so a step that still hits this budget names it.
       # A fetch that keeps moving is never cut. The script's header has the
       # reading; its self-test runs in lint.yml.
       #

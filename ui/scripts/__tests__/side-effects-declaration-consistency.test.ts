@@ -1119,6 +1119,7 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
       '@object-ui/plugin-markdown',
       '@object-ui/plugin-report',
       '@object-ui/plugin-timeline',
+      '@object-ui/plugin-timesheet',
       '@object-ui/plugin-tree',
       '@object-ui/plugin-view',
       '@object-ui/react',
@@ -1450,6 +1451,7 @@ describe('`sideEffects` declarations match load-time behaviour (objectui#3943)',
     );
     expect(exempt).toContain('@object-ui/plugin-form/src/core.ts');
     expect(exempt).toContain('@object-ui/plugin-view/src/core.ts');
+    expect(exempt).toContain('@object-ui/plugin-detail/src/core.ts');
     expect(exempt.filter((e) => /\/src\/index\.[a-z]+$/.test(e))).toEqual([]);
   });
 

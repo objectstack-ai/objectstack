@@ -48,7 +48,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { createRestApiPlugin } from '@objectstack/rest';
-import { AuthPlugin } from '@objectstack/plugin-auth';
+import { AuthManager, AuthPlugin } from '@objectstack/plugin-auth';
 import { SecurityPlugin, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects/plugin';
@@ -62,7 +62,6 @@ const BOOT_TIMEOUT = 180_000;
 const ORIGIN = 'http://localhost:3000';
 const API = '/api/v1';
 const ADMIN = { email: 'admin@objectos.ai', password: 'admin123' };
-const ORG = 'org_pin_30848';
 const READER = { email: 'pin-30848-reader@example.invalid', password: 'Reader-Pass-123' };
 const EDITOR = { email: 'pin-30848-editor@example.invalid', password: 'Editor-Pass-123' };
 const OBJECT = 'pin_step';
@@ -215,25 +214,23 @@ async function signIn(who: { email: string; password: string }): Promise<string>
 }
 
 async function signUpMember(who: { email: string; password: string }, n: number): Promise<string> {
-  // Default audience posture is invite_only: enter through a pending invitation.
-  await engine.insert(
-    'sys_invitation',
-    {
-      id: `inv_pin_30848_${n}`,
-      email: who.email,
-      status: 'pending',
-      organization_id: ORG,
-      role: 'member',
-      inviter_id: 'usr_pin_30848',
-      expires_at: new Date(Date.now() + 3_600_000),
-    },
-    { context: { isSystem: true } },
-  );
-  const res = await req('/auth/sign-up/email', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: who.email, password: who.password, name: `pin member ${n}`, invitationId: `inv_pin_30848_${n}` }),
-  });
+  // Default audience posture is invite_only. A member bound at creation enters
+  // through the operator door — the ticket the stack's own auth manager stages
+  // for exactly this address, as `@objectstack/verify`'s signUp mints its
+  // member. A sign-up admitted by the invitation it presents joins no
+  // organization until it verifies its address and accepts.
+  const auth: any = await kernel.getServiceAsync('auth');
+  const ticket = auth.stageOperatorProvisioning(who.email);
+  let res: Response;
+  try {
+    res = await req('/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: who.email, password: who.password, name: `pin member ${n}`, [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: ticket }),
+    });
+  } finally {
+    auth.clearOperatorProvisioning(who.email);
+  }
   if (!res.ok) throw new Error(`pin signUp failed: ${res.status} ${await res.text()}`);
   return (await res.json() as any).token;
 }

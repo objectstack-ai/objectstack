@@ -99,7 +99,7 @@ const result = DashboardSchema.parse(data);
 | **type** | `Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>` | optional | Filter input type |
 | **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string> }[]` | optional | Static filter options |
 | **optionsFrom** | `{ object: string; valueField: string; labelField: string; filter?: any }` | optional | Dynamic filter options from object |
-| **defaultValue** | `string \| number \| boolean` | optional | Default filter value |
+| **defaultValue** | `string \| number \| boolean` | optional | Default filter value. On a date filter: a preset name, an ISO date or a date-macro token. On a text filter keyed by ISO week, `{current_iso_week}` resolves to the current week key (e.g. `2026-W47`) each time the dashboard opens |
 | **scope** | `Enum<'dashboard' \| 'widget'>` | optional (default: `"dashboard"`) | Filter application scope |
 | **targetWidgets** | `string[]` | optional | Widget IDs to apply this filter to |
 
@@ -324,7 +324,7 @@ Widget configuration — declared query keys + open renderer extras
 | **type** | `Enum<'text' \| 'select' \| 'date' \| 'number' \| 'lookup'>` | optional | Filter input type |
 | **options** | `{ value: string \| number \| boolean; label: string \| Record<string, string> }[]` | optional | Static filter options |
 | **optionsFrom** | `{ object: string; valueField: string; labelField: string; filter?: any }` | optional | Dynamic filter options from object |
-| **defaultValue** | `string \| number \| boolean` | optional | Default filter value |
+| **defaultValue** | `string \| number \| boolean` | optional | Default filter value. On a date filter: a preset name, an ISO date or a date-macro token. On a text filter keyed by ISO week, `{current_iso_week}` resolves to the current week key (e.g. `2026-W47`) each time the dashboard opens |
 | **scope** | `Enum<'dashboard' \| 'widget'>` | optional (default: `"dashboard"`) | Filter application scope |
 | **targetWidgets** | `string[]` | optional | Widget IDs to apply this filter to |
 

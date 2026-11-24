@@ -146,7 +146,7 @@ describe('bundled template CI workflow', () => {
       ).toContain(script);
     }
 
-    // The three gates this workflow exists to run. `lint` is here on a
+    // The gates this workflow exists to run. `lint` is here on a
     // MEASUREMENT, not on the card's wording: scaffolded for real from the
     // repo-built scaffolder, `npm install` against the registry, then
     // `npm run lint` -> exit 0, "All checks passed". It is not a second
@@ -156,6 +156,10 @@ describe('bundled template CI workflow', () => {
     expect(invoked).toContain('validate');
     expect(invoked).toContain('lint');
     expect(invoked).toContain('typecheck');
+    // `test` (#35218): the starter `note.test.ts` and every test the app adds.
+    // The other scaffolder declares it too, with a starter test per template,
+    // which `packages/cli/test/scaffold-test-script-passes.test.ts` runs.
+    expect(invoked).toContain('test');
   });
 
   // Derived from the Dockerfile's build stage rather than restated: the

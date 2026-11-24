@@ -37,7 +37,7 @@ import {
   SysMetadata,
   SysMetadataHistoryObject,
 } from './metadata/index.js';
-import { SysExchangeRate, SysSecret, SysSetting } from './system/index.js';
+import { SysExchangeRate, SysSecret, SysSetting, SysUnit, SysWorkCalendar, SysWorkCalendarException } from './system/index.js';
 import { ACCOUNT_APP, SETUP_APP, SETUP_NAV_CONTRIBUTIONS, STUDIO_APP } from './apps/index.js';
 import { AppSchema } from '@objectstack/spec/ui';
 import { resolveEffectiveApiMethods, isApiOperationAllowed, canServeApiOperation } from '@objectstack/spec/data';
@@ -607,8 +607,11 @@ describe('@objectstack/platform-objects', () => {
         sys_organization: SysOrganization,
         sys_session: SysSession,
         sys_team: SysTeam,
+        sys_unit: SysUnit,
         sys_user: SysUser,
         sys_user_preference: SysUserPreference,
+        sys_work_calendar: SysWorkCalendar,
+        sys_work_calendar_exception: SysWorkCalendarException,
       };
       // Targets owned by another package (contributed there, gated by
       // `requiresObject`), so nothing here can read their `enable`. Named

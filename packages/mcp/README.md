@@ -67,6 +67,43 @@ interface MCPServerPluginOptions {
 }
 ```
 
+### The `initialize` instructions
+
+Over HTTP, `initialize` answers `result.instructions` with the first of: the
+host's per-request text (`instructions` / `dataOnlyInstructions` on the
+authoring injection), the `instructions` option, or the open server's own text.
+The host's text and the option are served exactly as written. The open
+server's own text is one sentence saying the tool list follows the credential's
+grant, then two parts:
+
+- **The selection rule**, only where this request registers both
+  `list_datasets` and `query_dataset`: look for a governed metric first with
+  `list_datasets` and the question's business words; each word with exactly
+  one measure match answers through `query_dataset`, and two such words are two
+  metrics computed both; several matches are a question for the user; a word
+  with `candidates` in the answer is the same question, never a match; no match
+  and no candidates falls back to the object tools and says the answer is not
+  from a governed metric. A grant without `data:read` gets no such sentence.
+- **The answer-order rule**, only where this request registers both
+  `search_package_docs` and `read_package_doc`: read the installed apps'
+  manuals before answering; a concept is answered from the manual, and a
+  general explanation says the manuals do not cover it; a process or rule is
+  read in the manual and in its real definition, the definition winning where
+  the two differ; the answer ends with each page's title and url. It names a
+  definition reader only where the connection lists one (`describe_metadata`,
+  else the open draft door's `get_metadata_item`, both under `metadata:write`);
+  without one it says to answer from the manual and state that the configured
+  process was not checked.
+- **The skills install line**: `Published skills: @objectstack/skills <version>`
+  and the command that installs it into the agent's skills directory with or
+  without a project, `os skills install --version <version>` (with its
+  `npx -p @objectstack/cli@<version>` form for a machine without the CLI), at
+  this package's own version (the packages are released together), never the
+  `version` option.
+
+The stdio server's instructions are fixed when it is constructed, before its
+tools are bridged, and carry neither part.
+
 Tools and resources are **not** opted into per-option — the plugin bridges the
 AI tool registry, metadata service and data engine automatically when it
 starts. The HTTP surface needs no start at all: it is served per-request at
@@ -124,14 +161,32 @@ apply):
 'list_actions'         // Invokable business actions the caller may run
 'run_action'           // Invoke an action by name or listed face with { recordId, params }
 'resume_run'           // Continue a run paused on a screen with { runId, values }
+
+// Governed metrics (ADR-0149)
+'list_datasets'        // Governed datasets: measures and dimensions, with labels, synonyms and exact matches
+'query_dataset'        // Compute a governed metric; the answer carries its provenance
+
+// App manuals (the installed packages' docs)
+'search_package_docs'  // Pages whose title, a heading or text contains a term; ≤10, more terms first, with excerpt and console url where the page has one
+'read_package_doc'     // One page by name: title, manual, Markdown content, console url where the page has one
 ```
 
 `aggregate_records` is registered only when the bridge implements `aggregate`,
-and `resume_run` only when it implements `resumeRun`; a bridge without those
-seams serves the rest and advertises nothing it cannot do.
+`resume_run` only when it implements `resumeRun`, and `list_datasets` /
+`query_dataset` only when it implements all three of `listDatasets`,
+`queryDataset` and `datasetToolDefinitions` (the runtime's bridge does where the
+analytics service serves its dataset executor), and `search_package_docs` /
+`read_package_doc` only when it implements both `searchPackageDocs` and
+`readPackageDoc` (the runtime's HTTP bridge does where the protocol serves the
+`/meta` list read; it reads every page through the `/meta/doc` docs-audience
+gate as the caller, so a page the caller may not read is neither found nor
+read; on an OAuth connection whose grant reaches the docs tools, a
+permission-set audience is read against the delegating person's own permission
+sets, never wider; the stdio bridge carries neither); a bridge without those seams
+serves the rest and advertises nothing it cannot do.
 
 OAuth scopes narrow the families at consent time: `data:read` covers
-list/describe/query/aggregate/get, `data:write` covers create/update/delete, and
+list/describe/query/aggregate/get, the dataset pair and the app-docs pair, `data:write` covers create/update/delete, and
 `actions:execute` covers `list_actions` / `run_action` / `resume_run`. `delete_records` needs both
 `data:read` and `data:write`: its preview reads the selection's ids and count. A tool outside the grant
 is **not registered at all**, so the SDK rejects it as an unknown tool — the

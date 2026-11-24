@@ -12,6 +12,7 @@ import { ListView } from './ListView';
 import { ListViewBlock } from './ListViewBlock';
 import { ViewSwitcher } from './ViewSwitcher';
 import { ObjectGallery } from './ObjectGallery';
+import { ListConditionsBlock } from './conditions/ListConditionsBlock';
 
 export { ListView, ListViewBlock, ViewSwitcher, ObjectGallery };
 // `ViewSwitcherDropdown`, `TabBarSelect` and `evaluateConditionalFormatting`
@@ -20,12 +21,22 @@ export { ListView, ListViewBlock, ViewSwitcher, ObjectGallery };
 export { TabBar } from './components/TabBar';
 export type { TabBarProps, ViewTab } from './components/TabBar';
 export { UserFilters } from './UserFilters';
+// objectstack#35883 / #35884 — the phone toolbar's panel container and the
+// context its view switcher reads, for the console's switcher to draw its
+// phone face with the list's own sheet.
+export { PhonePanelSheet, useListPhonePanels, PHONE_CHIP, PHONE_CHIP_ACTIVE } from './phone/PhoneListPanels';
+export type { PhonePanelSheetProps, ListPhonePanels } from './phone/PhoneListPanels';
 export type { UserFiltersProps, UserFiltersHandle } from './UserFilters';
 export { normalizeFilterCondition, normalizeFilters } from './ListView';
+// objectstack#36645 — the one mapping from an object definition's fields to the
+// Filter picker's field list, so the report builder's 「+ Filter」 offers the
+// same fields, labels and value pickers as a list's Filter panel.
+export { conditionCandidatesOf, conditionOptionsOf } from './ListView';
+export type { ConditionCandidateField } from './ListView';
 // The provider-less fallback table, exported so objectui#4401's mirror gate can
 // compare it against the `en` pack from a package that depends on both.
 export { LIST_DEFAULT_TRANSLATIONS } from './ListView';
-export type { ListViewProps, ListViewHandle, ListViewRowGroup } from './ListView';
+export type { ListViewProps, ListViewHandle, ListViewRowGroup, ListExportDoor, ListToolbarTrailingState } from './ListView';
 export type { ObjectGalleryProps } from './ObjectGallery';
 // The switcher's views are `@object-ui/core`'s `ListViewVisualization`. This
 // barrel no longer re-exports them as `ViewType`, the name `@object-ui/types`
@@ -33,6 +44,15 @@ export type { ObjectGalleryProps } from './ObjectGallery';
 // `ListViewSwitcherProps`, because `@object-ui/plugin-view` publishes
 // `ViewSwitcherProps` for a different switcher (objectui#6349, batch 8).
 export type { ListViewSwitcherProps } from './ViewSwitcher';
+// objectstack#35892 — the list page's condition row for a host that draws its
+// own rows and sits below this package: a record page's related tab gets it
+// through `@object-ui/plugin-detail`'s `RelatedListConditionsSlotContext`,
+// which the record page fills with this block. A host element, not a
+// registered node type: nothing about it is authored.
+export { ListConditionsBlock };
+export type { ListConditionsHostProps } from './conditions/ListConditionsBlock';
+export { ConditionDiscardButton } from './conditions/ListConditionControls';
+export type { ConditionDiscardButtonProps } from './conditions/ListConditionControls';
 
 /**
  * Registry entry point for `<ListView>`. Both bridges it carries — the
@@ -67,6 +87,7 @@ const VIEW_TYPE_LABELS: Record<ListViewVisualization, string> = {
   map: 'Map',
   chart: 'Chart',
   tree: 'Tree',
+  timesheet: 'Timesheet',
 };
 
 const VIEW_TYPE_OPTIONS = Object.entries(VIEW_TYPE_LABELS).map(([value, label]) => ({ label, value }));
@@ -360,6 +381,12 @@ const LIST_VIEW_INPUTS: ComponentInput[] = [
     description:
       'The chart a `type: "chart"` list draws, bound to an ADR-0021 dataset: `{ dataset, values, dimensions, chartType }`. There is no default binding.',
   },
+  {
+    name: 'timesheet',
+    type: 'object',
+    description:
+      'The editable row × weekday grid a `type: "timesheet"` list draws: `{ rowFields, dateField, valueField }`. All three are required; each typed cell creates, updates or deletes one record.',
+  },
 ];
 
 // Register ListView component
@@ -400,3 +427,4 @@ ComponentRegistry.register('list', ListViewRenderer, {
   // Same renderer, therefore the same declared surface as `list-view` above.
   inputs: LIST_VIEW_INPUTS.map((input) => ({ ...input })),
 });
+

@@ -1,5 +1,208 @@
 # @objectstack/plugin-sharing
 
+## 18.6.0
+
+### Patch Changes
+
+- 1381f08: fix(plugin-sharing): two sharing rules that reach one user on one record keep one grant each, so the widest level wins and revoking one rule leaves the other
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A user that two sharing rules reach on the same record now ends with the most permissive access either rule grants. Before this fix the two rules shared one `sys_record_share` row: `SharingService.grant` looked a rule grant up by object, record, recipient and source, without the rule's id, and overwrote the row it found. The last rule written won whatever its level, so an `edit` rule followed by a `read` rule left the user with `read`, and a project manager who is also on the project team could not edit the project. Each rule also revokes by its own id, so the merged row belonged to whichever rule wrote last: revoking that rule removed access the other rule still granted, and revoking the other rule removed nothing.
+  
+  A rule-materialised grant is now keyed by its rule id too, one row per rule and recipient. The read and write gates already take the widest level across a user's rows, so nothing on the read side changes. A manual grant, and any grant made outside the rule evaluator, keeps its one row per recipient.
+  
+  No migration is needed. A row two rules already share is split by the next reconcile of the rule whose id it no longer carries: that rule writes its own row, and the user regains its access.
+- c47e4ea: fix(plugin-sharing)!: the write gate judges by id exactly the writes the engine runs by id
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) a runtime authorization answer moves: no metadata key, accepted value or stored row changes, so `os migrate meta` has nothing to rewrite -->
+  
+  The sharing write gate now takes its by-id or bulk branch from the engine's own dispatch decision for the write's options. A write the engine runs by id is judged by id, as before. Every other write is one the engine runs as a predicate, an `$in` or `$eq` on `id` included, and it meets the bulk write scope: it writes the rows the caller may update or delete, leaves the others as they were, and answers no error.
+  
+  A member's multi-row delete or update of rows it owns, on a `private` or `public_read` object with an `owner_id`, now lands where it answered 403 FORBIDDEN.
+  
+  A call the engine refuses at dispatch (for example a scalar `where.id` beside another key without `multi: true`, or a payload `id` beside a `where` predicate) now gets the engine's own refusal, the answer a system caller gets, instead of this gate's 403 first. It is refused either way and nothing is written.
+  
+  **BREAKING** for a caller of a multi-row (`multi: true`) update or delete in one of two shapes, both of which the engine runs as a predicate and the gate now judges as one:
+  
+  - a `where` that carries a scalar `id` beside another key;
+  - an `id` that is falsy (`''` or `0`).
+  
+  Such a write meets the bulk write scope instead of the by-id judgment:
+  
+  - a row the caller may not write is left as it was, and the write answers no error where it answered 403 FORBIDDEN;
+  - a row the caller may write only because an application row-level policy widens the sharing scope for it (the by-id judgment's deferral to such a policy) is no longer written by these two shapes, as for every other predicate write.
+  
+  To write such a row, address it by id alone (`where: { id }`, or the payload `id`): that write is judged by id, as before.
+- e61af97: feat: the list toolbar offers the "In a queue" toggle only on objects that actually use queues
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  Until now the toggle appeared on every list of an object with a user owner as soon as the organization had a single queue, although on most of those objects no record ever sits in a queue, so it could only return an empty list. It now appears only on an object where a queue can hold something:
+  
+  - a record of the object sits in a queue now (no owner, a queue set), or
+  - an active assignment rule routes the object's new records into a queue: one of the organization's own rules, or a rule an installed package declares that is not switched off.
+  
+  Nothing is authored for this. The server works it out from the rules and the records.
+  
+  `GET /auth/me/permissions` carries the answer as a new field beside `hasAnyQueue`: `objectsUsingQueues`, a list of object names, declared in `MePermissionsAuthenticatedResponseSchema`. It names only objects the caller may read, and never a queue name or a count. It is empty when the organization has no queue, when no ownership-queue service is registered, and on the closed body. The ownership-queue service contract gains the optional method `objectsUsingQueues(organizationId)`, implemented by `@objectstack/plugin-sharing`. The method checks each owned object for one sitting record (`limit 1`) and reads the routing rules once. The route asks only when `hasAnyQueue` is true, so an organization with no queue pays nothing extra.
+  
+  **Migration.** `objectsUsingQueues` is required on the strict `MePermissionsAuthenticatedResponseSchema`. Code that builds a `MePermissionsAuthenticatedResponse` (a test fixture, a stub server) adds `objectsUsingQueues: []` beside `hasAnyQueue`. Code that parses a body from a server older than this release with the schema gets a parse failure for the missing key: parse with `.partial({ objectsUsingQueues: true })` or default it to `[]` until the server is upgraded. The console does not parse; it reads the field and treats its absence as "no object".
+  
+  The console reads the field from the payload it already loads once per session. A record that starts sitting in a queue on an object not listed yet shows the toggle from the next time the permissions are read. An answer without the field is treated as "no", the same way an unknown `hasAnyQueue` is.
+- 5d01679: fix(plugin-sharing)!: a share granted directly by a non-system caller is always a manual share
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answer is a refusal of two input fields on one service method and the door that calls it: no stored row changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a client that sends a non-manual `source` or a `sourceId` on the direct-grant door. `SharingService.grant` called by a non-system caller, and so `POST /api/v1/data/:object/:id/shares`, now refuses an input whose `source` is present and is not `'manual'`, and an input that carries any `sourceId`, with `VALIDATION_FAILED` (400), and writes nothing. The refusal comes before any other check reads anything. Only the platform's own sharing-rule, team and system paths, which run under a system context, write a share of another source.
+  
+  **Who moves:** a client that sent a non-manual `source` (`'rule'`, `'team'`, `'inherited'` or any other string) or a `sourceId` on the direct-grant door. FROM 201 with the row written TO 400 `VALIDATION_FAILED`, nothing written. The fix is one line: drop `source` and `sourceId` from the request (or send `source: 'manual'` with no `sourceId`); a share that should follow a rule is declared as a sharing rule.
+  
+  **Not moved.** A grant with no `source`, or with `source: 'manual'` and no `sourceId`, answers as before. The system path (the sharing-rule evaluator and other platform callers under a system context) writes its shares as before, and the revoke door answers as before.
+- Updated dependencies [e53e02e]
+- Updated dependencies [35c9a30]
+- Updated dependencies [1f923d7]
+- Updated dependencies [a00b422]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [5af956f]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [b109659]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [9a7f8c1]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [8f052e9]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [54f8e16]
+- Updated dependencies [bb3c163]
+- Updated dependencies [3c2fb32]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [4176c95]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [568d416]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [6844e6b]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [6080387]
+- Updated dependencies [8fd5004]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [803f909]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [a8e09bb]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [b91cefa]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [cc5472e]
+- Updated dependencies [a825152]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [0465f4a]
+- Updated dependencies [2487242]
+- Updated dependencies [3a78b89]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [6880b04]
+- Updated dependencies [d18d54b]
+- Updated dependencies [1354d2a]
+- Updated dependencies [0593356]
+- Updated dependencies [a2bb7d5]
+- Updated dependencies [6aeb665]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/objectql@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/formula@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

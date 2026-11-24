@@ -69,7 +69,7 @@ const DEFAULT_OFFSET: ToasterProps['offset'] = { top: APP_HEADER_HEIGHT + APP_HE
  *
  * "A right-edge drawer" is read off the DOM, not off a prop: an open Radix
  * dialog (`role="dialog"`, `data-state="open"`) laid out fixed against the
- * top, right and bottom edges. Every `side="right"` sheet in the console
+ * top, right and bottom edges, or floating up to 16px off them. Every `side="right"` sheet in the console
  * matches, the record drawer included; popovers, centred dialogs, left and
  * bottom sheets do not. Its header is the dialog's top-level block that holds
  * its `aria-labelledby` title. Sizes are layout sizes (`offsetWidth`,
@@ -86,12 +86,10 @@ interface DrawerClearance {
   mobileOffset: ToasterProps['mobileOffset'];
 }
 
-const isZero = (length: string) => parseFloat(length) === 0;
-
 function openRightDrawers(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"]')).filter((el) => {
     const style = window.getComputedStyle(el);
-    return style.position === 'fixed' && isZero(style.top) && isZero(style.right) && isZero(style.bottom);
+    return style.position === 'fixed' && [style.top, style.right, style.bottom].every((edge) => parseFloat(edge) <= 16);
   });
 }
 
@@ -148,10 +146,10 @@ function clearanceFor(drawers: HTMLElement[]): DrawerClearance | null {
   let width = 0;
   let clearBelow = 0;
   for (const drawer of drawers) {
-    width = Math.max(width, drawer.offsetWidth);
+    width = Math.max(width, drawer.offsetWidth + parseFloat(window.getComputedStyle(drawer).right));
     const header = headerOf(drawer);
-    if (header) clearBelow = Math.max(clearBelow, header.offsetTop + header.offsetHeight);
-    clearBelow = Math.max(clearBelow, firstControlRowBottom(drawer, header));
+    if (header) clearBelow = Math.max(clearBelow, drawer.offsetTop + header.offsetTop + header.offsetHeight);
+    clearBelow = Math.max(clearBelow, drawer.offsetTop + firstControlRowBottom(drawer, header));
   }
   const fitsBeside = window.innerWidth - width >= TOAST_WIDTH + 2 * VIEWPORT_GAP;
   return {

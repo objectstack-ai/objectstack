@@ -23,7 +23,8 @@
  * the existing DetailView output.
  */
 
-import { deriveFieldGroupLayout } from '@objectstack/spec/data';
+import { deriveFieldGroupLayout, isRecordPageBuiltinTab, readRelatedListsArrangement, relatedListEntryName, type RecordPageBuiltinTab } from '@objectstack/spec/data';
+import { RECORD_HIGHLIGHTS_MAX } from '@objectstack/spec/ui';
 import type { SelectOptionKind, ServiceObject } from '@objectstack/spec/data';
 import { detectStatusField } from '@object-ui/types';
 import { resolveNameField } from '@object-ui/core';
@@ -38,12 +39,15 @@ export interface ObjectDefLike {
   label?: string;
   fields?: Record<string, ObjectDefFieldLike>;
   /** Semantic role (ADR-0085): the linear-lifecycle field driving the
-   *  `record:path` stepper. `false` = the status-shaped field is NOT a
-   *  linear flow — suppress stage detection entirely (#2065). */
+   *  header's stage tag, and a `record:path` a page places itself. `false` =
+   *  the status-shaped field is NOT a linear flow — suppress stage detection
+   *  entirely (#2065). */
   stageField?: string | false;
   stages?: Array<{ value: any; label: string }>;
-  /** Semantic role (ADR-0085): the object's most important fields —
-   *  drives the highlight strip (first {@link RECORD_HIGHLIGHTS_MAX}). */
+  /** Semantic role (ADR-0085): the object's most important fields — the
+   *  hover card, a related list's default columns, the record picker, and a
+   *  strip a page places itself (first {@link RECORD_HIGHLIGHTS_MAX}). The
+   *  default record page draws no strip (objectstack#35891). */
   highlightFields?: string[];
   /**
    * ACCEPTED BUT NEVER READ — do not "tidy" this away (objectui#7287).
@@ -94,11 +98,31 @@ export interface ObjectDefLike {
    */
   fieldGroups?: Array<Partial<NonNullable<ServiceObject['fieldGroups']>[number]>>;
   /**
-   * Spec `enable` capability toggles. Only `files` is read here:
-   * `enable.files === true` (opt-in, objectstack-ai/objectstack#2727) makes the synthesizer emit an
-   * Attachments tab beside Details/Related (objectstack#4358).
+   * Spec `enable` capability toggles. `enable.files === true` (opt-in,
+   * objectstack-ai/objectstack#2727) makes the synthesizer emit an
+   * Attachments tab beside Details/Related (objectstack#4358). The activity
+   * stream tab follows the stream's three sources (objectstack#36693): it is
+   * left out when `feeds` and `activities` are both `false` (opt-out, spec
+   * default on) and `trackHistory` is not `true` (opt-in), since such a
+   * stream has nothing to draw (`streamHasSource`).
    */
-  enable?: { files?: boolean; [key: string]: any };
+  enable?: { files?: boolean; feeds?: boolean; activities?: boolean; trackHistory?: boolean; [key: string]: any };
+  /**
+   * The spec's `relatedLists` (objectstack#35897): the record page's tabs
+   * beside the overview, in order. Read here for the three built-in tab names
+   * (`RECORD_PAGE_BUILTIN_TABS`) and to place each related tab at its
+   * entry's position; which related lists exist (and their titles and
+   * columns) is the host's `related` option. See {@link buildDefaultTabs}.
+   */
+  relatedLists?: readonly unknown[];
+  /**
+   * The served read's `_relatedListsArrangement` decoration (ADR-0146 D10),
+   * present when the base's paired `.custom` package arranges this object's
+   * tabs. Read only through the spec's `readRelatedListsArrangement`, for
+   * `unlisted` (whether an unlisted attachments tab is still drawn, and
+   * whether an empty `relatedLists` is a declared list with every tab hidden).
+   */
+  _relatedListsArrangement?: unknown;
   // NOTE: the per-surface `detail` hints block was REMOVED from the spec by
   // ADR-0085 — presentation intent is declared via the top-level semantic
   // roles above (stageField / highlightFields / fieldGroups). Per-page
@@ -139,10 +163,22 @@ export interface ObjectDefFieldLike {
 }
 
 export interface BuildPageOptions {
-  /** Override the auto-derived highlight field list. */
+  /**
+   * ACCEPTED BUT NEVER READ by {@link buildDefaultPageSchema} and
+   * {@link buildDefaultTabs} (objectstack#35891). The default page draws no
+   * highlight strip and no stage bar, and the Details body keeps every
+   * grouped field (objectstack#35849), so these three keys have nothing left
+   * to override there. Only {@link buildDefaultHighlights} reads them, for a
+   * page that places the strip itself.
+   *
+   * They stay declared because this interface ships in a published `.d.ts`,
+   * as `ObjectDefLike.primaryField` does (objectui#7287); removing them is
+   * objectstack#35943's change, not a rider here.
+   */
   highlightFields?: string[];
-  /** Override the auto-derived statusField / stages. */
+  /** Accepted but never read by the default page — see `highlightFields`. */
   statusField?: string;
+  /** Accepted but never read by the default page — see `highlightFields`. */
   stages?: Array<{ value: any; label: string }>;
   /** Override the auto-derived section grouping. The heading rides `label` —
    *  the one slot `@object-ui/types` declares (objectui#6190). */
@@ -172,8 +208,9 @@ export interface BuildPageOptions {
    */
   headerActions?: any[];
   /**
-   * Related child objects. When non-empty, the synthesizer adds a
-   * "Related" tab containing one `record:related_list` per entry.
+   * Related child objects. Each entry is one `record:related_list`: a table
+   * of the 概览 tab when it is the record's body (`isBody`), otherwise a tab
+   * of its own (objectstack#35595).
    *
    * - `objectName` and `relationshipField` are required.
    * - `title` overrides the default child-object label.
@@ -226,15 +263,23 @@ export interface BuildPageOptions {
     isPrimary?: boolean;
     /**
      * The list is the record's own body (objectstack#27055, Target 8):
-     * `relatedList: 'primary'`, or a `master_detail` FK declaring `inlineEdit`
-     * and no `relatedList`. Drawn as a full-width table section in the Details
-     * tab, right after the first field section, instead of in the Related tab /
-     * related column. Absent: `isPrimary` decides. The host computes it from
-     * the FK with `@objectstack/spec`'s `isBodyTableRelationship`
+     * `relatedList: 'primary'`, or a `master_detail` FK declaring no
+     * `relatedList` that a field group of the parent places (objectstack#35889;
+     * unplaced, it is a tab). Drawn as a full-width table section in the
+     * Details tab instead of a tab of its own. Absent: `isPrimary` decides. The
+     * host computes it from the FK and the parent's field groups with
+     * `@objectstack/spec`'s `isBodyTableRelationship`
      * (objectstack#27478) — the one predicate, which the spec's refusal of a
      * field group naming a side card reads too (no spec key of its own).
      */
     isBody?: boolean;
+    /**
+     * objectstack#35889 item 4 — a body table that keeps its tab as well: a
+     * plain `master_detail` list a field group of this object makes a body
+     * table (the host sets it). Absent: a body table takes no tab, as a
+     * `relatedList: 'primary'` one never did.
+     */
+    keepsTab?: boolean;
   }>;
   // objectstack#27055 (Target 3): `showActivity` and `history` are gone too.
   // The timeline is ONE stream — discussion, activity (`sys_activity`) and
@@ -263,9 +308,9 @@ export interface BuildPageOptions {
    * - `actions` — replaces `record:quick_actions`. The override fires
    *   even when `headerActions` is empty (i.e. the override lets you
    *   add a header bar where the synthesizer would have skipped one).
-   * - `highlights` — replaces the highlight strip (chips + chevron
-   *   path). The override fires even when neither auto-emission
-   *   condition is met.
+   * - `highlights` — places a highlight strip (chips, a chevron path)
+   *   between the header and the tabs. The default page draws none
+   *   (objectstack#35891), so this slot is the only way one appears there.
    * - `details` — replaces the Details tab body (the `record:details`
    *   node). Other tabs (Timeline / Related / Approvals) are unaffected.
    *   There is no `tabs` slot (objectstack#27053): the strip is composed
@@ -443,11 +488,15 @@ export function resolveTitleField(def: ObjectDefLike | undefined): string | null
 }
 
 /**
- * How many highlights the record header shows (objectstack#27055, the v3
+ * How many highlights a synthesized strip shows (objectstack#27055, the v3
  * header: 「要点 6 项等宽」 — the same six Studio's highlight editor offers).
- * A declared `highlightFields` list longer than this is cut here.
+ * A declared `highlightFields` list longer than this is cut here. The default
+ * record page draws no strip; {@link buildDefaultHighlights} builds one for a
+ * page that places it in its `highlights` slot.
+ *
+ * Declared once in `@objectstack/spec/ui` and re-exported here.
  */
-export const RECORD_HIGHLIGHTS_MAX = 6;
+export { RECORD_HIGHLIGHTS_MAX };
 
 /**
  * The record's highlight strip: the object's DECLARED `highlightFields`
@@ -469,10 +518,9 @@ export const RECORD_HIGHLIGHTS_MAX = 6;
  * and "what the H1 shows" cannot disagree (objectui#7287). Filtering before
  * the slice means the title never wastes a slot.
  *
- * The three readers of the strip — the default page
- * ({@link buildDefaultHighlights}, and the body's `hideFields` in
- * {@link buildDefaultTabs}), the phone record header and the record hover
- * card — all ask this one function.
+ * Its readers — {@link buildDefaultHighlights} (for a page that places the
+ * strip itself; the default page draws none, objectstack#35891), the phone
+ * record header and the record hover card — all ask this one function.
  *
  * `_statusField` is accepted and not read. It is part of the published
  * signature from when this function guessed and skipped the stage; a declared
@@ -533,6 +581,10 @@ export function buildDefaultActions(
  * Sub-builder: the highlight strip — `record:highlights` chips plus
  * `record:path` chevron (when a status field is configured).
  *
+ * The default record page no longer calls it (objectstack#35891): the stage
+ * moves from the header's status tag, and the highlight fields stay in their
+ * groups. It is kept, unchanged, for a slotted page's `highlights` slot.
+ *
  * Returns an array because the strip is conceptually one region with
  * two adjacent nodes.
  *
@@ -564,34 +616,6 @@ export function buildDefaultHighlights(
   if (statusField && stages && stages.length > 0) {
     out.push(componentNode('record:path', { statusField, stages, allowStageChange: true }));
   }
-  return out;
-}
-
-/**
- * The stage field of the `record:path` among a page's strip nodes, or `null`
- * when the strip draws no path. A node's props are read the way
- * {@link bodyTablePlacement} reads a related-list node's: the ADR-0089 D3a
- * `properties` bag over the node's own keys.
- */
-function drawnPathField(nodes: readonly any[]): string | null {
-  for (const node of nodes) {
-    if (node?.type !== 'record:path') continue;
-    const props = { ...node, ...(node?.properties ?? {}) };
-    if (typeof props.statusField === 'string' && props.statusField.length > 0) return props.statusField;
-  }
-  return null;
-}
-
-/**
- * The fields the Details body leaves out because the page's header already
- * draws them (objectstack#28868): the highlight strip's fields, as many as
- * the strip shows ({@link RECORD_HIGHLIGHTS_MAX} — a declared entry past the
- * sixth is drawn by the body, not dropped from both), and the stage field
- * when the page draws `record:path` for it, so the stage is shown once.
- */
-function headerDrawnFields(highlightFields: readonly string[], pathField: string | null): string[] {
-  const out = highlightFields.slice(0, RECORD_HIGHLIGHTS_MAX);
-  if (pathField !== null && !out.includes(pathField)) out.push(pathField);
   return out;
 }
 
@@ -791,6 +815,33 @@ export function buildDefaultDetails(
   });
 }
 
+/**
+ * Whether the record page draws a Details section CLOSED when it opens
+ * (objectstack#35742): an enumerated section that is `collapsible` and
+ * `defaultCollapsed`, or a `{ group }` reference whose group declares the
+ * `collapsed` collapse. A reference inherits its presentation from the group
+ * — the spec refuses `collapsible` / `defaultCollapsed` beside `group` — so
+ * it is read the way `record:details` resolves it, through
+ * {@link deriveFieldGroupDetailEntries}. A reference naming no declared group
+ * draws nothing and counts as open, which leaves the tables where they are.
+ */
+function sectionDrawnClosed(def: ObjectDefLike | undefined): (section: Record<string, any>) => boolean {
+  let groups: Map<string, Record<string, any>> | null = null;
+  return (section) => {
+    if (typeof section?.group !== 'string') {
+      return section?.collapsible === true && section?.defaultCollapsed === true;
+    }
+    if (!groups) {
+      groups = new Map();
+      for (const entry of deriveFieldGroupDetailEntries(def) ?? []) {
+        if (typeof entry.key === 'string') groups.set(entry.key, entry.section);
+      }
+    }
+    const resolved = groups.get(section.group);
+    return resolved?.collapsible === true && resolved?.defaultCollapsed === true;
+  };
+}
+
 /** Rows on the first page of a body table (objectstack#27055, Target 8). */
 export const BODY_TABLE_PAGE_SIZE = 10;
 
@@ -806,11 +857,28 @@ export const BODY_TABLE_PAGE_SIZE = 10;
  *    no fields (the spec refuses one that does), so it is a position, never a
  *    section of its own. A group only POSITIONS a body table: only the
  *    lists in `bodies` are placed, and a side card is never among them (objectstack#27478:
- *    the spec refuses a group naming a side card or a hidden list, by the same
- *    `isBodyTableRelationship` the host computes `isBody` with);
- *  - every other body table goes right after the FIRST field section
- *    (conventionally 基本信息), stacked in the order given; with one section
- *    or none, after the details.
+ *    the spec refuses a group naming a side card or a hidden list; a plain
+ *    master-detail list a group names is a body table because the group names
+ *    it, objectstack#35889, by the same `isBodyTableRelationship` the host
+ *    computes `isBody` with);
+ *  - every other body table (a `relatedList: 'primary'` list no group places;
+ *    since objectstack#35889 a master-detail list is a body table only where a
+ *    group places it) goes AFTER the field sections the record page
+ *    draws open (objectstack#35742: the record's own fields first, then its
+ *    body tables — 「主记录的字段分组 → 主从子表」; on the default
+ *    page both sit directly under the header, which draws no stage bar and
+ *    no key fields), stacked in the order given — the parent's
+ *    `relatedLists`, then the derived order. The sections drawn CLOSED that
+ *    trail the last open one (a group whose collapse is `collapsed`, an
+ *    enumerated section that is `collapsible` and `defaultCollapsed`) follow
+ *    the tables: common fields before the tables, the fields an author tucked
+ *    away after them ({@link sectionDrawnClosed}). The declared order of the
+ *    sections is never changed — a closed section between two open ones stays
+ *    between them — and when no section is drawn open the tables follow every
+ *    section, so the record's own fields always lead. With no section at all
+ *    the details node leads (it draws the object's highlight fields) and the
+ *    tables follow it. (objectstack#27069 drew them after the FIRST section,
+ *    objectstack#35597 before every section.)
  *
  * The details node is split around the tables: each run of consecutive
  * sections is one `record:details`. A section names its group by `group` (the
@@ -855,7 +923,17 @@ export function bodyTablePlacement(
     return index ?? Number.POSITIVE_INFINITY;
   };
 
-  if (placed.length === 0 && resolved.length <= 1) {
+  // objectstack#35742 — the unplaced tables follow the last section drawn
+  // open; every section after it is drawn closed and follows the tables. No
+  // open section: the tables follow every section.
+  const closed = sectionDrawnClosed(def);
+  let lastOpen = -1;
+  resolved.forEach((section, index) => {
+    if (!closed(section)) lastOpen = index;
+  });
+  const tablesAt = lastOpen === -1 ? resolved.length : lastOpen + 1;
+
+  if (placed.length === 0 && tablesAt === resolved.length) {
     return [buildDefaultDetails(def, sections, hideFields), ...bodies];
   }
 
@@ -867,12 +945,12 @@ export function bodyTablePlacement(
   const flushPlacedBefore = (index: number) => {
     while (next < placed.length && placed[next].at < index) slots.push({ table: placed[next++].node });
   };
-  resolved.forEach((section, i) => {
+  resolved.forEach((section, index) => {
     flushPlacedBefore(sectionGroupIndex(section));
+    if (index === tablesAt) for (const node of unplaced) slots.push({ table: node });
     slots.push({ section });
-    if (i === 0) for (const node of unplaced) slots.push({ table: node });
   });
-  if (resolved.length === 0) for (const node of unplaced) slots.push({ table: node });
+  if (tablesAt === resolved.length) for (const node of unplaced) slots.push({ table: node });
   while (next < placed.length) slots.push({ table: placed[next++].node });
 
   const out: any[] = [];
@@ -896,13 +974,13 @@ export function bodyTablePlacement(
 }
 
 /**
- * Sub-builder: the `page:tabs` node. Emits the Details tab, always first,
- * then the Related tab, the Approvals tab and the Timeline tab (the one
- * stream, objectstack#27055: field changes join it under its Changes filter,
- * so there is no History tab), each of those three only when the options give
- * it content. The order is stable: Timeline sits last for every object — the
- * 动态 panel is the last panel of the record page's right column
- * (objectstack#34590, superseding objectstack#27524 Target 5's 动态-first).
+ * Sub-builder: the `page:tabs` node. Emits the 概览 tab (value `details`),
+ * always first, then one tab per ordinary related list, the Attachments tab,
+ * the Approvals tab and the Timeline tab (the one stream, objectstack#27055:
+ * field changes join it under its Changes filter, so there is no History
+ * tab), each after the first only when the options give it content
+ * (objectstack#35595). The order is stable: Timeline sits last for every
+ * object (objectstack#34590).
  *
  * Useful for slotted authors who want to add a custom tab — they can
  * call `buildDefaultTabs(def, opts)` and splice their tab into
@@ -916,29 +994,28 @@ export function buildDefaultTabs(
     /**
      * The Timeline tab's content (objectstack#27055); `buildDefaultPageSchema`
      * passes the `discussion` slot here. Absent: the default stream, unless
-     * `hideDiscussion`.
+     * `hideDiscussion` or the object's stream has no source (objectstack#36693).
      */
     timeline?: any[];
   } = {},
 ): any {
-  // The Details body leaves out what the default strip for these options
-  // draws: its highlights and the stage field of its `record:path`.
-  const highlightFields = options.highlightFields ?? deriveHighlightFields(def, null);
-  const strip = buildDefaultHighlights(def, { highlightFields, statusField: options.statusField });
-  return synthTabs(def, options, headerDrawnFields(highlightFields, drawnPathField(strip)));
+  return synthTabs(def, options);
 }
 
 type DefaultTabsOptions = NonNullable<Parameters<typeof buildDefaultTabs>[1]>;
 
 /**
- * {@link buildDefaultTabs}' body, given the fields the Details body leaves
- * out. `buildDefaultPageSchema` passes the ones the page it builds actually
- * draws in its header (an authored `highlights` slot included).
+ * {@link buildDefaultTabs}' body.
+ *
+ * The Details body draws every field the object's groups hold, the highlight
+ * fields and the stage field included (objectstack#35849): the groups an
+ * author configured read the same in view and in edit, and nothing the page
+ * draws elsewhere is taken out of them. A builder who does not want a field
+ * twice leaves it out of `highlightFields` or out of the group.
  */
 function synthTabs(
   def: ObjectDefLike | undefined,
   options: DefaultTabsOptions,
-  bodyHiddenFields: string[],
 ): any {
   // Every tab carries a STABLE, semantic `value` (objectui#2257): the active
   // tab is URL-addressable (`?tab=<value>`, ADR-0054 C3), so values must
@@ -964,50 +1041,59 @@ function synthTabs(
       ...(rel.filter ? { filter: rel.filter } : {}),
     });
   // objectstack#27055, Target 8 — a list that is the record's own body
-  // (`isBody`, else `isPrimary`) is a table section of the Details tab; every
-  // other list is a side card in the one `Related` tab. Body tables keep the
+  // (`isBody`, else `isPrimary`) is a table section of the Details tab, after
+  // the record's own open field sections (objectstack#35742); every
+  // other list is a tab of its own (objectstack#35595). Body tables keep the
   // order the host passed (the object's `relatedLists`, then the derived
   // order — objectstack#27069), unless a field group places one
   // (`bodyTablePlacement`).
   const related = Array.isArray(options.related) ? options.related : [];
   const isBody = (rel: (typeof related)[number]) => rel.isBody ?? rel.isPrimary === true;
   const bodies = related.filter(isBody).map((rel) => relatedNode(rel, BODY_TABLE_PAGE_SIZE));
-  const sides = related.filter((rel) => !isBody(rel));
+  // objectstack#35889 (item 4) — a body table a field group of this object
+  // MAKES one (`keepsTab`, set by the host for a plain master_detail list a
+  // group names) keeps its tab too, with its count: the group adds it to the
+  // overview, it does not take it off the tab row. A `relatedList: 'primary'`
+  // body table stays body-only, as before, whether or not a group positions it.
+  const sides = related.filter((rel) => !isBody(rel) || rel.keepsTab === true);
+  // objectstack#35595 — the first tab is 「概览」 (the token the tab strip
+  // localizes as `detail.recordTabOverview`); its value stays `details`, the
+  // URL token a `?tab=` link already names.
   const items: any[] = [
     {
-      label: 'Details',
+      label: 'Overview',
       value: 'details',
-      children: bodyTablePlacement(def, options.sections, bodyHiddenFields, bodies),
+      children: bodyTablePlacement(def, options.sections, undefined, bodies),
     },
   ];
-  // objectstack#27055, Target 3 — the timeline stream is ONE tab for every
-  // object (objectstack#27524, Target 5: 动态 is a panel, for every object —
-  // no object-derived default places it). objectstack#34590 — the strip is
-  // 详情 / 关联 / （审批） / 动态: the stream comes LAST, as the laid-out page
-  // draws it last in its right column, its stack and its tab row
-  // (「「动态」在最后」, superseding objectstack#27524 Targets 5 and 8's
-  // 动态-second). Attachments close the Related tab, as they close the related
-  // panels. The stream tab's token is `Activity stream`, which the strip reads
-  // as `detail.timeline` (「动态」); a bare `Timeline` is an author's word.
-  const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
+  // objectstack#35595 — EVERY ordinary related list is a tab of its own, in
+  // the order the host passed (the object's `relatedLists`, then the derived
+  // order), whether or not it has records: one table, one tab, one count. The
+  // value is `related:<object>.<field>`, the list's relationship id, so two
+  // lists over one child object stay two tabs. A tab merging several tables
+  // is an authored page's (it carries no count, `page:tabs`). Then
+  // Attachments, Approvals and the timeline stream, each its own tab
+  // (objectstack#34590 kept the stream last). The stream tab's token is
+  // `Activity stream`, which the strip reads as `detail.timeline` (「动态」); a
+  // bare `Timeline` is an author's word.
+  const timeline = options.timeline ?? (options.hideDiscussion || !streamHasSource(def) ? [] : [buildDefaultTimeline()]);
+  for (const rel of sides) {
+    items.push({
+      label: rel.title ?? rel.objectName,
+      value: `related:${rel.objectName}.${rel.relationshipField}`,
+      children: [relatedNode(rel)],
+    });
+  }
   // Attachments (objectstack#4358) — for `enable.files: true` objects; the
   // tab strip's count badge reads the `record:attachments` node.
-  const relatedChildren = [
-    ...sides.map((rel) => relatedNode(rel)),
-    ...(def?.enable?.files === true && !options.hideAttachments ? [buildDefaultAttachments()] : []),
-  ];
-  if (relatedChildren.length > 0) {
-    items.push({ label: 'Related', value: 'related', children: relatedChildren });
+  if (def?.enable?.files === true && !options.hideAttachments) {
+    items.push({ label: 'Attachments', value: 'attachments', children: [buildDefaultAttachments()] });
   }
   // Approvals tab (objectui#3461) — emitted only when the host reports the
   // record actually HAS approval requests, so approval-free records carry no
-  // dead tab. A peer of Details/Related for the same reason as Attachments
-  // below: footer placement buried the one thing a submitter opens the
-  // record to learn ("who is this waiting on"). The English label localizes
-  // in the tab strip, which reads the pack key for a well-known token
-  // (`detail.approvalsPanelTitle` → 审批 / 承認 / Aprobaciones …). That claim
-  // used to name `KNOWN_LABEL_DICT`, which shipped zh arms only and so was
-  // true for Chinese and silently false everywhere else — objectui#4645.
+  // dead tab. The English label localizes in the tab strip, which reads the
+  // pack key for a well-known token (`detail.approvalsPanelTitle` → 审批 /
+  // 承認 / Aprobaciones …) — objectui#4645.
   if (options.approvals) {
     items.push({
       label: 'Approvals',
@@ -1016,9 +1102,89 @@ function synthTabs(
       children: [componentNode('record:approvals', { ...(options.approvals.node || {}) })],
     });
   }
-  // objectstack#34590 — the 动态 tab closes the strip (see above).
+  // objectstack#34590 — the 动态 tab closes the strip.
   if (timeline.length > 0) items.push({ label: 'Activity stream', value: 'timeline', children: timeline });
-  return componentNode('page:tabs', { items });
+  return componentNode('page:tabs', {
+    items: arrangeDeclaredTabs(def?.relatedLists, items, readRelatedListsArrangement(def)?.unlisted),
+  });
+}
+
+/** The tab value each built-in tab name draws (objectstack#35897). */
+const BUILTIN_TAB_VALUES: Readonly<Record<RecordPageBuiltinTab, string>> = {
+  sys_attachment: 'attachments',
+  sys_approval_request: 'approvals',
+  sys_activity: 'timeline',
+};
+
+/**
+ * objectstack#35897 — the object's declared `relatedLists` arranges the tabs
+ * after the overview. Absent or empty: `items` exactly as built (every list,
+ * then attachments, approvals, the stream), unless `unlistedTabs` is
+ * `'hidden'`, which says the empty list is a declared one. Declared:
+ *
+ *  - each tab sits at the first entry naming it: a related tab at the entry
+ *    naming its relationship (`related:<object>.<field>`), a built-in at its
+ *    object name (`sys_attachment`, `sys_approval_request`, `sys_activity`);
+ *  - the attachments tab is drawn only when listed (it still needs
+ *    `enable.files`, decided above);
+ *  - an unlisted approvals tab follows every listed tab, and an unlisted
+ *    stream closes the strip, so leaving either out never hides it;
+ *  - a related tab no entry names (a list another package brings and does
+ *    not place, objectstack#35901, or a host that did not filter it) sits at
+ *    the end of the tabs: after the listed tabs, before a trailing run of
+ *    listed approvals / stream tabs, in the order passed.
+ *
+ * `unlistedTabs` (ADR-0146 D10, `unlisted` of the served read's
+ * `_relatedListsArrangement` decoration; `undefined` for every object
+ * without it). `'shown'`: the list is the base's paired `.custom` package's,
+ * laid over an object that declared none, so every tab the automatic list
+ * showed still shows. The one difference here: an unlisted attachments tab is
+ * drawn too, at the end of the tabs after the unlisted related ones.
+ * `'hidden'`: the list is laid over a declared one, and stays a declared list
+ * when it is EMPTY (the environment hid every tab of it): the tabs follow the
+ * declared rules above with no entry naming any, so an unlisted attachments
+ * tab is not drawn.
+ *
+ * Which related lists exist is the host's: `deriveRelatedLists` drops the
+ * unlisted side lists. A pure, stable reorder of the tabs already built.
+ */
+function arrangeDeclaredTabs(declared: readonly unknown[] | undefined, items: any[], unlistedTabs?: 'shown' | 'hidden'): any[] {
+  const entries = Array.isArray(declared) ? declared : [];
+  if (entries.length === 0 && unlistedTabs !== 'hidden') return items;
+  const unlistedShown = unlistedTabs === 'shown';
+  const [overview, ...tabs] = items;
+  const names = entries.map((entry) => relatedListEntryName(entry));
+  const unlisted = names.length;
+  // objectstack#35901 — the end of the tabs, for a related tab no entry names
+  // (a list another package brings and does not place): before a trailing run
+  // of listed approvals / stream tabs, which close the strip.
+  let tail = names.length;
+  while (tail > 0 && (names[tail - 1] === 'sys_approval_request' || names[tail - 1] === 'sys_activity')) tail -= 1;
+  const unlistedRelated = tail < names.length ? tail - 0.5 : unlisted;
+  const rank = (tab: any): number | null => {
+    const value = typeof tab?.value === 'string' ? tab.value : '';
+    const builtin = (Object.keys(BUILTIN_TAB_VALUES) as RecordPageBuiltinTab[])
+      .find((name) => BUILTIN_TAB_VALUES[name] === value);
+    if (builtin) {
+      const at = names.indexOf(builtin);
+      if (at !== -1) return at;
+      if (builtin === 'sys_attachment') return unlistedShown ? unlistedRelated : null;
+      return builtin === 'sys_activity' ? unlisted + 1 : unlisted;
+    }
+    if (value.startsWith('related:')) {
+      const id = value.slice('related:'.length);
+      const dot = id.indexOf('.');
+      const list = { childObject: id.slice(0, dot), referenceField: id.slice(dot + 1) };
+      const at = names.findIndex((name) => name !== undefined && !isRecordPageBuiltinTab(name) && relatedListEntryNames(name, list));
+      return at === -1 ? unlistedRelated : at;
+    }
+    return unlisted;
+  };
+  const ranked = tabs
+    .map((tab, index) => ({ tab, index, rank: rank(tab) }))
+    .filter((entry): entry is { tab: any; index: number; rank: number } => entry.rank !== null)
+    .sort((a, b) => a.rank - b.rank || a.index - b.index);
+  return [overview, ...ranked.map((entry) => entry.tab)];
 }
 
 /**
@@ -1028,6 +1194,24 @@ function synthTabs(
  */
 export function buildDefaultDiscussion(): any {
   return componentNode('record:discussion');
+}
+
+/**
+ * objectstack#36693 — whether the default record page's activity stream has a
+ * source to draw. The stream merges three, each switched by the object
+ * (`buildDefaultTimeline`): the discussion (`enable.feeds`, opt-out), the
+ * activity (`enable.activities`, opt-out) and the field changes
+ * (`enable.trackHistory`, opt-in; a field's own `trackHistory` /
+ * `fieldHistory` only decide whether a change shows its values). With all
+ * three off the 动态 tab would be empty, so the synthesizer leaves it out, the
+ * way the Attachments tab follows `enable.files`. A `relatedLists` entry
+ * `'sys_activity'` does not bring it back (`arrangeDeclaredTabs` only places
+ * tabs that were built). An authored page, or an authored `discussion` slot,
+ * draws what its author placed.
+ */
+function streamHasSource(def: ObjectDefLike | undefined): boolean {
+  const enable = def?.enable;
+  return enable?.feeds !== false || enable?.activities !== false || enable?.trackHistory === true;
 }
 
 /**
@@ -1063,7 +1247,7 @@ export function buildDefaultAttachments(): any {
  *
  * Shape:
  *   { type:'record', template:'default', regions:[ { name:'main',
- *     components: [page:header, record:highlights?, record:path?,
+ *     components: [page:header, <highlights slot>?,
  *     page:tabs, record:discussion?] } ] }
  *   For `enable.files: true` objects the tabs node carries a peer
  *   Attachments tab (`record:attachments` — objectstack#4358).
@@ -1114,30 +1298,23 @@ export function buildDefaultPageSchema(
     components.push(...toNodeArray(slots.alerts));
   }
 
-  // 3) Highlight strip (chips + chevron path).
-  const strip =
-    'highlights' in slots && slots.highlights !== undefined
-      ? toNodeArray(slots.highlights)
-      : buildDefaultHighlights(def, {
-          highlightFields: options.highlightFields,
-          statusField: options.statusField,
-          stages: options.stages,
-        });
-  components.push(...strip);
-  // What the Details body leaves out (objectstack#28868): the strip's
-  // highlights, and the stage field when THIS page draws `record:path` for it
-  // — the default strip's path, or one an authored `highlights` slot places.
-  const bodyHidden = headerDrawnFields(
-    options.highlightFields ?? deriveHighlightFields(def, null),
-    drawnPathField(strip),
-  );
+  // 3) Highlights slot. The default page draws no strip (objectstack#35891,
+  //    the maintainer's 2026-11-20 「把阶段条和关键字段条去掉」): the stage is
+  //    the header's status tag, which opens a menu to move it, and the
+  //    highlight fields stay in their groups (objectstack#35849).
+  //    `buildDefaultHighlights` and the two blocks are kept, so an authored
+  //    `highlights` slot, or an authored page, still places a strip and a path.
+  if ('highlights' in slots && slots.highlights !== undefined) {
+    components.push(...toNodeArray(slots.highlights));
+  }
 
   // The timeline stream's content (objectstack#27055): an authored
-  // `discussion` slot replaces it; `hideDiscussion` drops it.
+  // `discussion` slot replaces it; `hideDiscussion` drops it, and so does an
+  // object whose stream has no source (objectstack#36693, `streamHasSource`).
   const timeline =
     'discussion' in slots && slots.discussion !== undefined
       ? toNodeArray(slots.discussion)
-      : options.hideDiscussion
+      : options.hideDiscussion || !streamHasSource(def)
         ? []
         : [buildDefaultTimeline()];
 
@@ -1150,12 +1327,10 @@ export function buildDefaultPageSchema(
       sections: options.sections,
       related: options.related,
       approvals: options.approvals,
-      highlightFields: options.highlightFields,
-      statusField: options.statusField,
       hideAttachments: options.hideAttachments,
       hideDiscussion: options.hideDiscussion,
       timeline,
-    }, bodyHidden);
+    });
     // Replace the first tab's children (Details) with the override. The items
     // live in the node's `properties` bag — the canonical carrier per
     // ADR-0089 D3a (see `componentNode`).
@@ -1169,12 +1344,10 @@ export function buildDefaultPageSchema(
       sections: options.sections,
       related: options.related,
       approvals: options.approvals,
-      highlightFields: options.highlightFields,
-      statusField: options.statusField,
       hideAttachments: options.hideAttachments,
       hideDiscussion: options.hideDiscussion,
       timeline,
-    }, bodyHidden));
+    }));
   }
 
   // ADR-0085 (objectstack#27055): the synthesized page has ONE region. The

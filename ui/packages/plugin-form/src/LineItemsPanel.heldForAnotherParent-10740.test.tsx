@@ -147,11 +147,22 @@ const answerLines = (read: LinesRead, ...lines: Array<{ id: string; label: strin
   settle(() => read.resolve({ data: lines }));
 const fail = (read: Deferred<any>, message: string) => settle(() => read.reject(new Error(message)));
 
-/** The grid's line inputs; the grid always trails one blank entry row. */
+/** The grid's line inputs (it draws no trailing entry row, objectstack#35507). */
 const lineInputs = () =>
   Array.from(document.body.querySelectorAll('input[aria-label="Line"]')) as HTMLInputElement[];
-/** The lines the grid draws (its trailing blank row is not a line). */
+/** The lines the grid draws (a blank one is not counted). */
 const shownLines = () => lineInputs().map((input) => input.value).filter((value) => value !== '');
+/** Press the grid's Add once it is drawn, and wait for the new line. */
+const addLine = async () => {
+  const add = await waitFor(() => {
+    const el = document.body.querySelector('[data-testid="line-items-add"]') as HTMLButtonElement | null;
+    if (!el) throw new Error('grid not drawn yet');
+    return el;
+  });
+  const before = lineInputs().length;
+  await settle(() => { fireEvent.click(add); });
+  await waitFor(() => expect(lineInputs().length).toBeGreaterThan(before));
+};
 const saveButton = () =>
   Array.from(document.body.querySelectorAll('button')).find((b) => /^(Save|Saving…)$/.test(b.textContent ?? '')) as
     | HTMLButtonElement
@@ -247,9 +258,9 @@ describe('LineItemsPanel refuses the lines it holds for another parent (objectui
     const view = mount(dataSource, linesBlock());
     await fail(await nth(lineReads, 1), 'p1 load failed');
     await waitFor(() => expect(bannerShows('p1 load failed')).toBe(true));
-    // The first failure leaves the empty grid on screen (its entry row is
-    // there), as before this card. A line typed into it is p1's.
-    await waitFor(() => expect(lineInputs().length).toBeGreaterThan(0));
+    // The first failure leaves the empty grid on screen, as before this card.
+    // A line added and typed into it is p1's.
+    await addLine();
     await editFirstLine('new p1 line');
     await waitFor(() => expect(shownLines()).toEqual(['new p1 line']));
     expect(saveButton()?.disabled).toBe(false);
@@ -274,9 +285,9 @@ describe('LineItemsPanel refuses the lines it holds for another parent (objectui
       </SchemaRendererProvider>
     );
     // No adapter: the load declines before any fetch and the panel offers its
-    // empty grid (its entry row) for p1. A line typed there is p1's.
+    // empty grid for p1. A line added there is p1's.
     const view = render(tree(linesBlock(), null));
-    await waitFor(() => expect(lineInputs().length).toBeGreaterThan(0));
+    await addLine();
     await editFirstLine('typed under p1');
     await waitFor(() => expect(shownLines()).toEqual(['typed under p1']));
     expect(dataSource.find).not.toHaveBeenCalled();
@@ -392,8 +403,9 @@ describe('what the rule leaves alone (objectui#10740 controls)', () => {
     await waitFor(() => expect(bannerShows('p1 load failed')).toBe(true));
 
     expect(placeholder()).toBeNull();
-    // The grid is on screen: its entry row is drawn, no line is.
-    await waitFor(() => expect(lineInputs().length).toBeGreaterThan(0));
+    // The grid is on screen (its Add button), and no line is.
+    await waitFor(() => expect(document.body.querySelector('[data-testid="line-items-add"]')).not.toBeNull());
+    expect(lineInputs()).toHaveLength(0);
     expect(shownLines()).toEqual([]);
     expect(saveButton()?.disabled, 'a clean panel offered Save').toBe(true);
   });

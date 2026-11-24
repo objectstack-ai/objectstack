@@ -46,6 +46,22 @@ import { bindApprovalLockHook, APPROVALS_HOOK_PACKAGE } from './lifecycle-hooks.
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
+/**
+ * [#35384] A flat `a.b.c` pack as the nested data `II18nService.getTranslations()`
+ * hands over: the object label is read off it by `translateObject`, as `/meta`
+ * reads it, never through `t()`.
+ */
+function nestedPack(flat: Record<string, string> = {}): Record<string, unknown> {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(flat)) {
+    const parts = key.split('.');
+    let cur = out;
+    for (const part of parts.slice(0, -1)) cur = cur[part] ??= {};
+    cur[parts[parts.length - 1]] = value;
+  }
+  return out;
+}
+
 const OPPORTUNITY = {
   name: 'opportunity',
   label: 'Opportunity',
@@ -228,6 +244,8 @@ describe('[#18153] CONTROL — the operator-facing refusals are untouched', () =
     );
     expect(thrown.code).toBe('RECORD_LOCKED');
     expect(thrown.statusCode).toBe(409);
+    // [#34699] An operator-facing sentence (it names the API name) is not marked for the end user.
+    expect(thrown.userMessage).toBeUndefined();
   });
 
   it('the predicate cap refusal still names the object', async () => {
@@ -294,6 +312,7 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
   };
   const i18n = {
     getLocales: () => Object.keys(PACKS),
+    getTranslations: (locale: string) => nestedPack(PACKS[locale]),
     t: (key: string, locale: string) => PACKS[locale]?.[key] ?? key,
   };
 
@@ -356,6 +375,8 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
     expect(thrown.message).toContain('商机「Acme renewal」');
     expect(thrown.message).not.toContain(TAIL_EN);
     expect(thrown.message).not.toContain(opportunityId);
+    // [#34699] The same sentence is marked for the end user, without the wire prefix.
+    expect(thrown.userMessage).toBe(ZH.record_locked.replace('{{object}}', '商机').replace('{{title}}', 'Acme renewal'));
   });
 
   it('zh-CN, a record with no title: the label-only sentence, still in Chinese', async () => {
@@ -387,6 +408,7 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
     await rig(() => i18n);
     const thrown = await refusalIn(undefined, 'opportunity', opportunityId);
     expect(thrown.message).toBe(`RECORD_LOCKED: Opportunity 'Acme renewal' ${TAIL_EN}`);
+    expect(thrown.userMessage).toBe(`Opportunity 'Acme renewal' ${TAIL_EN}`);
   });
 
   it('no i18n service: the built-in catalog still answers zh-CN, with the declared label', async () => {
@@ -400,6 +422,7 @@ describe('[#34060] the per-row refusal is worded in the writer\'s locale', () =>
   it('a deployment translation of `errors.record_locked` wins, interpolated', async () => {
     const override = {
       getLocales: () => ['zh-CN'],
+      getTranslations: i18n.getTranslations,
       t: (key: string, locale: string) =>
         key === 'errors.record_locked' && locale === 'zh-CN' ? '{{object}}《{{title}}》审批中，暂不可改' : i18n.t(key, locale),
     };
@@ -441,6 +464,7 @@ describe('[#34454] the record-lock override is asked with the negotiated locale'
   /** `FileI18nAdapter`-shaped: exact tag match, `{{name}}` interpolation of `params`, the key echoed on a miss. */
   const exactMatchI18n = {
     getLocales: () => Object.keys(PACKS),
+    getTranslations: (locale: string) => nestedPack(PACKS[locale]),
     t: (key: string, locale: string, params?: Record<string, unknown>) => {
       const value = PACKS[locale]?.[key];
       if (value === undefined) return key;

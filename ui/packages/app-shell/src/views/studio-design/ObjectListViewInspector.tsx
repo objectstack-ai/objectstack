@@ -102,8 +102,9 @@ import {
 } from '@object-ui/data-objectstack';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { NavigationModeSchema, resolveI18nLabel, type I18nLabel, type NavigationMode } from '@objectstack/spec/ui';
-import { InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
+import { flagUnknownValue, InspectorReorderButtons, InspectorShell } from '../metadata-admin/inspectors/_shared.js';
 import { FieldsListEditor } from '../metadata-admin/previews/FieldsListEditor.js';
+import { FieldListRowNameOnHover } from '../metadata-admin/previews/ViewColumnPanes.js';
 import { useObjectFields } from '../metadata-admin/previews/useObjectFields.js';
 import { colFieldName } from '../metadata-admin/previews/view-column-io.js';
 import { WIDGETS, type ObjectFieldOption } from '../metadata-admin/widgets.js';
@@ -184,6 +185,22 @@ export function listViewTargetOf(
   }
   const flagged = ids.find((id) => isPlainObject(views[id]) && (views[id] as Row).isDefault === true);
   return { objectName, viewId: qualifiedViewId(objectName, flagged ?? 'default'), isDefault: true };
+}
+
+/**
+ * objectstack#36750 — whether `target` is the fallback default view: the
+ * object's default list view (`isDefault`) whose id no view of `views` is held
+ * under. {@link listViewTargetOf} names `<object>.default` when no view is
+ * flagged default, and nothing is published under that name until the
+ * panel's first edit creates the view and a publish makes it live, so the
+ * server answers `GET …/layers` for it with a 404 (objectstack#22397). `views`
+ * is the map {@link listViewTargetOf} read: the object's merged `listViews`,
+ * which holds every view item the server serves for it under its qualified
+ * name (`mergeViewsIntoObjects`), with this package's drafted list views.
+ */
+export function isFallbackListView(target: ListViewTarget, views: Record<string, unknown>): boolean {
+  if (!target.isDefault) return false;
+  return !Object.keys(views).some((key) => qualifiedViewId(target.objectName, key) === target.viewId);
 }
 
 /**
@@ -351,6 +368,13 @@ export interface ObjectListViewDraft {
   views: ListViewChoice[];
   /** The autosave's `target`: the buffer key of the view ({@link listViewBufferKey}), `''` with no target. */
   targetKey: string;
+  /**
+   * objectstack#36750 — `target` is the fallback default view
+   * ({@link isFallbackListView}): no view of the object is flagged default, and
+   * no view is held under the id it falls back to. Nothing is published under
+   * it, so nothing asks its published layer.
+   */
+  targetIsFallback: boolean;
   /** The autosave's `loadedFor`: the target the buffer was loaded for. */
   loadedFor: string;
   /** The view item as the server holds it (draft, else published), with edits; `null` when it does not exist yet. */
@@ -548,9 +572,8 @@ export function useObjectListViewDraft({
   const draftViewRows = viewDraftsRead ? viewDrafts.rows : [];
   // objectstack#30177 — the entry's view among the merged views and this
   // package's drafted list views (the module docblock's "Which view").
-  const entryTarget = objectName
-    ? listViewTargetOf(objectName, landingViewName, { ...publishedViews, ...draftedListViewsOf(objectName, draftViewRows) })
-    : null;
+  const knownViews = objectName ? { ...publishedViews, ...draftedListViewsOf(objectName, draftViewRows) } : {};
+  const entryTarget = objectName ? listViewTargetOf(objectName, landingViewName, knownViews) : null;
   const entryUnsettled =
     !!entryTarget?.isDefault &&
     !viewDraftsRead &&
@@ -571,6 +594,16 @@ export function useObjectListViewDraft({
     objectName && !holding ? listViewChoicesOf(objectName, publishedViews, draftViewRows, entryTarget, target) : [];
   const viewId = target?.viewId ?? '';
   const targetKey = viewId ? listViewBufferKey(viewId) : '';
+  // objectstack#36750 — the target is the fallback default view, read only off
+  // an answer that can say so: this package's view drafts have answered, and
+  // the shell's objects are composed with the `/meta/view` list it served
+  // (`getTypeStatus('object')` is `ready` only then). While either is still
+  // loading, or refetching after a publish, the view may yet be listed, so its
+  // layer is read as before. A context that reports no status (a hand-rolled
+  // one) is no such answer either: absence from its objects proves nothing.
+  const metadataSettled = metadata.getTypeStatus?.('object') === 'ready';
+  const targetIsFallback =
+    !!target && viewDraftsRead && metadataSettled && isFallbackListView(target, knownViews);
   // objectstack#30317 — a draft-only object is absent from the merged
   // metadata, so the columns a view created here starts with are read off
   // this package's drafted definition, read with the drafts overlaid (the
@@ -713,7 +746,9 @@ export function useObjectListViewDraft({
         // already carries that layer, so it is not asked again.
         const layeredAt = { packageId };
         const draftLayers = readAt === packageId ? (authoredRead?.layers ?? null) : null;
-        const lay = objectDraftOnly
+        // objectstack#36750 — nor for the fallback default view: nothing is
+        // published under its id, so its layer would answer 404 too.
+        const lay = objectDraftOnly || (!draft && targetIsFallback)
           ? null
           : !draft
             ? await client.layered<Row>('view', viewId, layeredAt)
@@ -752,7 +787,7 @@ export function useObjectListViewDraft({
     return () => {
       cancelled = true;
     };
-  }, [client, viewId, holding, objectName, packageId, publishNonce, reloadNonce, recordRead, customizing]);
+  }, [client, viewId, holding, objectName, packageId, publishNonce, reloadNonce, recordRead, customizing, targetIsFallback]);
 
   const edit = React.useCallback((row: Row) => {
     setBuffer((b) => ({ ...b, row, dirty: true }));
@@ -864,6 +899,7 @@ export function useObjectListViewDraft({
     entryTarget: pickedViewId ? entryTarget : null,
     views,
     targetKey,
+    targetIsFallback,
     loadedFor: buffer.for,
     row: current ? row : null,
     notList: current && notList,
@@ -1059,18 +1095,17 @@ const KANBAN_FIELDS_LABEL_ID = 'studio-list-view-kanban-fields';
 const UNSET = '__unset__';
 
 /**
- * The copy of each `navigation.mode` the spec declares (`NavigationModeSchema`).
- * Keyed by the spec's own union, so a member the spec adds or retires is a
- * compile error here — `modal`, `split` and `popover` left with
- * objectstack#26677 (a side-by-side pane is a reader's preference, not
- * metadata).
+ * The `navigation.mode` values the click-to-open select offers, besides the
+ * default (no key): only `none`. On an object's list the key is deprecated
+ * (objectstack#35854) — the record name opens the full page and the hover icon
+ * the side panel, for every reader — so `drawer`, `page` and `new_window`
+ * still parse and change nothing, and offering them would let an author pick a
+ * setting the board ignores. A stored one is drawn, flagged deprecated, so it
+ * can be seen and cleared; opening the view writes nothing.
  */
-const NAVIGATION_MODE_LABEL_KEYS: Record<NavigationMode, string> = {
-  drawer: 'engine.studio.inspector.listView.kanbanCard.mode.drawer',
-  page: 'engine.studio.inspector.listView.kanbanCard.mode.page',
-  new_window: 'engine.studio.inspector.listView.kanbanCard.mode.newWindow',
-  none: 'engine.studio.inspector.listView.kanbanCard.mode.none',
-};
+const OFFERED_NAVIGATION_MODES: ReadonlyArray<{ mode: NavigationMode; labelKey: string }> = [
+  { mode: 'none', labelKey: 'engine.studio.inspector.listView.kanbanCard.mode.none' },
+];
 
 /**
  * objectui#12725 — the 看板卡片 section of a kanban view: what each card on
@@ -1082,8 +1117,8 @@ const NAVIGATION_MODE_LABEL_KEYS: Record<NavigationMode, string> = {
  *    show on cards"), ordered;
  *  - title → `kanban.titleField`, optional: empty removes the key, and the
  *    card shows the record's display name, as the spec describes;
- *  - click to open → `navigation.mode` (`NavigationModeSchema`); the default
- *    removes the key;
+ *  - click to open → `navigation.mode`, offering only `none`
+ *    ({@link OFFERED_NAVIGATION_MODES}); the default removes the key;
  *  - group by → `kanban.groupByField`, required by the spec. Every field of
  *    the object is offered: the spec's check refuses only a padded name, and
  *    a field's name is never padded.
@@ -1221,17 +1256,24 @@ function KanbanCardSection({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            {/* A stored value the select does not offer: drawn first and flagged,
+                as `InspectorSelectField` draws one (objectui#8488), so the
+                trigger never goes blank and 默认 below clears it. */}
+            {mode && !OFFERED_NAVIGATION_MODES.some((o) => o.mode === mode) && (
+              <SelectItem value={mode}>
+                <span className="font-mono">
+                  {NavigationModeSchema.options.includes(mode as never)
+                    ? flagUnknownValue(mode, t('engine.form.deprecated', locale), locale)
+                    : mode}
+                </span>
+              </SelectItem>
+            )}
             <SelectItem value={UNSET}>
               <span className="text-muted-foreground">{t('engine.studio.inspector.listView.kanbanCard.openDefault', locale)}</span>
             </SelectItem>
-            {mode && !NavigationModeSchema.options.includes(mode as never) && (
-              <SelectItem value={mode}>
-                <span className="font-mono">{mode}</span>
-              </SelectItem>
-            )}
-            {NavigationModeSchema.options.map((m) => (
-              <SelectItem key={m} value={m}>
-                {t(NAVIGATION_MODE_LABEL_KEYS[m], locale)}
+            {OFFERED_NAVIGATION_MODES.map((o) => (
+              <SelectItem key={o.mode} value={o.mode}>
+                {t(o.labelKey, locale)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -1276,6 +1318,7 @@ function KanbanCardSection({
 export function ObjectListViewInspector({
   listView,
   readOnly,
+  readOnlyNote = null,
   locale,
   selection,
   onSelectionChange,
@@ -1283,6 +1326,12 @@ export function ObjectListViewInspector({
 }: {
   listView: ObjectListViewDraft;
   readOnly: boolean;
+  /**
+   * objectstack#35600 — why a read-only panel is read-only, when it is not
+   * the package's being read-only (a view the base does not ship): shown in
+   * that sentence's place, with its reason on the note.
+   */
+  readOnlyNote?: { reason: string; text: string } | null;
   locale: string;
   /**
    * objectui#12725 — the column selection, held by the host so a click on a
@@ -1355,8 +1404,16 @@ export function ObjectListViewInspector({
       ? { status: 'loading' }
       : loaded(
           // `options` ride along for the filter's picklist value picker
-          // (objectstack#27515); the other pickers read name, label and type.
-          fields.map((f) => ({ name: f.name, label: f.label, type: f.type, ...(f.options ? { options: f.options } : {}) })),
+          // (objectstack#27515), `multiple` for its operator set (a list-valued
+          // column takes membership and the empty checks only); the other
+          // pickers read name, label and type.
+          fields.map((f) => ({
+            name: f.name,
+            label: f.label,
+            type: f.type,
+            ...(f.options ? { options: f.options } : {}),
+            ...(f.multiple ? { multiple: true } : {}),
+          })),
         );
   const labelOf = (name: string) => fields.find((f) => f.name === name)?.label ?? name;
   const sort = sortEntriesOf(body.sort);
@@ -1435,17 +1492,16 @@ export function ObjectListViewInspector({
         ) : null
       }
     >
-      <div data-testid="studio-list-view-inspector" className="space-y-3">
-        {/* objectui#13151 — the machine name, secondary to the title, as a
-            Studio row shows it (smaller, monospace, only where it differs). */}
-        {target.viewId !== title && (
-          <p className="truncate font-mono text-[10px] leading-tight text-muted-foreground" data-testid="list-view-name">
-            {target.viewId}
-          </p>
-        )}
+      {/* objectstack#34796 — no `object.view` machine name under the title: the
+          panel names the view by its label alone; the name stays an attribute. */}
+      <div data-testid="studio-list-view-inspector" data-view-id={target.viewId} className="space-y-3">
         {readOnly ? (
-          <p className="rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground" data-testid="list-view-read-only">
-            {t('engine.studio.inspector.listView.readOnly', locale)}
+          <p
+            className="rounded-md border bg-muted/40 px-2 py-1.5 text-[11px] leading-snug text-muted-foreground"
+            data-testid="list-view-read-only"
+            data-reason={readOnlyNote?.reason}
+          >
+            {readOnlyNote?.text ?? t('engine.studio.inspector.listView.readOnly', locale)}
           </p>
         ) : (
           <p className="text-[11px] leading-snug text-muted-foreground">
@@ -1476,8 +1532,8 @@ export function ObjectListViewInspector({
         ) : (
           <>
             {!row && (
-              <p className="rounded-md border border-dashed px-2 py-1.5 text-[11px] leading-snug text-muted-foreground" data-testid="list-view-not-created">
-                {tFormat('engine.studio.inspector.listView.notCreated', locale, { view: title })}
+              <p className="text-[11px] leading-snug text-muted-foreground" data-testid="list-view-not-created">
+                {t('engine.studio.inspector.listView.notCreated', locale)}
               </p>
             )}
             {body.type === 'kanban' && (
@@ -1516,21 +1572,25 @@ export function ObjectListViewInspector({
               />
             )}
             <div className="space-y-1.5" data-testid="list-view-columns">
-              <FieldsListEditor
-                variantKey="config"
-                schema={body}
-                columns={columns}
-                allStrings={allStrings}
-                objectName={objectName}
-                objectFieldsOverride={fields}
-                selectedIndex={selectedIndex}
-                readOnly={readOnly}
-                onPatch={(patch) => {
-                  if (isPlainObject(patch.config)) writeBody(patch.config);
-                }}
-                onSelectionChange={selectColumn}
-                copilotAdded={addedColumns.length > 0 ? new Set(addedColumns) : undefined}
-              />
+              {/* objectstack#34796 — a column row shows its label; the field's
+                  machine name is on hover only. */}
+              <FieldListRowNameOnHover.Provider value={true}>
+                <FieldsListEditor
+                  variantKey="config"
+                  schema={body}
+                  columns={columns}
+                  allStrings={allStrings}
+                  objectName={objectName}
+                  objectFieldsOverride={fields}
+                  selectedIndex={selectedIndex}
+                  readOnly={readOnly}
+                  onPatch={(patch) => {
+                    if (isPlainObject(patch.config)) writeBody(patch.config);
+                  }}
+                  onSelectionChange={selectColumn}
+                  copilotAdded={addedColumns.length > 0 ? new Set(addedColumns) : undefined}
+                />
+              </FieldListRowNameOnHover.Provider>
               {/* A copilot change to `columns` that added no column (a reorder,
                   a removal) has no row to mark: the setting carries the chip. */}
               {columnsMark && addedColumns.length === 0 && <DraftChip locale={locale} of="columns" />}

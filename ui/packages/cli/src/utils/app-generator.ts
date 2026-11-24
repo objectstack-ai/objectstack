@@ -405,6 +405,12 @@ const APP_THEME_TOKENS = `@theme {
   --color-secondary-foreground: hsl(var(--secondary-foreground));
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
+  /* Danger TEXT colour (text-destructive and its variants). Tailwind reads
+     --text-color-* before --color-* for text utilities, so this splits the
+     text colour from the fill used by bg-/border-/ring-destructive. Light and
+     dark each set --destructive-text, through --destructive-text-light /
+     -dark, which ThemeEngine derives per mode from a theme's error colour. */
+  --text-color-destructive: hsl(var(--destructive-text, var(--destructive)));
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
   --color-accent: hsl(var(--accent));
@@ -428,6 +434,11 @@ const APP_THEME_TOKENS = `@theme {
   --color-chart-3: hsl(var(--chart-3));
   --color-chart-4: hsl(var(--chart-4));
   --color-chart-5: hsl(var(--chart-5));
+  --color-chart-6: hsl(var(--chart-6));
+  --color-chart-7: hsl(var(--chart-7));
+  --color-chart-8: hsl(var(--chart-8));
+  --color-chart-9: hsl(var(--chart-9));
+  --color-chart-10: hsl(var(--chart-10));
 }`;
 
 /**
@@ -437,7 +448,10 @@ const APP_THEME_TOKENS = `@theme {
  * `packages/components/src/index.css`: `@theme` already emits into `:root`, and
  * `.dark` only has to override the values. Every `var(--x)` named by
  * `APP_THEME_TOKENS` is declared here — pinned by a test, since a token that
- * resolves to nothing is a class that silently renders unstyled.
+ * resolves to nothing is a class that silently renders unstyled. The
+ * `--chart-1..10` values are the library's own, light and dark, value for value:
+ * the CLI ships without that stylesheet, so they are kept in step and a test
+ * compares the two.
  */
 const APP_THEME_VARIABLES = `:root {
   color-scheme: light;
@@ -457,6 +471,9 @@ const APP_THEME_VARIABLES = `:root {
   --accent: 210 40% 96.1%;
   --accent-foreground: 222.2 47.4% 11.2%;
   --destructive: 0 84.2% 60.2%;
+  /* Danger text on light surfaces (red-700, #b91c1c); --destructive stays the
+     brand red for button and badge fills. */
+  --destructive-text: var(--destructive-text-light, 0 73.7% 41.8%);
   --destructive-foreground: 210 40% 98%;
   --border: 214.3 31.8% 91.4%;
   --input: 214.3 31.8% 91.4%;
@@ -467,6 +484,11 @@ const APP_THEME_VARIABLES = `:root {
   --chart-3: 197 37% 24%;
   --chart-4: 43 74% 66%;
   --chart-5: 27 87% 67%;
+  --chart-6: 130 55% 40%;
+  --chart-7: 315 65% 38%;
+  --chart-8: 195 85% 48%;
+  --chart-9: 0 70% 38%;
+  --chart-10: 215 14% 55%;
 
   /* Sidebar colors */
   --sidebar: 0 0% 98%;
@@ -497,6 +519,9 @@ const APP_THEME_VARIABLES = `:root {
   --accent: 217.2 32.6% 17.5%;
   --accent-foreground: 210 40% 98%;
   --destructive: 0 62.8% 30.6%;
+  /* Readable red for danger text on dark surfaces; --destructive stays the
+     red-button fill (white text on it). */
+  --destructive-text: var(--destructive-text-dark, 0 91% 71%);
   --destructive-foreground: 210 40% 98%;
   --border: 217.2 32.6% 17.5%;
   --input: 217.2 32.6% 17.5%;
@@ -506,6 +531,11 @@ const APP_THEME_VARIABLES = `:root {
   --chart-3: 30 80% 55%;
   --chart-4: 280 65% 60%;
   --chart-5: 340 75% 55%;
+  --chart-6: 115 55% 48%;
+  --chart-7: 300 55% 72%;
+  --chart-8: 187 65% 48%;
+  --chart-9: 0 70% 46%;
+  --chart-10: 210 12% 60%;
 
   /* Sidebar colors for dark mode */
   --sidebar: 240 5.9% 10%;

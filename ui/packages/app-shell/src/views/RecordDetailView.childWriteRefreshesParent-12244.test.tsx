@@ -47,7 +47,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup, act, within } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, act, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MetadataCtx, notifyDataChanged, useMutationInvalidationBridge } from '@object-ui/react';
@@ -138,6 +138,8 @@ const childObject = {
       reference: PARENT,
       label: 'Quote',
       relatedListColumns: ['name', 'quantity'],
+      // A side list (objectstack#35597: a plain master_detail FK is an overview body table).
+      relatedList: true,
     },
   },
 };
@@ -257,8 +259,17 @@ async function settledPage(objects: readonly unknown[] = OBJECTS) {
   renderPage(backend.ds, objects);
   await waitFor(() => expect(parentReads(backend.ds)).toBe(1));
   await screen.findByText('Seat licence');
-  await waitFor(() => expect(figureShown(backend.rollup())).toBe(true));
+  // objectstack#35595 — the key fields (the rollup among them) are the 概览
+  // tab's: the list's tab, open here, draws none.
+  expect(figureShown(backend.rollup())).toBe(false);
   return backend;
+}
+
+/** Back to 概览, where the highlight strip draws the parent's rollup. */
+async function toOverview() {
+  await act(async () => {
+    fireEvent.click(document.querySelector('[role="tab"][data-record-tab="overview"]') as HTMLElement);
+  });
 }
 
 beforeEach(() => {
@@ -280,11 +291,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The record's header: its own row, or, on a page, the name it draws into the
+// top bar's one row (objectstack#35593). Either is the same element across a
+// re-read that does not remount the page.
+const HEADER = 'header, [data-record-header-title]';
+
 describe('RecordDetailView — a child write in a related list refreshes the parent (objectui#12244)', () => {
   it('a row Delete in the related list re-reads the parent and shows the recomputed total', async () => {
     const { ds, rollup } = await settledPage();
     expect(rollup()).toBe(9000);
-    const headerBefore = document.querySelector('header');
+    const headerBefore = document.querySelector(HEADER);
     expect(headerBefore).toBeTruthy();
 
     const row = screen.getByText('Seat licence').closest('tr')!;
@@ -298,16 +314,19 @@ describe('RecordDetailView — a child write in a related list refreshes the par
     await waitFor(() => expect(ds.delete).toHaveBeenCalledWith(CHILD, 'l-1'));
     expect(rollup()).toBe(3000);
     await waitFor(() => expect(parentReads(ds)).toBe(2));
+    // In place: the same header node, the list's face still the open one.
+    expect(document.querySelector(HEADER)).toBe(headerBefore);
+    expect(document.querySelector(`[data-related-enlarged="${CHILD}.${PARENT}"]`)).not.toBeNull();
+    // 概览 draws the re-read row: the recomputed total, with no read of its own.
+    await toOverview();
     await waitFor(() => expect(figureShown(3000)).toBe(true));
     expect(figureShown(9000)).toBe(false);
-    // In place: the same header node, the list's face still the open one.
-    expect(document.querySelector('header')).toBe(headerBefore);
-    expect(document.querySelector(`[data-related-enlarged="${CHILD}.${PARENT}"]`)).not.toBeNull();
+    expect(parentReads(ds)).toBe(2);
   });
 
   it('a child update through the dataSource (the form overlay\'s save) re-reads the parent', async () => {
     const { ds, rollup } = await settledPage();
-    const headerBefore = document.querySelector('header');
+    const headerBefore = document.querySelector(HEADER);
 
     await act(async () => {
       await ds.update(CHILD, 'l-2', { quantity: 2 });
@@ -315,8 +334,9 @@ describe('RecordDetailView — a child write in a related list refreshes the par
 
     expect(rollup()).toBe(12000);
     await waitFor(() => expect(parentReads(ds)).toBe(2));
+    expect(document.querySelector(HEADER)).toBe(headerBefore);
+    await toOverview();
     await waitFor(() => expect(figureShown(12000)).toBe(true));
-    expect(document.querySelector('header')).toBe(headerBefore);
   });
 
   it('a child row action that bypasses the dataSource (an object-wide child change) re-reads the parent', async () => {

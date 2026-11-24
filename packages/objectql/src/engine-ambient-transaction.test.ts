@@ -587,3 +587,72 @@ describe('ScopedContext trio joins the ambient transaction (ADR-0067 D2, #6406)'
     expect(checkouts).toHaveLength(1);
   });
 });
+
+/**
+ * ADR-0034 D1 on the trio's face: an operation made through a context the
+ * `beginTransaction` trio returned publishes the trio's handle for its own
+ * duration, so a read it issues WITHOUT a handle (an automation run's settings
+ * read, issued by an after-hook) rides the transaction instead of asking a
+ * single-connection pool for the connection the transaction holds.
+ */
+describe('an operation through a trio-opened transaction publishes it to the reads it issues (ADR-0034 D1)', () => {
+  let engine: ObjectQL;
+  let seen: ReturnType<typeof makeRecordingDriver>['seen'];
+  let begins: number;
+
+  beforeEach(async () => {
+    engine = new ObjectQL();
+    const d = makeRecordingDriver();
+    seen = d.seen;
+    begins = 0;
+    const begin = d.driver.beginTransaction;
+    d.driver.beginTransaction = async () => { begins += 1; return begin(); };
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+    engine.registry.registerObject({ name: 'thing', fields: { name: { type: 'text' } } }, 'test');
+    engine.registry.registerObject({ name: 'setting', fields: { name: { type: 'text' } } }, 'test');
+  });
+
+  const scoped = () => (engine as any).createContext({ userId: 'u1' }) as ScopedContext;
+  const settingReads = () => seen.find.filter((f) => f.object === 'setting').map((f) => f.transaction);
+
+  it('an after-hook read that carries no handle runs on the trio transaction', async () => {
+    engine.registerHook('afterInsert', async () => {
+      await engine.find('setting', { context: { isSystem: true } });
+    }, { object: 'thing' });
+    const s = scoped();
+    const begun = (await s.beginTransaction())!;
+    expect(begun.owned).toBe(true);
+
+    await begun.ctx.object('thing').insert({ name: 'A' });
+    await s.commitTransaction(begun.handle);
+
+    expect(seen.create.find((c) => c.object === 'thing')?.transaction).toBe(begun.handle);
+    expect(settingReads()).toEqual([begun.handle]);
+  });
+
+  it('publishes nothing outside its operations: a read between them, and one after the commit, carry no handle', async () => {
+    const s = scoped();
+    const begun = (await s.beginTransaction())!;
+    await begun.ctx.object('thing').insert({ name: 'A' });
+    await engine.find('setting', { context: { isSystem: true } });
+    await s.commitTransaction(begun.handle);
+    await engine.find('setting', { context: { isSystem: true } });
+
+    expect(settingReads()).toEqual([undefined, undefined]);
+  });
+
+  it('a nested transaction() inside the operation joins the trio transaction: one begin', async () => {
+    let nested: unknown;
+    engine.registerHook('afterInsert', async () => {
+      await engine.transaction(async (ctx: any) => { nested = ctx.transaction; });
+    }, { object: 'thing' });
+    const s = scoped();
+    const begun = (await s.beginTransaction())!;
+    await begun.ctx.object('thing').insert({ name: 'A' });
+    await s.commitTransaction(begun.handle);
+
+    expect(nested).toBe(begun.handle);
+    expect(begins).toBe(1);
+  });
+});

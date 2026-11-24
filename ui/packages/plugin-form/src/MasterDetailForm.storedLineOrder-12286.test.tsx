@@ -141,12 +141,12 @@ async function ready(container: HTMLElement, ds: FakeServer, lines: number) {
   });
   await waitFor(() => expect(lineReads(ds).length).toBeGreaterThanOrEqual(2));
   await act(async () => {});
-  await waitFor(() => expect(descriptions()).toHaveLength(lines + 1));
+  await waitFor(() => expect(descriptions()).toHaveLength(lines));
   await waitFor(() => expect(saveButton().disabled).toBe(false));
 }
 
-/** The order the grid draws: each stored line's description, the entry row left off. */
-const drawn = () => descriptions().slice(0, -1).map((el) => el.value);
+/** The order the grid draws: each stored line's description (no entry row follows them, objectstack#35507). */
+const drawn = () => descriptions().map((el) => el.value);
 
 /** Save, and return the batch's child operations. */
 async function saveChildOps(batch: ReturnType<typeof renderForm>['batch']): Promise<Op[]> {
@@ -271,7 +271,7 @@ describe('the line read orders by the line-position field the spec names, and by
       const ref = container.querySelector('input[name="ref"]') as HTMLInputElement | null;
       expect(ref?.value).toBe('INV-1');
     });
-    await waitFor(() => expect(descriptions()).toHaveLength(3));
+    await waitFor(() => expect(descriptions()).toHaveLength(2));
     await act(async () => {});
     expect(drawn()).toEqual(['Widget A units', 'Consulting hours']);
     const reads = lineReads(ds);

@@ -7,7 +7,10 @@
 #
 # The property under test is the one the four 2026-11-16/17 step timeouts
 # broke: an attempt that STALLS is ended and retried, while an attempt that
-# keeps moving is left alone. A real stalled transfer cannot be ordered on
+# keeps moving is left alone. Since #34994 a stall is also one that keeps
+# PRINTING server progress while no pack arrives: curl's low-speed abort ends
+# it (exit 128, "curl 28"), so the cases pin that the script hands git that
+# bound and retries what it ends, and that each phase prints as it starts. A real stalled transfer cannot be ordered on
 # demand, so a stub `git` on PATH plays `fetch` per attempt (healthy, silent
 # hang, hang after some progress, slow but moving, fast failure) and hands
 # every other git command to the real git. A healthy `fetch` IS the real one,
@@ -17,8 +20,10 @@
 # Each case pins the exit status, the attempt count, the `fetch` arguments, the
 # ::warning:: / ::error:: lines, and for a hang that the stub's child process
 # (standing in for git-remote-https) is gone afterwards -- the process-group
-# kill. The last section reads ci.yml and pins that all five jobs call the
-# script and no inline copy of the old loop is left.
+# kill. The last sections read ci.yml and lint.yml: all five ci.yml jobs call
+# the script and no inline copy of the old loop is left; both workflows carry
+# the same low-speed bound as the script's defaults; `lint-eslint` checks out
+# at depth 1.
 #
 # Offline; ~40 s (the stall bound is 2 s here, 60 s in CI). Every fixture path
 # is under a mktemp directory; none is spelled as a repo path
@@ -28,6 +33,7 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 
 SCRIPT_REL='scripts/ci/fetch-history.sh'
 WORKFLOW_REL='.github/workflows/ci.yml'
+LINT_WORKFLOW_REL='.github/workflows/lint.yml'
 SCRIPT="$PWD/$SCRIPT_REL"
 REAL_GIT="$(command -v git)"
 FIX=$(mktemp -d "${TMPDIR:-/tmp}/os-fetch-history-selftest.XXXXXX") || exit 1
@@ -58,6 +64,7 @@ if [ "${1:-}" != fetch ]; then exec "$STUB_REAL_GIT" "$@"; fi
 n=$(( $(cat "$STUB_DIR/attempts" 2> /dev/null || echo 0) + 1 ))
 echo "$n" > "$STUB_DIR/attempts"
 echo "$*" >> "$STUB_DIR/argv"
+echo "${GIT_HTTP_LOW_SPEED_LIMIT-unset} ${GIT_HTTP_LOW_SPEED_TIME-unset}" >> "$STUB_DIR/env"
 step=$(echo "$STUB_PLAN" | cut -d, -f"$n")
 case "$step" in
   ok) exec "$STUB_REAL_GIT" "$@" ;;
@@ -68,6 +75,14 @@ case "$step" in
     echo "$!" >> "$STUB_DIR/children"
     wait
     exit 1
+    ;;
+  talk-then-curl28)
+    # The 2026-11-17 shape: no pack, but server progress every second, longer
+    # than the stall bound, then curl's low-speed abort as git reports it.
+    for i in 1 2 3 4 5; do printf 'remote: Counting objects:  %d0%% (%d/10)\r' "$i" "$i" >&2; sleep 1; done
+    echo "error: RPC failed; curl 28 Operation too slow. Less than 1000 bytes/sec transferred the last 120 seconds" >&2
+    echo "fatal: expected 'packfile'" >&2
+    exit 128
     ;;
   slow)
     for i in 1 2 3 4 5; do printf 'Receiving objects:  %d0%% (%d/10)\r' "$i" "$i" >&2; sleep 1; done
@@ -90,8 +105,13 @@ run_case() {
   fi
   local start end
   start=$(date +%s)
+  local low=()
+  if [ -n "${CASE_LOW_SPEED:-}" ]; then
+    low=(GIT_HTTP_LOW_SPEED_LIMIT="${CASE_LOW_SPEED% *}" GIT_HTTP_LOW_SPEED_TIME="${CASE_LOW_SPEED#* }")
+  fi
   (
     cd "$case_dir/ws" &&
+      env -u GIT_HTTP_LOW_SPEED_LIMIT -u GIT_HTTP_LOW_SPEED_TIME ${low[@]+"${low[@]}"} \
       PATH="$bin:$PATH" STUB_REAL_GIT="$REAL_GIT" STUB_DIR="$case_dir/stub" STUB_PLAN="$plan" \
         FETCH_HISTORY_STALL_SECONDS=2 FETCH_HISTORY_RETRY_SLEEP=0 PR_BASE_REF="$base" RUNNER_TEMP="$case_dir" \
         bash "$SCRIPT" > "$case_dir/out" 2>&1
@@ -102,6 +122,7 @@ run_case() {
   attempts=$(cat "$case_dir/stub/attempts" 2> /dev/null || echo 0)
   out=$(cat "$case_dir/out")
   argv1=$(head -n 1 "$case_dir/stub/argv" 2> /dev/null)
+  env1=$(head -n 1 "$case_dir/stub/env" 2> /dev/null)
   ws="$case_dir/ws"
 }
 children_gone() {
@@ -124,6 +145,13 @@ check "healthy clone has all 5 commits" '[ "$("$REAL_GIT" -C "$ws" rev-list --co
 check "healthy fetched no tag" '[ -z "$("$REAL_GIT" -C "$ws" tag)" ]'
 check "healthy prints the History line" 'grep -q "^History: 5 commit(s) behind HEAD, shallow=false, no tags" <<< "$out"'
 check "healthy prints no warning" '! grep -q "::warning::" <<< "$out"'
+check "healthy hands git the low-speed defaults (1000 B/s for 120 s)" '[ "$env1" = "1000 120" ]'
+check "healthy names the bound once" '[ "$(grep -c "^Each attempt ends when it moves under 1000 bytes/s for 120s (curl) or writes nothing for 2s, and is retried.$" <<< "$out")" = 1 ]'
+
+echo "-- #34994: a bound the workflow already set is kept, not overwritten"
+CASE_LOW_SPEED="5 7" run_case preset ok
+check "preset exits 0" '[ "$rc" = 0 ]'
+check "preset hands git the workflow's values" '[ "$env1" = "5 7" ]'
 
 echo "-- a PR into another branch fetches that branch too; a PR into main does not repeat main"
 run_case pr-release ok shallow release-x
@@ -160,6 +188,17 @@ check "slow takes one attempt" '[ "$attempts" = 1 ]'
 check "slow ran longer than the stall bound" '[ "$elapsed" -ge 4 ]'
 check "slow prints no warning" '! grep -q "::warning::" <<< "$out"'
 check "slow prints one line for its progress phase" '[ "$(grep -c "^Receiving objects:" <<< "$out")" = 1 ]'
+check "slow names its phase live, once" '[ "$(grep -cE "^fetch-history: \+[0-9]+s Receiving objects$" <<< "$out")" = 1 ]'
+
+echo "-- #34994: a fetch that keeps printing server progress but gets no pack is ended by curl and retried"
+run_case talk-then-ok talk-then-curl28,ok
+check "talk-then-ok exits 0" '[ "$rc" = 0 ]'
+check "talk-then-ok takes two attempts" '[ "$attempts" = 2 ]'
+check "talk-then-ok: the silence bound did not fire (it cannot: the log kept growing)" '! grep -q "::warning::git fetch wrote nothing" <<< "$out"'
+check "talk-then-ok: both attempts ran under the low-speed bound" '[ "$(grep -c "^1000 120$" "$case_dir/stub/env")" = 2 ]'
+check "talk-then-ok shows curl's abort" 'grep -q "curl 28 Operation too slow" <<< "$out"'
+check "talk-then-ok names the server phase it stood in, live" 'grep -qE "^fetch-history: \+[0-9]+s remote: Counting objects$" <<< "$out"'
+check "talk-then-ok ends unshallowed" '[ "$("$REAL_GIT" -C "$ws" rev-parse --is-shallow-repository)" = false ]'
 
 echo "-- three fast failures end red, named"
 run_case fail3 fail,fail,fail
@@ -187,6 +226,24 @@ check "ci.yml calls the script five times" '[ "$calls" = 5 ]'
 check "each fetch step's run line is the script" '[ "$(grep -A4 "^      - name: Fetch this commit'"'"'s history and the base branch$" "$wf" | grep -c "^        run: bash scripts/ci/fetch-history.sh$")" = 5 ]'
 check "each fetch step passes PR_BASE_REF" '[ "$(grep -A4 "^      - name: Fetch this commit'"'"'s history and the base branch$" "$wf" | grep -c "PR_BASE_REF: \${{ github.event.pull_request.base.ref }}")" = 5 ]'
 check "no inline fetch loop is left in ci.yml" '! grep -q "git fetch --no-tags \"\${deepen\[@\]}\"" "$wf"'
+
+echo "-- #34994: both workflows set the script's low-speed bound for every job"
+lint_wf="$PWD/$LINT_WORKFLOW_REL"
+script_limit=$(sed -n 's/^export GIT_HTTP_LOW_SPEED_LIMIT="\${GIT_HTTP_LOW_SPEED_LIMIT:-\([0-9]*\)}"$/\1/p' "$SCRIPT")
+script_time=$(sed -n 's/^export GIT_HTTP_LOW_SPEED_TIME="\${GIT_HTTP_LOW_SPEED_TIME:-\([0-9]*\)}"$/\1/p' "$SCRIPT")
+check "the script's defaults read as 1000 and 120" '[ "$script_limit" = 1000 ] && [ "$script_time" = 120 ]'
+for f in "$wf" "$lint_wf"; do
+  name=$(basename "$f")
+  block=$(awk '/^env:$/ { on = 1; next } on && /^[^ ]/ { on = 0 } on' "$f")
+  check "$name has one workflow-level env: block" '[ "$(grep -c "^env:$" "$f")" = 1 ]'
+  check "$name's env: sets GIT_HTTP_LOW_SPEED_LIMIT to the script's default" 'grep -qx "  GIT_HTTP_LOW_SPEED_LIMIT: '"'"'$script_limit'"'"'" <<< "$block"'
+  check "$name's env: sets GIT_HTTP_LOW_SPEED_TIME to the script's default" 'grep -qx "  GIT_HTTP_LOW_SPEED_TIME: '"'"'$script_time'"'"'" <<< "$block"'
+done
+
+echo "-- #34994: lint-eslint reads no history, so it checks out at depth 1"
+eslint_job=$(awk '/^  lint-eslint:$/ { on = 1; next } on && /^  [a-z0-9_-]+:$/ { on = 0 } on' "$lint_wf")
+check "lint.yml has the lint-eslint job" '[ -n "$eslint_job" ] && grep -q "uses: actions/checkout@" <<< "$eslint_job"'
+check "lint-eslint's checkout sets no fetch-depth" '! grep -qE "^ +fetch-depth:" <<< "$eslint_job"'
 
 echo ""
 if [ "$fails" -gt 0 ]; then

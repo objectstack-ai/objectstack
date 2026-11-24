@@ -14,7 +14,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveRecordFormTarget,
-  resolveFormViewLayout,
+  recordFormSubforms,
+  isFieldAskedOnFlow,
+  resolveRecordFormModalLayout,
   resolveNavigateCreateUrl,
   resolveNavigateEditUrl,
   resolvePostCreateTarget,
@@ -329,76 +331,52 @@ describe('resolveNavigateEditUrl', () => {
 });
 
 
-describe('resolveFormViewLayout', () => {
-  it('returns {} when objectDef is missing', () => {
-    expect(resolveFormViewLayout(undefined)).toEqual({});
-    expect(resolveFormViewLayout(null)).toEqual({});
+// objectstack-ai/objectstack#36425 — a record create or edit reads no internal
+// form view: its child collections are the field groups' (`groupSubforms`),
+// and a create leaves out a `showOnCreate: false` field.
+describe('recordFormSubforms', () => {
+  it('returns the child collections the field groups place', () => {
+    const groupSubforms = [{ childObject: 'invoice_line', relationshipField: 'invoice' }];
+    expect(recordFormSubforms({ name: 'invoice', groupSubforms })).toBe(groupSubforms);
   });
 
-  it('returns {} when the object declares no form view', () => {
-    expect(resolveFormViewLayout({})).toEqual({});
-    expect(resolveFormViewLayout({ formViews: {} })).toEqual({});
+  it('reads no internal form view\'s subforms, and treats an empty list as none', () => {
+    const formSubforms = [{ childObject: 'invoice_line' }];
+    expect(recordFormSubforms({ name: 'invoice', form: { subforms: formSubforms } } as any)).toBeUndefined();
+    expect(recordFormSubforms({ name: 'invoice', formViews: { default: { subforms: formSubforms } } } as any)).toBeUndefined();
+    expect(recordFormSubforms({ name: 'invoice', groupSubforms: [] })).toBeUndefined();
+    expect(recordFormSubforms(undefined)).toBeUndefined();
+  });
+});
+
+describe('isFieldAskedOnFlow', () => {
+  it('a create leaves out a showOnCreate: false field; an edit asks for it', () => {
+    expect(isFieldAskedOnFlow({ showOnCreate: false }, 'create')).toBe(false);
+    expect(isFieldAskedOnFlow({ showOnCreate: false }, 'edit')).toBe(true);
   });
 
-  it('returns the curated sections for a simple form view (no contentLayout)', () => {
-    const sections = [{ label: 'Details', fields: [{ field: 'subject' }] }];
-    expect(resolveFormViewLayout({ form: { type: 'simple', sections } })).toEqual({ sections });
+  it('CONTROL: absent or true is asked for on both flows', () => {
+    for (const field of [{}, { showOnCreate: true }, undefined]) {
+      expect(isFieldAskedOnFlow(field, 'create')).toBe(true);
+      expect(isFieldAskedOnFlow(field, 'edit')).toBe(true);
+    }
+  });
+});
+
+describe('resolveRecordFormModalLayout', () => {
+  const tabbed = {
+    name: 'crm_case',
+    form: { type: 'tabbed', modalSize: 'lg', sections: [{ label: 'A', fields: ['x'] }], subforms: [{ childObject: 'x' }] },
+  };
+
+  it('an internal form view steers nothing: no sections, tabs, subforms or modalSize', () => {
+    expect(resolveRecordFormModalLayout(tabbed as any, 'auto')).toStrictEqual({});
   });
 
-  it('adds contentLayout:"tabbed" for a tabbed form view with sections', () => {
-    const sections = [
-      { label: 'A', fields: [{ field: 'x' }] },
-      { label: 'B', fields: [{ field: 'y' }] },
-    ];
-    expect(resolveFormViewLayout({ form: { type: 'tabbed', sections } })).toEqual({
-      sections,
-      contentLayout: 'tabbed',
-    });
-  });
-
-  it('stacks wizard/split sections (no contentLayout — no modal equivalent)', () => {
-    const sections = [{ label: 'Step 1', fields: ['a'] }];
-    expect(resolveFormViewLayout({ form: { type: 'wizard', sections } })).toEqual({ sections });
-    expect(resolveFormViewLayout({ form: { type: 'split', sections } })).toEqual({ sections });
-  });
-
-  it('treats an empty sections array as "no curation" (omits the key)', () => {
-    expect(resolveFormViewLayout({ form: { type: 'simple', sections: [] } })).toEqual({});
-    // …even when tabbed: contentLayout only rides along with real sections.
-    expect(resolveFormViewLayout({ form: { type: 'tabbed', sections: [] } })).toEqual({});
-  });
-
-  it('forwards non-empty subforms (master-detail) and omits empty ones', () => {
-    const subforms = [{ childObject: 'invoice_line' }];
-    expect(resolveFormViewLayout({ form: { type: 'simple', subforms } })).toEqual({ subforms });
-    expect(resolveFormViewLayout({ form: { type: 'simple', subforms: [] } })).toEqual({});
-  });
-
-  it('combines sections + subforms', () => {
-    const sections = [{ label: 'Details', fields: ['subject'] }];
-    const subforms = [{ childObject: 'invoice_line' }];
-    expect(resolveFormViewLayout({ form: { type: 'simple', sections, subforms } })).toEqual({
-      sections,
-      subforms,
-    });
-  });
-
-  it('falls back to formViews.default when `form` is absent (legacy container)', () => {
-    const sections = [{ label: 'Details', fields: ['subject'] }];
-    expect(
-      resolveFormViewLayout({ formViews: { default: { type: 'simple', sections } } }),
-    ).toEqual({ sections });
-  });
-
-  it('prefers the default `form` ViewItem over formViews.default', () => {
-    const formSections = [{ label: 'Primary', fields: ['a'] }];
-    const legacySections = [{ label: 'Legacy', fields: ['b'] }];
-    expect(
-      resolveFormViewLayout({
-        form: { type: 'simple', sections: formSections },
-        formViews: { default: { type: 'simple', sections: legacySections } },
-      }),
-    ).toEqual({ sections: formSections });
+  it('carries the field groups\' subforms, and the derived phone size', () => {
+    const groupSubforms = [{ childObject: 'line' }];
+    expect(resolveRecordFormModalLayout({ ...tabbed, groupSubforms } as any, 'full'))
+      .toStrictEqual({ subforms: groupSubforms, modalSize: 'full' });
   });
 });
 

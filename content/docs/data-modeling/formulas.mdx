@@ -132,7 +132,7 @@ evaluates (`objectql` computes a formula virtual field from its `expression`
 only). Do **not** pass `type: 'currency' | 'number' | …` to `Field.formula` — it
 is rejected by the typed `FieldInput` and, untyped, would override `type:'formula'`
 so the field silently never computes. To declare what the formula returns, set
-**`returnType`** (`'number' | 'text' | 'boolean' | 'date' | 'currency'`). You declare it
+**`returnType`** (`'number' | 'text' | 'boolean' | 'date' | 'currency' | 'percent'`). You declare it
 yourself — nothing back-fills it — but the agent-callable `validate_expression`
 tool reports the type it infers from the expression (`inferredType`) so an AI
 author can stamp the matching value. A `'currency'` result is an amount of money
@@ -141,7 +141,13 @@ and carries its currency the way a currency field does: in the formula's own
 record-mode amounts it is `{ currencyMode: 'record', currencyField }`, naming the
 same code field). Copy it from
 the currency field the formula computes from — `inferFormulaReturn` in
-`@objectstack/formula` answers both halves for a formula it can prove is money. Consumers read the declared `returnType`
+`@objectstack/formula` answers both halves for a formula it can prove is money. A `'percent'`
+result is a ratio, read exactly as a `percent` field reads its stored value: a
+fraction (`0.25` shows `25%`, so the expression divides and does not multiply by
+100), unless the formula declares a `max` above 1, then percentage points. Its
+`scale` counts the decimal places of the displayed percentage (absent: 0), and
+`percentDisplay` picks the bar or the plain face. No CEL type proves a quotient
+is a percentage, so `'percent'` is only ever declared, never inferred. Consumers read the declared `returnType`
 instead of re-parsing the expression (record-title eligibility, for one: a
 formula is title-eligible only when its `returnType` is `'text'`, which is what
 lets it be *derived* as the record title — an explicit `nameField` pointer is

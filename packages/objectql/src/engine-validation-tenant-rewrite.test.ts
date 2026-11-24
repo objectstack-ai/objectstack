@@ -130,6 +130,10 @@ function servedI18n(bundle: Record<string, any>, fallbackLocale = 'en') {
       return typeof fallback === 'string' ? fallback : key;
     },
     getLocales: () => Object.keys(bundle),
+    // [#35384] The refusal reads a rule message off the bundle by
+    // `translateObject`, as `/meta` does, never through `t()`.
+    getTranslations: (locale: string) => bundle[locale] ?? {},
+    getFallbackLocale: () => fallbackLocale,
   };
 }
 

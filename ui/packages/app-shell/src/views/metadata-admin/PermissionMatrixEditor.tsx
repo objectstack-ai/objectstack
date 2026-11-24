@@ -103,9 +103,11 @@ import {
 } from './draftVerdict.js';
 // objectui#11787 — the package door autosaves through the pillars' own autosave.
 import { useDraftAutoSave, type DraftSend } from '../studio-design/useDraftAutoSave.js';
+// objectstack#36511 — in the Studio the set is sent by the top bar's Save, which makes it live.
+import { publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from '../studio-design/studioSaveBar.js';
+import { publishFailureOf, publishRefusal } from '../studio-design/metadataError.js';
 // objectui#12456 — the Studio Access pillar's presentation draws the shared item header.
 import { StudioItemHeader, StudioTab } from '../studio-design/StudioItemHeader.js';
-import { STUDIO_KIND_CHIP } from '../studio-design/studio-tokens.js';
 import type { CustomizationMarkKind } from '../studio-design/customizationMarks.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import {
@@ -117,6 +119,14 @@ import {
 } from './i18n.js';
 import { isStudioCatalogueLoaded } from '@object-ui/i18n/namespaces/studio';
 import { MatrixScrollPane } from './MatrixScrollPane.js';
+import {
+  PERM_BULK_COLUMN_WIDTH,
+  PERM_FLAT_ONLY_CELL,
+  PERM_FLAT_ONLY_FLEX,
+  PERM_FOLDED_ONLY,
+  PERM_MATRIX_FLAT_KEYS,
+  PERM_MATRIX_TABLE_FLOOR,
+} from './permissionMatrixFold.js';
 import { PermissionAdvancedFacets, rlsClauseFindingCount } from './PermissionAdvancedFacets.js';
 import { CelPredicateField } from './CelPredicateField.js';
 import type { CelLintIssue } from './celAuthoring.js';
@@ -569,6 +579,14 @@ export interface PermissionMatrixEditPageProps {
   onDraftSaved?: () => void;
   publishNonce?: number;
   /**
+   * objectstack#36511 — in the Studio (`studio` with a `packageId`) the set is
+   * not autosaved: the top bar's Save writes its draft and publishes that one
+   * set, so it is live at once, and Cancel puts back what the server holds.
+   * `onSaved` fires when such a Save made the set live (no draft is left);
+   * a refused publish that keeps the draft reports `onDraftSaved` instead.
+   */
+  onSaved?: () => void;
+  /**
    * objectui#2505 — when provided, the per-object OWD badge becomes a link that
    * opens the package-level Record Sharing Baseline (OWD) overview, scrolled to
    * that object. Set only by the Studio Access pillar (which hosts the sibling
@@ -608,8 +626,10 @@ export interface PermissionMatrixEditPageProps {
    * name, Package chip, granted / override counts, History and a more menu
    * holding the name / label editor) instead of the PageShell breadcrumb,
    * badge row and collapsible set header, and splits its sections into five
-   * tabs, all kept mounted. Presentation only: every write, gate and autosave
-   * is the routed page's. Omitted (Setup's permission page): unchanged.
+   * tabs, all kept mounted. With a package, it also selects the save path:
+   * the grants are held until the Studio top bar's Save, which writes the
+   * draft and publishes that one set (objectstack#36511), instead of the
+   * routed page's autosave. Omitted (Setup's permission page): unchanged.
    */
   studio?: PermissionStudioChrome;
   /**
@@ -624,11 +644,14 @@ export interface PermissionMatrixEditPageProps {
   customizationMark?: CustomizationMarkKind | null;
 }
 
+/** objectstack#36511 — a set is saved after the objects it grants on. */
+const PERMISSION_SET_SAVE_ORDER = 4;
+
 /* ────────────────────────────────────────────────────────────────── */
 /* Component                                                          */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio, customizationMark = null }: PermissionMatrixEditPageProps) {
+export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, onSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio, customizationMark = null }: PermissionMatrixEditPageProps) {
   // objectstack ADR-0146 D1 (#28561) — Studio's "All metadata" area mounts this
   // editor through the routed item page, which hands it no `readOnly`: a
   // read-only package's area is the host gate here, as a pillar's prop is.
@@ -917,6 +940,11 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // objectui#11787 — when the package door's last draft save landed, for the
   // status line that replaces its Save button ("Saved 10:42").
   const [savedAt, setSavedAt] = React.useState<Date | null>(null);
+  // objectstack#36511 — the Studio's Save sends this door's edit and publishes it.
+  const saveByTopBar = !!packageId && !!studio;
+  // Whether the set held a pending draft before this editor's Save wrote one:
+  // a refused publish discards only the draft the Save itself wrote.
+  const hadDraftRef = React.useRef(false);
   const displayLocale = useDisplayLocale();
   const [error, setError] = React.useState<string | null>(null);
   // objectstack#29148 — the server refused to read this set's pending package
@@ -1090,6 +1118,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           return;
         }
         const pendingDraft = pendingRead?.answer ?? null;
+        hadDraftRef.current = !!pendingDraft;
         verdictReadSeq.current += 1;
         setServedVerdict(
           editedItemDiagnostics({
@@ -1489,12 +1518,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // draws (the object grant), so the click changes only the box it lands on.
       const cur = fieldRuleSeed(fields[key], drawnObjectPerm(prev, objectName));
       const next: FieldPerm = { ...cur, [action]: value };
-      // Cascade: !readable implies !editable — and no row condition: the spec
-      // refuses `when` beside `readable: false` (objectstack#25866), so Read
-      // off clears the condition instead of authoring the refused shape.
+      // Cascade: !readable implies !editable — and no row condition and no
+      // roll-up acknowledgement: the spec refuses `when` (objectstack#25866)
+      // and `rollupSourceUnreadableReason` beside `readable: false`, so Read
+      // off clears both instead of authoring the refused shape.
       if (action === 'readable' && !value) {
         next.editable = false;
         delete next.when;
+        delete next.rollupSourceUnreadableReason;
       }
       // Cascade: editable implies readable.
       if (action === 'editable' && value) next.readable = true;
@@ -1565,9 +1596,11 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   /**
    * `sent` is the autosave's claim on the buffer it sent (objectui#11787, the
    * package door only); the environment door's Save and the destructive
-   * dialog's force-save pass none.
+   * dialog's force-save pass none. Under the Studio's Save (`saveByTopBar`)
+   * the draft is published at once (objectstack#36511); the answer is what the
+   * top bar reports.
    */
-  async function doSave(force: boolean, pending?: PermissionSetDraft, sent?: DraftSend) {
+  async function doSave(force: boolean, pending?: PermissionSetDraft, sent?: DraftSend): Promise<StudioSaveResult> {
     const payload = pending ?? draft;
     setSaving(true);
     setError(null);
@@ -1629,8 +1662,10 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         toSave = mergePermissionSlice(base, payload, scope);
       }
       // ADR-0086 P2 (D6/D7). Package door → the set is metadata: write a DRAFT
-      // (stamped with `packageId`) that the package's atomic Publish promotes,
-      // exactly like the Data/Interfaces pillars — NOT a live record write.
+      // (stamped with `packageId`), exactly like the Data/Interfaces pillars —
+      // NOT a live record write. Under the Studio's Save the set's own publish
+      // follows it at once (objectstack#36511); otherwise the package's Publish
+      // promotes it.
       // Environment door (no packageId) stays live (config).
       // objectui#11773 — the guard pins the package door's DRAFT save; the
       // environment door's live write passes through it unpinned, as before.
@@ -1644,8 +1679,33 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         ...(packageId && embedded ? { surface: 'studio' as const } : {}),
       });
       // The author chose the saved version; the load replaces the matrix.
-      if (outcome === 'reloaded') return;
-      if (packageId) {
+      if (outcome === 'reloaded') return { kind: 'declined' };
+      if (packageId && saveByTopBar) {
+        // objectstack#36511 — the draft just written is published alone, so
+        // the set is live; a refused publish drops the draft this Save wrote
+        // (one that was pending before stays, listed under Changes).
+        const live = await publishSavedItem(client, { type, name: payload.name, packageId }, hadDraftRef.current);
+        if (!live.ok) {
+          hadDraftRef.current = !live.draftDiscarded;
+          if (live.draftDiscarded) recordSetRead(type, payload.name, packageId, { ifNoneMatch: '*' });
+          else onDraftSaved?.();
+          const refusal = publishRefusal(
+            publishFailureOf(type, payload.name, live.error),
+            type,
+            toSave as unknown as Record<string, unknown>,
+            locale,
+          );
+          setError(refusal.message);
+          return { kind: 'refused', reason: refusal.message };
+        }
+        hadDraftRef.current = false;
+        recordSetRead(type, payload.name, packageId, { ifNoneMatch: '*' });
+        resetDraftBaseline(toDisplayDraft(toSave));
+        verdictReadSeq.current += 1;
+        setServedVerdict(undefined);
+        setServedVerdictBody(toSave);
+        onSaved?.();
+      } else if (packageId) {
         setSavedAt(new Date());
         if (sent && !sent.unmoved()) {
           // objectui#11787 (the objectui#11204 rule) — the author edited while
@@ -1727,10 +1787,13 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       // key the editor on the server's prose.
       setCloned((c) => (c && c.name === payload.name ? null : c));
       setDestructive(null);
+      return { kind: 'saved' };
     } catch (err: any) {
       if (err?.status === 409 && errorCodeIs(err, 'DESTRUCTIVE_CHANGE')) {
         const issues = err?.body?.issues ?? [];
         setDestructive({ issues: Array.isArray(issues) ? issues : [], pending: payload });
+        // The author is asked; the dialog's own button sends the set.
+        return { kind: 'declined' };
       } else if (!packageId && err?.status === 403 && errorCodeIs(err, 'NOT_OVERRIDABLE')) {
         // objectui#5987 (the card's item 3) — the environment door refused the
         // write because a code package ships this set: the same condition the
@@ -1746,6 +1809,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // own issue messages, a policy's in the author's words.
         setError(refusalText(err, locale) ?? err?.message ?? String(err));
       }
+      return { kind: 'refused', reason: refusalText(err, locale) ?? err?.message ?? String(err) };
     } finally {
       setSaving(false);
     }
@@ -1768,10 +1832,49 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     target: autosaveTarget,
     loadedFor: loading || draftRefused ? '' : autosaveTarget,
     dirty: isDirty,
-    blocked: !packageId || !writable || saving || saveHeld || destructive !== null || draftRefused !== null,
+    blocked: saveByTopBar || !packageId || !writable || saving || saveHeld || destructive !== null || draftRefused !== null,
     snapshot: draft,
-    save: (sent) => doSave(false, undefined, sent),
+    save: async (sent) => {
+      await doSave(false, undefined, sent);
+    },
   });
+
+  /* ── The Studio's Save and Cancel (objectstack#36511) ──────────── */
+  // The set is one buffer of the top bar's: nothing is written before Save,
+  // Save writes the draft and publishes this set alone, and Cancel puts back
+  // the body the editor last read or saved. Held while a finding the door
+  // would refuse is on the page, in the words the status line shows.
+  const heldClause =
+    celErrorTotal > 0
+      ? t('perm.cel.saveBlocked')
+      : rlsUnnamedCount > 0
+      ? t('perm.rls.nameNeeded')
+      : rlsClauseRefusedCount > 0
+      ? t('perm.rls.clauseHeld')
+      : null;
+  const cancelEdits = () => {
+    const snap = baselineRef.current;
+    if (snap == null) return;
+    try {
+      setDraft(JSON.parse(snap) as PermissionSetDraft);
+    } catch {
+      return;
+    }
+    setError(null);
+    setDestructive(null);
+  };
+  useStudioSaveEntry(
+    saveByTopBar && writable && !loading && draftRefused === null
+      ? {
+          label: typeof headerLabel === 'string' && headerLabel ? headerLabel : name,
+          order: PERMISSION_SET_SAVE_ORDER,
+          dirty: isDirty,
+          held: isDirty ? heldClause : null,
+          save: () => doSave(false),
+          cancel: cancelEdits,
+        }
+      : null,
+  );
 
   /* ── Clone to customize (objectui#5987, objectui#7611) ─────────── */
   /**
@@ -2308,26 +2411,38 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     const chipButton =
       'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground';
     const facetTab = chrome.tab === 'rls' || chrome.tab === 'tabs' || chrome.tab === 'admin' ? chrome.tab : null;
+    // objectstack#35018 — the title is the set's label alone: the app's name
+    // is the top bar's, so it is not repeated here (objectstack#34795 put it
+    // in front). The title row holds nothing else, so it is not cut; the
+    // set's machine name is the title's tooltip, and the provenance, default
+    // and lock labels are the line under it.
+    const studioTitle = headerLabel || name;
     return (
       <div className="flex h-full flex-col">
         <StudioItemHeader
           testId="access-item-header"
           leading={chrome.leading}
           icon={Shield}
-          title={headerLabel || name}
-          apiName={name}
-          chips={
-            <>
-              {/* The provenance chip in the artboard's kind-chip look; same
-                  test id and the same answer as the page's badge. */}
-              <span className={STUDIO_KIND_CHIP} data-testid="perm-provenance-badge">
-                {shippedByPackage ? t('perm.badge.package') : t('perm.badge.custom')}
+          title={studioTitle}
+          titleProps={{ title: name, 'data-testid': 'perm-studio-title' }}
+          note={
+            <span className="inline-flex items-center gap-1.5" data-testid="perm-studio-title-note">
+              {/* Same test id and the same answer as the page's badge. */}
+              {/* objectstack#35018 — in the builder's words: a set the app
+                  brings reads 「随应用提供」, not the package term 「包内置」. */}
+              <span data-testid="perm-provenance-badge">
+                {shippedByPackage ? t('engine.studio.access.origin.app') : t('perm.badge.custom')}
               </span>
-              {!!draft.isDefault && <span className={STUDIO_KIND_CHIP}>{t('perm.badge.default')}</span>}
+              {!!draft.isDefault && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>{t('perm.badge.default')}</span>
+                </>
+              )}
               {/* A host-locked package says so in the pillar's note; the
                   other gates (type, artifact, wall) keep their own badge. */}
               {!readOnly && lockBadgeEl}
-            </>
+            </span>
           }
           meta={meta}
           actions={
@@ -2442,11 +2557,6 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                   onOpenOwd={onOpenOwd}
                 />
               </MatrixScrollPane>
-              {writable && (
-                <p className="shrink-0 border-t px-6 py-2.5 text-xs text-muted-foreground">
-                  {t('engine.studio.access.bulkHint')}
-                </p>
-              )}
             </div>
             <div hidden={chrome.tab !== 'capabilities'} data-testid="perm-tabpanel-capabilities" className="min-h-0 flex-1 overflow-auto">
               {capabilitiesEl}
@@ -2717,6 +2827,17 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
  */
 const STICKY_OBJECT_CELL =
   'sticky left-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:hidden after:w-px after:bg-border group-data-[scrolled-x=true]/matrix:after:block';
+
+/**
+ * objectstack#34795 — the Studio matrix's bulk column, header and rows alike:
+ * pinned to the right edge of the scroll pane, so a row's "全选 · 只读 · 清空"
+ * stay in view when the matrix is wider than the pane. Its left edge is drawn
+ * by a pseudo-element, because a collapsed border does not travel with a
+ * sticky cell. A row tint is laid on as a background image, as on the Object
+ * column.
+ */
+const STICKY_BULK_CELL =
+  'sticky right-0 bg-background before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-border';
 
 /* ────────────────────────────────────────────────────────────────── */
 /* Subcomponent: PermissionTable                                      */
@@ -2989,6 +3110,26 @@ const STUDIO_LEGEND_KEYS: Partial<Record<keyof ObjectPerm, string>> = {
 /** The sharing group (Transfer, View all, Modify all) opens behind a divider. */
 const STUDIO_SHARING_GROUP_START: keyof ObjectPerm = 'allowTransfer';
 
+/** objectstack#35061 — whether a box column stays flat in the folded matrix (`PERM_MATRIX_FLAT_KEYS`). */
+function isFlatKey(key: ObjectPermFlag): boolean {
+  return (PERM_MATRIX_FLAT_KEYS as readonly string[]).includes(key as string);
+}
+
+/**
+ * objectstack#35061 — how many of the six folded permissions a row has on:
+ * a ticked box among the four non-CRUD columns, and a record scope that is set
+ * (a picker reading anything but "Not set"). Read from the drawn entry, so an
+ * inherited row counts what it draws.
+ */
+function foldedPermissionsOn(
+  perm: ObjectPerm,
+  objectActions: ReadonlyArray<{ key: ObjectPermFlag }>,
+): number {
+  const boxes = objectActions.filter((a) => !isFlatKey(a.key) && perm[a.key] === true).length;
+  const scopes = SCOPE_AXES.filter((s) => perm[s.axis] !== undefined).length;
+  return boxes + scopes;
+}
+
 function StudioObjectsToolbar({
   shown,
   total,
@@ -3081,23 +3222,46 @@ function StudioObjectMatrix({
 }: PermissionTableProps) {
   const sharingStart = objectActions.findIndex((a) => a.key === STUDIO_SHARING_GROUP_START);
   const divider = (i: number) => (i === 0 || i === sharingStart ? 'border-l' : '');
+  // objectstack#35061 — below the fold width (`permissionMatrixFold.ts`) only
+  // the four CRUD columns are drawn; the other six live in each row's "More
+  // permissions" row. Both forms are in the DOM; the pane's width picks one.
   return (
-    <table className="w-full min-w-[1304px] border-collapse text-[13px]" data-testid="perm-studio-matrix">
+    <table
+      className={cn('w-full border-collapse text-[13px]', PERM_MATRIX_TABLE_FLOOR)}
+      data-testid="perm-studio-matrix"
+    >
       <thead className="sticky top-0 z-10">
         <tr className="h-9 border-y bg-sidebar text-xs font-medium text-muted-foreground">
           <th className={cn(STICKY_OBJECT_CELL, 'pl-6 pr-3 text-left font-medium z-[1] bg-sidebar')}>{t('perm.col.object')}</th>
           <th className="w-28 px-3 text-left font-medium">{t('engine.studio.access.colOwd')}</th>
           {objectActions.map((a, i) => (
-            <th key={a.key as string} title={a.tip} className={cn('w-[52px] px-1 text-center font-medium', divider(i))}>
+            <th
+              key={a.key as string}
+              title={a.tip}
+              data-perm-fold={isFlatKey(a.key) ? undefined : 'flat-only'}
+              className={cn('w-[52px] px-1 text-center font-medium', divider(i), !isFlatKey(a.key) && PERM_FLAT_ONLY_CELL)}
+            >
               <span className="break-keep">{a.short}</span>
             </th>
           ))}
           {SCOPE_AXES.map((s, i) => (
-            <th key={s.axis} title={t(s.tipKey)} className={cn('w-36 px-2 text-left font-medium', i === 0 && 'border-l')}>
+            <th
+              key={s.axis}
+              title={t(s.tipKey)}
+              data-perm-fold="flat-only"
+              className={cn('w-36 px-2 text-left font-medium', i === 0 && 'border-l', PERM_FLAT_ONLY_CELL)}
+            >
               {t(s.labelKey)}
             </th>
           ))}
-          <th className="w-56 border-l px-3 font-medium">
+          <th
+            data-perm-fold="folded-only"
+            data-testid="perm-more-col"
+            className={cn('border-l px-3 text-left font-medium whitespace-nowrap', PERM_FOLDED_ONLY)}
+          >
+            {t('perm.more.col')}
+          </th>
+          <th className={cn(STICKY_BULK_CELL, PERM_BULK_COLUMN_WIDTH, 'px-3 font-medium z-[1] bg-sidebar')}>
             <span className="sr-only">{t('perm.col.bulk')}</span>
           </th>
         </tr>
@@ -3105,7 +3269,7 @@ function StudioObjectMatrix({
       <tbody>
         {objects.length === 0 && (
           <tr>
-            <td colSpan={objectActions.length + SCOPE_AXES.length + 3} className="px-6 py-8 text-center text-muted-foreground">
+            <td colSpan={objectActions.length + SCOPE_AXES.length + 4} className="px-6 py-8 text-center text-muted-foreground">
               {t('perm.filter.empty')}
             </td>
           </tr>
@@ -3181,18 +3345,25 @@ function StudioObjectRow({
   onFieldWhenLint: (objectName: string, fieldName: string, issues: CelLintIssue[]) => void;
   onOpenOwd?: (objectName: string) => void;
 }) {
-  // The bulk strip draws on the row under the pointer, and on the row that
-  // holds keyboard focus — read from the focus events themselves, so a Tab
-  // into the row's first checkbox brings the strip into the tab order.
+  // The row under the pointer, and the row that holds keyboard focus, is
+  // highlighted — read from the focus events themselves. objectstack#34795:
+  // the bulk strip no longer waits for either; every row draws it.
   const [hovered, setHovered] = React.useState(false);
   const [focused, setFocused] = React.useState(false);
+  // objectstack#35061 — the row's "More permissions" row (folded form only).
+  const [moreOpen, setMoreOpen] = React.useState(false);
   const active = hovered || focused;
   const perm = cell.perm;
+  const moreOn = foldedPermissionsOn(perm, objectActions);
+  const moreCount = t('perm.more.count').replace('{count}', String(moreOn));
+  // objectstack#34795 — read as "All · Read only · Clear", the three the card
+  // names, then the CRUD arm as the fourth. Each still calls `onBulkSet` with
+  // the action it called before.
   const bulk: Array<{ action: 'read' | 'crud' | 'all' | 'none'; key: string }> = [
-    { action: 'read', key: 'perm.bulk.read' },
-    { action: 'crud', key: 'perm.bulk.crud' },
     { action: 'all', key: 'perm.bulk.all' },
+    { action: 'read', key: 'perm.bulk.read' },
     { action: 'none', key: 'perm.bulk.none' },
+    { action: 'crud', key: 'perm.bulk.crud' },
   ];
   return (
     <>
@@ -3219,6 +3390,10 @@ function StudioObjectRow({
             type="button"
             onClick={() => onToggleExpand(o.name)}
             aria-expanded={open}
+            // objectstack#34795 — the row shows the object's label alone; its
+            // machine name is the tooltip.
+            title={o.label ? o.name : undefined}
+            data-testid={`perm-object-name-${o.name}`}
             className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-left"
           >
             {/* The chevron opens the object's field-level R/W, as on the page. */}
@@ -3228,7 +3403,6 @@ function StudioObjectRow({
               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             )}
             <span className="font-medium text-foreground">{o.label ?? o.name}</span>
-            {o.label && <span className="font-mono text-[11px] text-muted-foreground">{o.name}</span>}
           </button>
           {o.accessDefault === 'private' && (
             <Badge
@@ -3249,7 +3423,7 @@ function StudioObjectRow({
         <td className="px-3 py-1 align-middle">
           <span
             className={cn(
-              'inline-flex h-[22px] items-center rounded px-1.5 text-[11px] font-medium',
+              'inline-flex h-[22px] items-center whitespace-nowrap rounded px-1.5 text-[11px] font-medium',
               owdChipTone(o.owd),
               onOpenOwd && 'cursor-pointer hover:ring-1 hover:ring-border focus:outline-none focus-visible:ring-1 focus-visible:ring-primary',
             )}
@@ -3273,7 +3447,11 @@ function StudioObjectRow({
           </span>
         </td>
         {objectActions.map((a, i) => (
-          <td key={a.key as string} className={cn('px-1 py-1 text-center align-middle', divider(i))}>
+          <td
+            key={a.key as string}
+            data-perm-fold={isFlatKey(a.key) ? undefined : 'flat-only'}
+            className={cn('px-1 py-1 text-center align-middle', divider(i), !isFlatKey(a.key) && PERM_FLAT_ONLY_CELL)}
+          >
             <ObjectRuleBox
               objectName={o.name}
               action={a}
@@ -3287,7 +3465,11 @@ function StudioObjectRow({
           </td>
         ))}
         {SCOPE_AXES.map((s, i) => (
-          <td key={s.axis} className={cn('px-2 py-1 align-middle', i === 0 && 'border-l')}>
+          <td
+            key={s.axis}
+            data-perm-fold="flat-only"
+            className={cn('px-2 py-1 align-middle', i === 0 && 'border-l', PERM_FLAT_ONLY_CELL)}
+          >
             <ScopePicker
               objectName={o.name}
               perm={perm}
@@ -3299,28 +3481,136 @@ function StudioObjectRow({
             />
           </td>
         ))}
-        <td className="border-l px-3 py-1 align-middle">
-          {active && (
-            <span className="flex items-center gap-1" data-testid={`perm-bulk-${o.name}`}>
+        <td data-perm-fold="folded-only" className={cn('border-l px-2 py-1 align-middle', PERM_FOLDED_ONLY)}>
+          {/* Open on a read-only row too: its boxes show the grants, locked as their flat twins are. */}
+          <button
+            type="button"
+            onClick={() => setMoreOpen((v) => !v)}
+            aria-expanded={moreOpen}
+            // Named like the strip's buttons, without the object: the row says which.
+            aria-label={`${t('perm.more.col')} · ${moreCount}`}
+            data-testid={`perm-more-toggle-${o.name}`}
+            data-on={moreOn}
+            className="inline-flex h-6 items-center gap-1 whitespace-nowrap rounded px-1.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {moreOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+            <span className={cn(moreOn > 0 && 'font-medium text-foreground')}>{moreCount}</span>
+          </button>
+        </td>
+        <td
+          className={cn(
+            STICKY_BULK_CELL,
+            'px-3 py-1 align-middle z-[1]',
+            active && 'bg-gradient-to-r from-primary/5 to-primary/5',
+          )}
+        >
+          {/* objectstack#35061 — the folded form's one "Bulk" menu: the strip's four actions, in its order. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={!writable}
+                data-testid={`perm-bulk-menu-${o.name}`}
+                data-perm-fold="folded-only"
+                className={cn(
+                  'inline-flex h-6 items-center gap-0.5 whitespace-nowrap rounded px-1 text-[12px] font-medium text-primary hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground disabled:hover:bg-transparent',
+                  PERM_FOLDED_ONLY,
+                )}
+              >
+                {t('perm.col.bulk')}
+                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
               {bulk.map((b) => (
-                <button
+                <DropdownMenuItem
                   key={b.action}
+                  disabled={!writable}
+                  onSelect={() => onBulkSet(o.name, b.action)}
+                  title={b.action === 'all' ? t('perm.bulk.allTip') : undefined}
+                >
+                  {t(b.key)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <span
+            className={cn('items-center gap-1 whitespace-nowrap', PERM_FLAT_ONLY_FLEX)}
+            data-testid={`perm-bulk-${o.name}`}
+            data-perm-fold="flat-only"
+          >
+            {bulk.map((b, i) => (
+              <React.Fragment key={b.action}>
+                {i > 0 && (
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    ·
+                  </span>
+                )}
+                <button
                   type="button"
                   disabled={!writable}
                   onClick={() => onBulkSet(o.name, b.action)}
                   title={b.action === 'all' ? t('perm.bulk.allTip') : undefined}
-                  className="inline-flex h-6 items-center rounded border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-6 items-center rounded px-1 text-[12px] font-medium text-primary hover:bg-muted hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline disabled:hover:bg-transparent"
                 >
                   {t(b.key)}
                 </button>
-              ))}
-            </span>
-          )}
+              </React.Fragment>
+            ))}
+          </span>
         </td>
       </tr>
+      {moreOpen && (
+        // objectstack#35061 — the six folded permissions, under their row. The
+        // same boxes and pickers as the flat columns, so each is exactly as
+        // editable or locked as its flat twin. Folded form only.
+        <tr
+          className={cn('border-b bg-muted/10', PERM_FOLDED_ONLY)}
+          data-testid={`perm-more-row-${o.name}`}
+          data-perm-fold="folded-only"
+        >
+          <td colSpan={objectActions.length + SCOPE_AXES.length + 4} className="py-2.5 pl-12 pr-6">
+            <div className={cn('flex flex-wrap items-center gap-x-5 gap-y-2', FIELD_PANEL)}>
+              {objectActions
+                .filter((a) => !isFlatKey(a.key))
+                .map((a) => (
+                  <label key={a.key as string} className="inline-flex items-center gap-1.5 text-[13px]" title={a.tip}>
+                    <ObjectRuleBox
+                      objectName={o.name}
+                      action={a}
+                      checked={!!perm[a.key]}
+                      source={cell.source}
+                      writable={writable}
+                      t={t}
+                      onObjectPerm={onObjectPerm}
+                      className="h-[18px] w-[18px] rounded border-muted-foreground/40 align-middle data-[state=checked]:border-primary"
+                    />
+                    <span className="whitespace-nowrap">{t(STUDIO_LEGEND_KEYS[a.key] ?? '') || a.tip}</span>
+                  </label>
+                ))}
+              {SCOPE_AXES.map((s) => (
+                <span key={s.axis} className="inline-flex items-center gap-1.5 text-[13px]">
+                  <span className="whitespace-nowrap text-muted-foreground">{t(s.labelKey)}</span>
+                  <span className="w-36">
+                    <ScopePicker
+                      objectName={o.name}
+                      perm={perm}
+                      inherited={cell.inherited}
+                      axis={s}
+                      writable={writable}
+                      t={t}
+                      onChange={onObjectScope}
+                    />
+                  </span>
+                </span>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
       {open && (
         <tr className="border-b bg-muted/10">
-          <td colSpan={objectActions.length + SCOPE_AXES.length + 3} className="py-3 pl-12 pr-6">
+          <td colSpan={objectActions.length + SCOPE_AXES.length + 4} className="py-3 pl-12 pr-6">
             <FieldsSubTable
               objectName={o.name}
               objectPerm={perm}

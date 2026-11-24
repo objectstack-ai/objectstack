@@ -26,6 +26,15 @@
  * its loading state across the waits, this one keeps rendering throughout and
  * simply fills the value in if and when an attempt succeeds.
  *
+ * ## One request per cold load (objectstack#35455)
+ *
+ * On a device's first visit `seedTenantLanguage()` asks this endpoint before
+ * React mounts, and its request usually settles inside the seed's race —
+ * before this provider mounts, so the in-flight sharing above no longer
+ * covers it. The boot read's first attempt therefore takes that settled answer
+ * (`takeSettledSeedAnswer`), once, when it answered this very request for the
+ * browser's current owner; otherwise it asks as before.
+ *
  * ## Read again after the signed-in user's own row changes (objectstack#27498)
  *
  * The answer's `locale` is the caller's language: their own `sys_user.locale`
@@ -91,7 +100,7 @@ import {
   type LocalizationValue,
 } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount, useAuth } from '@object-ui/auth';
-import { startedPreferredLocale } from './languageSeed';
+import { startedPreferredLocale, takeSettledSeedAnswer } from './languageSeed';
 import { useDataInvalidation } from '@object-ui/react';
 import {
   HttpFetchError,
@@ -168,14 +177,21 @@ export function LocalizationFetchProvider({
           // before — including `Retry-After` — so the retry policy below is
           // untouched, and a shared 503 reaches BOTH callers rather than
           // resolving one of them empty.
-          const json = await sharedGetJson<MeLocalizationResponse>(endpoint, {
+          const init: RequestInit = {
             credentials: 'include',
             headers: {
               Accept: 'application/json',
               ...(preference ? { 'Accept-Language': preference } : {}),
             },
             signal: reread?.signal,
-          });
+          };
+          // The boot read's first attempt takes the seed's answer to this very
+          // request when it settled earlier in this page load
+          // (objectstack#35455); a re-read never does.
+          const handed = !reread && attempt === 0
+            ? (takeSettledSeedAnswer(endpoint, init) as MeLocalizationResponse | null)
+            : null;
+          const json = handed !== null ? handed : await sharedGetJson<MeLocalizationResponse>(endpoint, init);
           // Refresh the UI-language seed cache (objectui#4035) — the
           // "revalidate" half of stale-while-revalidate. This boot has already
           // committed to a language; what this write buys is the NEXT one, so a

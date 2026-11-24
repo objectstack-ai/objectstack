@@ -71,15 +71,7 @@ const LOCALES: Array<[string, { settings?: Record<string, any> }]> = [
  * the moment its help is translated, and the test below reds while an entry
  * lists help that no locale is missing any more.
  */
-const HELP_OWED: Record<string, readonly string[]> = {
-  access_policy: [
-    'allowed_ip_ranges',
-    'session_idle_timeout_minutes',
-    'session_absolute_max_hours',
-    'max_concurrent_sessions_per_user',
-    'mfa_required',
-  ],
-};
+const HELP_OWED: Record<string, readonly string[]> = {};
 
 function missingFor(data: { settings?: Record<string, any> }, m: SettingsManifest): string[] {
   const tr = (data.settings ?? {})[m.namespace];

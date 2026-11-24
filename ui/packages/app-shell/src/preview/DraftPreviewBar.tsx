@@ -12,6 +12,13 @@
  * offers the only two actions that matter: leave the preview, or make it real
  * (the same governed one-click publish the Home banner uses). The bar is what
  * keeps a read-only preview from ever being confused with the live app.
+ *
+ * objectstack#34610 — the bar is the screen's one Publish while the main area
+ * shows an app's draft (the AI build runs in the drawer beside it, and the
+ * chat draws no Publish of its own). Its count, its changes panel and its
+ * Publish share ONE scope: the current app's package, the scope the chat's
+ * count reads too. Outside an app (no `/apps/:appName` route) the scope is
+ * the environment, as before.
  */
 
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
@@ -20,8 +27,10 @@ import { Eye, X, Rocket, GitCompareArrows, Sparkles } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { usePreviewDrafts, markPreviewExit, PREVIEW_QUERY_FLAG } from './PreviewModeContext.js';
-import { usePendingDrafts } from './usePendingDrafts.js';
+import { appDraftPackages, usePendingDrafts } from './usePendingDrafts.js';
 import { usePublishAllDrafts } from './usePublishAllDrafts.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { matchAppBySegment } from '../utils/appRoute.js';
 // objectstack#33582: the Pending changes sheet loads with the bar, not with the
 // console. The bar is in every route's EAGER graph (`ConsoleLayout`), and the
 // sheet, closed until asked for, held the metadata form strings and the object
@@ -30,7 +39,21 @@ import { usePublishAllDrafts } from './usePublishAllDrafts.js';
 const DraftChangesPanel = lazy(() =>
   import('./DraftChangesPanel.js').then((m) => ({ default: m.DraftChangesPanel })),
 );
-import { draftSurfaceOf, draftsOnSurface } from './draftSurface.js';
+
+/**
+ * objectstack#34610 — the package the bar's count and Publish are scoped to:
+ * the routed app's package, else the route segment itself (an app the
+ * registry does not list yet, a new build's draft, is routed at its package
+ * id, ADR-0048), else null outside any app (the environment).
+ */
+export function draftBarPackageOf(
+  appSegment: string | undefined,
+  apps: readonly { name?: string; _packageId?: string; packageId?: string }[] | null | undefined,
+): string | null {
+  if (!appSegment) return null;
+  const app = matchAppBySegment(apps, appSegment);
+  return app?._packageId ?? app?.packageId ?? appSegment;
+}
 
 export function DraftPreviewBar() {
   const preview = usePreviewDrafts();
@@ -39,28 +62,29 @@ export function DraftPreviewBar() {
   const { t } = useObjectTranslation();
   const { publishAll, publishing } = usePublishAllDrafts(t);
   const [changesOpen, setChangesOpen] = useState(false);
+  const { appName } = useParams();
+  const { apps } = useMetadata();
+  const packageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
   // Pending-draft count for the Changes button label — what Publish will
-  // actually promote. The shared source (objectui#5801) refreshes on the
-  // metadata-refresh pulse; the pathname effect keeps the old "drafts staged
-  // while the preview is open" trigger too.
+  // actually promote, in the app's package (objectstack#34610). The shared
+  // source (objectui#5801) refreshes on the metadata-refresh pulse; the
+  // pathname effect keeps the old "drafts staged while the preview is open"
+  // trigger too.
   const { count: pendingCount, entries: pendingEntries, refresh: refreshPending } = usePendingDrafts({
+    appPackageId: packageId,
     enabled: Boolean(preview),
   });
+  // The changes panel lists the same drafts: the app's package and its
+  // customization pair (`appDraftPackages`), off the env-wide list.
+  const inApp = useMemo(() => {
+    if (!packageId) return undefined;
+    const scope = appDraftPackages(packageId);
+    return (entry: { packageId: string | null }) => entry.packageId !== null && scope.includes(entry.packageId);
+  }, [packageId]);
   useEffect(() => {
     if (!preview) return;
     void refreshPending();
   }, [preview, location.pathname, refreshPending]);
-  // objectui#12968 — what is pending on the surface this preview shows: the
-  // route below `/apps/:appName` names it (an object, a page, a dashboard or a
-  // report), and the entries the count above already read are filtered to it.
-  // No surface (the app's landing, admin pages) or an unknown count → no line.
-  const appSubPath = useParams()['*'];
-  const surface = useMemo(
-    () => (appSubPath === undefined ? null : draftSurfaceOf(appSubPath)),
-    [appSubPath],
-  );
-  const pendingHere =
-    surface && typeof pendingCount === 'number' ? draftsOnSurface(pendingEntries, surface).length : 0;
 
   if (!preview) return null;
 
@@ -75,12 +99,14 @@ export function DraftPreviewBar() {
   };
 
   const publish = async () => {
-    const result = await publishAll();
+    const result = await publishAll({ packageId });
     if (!result.ok) return;
-    // The draft world just became the real world — exit preview and reload so
-    // every renderer re-reads the published registry.
+    // The draft world just became the real world — exit preview. Leaving
+    // preview swaps every metadata tree back to the published registry, and
+    // the publish's own refresh pulse re-reads it. objectstack#34610: no page
+    // reload, which would drop the drawer's conversation and the chat's
+    // receipt for this publish.
     exit();
-    setTimeout(() => { try { window.location.reload(); } catch { /* ignore */ } }, 300);
   };
 
   // Under the auto-publish posture (and any time a draft preview is opened with
@@ -94,8 +120,8 @@ export function DraftPreviewBar() {
   // what Publish will do, and publishing loads rows only for a `seed` draft it
   // promotes (the publish response's `seedApplied` receipt rides on a seed's
   // promotion and nothing else). So the sentence shows only while a pending
-  // `seed` draft is in the list this bar read — the same env-wide `_drafts`
-  // list `usePublishAllDrafts` publishes. A package with no sample data, whose
+  // `seed` draft is in the list this bar read — the same `_drafts`
+  // scope `usePublishAllDrafts` publishes. A package with no sample data, whose
   // records already show, gets the Publish button alone; so does an unknown
   // count, which read no entries and so cannot back the promise.
   const seedPending = pendingEntries.some((entry) => entry.type === 'seed');
@@ -120,10 +146,11 @@ export function DraftPreviewBar() {
             ? t('preview.draftBar.messageClean', {
                 defaultValue: 'Draft preview — no unpublished changes; everything here is already live.',
               })
-            : pendingHere > 0
-              ? t('preview.draftBar.pendingHere', {
-                  count: pendingHere,
-                  defaultValue: 'Draft preview · {{count}} unpublished changes on this page',
+            : typeof pendingCount === 'number' && packageId
+              ? t('preview.draftBar.pendingInApp', {
+                  count: pendingCount,
+                  defaultValue:
+                    'Draft preview · {{count}} unpublished changes in this app. Nothing here is live until you publish.',
                 })
               : t('preview.draftBar.message', {
                   defaultValue:
@@ -190,7 +217,7 @@ export function DraftPreviewBar() {
             </Button>
           </div>
           <Suspense fallback={null}>
-            <DraftChangesPanel open={changesOpen} onOpenChange={setChangesOpen} />
+            <DraftChangesPanel open={changesOpen} onOpenChange={setChangesOpen} include={inApp} />
           </Suspense>
         </>
       )}

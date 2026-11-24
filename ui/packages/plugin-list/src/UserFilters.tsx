@@ -856,7 +856,7 @@ function DropdownFilters({ fields, objectDef, objectDefPending, data, onFilterCh
           >
             <span className="truncate max-w-[100px]">{name ?? <PendingChipName field={f.field} />}</span>
             {hasSelection && (
-              <span className="text-[10px] text-muted-foreground/80 tabular-nums">
+              <span className="text-xs text-muted-foreground/80 tabular-nums">
                 {activeCount}
               </span>
             )}
@@ -953,8 +953,8 @@ function DropdownFilters({ fields, objectDef, objectDefPending, data, onFilterCh
           ) : (
             <div className="max-h-60 overflow-y-auto space-y-0.5" data-testid={`filter-options-${f.field}`}>
               {f.options.length === 0 ? (
-                <div className="px-2 py-3 text-center text-xs text-muted-foreground">
-                  No options
+                <div className="px-2 py-3 text-center text-xs text-muted-foreground" data-testid={`filter-options-empty-${f.field}`}>
+                  {tt('fields.options.empty', 'No options available')}
                 </div>
               ) : (
                 f.options.map(opt => (
@@ -1023,7 +1023,7 @@ function DropdownFilters({ fields, objectDef, objectDefPending, data, onFilterCh
                   className="inline-flex items-center gap-1 h-7 px-2 text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0 rounded-md"
                 >
                   <span>{moreLabel}</span>
-                  <span className="text-[10px] text-muted-foreground/80 tabular-nums">
+                  <span className="text-xs text-muted-foreground/80 tabular-nums">
                     {overflowFields.length}
                   </span>
                   <ChevronDown className="h-3 w-3 opacity-60" />

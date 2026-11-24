@@ -103,7 +103,13 @@ const FULL_LIST_VIEW: AnyRec = {
     fields: [{ field: 'status' }],
     tabs: [{ name: 'open', filter: [{ field: 'status', operator: 'equals', value: 'open' }] }],
   },
-  kanban: { groupByField: 'status', summarizeField: 'estimate', columns: ['title'], titleField: 'title' },
+  kanban: {
+    groupByField: 'status',
+    summarizeField: 'estimate',
+    columns: ['title'],
+    titleField: 'title',
+    summary: { type: 'sum', field: 'estimate' },
+  },
   calendar: {
     startDateField: 'due_at',
     endDateField: 'visible_from',
@@ -319,6 +325,9 @@ describe('#14107 — every other walked position', () => {
     ],
     [{ kanban: { summarizeField: BAD } }, 'views[0].list.kanban.summarizeField', 'warning'],
     [{ kanban: { columns: [BAD] } }, 'views[0].list.kanban.columns[0]', 'warning'],
+    // [#36370] The lane foot statistic: a stale name prints a sum of 0 at every
+    // lane's foot, the `columns[].summary.field` level.
+    [{ kanban: { summary: { type: 'sum', field: BAD } } }, 'views[0].list.kanban.summary.field', 'error'],
     // [#18565] Calendar's level, not the required siblings' — see the row's
     // own note in the rule. The board renders every card; only the title is
     // not the one the author named.
@@ -373,6 +382,10 @@ describe('#14107 — every other walked position', () => {
     [{ tree: { parentField: BAD } }, 'views[0].list.tree.parentField', 'error'],
     [{ tree: { labelField: BAD } }, 'views[0].list.tree.labelField', 'warning'],
     [{ tree: { fields: [BAD] } }, 'views[0].list.tree.fields[0]', 'warning'],
+    // [#34382] Every timesheet binding is written into the records its cells create.
+    [{ timesheet: { rowFields: [BAD] } }, 'views[0].list.timesheet.rowFields[0]', 'error'],
+    [{ timesheet: { dateField: BAD } }, 'views[0].list.timesheet.dateField', 'error'],
+    [{ timesheet: { valueField: BAD } }, 'views[0].list.timesheet.valueField', 'error'],
   ];
 
   for (const [patch, path, severity] of cases) {
@@ -1589,6 +1602,34 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
     }
   });
 
+  it('[#35702] refuses the boolean yes / no counts over anything but a boolean — the door would answer a total', () => {
+    expect(refused(withColumns(
+      { field: 'is_locked', summary: 'count_true' },
+      { field: 'title', summary: { type: 'count_false', field: 'is_all_day' } },
+    ))).toEqual([]);
+    for (const [column, words] of [
+      [{ field: 'estimate', summary: 'count_true' }, '"count_true" over "estimate" (`number`)'],
+      [{ field: 'is_locked', summary: { type: 'count_false', field: 'title' } }, '"count_false" over "title" (`text`)'],
+    ] as const) {
+      const findings = withColumns(column);
+      expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+        [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, 'views[0].list.columns[1].summary', 'error'],
+      ]);
+      expect(findings[0].message).toContain(`summary ${words} is a true / false count`);
+      expect(findings[0].hint).toMatch(/^Point "count_(true|false)" at a boolean or toggle field/);
+    }
+    // Every declared `FieldType`: refused exactly where the spec's member table refuses.
+    for (const member of ['count_true', 'count_false']) {
+      for (const type of FieldType.options) {
+        const objects = [{ name: 'duly_task', label: 'Task', fields: [{ name: 'probe', type, label: 'Probe' }] }];
+        const findings = refused(validateListViewFieldRefsUnrecorded(stackWith({ data: { provider: 'object', object: 'duly_task' }, columns: [{ field: 'probe', summary: member }] }, objects)));
+        expect(findings.length, `${member} over ${type}`).toBe(type === 'boolean' || type === 'toggle' ? 0 : 1);
+      }
+    }
+    // Unjudgeable stays unjudged: an unknown field is the existence rule's, a dotted path is skipped.
+    expect(refused(withColumns({ field: 'title', summary: { type: 'count_true', field: 'owner.name' } }))).toEqual([]);
+  });
+
   it('skips what it cannot judge: an unknown field (the existence rule\'s), a dotted path, no declared type, a type outside `FieldType`', () => {
     expect(withColumns({ field: 'title', summary: { type: 'sum', field: 'nope_field' } }).map((f) => [f.rule, f.path])).toEqual([
       [LIST_VIEW_FIELD_UNKNOWN, 'views[0].list.columns[1].summary.field'],
@@ -1661,5 +1702,47 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
         expect(line.length, line).toBeLessThanOrEqual(200);
       }
     }
+  });
+});
+
+/**
+ * [#36370] `kanban.summary`, the lane foot statistic: `sum` over the field it
+ * totals is judged by the aggregate × field-type table's `sum` row, the verdict
+ * `columns[].summary` asks; `count` and `none` compare no value.
+ */
+describe('[#36370] the lane foot statistic of a board', () => {
+  const withSummary = (summary: unknown) =>
+    validateListViewFieldRefs(stackWith(mutate({ kanban: { summary } }))).filter(
+      (f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
+    );
+
+  it('refuses a sum over a text field, at `kanban.summary`, with the count as the way out', () => {
+    const findings = withSummary({ type: 'sum', field: 'title' });
+    expect(findings.map((f) => [f.path, f.severity])).toEqual([['views[0].list.kanban.summary', 'error']]);
+    expect(findings[0].message).toContain('summary "sum" over "title" (`text`) totals no number');
+    expect(findings[0].hint).toContain("summary: { type: 'count' }");
+  });
+
+  it('refuses a sum over a formula the same way the column summary does (the field stores no value)', () => {
+    expect(withSummary({ type: 'sum', field: 'score' })).toHaveLength(1);
+  });
+
+  it('refuses a sum over a boolean, which the aggregate table admits but the board does not add', () => {
+    const findings = withSummary({ type: 'sum', field: 'is_locked' });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('summary "sum" over "is_locked" (`boolean`) totals no number');
+    // A toggle is the same true / false class: refused at the same place.
+    const objects = [{ name: 'duly_task', label: 'Task', fields: [{ name: 'probe', type: 'toggle', label: 'Probe' }] }];
+    const toggle = validateListViewFieldRefsUnrecorded(
+      stackWith({ data: { provider: 'object', object: 'duly_task' }, type: 'kanban', columns: ['probe'], kanban: { groupByField: 'probe', summary: { type: 'sum', field: 'probe' } } }, objects),
+    ).filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    expect(toggle.map((f) => [f.path, f.severity])).toEqual([['views[0].list.kanban.summary', 'error']]);
+    expect(toggle[0].message).toContain('(`toggle`) totals no number');
+  });
+
+  it('accepts a sum over a number, and judges nothing for count or none', () => {
+    expect(withSummary({ type: 'sum', field: 'estimate' })).toEqual([]);
+    expect(withSummary({ type: 'count' })).toEqual([]);
+    expect(withSummary({ type: 'none' })).toEqual([]);
   });
 });

@@ -20,7 +20,7 @@
  */
 
 import { useMemo } from 'react';
-import type { NavIconTarget, NavTargetIconResolver } from '@object-ui/layout';
+import type { NavIconTarget, NavTargetColorResolver, NavTargetIconResolver } from '@object-ui/layout';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { readObjectsByName } from './useObjectPresence.js';
 
@@ -34,6 +34,27 @@ export function useNavTargetIcon(): NavTargetIconResolver {
           !!item && typeof item === 'object' && (item as { name?: unknown }).name === target.objectName,
       );
       return typeof def?.icon === 'string' && def.icon.trim() !== '' ? def.icon : undefined;
+    },
+    [metadata],
+  );
+}
+
+/**
+ * useNavTargetColor — the same read for the object's palette `color`
+ * (objectstack#35985), as a {@link NavTargetColorResolver}: the colour of the
+ * tile an `object` entry is drawn on. An object with no `color`, or one not
+ * loaded yet, answers `undefined` and the tile is the neutral gray.
+ */
+export function useNavTargetColor(): NavTargetColorResolver {
+  const metadata = useMetadata();
+  return useMemo<NavTargetColorResolver>(
+    () => (target: NavIconTarget) => {
+      if (target.kind !== 'object') return undefined;
+      const def = readObjectsByName(metadata, [target.objectName]).find(
+        (item): item is { name: string; color?: unknown } =>
+          !!item && typeof item === 'object' && (item as { name?: unknown }).name === target.objectName,
+      );
+      return typeof def?.color === 'string' && def.color !== '' ? def.color : undefined;
     },
     [metadata],
   );

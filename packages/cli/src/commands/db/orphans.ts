@@ -230,8 +230,16 @@ export default class DbOrphans extends Command {
           + 'deeper detail row(s) their cascade removes. The export below is the only copy that survives.',
         );
       }
+      // A run that did not get its confirmation deletes nothing and exits 1,
+      // naming the flag that gives it — the `os migrate` family's rule. An
+      // operator who answers `n` at the prompt declined on purpose: exit 0.
       if (!flags.yes) {
         if (json) { await emitJson({ error: 'confirmation_required', hint: 'pass --yes' }, 1, { compact: true }); return; }
+        if (!process.stdin.isTTY) {
+          printWarning(`Confirmation required. Re-run with --yes to delete. No export was written and no row was deleted.${journalNote}`);
+          this.exit(1);
+          return;
+        }
         const ok = await confirm(chalk.yellow(`  Delete ${doomed.length} row(s) after writing the export? [y/N] `));
         if (!ok) { printInfo(`Aborted — no export was written and no row was deleted.${journalNote}`); return; }
       }

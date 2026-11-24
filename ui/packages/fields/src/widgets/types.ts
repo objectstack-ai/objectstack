@@ -242,11 +242,42 @@ export type FieldWidgetComponentProps<T = any> = {
    */
   compact?: boolean;
   /**
+   * Draw the face for the list grid's cell editor, the layer over one cell
+   * (objectstack#35688): the control opens at once, sized to the cell's row.
+   * A single select shows its searchable option list and picks on a click or
+   * Enter; a multi-select or tags field a searchable check list; a date opens
+   * its calendar with the today / tomorrow / next week / clear picks; a colour
+   * its swatches. Without it every widget draws its form face, unchanged.
+   *
+   * **Producer**: `ObjectGrid`'s `renderCellEditor`, through `FieldEditWidget`.
+   * **Consumer**: the option, tags, date, time and colour widgets.
+   */
+  inCell?: boolean;
+  /**
+   * The user has finished: the host writes the value last handed to
+   * `onChange` and closes the editor. A widget calls it after the gesture
+   * that ends a choice, and never instead of `onChange`.
+   *
+   * **Producer**: `ObjectGrid`'s `renderCellEditor` (the grid's commit).
+   * **Consumer**: the `date` picker calls it on a calendar day or a quick
+   * pick (Today, Tomorrow; the `inCell` face adds Next week and Clear),
+   * whether or not `inCell` is set; the `datetime` picker only on the in-cell
+   * Clear; the colour widget on a swatch of its `inCell` face. A host
+   * that passes nothing keeps the editor open until it commits on its own
+   * terms (Enter, a click elsewhere).
+   */
+  onCommit?: () => void;
+  /**
    * Receive the FULL selected record rather than just its id, so a host can
    * auto-fill sibling fields from it (a line-item grid copying a product's
    * price). When provided, the host owns the resulting value change.
+   *
+   * `picked.sourceFields` is the referenced object's field map, as the widget
+   * read it for its labels (`null` before it loads or when it cannot be read):
+   * a host copying an amount judges its currency by its field
+   * (objectstack#36249).
    */
-  onSelectRecord?: (record: Record<string, any>) => void;
+  onSelectRecord?: (record: Record<string, any>, picked?: { sourceFields?: Readonly<Record<string, unknown>> | null }) => void;
   /**
    * Write sibling fields of the record being edited: the targets a pick in a
    * lookup fills under its declared `lookupAutofill` pairs, as one patch of
@@ -256,8 +287,24 @@ export type FieldWidgetComponentProps<T = any> = {
    * **Consumer**: `LookupField`, on a single-value pick whose host owns no
    * `onSelectRecord` (a host that owns the pick, the line-item grid, applies
    * the pairs itself). A lookup reached without it fills nothing.
+   *
+   * `options.opening` marks the fill a create form's opening value made (see
+   * {@link openingValue}): the filled values join what the form opened with,
+   * so the writer records them as opening values, not as the user's edits.
    */
-  onAutofill?: (patch: Record<string, unknown>) => void;
+  onAutofill?: (patch: Record<string, unknown>, options?: { opening?: boolean }) => void;
+  /**
+   * The value this field held when a CREATE form opened: a related list's New
+   * pre-linking its parent, a URL prefill, a form view default.
+   *
+   * **Producer**: the form renderer, on a create form only (an edit form's
+   * value is the stored record's, and fills nothing).
+   * **Consumer**: `LookupField`, which fills its declared `lookupAutofill`
+   * targets from that record once, as a pick does, while the field still holds
+   * it, and only where a target is empty: a value the form opened with is an
+   * explicit one, so `overwrite: true` does not replace it.
+   */
+  openingValue?: unknown;
   /**
    * Offer a "create new" affordance in a record picker, carrying whatever the
    * user had typed. Also declarable on the field metadata.

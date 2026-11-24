@@ -75,6 +75,7 @@ import {
   rejectUnknownEngineOptions,
 } from './engine.js';
 import type { EngineReadOptions, ObjectQL, OperationContext } from './engine.js';
+import { atFixedReadLeafDoor } from './fixed-read-leaf-seam.js';
 
 /**
  * The `ObjectQL` members the functions below read — every one of them, and no
@@ -95,11 +96,14 @@ export interface CountAggregateHost {
   buildDriverOptions: ObjectQL['buildDriverOptions'];
   composeReadableIdsAtBoundary: ObjectQL['composeReadableIdsAtBoundary'];
   find: ObjectQL['find'];
+  /** [ADR-0155 D4] The engine and its logger, for the door's once-per-engine log of a fixed-read leaf refusal. */
+  readonly facade: ObjectQL;
+  readonly logger: ObjectQL['logger'];
 }
 
 /** The body of `ObjectQL#count`; the method's docblock there is its contract. */
 export async function count(
-  this: Pick<CountAggregateHost, 'resolveObjectName' | '_registry' | 'relatedSchemaOf' | 'expandSearchOnOptions' | 'getDriver' | 'resolveWhereTokens' | 'executeWithMiddleware' | 'buildDriverOptions' | 'composeReadableIdsAtBoundary' | 'find'>,
+  this: Pick<CountAggregateHost, 'resolveObjectName' | '_registry' | 'relatedSchemaOf' | 'expandSearchOnOptions' | 'getDriver' | 'resolveWhereTokens' | 'executeWithMiddleware' | 'buildDriverOptions' | 'composeReadableIdsAtBoundary' | 'find' | 'facade' | 'logger'>,
   object: string,
   query?: EngineCountOptions,
   options?: EngineReadOptions,
@@ -109,7 +113,7 @@ export async function count(
    // `query.where` only, so an unfolded `{ filter }` counted the whole table.
    query = foldEngineOptionAliases(object, 'count', query, ENGINE_WHERE_SLOTS);
    rejectUnknownEngineOptions(object, 'count', query, ENGINE_COUNT_OPTION_KEYS);
-   query = lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf);
+   query = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(object, 'count', query, this._registry.getObject(object), this.relatedSchemaOf));
    // [ADR-0100] Same internal-field and credential-column refusals as `find`, same position.
    rejectInternalFieldEvaluation(object, query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
    rejectCredentialEvaluation(object, 'count', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);

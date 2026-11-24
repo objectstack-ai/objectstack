@@ -193,13 +193,30 @@ describe('the greeting row (objectstack#29147)', () => {
   });
 
   it('with no app yet, the empty state\'s "Ask AI" is 44 px below sm', async () => {
-    state.apps = [];
-    state.agents = [{ name: 'ask' }];
-    state.askAgent = true;
-    render(<HomePage />);
-    expectPhoneTarget(await screen.findByTestId('home-ask-ai'), ['h-10'], ['max-sm:h-11']);
+    const restoreWidth = atPhoneWidth();
+    try {
+      state.apps = [];
+      state.agents = [{ name: 'ask' }];
+      state.askAgent = true;
+      render(<HomePage />);
+      expectPhoneTarget(await screen.findByTestId('home-ask-ai'), ['h-10'], ['max-sm:h-11']);
+    } finally {
+      restoreWidth();
+    }
   });
 });
+
+
+/**
+ * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
+ * no-apps empty state (`HomePage.desktopNoApps-36732.test.tsx`); the empty
+ * state these cases read is a phone's, so they render at phone width.
+ */
+function atPhoneWidth() {
+  const real = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
+  return () => Object.defineProperty(window, 'innerWidth', { value: real, configurable: true, writable: true });
+}
 
 describe('"Your apps" (objectstack#29147)', () => {
   it('the heading\'s links are 44 px tall below sm', () => {
@@ -256,7 +273,7 @@ describe('"Recently accessed" and the activity feed (objectstack#29147)', () => 
   });
 });
 
-describe('the host checklist slot: above the page on a desktop, after the apps on a phone (objectstack#34596)', () => {
+describe('the host checklist slot: above the page on a desktop; a phone with apps shows the app list alone (objectstack#34596, objectstack#35881)', () => {
   const realWidth = window.innerWidth;
   function atWidth(width: number) {
     Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
@@ -286,15 +303,17 @@ describe('the host checklist slot: above the page on a desktop, after the apps o
     expect(follows(screen.getByTestId('home-apps-count'), marker)).toBe(true);
   });
 
-  it('375 px: drawn once, after the apps and before "My work"; never above them', () => {
+  // objectstack#35881 — a phone's Home is the app list alone: the checklist
+  // goes with the rest of the page it used to sit in (objectstack#34596).
+  it('375 px with apps: the page is the app list, and no placement is asked for', () => {
     atWidth(375);
     const { placements, checklist } = slot();
     render(<HomePage checklist={checklist} />);
-    const marker = screen.getByTestId('checklist-slot-afterApps');
-    expect(screen.queryByTestId('checklist-slot-top')).toBeNull();
-    expect(new Set(placements)).toEqual(new Set(['afterApps']));
-    expect(follows(marker, screen.getByTestId('app-tile-app_0'))).toBe(true);
-    expect(follows(screen.getByTestId('home-my-work-open-inbox'), marker)).toBe(true);
+    expect(screen.getByTestId('home-phone-app-list')).toBeInTheDocument();
+    expect(screen.getByTestId('phone-app-row-app_0')).toBeInTheDocument();
+    expect(placements).toEqual([]);
+    expect(screen.queryByTestId('home-work-summary')).toBeNull();
+    expect(screen.queryByTestId('home-my-work-open-inbox')).toBeNull();
   });
 
   it('375 px with no app yet: there are no apps to keep, so it is drawn above the empty state', () => {
@@ -306,8 +325,8 @@ describe('the host checklist slot: above the page on a desktop, after the apps o
     expect(new Set(placements)).toEqual(new Set(['top']));
   });
 
-  it('CONTROL: with no slot given the page draws as it did', () => {
-    atWidth(375);
+  it('CONTROL: with no slot given a desktop page draws as it did', () => {
+    atWidth(1024);
     render(<HomePage />);
     expect(screen.queryByTestId('checklist-slot-top')).toBeNull();
     expect(screen.queryByTestId('checklist-slot-afterApps')).toBeNull();

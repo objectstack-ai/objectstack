@@ -112,6 +112,24 @@ const CAMPAIGN = {
      * nothing on this branch may start rounding it.
      */
     plain_rate: { name: 'plain_rate', label: 'Plain Rate', type: 'number' as const, scale: 2 },
+    /** #35047 — a `percent` formula: a fraction, `scale` counting the displayed percentage's places. */
+    response_ratio: {
+      name: 'response_ratio', label: 'Response Ratio', type: 'formula' as const, returnType: 'percent' as const,
+      expression: { dialect: 'cel', source: 'coalesce(record.num_sent, 0) > 0 ? (coalesce(record.num_responses, 0) * 1.0) / record.num_sent : 0.0' },
+      scale: 1,
+    },
+    /** #35047 — a `percent` formula declaring whole-percent storage (`max` above 1). */
+    response_points: {
+      name: 'response_points', label: 'Response Points', type: 'formula' as const, returnType: 'percent' as const,
+      expression: { dialect: 'cel', source: 'coalesce(record.num_sent, 0) > 0 ? (coalesce(record.num_responses, 0) * 100.0) / record.num_sent : 0.0' },
+      scale: 1, max: 100,
+    },
+    /** #35047 — a STORED `percent` field computed from its expression: the same storage rule. */
+    stored_ratio: {
+      name: 'stored_ratio', label: 'Stored Ratio', type: 'percent' as const,
+      expression: { dialect: 'cel', source: 'coalesce(record.num_sent, 0) > 0 ? (coalesce(record.num_responses, 0) * 1.0) / record.num_sent : 0.0' },
+      scale: 1,
+    },
   },
 };
 
@@ -310,6 +328,34 @@ describe('#10280 CONTROL 1 (defect) — a formula applies its declared `scale`',
       data: { name: 'Even', num_sent: 16, num_responses: 4 },
     });
     expect((created.record as Rec).response_rate).toBe(25);
+  });
+});
+
+describe('#35047 — a percentage is rounded at the percent storage scale', () => {
+  let rig: Rig;
+  beforeEach(async () => { rig = await makeEngine(); });
+
+  it('a `percent` formula keeps `scale + 2` places of its fraction: 5 of 12 at `scale: 1` is 0.417 (41.7%), not 0.4', async () => {
+    const created = await rig.protocol.createData({ object: 'fs_campaign', data: SEED });
+    expect((created.record as Rec).response_ratio).toBe(0.417);
+    const [row] = await rig.engine.find('fs_campaign', {} as never) as Rec[];
+    expect(row.response_ratio).toBe(0.417);
+  });
+
+  it('a `percent` formula declaring `max` above 1 holds percentage points, rounded to `scale`', async () => {
+    const created = await rig.protocol.createData({ object: 'fs_campaign', data: SEED });
+    expect((created.record as Rec).response_points).toBe(41.7);
+  });
+
+  it('a stored `percent` field computed from its expression is rounded the same way', async () => {
+    const created = await rig.protocol.createData({ object: 'fs_campaign', data: SEED });
+    expect((created.record as Rec).stored_ratio).toBe(0.417);
+  });
+
+  it('CONTROL — a `number` formula at the same `scale` still rounds to `scale`', async () => {
+    const created = await rig.protocol.createData({ object: 'fs_campaign', data: SEED });
+    expect((created.record as Rec).response_rate_whole).toBe(42);
+    expect((created.record as Rec).response_rate).toBe(41.67);
   });
 });
 

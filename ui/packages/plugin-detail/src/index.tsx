@@ -102,6 +102,10 @@ export type { SysActivityRow } from './renderers/recordActivityFeed';
 
 export { RecordDetailDrawer, deriveRecordPageHref } from './RecordDetailDrawer';
 export type { RecordDetailDrawerProps } from './RecordDetailDrawer';
+// objectstack#35891 — the record header's stage tag as a menu that moves the
+// stage; a host hands it to the header as `RecordHeaderState.stage`.
+export { RecordStageMenu } from './RecordStageMenu';
+export type { RecordStageMenuProps } from './RecordStageMenu';
 /**
  * The record overlay PAYLOAD, with no shell of its own (objectui#9299).
  *
@@ -128,7 +132,7 @@ export type {
 } from './ConcurrentUpdateDialog';
 // `__clearRecordEditableCache` is test-only and stays off the barrel
 // (objectui#13453); tests import it from `useRecordEditable` directly.
-export { useRecordEditable, seedRecordVerdict } from './useRecordEditable';
+export { useRecordEditable, useRecordVerdict, seedRecordVerdict } from './useRecordEditable';
 // objectstack#27627 — the record page payload's field projection, for the
 // in-place edit blocks' first ask.
 export { seedRecordFieldAccess } from './recordFieldAccess';
@@ -138,6 +142,10 @@ export type { RecordOperation } from './useRecordEditable';
 // claim is `{ owner_id: <self> }` through the normal update.
 export { recordSitsInQueue, useQueueClaimOffered, claimQueuedRecord, seedQueueClaimDecision } from './queueClaim';
 export type { QueueClaimOutcome, ClaimWriter } from './queueClaim';
+// objectstack#35928 — the flows a stage change would start, named in both
+// stage confirms: the record page's and the list cell's (`@object-ui/plugin-grid`).
+export { useRecordUpdateStarts, StageChangeStarts, RECORD_UPDATE_STARTS_PATH } from './stageChangeStarts';
+export type { RecordUpdateStartsAsk } from './stageChangeStarts';
 export { SectionGroup } from './SectionGroup';
 export { HeaderHighlight } from './HeaderHighlight';
 export { InlineFieldInput } from './InlineFieldInput';
@@ -154,9 +162,23 @@ export { CommentAttachment } from './CommentAttachment';
 export { RecordActivityTimeline } from './RecordActivityTimeline';
 export { RecordChatterPanel } from './RecordChatterPanel';
 export { FieldChangeItem } from './FieldChangeItem';
+// objectstack#36290 — one field's change history, opened in place: the record
+// page's field button, and the card a list cell's context menu opens.
+export {
+  FieldHistoryButton,
+  FieldHistoryCard,
+  FieldHistoryPopover,
+  fieldHistoryOffered,
+  useFieldHistory,
+  useFieldHistoryOffered,
+  FIELD_HISTORY_PAGE_SIZE,
+  FIELD_HISTORY_SCAN_BATCH,
+  FIELD_HISTORY_SCAN_BATCHES_PER_LOAD,
+} from './FieldHistory';
 export { SubscriptionToggle } from './SubscriptionToggle';
 export { ReactionPicker } from './ReactionPicker';
 export { ThreadedReplies } from './ThreadedReplies';
+export { CommentAuthorAvatar } from './CommentAuthorAvatar';
 export { RecordMetaFooter } from './RecordMetaFooter';
 export type { RecordMetaFooterProps } from './RecordMetaFooter';
 export type { DetailViewProps } from './DetailView';
@@ -178,9 +200,19 @@ export type { CommentAttachmentProps, Attachment } from './CommentAttachment';
 export type { RecordActivityTimelineProps, FeedFilterMode } from './RecordActivityTimeline';
 export type { RecordChatterPanelProps } from './RecordChatterPanel';
 export type { FieldChangeItemProps } from './FieldChangeItem';
+export type {
+  FieldHistoryButtonProps,
+  FieldHistoryCardProps,
+  FieldHistoryCreation,
+  FieldHistoryEntry,
+  FieldHistoryPopoverProps,
+  FieldHistoryState,
+  UseFieldHistoryOptions,
+} from './FieldHistory';
 export type { SubscriptionToggleProps } from './SubscriptionToggle';
 export type { ReactionPickerProps } from './ReactionPicker';
 export type { ThreadedRepliesProps } from './ThreadedReplies';
+export type { CommentAuthorAvatarProps } from './CommentAuthorAvatar';
 
 // Track 3 (convergence): pure-function synthesizers for the default
 // detail page. Phase G slice 1 — not yet wired into RecordDetailView.
@@ -207,6 +239,9 @@ export type {
 // details and panels, and the layout.
 export {
   RECORD_PAGE_TWO_COLUMN_MIN_WIDTH,
+  RECORD_PAGE_DETAILS_WIDTH,
+  RECORD_PAGE_PIN_MIN_WIDTH,
+  recordPagePinsDetails,
   recordPageTierFor,
   recordPageTierHasRightColumn,
   buildDefaultPageColumns,
@@ -226,7 +261,17 @@ export type { RecordPageColumnsProps } from './RecordPageColumns';
 // objectstack#27055 — the record page v3 face: a host drawing the
 // synthesized default page in its tabbed tier marks it, as the column tiers do.
 export { DefaultRecordPageContext } from './defaultRecordPage';
+// objectstack#35484 — a page drawn as written draws one approval band.
+export { ApprovalBandOnceScope } from './defaultRecordPage';
 export { RecordBodyTablesContext } from './relatedListCompact';
+// objectstack#35599 — the record page's edit state draws its body tables as
+// the host's editor through this slot.
+export { RecordBodyTableEditorSlotContext } from './relatedListCompact';
+export type { RecordBodyTableEditorSlot } from './relatedListCompact';
+// objectstack#35892 — the related tab's condition row, supplied by the host
+// (`plugin-list`'s `ListConditionsBlock`) through this slot.
+export { RelatedListConditionsSlotContext } from './relatedListCompact';
+export type { RelatedListConditionsProps } from './relatedListCompact';
 // objectstack#27056 — for the app-shell record drawer's prefetch: it warms
 // the next record's related counts before the reader steps to it.
 export { prefetchRelatedCounts, relatedCountTargetsIn } from './useRelatedCounts';
@@ -242,10 +287,45 @@ export {
   // panel's most entries (the host asks that many activity rows at open).
   RecordTimelineTotalContext,
   RECORD_TIMELINE_PANEL_MAX_ENTRIES,
+  // objectstack#36075 — the record's comments live in its comment panel.
+  RecordCommentsInPanelContext,
   auditEntriesToFeedItems,
   mergeTimelineStream,
 } from './recordTimelineStream';
 export type { AuditEntryLike, TimelineStreamFilter } from './recordTimelineStream';
+// objectstack#36075 — the record's comment panel and the parts the phone's
+// comment page (objectstack#36076) shares with it.
+export {
+  useRecordComments,
+  buildCommentThreads,
+  latestRepliers,
+  threadResolvable,
+  threadResolved,
+  threadInvolvesViewer,
+  filterCommentThreads,
+  unresolvedThreadCount,
+  DEFAULT_COMMENT_THREAD_FILTER,
+  CommentItem,
+  CommentThread,
+  CommentComposer,
+  CommentHoverActions,
+  CommentsPanel,
+  CommentsButton,
+  CommentsPage,
+} from './comments';
+export type {
+  RecordCommentsData,
+  CommentThreadData,
+  CommentThreadFilter,
+  CommentItemProps,
+  RecordCommentThreadProps,
+  CommentItemActions,
+  CommentComposerProps,
+  CommentHoverActionsProps,
+  CommentsPanelProps,
+  CommentsButtonProps,
+  CommentsPageProps,
+} from './comments';
 // objectstack#27055 — the reader's arrangement of the related cards: the pure
 // merge rule and the stored record's codec halves, for the host's
 // workspace-preference store.
@@ -619,7 +699,7 @@ ComponentRegistry.register('details', RecordDetailsRenderer, {
   // `record:reference_rail`'s own component-level `hideEmpty` input below.
   inputs: [
     { name: 'columns', type: 'enum', enum: ['1', '2', '3', '4'], description: 'Number of columns for field layout (1-4)' },
-    { name: 'sections', type: 'array', of: 'object', description: 'Field groups rendered as the detail body, in order. Every entry is an OBJECT — `{ name?, label?, columns?, fields }` — a bare section-id string is NOT accepted (the spec retired that spelling in objectstack#5611, and the renderer reads name/label/fields off each entry, so a string entry renders no fields at all). `fields` are the field names shown in this section, in order — required unless `group` supplies the members instead (the spec refuses a section carrying neither, and refuses one carrying both). `label` is the section heading; omit it for an untitled, borderless section. `name` is a stable snake_case identifier and the i18n anchor — the heading resolves through objects.<object>._sections.<name>.label, so a section without a name shows its authored label in every locale. `columns` (1-4) is THIS section\'s field-grid width; omit it and the renderer derives the width. Authoring `sections` at all makes it the only source of the detail body; omit it and the body falls back to the object\'s highlightFields. @objectstack/spec 17.3.0 declares eight more member keys on an entry, and this renderer honours all eight: `icon` (a Lucide name on the section header), `description` (sub-heading copy under the heading), `collapsible` and `defaultCollapsed` (a foldable section and its initial state), `showBorder` (force the Card wrapper on or off, overriding the heading-derived default) and `headerColor` (a header tint from the shared palette) through DetailSection, plus `group` — the ADR-0085 §5 REFERENCE form, the alternative to enumerating `fields`. `{ group: \'contact_info\' }` inherits the object\'s `fieldGroups` entry with that key: its members (every visible field pointing at it, in declaration order), its presentation (label, icon, description, collapse) and its `visibleWhen` all come from the group, so the section restates none of it — the predicate is evaluated against the bound record exactly as the entry form evaluates it, and a group it hides renders nothing (a `visibleWhen` written on a section itself is refused by the spec and not read: gate the group and reference it) and the spec refuses those keys beside `group`; `columns`, `showBorder` and `headerColor` stay yours because they are how THIS page lays the section out. A `group` naming no declared group renders nothing and is reported to the console (`@objectstack/lint` flags it as `page-section-group-unknown`). `hideEmpty` is the eighth, and it decides whether an ALL-empty section exists: it defaults to on, so a section whose fields are every one of them empty renders nothing at all — no heading, no skeleton — and `hideEmpty: false` is the spelling that keeps the section on a brand-new record: in read-only mode as its heading plus one fold row that counts the empty fields and reveals them on request (the same fold a partly-filled section uses, objectui#13386), in edit mode as every field an editable row. It decides ONLY the all-empty case; the empty rows of a section that still has a filled one belong to DetailSection\'s auto-hide heuristic plus the reader\'s show-empty toggle, which no authored value overrides in either polarity (objectui#7129 Q2-C), and inline-edit mode renders the section either way so its fields stay reachable. Restored under objectui#8603 (maintainer 2026-09-15) after objectui#7129 retired it on the premise, since falsified upstream, that the spec refused the key. None of the eight has a designer control yet; they are authorable in source mode only, tracked as a deferred feature. @objectstack/spec 18 declares a ninth, `count` (`{ field }`): the renderer fills the heading\'s `{{ count }}` hole with how many values that multi-value field holds on the current record — `{ name: \'tagging\', label: \'{{ count }} tags\', count: { field: \'tags\' }, fields: [\'tags\'] }` reads `3 tags` when three are selected. An absent or empty value counts 0; `count` changes only the heading, never whether the section renders, so with `hideEmpty` on an all-empty section is still absent. The hole is filled after the heading is translated, so each locale of an inline label map and a translated objects.<object>._sections.<name>.label write the same `{{ count }}`. The spec refuses `count` beside `group`, on a section with no `label`, and on a label with no hole; a heading on a section without `count` prints as written. Like the eight, `count` has no designer control yet.' },
+    { name: 'sections', type: 'array', of: 'object', description: 'Field groups rendered as the detail body, in order. Every entry is an OBJECT — `{ name?, label?, columns?, fields }` — a bare section-id string is NOT accepted (the spec retired that spelling in objectstack#5611, and the renderer reads name/label/fields off each entry, so a string entry renders no fields at all). `fields` are the field names shown in this section, in order — required unless `group` supplies the members instead (the spec refuses a section carrying neither, and refuses one carrying both). `label` is the section heading; omit it for an untitled, borderless section. `name` is a stable snake_case identifier and the i18n anchor — the heading resolves through objects.<object>._sections.<name>.label, so a section without a name shows its authored label in every locale. `columns` (1-4) is THIS section\'s field-grid width; omit it and the renderer derives the width. Authoring `sections` at all makes it the only source of the detail body; omit it and the body falls back to the object\'s highlightFields. @objectstack/spec 17.3.0 declares eight more member keys on an entry, and this renderer honours all eight: `icon` (a Lucide name on the section header), `description` (sub-heading copy under the heading), `collapsible` and `defaultCollapsed` (a foldable section and its initial state), `showBorder` (force the Card wrapper on or off, overriding the heading-derived default) and `headerColor` (a header tint from the shared palette) through DetailSection, plus `group` — the ADR-0085 §5 REFERENCE form, the alternative to enumerating `fields`. `{ group: \'contact_info\' }` inherits the object\'s `fieldGroups` entry with that key: its members (the group\'s own `fields` list in its order, then every other visible field whose `group` names it, in declaration order), its presentation (label, icon, description, collapse) and its `visibleWhen` all come from the group, so the section restates none of it — the predicate is evaluated against the bound record exactly as the entry form evaluates it, and a group it hides renders nothing (a `visibleWhen` written on a section itself is refused by the spec and not read: gate the group and reference it) and the spec refuses those keys beside `group`; `columns`, `showBorder` and `headerColor` stay yours because they are how THIS page lays the section out. A `group` naming no declared group renders nothing and is reported to the console (`@objectstack/lint` flags it as `page-section-group-unknown`). `hideEmpty` is the eighth, and it decides whether an ALL-empty section exists: it defaults to on, so a section whose fields are every one of them empty renders nothing at all — no heading, no skeleton — and `hideEmpty: false` is the spelling that keeps the section on a brand-new record: in read-only mode named in the one line that closes the body, beside every other all-empty section kept this way, and expanding that line draws each in its place as its heading plus one fold row that counts the empty fields and reveals them on request (the same fold a partly-filled section uses, objectui#13386), in edit mode as every field an editable row. It decides ONLY the all-empty case; the empty rows of a section that still has a filled one belong to DetailSection\'s auto-hide heuristic plus the reader\'s show-empty toggle, which no authored value overrides in either polarity (objectui#7129 Q2-C), and inline-edit mode renders the section either way so its fields stay reachable. Restored under objectui#8603 (maintainer 2026-09-15) after objectui#7129 retired it on the premise, since falsified upstream, that the spec refused the key. None of the eight has a designer control yet; they are authorable in source mode only, tracked as a deferred feature. @objectstack/spec 18 declares a ninth, `count` (`{ field }`): the renderer fills the heading\'s `{{ count }}` hole with how many values that multi-value field holds on the current record — `{ name: \'tagging\', label: \'{{ count }} tags\', count: { field: \'tags\' }, fields: [\'tags\'] }` reads `3 tags` when three are selected. An absent or empty value counts 0; `count` changes only the heading, never whether the section renders, so with `hideEmpty` on an all-empty section is still absent. The hole is filled after the heading is translated, so each locale of an inline label map and a translated objects.<object>._sections.<name>.label write the same `{{ count }}`. The spec refuses `count` beside `group`, on a section with no `label`, and on a label with no hole; a heading on a section without `count` prints as written. Like the eight, `count` has no designer control yet.' },
     { name: 'fields', type: 'array', of: 'string', description: 'Explicit field list (overrides highlightFields)' },
     // `hideFields` is DECLARED, not merely honoured (objectui#3808). The spec
     // declares it (objectstack#5611) and `RecordDetailsRenderer` has read it
@@ -640,7 +720,7 @@ ComponentRegistry.register('details', RecordDetailsRenderer, {
     // The "hiding every field drops the section" sentence is read off
     // `DetailSection.tsx` (`visibleFields.length === 0 &&
     // emptyCount === section.fields.length` returns null), not assumed.
-    { name: 'hideFields', type: 'array', of: 'string', description: 'Field names to omit from the body — applied to the top-level `fields` list AND to every section\'s `fields`. Bare field names only. Authors rarely need it: the synth pipeline fills it with the fields already shown in `record:highlights`, and hand-authored pages get the same dedup live from HighlightFieldsContext, so its purpose is suppressing a field you do not want repeated (the page H1 title field is dropped for you too). Hiding every field of a section leaves that section out entirely.' },
+    { name: 'hideFields', type: 'array', of: 'string', description: 'Field names to omit from the body — applied to the top-level `fields` list AND to every section\'s `fields`. Bare field names only. Authors rarely need it: the default record page sets none and draws no highlight strip, and a page that places a `record:highlights` block gets the fields of that block dropped from the body live through HighlightFieldsContext, so its purpose is suppressing a field you do not want repeated (the page H1 title field is dropped for you too). Hiding every field of a section leaves that section out entirely.' },
     // `inlineEdit` and `showHeader` are DECLARED, not merely honoured
     // (objectui#4668) — the same reverse-direction defect `hideFields` above
     // records, on the two keys @objectstack/spec 17.0.0 GA added to this block.
@@ -664,7 +744,7 @@ ComponentRegistry.register('details', RecordDetailsRenderer, {
     // open editing the platform refuses; only `false` is unconditional. Saying
     // "enables inline editing" would advertise an authority this key does not
     // have.
-    { name: 'inlineEdit', type: 'boolean', description: 'Offer the per-field double-click / pencil inline-edit affordances in the detail body. On by default, and an OPT-OUT only: the value is combined with the object\'s own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server\'s effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The edit session and the atomic Save bar are hosted by the page, so one draft spans the highlights strip and this body.' },
+    { name: 'inlineEdit', type: 'boolean', description: 'Offer the per-field edit affordances in the detail body. On the default record page a click on a value (or its pencil) edits that field alone in place and saves it on Enter or a click elsewhere; on a page an author laid out a double-click (or the pencil) enters the page\'s whole-record edit session, saved together by its Save bar. On by default, and an OPT-OUT only: the value is combined with the object\'s own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server\'s effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The whole-record session and its atomic Save bar are hosted by the page, so that one draft spans the highlights strip and this body.' },
     { name: 'showHeader', type: 'boolean', description: 'Render the detail body\'s own title / follow-star / copy-id chip above the fields. Off by default because this block is normally composed under a `page:header` that already draws that chrome, and turning it on there shows the record title twice. Set it true only when this block is the whole page.' },
     // The field-security triple — `enforceFieldSecurity`, `redactFields`,
     // `requiredPermissions` — is DECLARED here by objectui#8649, the reverse

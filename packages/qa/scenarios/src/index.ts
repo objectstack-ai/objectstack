@@ -3,3 +3,4 @@
 export * from './schema.js';
 export * from './truth.js';
 export * from './loader.js';
+export * from './ask-kinds.js';

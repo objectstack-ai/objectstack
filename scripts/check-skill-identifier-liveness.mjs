@@ -367,7 +367,9 @@ const BINDINGS = [
     id: 'seed-modes',
     file: 'skills/objectstack-platform/SKILL.md',
     heading: '## Seed Data',
-    symbol: 'SeedMode',
+    // [#34613] `SeedMode` is an `enumWithRetiredValues` call this gate does not
+    // read whole; its live members are the `SEED_MODE_VALUES` array it wraps.
+    symbol: 'SEED_MODE_VALUES',
     source: 'packages/spec/src/data/seed.zod.ts',
     why: 'The mode table is the only place an author learns what `mode` accepts.',
   },

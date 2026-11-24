@@ -51,7 +51,9 @@ describe('the unknown-object state offers a way back to Home', () => {
     renderObjectNotFound();
     const state = screen.getByTestId('object-not-found');
     expect(state).toHaveTextContent('Object Not Found');
-    expect(state).toHaveTextContent('The object "no_such_object" does not exist in the current configuration.');
+    // objectstack-ai/objectstack#34740: neutral on existence — an object the
+    // reader cannot read is answered exactly like a missing name.
+    expect(state).toHaveTextContent('The object "no_such_object" does not exist, or you do not have access to it.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to home' }));
     expect(await screen.findByRole('heading', { name: 'Home page' })).toBeInTheDocument();

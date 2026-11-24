@@ -592,6 +592,45 @@ export function inferModalSize(columns: number): 'sm' | 'default' | 'lg' | 'xl' 
 }
 
 /**
+ * The most fields a dialog lays out in ONE column (objectstack-ai/objectstack#35980).
+ * See {@link dialogDrawsSingleColumn}. Six is the maintainer's choice (ruling
+ * of record 7061696632 on #35980, over the card's proposed eight): measured at
+ * 1366×768, six fields fit the dialog with nothing to scroll, and eight run
+ * past its height cap. This constant is the one place the number lives.
+ */
+export const DIALOG_SINGLE_COLUMN_MAX_FIELDS = 6;
+
+/**
+ * Whether a dialog draws its fields one per row in the narrow `lg` size
+ * (objectstack-ai/objectstack#35980): it lays out at most
+ * {@link DIALOG_SINGLE_COLUMN_MAX_FIELDS} fields, and NOTHING in it declares
+ * `columns` — not the form, and no section. A short create or edit form then
+ * reads top to bottom, the way a list's 「New」 dialog is filled in.
+ *
+ * This reverses, for such a dialog, the development default of at least two
+ * columns that its undeclared grid drew (objectui#12521,
+ * objectstack-ai/objectstack#34607). It keeps the section-`columns` ruling on
+ * objectui#12521 (6204264665): an undeclared count is still the renderer's
+ * choice, and a declared one is drawn as written.
+ * One declared count anywhere keeps the dialog as it was — the declared count
+ * is drawn as written, the dialog is as wide as it needs, and an undeclared
+ * section beside it keeps {@link dialogUndeclaredColumns}.
+ *
+ * @param fieldCount     The number of fields the dialog lays out.
+ * @param formColumns    The form's authored `columns`.
+ * @param sectionColumns Each section's authored `columns` (empty for a flat form).
+ */
+export function dialogDrawsSingleColumn(
+  fieldCount: number,
+  formColumns: unknown,
+  sectionColumns: ReadonlyArray<unknown> = [],
+): boolean {
+  if (fieldCount > DIALOG_SINGLE_COLUMN_MAX_FIELDS) return false;
+  if (declaredColumns(formColumns) !== undefined) return false;
+  return sectionColumns.every((c) => declaredColumns(c) === undefined);
+}
+
+/**
  * How many fields per row a DIALOG draws where its author declared no
  * `columns` — on the form, and for a section on that section too
  * (objectstack-ai/objectstack#34607). Dialog-only: every page host keeps
@@ -602,8 +641,10 @@ export function inferModalSize(columns: number): 'sm' | 'default' | 'lg' | 'xl' 
  * field-heavy business form spreads across a wide dialog while a light one is
  * never thinned out — with two bounds:
  *
- * - FLOOR two: the dialog's earlier fixed default (objectui#12521), so a form
- *   of up to eight fields draws exactly what it drew before.
+ * - FLOOR two: the dialog's earlier fixed default (objectui#12521). A dialog
+ *   that declares nothing and lays out at most six fields never reaches
+ *   this count: it draws one column ({@link dialogDrawsSingleColumn},
+ *   objectstack-ai/objectstack#35980).
  * - CAP by the dialog's size: three in a bounded dialog, four only in a
  *   `full` one. The grid's tiers are container queries
  *   ({@link CONTAINER_GRID_COLS}), and the bounded `xl` dialog's field

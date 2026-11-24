@@ -122,14 +122,7 @@ vi.mock('../../../providers/AdapterProvider', async (importOriginal) => {
 vi.mock('../ConversationsSidebar', () => ({
   ConversationsSidebar: () => <div data-testid="sidebar" />,
 }));
-// The canvas is an IFRAME onto `/apps/:seg?preview=draft`; happy-dom really
-// tries to load it and the rejected request fails the run. What this test needs
-// from the canvas is only that the page switched INTO the split layout — the
-// split handle (rendered by AiChatPage itself, not by the canvas) is the
-// unmocked half of that assertion. The pane's own behaviour is LiveCanvas.test.
-vi.mock('../LiveCanvas', () => ({
-  LiveCanvas: () => <div data-testid="live-canvas" />,
-}));
+
 
 import { AiChatPage } from '../AiChatPage';
 
@@ -216,9 +209,8 @@ async function driveBuildToPreview(): Promise<number> {
   // so a read taken right now returns nothing — that is the race window.
   serverTurns = [];
 
-  // `apply_blueprint`'s draft lands mid-stream: the Live Canvas opens (the
-  // layout switches from full-screen chat to the chat|preview split) and the
-  // thread starts carrying the package the build just minted.
+  // `apply_blueprint`'s draft lands mid-stream and the thread starts carrying
+  // the package the build just minted.
   await act(async () => {
     chat.append?.({
       id: 'live-build',
@@ -233,10 +225,11 @@ async function driveBuildToPreview(): Promise<number> {
       'app.crm',
     );
   });
-  // The layout switch actually happened — this is the transition under test.
-  // The split handle only exists in the desktop chat|preview layout.
-  expect(screen.getByTestId('live-canvas')).toBeInTheDocument();
-  expect(screen.getByTestId('ai-chat-split-handle')).toBeInTheDocument();
+  // objectstack#34610 — the draft no longer switches this pane's layout (the
+  // app shows in the console's main area, not in a split beside the chat), so
+  // the remount this file guards against has one cause fewer. The bind-on-
+  // create re-key below is still the transition under test.
+  expect(screen.queryByTestId('ai-chat-split-handle')).not.toBeInTheDocument();
   const mountsAtPreview = mountCount();
 
   // The turn ends. A1.b bind-on-create waits for exactly this edge, then

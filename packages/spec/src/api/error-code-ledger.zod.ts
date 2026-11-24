@@ -904,6 +904,35 @@ export const ERROR_CODE_LEDGER = {
     // Fixed by setting `localization.currency` — a different remedy from
     // `ERR_EXCHANGE_RATE_MISSING`, hence its own code.
     'ERR_HOME_CURRENCY_UNSET',
+    // [ADR-0158 U5, Open items 3 and 9] The unit-of-measure write check
+    // (`validation/unit-code-membership.ts`). Each is 400 and the driver is
+    // never asked to write the row; `field` names the unit code field and,
+    // for a quantity, `quantityField` the quantity. One code per remedy, the
+    // way `ERR_HOME_CURRENCY_UNSET` stands beside `ERR_EXCHANGE_RATE_MISSING`.
+    //
+    // A quantity would be stored beside a blank unit code (Open item 9 case 3,
+    // mirroring `ERR_CURRENCY_CODE_REQUIRED`). Fixed by writing the code in the
+    // same write, or leaving the quantity empty. The server never fills one in.
+    'ERR_UNIT_CODE_REQUIRED',
+    // The unit code is neither a standard code (U1) nor one of the
+    // organization's own units (`sys_unit`), in exact uppercase (cases 1 and 2).
+    // Fixed by writing a standard code, or adding the unit in Setup first.
+    'ERR_UNIT_CODE_UNKNOWN',
+    // The unit code names one of the organization's units that is retired
+    // (L1's delete, Open item 11). A retired code is never created again, so
+    // the remedy is moving the record to an existing unit.
+    'ERR_UNIT_CODE_RETIRED',
+    // The unit code is a member, of another dimension than the
+    // `unitConfig.unitDimension` the field declares (Open item 9, point 5).
+    // Fixed by writing a code of that dimension.
+    'ERR_UNIT_DIMENSION_MISMATCH',
+    // [ADR-0158 Open item 11; #35488's carried requirement] A delete of a
+    // `sys_unit` row, refused in every context — user, system and automation —
+    // before any middleware or hook runs (`delete()`, `engine-delete-and-aggregate.ts`).
+    // Retiring is the delete: a removed row would free its code to be created
+    // again with another dimension. 405, the status the data door answers the
+    // same verb on this object with (`apiMethods` serves no `delete`).
+    'ERR_UNIT_DELETE_REFUSED',
     // [#5320] Third EMITTER of the code (metadata-protocol and plugin-security
     // already register it) — the registration loop's `views:` tighten refuses a
     // non-container entry, and the `viewItems:` channel refuses an entry the
@@ -1162,6 +1191,17 @@ export const ERROR_CODE_LEDGER = {
     'API_KEY_EXPIRED',            // past its `expires_at`, or past the one-year grace of a key signed with none
     'API_KEY_INACTIVE',           // no recorded use within the inactivity window; not revoked, a new key is the remedy
     'API_KEY_REVOKED',            // its `revoked` flag is set
+    // [#35402] 403 from the Change Owner doors (`POST /data/:object/:id/change-owner`
+    // and `POST /data/:object/change-owner`, served by `@objectstack/rest`'s
+    // `handleRouteError` passthrough), stamped by `changeOwnerOffRefusal`
+    // (`security/change-record-owner.ts`): the object does not offer the action —
+    // structurally ineligible, or its `userActions.transfer` switch is off — so the
+    // whole call is refused before any row is read, whoever asks (a holder of
+    // `modifyAllRecords` included; ruling 7000907189 points 1–3). The
+    // `CLONE_DISABLED` / `FEEDS_DISABLED` family: it names WHICH object
+    // capability is off, and it is not `PERMISSION_DENIED`, the answer the write
+    // path gives a caller who lacks the transfer grant on an object that offers it.
+    'CHANGE_OWNER_DISABLED',
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',
@@ -1555,6 +1595,12 @@ export const ERROR_CODE_LEDGER = {
     // through rest. `@objectstack/rest` keeps its own rows for the data door.
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // [#35525] …and the data door's disabled-package refusal, stamped by the
+    // same gate (`api-exposure-door.ts`) for an object of a disabled package
+    // in a query's read set: 404, the data route's own sentence. Same wire
+    // paths as the two above. Provenance, not identity:
+    // `@objectstack/metadata-protocol` keeps its row for the data door.
+    'OBJECT_PACKAGE_DISABLED',
     'RAW_SQL_UNSUPPORTED',
     'READ_SCOPE_COMPILE_FAILED',   // [#5367] RLS read-scope lowering failed fail-closed — a SERVER fault (500), never the caller's
   ],
@@ -1861,6 +1907,17 @@ export const ERROR_CODE_LEDGER = {
     // tree answers with it, the thrown value is the boundary.
     'CONNECTOR_UPSTREAM_CHANGED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
+    // `door: 'none'` on the `PLUGIN_UI_REQUIRED_KEY_MISSING` reading below: the
+    // `controlled_by_parent` master refusal's code (`data/controlled-by-parent-master.ts`),
+    // stamped on the zod ISSUE as `params.code` beside `params.shape` by
+    // `ObjectSchema`'s refinement and `defineStack`'s extension-merge gate, never
+    // on a thrown error, and not in the `message`; no `status` of its own.
+    // Visible on the zod issue itself (any `safeParse`, the Studio settings
+    // tab's path, which keys its localized wording on it) and on `defineStack`'s
+    // `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues. NOT
+    // on the metadata save door's `422 INVALID_METADATA`: `zodIssuesToMetadataIssues`
+    // keeps `path`, `message` and zod's `code` ('custom'), never `params`.
+    'CONTROLLED_BY_PARENT_MASTER_INVALID',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
     'EXTERNAL_WRITE_FORBIDDEN',
@@ -1943,6 +2000,18 @@ export const ERROR_CODE_LEDGER = {
     'STACK_COMPOSE_FUNCTIONS_SHAPE_CONFLICT',    // `functions` authored in the map form by one stack and the array form by another
     'STACK_COMPOSE_KEY_CONFLICT',                // a single-valued top-level key is declared with different values by two stacks
     'STACK_COMPOSE_OBJECT_CONFLICT',             // the same object name is defined by more than one stack under the default `objectConflict: 'error'`
+    // [ADR-0157 D2, D7, D8, D10] The working-calendar refusals, every one
+    // `status: 400`. The codes are this package's constants
+    // (`data/work-calendar.ts`, where the provenance scan reads them); the three
+    // error classes that carry them are `@objectstack/formula`'s
+    // (`work-calendar.ts`). The calendar service (`@objectstack/objectql`) and
+    // the working-day formula functions throw them; the thrown value is the
+    // boundary on this tree (no HTTP door answers with them yet — the approval
+    // sweep that reads them skips and retries, ADR-0157 D9). No wall-clock
+    // answer stands in for any.
+    'ERR_WORK_CALENDAR_INVALID',                 // a stored calendar or exception row the arithmetic cannot read as written (a period crossing midnight, a zone that is not IANA, an `on` row without periods); `field` names the column
+    'ERR_WORK_CALENDAR_NOT_MAINTAINED',          // the computation needs a date outside the calendar's `maintained_from`..`maintained_through` span (D8); fixed by entering that span's holidays and moving the bound
+    'ERR_WORK_CALENDAR_UNRESOLVED',              // no calendar resolves under D2: the named code is absent, the organization has no default, more than one row answers, or no organization is named outside the `single` posture (`reason`)
   ],
   '@objectstack/lint': [
     // [#20206] `packagesOf` (`object-graph.ts`) refuses a present non-array
@@ -2270,6 +2339,16 @@ export type ProvenanceWaiver = z.input<typeof ProvenanceWaiverSchema>;
  * adjudicated on #13353 itself.
  */
 export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
+  {
+    package: '@objectstack/core',
+    code: 'PROJECT_MEMBERSHIP_REQUIRED',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Shared verdict one package over: core\'s `environment-membership.ts` defines the code ' +
+      'beside `judgeEnvironmentMembership` so every door of a multi-environment host applies one ' +
+      'judgment, but core has no HTTP door. The refusal ships on the wire from the runtime ' +
+      'dispatcher (`HttpDispatcher`, the runtime row\'s emitter) and from the REST server, both ' +
+      'of which ask that function and write its code; neither spells the string itself.',
+  },
   {
     package: '@objectstack/metadata-core',
     code: 'SCHEMA_UPGRADE_CONFIRMATION_REQUIRED',

@@ -131,6 +131,16 @@ export function flowNodeLabel(node: AnyRec, index: number): string {
   return strName(node.label) ?? strName(node.id) ?? `#${index}`;
 }
 
+/**
+ * A flow's name for a USER sentence (`userTextParams`): its `label`, then its
+ * machine `name`, then `(flow N)`. A builder reads a flow by the label Studio
+ * shows them; the machine name is the fallback for a flow that declares none,
+ * the way {@link flowNodeLabel} falls back to a node's `id`.
+ */
+export function flowDisplayLabel(flow: AnyRec, index: number): string {
+  return strName(flow.label) ?? strName(flow.name) ?? `(flow ${index})`;
+}
+
 const EMPTY_SLOTS: readonly string[] = [];
 
 /** The region slots a node type owns — empty for every non-container type. */

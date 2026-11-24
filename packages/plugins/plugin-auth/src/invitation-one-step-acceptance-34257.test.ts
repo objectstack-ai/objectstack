@@ -35,6 +35,11 @@ import {
 import { authIdentityManifest } from './manifest';
 import { BREACH_CHECK_VENDOR_DEFAULT_PATHS } from './auth-manager-plugin-list';
 import { INTERACTIVE_REVOKE_REASON } from './session-tombstone';
+import { readCredentialChangedAt } from './credential-change-ends-prior-access';
+// The SSO discovery egress guard the source loads with a dynamic import: its
+// first module load is paid here, during collection, not inside the first case
+// (AGENTS.md, Build & Test: clocked windows measure behaviour).
+import '@objectstack/core/egress';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
 const BASE = 'http://localhost:3000';
@@ -1233,5 +1238,170 @@ describe('#34257 — a password the door sets starts the password-age clock and 
 
   it('the sessions the door ends are ledgered with the reason a password reset records', () => {
     expect(INTERACTIVE_REVOKE_REASON[ACCEPT_INVITATION_ONE_STEP_PATH]).toBe('password_reset');
+  });
+});
+
+describe('a credential change ends access issued before it — the one-step door', () => {
+  quietConsole();
+
+  it('a session opened before the door writes the password is ended, and the session the door opens stands', async () => {
+    const { engine, manager, invite } = await boot();
+    const { invitation, proof } = await invite('raced@example.com');
+    await signUp(manager, engine, 'raced@example.com');
+    const internal = (await manager.getAuthContext()).internalAdapter;
+    const original = internal.updatePassword.bind(internal);
+    let opened: string | undefined;
+    vi.spyOn(internal, 'updatePassword').mockImplementation(async (...args: unknown[]) => {
+      if (opened === undefined) {
+        const res = await post(manager, '/sign-in/email', { email: 'raced@example.com', password: PASSWORD });
+        opened = res.status === 200 ? cookieFrom(res) : '';
+      }
+      return (original as (...a: unknown[]) => Promise<unknown>)(...args);
+    });
+
+    const res = await door(manager, { invitationId: invitation.id, proof, name: 'R', password: NEW_PASSWORD });
+    await expectAccepted(res);
+
+    expect(opened, 'a sign-in ran before the password write').toBeTruthy();
+    expect(await sessionUser(manager, opened!)).toBeNull();
+    expect(await sessionUser(manager, cookieFrom(res))).toMatchObject({ email: 'raced@example.com' });
+  });
+
+  it("the first password the door sets on an existing account is a change; one it creates with the account is not", async () => {
+    const { engine, manager, invite } = await boot();
+    const internal = (await manager.getAuthContext()).internalAdapter;
+    // An account that holds no local password: it was there before the door,
+    // and signed in some other way.
+    const existing = await invite('passwordless@example.com');
+    const { userId } = await signUp(manager, engine, 'passwordless@example.com');
+    engine.tables.set('sys_account', (engine.tables.get('sys_account') ?? []).filter((row) => row.user_id !== userId));
+    expect(await readCredentialChangedAt(internal, userId), 'no local password: never changed').toBeUndefined();
+    const newcomer = await invite('newcomer@example.com');
+    try {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + 2_000);
+
+      await expectAccepted(
+        await door(manager, { invitationId: existing.invitation.id, proof: existing.proof, name: 'P', password: NEW_PASSWORD }),
+      );
+      const changedAt = await readCredentialChangedAt(internal, userId);
+      expect(changedAt, 'the first password set onto the existing account is a change').toBeGreaterThan(Date.now() - 1_000);
+
+      // The control: the door creates the account and its password in one request.
+      await expectAccepted(
+        await door(manager, { invitationId: newcomer.invitation.id, proof: newcomer.proof, name: 'N', password: NEW_PASSWORD }),
+      );
+      const created = String(userRow(engine, 'newcomer@example.com')!.id);
+      expect(await readCredentialChangedAt(internal, created), 'a password created with its account is not a change').toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// #35107 — a host that calls the organization plugin's `sendInvitationEmail`
+// from its own code (no better-auth endpoint around the call) gets the same
+// mail: the proof is minted through the manager's own auth context.
+describe('#35107 — an invitation mail sent outside an endpoint carries the proof', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  /** The plugin's own `sendInvitationEmail`, as a host reaches it on the built instance. */
+  const hostSend = async (manager: AuthManager) => {
+    const auth: any = await manager.getAuthInstance();
+    const plugin = (auth.options.plugins as any[]).find((p) => p?.id === 'organization');
+    const send = plugin?.options?.sendInvitationEmail;
+    expect(typeof send).toBe('function');
+    return send as (data: Record<string, unknown>) => Promise<void>;
+  };
+
+  /** A pending invitation written the way a host writes one: through the manager's adapter. */
+  const hostInvitation = async (manager: AuthManager, ownerId: string, email: string) => {
+    const ctx: any = await manager.getAuthContext();
+    return ctx.adapter.create({
+      model: 'invitation',
+      data: {
+        organizationId: PARTNER_ORG,
+        email,
+        role: 'member',
+        status: 'pending',
+        inviterId: ownerId,
+        expiresAt: new Date(Date.now() + 48 * 3600 * 1000),
+        createdAt: new Date(),
+      },
+    });
+  };
+
+  const sendFromHost = async (manager: AuthManager, ownerId: string, email: string) => {
+    const send = await hostSend(manager);
+    const invitation = await hostInvitation(manager, ownerId, email);
+    const { tryGetCurrentAuthEndpointContext } = await import('@better-auth/core/context');
+    expect(tryGetCurrentAuthEndpointContext()).toBeUndefined();
+    await send({
+      id: invitation.id,
+      email,
+      role: 'member',
+      invitation,
+      organization: { id: PARTNER_ORG, name: 'Partner', slug: 'partner' },
+      inviter: { user: { name: 'Owner', email: 'owner@example.com' } },
+    });
+    return invitation;
+  };
+
+  it('the delivered mail carries a proof the one-step door redeems, and no stored row holds it', async () => {
+    const { engine, manager, owner, sent } = await boot();
+    const invitation = await sendFromHost(manager, owner.userId, 'hosted@example.com');
+
+    const mail = [...sent].reverse().find((m) => m.template === 'auth.invitation' && m.to === 'hosted@example.com');
+    expect(mail, 'no invitation mail').toBeDefined();
+    const proof = proofOf(mail!);
+    expect(JSON.stringify(mail!.data)).not.toContain(proof);
+    expect(JSON.stringify([...engine.tables.entries()])).not.toContain(proof);
+
+    const res = await door(manager, { invitationId: invitation.id, proof, name: 'Hosted', password: PASSWORD });
+    const text = await res.clone().text();
+    expect(res.status, text).toBe(200);
+    expect(JSON.parse(text)).toEqual({ success: true, data: { outcome: 'accepted', organizationId: PARTNER_ORG } });
+    expect(userRow(engine, 'hosted@example.com')?.email_verified).toBeTruthy();
+    expect(invitationOf(engine, 'hosted@example.com')?.status).toBe('accepted');
+  });
+
+  it('the manager context is read at send time and only outside an endpoint (CONTROL: the in-endpoint send reads the endpoint store)', async () => {
+    const { manager, owner, invite } = await boot();
+    const read = vi.spyOn(manager, 'getAuthContext');
+
+    // CONTROL: the console's invite runs inside the endpoint and mints there.
+    const { proof } = await invite('console@example.com');
+    expect(proof).toBeTruthy();
+    expect(read).not.toHaveBeenCalled();
+
+    const send = await hostSend(manager);
+    const invitation = await hostInvitation(manager, owner.userId, 'outside@example.com');
+    read.mockClear();
+    await send({
+      id: invitation.id,
+      email: 'outside@example.com',
+      role: 'member',
+      invitation,
+      organization: { id: PARTNER_ORG, name: 'Partner', slug: 'partner' },
+      inviter: { user: { name: 'Owner', email: 'owner@example.com' } },
+    });
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it('building the auth instance never reads the manager context for the mail, so the send cannot wait on its own build', async () => {
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: BASE,
+      dataEngine: createMemoryEngine() as any,
+      membershipPolicy: 'auto',
+      getTenancy: () => singleOrgTenancy(),
+    });
+    const read = vi.spyOn(manager, 'getAuthContext');
+    await manager.getAuthInstance();
+    expect(read).not.toHaveBeenCalled();
   });
 });

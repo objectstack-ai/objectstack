@@ -1,0 +1,18 @@
+---
+'@objectstack/objectql': patch
+---
+
+fix(objectql): `aggregate` refuses a dotted `groupBy` entry with `INVALID_FIELD` / 400, before any driver runs
+
+Clause-②: no (narrowing)
+Metadata-protocol: none
+
+`groupBy` groups by the columns of the aggregated object itself. The REST query door already refused a dotted entry such as `purchase_order.name` at ingress, but a caller that reaches `engine.aggregate` past that door — the MCP `aggregate_records` tool, a flow, a hook — handed the dotted name to the driver as a qualified column. On SQLite a path of one or two hops came back as the driver's missing-column refusal (advising a schema sync that cannot help), and three or four hops (`purchase_order.requisition.requester.department.name`) came back `500 DATABASE_ERROR`; an engine that aggregates in memory put every row into one null group.
+
+`engine.aggregate` now refuses any dotted `groupBy` entry that is not itself a field of the object, in either form (`'a.b'` or `{ field: 'a.b' }`, a date bucket included), with `INVALID_FIELD` / 400 at its position (`groupBy.N` or `groupBy.N.field`), naming the path and the depth `groupBy` serves (0 hops, the object's own columns by their bare names). No statement reaches the database. The refused set has three shapes: a path through a relation field (`purchase_order.requisition.requester.department.name`), a sub-path into a stored value (`address.city` on a JSON field), and the object's own name used as a qualifier (`po_line.amount`). For a relation path the refusal counts the hops and says to group by the relation field itself (one group per related record) or to aggregate the related object; for a multi-value relation it says to aggregate the related object; for the other two shapes it says to name the field without a qualifier, or to store the part in a field of its own.
+
+**BREAKING**: a dotted `groupBy` entry that reaches `engine.aggregate` past the REST query door (the MCP `aggregate_records` tool, a flow, a hook) is now refused `INVALID_FIELD` / 400 before any statement runs, for all three shapes. What they answered before: a relation path, on SQLite, the driver's missing-column refusal (one or two hops) or `500 DATABASE_ERROR` (three or four), and on an engine that aggregates in memory one null group under 200; a JSON sub-path, on SQLite, the driver's own `INVALID_FIELD` / 400 after the statement ran, and in memory groups by the nested value; the object's own name as a qualifier, on SQLite, an answer under 200 grouped by the bare column. A caller that relied on either of the last two now gets a 400 and must drop the qualifier or store the part in a field of its own. It ships `patch` because no metadata an author writes changes (`Metadata-protocol: none`): the refused input is a runtime query that the REST query door already refused in the same three shapes, and the fix for a caller that hits it is in the refusal.
+
+**Unchanged.** A `groupBy` naming the relation field itself (`purchase_order`), every other `groupBy` entry, an alias that contains a dot, and the REST door's own refusal of a dotted entry. A genuine database fault still answers `DATABASE_ERROR` / 500.
+
+<!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moved is that engine.aggregate refuses a dotted groupBy entry (a relation path, a JSON sub-path, the object's own name as a qualifier), which the REST query door already refused. There is nothing for a migration to rewrite and no tombstone; the one-line fix for a refused query is in the refusal: group by the relation field itself, aggregate the related object, or drop the qualifier. -->

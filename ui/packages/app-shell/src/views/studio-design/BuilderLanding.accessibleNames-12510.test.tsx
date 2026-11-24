@@ -37,8 +37,9 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 // A read-only base's customization read (ADR-0146 D3) is not under test here:
 // it stays pending, so no request leaves the file.
-vi.mock('./packageCustomizations-io', () => ({
-  fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
+vi.mock('./packageCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./packageCustomizations-io')>()),
+  fetchPackageCustomizations: vi.fn(() => new Promise<never>(() => {})),
 }));
 // One flow belongs to no package, so the landing draws that entry (objectstack#34715).
 vi.mock('./packageSurfaces', async (importOriginal) => {
@@ -93,7 +94,7 @@ describe('Studio home cards carry their visible label as their name (objectui#12
     const recent = await screen.findByTestId('studio-landing-recent');
     expect(within(recent).getByRole('link', { name: /HotCRM/ })).toHaveAttribute('href', '/studio/app.objectstack.hotcrm');
 
-    // The writable card: its label leads the name; the api name follows it.
+    // The writable card: named by its label (its id is only its hover title, objectstack#35018).
     expect(screen.getByRole('button', { name: /^Acme CRM\b/ })).toBeInTheDocument();
     // The installed (read-only) card: its label, and its Customize button named for it.
     expect(screen.getByRole('button', { name: 'HotCRM' })).toBeInTheDocument();

@@ -163,7 +163,7 @@ export function AuthLayout({ children, formWidth = 'sm' }: AuthLayoutProps) {
         {showHostPill ? (
           <div className="flex justify-center">
             <span
-              className="rounded-full border border-border/60 bg-background/60 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground"
+              className="rounded-full border border-border/60 bg-background/60 px-2 py-0.5 font-mono text-xs uppercase tracking-wide text-muted-foreground"
               title={t('auth.shell.tenantHostHint', {
                 defaultValue: 'You are signing in to this system',
               })}
@@ -174,7 +174,7 @@ export function AuthLayout({ children, formWidth = 'sm' }: AuthLayoutProps) {
         ) : null}
         {children}
         {showPoweredBy ? (
-          <p className="text-center text-[11px] text-muted-foreground">
+          <p className="text-center text-xs text-muted-foreground">
             <a
               data-testid="auth-powered-by"
               href={OBJECTSTACK_SITE_URL}

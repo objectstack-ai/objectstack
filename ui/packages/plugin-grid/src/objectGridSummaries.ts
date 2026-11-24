@@ -8,7 +8,7 @@
 
 import React from 'react';
 import type { ObjectGridSchema, DataSource, ListColumn } from '@object-ui/types';
-import { useScopedColumnSummary } from './useColumnSummary';
+import { useScopedColumnSummary, type ColumnSummaryType } from './useColumnSummary';
 import { useWholeSetSummary, type WholeSetSummaryFields } from './useWholeSetSummary';
 import { normalizeColumns } from './objectGridColumns';
 import type { ObjectGridExternalPaginationProps } from './objectGridProps';
@@ -24,7 +24,7 @@ type Grouping = ReturnType<typeof useObjectGridGrouping>;
 export function useObjectGridSummaries({
   schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data, hasInlineData,
   externalManualPagination, hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
-  fetchWindow, serverGroupedFetch, isGrouped,
+  fetchWindow, serverGroupedFetch, isGrouped, summaryPicks,
 }: {
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
@@ -45,6 +45,12 @@ export function useObjectGridSummaries({
   fetchWindow: GroupingDecisions['fetchWindow'];
   serverGroupedFetch: GroupingDecisions['serverGroupedFetch'];
   isGrouped: Grouping['isGrouped'];
+  /**
+   * objectstack#35702 — calculations the reader picked in the footer, by
+   * field, drawn at once over the view's own until the host's save comes back
+   * as the view (`null` = None).
+   */
+  summaryPicks?: Readonly<Record<string, ColumnSummaryType | null>>;
 }) {
   // The query the cross-page fan-out would replay — from whichever side owns the
   // fetch (objectui#4501). ONE value, read by the fan-out AND by the affordance
@@ -94,11 +100,27 @@ export function useObjectGridSummaries({
   // --- Column summary support ---
   const summaryColumns = React.useMemo(() => {
     const cols = normalizeColumns(schema.columns);
-    if (cols && cols.length > 0 && typeof cols[0] === 'object') {
-      return cols as ListColumn[];
+    const declared = cols && cols.length > 0 && typeof cols[0] === 'object' ? cols as ListColumn[] : undefined;
+    const picked = summaryPicks ? Object.keys(summaryPicks) : [];
+    if (picked.length === 0) return declared;
+    const pickedOf = (c: ListColumn): ListColumn => (c.field in summaryPicks!
+      ? { ...c, summary: summaryPicks![c.field] ?? undefined }
+      : c);
+    const merged = (declared ?? []).map(pickedOf);
+    for (const field of picked) {
+      if (!merged.some((c) => c.field === field)) merged.push({ field, summary: summaryPicks![field] ?? undefined } as ListColumn);
     }
-    return undefined;
-  }, [schema.columns]);
+    return merged;
+  }, [schema.columns, summaryPicks]);
+  // The calculation in force per field, for the footer's menu tick.
+  const summaryTypes = React.useMemo(() => {
+    const types = new Map<string, ColumnSummaryType>();
+    for (const c of summaryColumns ?? []) {
+      if (!c.summary) continue;
+      types.set(c.field, (typeof c.summary === 'string' ? c.summary : c.summary.type) as ColumnSummaryType);
+    }
+    return types;
+  }, [summaryColumns]);
   // [objectui#12081 item 3] Whether the rows the footer reads ARE the set it
   // is drawn beside. Under server paging they are one page of it: a host
   // (`ListView`) hands this grid one window with the set's `rowCount`, or this
@@ -134,6 +156,26 @@ export function useObjectGridSummaries({
   );
 
   return {
-    bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary,
+    bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary, summaryTypes,
   };
+}
+
+/**
+ * objectstack#35702 — the calculation each column of `columns` declares, by
+ * field (the string shorthand and the object form alike; `none` included).
+ */
+export function declaredColumnSummaries(columns: ObjectGridSchema['columns']): Map<string, ColumnSummaryType> {
+  const declared = new Map<string, ColumnSummaryType>();
+  const cols = normalizeColumns(columns);
+  if (!cols || typeof cols[0] !== 'object') return declared;
+  for (const c of cols as ListColumn[]) {
+    if (!c.summary) continue;
+    declared.set(c.field, (typeof c.summary === 'string' ? c.summary : c.summary.type) as ColumnSummaryType);
+  }
+  return declared;
+}
+
+/** The declared calculations as one string, for keying an effect on their content. */
+export function declaredColumnSummaryKey(columns: ObjectGridSchema['columns']): string {
+  return Array.from(declaredColumnSummaries(columns), ([field, type]) => `${field}=${type}`).join('|');
 }

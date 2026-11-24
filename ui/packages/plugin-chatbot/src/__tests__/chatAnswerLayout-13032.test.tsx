@@ -21,6 +21,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { I18nProvider } from '@object-ui/i18n';
 import { MessageResponse } from '../elements/message';
 import {
   Conversation,
@@ -411,5 +412,43 @@ describe('the docked plain surface keeps one 16px gutter (objectstack#34609)', (
     expect(list).toHaveClass('px-4', 'py-3');
     expect(list).not.toHaveClass('@3xl:px-0');
     expect(assistant).toHaveClass('max-w-[95%]');
+  });
+});
+
+describe('an answer table in the side panel: inner scroll and tools in the reader\'s language (objectstack#35445)', () => {
+  function renderIn(language: string) {
+    return render(
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
+        <MessageResponse>{WIDE_TABLE}</MessageResponse>
+      </I18nProvider>,
+    );
+  }
+
+  /** The table's own tool buttons, by the name (`title`) streamdown gives them. */
+  async function toolNames(container: HTMLElement): Promise<string[]> {
+    await screen.findByRole('cell', { name: 'Acme Corporation' });
+    const wrapper = container.querySelector('[data-streamdown="table-wrapper"]')!;
+    return Array.from(wrapper.querySelectorAll('button')).map((b) => b.title);
+  }
+
+  it('in Chinese the copy and download tools are named 复制表格 / 下载表格, never in English', async () => {
+    const { container } = renderIn('zh-Hans');
+    const names = await toolNames(container);
+    expect(names).toEqual(expect.arrayContaining(['复制表格', '下载表格']));
+    expect(names.some((n) => /table/i.test(n))).toBe(false);
+  });
+
+  it('CONTROL: in English they keep their English names', async () => {
+    const { container } = renderIn('en');
+    expect(await toolNames(container)).toEqual(expect.arrayContaining(['Copy table', 'Download table']));
+  });
+
+  it('the table scrolls inside its own box, and the answer column can shrink to the panel', async () => {
+    const { container } = renderIn('en');
+    await screen.findByRole('cell', { name: 'Acme Corporation' });
+    const box = container.querySelector('[data-streamdown="table"]')!.parentElement!;
+    expect(box).toHaveClass('overflow-x-auto');
+    expect(container.querySelector('[data-chat-answer]')).toHaveClass('min-w-0');
+    expect(container.querySelector('[data-chat-answer-body]')).toHaveClass('min-w-0');
   });
 });

@@ -139,6 +139,7 @@ the **absolute** URL of the control plane's upgrade / billing page — beside th
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `upgradeUrl` | absolute `http(s)` URL | **absent** | Where the Console sends a user who chooses "upgrade" (AI quota exhausted, plan limit hit). Declared by the host that owns the page and served verbatim; no key means "render no link". |
+| `cloudHomeUrl` | absolute `http(s)` URL | **absent** | The control plane's console home page, opened by the marketplace's "Open on Cloud" link. Same contract as `upgradeUrl`: host option only, served verbatim, refused at mount when not absolute; no key means the link keeps its `cloudUrl` target. |
 
 ```json
 {
@@ -159,7 +160,8 @@ Why it is published rather than composed by the Console: the destination
 depends on the console mount, the app slug and the page route — three facts
 owned by whoever deploys the control plane — and a consumer in another repo
 that guessed them landed on the control plane's API 404. Three properties,
-pinned by `runtime-config-upgrade-url.test.ts`:
+pinned by `runtime-config-upgrade-url.test.ts` (which pins `cloudHomeUrl` to
+the same three):
 
 - **Absent by default.** A vanilla `objectstack dev`, a self-hosted box and an
   air-gapped deployment have no billing page. They serve no `upgradeUrl` key at

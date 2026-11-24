@@ -128,6 +128,11 @@ export const CrmTranslationBundle = defineTranslationBundle({
           website: { label: '官网' },
           owner_id: { label: '负责人' },
         },
+        // The account's field groups, keyed by `fieldGroups[].key`.
+        _sections: {
+          basic: { label: '基本信息' },
+          financials: { label: '财务信息' },
+        },
       },
       crm_contact: {
         label: '联系人',
@@ -413,6 +418,12 @@ export const CrmTranslationBundle = defineTranslationBundle({
         label: '将线索转化为客户和商机',
         successMessage: '🎉 线索已转化 — 已创建客户和商机。',
         errorMessage: '线索转化未完成 — 请检查线索后重试。',
+        // Each step's name where a manual draws the flow.
+        nodes: {
+          start: { label: '开始' },
+          check_converted: { label: '已转化？' },
+          end: { label: '结束' },
+        },
         screens: {
           screen_already_converted: { title: '已转化', description: '该线索已转化为商机。' },
           screen_account: {

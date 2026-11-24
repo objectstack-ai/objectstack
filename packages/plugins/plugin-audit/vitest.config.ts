@@ -40,6 +40,13 @@ export default defineConfig({
     // One rule for all namespaces cannot go stale that way.
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // The never-listening route table `comment-doors-member.ts` serves the
+      // comment doors on for a kernel with no `http.server`: to source, so the
+      // suite's verdict is about the checkout (`pnpm check:test-source-alias`).
+      {
+        find: /^@objectstack\/plugin-hono-server$/,
+        replacement: path.resolve(__dirname, '../plugin-hono-server/src/index.ts'),
+      },
       // [#16829] The real driver `read-audit-view-instant-preservation.integration.test.ts`
       // boots. That file exists to judge the ledger row AFTER the real
       // `sys_stamp_audit_insert` hook and a real driver have both run, so
@@ -50,6 +57,14 @@ export default defineConfig({
       {
         find: /^@objectstack\/driver-sqlite-wasm$/,
         replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),
+      },
+      // The real messaging service `mention-email.integration.test.ts` boots:
+      // the @mention e-mail's dedup window, preference filter and template are
+      // messaging's, so the suite's verdict is about the checkout, not
+      // service-messaging's dist build state (`pnpm check:test-source-alias`).
+      {
+        find: /^@objectstack\/service-messaging$/,
+        replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts'),
       },
       // [#10101] The shared platform-row resolver's home — aliased to source
       // so the suite's verdict is about the checkout, not metadata-core's

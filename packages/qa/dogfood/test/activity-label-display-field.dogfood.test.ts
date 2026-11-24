@@ -257,6 +257,9 @@ const RefTitled = ObjectSchema.create({
   pluralLabel: 'ALD Ref Titled',
   sharingModel: 'public_read_write',
   nameField: 'target',
+  // [#36290] values off, so the update's summary stays the frame that names the
+  // record by its label — the surface these pins read.
+  enable: { fieldHistory: false },
   fields: {
     name: Field.text({ label: 'Name' }),
     target: Field.lookup(REF_TARGET, { label: 'Target' }),

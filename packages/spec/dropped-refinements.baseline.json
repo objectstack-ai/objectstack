@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 269,
-    "droppedRefinementSites": 1122,
+    "publishedSchemasWithDroppedRefinements": 274,
+    "droppedRefinementSites": 1171,
     "refinementSitesThatDidProject": 728,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -82,6 +82,11 @@
         "schema"
       ]
     },
+    "api/AiSavedQuestion": {
+      "sites": [
+        "source.filter.lazy"
+      ]
+    },
     "api/AnalyticsQueryRequest": {
       "sites": [
         "where.lazy"
@@ -106,7 +111,9 @@
         "manifest.actions.element.in.onSuccess",
         "manifest.actions.element.in.params.element.in",
         "manifest.actions.element.in.preflight.fields.element",
+        "manifest.actions.element.in.refusals.valueType",
         "manifest.actions.element.in.resultDialog.fields.element",
+        "manifest.actions.element.in.texts.valueType",
         "manifest.agents.element.memory",
         "manifest.agents.element.structuredOutput.schema",
         "manifest.analyticsCubes.element.measures.valueType",
@@ -155,6 +162,8 @@
         "manifest.objects.element.lifecycle",
         "manifest.objects.element.membershipKeys",
         "manifest.objects.element.membershipKeys.valueType",
+        "manifest.objects.element.actionLayout.list",
+        "manifest.objects.element.actionLayout.record",
         "manifest.pages.element",
         "manifest.pages.element.apps",
         "manifest.pages.element.slots.header.options[0].type",
@@ -203,6 +212,11 @@
         "data.flow.errorHandling",
         "data.flow.nodes.element.in.waitEventConfig",
         "data.flow.variables.element"
+      ]
+    },
+    "api/CreateAiSavedQuestionResponse": {
+      "sites": [
+        "question.source.filter.lazy"
       ]
     },
     "api/CreateFlowRequest": {
@@ -291,7 +305,9 @@
         "data.options[1].manifest.actions.element.in.onSuccess",
         "data.options[1].manifest.actions.element.in.params.element.in",
         "data.options[1].manifest.actions.element.in.preflight.fields.element",
+        "data.options[1].manifest.actions.element.in.refusals.valueType",
         "data.options[1].manifest.actions.element.in.resultDialog.fields.element",
+        "data.options[1].manifest.actions.element.in.texts.valueType",
         "data.options[1].manifest.agents.element.memory",
         "data.options[1].manifest.agents.element.structuredOutput.schema",
         "data.options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -337,6 +353,8 @@
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.objects.element.membershipKeys",
         "data.options[1].manifest.objects.element.membershipKeys.valueType",
+        "data.options[1].manifest.objects.element.actionLayout.list",
+        "data.options[1].manifest.objects.element.actionLayout.record",
         "data.options[1].manifest.pages.element",
         "data.options[1].manifest.pages.element.apps",
         "data.options[1].manifest.pages.element.slots.header.options[0].type",
@@ -444,7 +462,9 @@
         "options[1].manifest.actions.element.in.onSuccess",
         "options[1].manifest.actions.element.in.params.element.in",
         "options[1].manifest.actions.element.in.preflight.fields.element",
+        "options[1].manifest.actions.element.in.refusals.valueType",
         "options[1].manifest.actions.element.in.resultDialog.fields.element",
+        "options[1].manifest.actions.element.in.texts.valueType",
         "options[1].manifest.agents.element.memory",
         "options[1].manifest.agents.element.structuredOutput.schema",
         "options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -490,6 +510,8 @@
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.objects.element.membershipKeys",
         "options[1].manifest.objects.element.membershipKeys.valueType",
+        "options[1].manifest.objects.element.actionLayout.list",
+        "options[1].manifest.objects.element.actionLayout.record",
         "options[1].manifest.pages.element",
         "options[1].manifest.pages.element.apps",
         "options[1].manifest.pages.element.slots.header.options[0].type",
@@ -526,6 +548,11 @@
         "options[1].manifest.views.element.list.timeline.groupByField"
       ]
     },
+    "api/ListAiSavedQuestionsResponse": {
+      "sites": [
+        "questions.element.source.filter.lazy"
+      ]
+    },
     "api/ListInstalledPackagesResponse": {
       "sites": [
         "data.packages.element.options[0].manifest.data.element.records.element.valueType",
@@ -536,7 +563,9 @@
         "data.packages.element.options[1].manifest.actions.element.in.onSuccess",
         "data.packages.element.options[1].manifest.actions.element.in.params.element.in",
         "data.packages.element.options[1].manifest.actions.element.in.preflight.fields.element",
+        "data.packages.element.options[1].manifest.actions.element.in.refusals.valueType",
         "data.packages.element.options[1].manifest.actions.element.in.resultDialog.fields.element",
+        "data.packages.element.options[1].manifest.actions.element.in.texts.valueType",
         "data.packages.element.options[1].manifest.agents.element.memory",
         "data.packages.element.options[1].manifest.agents.element.structuredOutput.schema",
         "data.packages.element.options[1].manifest.analyticsCubes.element.measures.valueType",
@@ -582,6 +611,8 @@
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys.valueType",
+        "data.packages.element.options[1].manifest.objects.element.actionLayout.list",
+        "data.packages.element.options[1].manifest.objects.element.actionLayout.record",
         "data.packages.element.options[1].manifest.pages.element",
         "data.packages.element.options[1].manifest.pages.element.apps",
         "data.packages.element.options[1].manifest.pages.element.slots.header.options[0].type",
@@ -626,7 +657,9 @@
         "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
         "data.actions.element.in.preflight.fields.element",
-        "data.actions.element.in.resultDialog.fields.element"
+        "data.actions.element.in.refusals.valueType",
+        "data.actions.element.in.resultDialog.fields.element",
+        "data.actions.element.in.texts.valueType"
       ]
     },
     "api/ObjectDefinitionResponse": {
@@ -637,7 +670,9 @@
         "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
         "data.actions.element.in.preflight.fields.element",
+        "data.actions.element.in.refusals.valueType",
         "data.actions.element.in.resultDialog.fields.element",
+        "data.actions.element.in.texts.valueType",
         "data.defaultRowScope",
         "data.fieldGroups",
         "data.fields.out.valueType",
@@ -657,7 +692,9 @@
         "data.listViews.valueType.kanban.groupByField",
         "data.listViews.valueType.timeline.groupByField",
         "data.membershipKeys",
-        "data.membershipKeys.valueType"
+        "data.membershipKeys.valueType",
+        "data.actionLayout.list",
+        "data.actionLayout.record"
       ]
     },
     "api/PackageInstallBody": {
@@ -1148,7 +1185,9 @@
         "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
         "actions.element.in.preflight.fields.element",
+        "actions.element.in.refusals.valueType",
         "actions.element.in.resultDialog.fields.element",
+        "actions.element.in.texts.valueType",
         "defaultRowScope",
         "fieldGroups",
         "fields.out.valueType",
@@ -1168,7 +1207,9 @@
         "listViews.valueType.kanban.groupByField",
         "listViews.valueType.timeline.groupByField",
         "membershipKeys",
-        "membershipKeys.valueType"
+        "membershipKeys.valueType",
+        "actionLayout.list",
+        "actionLayout.record"
       ]
     },
     "data/ObjectExtension": {
@@ -1179,7 +1220,9 @@
         "fields.out.valueType.inlineColumns.element",
         "fields.out.valueType.lookupFilters.element",
         "fields.out.valueType.relatedListFilter.lazy",
-        "fields.out.valueType.summaryOperations"
+        "fields.out.valueType.summaryOperations",
+        "actionLayout.list",
+        "actionLayout.record"
       ]
     },
     "data/OracleConfig": {
@@ -1390,7 +1433,9 @@
         "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
         "actions.element.in.preflight.fields.element",
-        "actions.element.in.resultDialog.fields.element"
+        "actions.element.in.refusals.valueType",
+        "actions.element.in.resultDialog.fields.element",
+        "actions.element.in.texts.valueType"
       ]
     },
     "kernel/OpsDomainModule": {
@@ -1515,7 +1560,9 @@
         "operations.element.options[3].object.actions.element.in.onSuccess",
         "operations.element.options[3].object.actions.element.in.params.element.in",
         "operations.element.options[3].object.actions.element.in.preflight.fields.element",
+        "operations.element.options[3].object.actions.element.in.refusals.valueType",
         "operations.element.options[3].object.actions.element.in.resultDialog.fields.element",
+        "operations.element.options[3].object.actions.element.in.texts.valueType",
         "operations.element.options[3].object.defaultRowScope",
         "operations.element.options[3].object.fieldGroups",
         "operations.element.options[3].object.fields.out.valueType",
@@ -1530,7 +1577,9 @@
         "operations.element.options[3].object.listViews.valueType.kanban.groupByField",
         "operations.element.options[3].object.listViews.valueType.timeline.groupByField",
         "operations.element.options[3].object.membershipKeys",
-        "operations.element.options[3].object.membershipKeys.valueType"
+        "operations.element.options[3].object.membershipKeys.valueType",
+        "operations.element.options[3].object.actionLayout.list",
+        "operations.element.options[3].object.actionLayout.record"
       ]
     },
     "system/CreateObjectOperation": {
@@ -1541,7 +1590,9 @@
         "object.actions.element.in.onSuccess",
         "object.actions.element.in.params.element.in",
         "object.actions.element.in.preflight.fields.element",
+        "object.actions.element.in.refusals.valueType",
         "object.actions.element.in.resultDialog.fields.element",
+        "object.actions.element.in.texts.valueType",
         "object.defaultRowScope",
         "object.fieldGroups",
         "object.fields.out.valueType",
@@ -1561,7 +1612,9 @@
         "object.listViews.valueType.kanban.groupByField",
         "object.listViews.valueType.timeline.groupByField",
         "object.membershipKeys",
-        "object.membershipKeys.valueType"
+        "object.membershipKeys.valueType",
+        "object.actionLayout.list",
+        "object.actionLayout.record"
       ]
     },
     "system/CronSchedule": {
@@ -1599,7 +1652,9 @@
         "options[3].object.actions.element.in.onSuccess",
         "options[3].object.actions.element.in.params.element.in",
         "options[3].object.actions.element.in.preflight.fields.element",
+        "options[3].object.actions.element.in.refusals.valueType",
         "options[3].object.actions.element.in.resultDialog.fields.element",
+        "options[3].object.actions.element.in.texts.valueType",
         "options[3].object.defaultRowScope",
         "options[3].object.fieldGroups",
         "options[3].object.fields.out.valueType",
@@ -1614,7 +1669,9 @@
         "options[3].object.listViews.valueType.kanban.groupByField",
         "options[3].object.listViews.valueType.timeline.groupByField",
         "options[3].object.membershipKeys",
-        "options[3].object.membershipKeys.valueType"
+        "options[3].object.membershipKeys.valueType",
+        "options[3].object.actionLayout.list",
+        "options[3].object.actionLayout.record"
       ]
     },
     "system/ObjectStorageConfig": {
@@ -1737,7 +1794,9 @@
         "in.onSuccess",
         "in.params.element.in",
         "in.preflight.fields.element",
-        "in.resultDialog.fields.element"
+        "in.refusals.valueType",
+        "in.resultDialog.fields.element",
+        "in.texts.valueType"
       ]
     },
     "ui/ActionAi": {
@@ -2204,6 +2263,16 @@
       "sites": [
         "filter.element",
         "filter.element.options[0]"
+      ]
+    },
+    "ui/ActionRefusal": {
+      "sites": [
+        ""
+      ]
+    },
+    "ui/ActionText": {
+      "sites": [
+        ""
       ]
     }
   }

@@ -28,7 +28,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 const openMock = vi.fn();
 vi.mock('../../console/marketplace/marketplaceApi', () => ({
-  cloudConsoleUrl: () => 'https://cloud.example',
+  cloudConsoleUrl: vi.fn(() => 'https://cloud.example'),
 }));
 vi.mock('../../hooks/useAiUsage', () => ({ useAiUsage: vi.fn() }));
 // objectui#11799 — the indicator reads usage only while the agent catalog lists
@@ -41,6 +41,8 @@ vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
 
 import { useAiUsage } from '../../hooks/useAiUsage';
 import { AiUsageIndicator } from '../AiUsageIndicator';
+import { cloudConsoleUrl } from '../../console/marketplace/marketplaceApi';
+import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../runtime-config';
 
 // The REAL hook, for the cases that drive a wire payload through the parser
 // into the component. Loaded at module scope so its import cost is paid in the
@@ -306,5 +308,81 @@ describe('AiUsageIndicator', () => {
       fireEvent.click(screen.getByTestId('ai-usage-indicator'));
       expect(screen.queryByText(/Resets/)).not.toBeInTheDocument();
     });
+  });
+});
+
+// objectstack#34622 — the call to action opens the control plane's declared
+// `upgradeUrl` (served by /api/v1/runtime/config) when the runtime serves one,
+// and is unchanged — target and show/hide rule — when it does not. Driven
+// through the REAL runtime-config reader: only `fetch` is replaced, for the one
+// config request.
+describe('AiUsageIndicator — declared upgradeUrl (objectstack#34622)', () => {
+  const UPGRADE = 'https://cloud.example/_console/billing?org=acme';
+  const cloudMock = cloudConsoleUrl as unknown as ReturnType<typeof vi.fn>;
+
+  async function serveRuntimeConfig(payload: Record<string, unknown>) {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => payload })) as unknown as typeof fetch;
+    try {
+      await initRuntimeConfig();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  function openCta() {
+    render(<AiUsageIndicator apiBase="/api/v1/ai" />);
+    fireEvent.click(screen.getByTestId('ai-usage-indicator'));
+    return screen.queryByTestId('ai-usage-cta');
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('open', openMock);
+    resetRuntimeConfigForTesting();
+  });
+  afterEach(() => {
+    resetRuntimeConfigForTesting();
+    cloudMock.mockImplementation(() => 'https://cloud.example');
+  });
+
+  it.each([
+    ['upgrade', { upgrade: true, topUp: false }],
+    ['top-up', { upgrade: false, topUp: true }],
+  ])('declared: the %s CTA opens the declared address, not the Cloud origin', async (_label, flags) => {
+    await serveRuntimeConfig({ upgradeUrl: UPGRADE });
+    setUsage({ pool: pool({ fraction: 0.95, ...flags }) });
+    fireEvent.click(openCta()!);
+    expect(openMock).toHaveBeenCalledTimes(1);
+    expect(openMock).toHaveBeenCalledWith(UPGRADE, '_blank', 'noopener,noreferrer');
+  });
+
+  it('declared on a runtime that names no upstream cloud: the CTA is drawn, to the declared address', async () => {
+    cloudMock.mockReturnValue('');
+    await serveRuntimeConfig({ upgradeUrl: UPGRADE });
+    setUsage({ pool: pool({ fraction: 0.95, upgrade: true }) });
+    fireEvent.click(openCta()!);
+    expect(openMock).toHaveBeenCalledWith(UPGRADE, '_blank', 'noopener,noreferrer');
+  });
+
+  it('declared: a pool with headroom still shows no CTA', async () => {
+    await serveRuntimeConfig({ upgradeUrl: UPGRADE });
+    setUsage({ pool: pool({ fraction: 0.2, upgrade: true }) });
+    expect(openCta()).toBeNull();
+  });
+
+  // CONTROL — absent, today's target and today's show/hide rule.
+  it('absent: the CTA opens the Cloud origin, as before', async () => {
+    await serveRuntimeConfig({ cloudUrl: 'https://cloud.example' });
+    setUsage({ pool: pool({ fraction: 0.95, upgrade: true }) });
+    fireEvent.click(openCta()!);
+    expect(openMock).toHaveBeenCalledWith('https://cloud.example', '_blank', 'noopener,noreferrer');
+  });
+
+  it('absent on a runtime that names no upstream cloud: no CTA, as before', async () => {
+    cloudMock.mockReturnValue('');
+    await serveRuntimeConfig({ singleEnvironment: true });
+    setUsage({ pool: pool({ fraction: 0.95, upgrade: true }) });
+    expect(openCta()).toBeNull();
   });
 });

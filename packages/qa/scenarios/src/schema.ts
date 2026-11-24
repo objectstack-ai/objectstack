@@ -62,6 +62,56 @@ export const LookupExpectationSchema = z.strictObject({
   to: MachineNameSchema,
 });
 
+// ── The datasets a card's build declares (ADR-0149) ──
+//
+// A card that measures how an agent answers through the governed semantic
+// layer declares the datasets its build must carry: each dataset's base
+// object, its measures and dimensions, and each member's business vocabulary
+// (`synonyms`, `description`, ADR-0149 D1). The loader holds every declaration
+// to the platform's own dataset schema (`DatasetSchema` of
+// `@objectstack/spec/ui`), so a card can never ask a build for a dataset the
+// platform would refuse, and the build prompt states each one by name.
+
+/** A dataset member's business words (ADR-0149 D1): matched by the dataset tools, never rendered. */
+const SynonymsSchema = z.array(z.string().min(1)).min(1);
+
+/** One or two sentences of business definition, never an instruction to a model (ADR-0149 M1). */
+const MemberDescriptionSchema = z.string().min(1);
+
+export const DatasetDimensionExpectationSchema = z.strictObject({
+  name: MachineNameSchema,
+  label: z.string().min(1),
+  /** The base object's field the dimension groups by; a seed field of that object. */
+  field: MachineNameSchema,
+  synonyms: SynonymsSchema.optional(),
+  description: MemberDescriptionSchema.optional(),
+});
+
+/** The aggregates a card's measure may declare: the ones its truth evaluator computes too. */
+export const DATASET_MEASURE_AGGREGATES = ['count', 'sum', 'avg', 'min', 'max'] as const;
+
+export const DatasetMeasureExpectationSchema = z.strictObject({
+  name: MachineNameSchema,
+  label: z.string().min(1),
+  aggregate: z.enum(DATASET_MEASURE_AGGREGATES),
+  /** The base object's number field aggregated; absent only for `count`. */
+  field: MachineNameSchema.optional(),
+  synonyms: SynonymsSchema.optional(),
+  description: MemberDescriptionSchema.optional(),
+});
+
+export const DatasetExpectationSchema = z.strictObject({
+  name: MachineNameSchema,
+  label: z.string().min(1),
+  /** What the dataset as a whole covers: the text an agent picks a dataset by (ADR-0149 D1). */
+  description: z.string().min(1),
+  /** The base object, one of `expect.objects`. */
+  object: MachineNameSchema,
+  measures: z.array(DatasetMeasureExpectationSchema).min(1),
+  dimensions: z.array(DatasetDimensionExpectationSchema).optional(),
+});
+export type DatasetExpectation = z.infer<typeof DatasetExpectationSchema>;
+
 export const ExpectSchema = z.strictObject({
   objects: z.array(MachineNameSchema).min(1),
   minFieldsPerObject: z.number().int().min(1).optional(),
@@ -69,6 +119,8 @@ export const ExpectSchema = z.strictObject({
   lookups: z.array(LookupExpectationSchema).optional(),
   dashboards: z.array(MachineNameSchema).optional(),
   appNavTargets: z.array(MachineNameSchema).optional(),
+  /** The datasets the build declares, with their members' vocabulary (above). */
+  datasets: z.array(DatasetExpectationSchema).min(1).optional(),
 });
 export type ScenarioExpect = z.infer<typeof ExpectSchema>;
 
@@ -246,14 +298,100 @@ export const TruthSpecSchema = z.discriminatedUnion('kind', [
 ]);
 export type TruthSpec = z.infer<typeof TruthSpecSchema>;
 
+// ── Ask kinds: what kind of question an ask is ──
+//
+// The ten kinds of question an ask round asks, borrowed from the hosted ask
+// set's categories (D6 = A on #34659: the kinds, never its fixture). A
+// question names its kind (`askKind`), so a round reports what it asked kind
+// by kind, and the open cards can show that every kind is asked. The loader
+// holds each declaration to what the card states (`checkAskKinds` in
+// `ask-kinds.ts`, called from `loader.ts`); `forbidden` is also read per turn: a question asked as a
+// persona whose truth is `withheld` is a `forbidden` ask, whatever kind it
+// declares (`questionTurnKind` in `ask-kinds.ts`).
+//
+//   count          one figure over the matching rows (how many, how much), no grouping
+//   group_sum      a figure per value of a field (a count or a total per group)
+//   top_n          a ranking: the first N rows or groups by a measure
+//   time_range     a figure over a time window (`in_window`)
+//   join           a figure that reads across a lookup (a relation path)
+//   owner_latest   who holds a row or acted on it, grouped by a person field: an owner, an approver
+//   business_term  a business word that names exactly one governed metric (`metric_selected`)
+//   ambiguous      a word that names more than one metric, or none exactly (`asked_back`)
+//   forbidden      asked as a persona who may not see what the question reads
+//   unanswerable   the data cannot answer it (`truth.kind: unanswerable`)
+
+export const ASK_KINDS = [
+  'count',
+  'group_sum',
+  'top_n',
+  'time_range',
+  'join',
+  'owner_latest',
+  'business_term',
+  'ambiguous',
+  'forbidden',
+  'unanswerable',
+] as const;
+export type AskKind = (typeof ASK_KINDS)[number];
+
+export const AskKindSchema = z.enum(ASK_KINDS);
+
 export const QuestionSchema = z.strictObject({
   id: MachineNameSchema,
   ask: LocalizedTextSchema,
+  /** What kind of question this is ({@link ASK_KINDS}); a card that names one names it on every question and dataset question. */
+  askKind: AskKindSchema.optional(),
   object: MachineNameSchema,
   truth: TruthSpecSchema,
   /** Also compute the truth AS each of these personas (their row scope and hidden fields applied). */
   personas: z.array(MachineNameSchema).min(1).optional(),
 });
+
+// ── Dataset questions: how the answer was reached (ADR-0149 D3) ──
+//
+// A dataset question is graded on the route its answer took, never on a
+// figure: the selection rule of ADR-0149 D3 decides what the right route is,
+// from the word the question turns on and the vocabulary the card's datasets
+// declare. The kinds borrow cloud's ask-accuracy business-term categories
+// (ADR-0149 D5), not its fixture.
+//
+//   - `metric_selected`: the word matches exactly one measure (D3 rule 2);
+//     the answer comes through `query_dataset` with that dataset and measure.
+//   - `asked_back`: the word matches two members (`ambiguous`, D3 rule 3), or
+//     none while it is close to one (`near_miss`: a substring or a stem, which
+//     D3 rule 1 says is no hit and may only be offered back); the answer asks
+//     which reading is meant, names every candidate and states no figure.
+//   - `fallback_labelled`: the word matches nothing and no dataset covers the
+//     object (D3 rule 4, M2 ruled A); the answer comes from an object query
+//     and says it is not from a governed metric.
+
+/** A measure of one of the card's datasets. */
+export const DatasetMemberRefSchema = z.strictObject({ dataset: MachineNameSchema, measure: MachineNameSchema });
+
+export const DATASET_QUESTION_KINDS = ['metric_selected', 'asked_back', 'fallback_labelled'] as const;
+export type DatasetQuestionKind = (typeof DATASET_QUESTION_KINDS)[number];
+
+export const DatasetExpectedRouteSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('metric_selected'), dataset: MachineNameSchema, measure: MachineNameSchema }),
+  z.strictObject({ kind: z.literal('asked_back'), reason: z.enum(['ambiguous', 'near_miss']), candidates: z.array(DatasetMemberRefSchema).min(1) }),
+  z.strictObject({ kind: z.literal('fallback_labelled'), object: MachineNameSchema }),
+]);
+export type DatasetExpectedRoute = z.infer<typeof DatasetExpectedRouteSchema>;
+
+export const DatasetQuestionSchema = z.strictObject({
+  id: MachineNameSchema,
+  ask: LocalizedTextSchema,
+  /**
+   * The business word (or words, one per language) the ask turns on, as the
+   * ask writes it; the loader finds each in the ask and judges the route
+   * `expect` declares against what the word matches.
+   */
+  words: z.array(z.string().min(1)).min(1),
+  /** What kind of question this is ({@link ASK_KINDS}); a card that names one names it on every question and dataset question. */
+  askKind: AskKindSchema.optional(),
+  expect: DatasetExpectedRouteSchema,
+});
+export type DatasetQuestion = z.infer<typeof DatasetQuestionSchema>;
 
 export const FieldRefSchema = z.strictObject({
   object: MachineNameSchema,
@@ -305,22 +443,53 @@ export const PersonaSchema = z
 
 export const OPERATION_KINDS = ['create', 'update', 'delete'] as const;
 
-/** A record as the data API should read it after an applied write. */
+/**
+ * A record as the data API should read it after an applied write — or, as an
+ * AGGREGATE, the rows a `where` matches taken together.
+ *
+ *   values  the one row its `id` / `where` names holds each value;
+ *   absent  no row matches;
+ *   sum     the field summed over every row the `where` matches (at least
+ *           one) equals the declared number;
+ *   each    every row the `where` matches (at least one) holds the value.
+ *
+ * An aggregate checks what a faithful write must come to without pinning how
+ * the agent split it into rows: two hotel nights are one line of quantity 2
+ * or two lines of quantity 1, and both sum to the same amount.
+ *
+ * A `where` key is a field of the object or a RELATION PATH through lookups
+ * declared in `expect.lookups` (`claim.trip`), read through the rows the data
+ * API returns after the turn: it scopes rows the write created to the parent
+ * row they belong to.
+ */
 export const PostStateSchema = z
   .strictObject({
     object: MachineNameSchema,
     /** A seeded row's id — or, for a row the write creates, `where` matches it. */
     id: z.string().min(1).optional(),
-    where: z.record(MachineNameSchema, ScalarSchema).optional(),
+    where: z.record(FieldPathSchema, ScalarSchema).optional(),
     values: z.record(MachineNameSchema, ScalarSchema).optional(),
     absent: z.literal(true).optional(),
+    /** Aggregate: per field, the sum over every row the `where` matches. */
+    sum: z.record(MachineNameSchema, z.number()).optional(),
+    /** Aggregate: per field, the value every row the `where` matches holds. */
+    each: z.record(MachineNameSchema, ScalarSchema).optional(),
   })
   .superRefine((s, ctx) => {
     if ((s.id === undefined) === (s.where === undefined)) {
       ctx.addIssue({ code: 'custom', path: ['id'], message: 'a post-state names its row by exactly one of `id` or `where`' });
     }
-    if ((s.values === undefined) === (s.absent === undefined)) {
-      ctx.addIssue({ code: 'custom', path: ['values'], message: 'a post-state carries exactly one of `values` or `absent`' });
+    const aggregate = s.sum !== undefined || s.each !== undefined;
+    if ((s.values !== undefined ? 1 : 0) + (s.absent !== undefined ? 1 : 0) + (aggregate ? 1 : 0) !== 1) {
+      ctx.addIssue({ code: 'custom', path: ['values'], message: 'a post-state carries exactly one of `values`, `absent` or an aggregate (`sum` / `each`)' });
+    }
+    if (aggregate && s.id !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['id'], message: 'an aggregate (`sum` / `each`) reads every row a `where` matches, so it names its rows by `where`, never `id`' });
+    }
+    for (const key of ['sum', 'each'] as const) {
+      if (s[key] !== undefined && Object.keys(s[key]).length === 0) {
+        ctx.addIssue({ code: 'custom', path: [key], message: `\`${key}\` names at least one field` });
+      }
     }
   });
 
@@ -339,10 +508,10 @@ export const OutcomeSchema = z.discriminatedUnion('kind', [
     code: ErrorCode,
   }),
   /**
-   * The agent asks first and writes nothing until confirmed. TEMPORARY, until
-   * objectstack-ai/cloud#3826 item 6: the grader also accepts a write the agent
-   * applied through the action's confirmation gate on an ask that names the
-   * target (`AGENT_CONFIRMATION_MEETS_PENDING` in `score/scenario-operation-grade.ts`).
+   * The agent asks first and writes nothing until confirmed, graded strictly: a
+   * write the agent applied itself fails, whatever route it took. (The temporary
+   * relaxation, `AGENT_CONFIRMATION_MEETS_PENDING` in
+   * `score/scenario-operation-grade.ts`, is off and deprecated.)
    */
   z.strictObject({ kind: z.literal('pending_confirmation') }),
 ]);
@@ -357,6 +526,16 @@ export const OperationSchema = z
     values: z.record(MachineNameSchema, ScalarSchema).optional(),
     /** The persona the agent acts for. */
     actingAs: MachineNameSchema,
+    /**
+     * The card's own agent action this write is designed to go through
+     * (`run.agentActions[].name`, on this operation's object; the loader holds
+     * that). An action body writes as the platform, so a build may withhold
+     * the verb from the persona's set and route the write through it: the
+     * Build grant check then leaves the write to the run, never a pass
+     * (`gradePersonaGrants` in `score/scenario-tags.ts`). Absent ⇒ the write
+     * is measured against the persona's grant. A `refused` write takes none.
+     */
+    via: MachineNameSchema.optional(),
     outcome: OutcomeSchema,
   })
   .superRefine((op, ctx) => {
@@ -602,6 +781,12 @@ export const ScenarioCardSchema = z.strictObject({
     /** Why the card runs fewer than 8 questions or 4 operations; required then. */
     countsReason: z.string().min(1).optional(),
     agentActions: z.array(AgentActionSchema).min(3).optional(),
+    /**
+     * Questions graded on the route the answer took through the card's
+     * datasets (above); asked as the admin, after the questions and before
+     * any operation writes. Needs `expect.datasets`.
+     */
+    datasetQuestions: z.array(DatasetQuestionSchema).min(1).optional(),
   }),
   iterate: IterateSchema,
 });

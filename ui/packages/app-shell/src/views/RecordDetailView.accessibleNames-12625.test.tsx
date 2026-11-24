@@ -26,7 +26,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, screen, cleanup, within } from '@testing-library/react';
+import { render, waitFor, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { MemoryRouter } from 'react-router-dom';
@@ -115,7 +115,10 @@ async function mountLeadPage() {
   const objects = [LEAD, TASK];
   const findOne = vi.fn(async () => ({ id: 'L1', name: 'Ada', company: 'Acme', city: 'Paris' }));
   const dataSource = {
-    find: vi.fn(async () => ({ data: [] })),
+    // The lead has one task, so the right rail draws its card (objectstack#35596).
+    find: vi.fn(async (object: string) =>
+      object === 'task' ? { data: [{ id: 't1', subject: 'Call back' }], total: 1 } : { data: [] },
+    ),
     findOne,
     create: vi.fn(async () => ({})),
     update: vi.fn(async () => ({})),
@@ -170,19 +173,25 @@ afterEach(() => {
 });
 
 describe('objectui#12625 — the record page names its regions, header actions and section headers', () => {
-  it('the right column and its panels are named by their labels', async () => {
+  it('the record\'s tabs are named by their labels: 详情, the related lists, 动态 (objectstack#35890: no right column)', async () => {
     await mountLeadPage();
-    const right = screen.getByRole('complementary', { name: 'Right column' });
-    expect(right).toBeInTheDocument();
-    expect(within(right).getByRole('region', { name: 'Activity' })).toBeInTheDocument();
-    expect(await within(right).findByRole('region', { name: 'Task' })).toBeInTheDocument();
+    // objectstack#35890 — the right rail is retired: no complementary region.
+    expect(screen.queryByRole('complementary', { name: 'Right column' })).toBeNull();
+    expect(screen.getByRole('tab', { name: /^Details/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^Activity/ })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: /^Task/ })).toBeInTheDocument();
   });
 
   it('the header actions are named by their labels', async () => {
+    const user = userEvent.setup();
     await mountLeadPage();
+    // objectstack#35853 — the header bar draws up to three inline actions,
+    // each a button named by its label; the ⋯ holds the system entries.
     expect(screen.getByRole('button', { name: 'Log a Call' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Log a Meeting' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Schedule a Meeting' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    expect((await screen.findAllByRole('menuitem')).length).toBeGreaterThan(0);
   });
 
   it('the collapsible field group header is a button named by its label that toggles', async () => {
@@ -192,8 +201,8 @@ describe('objectui#12625 — the record page names its regions, header actions a
     expect(header).toHaveAttribute('aria-expanded', 'true');
     await user.click(header);
     expect(header).toHaveAttribute('aria-expanded', 'false');
-    // CONTROL: the non-collapsible group shows its heading but is no button.
-    expect(screen.getByText('Address')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Address' })).toBeNull();
+    // A group that declares no collapse folds on the default record page too,
+    // starting open (objectstack#36269).
+    expect(screen.getByRole('button', { name: 'Address' })).toHaveAttribute('aria-expanded', 'true');
   });
 });

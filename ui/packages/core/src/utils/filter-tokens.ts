@@ -14,7 +14,7 @@ import {
   type RecordContextToken,
 } from '@objectstack/spec/data';
 
-import { resolveDateMacros } from './date-macros.js';
+import { resolveDateMacros, resolvePeriodKeyTokens } from './date-macros.js';
 
 /**
  * Session-scoped filter placeholders — the sibling vocabulary to
@@ -287,15 +287,16 @@ export function resolveContextTokens<T = any>(filter: T, scope: FilterTokenScope
 
 /**
  * Resolve **every** placeholder vocabulary a filter value understands — date
- * macros and context tokens — in one call.
+ * macros, period keys (`{current_iso_week}`) and context tokens — in one call.
  *
- * This is the function surfaces should call. Calling only one of the two
+ * This is the function surfaces should call. Calling only one of the
  * resolvers is the defect behind objectstack-ai/objectstack#3574: dashboard widgets called
  * `resolveDateMacros` alone, so `{today}` worked and `{current_user_id}`
  * silently did not.
  *
  * Order is irrelevant (the vocabularies are disjoint) but fixed here so
- * behaviour is identical everywhere.
+ * behaviour is identical everywhere. The date macros and the period keys read
+ * one `now`, so a filter that carries both names one instant.
  */
 export function resolveFilterPlaceholders<T = any>(
   filter: T,
@@ -303,5 +304,5 @@ export function resolveFilterPlaceholders<T = any>(
   now: Date = new Date(),
 ): T {
   if (filter == null) return filter;
-  return resolveContextTokens(resolveDateMacros(filter, now), scope);
+  return resolveContextTokens(resolvePeriodKeyTokens(resolveDateMacros(filter, now), now), scope);
 }

@@ -32,6 +32,7 @@
 
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
 import { MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_METADATA_WRITE } from '@objectstack/spec/ai';
+import { ASK_SKILL_DATA_LOOP } from './ask-skill.generated.js';
 import {
   DELETE_AMBIGUOUS_ASKS_FIRST,
   DELETE_NAMED_RECORD_IS_APPROVAL,
@@ -125,7 +126,8 @@ export interface RenderSkillOptions {
   /**
    * [ADR-0149 D2] Whether the host's bridge carries the dataset pair
    * (`list_datasets` / `query_dataset`, `registerDatasetTools`). The entries,
-   * and the D3 selection rule that teaches a client when to use them, render
+   * and the ask-data skill's data loop that teaches a client when to use them
+   * (#34686: generated from the published skill), render
    * only when this is true AND {@link grantedScopes} admit `data:read`, so the
    * skill names them exactly where `tools/list` lists them. Default false: the
    * renderer cannot see the bridge, so the host says so.
@@ -232,7 +234,11 @@ const UPLOAD_LINK_TOOL_LINES = `- **create_upload_link({ objectName, recordId, f
   Give the link to the user to open where they are signed in to this
   deployment; it works only for them, once, for that record and field only,
   and expires at \`expiresAt\`. The upload is stored as the user, so they
-  must be able to edit the record.
+  must be able to edit the record. A field link also needs a field they may
+  write: none is made for a read-only field (\`readonly\`, or \`readonlyWhen\`
+  on this record) or a record a pending approval locks, which still takes
+  attachments. An upload refused when it arrives attaches nothing and answers
+  the reason.
 `;
 
 /**
@@ -253,50 +259,55 @@ const NEW_RECORD_UPLOAD_LINK_LINES = `  For a record you have not created yet (a
 `;
 
 /**
- * [ADR-0149 D2/D3] The dataset pair's entries and the selection rule that
- * tells a client when a governed metric answers instead of an object query.
- * The rule is ADR-0149 D3's, in the client's terms: an exact word match
- * (after normalization) is the only hit, one hit wins, several hits are a
- * question for the user, no hit falls back to the object tools with the
- * answer labelled as not a governed metric, and a dimension alone is not an
- * answer. The last entry covers a question no tool can answer: name what the
- * data lacks, never answer from an assumed value.
+ * [ADR-0149 D2] The dataset pair's entries in the tool list: each tool's
+ * signature and what its answer carries, in a sentence. When to call them and
+ * how to read their answers (ADR-0149 D3's selection rule, the fallback, and a
+ * question the data cannot answer) is {@link ASK_SECTION_HEADING}'s section,
+ * which the published skill writes.
  */
 const DATASET_TOOL_LINES = `- **list_datasets({ terms? })** — the governed datasets (business metrics)
   you may query: each dataset's measures and dimensions with their business
-  labels, descriptions and synonyms. Pass the business words of the question
-  as \`terms\`; the answer's \`matches\` says which member each word names
-  exactly. \`membersWithheld: true\` means some measures exist that you may not
-  read: say so rather than saying the metric does not exist.
-- **query_dataset({ datasetName, selection })** — compute a governed metric:
-  \`selection\` takes \`measures\`, \`dimensions\` and a \`runtimeFilter\`, by
-  the names \`list_datasets\` gives. The answer carries \`provenance\` (the
-  dataset and measures used); cite the source from it, not from memory, and
-  use a measure's \`description\` to explain what the number includes.
-- **Choosing between a metric and an object query.** Call \`list_datasets\`
-  with the question's business words first. A word matches only when it
-  equals a member's name, label or synonym (case, spacing, \`_\` and \`-\`
-  aside), never by similarity. One measure match: answer with
-  \`query_dataset\`. Several matches (two datasets or two members): ask the
-  user which one they mean, listing each candidate's label, dataset and
-  description; do not pick. No match: fall back to \`query_records\` /
-  \`aggregate_records\` and say the answer is not from a governed metric. A
-  dimension match alone (a grouping such as "by stage") is not an answer: you
-  still need a measure match, or ask.
-- **When the data cannot answer.** No metric, object or field records what the
-  question needs: say the data you can read does not record it and name what
-  is missing (such as a shipment's weight), and offer the computation if the
-  user supplies it. Never fill the gap with an assumed value,
-  nor draw a conclusion from one ("under a typical term, none would…").
-  Any figure you add comes from a tool answer; cite it.
+  labels, descriptions and synonyms, and, for the \`terms\` you pass, the
+  \`matches\` each word made.
+- **query_dataset({ datasetName, selection })** — compute a governed metric
+  by the names \`list_datasets\` gives; the answer carries \`provenance\`.
+  When to call these two, and how to read their answers: the section
+  **Answering a business question** below.
 `;
 
-/** The dataset pair's entries for a host whose bridge carries them, under the grant that registers them. */
-function renderDatasetToolLines(options: RenderSkillOptions): string {
-  if (options.datasetTools !== true) return '';
+/**
+ * [#34686] The heading the served page gives the ask-data skill's data loop.
+ * The text under it is {@link ASK_SKILL_DATA_LOOP}, generated from
+ * `skills/objectstack-ask/SKILL.md` (`scripts/gen-mcp-ask-skill.mjs`) and pinned
+ * equal to it by `skill-single-source-34686.test.ts`: the published skill is
+ * the one source, and nothing here restates it.
+ */
+export const ASK_SECTION_HEADING = '## Answering a business question';
+
+/**
+ * Whether this render teaches the dataset pair: a host whose bridge carries
+ * them, under a grant that registers them.
+ */
+function datasetToolsTaught(options: RenderSkillOptions): boolean {
+  if (options.datasetTools !== true) return false;
   // Mirrors the gate in `registerDatasetTools` (`!scopes || scopes.includes(data:read)`).
   const scopes = options.grantedScopes;
-  return !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ) ? DATASET_TOOL_LINES : '';
+  return !scopes || scopes.includes(MCP_OAUTH_SCOPE_DATA_READ);
+}
+
+/** The dataset pair's entries in the tool list, where {@link datasetToolsTaught}. */
+function renderDatasetToolLines(options: RenderSkillOptions): string {
+  return datasetToolsTaught(options) ? DATASET_TOOL_LINES : '';
+}
+
+/**
+ * [#34686] The ask-data skill's data loop under its own heading, where
+ * {@link datasetToolsTaught}. It renders after every other block of the tool
+ * list and before the conventions, so a render that does not teach the pair is
+ * byte-identical to one from before this section existed.
+ */
+function renderAskSection(options: RenderSkillOptions): string {
+  return datasetToolsTaught(options) ? `\n${ASK_SECTION_HEADING}\n\n${ASK_SKILL_DATA_LOOP}\n` : '';
 }
 
 /** The file pair's entries for a host whose bridge carries them, each for the grant that registers it. */
@@ -418,8 +429,14 @@ create/update payload.
 
 - **list_objects()** — list available objects. System \`sys_*\` objects are hidden,
   except the few declared readable by agents, such as \`sys_user\` (read only).
-- **describe_object({ objectName })** — an object's fields and features.
-- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, field? })** — check a CEL
+- **describe_object({ objectName })** — an object's fields and features. A
+  \`readonly\` field is never set in a write (a computed value or a declared
+  read-only field); \`readonly\` is the schema's, not your edit permission, so a
+  write naming a field you may not edit is refused. Send an option's \`value\`.
+  To get a \`defaultValue\`, omit the field: a token (\`NOW()\`, \`current_user\`)
+  or an expression object is never copied. A validation's \`message\` is what a
+  refused write answers.
+- **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject?, startCondition?, variables?, field? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
   unknown fields/functions; at a \`formula\` or \`validation\` site, every other
@@ -429,7 +446,8 @@ create/update payload.
   an unguarded nullable field or a read of \`parent\`; at a \`flow_condition\`
   of a record-triggered flow, an unguarded nullable \`record.\`/\`previous.\`
   read) and advisory warnings
-  (text/boolean fields misused in arithmetic; an error at a \`validation\` site,
+  (text/boolean fields misused in arithmetic; date-equality pitfalls; an error
+  at a \`validation\` site,
   worded for the rule's \`severity\`, and at a \`flow_condition\` of a
   record-triggered or time-relative flow, where it fails the run; a warning on
   any other flow; at a \`formula\`, \`validation\` or \`flow_condition\` site,
@@ -448,13 +466,32 @@ create/update payload.
   At a \`flow_condition\` the verdict is the runtime publish gate's, the one a
   flow saved through MCP meets: \`os validate\` also judges bare names and
   unbound roots over the whole flow, so write \`record.<field>\`, and pass the
-  flow's \`startCondition\` for an edge or \`decision\` condition after it. Pass
-  \`field\` (formula) to be judged as that field: its type, and the formula
+  flow's \`startCondition\` for an edge or \`decision\` condition after it, and
+  its declared \`variables\`: the shadowed-read warning, and the binding of a
+  bare name to the variable rather than the field, need them at a
+  \`flow_condition\`. Pass \`field\` (formula) to be judged as that field: its type, and the formula
   cycle it would close; a field not yet declared is judged as a new formula.
-- **query_records({ objectName, where?, fields?, limit?, offset?, orderBy? })** —
+- **query_records({ objectName, where?, fields?, limit?, offset?, orderBy?, expand?, latestPer? })** —
   read records. \`where\` is a field→value match, e.g. \`{ "status": "open" }\`.
-  Results are page-capped; use \`limit\`/\`offset\` to page.
-- **get_record({ objectName, recordId })** — fetch one record by id.
+  Results are page-capped; use \`limit\`/\`offset\` to page. The answer's
+  \`source\` names the object, filter, measures and grouping its figures came
+  from; \`source.line\` is that source in the user's language. For "each X with
+  its latest Y", \`latestPer: { "by": ["account"], "orderBy": [{ "field":
+  "close_date", "order": "desc" }] }\` answers one record per group (ties go by
+  id). \`expand: ["account"]\` returns a lookup as the record it names; a field
+  whose object this door does not serve you refuses the call. For counts,
+  sums and breakdowns, \`aggregate_records({ objectName, aggregations,
+  groupBy?, where?, orderBy?, limit? })\` computes them in the database where
+  it is offered: groups of a select field come in the field's option order,
+  an amount over one fixed currency names its ISO 4217 code in \`currencies\`,
+  and a lookup group carries \`<key>__label\`, the record's name: name the group
+  by it, and where it has none, say the record cannot be named rather than
+  quoting the id.
+- **get_record({ objectName, recordId, related? })** — fetch one record by id.
+  \`related: [{ "object": "crm_opportunity" }]\` adds up to 3 lists of the
+  records that point at it (name \`field\` when the child points here through
+  several fields), each under your permissions on that object; a list with
+  \`truncated: true\` has more rows.
 - **create_record({ objectName, data })** — create a record.
 - **update_record({ objectName, recordId, data })** — change fields on a record.
 - **delete_record({ objectName, recordId, confirm })** — delete a record.
@@ -512,7 +549,8 @@ create/update payload.
   account's own key (an agent acting for itself, for no person) the call is
   refused whatever it sends and nothing runs: hand the action to a person, or
   its author declares \`ai.requiresConfirmation: false\` when it is safe
-  unattended.
+  unattended. A flow action that fails answers \`FLOW_FAILED\`: tell the user
+  the reason its second text block gives, never the flow and node chain.
 - **resume_run({ runId, values? })** — continue a flow run that
   \`run_action\` answered with \`status: "paused"\` and a \`screen\` (a form the
   flow needs filled in). Send the screen's field values in \`values\`, keyed by
@@ -522,7 +560,7 @@ create/update payload.
   (the person's confirmation, in your client or in the app, for an action its
   author declared \`requiresConfirmation\`, the refusal of a call that sends \`confirm\`,
   and its refusal under an AI service account's own key whatever the call sends).
-${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}${dataOnlyBlock}
+${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.federationTools === true && grantsAuthoringTools(options.grantedScopes) ? FEDERATION_TOOL_LINES : ''}${authoringTools ? renderAuthoringSection(authoringTools, describeObjectRegistered) : ''}${dataOnlyBlock}${renderAskSection(options)}
 ## Conventions & gotchas
 
 - **Permissions/RLS apply to every call.** Fewer rows than expected, or a
@@ -542,6 +580,10 @@ ${renderFileToolLines(options)}${renderDatasetToolLines(options)}${options.feder
   share a name, tell them apart by email, and ask your human which one if
   unsure. You see the colleagues your console's person picker shows you (your
   organization, directory fields), and \`sys_user\` is read only.
+- **Approvals waiting on you.** Where the app runs approvals, query
+  \`sys_approval_request\` with
+  \`where: {"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}\`
+  (\`{current_user_id}\` stands for you), and decide one with \`run_action\`.
 - **Prefer actions over hand-edits.** When \`list_actions\` offers an action for
   the task (approve, convert, close, …), call it instead of updating the
   records yourself — actions carry the app's validation and side effects.

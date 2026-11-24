@@ -1083,10 +1083,33 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
   });
 
   /**
-   * ⛔ The fold reaches `fields.*` and `_validations.*` and no other rung,
-   * because `ObjectExtensionSchema` reaches no further: an author cannot
-   * contribute a view, a section, a filter-preset tab or an action through an
-   * extension at all, so a key for one is an orphan exactly as it was.
+   * [ADR-0146 D10] The third rung an extension reaches: the base's paired
+   * `.custom` package declares the target's whole field arrangement
+   * (`fieldGroups`), and `fieldGroups[].key` is the `_sections` anchor
+   * (ADR-0085), so a group that arrangement brings is addressable. A section
+   * no group of the object or of an extension declares is still an orphan.
+   */
+  it('accepts a `_sections` key for a group an extension\'s `fieldGroups` brings, and still reports one nobody declares', () => {
+    const stack = (sections: Record<string, unknown>) => ({
+      objects: [{ name: 'crm_lead', label: 'Lead', fields: { name: { type: 'text', label: 'Name' } } }],
+      objectExtensions: [
+        { extend: 'crm_lead', fieldGroups: [{ key: 'reach', label: 'Reach', fields: ['name'] }] },
+      ],
+      translations: [{ 'zh-CN': { objects: { crm_lead: { _sections: sections } } } }],
+    });
+    expect(validateTranslationReferences(stack({ reach: { label: '联系方式' } }))).toEqual([]);
+    expect(validateTranslationReferences(stack({ zzz_gone: { label: 'x' } })).map((f) => f.path)).toEqual([
+      'translations[0]["zh-CN"].objects.crm_lead._sections.zzz_gone',
+    ]);
+  });
+
+  /**
+   * ⛔ The fold reaches `fields.*`, `_validations.*` and the `_sections` of a
+   * `fieldGroups` arrangement, and no other rung, because
+   * `ObjectExtensionSchema` reaches no further: an author cannot contribute a
+   * view, a filter-preset tab or an action through an extension at all, and a
+   * section its `fieldGroups` does not declare is not one either, so a key
+   * for one is an orphan exactly as it was.
    */
   it('folds no other rung — an extended object still reports its ghost view, section, tab and action', () => {
     const findings = validateTranslationReferences(
@@ -1110,7 +1133,7 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
    * the SCHEMA, so if `ObjectExtensionSchema` ever accepts one of these keys,
    * this fails here rather than leaving the rule reporting correct keys for a
    * surface that has started to exist. Both arms are asserted, so the refusal
-   * reading is not a dead instrument: the two keys the fold DOES read parse.
+   * reading is not a dead instrument: the keys the fold DOES read parse.
    */
   it('pins the extension key surface the fold is sized against', () => {
     const refusedByName = (key: string): boolean => {
@@ -1125,7 +1148,9 @@ describe('validateTranslationReferences — objectExtensions-injected surfaces (
       'views:refused',
       'listViews:refused',
       'actions:refused',
-      'fieldGroups:refused',
+      // [ADR-0146 D10] The paired `.custom` package's arrangement: accepted by
+      // the schema, and its group keys are folded into `_sections` (above).
+      'fieldGroups:accepted',
       'sections:refused',
       'tabs:refused',
       'hooks:refused',
@@ -2373,7 +2398,7 @@ describe('validateTranslationReferences — flow approval steps (`approvals.<nod
     expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.opportunity_approval.approvals.gate');
     expect(findings[0].message).toBe(
       'Translations are keyed to approval step "gate", which flow "opportunity_approval" declares as a ' +
-        '`decision` node, not an `approval`, so nothing resolves this key.',
+        '`decision` node, not an `approval`; its label is keyed `nodes.gate.label`.',
     );
     expect(findings[0].hint).toBe('Approval-step translations are keyed by the `id` of an `approval` node.');
   });
@@ -2426,10 +2451,122 @@ describe('validateTranslationReferences — flow approval steps (`approvals.<nod
     );
   });
 
-  it('control: a `screens` key over a non-approval, non-screen node keeps its own diagnosis', () => {
+  it('a `screens` key over a non-approval, non-screen node keeps its own diagnosis, pointed at `nodes`', () => {
     const findings = validateTranslationReferences(bundle({ opportunity_approval: { screens: { gate: { title: 'x' } } } }));
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('declares as a `decision` node, not a `screen`');
+    expect(findings[0].message).toBe(
+      'Translations are keyed to screen "gate", which flow "opportunity_approval" declares as a `decision` node, ' +
+        'not a `screen`; its label is keyed `nodes.gate.label`.',
+    );
+  });
+});
+
+describe('validateTranslationReferences — flow node labels (`nodes.<node_id>.label`, ruling 7076440876)', () => {
+  /**
+   * The same measured HotCRM shape as the approval steps above: a start, a
+   * decision, a screen, an approval and a refusing end, plus a notify nested
+   * in a loop body (an ADR-0031 region), so every verdict below is judged
+   * against the same metadata and differs only in the bundle.
+   */
+  const nodeStack = {
+    flows: [
+      {
+        name: 'opportunity_approval',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'gate', type: 'decision', label: 'High Value (> $500K)?' },
+          { id: 'collect', type: 'screen', label: 'Collect', config: { fields: [{ name: 'note' }] } },
+          { id: 'greet', type: 'screen', label: 'Greeting', config: { title: 'Hello {{ vars.name }}' } },
+          {
+            id: 'manager_review',
+            type: 'approval',
+            label: 'Sales Manager Review',
+            config: { approvers: [{ type: 'manager' }] },
+          },
+          {
+            id: 'each_line',
+            type: 'loop',
+            label: 'Each line',
+            config: { collection: '{lines}', body: { nodes: [{ id: 'tell_owner', type: 'notify', label: 'Tell owner' }] } },
+          },
+          { id: 'refuse', type: 'end', label: 'Refused', config: { outcome: 'refused', message: 'Refused.' } },
+        ],
+      },
+    ],
+  };
+  const bundle = (flows: unknown) => ({ ...nodeStack, translations: [{ 'zh-CN': { flows } }] });
+
+  it('reports nothing for the label of a start, decision, end or nested node — and the other groups beside it', () => {
+    expect(
+      validateTranslationReferences(
+        bundle({
+          opportunity_approval: {
+            nodes: {
+              start: { label: '开始' },
+              gate: { label: '大额（> 50 万美元）？' },
+              each_line: { label: '逐行' },
+              tell_owner: { label: '通知负责人' },
+              refuse: { label: '已拒绝' },
+            },
+            screens: { collect: { title: '收集' } },
+            approvals: { manager_review: { label: '销售经理审核' } },
+            refusals: { refuse: { message: '已拒绝。' } },
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('points a `nodes` key over an `approval` node at its step label', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { manager_review: { label: 'x' } } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0]["zh-CN"].flows.opportunity_approval.nodes.manager_review'],
+    ]);
+    expect(findings[0].message).toBe(
+      'Translations are keyed to node "manager_review", which flow "opportunity_approval" declares as an ' +
+        '`approval` node; its step label is keyed `approvals.manager_review.label`.',
+    );
+  });
+
+  it('points a `nodes` key over an untitled `screen` node at its heading', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { collect: { label: 'x' } } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0]["zh-CN"].flows.opportunity_approval.nodes.collect'],
+    ]);
+    expect(findings[0].message).toContain('`screens.collect.title`');
+  });
+
+  it('accepts a `nodes` key over a screen that authors its own `config.title`, beside that screen\'s heading key', () => {
+    expect(
+      validateTranslationReferences(
+        bundle({
+          opportunity_approval: {
+            nodes: { greet: { label: '问候' } },
+            screens: { greet: { title: '你好 {{ vars.name }}' } },
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('offers a titled screen as the nearest node for a misspelt `nodes` key', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { gret: { label: 'x' } } } }));
+    expect(findings.map((f) => f.rule)).toEqual([TRANSLATION_TARGET_UNKNOWN]);
+    expect(findings[0].message).toContain('Did you mean "greet"?');
+  });
+
+  it('refuses a `nodes` key over an UNKNOWN node, with the nearest labelled node offered', () => {
+    const findings = validateTranslationReferences(bundle({ opportunity_approval: { nodes: { gaet: { label: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.opportunity_approval.nodes.gaet');
+    expect(findings[0].message).toContain(
+      'Translations are keyed to node "gaet", which flow "opportunity_approval" does not declare, so its drawn ' +
+        'step keeps its authored label.',
+    );
+    expect(findings[0].message).toContain('Did you mean "gate"?');
+    expect(findings[0].hint).toBe("Node-label translations are keyed by a node's `id`, not its `label`.");
   });
 });
 
@@ -3773,6 +3910,11 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
       ghost: { _tabs: { ghost_tab: { label: 'Ghost' } } },
       path: 'translations[0].en.objects.crm_lead._tabs.ghost_tab',
     },
+    _relatedLists: {
+      kind: 'reference-checked',
+      ghost: { _relatedLists: { ghost_list: { label: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead._relatedLists.ghost_list',
+    },
     _validations: {
       kind: 'reference-checked',
       ghost: { _validations: { ghost_rule: { message: 'Ghost' } } },
@@ -3865,7 +4007,15 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         objectName: 'crm_env',
         type: 'api',
         target: '/api/v1/rotate',
-        resultDialog: { title: 'Secret', fields: [{ path: 'client.secret', label: 'Secret' }, { path: 'token' }] },
+        resultDialog: {
+          title: 'Secret',
+          fields: [
+            { path: 'client.secret', label: 'Secret' },
+            { path: 'token' },
+            // [#34652] A table field: its columns' headers are keyed under `resultDialog.columns`.
+            { path: 'rows', format: 'table', columns: [{ path: 'id', label: 'ID' }, { path: 'error.message', label: 'Why' }] },
+          ],
+        },
       },
       { name: 'plain_env', label: 'Plain', objectName: 'crm_env', type: 'script', target: 'plainEnv' },
       {
@@ -3880,7 +4030,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         label: 'Mint',
         type: 'api',
         target: '/api/v1/mint',
-        resultDialog: { fields: [{ path: 'token' }] },
+        resultDialog: { fields: [{ path: 'token' }, { path: 'rows', format: 'table', columns: [{ path: 'id' }] }] },
       },
       // [#31885] A preflight panel with declared fields, bound and object-less,
       // and a bound one that declares none (its panel shows the answer as JSON).
@@ -3893,7 +4043,11 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         params: [{ name: 'version', label: 'Version', type: 'text' }],
         preflight: {
           read: { url: '/api/v1/upgrade-plan?version=${param.version}' },
-          fields: [{ path: 'verdict.summary', label: 'Verdict' }, { path: 'findings' }],
+          fields: [
+            { path: 'verdict.summary', label: 'Verdict' },
+            { path: 'findings' },
+            { path: 'steps', format: 'table', columns: [{ path: 'step.name', label: 'Step' }] },
+          ],
         },
       },
       {
@@ -3913,7 +4067,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         params: [{ name: 'version', label: 'Version', type: 'text' }],
         preflight: {
           read: { url: '/api/v1/upgrade-plan?version=${param.version}' },
-          fields: [{ path: 'findings', label: 'Findings' }],
+          fields: [{ path: 'findings', label: 'Findings' }, { path: 'steps', format: 'table', columns: [{ path: 'step.name' }] }],
         },
       },
     ],
@@ -4207,6 +4361,65 @@ describe('validateTranslationReferences — keyed children of an action entry (#
   });
 
   /**
+   * [#34652] `resultDialog.columns.<path>.<column_path>` and
+   * `preflight.columns.<path>.<column_path>` — a table field's column headers,
+   * read by the resolvers for the declared table fields and their declared
+   * columns only.
+   */
+  describe('resultDialog.columns / preflight.columns', () => {
+    it('refuses a column the table field does not list, quoting a dotted path as ONE key', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            rotate_secret: { resultDialog: { columns: { rows: { id: '编号', 'error.message': '原因', 'error.code': '代码' } } } },
+            upgrade_env: { preflight: { columns: { steps: { 'step.name': '步骤', 'step.ghost': '幽灵' } } } },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.rotate_secret.resultDialog.columns.rows["error.code"]`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.upgrade_env.preflight.columns.steps["step.ghost"]`],
+      ]);
+      expect(findings[0].message).toContain('does not list');
+    });
+
+    it('refuses headers keyed to a field that is not a table, a field no row declares, or a block the action lacks', () => {
+      const findings = validateTranslationReferences(
+        actionStack(
+          onEnv({
+            rotate_secret: { resultDialog: { columns: { 'client.secret': { id: '编号' }, ghost_rows: { id: '编号' } } } },
+            plain_env: { preflight: { columns: { steps: { 'step.name': '步骤' } } } },
+          }),
+        ),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.rotate_secret.resultDialog.columns["client.secret"]`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.rotate_secret.resultDialog.columns.ghost_rows`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.preflight.columns.steps`],
+      ]);
+      expect(findings[0].message).toContain("no `format: 'table'` field at that path");
+      expect(findings[2].message).toContain('declares no `preflight`');
+    });
+
+    it('accepts every declared column at both addresses (the control)', () => {
+      expect(
+        validateTranslationReferences(
+          actionStack({
+            ...onEnv({
+              rotate_secret: { resultDialog: { columns: { rows: { id: '编号', 'error.message': '原因' } } } },
+              upgrade_env: { preflight: { columns: { steps: { 'step.name': '步骤' } } } },
+            }),
+            globalActions: {
+              mint_token: { resultDialog: { columns: { rows: { id: '编号' } } } },
+              upgrade_pkg: { preflight: { columns: { steps: { 'step.name': '步骤' } } } },
+            },
+          }),
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  /**
    * The action-entry twin of the #13835 object-branch pin above: every key the
    * action translation shape declares — down into `params.<name>.*` and
    * `resultDialog.*` — classified, and every `reference-checked` claim backed
@@ -4241,7 +4454,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     };
 
     type Address = 'bound' | 'global';
-    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog' | 'preflight';
+    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog' | 'preflight' | 'noRefusals' | 'noTexts';
     /**
      * Which declared action a ghost is written under, per address. `noDialog`
      * names an action that declares no `resultDialog`: the dialog's leaves
@@ -4260,6 +4473,12 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       noPreRunDialog: { bound: 'plain_env', global: 'mint_token' },
       // [#31885] An action whose `preflight` declares `fields`.
       preflight: { bound: 'upgrade_env', global: 'upgrade_pkg' },
+      // [#34273] An action that declares no `refusals`, so a refusal key under
+      // it is read by nothing (`coverageStack` gives the outcome hosts one).
+      noRefusals: { bound: 'plain_env', global: 'mint_token' },
+      // [#34374 PR2] An action that declares no `texts`, so a text key under
+      // it is read by nothing (`coverageStack` gives the outcome hosts some).
+      noTexts: { bound: 'plain_env', global: 'mint_token' },
     };
     type Coverage =
       | { kind: 'reference-checked'; host: Host; ghost: Record<string, unknown>; suffix: string; rule: string }
@@ -4311,7 +4530,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       },
       resultDialog: {
         kind: 'container',
-        why: 'a fixed-key node; its leaves and its keyed child `resultDialog.fields` are each judged below',
+        why: 'a fixed-key node; its leaves and its keyed children `resultDialog.fields` and `resultDialog.columns` are each judged below',
       },
       'resultDialog.title': {
         kind: 'reference-checked',
@@ -4341,15 +4560,43 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         suffix: '.resultDialog.fields.ghost_path',
         rule: TRANSLATION_TARGET_UNKNOWN,
       },
+      'resultDialog.columns': {
+        kind: 'reference-checked',
+        host: 'dialog',
+        ghost: { resultDialog: { columns: { rows: { ghost_column: 'x' } } } },
+        suffix: '.resultDialog.columns.rows.ghost_column',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
       preflight: {
         kind: 'container',
-        why: 'a fixed-key node; its one keyed child `preflight.fields` is judged below',
+        why: 'a fixed-key node; its keyed children `preflight.fields` and `preflight.columns` are judged below',
       },
       'preflight.fields': {
         kind: 'reference-checked',
         host: 'preflight',
         ghost: { preflight: { fields: { ghost_path: 'x' } } },
         suffix: '.preflight.fields.ghost_path',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      'preflight.columns': {
+        kind: 'reference-checked',
+        host: 'preflight',
+        ghost: { preflight: { columns: { ghost_path: { 'step.name': 'x' } } } },
+        suffix: '.preflight.columns.ghost_path',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      refusals: {
+        kind: 'reference-checked',
+        host: 'noRefusals',
+        ghost: { refusals: { GHOST_CODE: { message: 'x' } } },
+        suffix: '.refusals.GHOST_CODE',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      texts: {
+        kind: 'reference-checked',
+        host: 'noTexts',
+        ghost: { texts: { ghost_key: { message: 'x' } } },
+        suffix: '.texts.ghost_key',
         rule: TRANSLATION_TARGET_UNKNOWN,
       },
     };
@@ -4359,6 +4606,16 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       const stack = actionStack(bundle);
       const check = stack.actions.find((a) => a.name === 'check_updates') as Record<string, unknown>;
       check.params = [{ name: 'mode', label: 'Mode', type: 'select', options: [{ value: 'soft', label: 'Soft' }] }];
+      // [#34273] The outcome hosts declare a refusal catalogue, for the real instance below.
+      for (const name of [HOST.outcome.bound, HOST.outcome.global]) {
+        (stack.actions.find((a) => a.name === name) as Record<string, unknown>).refusals = {
+          NOT_READY: { message: 'Not ready.', reasons: { stale: { message: 'Stale.' } } },
+        };
+        // [#34374 PR2] …and declared texts.
+        (stack.actions.find((a) => a.name === name) as Record<string, unknown>).texts = {
+          audit_line: { message: 'Done.' },
+        };
+      }
       return stack;
     };
     const bundleAt = (address: Address, actionName: string, node: Record<string, unknown>) =>
@@ -4402,9 +4659,13 @@ describe('validateTranslationReferences — keyed children of an action entry (#
             cancelText: 'x',
             outcomeMessages: address === 'bound' ? { archived: 'x' } : { up_to_date: 'x' },
             params: { mode: { label: 'x', helpText: 'x', placeholder: 'x', options: { soft: 'x' } } },
+            refusals: { NOT_READY: { message: 'x', reasons: { stale: { message: 'x' } } } },
+            texts: { audit_line: { message: 'x' } },
           },
-          [dialog]: { resultDialog: { title: 'x', description: 'x', acknowledge: 'x', fields: { token: 'x' } } },
-          [HOST.preflight[address]]: { preflight: { fields: { findings: 'x' } } },
+          [dialog]: {
+            resultDialog: { title: 'x', description: 'x', acknowledge: 'x', fields: { token: 'x' }, columns: { rows: { id: 'x' } } },
+          },
+          [HOST.preflight[address]]: { preflight: { fields: { findings: 'x' }, columns: { steps: { 'step.name': 'x' } } } },
         };
       };
       expect(
@@ -4586,6 +4847,10 @@ describe('[#22161] one-line verdicts — translation-target-unknown, translation
     '`screen` node; its heading is keyed',
     'declares no node for, so the step keeps',
     '`approval` node; its step label is keyed',
+    '`decision` node, not a `screen`; its label is keyed',
+    'not an `approval`; its label is keyed',
+    'so its drawn step keeps its authored label',
+    '`screen` node; its heading is keyed `screens.collect.title`',
     'is not a form view, so no title resolves this key',
     'Translations are keyed to parameter "',
     'does not declare in `outcomeMessages`',
@@ -4865,6 +5130,42 @@ describe('validateTranslationReferences — reports', () => {
   });
 });
 
+describe('validateTranslationReferences — import mappings', () => {
+  const stack = (data: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    mappings: [{ name: 'lead_feed', label: 'Lead feed', targetObject: 'lead', fieldMapping: [{ source: 'Company', target: 'company' }] }],
+    ...extra,
+    translations: [{ en: data }],
+  });
+
+  it('a declared name is clean', () => {
+    expect(validateTranslationReferences(stack({ mappings: { lead_feed: { label: 'Lead feed' } } }))).toEqual([]);
+  });
+
+  it('a name no package declares is translation-target-unknown, at the named-item groups\' error', () => {
+    const findings = validateTranslationReferences(stack({ mappings: { lead_fede: { label: 'x' } } }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path, f.where])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', 'translations[0].en.mappings.lead_fede', 'locale "en" · import mapping "lead_fede"'],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "lead_feed"?');
+  });
+
+  it('judges the group against its own collection — a report name under `mappings` is an orphan', () => {
+    const findings = validateTranslationReferences(stack(
+      { mappings: { opps_by_stage: { label: 'x' } } },
+      { reports: [{ name: 'opps_by_stage', label: 'Opportunities by Stage', type: 'summary', dataset: 'pipeline', values: ['amount'] }] },
+    ));
+    expect(findings.map((f) => f.path)).toEqual(['translations[0].en.mappings.opps_by_stage']);
+  });
+
+  it('resolves a name a sibling package of the artifact declares', () => {
+    const findings = validateTranslationReferences(stack(
+      { mappings: { contact_feed: { label: 'Contact feed' } } },
+      { packages: [{ manifest: { mappings: [{ name: 'contact_feed', targetObject: 'contact', fieldMapping: [] }] } }] },
+    ));
+    expect(findings).toEqual([]);
+  });
+});
+
 describe('validateTranslationReferences — hook refusals (#26170)', () => {
   const creditStack = {
     hooks: [
@@ -5118,5 +5419,136 @@ describe('validateTranslationReferences — text a flow writes into a record (ru
     const otherType = validateTranslationReferences(keyed({ message: 'x' }, 'tell'));
     expect(otherType.map((f) => f.path)).toEqual(['translations[0]["zh-CN"].flows.case_escalation.records.tell']);
     expect(otherType[0].message).toContain('`save_notice` node');
+  });
+});
+
+describe('validateTranslationReferences — action refusals (#34273)', () => {
+  const refusals = {
+    NOT_DRAFT: { message: 'Only a draft invoice can be signed off.' },
+    STAGE_LOCKED: { message: 'Locked.', reasons: { closed: { message: 'Closed.' } } },
+  };
+  const refusalStack = (bundle: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_invoice', label: 'Invoice', fields: { name: { type: 'text', label: 'Name' } } }],
+    actions: [
+      {
+        name: 'submit_signoff',
+        label: 'Submit',
+        objectName: 'crm_invoice',
+        type: 'script',
+        body: { language: 'js', source: "throw { code: 'NOT_DRAFT' };" },
+        refusals,
+      },
+      {
+        name: 'export_all',
+        label: 'Export',
+        type: 'script',
+        body: { language: 'js', source: "throw { code: 'NOT_DRAFT' };" },
+        refusals,
+      },
+      { name: 'plain_invoice', label: 'Plain', objectName: 'crm_invoice', type: 'script', target: 'plainInvoice' },
+    ],
+    translations: [{ 'zh-CN': bundle }],
+  });
+  const ON = 'translations[0]["zh-CN"].objects.crm_invoice._actions';
+  const GLOBAL = 'translations[0]["zh-CN"].globalActions';
+
+  it('CONTROL: reports nothing for declared codes and reasons, bound and object-less', () => {
+    expect(validateTranslationReferences(refusalStack({
+      objects: {
+        crm_invoice: {
+          _actions: {
+            submit_signoff: {
+              refusals: {
+                NOT_DRAFT: { message: '只有草稿发票可以签核。' },
+                STAGE_LOCKED: { message: '已锁定。', reasons: { closed: { message: '已关闭。' } } },
+              },
+            },
+          },
+        },
+      },
+      globalActions: { export_all: { refusals: { NOT_DRAFT: { message: '只有草稿可以导出。' } } } },
+    }))).toEqual([]);
+  });
+
+  it('refuses a code the action does not declare, with the nearest declared code offered', () => {
+    const findings = validateTranslationReferences(refusalStack({
+      objects: { crm_invoice: { _actions: { submit_signoff: { refusals: { NOT_DRAFTT: { message: 'x' } } } } } },
+    }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', `${ON}.submit_signoff.refusals.NOT_DRAFTT`],
+    ]);
+    expect(findings[0].message).toContain('a code action "submit_signoff" does not declare under `refusals`');
+    expect(findings[0].message).toContain('Did you mean "NOT_DRAFT"?');
+  });
+
+  it('refuses a refusal key on an action that declares no `refusals`', () => {
+    const findings = validateTranslationReferences(refusalStack({
+      objects: { crm_invoice: { _actions: { plain_invoice: { refusals: { ANY: { message: 'x' } } } } } },
+    }));
+    expect(findings.map((f) => f.path)).toEqual([`${ON}.plain_invoice.refusals.ANY`]);
+    expect(findings[0].message).toContain('action "plain_invoice" declares no `refusals`');
+  });
+
+  it('refuses a reason the code does not declare, and a reason under a code that declares none', () => {
+    const findings = validateTranslationReferences(refusalStack({
+      globalActions: {
+        export_all: {
+          refusals: {
+            STAGE_LOCKED: { reasons: { clsoed: { message: 'x' } } },
+            NOT_DRAFT: { reasons: { any: { message: 'x' } } },
+          },
+        },
+      },
+    }));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, `${GLOBAL}.export_all.refusals.STAGE_LOCKED.reasons.clsoed`],
+      [TRANSLATION_TARGET_UNKNOWN, `${GLOBAL}.export_all.refusals.NOT_DRAFT.reasons.any`],
+    ]);
+    expect(findings[0].message).toContain('Did you mean "closed"?');
+    expect(findings[1].message).toContain('declares no `reasons` under that code');
+  });
+});
+
+describe('validateTranslationReferences — action texts (#34374 PR2)', () => {
+  const texts = { email_subject: { message: 'Email: {{ subject }}', params: ['subject'] } };
+  const body = { language: 'js', source: "await ctx.text('email_subject', { subject: input.subject });" };
+  const textStack = (bundle: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_contact', label: 'Contact', fields: { name: { type: 'text', label: 'Name' } } }],
+    actions: [
+      { name: 'send_email', label: 'Send email', objectName: 'crm_contact', type: 'script', body, texts },
+      { name: 'send_digest', label: 'Send digest', type: 'script', body, texts },
+      { name: 'plain_contact', label: 'Plain', objectName: 'crm_contact', type: 'script', target: 'plainContact' },
+    ],
+    translations: [{ 'zh-CN': bundle }],
+  });
+  const ON = 'translations[0]["zh-CN"].objects.crm_contact._actions';
+  const GLOBAL = 'translations[0]["zh-CN"].globalActions';
+
+  it('CONTROL: reports nothing for declared text keys, bound and object-less', () => {
+    expect(validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { send_email: { texts: { email_subject: { message: '邮件：{{ subject }}' } } } } } },
+      globalActions: { send_digest: { texts: { email_subject: { message: '邮件：{{ subject }}' } } } },
+    }))).toEqual([]);
+  });
+
+  it('refuses a key the action does not declare, with the nearest declared key offered, at both addresses', () => {
+    const findings = validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { send_email: { texts: { email_subjct: { message: 'x' } } } } } },
+      globalActions: { send_digest: { texts: { email_subjct: { message: 'x' } } } },
+    }));
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [TRANSLATION_TARGET_UNKNOWN, 'error', `${ON}.send_email.texts.email_subjct`],
+      [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.send_digest.texts.email_subjct`],
+    ]);
+    expect(findings[0].message).toContain('a key action "send_email" does not declare under `texts`');
+    expect(findings[0].message).toContain('Did you mean "email_subject"?');
+  });
+
+  it('refuses a text key on an action that declares no `texts`', () => {
+    const findings = validateTranslationReferences(textStack({
+      objects: { crm_contact: { _actions: { plain_contact: { texts: { any: { message: 'x' } } } } } },
+    }));
+    expect(findings.map((f) => f.path)).toEqual([`${ON}.plain_contact.texts.any`]);
+    expect(findings[0].message).toContain('action "plain_contact" declares no `texts`');
   });
 });

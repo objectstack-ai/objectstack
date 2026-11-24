@@ -20,6 +20,7 @@ export const ptBR: TranslationData = {
         nav_account_profile: { label: 'Perfil' },
         nav_account_mobile_app: { label: 'Aplicativo móvel' },
         nav_account_notifications: { label: 'Notificações' },
+        nav_account_notification_settings: { label: 'Configurações de notificação' },
         nav_account_approvals: { label: 'Minhas aprovações pendentes' },
         nav_account_memberships: { label: 'Minhas organizações' },
         nav_account_linked: { label: 'Contas vinculadas' },
@@ -38,7 +39,6 @@ export const ptBR: TranslationData = {
       navigation: {
         group_overview: { label: 'Visão geral' },
         group_apps: { label: 'Aplicativos' },
-        nav_packaged_actions: { label: 'Ações fornecidas por pacotes' },
         nav_marketplace_browse: { label: 'Explorar o Marketplace' },
         nav_marketplace_installed: { label: 'Aplicativos instalados' },
         nav_cloud_connection: { label: 'Conexão com a nuvem' },
@@ -96,6 +96,9 @@ export const ptBR: TranslationData = {
         nav_settings_hub: { label: 'Todas as configurações' },
         nav_settings_localization: { label: 'Localização' },
         nav_exchange_rates: { label: 'Taxas de câmbio' },
+        nav_units_of_measure: { label: 'Unidades de medida' },
+        nav_work_calendars: { label: 'Calendários de trabalho' },
+        nav_work_calendar_exceptions: { label: 'Exceções de calendário' },
         nav_settings_company: { label: 'Empresa' },
         nav_settings_mail: { label: 'Envio de e-mail' },
         nav_settings_sms: { label: 'Envio de SMS' },
@@ -107,6 +110,7 @@ export const ptBR: TranslationData = {
         nav_settings_knowledge: { label: 'Conhecimento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida dos dados' },
         nav_recycle_bin: { label: 'Lixeira' },
+        nav_public_forms: { label: 'Formulários públicos' },
         nav_notification_preferences: { label: 'Preferências de notificação' },
         nav_notification_templates: { label: 'Modelos de notificação' },
 
@@ -124,6 +128,7 @@ export const ptBR: TranslationData = {
         nav_datasources: { label: 'Fontes de dados' },
         nav_connector_credentials: { label: 'Credenciais dos conectores' },
         nav_connector_connections: { label: 'Conexões dos conectores' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'Aplicativos OAuth' },
       },
@@ -190,13 +195,55 @@ export const ptBR: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Número de usuários' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Número de organizações' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Número de sessões' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Número de instalações' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'Número de usuários',
+          description: 'Número de contas de usuário registradas, ativas ou não.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'Número de organizações',
+          description: 'Número de organizações registradas; cada uma tem seus próprios membros, dados e configurações.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'Número de sessões',
+          description: 'Número de sessões de login registradas, uma por login feito em um navegador ou dispositivo.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'Número de instalações',
+          description: 'Número de instalações de pacotes registradas, uma por pacote instalado.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Tipo de ação' }, user_id: { label: 'Usuário' } },
-      measures: { event_count: { label: 'Número de eventos' } },
+      dimensions: {
+        action: {
+          label: 'Tipo de ação',
+          description: 'Tipo de ação registrada por uma entrada do log de auditoria, como criar, atualizar, excluir, fazer login ou alterar a configuração.',
+        },
+        user_id: {
+          label: 'Usuário',
+          description: 'Usuário que realizou a ação auditada; as entradas gravadas pela própria plataforma são agrupadas em "Sistema".',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'Número de eventos',
+          description: 'Número de entradas do log de auditoria; cada uma registra uma ação realizada no sistema por um usuário ou pela própria plataforma.',
+        },
+      },
     },
   },
 

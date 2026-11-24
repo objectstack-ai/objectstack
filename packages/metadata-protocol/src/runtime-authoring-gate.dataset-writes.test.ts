@@ -48,18 +48,22 @@ const OBJECTS = [
   },
 ];
 
-/** A dataset every crossed rule passes. */
+/**
+ * A dataset every crossed rule passes. Each member carries `synonyms`
+ * (ADR-0149 D1): a member with neither `synonyms` nor a `description` is
+ * advised (`dataset-member-no-vocabulary`), and "clean" here means no advisory.
+ */
 const cleanDataset = (over: Record<string, unknown> = {}) => ({
   name: 'acme_invoice_metrics',
   label: 'Invoice Metrics',
   object: 'acme_invoice',
   dimensions: [
-    { name: 'region', field: 'region' },
-    { name: 'issued_on', field: 'issued_on', dateGranularity: 'month' },
+    { name: 'region', field: 'region', synonyms: ['billing region'] },
+    { name: 'issued_on', field: 'issued_on', dateGranularity: 'month', synonyms: ['issue date'] },
   ],
   measures: [
-    { name: 'invoice_count', aggregate: 'count' },
-    { name: 'total_amount', aggregate: 'sum', field: 'total' },
+    { name: 'invoice_count', aggregate: 'count', synonyms: ['number of invoices'] },
+    { name: 'total_amount', aggregate: 'sum', field: 'total', synonyms: ['billed amount'] },
   ],
   ...over,
 });

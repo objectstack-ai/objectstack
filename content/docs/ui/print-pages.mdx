@@ -145,8 +145,18 @@ const file = await print.printRecordToFile(
   { app: 'sales', object: 'invoice', recordId: 'inv_1', page: 'invoice_document' },
   context, // the requesting user's execution context
 );
-// { fileId, attachmentId, size, filename: 'invoice_document-inv_1.pdf' }
+// { fileId, attachmentId, size, filename: 'INV-0001.pdf' }
 ```
+
+With no `filename`, the PDF is named after the record: its display name — the
+value of the object's title field (`nameField`, or the field derived from its
+fields) — plus `.pdf`, read from the record as the requesting user reads it.
+The name is made safe for a file: `/ \ : * ? " < > |` become `_`, control
+characters and runs of whitespace become one space, leading dots are dropped,
+and it is cut to 100 characters. A record with no display value keeps
+`<page>-<recordId>.pdf` (`invoice_document-inv_1.pdf`). A `filename` in the
+request is used exactly as given. Printing a record twice attaches two files
+of the same name; neither replaces the other.
 
 The page is rendered as the requesting user — never as the system — through a
 short-lived session minted for that user and revoked as soon as the print ends,

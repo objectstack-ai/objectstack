@@ -55,6 +55,8 @@ export type {
 } from './dataset-tools.js';
 export { matchDatasetTerms } from './dataset-term-matcher.js';
 export type { MatchableMember } from './dataset-term-matcher.js';
+// [#34919] The order list_datasets reports mixed cases by (`nextStep`), for the texts that name it.
+export { DATASET_NEXT_STEP_PRECEDENCE } from './dataset-next-step.js';
 
 // Strategies
 export { NativeSQLStrategy } from './strategies/native-sql-strategy.js';

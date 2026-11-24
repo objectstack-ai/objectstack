@@ -9,7 +9,8 @@
  */
 
 import type { DriverOptions, ValueShapeFieldDef } from '@objectstack/spec/data';
-import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
+import type { DriverAggregateQuery, DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import {
   MongoClient,
   Db,
@@ -106,6 +107,44 @@ function withoutUndefinedOwnKeys<T extends Record<string, unknown>>(record: T): 
   return (out as T) ?? record;
 }
 
+/**
+ * [#34598] The non-UTC reference zone an `aggregate()` query asks its date
+ * buckets to be read in (`DriverAggregateQuery.timezone`, ADR-0053 Phase 2 D2
+ * as amended), or `undefined` when there is none to read: no `timezone`, the
+ * `UTC` the engine never sends but a direct caller may, or a query with no
+ * `dateGranularity` item (no bucket reads a zone). The same reading as
+ * driver-sql's `zonedBucketOf`, so the two faces refuse the same population.
+ */
+function zonedBucketOf(query: DriverAggregateQuery): string | undefined {
+  const zone = query.timezone;
+  if (zone === undefined || zone === 'UTC') return undefined;
+  const bucketed = (query.groupBy ?? []).some((g) => typeof g === 'object' && g !== null && !!g.dateGranularity);
+  return bucketed ? zone : undefined;
+}
+
+/**
+ * [#34598] A direct `aggregate()` caller asked for date buckets in a non-UTC
+ * reference zone. This driver lowers a bucket with `$dateToString` and no
+ * `timezone` operand, so every bucket it emits is a UTC calendar label; it
+ * does not declare `supports.zonedDateBucketing`, and the engine therefore
+ * never sends it a zone (it buckets such a query in memory). Reaching this
+ * means a caller went around that bit. Answered as driver-sql's `dialect`
+ * cause is answered, first sentence for first sentence: a capability gap in
+ * the backend, NOT_IMPLEMENTED / 501 (ADR-0112) — never the UTC bucket, which
+ * is the plausible wrong answer this refusal exists to prevent.
+ */
+function refuseZonedDateBucket(zone: string): never {
+  const err = new Error(
+    `Date bucketing in the reference timezone '${zone}' is not supported by this backend (driver-mongodb). ` +
+      `This is a capability gap in the backend, not a mistake in the query, which is why it answers ` +
+      `NOT_IMPLEMENTED/501. A driver publishes zone-aware bucketing as \`supports.zonedDateBucketing\`; ` +
+      `the engine buckets a non-UTC zone in memory on every driver without it, which is always correct.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  throw err;
+}
+
 // ── Configuration ────────────────────────────────────────────────────────────
 
 /**
@@ -173,10 +212,14 @@ export class MongoDBDriver implements IDataDriver {
    * `mongodb-date-bucket-parity.test.ts`, and it is the reason that suite exists
    * rather than an enrolment in `checkDateBucketParity`, which needs a server.
    *
-   * Timezones stay engine-side: `engine.aggregate` forces the in-memory path for
-   * any non-UTC reference zone (ADR-0053 Phase 2 D2), and the AST it hands a
-   * driver carries no `timezone` at all, so this bucketing is UTC by
-   * construction — the only thing it could mean.
+   * Timezones stay engine-side: this driver does not declare
+   * `supports.zonedDateBucketing`, so `engine.aggregate` buckets any non-UTC
+   * reference zone in memory (ADR-0053 Phase 2 D2 as amended) and the query it
+   * hands this driver carries no `timezone`. The lowering takes no zone, so
+   * every bucket here is a UTC calendar label. [#34598] A DIRECT caller can
+   * still pass `DriverAggregateQuery.timezone`; {@link aggregate} answers a
+   * non-UTC zone on a date bucket with NOT_IMPLEMENTED / 501 rather than the
+   * UTC bucket. Absent or `UTC` buckets in UTC, as it always has.
    */
   public readonly supports = {
     batchSchemaSync: true,
@@ -627,7 +670,13 @@ export class MongoDBDriver implements IDataDriver {
   // Aggregation
   // ===========================================================================
 
-  async aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  async aggregate(object: string, query: DriverAggregateQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
+    // [#34598] A reference zone on a date bucket is judged before anything is
+    // built or sent: this face buckets in UTC only, so a non-UTC zone is
+    // refused rather than silently answered with UTC buckets.
+    const bucketZone = zonedBucketOf(query);
+    if (bucketZone !== undefined) refuseZonedDateBucket(bucketZone);
+
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 

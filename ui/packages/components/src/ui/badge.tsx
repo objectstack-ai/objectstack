@@ -15,7 +15,7 @@ const badgeVariants = cva(
   // `whitespace-nowrap`: a badge is a single-line pill by definition. Without
   // it, CJK labels (e.g. 待审批) break per-character inside a cramped table
   // cell and render stacked vertically (objectui#2762 P0-1).
-  "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
   {
     variants: {
       variant: {

@@ -32,12 +32,19 @@ import {
 import { isCustomizationPackage } from '@objectstack/spec/kernel';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 
-/** What the landing draws for one base: two served numbers. */
+/** What the landing draws for one base: two served numbers, and which switched-off items are actions. */
 export interface PackageCustomizationCounts {
   /** Served overrides plus served extensions of the base's pair. */
   customized: number;
   /** Served switched-off items of the base. */
   switchedOff: number;
+  /**
+   * objectstack#34724 — the names of the switched-off items that are
+   * actions, in the served order: the landing's "switched off" link leads to
+   * them, since an action's switch is on the action in Studio. Absent reads
+   * as none.
+   */
+  switchedOffActions?: readonly string[];
 }
 
 /** The route of the read, for one base package id. */
@@ -84,6 +91,24 @@ export async function fetchPackageCustomizations(baseId: string): Promise<Packag
  * counts the server served.
  */
 export async function fetchPackageCustomizationCounts(baseId: string): Promise<PackageCustomizationCounts> {
-  const { counts } = await fetchPackageCustomizations(baseId);
-  return { customized: counts.overrides + counts.extensions, switchedOff: counts.switchedOff };
+  return customizationCountsOf(await fetchPackageCustomizations(baseId));
+}
+
+/**
+ * What a card draws, off one served answer: "customized" is the served
+ * overrides plus the served extensions, "switched off" the served
+ * switched-off count, and (objectstack#34724) the switched-off items that are
+ * actions, by name, which the "switched off" link leads to. Pure, so a reader
+ * that holds the whole answer (the landing, which also lists its rows,
+ * objectstack#34714) draws the same numbers without a second request.
+ */
+export function customizationCountsOf({
+  counts,
+  switchedOff,
+}: Pick<PackageCustomizations, 'counts' | 'switchedOff'>): PackageCustomizationCounts {
+  return {
+    customized: counts.overrides + counts.extensions,
+    switchedOff: counts.switchedOff,
+    switchedOffActions: switchedOff.filter((item) => item.type === 'action').map((item) => item.name),
+  };
 }

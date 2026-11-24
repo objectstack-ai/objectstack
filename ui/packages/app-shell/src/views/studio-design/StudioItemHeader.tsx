@@ -73,6 +73,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  ObjectIconTile,
 } from '@object-ui/components';
 import {
   STUDIO_API_CHIP,
@@ -590,6 +591,12 @@ function useTitleRowFold(
 export interface StudioItemHeaderProps {
   /** The icon component for the tile; omitted when the pillar has nothing open. */
   icon?: React.ElementType;
+  /**
+   * Set when the item is an object (objectstack#35985): the icon is drawn as
+   * the object's tile, a white glyph on the object's palette colour, as the
+   * console's menu draws it. Absent: the primary-tinted tile.
+   */
+  objectTile?: { color?: string };
   /** The item's label. */
   title: React.ReactNode;
   /** Attributes for the title element (a test id, a tooltip with the machine name). */
@@ -629,6 +636,7 @@ export interface StudioItemHeaderProps {
 
 export function StudioItemHeader({
   icon: Icon,
+  objectTile,
   title,
   titleProps,
   apiName,
@@ -670,11 +678,13 @@ export function StudioItemHeader({
     <div data-testid={testId} className={cn(STUDIO_ITEM_HEADER, !tabs && 'pb-3', className)}>
       <div ref={titleRowRef} className={STUDIO_ITEM_ROW}>
         {leading}
-        {Icon && (
+        {Icon && objectTile ? (
+          <ObjectIconTile glyph={Icon} color={objectTile.color} size="lg" />
+        ) : Icon ? (
           <span className={STUDIO_ICON_TILE}>
             <Icon className="h-4 w-4" />
           </span>
-        )}
+        ) : null}
         <h1 {...titleProps} ref={titleRef} title={titleTooltip} className={cn(STUDIO_ITEM_TITLE, titleProps?.className)}>
           {title}
         </h1>

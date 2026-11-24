@@ -152,6 +152,14 @@ import {
   type ParentRecordGate,
   type ParentRecordGateEngine,
 } from './parent-record-read-gate.js';
+import {
+  clearClientResolution,
+  installCommentReplyReopens,
+  isResolutionOnlyUpdate,
+  namesResolution,
+  refuseResolutionOnReply,
+  stampCommentResolution,
+} from './comment-resolution.js';
 
 /** Minimal engine surface these installers need — duck-typed (like
  * service-storage's attachment seams) so tests can fake it and so plugin-audit
@@ -186,6 +194,10 @@ export interface CommentAccessEngine {
    * declares its parent pair ({@link declaresCommentParentPair}). Optional: an
    * engine without it is treated as one whose `sys_comment` declares none. */
   getSchema?(object: string): unknown;
+  /** [#36071] The platform's own write that reopens a resolved thread when a
+   * reply is posted into it (`comment-resolution.ts`). Optional: an engine
+   * without it cannot reopen, and says so at `error` when a reply needs it. */
+  update?(object: string, data: Record<string, unknown>, options: Record<string, unknown>): Promise<unknown>;
 }
 
 /** Minimal shape of the engine `OperationContext` the read middleware reads. */
@@ -226,6 +238,8 @@ export interface CommentAccessLogger {
   info(msg: string, meta?: unknown): void;
   warn(msg: string, meta?: unknown): void;
   debug?(msg: string, meta?: unknown): void;
+  /** [#36071] A reply stored under a thread that could not be reopened. Absent: `warn`. */
+  error?(msg: string, meta?: unknown): void;
 }
 
 /** A comment author's display identity: the name and avatar URL the platform
@@ -941,6 +955,10 @@ export function installCommentAccessHooks(
     // touched; an absent one takes the field's default.
     if (Object.prototype.hasOwnProperty.call(data, 'is_edited')) data.is_edited = false;
     if (Object.prototype.hasOwnProperty.call(data, 'edited_at')) data.edited_at = null;
+    // [#36071] And not a resolved one: the resolution is the platform's to
+    // record on an update (`comment-resolution.ts`), never the client's to
+    // send on a create.
+    clearClientResolution(data);
 
     const target = parseCommentThreadId(data.thread_id);
     if (!target) {
@@ -1103,6 +1121,44 @@ export function installCommentAccessHooks(
     }
   };
 
+  /**
+   * [#36071, maintainer ruling record 7063285032, option A] Who may resolve
+   * or reopen a thread: whoever may comment on the record it is on — the
+   * insert rule above ({@link callerCanRead} on the parent), not the
+   * author-or-parent-editor rule. Reached only for an update that changes
+   * nothing but `is_resolved`. Every matched row must pass. The author of a
+   * top-level comment passes, as on every update. A thread naming no record
+   * has no parent to read, so only its author passes; anyone else, and a
+   * caller who cannot read the parent, gets the not-visible refusal, which
+   * names nothing the read door hides.
+   */
+  const authorizeResolution = async (ctx: any, rows: Array<Record<string, unknown>>): Promise<void> => {
+    const userId = ctx.session.userId as string | undefined;
+    const readable = new Map<string, boolean>();
+    for (const row of rows) {
+      if (userId && row.author_id === userId) continue;
+      const target = parseCommentThreadId(row.thread_id);
+      let canRead = false;
+      if (target) {
+        const key = `${target.object}:${target.recordId}`;
+        let verdict = readable.get(key);
+        if (verdict === undefined) {
+          verdict = await callerCanRead(ctx, target);
+          readable.set(key, verdict);
+        }
+        canRead = verdict;
+      }
+      if (!canRead) {
+        logger.warn(
+          `[audit] comment access: cannot resolve or reopen comment ${String(row.id)} — the caller cannot read the ` +
+            'record its thread is on (answered not-visible)',
+          { operation: 'update', object: COMMENT_OBJECT, recordId: row.id, userId: userId ?? 'unknown' },
+        );
+        refuseNotVisible(callerContext(ctx), messageTranslator);
+      }
+    }
+  };
+
   // ── Update: author or parent editor (+ the insert rule on a re-point) ──
   engine.registerHook(
     'beforeUpdate',
@@ -1110,7 +1166,20 @@ export function installCommentAccessHooks(
       if (ctx?.session?.isSystem) return;
       if (!ctx?.session) return;
       const rows = await resolveTargetRows(ctx, 'update');
-      if (rows.length) await authorizeRows(ctx, rows, 'update');
+      const data: unknown = ctx?.input?.data;
+      if (rows.length) {
+        // [#36071, ruling record 7063285032] Resolving or reopening a thread,
+        // and nothing else, is collaboration: the rule that admits a new
+        // comment admits it.
+        if (isResolutionOnlyUpdate(data)) await authorizeResolution(ctx, rows);
+        else await authorizeRows(ctx, rows, 'update');
+      }
+      // [#36071] A thread is resolved on its top-level comment, never on a
+      // reply — refused for every non-system caller, the reply's author too.
+      // AFTER the access gate: `rows` were read in system context, so a caller
+      // who cannot see the record must meet the not-visible refusal above
+      // (#21755), never a 400 that confirms the reply exists.
+      if (namesResolution(data)) refuseResolutionOnReply(rows);
 
       // Moving a comment to another thread is an insert into that thread: the
       // NEW parent must be readable, or an authorized edit of your own comment
@@ -1148,6 +1217,14 @@ export function installCommentAccessHooks(
   // whole-operation dispatch, and the stamp wants neither — see
   // {@link stampCommentBodyEdit}.
   engine.registerHook('beforeUpdate', stampCommentBodyEdit, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
+
+  // ── Update: the platform stamps who resolved a thread and when (#36071) ─
+  // Its own registration, for the edit stamp's reason above: every caller is
+  // stamped — see `stampCommentResolution` in `comment-resolution.ts`.
+  engine.registerHook('beforeUpdate', stampCommentResolution, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
+
+  // ── Create: a reply reopens its resolved thread (#36071) ────────────
+  installCommentReplyReopens(engine, logger, { packageId: PACKAGE_ID });
 
   // ── Create and re-point: the platform stamps the parent pair (ADR-0139 E7) ─
   // Its own registrations, for the stamp's reason above: every caller is

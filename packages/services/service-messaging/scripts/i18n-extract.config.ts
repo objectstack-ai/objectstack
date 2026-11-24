@@ -44,6 +44,8 @@ import {
   NotificationTemplate,
   HttpDelivery,
   UserDevice,
+  ChannelAccount,
+  ChannelUserLink,
 } from '../src/objects/index.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
@@ -80,6 +82,8 @@ const config: ObjectStackDefinition = defineStack({
     NotificationTemplate,
     HttpDelivery,
     UserDevice,
+    ChannelAccount,
+    ChannelUserLink,
   ] as any,
   translations: [
     { en: { objects: enObjects } },

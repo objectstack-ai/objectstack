@@ -133,6 +133,13 @@
  * `isRuntimeDefaultToken` from `@objectstack/spec/data`, which `sql-driver.ts`
  * no longer reads.
  *
+ * [#34973] Two bodies were born here rather than moved:
+ * `backfillCanonicalBooleans`, the fourth storage convergence (legacy text
+ * `'true'` / `'false'` in a SQLite boolean column to `1` / `0`), and
+ * `previewBooleanConvergence`, its deferred-DDL preview. Each carries its
+ * contract in its own docblock, and the class methods only point there,
+ * because `sql-driver.ts` sits under its facade line ceiling.
+ *
  * A MOVE, not a redesign. Each function below is the body of the `SqlDriver`
  * method of the same name as it stood, re-indented one level and otherwise
  * unedited: the same dialect statements, the same rebuild procedure, the same
@@ -170,6 +177,7 @@ import { activeConcurrentIndexDeferral, attachUniqueConstraintSql, clearConcurre
 import { isJsonColumnType, mediaColumnMoveDialect, mediaColumnMovePlan, type MediaColumnMovePlan, type MediaColumnMoveRefusal, type MediaColumnMoveScan } from './media-column-move.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
+import { SQLITE_BOOLEAN_TEXT_SPELLINGS } from './sql-driver-sqlite-serialisation.js';
 import { renderExistingTableAdoptionRefusal } from './existing-table-refusal.js';
 import { renderDeclaredRenameRefusal } from './declared-rename.js';
 import { aggregandColumnClass } from '@objectstack/core';
@@ -249,6 +257,7 @@ export interface SchemaSyncHost {
   readonly physicalSchemaByObject: SqlDriver['physicalSchemaByObject'];
   readonly physicalTableByObject: SqlDriver['physicalTableByObject'];
   planDeclaredRenames: SqlDriver['planDeclaredRenames'];
+  previewBooleanConvergence: SqlDriver['previewBooleanConvergence'];
   previewDatetimeConvergence: SqlDriver['previewDatetimeConvergence'];
   previewTimeConvergence: SqlDriver['previewTimeConvergence'];
   probeNullSafeUniqueDuplicates: SqlDriver['probeNullSafeUniqueDuplicates'];
@@ -524,6 +533,8 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
       case 'drop_column_default':
         await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
         return true;
+      case 'set_column_default':
+        return setDeclaredColumnDefault.call(this, table, column);
     }
   }
   if (this.isMysql) {
@@ -552,15 +563,49 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
         await this.knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, column]);
         return true;
       case 'drop_column_default':
-        // `ALTER … ALTER COLUMN … DROP DEFAULT` — the one ALTER COLUMN form
-        // MySQL accepts without restating the type, so it cannot lose a
-        // varchar length the way MODIFY can.
-        await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+        // `ALTER … ALTER COLUMN …` — the one form MySQL accepts without
+        // restating the type, so it cannot lose a varchar length the way
+        // MODIFY can. [#36596] On a NULLABLE column it is `SET DEFAULT NULL`,
+        // never `DROP DEFAULT`: MySQL 8's DROP DEFAULT leaves the column with
+        // no default at all, and a strict-mode insert that omits it is then
+        // refused ("Field … doesn't have a default value", ER 1364) where
+        // Postgres and SQLite store NULL. Measured on 8.0.46. A NOT NULL
+        // column keeps DROP DEFAULT: NULL is not a default it can take.
+        if (ci?.nullable === true) {
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT NULL', [table, column]);
+        } else {
+          await this.knex.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+        }
         return true;
+      case 'set_column_default':
+        // `ALTER … ALTER COLUMN … SET DEFAULT` — the same MODIFY-free form.
+        return setDeclaredColumnDefault.call(this, table, column);
     }
   }
   this.logger.warn(`[schema-drift] ${op.type} on ${table}.${column} is unsupported on dialect '${this.dialectName}' — skipped`);
   return false;
+}
+
+/**
+ * [#36245] The in-place arm of `set_column_default` on Postgres and MySQL:
+ * `ALTER TABLE … ALTER COLUMN … SET DEFAULT <literal>`, the literal being the
+ * field's declared `defaultValue` read now, from the metadata the driver was
+ * given, and inlined as the client escapes it (DDL takes no bind parameters).
+ * Answers `false` (skipped) when the declaration no longer carries a literal
+ * the column could hold — the entry was planned against a different one —
+ * rather than guess at a value.
+ */
+async function setDeclaredColumnDefault(
+  this: Pick<SchemaSyncHost, 'knex' | 'managedObjectFields'>,
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const dv = this.managedObjectFields.get(table)?.[column]?.defaultValue;
+  if (typeof dv !== 'string' && typeof dv !== 'number' && typeof dv !== 'boolean') return false;
+  if (isRuntimeDefaultToken(dv)) return false;
+  const literal = this.knex.raw('?', [dv]).toQuery();
+  await this.knex.raw(`ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT ${literal}`, [table, column]);
+  return true;
 }
 
 /**
@@ -690,6 +735,9 @@ export async function rebuildSqliteTablePatched(this: Pick<SchemaSyncHost, 'appl
     else if (e.op.type === 'tighten_not_null') tighten.add(e.op.column);
     else if (e.op.type === 'drop_column') drop.add(e.op.column);
     else if (e.op.type === 'drop_column_default') dropDefault.add(e.op.column);
+    // [#36245] Nothing to collect: the rebuild re-emits every column's DEFAULT
+    // from the declaration (below), which IS the restated default.
+    else if (e.op.type === 'set_column_default') { /* honoured by the rebuild itself */ }
     // Everything else is IGNORED here and must be reported as such (#11722):
     // widen/narrow varchar (SQLite ignores declared length — nothing to do),
     // `manual_column_type_change` (no reconciler arm on ANY dialect, by
@@ -1495,7 +1543,7 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
 /**
  * [#32590] Is this drift entry a column change the publish of the declaration
  * applies? Every `safe` column entry — the class that cannot lose data or fail
- * on existing rows (a wider varchar, a dropped runtime-token DEFAULT, a `date`
+ * on existing rows (a wider varchar, a dropped or restated column DEFAULT, a `date`
  * column widened to the declared `datetime`) — and the one `needs_confirm`
  * entry whose declaration says so in words: a NOT NULL column whose field
  * declares `storage: { notNull: false }`. That entry stays `needs_confirm` for
@@ -1506,7 +1554,17 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
 function isPublishedColumnChange(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
   if (isIndexDriftOp(d.op)) return false;
   if (d.category === 'safe') return true;
-  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
+  return isDeclaredRelaxPair(d, fields);
+}
+
+/**
+ * [#32590 / #36596] The `needs_confirm` entries a declared `storage: { notNull:
+ * false }` makes deliberate: the relax of the NOT NULL column, and the drop of
+ * a stale literal DEFAULT the differ pairs with that relax (never proposed
+ * without it). Applying the relax alone would keep storing the old default.
+ */
+function isDeclaredRelaxPair(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
+  return (d.op.type === 'relax_not_null' || d.op.type === 'drop_column_default') && d.category === 'needs_confirm'
     && fields?.[d.op.column]?.storage?.notNull === false;
 }
 
@@ -1540,8 +1598,7 @@ export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'ap
  * installing package's own declaration says so for.
  */
 function isInstallRelaxation(d: ManagedDriftEntry, fields: Record<string, any> | undefined, columns: ReadonlySet<string>): boolean {
-  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
-    && columns.has(d.op.column) && fields?.[d.op.column]?.storage?.notNull === false;
+  return isDeclaredRelaxPair(d, fields) && columns.has(d.op.column ?? '');
 }
 
 /** The body of `SqlDriver#relaxDeclaredNotNull`; the method's docblock there is its contract. */
@@ -2036,6 +2093,151 @@ export async function backfillCanonicalTimes(this: Pick<SchemaSyncHost, 'canonic
   }
 }
 
+/**
+ * [#34973] The legacy text cells of a SQLite boolean column, as one `WHERE`
+ * predicate spelling `??` twice (the column, then the column again). The
+ * backfill's count, its id sample, its `UPDATE` and the deferred-DDL preview
+ * all read this one predicate, so the plan cannot count rows the step will not
+ * convert.
+ *
+ * Four spellings can be there. `'true'` / `'false'`: SQLite's NUMERIC
+ * affinity, which a `boolean` column takes, folds the text `'1'` / `'0'` into
+ * integers on write and keeps `'true'` / `'false'` as TEXT. [#35341]
+ * `'1.0'` / `'0.0'`: on a column with TEXT affinity (a `text` field retyped to
+ * `boolean`), the driver's own writes stored the REAL its JS number bound as,
+ * as that text, until it bound `sqliteBooleanBinding`'s `'1'` / `'0'`. `IN`
+ * compares with the BINARY collation, so `'TRUE'` or `'yes'` is not selected.
+ * The four are the `legacy` rows of `SQLITE_BOOLEAN_TEXT_SPELLINGS`, the table
+ * the write door binds from, so no write stores one of them any more and
+ * neither door nor convergence can take a spelling the other does not.
+ */
+const SQLITE_LEGACY_BOOLEAN_TEXT = `typeof(??) = 'text' and ?? in (${sqlTextList((s) => s.legacy)})`;
+
+/**
+ * The spellings of {@link SQLITE_BOOLEAN_TEXT_SPELLINGS} that `pick` keeps, as a
+ * SQL list of string literals (`'true', 'false', '1.0', '0.0'` for the legacy
+ * ones). The table is the write door's too (`sqliteBooleanWriteReading`), so
+ * the convergence and the write accept one set of spellings. Each spelling is
+ * a constant of that table, never a caller's value, and holds no quote.
+ */
+function sqlTextList(pick: (s: (typeof SQLITE_BOOLEAN_TEXT_SPELLINGS)[number]) => boolean): string {
+  return SQLITE_BOOLEAN_TEXT_SPELLINGS.filter(pick).map((s) => `'${s.text}'`).join(', ');
+}
+
+/**
+ * [#34973] How many ids of the converted rows the backfill's `info` line
+ * names per column: a sample an operator can look up, never the full list, so
+ * one line stays one line on a large table. The same cap as the
+ * `os migrate` data-repair reports (`MAX_SAMPLE_IDS`).
+ */
+const BOOLEAN_BACKFILL_SAMPLE_IDS = 5;
+
+/**
+ * The body of `SqlDriver#backfillCanonicalBooleans`, and its contract (#34973).
+ * The class method's docblock points here.
+ *
+ * Converges one table's scalar `Field.boolean` / `Field.toggle` columns
+ * ({@link SqlDriver.booleanFields}) on the integer form every write takes
+ * since the engine stores the boolean a reading spells (#34916). Rows written
+ * before that by a door that sent the text `'true'` / `'false'` (the console's
+ * inline grid) still hold that TEXT. [#35341] So do the `'1.0'` / `'0.0'` the
+ * driver's own writes left on a TEXT-affinity column, which the row read
+ * presented as `true` both. The row read presents the others as booleans,
+ * but every comparison runs in SQL against the raw cell, so `= false` misses a
+ * text `'false'`, `$in`, `!=` and `$nin` answer wrongly, ORDER BY sorts the
+ * text after every integer, and an aggregate group key presents a text
+ * `'false'` as true. Only the stored form can be fixed: the engine presents
+ * these rows as booleans and narrows a `'false'` comparand to `false`, so it
+ * cannot address them. Hence raw SQL here, the fourth storage convergence
+ * beside the datetime, time and JSON backfills.
+ *
+ * SQLite only. Postgres parses the text into its native boolean, MSSQL's
+ * `bit` converts it, and MySQL's `tinyint(1)` and Oracle's `number(1)` refuse
+ * it, so no other dialect can hold such a row.
+ *
+ * ONE `UPDATE` per column, atomic on SQLite, whose `WHERE` is
+ * {@link SQLITE_LEGACY_BOOLEAN_TEXT}: it selects only the four text spellings,
+ * so a converged column is a no-op and a second boot converts 0 rows. One
+ * counting scan over the column's text cells comes first, and the id sample and
+ * the `UPDATE` run only when it found legacy text, so a converged column costs
+ * a boot that single read. No other
+ * value is ever written: integers and NULL are already canonical, and other
+ * text (`'yes'`, `'TRUE'`) has no boolean the driver can read without
+ * guessing. Those rows are counted and warned about, the way the julian-day
+ * guard withholds its rows from the temporal backfills.
+ *
+ * The record is an `info` line per column with the rows converted and up to
+ * {@link BOOLEAN_BACKFILL_SAMPLE_IDS} of their ids. There is no down step:
+ * since #34916 a text row reads as its integer, so an undo would only restore
+ * the form the filters miss. `os migrate plan` previews the step as
+ * `normalize_boolean_storage` ({@link previewBooleanConvergence}).
+ *
+ * A table created by this very call is empty, so it is clean without a row
+ * being read. Failures are logged and swallowed: a migration must never take
+ * boot down, the column stays as it was, and the next boot tries again.
+ */
+export async function backfillCanonicalBooleans(this: Pick<SchemaSyncHost, 'booleanFields' | 'isSqlite' | 'knex' | 'logger'>, table: string, tableExisted: boolean): Promise<void> {
+  const fields = this.booleanFields[table];
+  if (!this.isSqlite || !fields || fields.length === 0 || !tableExisted) return;
+
+  for (const field of fields) {
+    try {
+      // One scan classifies every text cell: legacy (converted below),
+      // canonical text, or other text (withheld and warned about). Canonical
+      // text is the `'1'` / `'0'` a column with TEXT affinity (one whose type
+      // changed to boolean without a rebuild) stores for the driver's own
+      // `1` / `0`: it already reads as its boolean, so it is not withheld.
+      const counted: any = await this.knex.raw(
+        `select count(*) as text_rows, coalesce(sum(case when ${SQLITE_LEGACY_BOOLEAN_TEXT} then 1 else 0 end), 0) as legacy, ` +
+          `coalesce(sum(case when ?? in (${sqlTextList((s) => !s.legacy)}) then 1 else 0 end), 0) as canonical ` +
+          `from ?? where typeof(??) = 'text'`,
+        [field, field, field, table, field],
+      );
+      const tally = Array.isArray(counted) ? counted[0] : counted;
+      const legacy = Number(tally?.legacy ?? 0);
+      const withheld = Number(tally?.text_rows ?? 0) - legacy - Number(tally?.canonical ?? 0);
+      if (legacy > 0) {
+        const sample: Array<{ id: unknown }> = await this.knex.raw(
+          `select id from ?? where ${SQLITE_LEGACY_BOOLEAN_TEXT} order by id limit ?`,
+          [table, field, field, BOOLEAN_BACKFILL_SAMPLE_IDS],
+        );
+        const res = await this.knex.raw(
+          `update ?? set ?? = case when ?? in (${sqlTextList((s) => s.legacy && s.value)}) then 1 else 0 end where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
+          [table, field, field, field, field],
+        );
+        // better-sqlite3 reports `changes`; a client whose raw path returns
+        // rows instead (driver-sqlite-wasm, knex `sqlite3`) does not, and the
+        // guarded UPDATE converts exactly the rows counted above.
+        const changes = (res as any)?.changes;
+        const converted = typeof changes === 'number' ? changes : legacy;
+        if (converted) {
+          this.logger.info?.(
+            `[sql-driver] canonicalised boolean storage for ${table}.${field}: rows that held the ` +
+              `text 'true' / 'false' (or '1.0' / '0.0') now hold 1 / 0, so boolean filters, sorts and groups answer them ` +
+              `as the boolean they read as`,
+            { table, field, rowsConverted: converted, sampleIds: sample.map((r) => String(r.id)) },
+          );
+        }
+      }
+      if (withheld > 0) {
+        this.logger.warn(
+          `[sql-driver] left ${withheld} row(s) of ${table}.${field} unconverted: their stored ` +
+            `value is text other than 'true', 'false', '1.0' or '0.0', which names no boolean the driver can ` +
+            `read without guessing. Boolean filters do not match them until the values are ` +
+            `corrected or cleared at the source`,
+          { table, field, rowsWithheld: withheld },
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `[sql-driver] could not canonicalise boolean storage for ${table}.${field}; rows holding ` +
+          `the text 'true' / 'false' (or '1.0' / '0.0') stay missed by boolean filters until a later boot converts them`,
+        { error: err instanceof Error ? err.message : String(err) },
+      );
+    }
+  }
+}
+
 /** The body of `SqlDriver#legacyMysqlTimestampColumns`; the method's docblock there is its contract. */
 export async function legacyMysqlTimestampColumns(this: Pick<SchemaSyncHost, 'isMysql' | 'knex'>, table: string, fields: Record<string, any>): Promise<Array<{ name: string; nullable: boolean }>> {
   if (!this.isMysql) return [];
@@ -2368,7 +2570,7 @@ export function registerExternalObject(this: Pick<SchemaSyncHost, 'autoNumberFie
 }
 
 /** The body of `SqlDriver#previewDeferredSchemaWork`; the method's docblock there is its contract. */
-export async function previewDeferredSchemaWork(this: Pick<SchemaSyncHost, 'deferredSchemaObjects' | 'knex' | 'planDeclaredRenames' | 'previewDatetimeConvergence' | 'previewTimeConvergence' | 'rotationShardKey' | 'supportsRotation'>): Promise<PendingSchemaWork[]> {
+export async function previewDeferredSchemaWork(this: Pick<SchemaSyncHost, 'deferredSchemaObjects' | 'knex' | 'planDeclaredRenames' | 'previewBooleanConvergence' | 'previewDatetimeConvergence' | 'previewTimeConvergence' | 'rotationShardKey' | 'supportsRotation'>): Promise<PendingSchemaWork[]> {
   const out: PendingSchemaWork[] = [];
   for (const [tableName, obj] of this.deferredSchemaObjects) {
     const declared = Object.entries<any>(obj.fields ?? {})
@@ -2453,6 +2655,8 @@ export async function previewDeferredSchemaWork(this: Pick<SchemaSyncHost, 'defe
     }
     out.push(...(await this.previewDatetimeConvergence(tableName, obj.fields ?? {}, existing)));
     out.push(...(await this.previewTimeConvergence(tableName, obj.fields ?? {}, existing)));
+    // [#34973] The boolean storage convergence `initObjects` runs beside the two above.
+    out.push(...(await this.previewBooleanConvergence(tableName, existing)));
   }
   out.sort((a, b) => a.table.localeCompare(b.table) || a.kind.localeCompare(b.kind));
   return out;
@@ -2535,6 +2739,35 @@ export async function previewTimeConvergence(this: Pick<SchemaSyncHost, 'isMysql
     }
 
     return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The body of `SqlDriver#previewBooleanConvergence` (#34973): the work
+ * {@link backfillCanonicalBooleans} would do for `table`, measured, not
+ * performed. The boolean twin of {@link previewDatetimeConvergence}: it counts
+ * the rows matching the backfill's own predicate,
+ * {@link SQLITE_LEGACY_BOOLEAN_TEXT}, so the plan names exactly the rows apply
+ * converts and none it withholds. SQLite only, like the backfill; failures are
+ * swallowed to `[]`, like its siblings.
+ */
+export async function previewBooleanConvergence(this: Pick<SchemaSyncHost, 'booleanFields' | 'isSqlite' | 'knex'>, table: string, existingColumns: Set<string>): Promise<PendingSchemaWork[]> {
+  if (!this.isSqlite) return [];
+  try {
+    const declared = (this.booleanFields[table] ?? []).filter((c) => existingColumns.has(c));
+    const columns: string[] = [];
+    let rows = 0;
+    for (const field of declared) {
+      const res: any = await this.knex.raw(
+        `select count(*) as n from ?? where ${SQLITE_LEGACY_BOOLEAN_TEXT}`,
+        [table, field, field],
+      );
+      const n = Number((Array.isArray(res) ? res[0] : res)?.n ?? 0);
+      if (n > 0) { columns.push(field); rows += n; }
+    }
+    return columns.length === 0 ? [] : [{ table, kind: 'normalize_boolean_storage', columns, rows }];
   } catch {
     return [];
   }

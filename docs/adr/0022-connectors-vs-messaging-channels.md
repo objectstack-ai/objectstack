@@ -4,7 +4,7 @@
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0012](./0012-notification-platform.md) (Messaging Platform — outbound `notify` on a generalized outbox), [ADR-0013](./0013-bidirectional-messaging.md) (Bidirectional Messaging — Slack first), [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` as baseline generic dispatch)
 **Consumers**: `@objectstack/spec` (`integration/`, future `messaging/`), `@objectstack/services/service-automation` (connector registry), future `@objectstack/service-messaging`, future `@objectstack/plugin-messaging-slack`, `@objectstack/connectors/*`
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — §4's connector-auth half moves to the open tier; see the note under §4.
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — §4's connector-auth half moves to the open tier; see the note under §4. Ruling `7023709522` on #34730 (2026-11-19) — the self-hosted Slack channel install and person link are open tier; see the second note under §4 and [ADR-0013's addendum](./0013-bidirectional-messaging.md).
 
 ---
 
@@ -122,6 +122,14 @@ A static Slack bot token is just a bearer credential, so a basic open-source Sla
 > messaging channel, which ADR-0143 does not move. A Slack channel whose `send()` delegates to the
 > Slack connector (§3) inherits the open connector auth. The open/enterprise line also no longer
 > traces to ADR-0015, which never drew it. Every other decision here stands.
+>
+> **Amendment note (2026-11-19, ruling `7023709522` on #34730).** For the Slack messaging channel,
+> the `sys_channel_account` lifecycle named in the note above is narrowed to the managed
+> multi-workspace lifecycle (this row's "multi-tenant `sys_channel_account` lifecycle"): a
+> self-hosted organization's own Slack app with a token it supplies, one `sys_channel_account` row
+> per organization, and the confirm-once `sys_channel_user_link` binding are open tier. The hosted
+> one-click ObjectOS app, managed credentials and the vault, and account health stay enterprise.
+> See ADR-0013's 2026-11-19 addendum. Every other decision here stands.
 
 ### 5. Anti-patterns this rules out
 

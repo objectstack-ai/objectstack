@@ -87,7 +87,7 @@ export const ExchangeRateSyncFlow = defineFlow({
       type: 'start',
       label: 'Daily at 06:00',
       config: {
-        schedule: { type: 'cron', expression: '0 6 * * *' },
+        schedule: { type: 'cron', expression: '0 6 * * *', timezone: 'UTC' },
       },
     },
     {
@@ -97,6 +97,7 @@ export const ExchangeRateSyncFlow = defineFlow({
       config: {
         url: '{{ rate_feed_url }}',
         method: 'GET',
+        timeoutMs: 10000,
       },
     },
     {

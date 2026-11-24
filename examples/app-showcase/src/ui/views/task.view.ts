@@ -380,7 +380,12 @@ export const TaskViews = defineView({
     },
   },
 
-  // The default form — what the create and edit surfaces render.
+  // The default form. Since #36425 the Console's create and edit surfaces lay
+  // the record out by the object's fieldGroups and no longer load it there. It
+  // is not inert: three `type: 'form'` actions open it by its served name
+  // `showcase_task.form` (Log Time, New Task, and the Overview page's Create
+  // Task), and the console still loads a form opened by name, so the lint rule
+  // form-view-internal-not-loaded does not report it (#36545).
   // simple ── single-section form ──────────────────────────────────────
   form: {
     type: 'simple',

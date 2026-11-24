@@ -47,9 +47,11 @@ import {
   ValueDataSource,
 } from '@object-ui/core';
 import { SchemaRendererProvider, SchemaRenderer, notifyDataChanged } from '@object-ui/react';
+import { I18nProvider } from '@object-ui/i18n';
 import type { DataSource, DeclaredNode, ObjectGanttBlockNode } from '@object-ui/types';
 import { safeValidateSchema } from '@object-ui/types/zod';
 import { ObjectGantt } from './ObjectGantt';
+import { GANTT_FETCH_STEP } from './ganttRowWalk';
 // Module scope, not a hook: this import IS the registration (AGENTS.md
 // test-discipline section).
 import './index';
@@ -321,14 +323,25 @@ describe('ObjectGantt.rowCeiling-7210', () => {
 
   let calls: Array<Record<string, any>> = [];
 
-  /** An adapter that HONOURS `$top`, the way a real one does. */
-  function makeDataSource(storeSize: number) {
+  /**
+   * An adapter that HONOURS `$top` and `$skip`, the way a real one does. With
+   * `maxPageSize` it also refuses a `$top` over it, before reading anything,
+   * the way a host with `OS_DATA_MAX_PAGE_SIZE` set does (hosted: 5,000).
+   */
+  function makeDataSource(storeSize: number, maxPageSize?: number) {
     const store = makeRows(storeSize);
     return {
       find: vi.fn(async (_resource: string, params: any) => {
         calls.push({ ...(params ?? {}) });
         const top = typeof params?.$top === 'number' ? params.$top : store.length;
-        return { data: store.slice(0, top), total: store.length };
+        if (maxPageSize !== undefined && top > maxPageSize) {
+          throw new Error(
+            `Query parameter 'top' asks for ${top} rows; this deployment's maximum page size is ${maxPageSize}. `
+            + `The query was not run. Ask for at most ${maxPageSize} rows and page with offset.`,
+          );
+        }
+        const skip = typeof params?.$skip === 'number' ? params.$skip : 0;
+        return { data: store.slice(skip, skip + top), total: store.length };
       }),
       findOne: vi.fn(),
       create: vi.fn(),
@@ -373,12 +386,21 @@ describe('ObjectGantt.rowCeiling-7210', () => {
         ),
       );
 
-      // The fetch asked for one probe row past the ceiling — that is what makes
-      // the cut a fact about the rows in hand rather than a guess.
-      expect(calls.length).toBeGreaterThan(0);
-      for (const params of calls) {
-        expect(params.$top).toBe(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top);
-      }
+      // The first read came back full, so the set was walked from the top
+      // under a unique order. The walk read one probe row past the ceiling —
+      // that is what makes the cut a fact about the rows in hand rather than a
+      // guess — and asked no single read for more than one step (a hosted
+      // maximum page size refuses a `$top` of 10,001).
+      const wanted = nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top;
+      expect(calls[0].$top).toBe(GANTT_FETCH_STEP);
+      const walk = calls.slice(1);
+      const tops = walk.map((params) => params.$top);
+      expect(tops.reduce((sum, top) => sum + top, 0)).toBe(wanted);
+      for (const top of tops) expect(top).toBeLessThanOrEqual(GANTT_FETCH_STEP);
+      expect(walk.map((params) => params.$skip ?? 0)).toEqual(
+        tops.map((_, i) => tops.slice(0, i).reduce((sum, top) => sum + top, 0)),
+      );
+      for (const params of walk) expect(params.$orderby).toEqual({ id: 'asc' });
 
       // ⭐ The half the ruling cares about: the truncation is NOT silent.
       const note = await screen.findByRole('note');
@@ -409,9 +431,58 @@ describe('ObjectGantt.rowCeiling-7210', () => {
       );
       expect(calls.length).toBeGreaterThan(0);
       for (const params of calls) {
-        expect(params.$top).toBe(GANTT_ROW_CEILING + 1);
+        expect(params.$top).toBe(GANTT_FETCH_STEP);
       }
       expect(screen.queryByRole('note')).toBeNull();
+    });
+
+    /**
+     * objectstack — the hosted refusal. A host with a maximum page size (the
+     * hosted plane sets `OS_DATA_MAX_PAGE_SIZE` to 5,000) refuses a `$top`
+     * over it before running the query, so a single read of the ceiling plus
+     * its probe row (10,001) put the refusal in place of the chart, on an
+     * EMPTY object as on a full one.
+     *
+     * REVERSE VERIFICATION: sending `...nonGridRowCeilingQuery(GANTT_ROW_CEILING)`
+     * as one read again turns all three of these red at the drawn count, with
+     * the refusal on screen.
+     */
+    describe('a host with a maximum page size of 5,000', () => {
+      const HOSTED_MAX_PAGE_SIZE = 5000;
+
+      it('draws an empty object instead of the refusal', async () => {
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(0, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('0'),
+        );
+        expect(screen.queryByText(/maximum page size/)).toBeNull();
+        expect(calls).toHaveLength(1);
+      });
+
+      it('draws a set larger than one host page, every row', async () => {
+        const rows = HOSTED_MAX_PAGE_SIZE + 1234;
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(rows, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(String(rows)),
+        );
+        expect(screen.queryByRole('note')).toBeNull();
+        for (const params of calls) expect(params.$top).toBeLessThanOrEqual(HOSTED_MAX_PAGE_SIZE);
+      });
+
+      it('past the gantt ceiling: draws the ceiling and still says so', async () => {
+        render(<ObjectGantt schema={schema} dataSource={makeDataSource(TOTAL_ROWS, HOSTED_MAX_PAGE_SIZE)} />);
+
+        await waitFor(() =>
+          expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe(
+            String(GANTT_ROW_CEILING),
+          ),
+        );
+        const note = await screen.findByRole('note');
+        expect(note.textContent).toContain(String(GANTT_ROW_CEILING));
+        expect(note.textContent).toContain(String(TOTAL_ROWS));
+      });
     });
 
     /**
@@ -431,7 +502,7 @@ describe('ObjectGantt.rowCeiling-7210', () => {
           expect(screen.getByTestId('gantt-view').getAttribute('data-task-count')).toBe('4999'),
         );
         for (const params of calls) {
-          expect(params.$top).toBe(GANTT_ROW_CEILING + 1);
+          expect(params.$top).toBe(GANTT_FETCH_STEP);
         }
         expect(screen.queryByRole('note')).toBeNull();
         unmount();
@@ -640,10 +711,11 @@ describe('ObjectGantt.hostDataProp-7210', () => {
       await waitFor(() => expect(calls.length).toBeGreaterThan(0));
 
       for (const params of calls) {
-        // Not `pagination.pageSize` (2), and not absent either: the platform
-        // ceiling, one probe row wide so the cut is detectable.
+        // Not `pagination.pageSize` (2), and not absent either: the walk's
+        // first step toward the platform ceiling. Five rows answer it short,
+        // so it is the only read.
         expect(params.$top).not.toBe(2);
-        expect(params.$top).toBe(nonGridRowCeilingQuery(GANTT_ROW_CEILING).$top);
+        expect(params.$top).toBe(GANTT_FETCH_STEP);
         expect(params.$skip).toBeUndefined();
       }
     });
@@ -2160,5 +2232,125 @@ describe('ObjectGantt.lookupParent-34395', () => {
     expect(byId(tasks, 'p1').parent).toBeNull();
     expect(byId(tasks, 'c1').parent).toBeNull();
     expect(byId(tasks, 'c2').parent).toBeNull();
+  });
+});
+
+// ── ObjectGantt.refusedRead-35317 ───────────────────────────────────────────────
+
+/**
+ * objectstack#35317 — a refused task read draws the calm no-access state, not
+ * the raw error.
+ *
+ * A reader who may open a project but not read its tasks used to see the
+ * transport's own string where the chart would be ("Error: ApiDataSource:
+ * HTTP 403 Forbidden — {…}"), untranslated. The gantt now classifies a failed
+ * load with the shared `classifyLoadError` and, for a `forbidden` read, draws
+ * the related list's no-access sentence (`list.loadErrorForbidden*`) as a
+ * neutral `role="status"` panel, never the server's text. Every other failure
+ * keeps the existing error screen (CONTROL below).
+ */
+describe('ObjectGantt.refusedRead-35317', () => {
+  beforeEach(() => {
+    standIns.ganttView = ({ tasks }: any) => (
+      <div data-testid="gantt-view" data-task-count={String(tasks.length)} />
+    );
+  });
+
+  const OBJECT_SCHEMA = {
+    fields: {
+      name: { type: 'text' },
+      start_date: { type: 'date' },
+      end_date: { type: 'date' },
+    },
+  };
+
+  const SCHEMA: any = {
+    type: 'object-gantt',
+    objectName: 'project_task',
+    gantt: { titleField: 'name', startDateField: 'start_date', endDateField: 'end_date' },
+  };
+
+  function adapter(find: () => Promise<unknown>) {
+    return {
+      find: vi.fn(find),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => OBJECT_SCHEMA),
+    } as unknown as DataSource;
+  }
+
+  /** The shape the ObjectStack adapter throws: status + code decorated on the Error. */
+  function refusal(): Error {
+    const err = new Error(
+      'ApiDataSource: HTTP 403 Forbidden — {"error":"PERMISSION_DENIED: no read access to project_task"}',
+    ) as Error & { httpStatus?: number; code?: string };
+    err.httpStatus = 403;
+    err.code = 'PERMISSION_DENIED';
+    return err;
+  }
+
+  let consoleError: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleError.mockRestore();
+  });
+
+  it('a 403 task read draws the no-access state, with none of the server text', async () => {
+    const { container } = render(
+      <ObjectGantt schema={SCHEMA} dataSource={adapter(async () => { throw refusal(); })} />,
+    );
+    const panel = await screen.findByTestId('gantt-no-access');
+    expect(panel.getAttribute('role')).toBe('status');
+    expect(panel.textContent).toContain('You don’t have access');
+    expect(panel.textContent).toContain('You don’t have permission to view these records.');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('Error:');
+    expect(text).not.toContain('PERMISSION_DENIED');
+    expect(text).not.toContain('HTTP 403');
+    expect(screen.queryByTestId('gantt-view')).toBeNull();
+  });
+
+  it('the no-access state speaks the reader\'s language under a zh provider', async () => {
+    window.localStorage.clear();
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
+        <ObjectGantt schema={SCHEMA} dataSource={adapter(async () => { throw refusal(); })} />
+      </I18nProvider>,
+    );
+    const panel = await screen.findByTestId('gantt-no-access');
+    expect(panel.textContent).toContain('无权访问');
+    expect(panel.textContent).not.toContain('You don’t have access');
+    window.localStorage.clear();
+  });
+
+  it('a 403 with only the status in the message (no decorated fields) is the same refusal', async () => {
+    render(
+      <ObjectGantt
+        schema={SCHEMA}
+        dataSource={adapter(async () => { throw new Error('ApiDataSource: HTTP 403 Forbidden — {"error":"denied"}'); })}
+      />,
+    );
+    expect(await screen.findByTestId('gantt-no-access')).toBeTruthy();
+    expect(screen.queryByText(/Error:/)).toBeNull();
+  });
+
+  it('CONTROL: a 500 keeps the existing error screen', async () => {
+    const err = new Error('ApiDataSource: HTTP 500 Internal Server Error') as Error & { httpStatus?: number };
+    err.httpStatus = 500;
+    render(<ObjectGantt schema={SCHEMA} dataSource={adapter(async () => { throw err; })} />);
+    expect(await screen.findByText('Error: ApiDataSource: HTTP 500 Internal Server Error')).toBeTruthy();
+    expect(screen.queryByTestId('gantt-no-access')).toBeNull();
+  });
+
+  it('CONTROL: rows that load render the chart', async () => {
+    const rows = [{ id: '1', name: 'Design', start_date: '2026-01-01', end_date: '2026-01-05' }];
+    render(<ObjectGantt schema={SCHEMA} dataSource={adapter(async () => ({ data: rows, total: 1 }))} />);
+    const view = await screen.findByTestId('gantt-view');
+    expect(view.getAttribute('data-task-count')).toBe('1');
+    expect(screen.queryByTestId('gantt-no-access')).toBeNull();
   });
 });

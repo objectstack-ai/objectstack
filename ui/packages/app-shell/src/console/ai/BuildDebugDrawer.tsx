@@ -201,7 +201,7 @@ export function BuildDebugDrawer({ apiBase, conversationId, open, onOpenChange }
                 <summary className="cursor-pointer font-medium text-foreground">
                   {t('console.ai.buildDoctorDrawer.timeline', { count: report.timeline.length })}
                 </summary>
-                <div className="mt-2 space-y-1 font-mono text-[11px] leading-relaxed">
+                <div className="mt-2 space-y-1 font-mono text-xs leading-relaxed">
                   {report.timeline.map((e, i) => (
                     <TimelineRow key={i} entry={e} />
                   ))}

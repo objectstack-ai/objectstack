@@ -117,7 +117,7 @@ import { bulkConfirmTemplateRoots } from '@objectstack/spec/ui';
 // [#24814] An action's copy — `confirmText`, `successMessage`, `errorMessage` —
 // is a `template` slot too, judged in its own module by the same judge.
 import { actionCopyTemplateIssues } from './validate-action-copy-templates.js';
-import { hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
+import { actionRefusalTemplateIssues, hookRefusalTemplateIssues } from './validate-hook-refusal-templates.js';
 // [#15137] The `value`-role half. Same two published primitives the engine
 // composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
 // same order: the SHAPE rule lives in the spec's `FlowValueSlotSchema` (the
@@ -138,6 +138,7 @@ import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } 
 import {
   injectedSystemColumnDefs,
   isInjectedColumnDefinition,
+  isMultiValueField,
   platformProvisionsStorage,
   referenceCarrierOf,
   referenceTargetOf,
@@ -171,6 +172,7 @@ import { objectExtensionsByTarget, objectsAsServed, objectsWithoutTiedFields, re
 import type { StoredObjectExtension } from './object-graph.js';
 import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 import { extensionFormulaLoci, formulaCycleIssues } from './formula-cycle-issues.js';
+import { requiredVisibleWhenFormulaIssue } from './required-visible-when-formula-issue.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -366,6 +368,29 @@ function withAttachedBlocks(
  */
 const BOUND_RECORD_ROOTS = ['record', 'previous'] as const;
 
+/**
+ * [ruling 7023700548] The codes of the date-text verdict a flow value envelope
+ * gets only when typed (`ExprSchemaHint.flowValueEnvelope`): the family whose
+ * refusal names {@link SHARED_STEPS_REWRITE}.
+ */
+const TYPED_VALUE_ENVELOPE_CODES: ReadonlySet<string> = new Set([
+  'date-text-call-value-run-may-fail',
+  'date-text-arithmetic-value-run-may-fail',
+]);
+
+/**
+ * [ruling 7023700548] The rewrite the typed date-text refusal names, appended
+ * after the verdict's own fix. The typing holds only on a flow with its own
+ * record trigger or sweep, which stays refused when a parent also starts it;
+ * a flow with no trigger of its own is judged untyped. The engine's
+ * `registerFlow` appends the same sentence (`flow-registration-checks.ts`).
+ */
+const SHARED_STEPS_REWRITE =
+  'This flow has its own record trigger or time-relative sweep, which hands it a row of that object on every '
+  + 'run it starts, so this stands even where another flow also starts it through a `subflow` or `map` node. '
+  + 'To share these steps with such a flow, move them into a child flow with no trigger of its own, which is '
+  + 'judged untyped because its `record` is whatever each caller hands it, and start that child from both flows.';
+
 /** Minimal structural view of a `parseCelToAst` node (`{ op, args }`). */
 type CelNodeLike = { op?: string; args?: unknown };
 
@@ -458,6 +483,30 @@ function buildFieldTypeIndex(objects: AnyRec[]): Map<string, Record<string, stri
       }
     }
     idx.set(name, types);
+  }
+  return idx;
+}
+
+/**
+ * [#36167] object name → the fields whose stored value is a list, read
+ * through `isMultiValueField` (`@objectstack/spec/data`): an inherently-multi
+ * option type, or a multi-capable type declared `multiple: true`. Handed to
+ * the shared validator as `ExprSchemaHint.multiValueFields` beside the field
+ * types, so a `==` / `!=` between such a field and a scalar is refused there
+ * (`list-equality`) — the type alone cannot say a `select` / `lookup` /
+ * `user` is multiple. Built from the same objects as {@link buildFieldTypeIndex}
+ * (a field two packages tie on has no definition here either).
+ */
+function buildMultiValueFieldIndex(objects: AnyRec[]): Map<string, string[]> {
+  const idx = new Map<string, string[]>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const out: string[] = [];
+    for (const [fn, def] of fieldEntries(obj)) {
+      if (typeof def.type === 'string' && isMultiValueField({ type: def.type, multiple: def.multiple === true })) out.push(fn);
+    }
+    idx.set(name, out);
   }
   return idx;
 }
@@ -1294,9 +1343,10 @@ const FIELD_RULE_SLOT_CONSEQUENCE: Record<string, string> = {
     '(plugin-form\'s `sectionFields` copies this object rule onto the runtime form field and ' +
     '`resolveFieldRuleState` evaluates it with the host scope bound, the `current_user` binding ' +
     'ADR-0089 D1 gives every runtime record surface) — so the ' +
-    'control is hidden in that one form while NO server-side gate evaluates a field-level ' +
-    '`visibleWhen` at all: the record still carries the value and every other reader still ' +
-    'returns it, a SILENT enforcement gap. Where no host publishes a scope (the console public ' +
+    'control is hidden in that one form while NO server-side gate hides anything by a field-level ' +
+    '`visibleWhen` (the write path reads one only to decide whether a `required` field must be ' +
+    'filled): the record still carries the value and every other reader still returns it, a SILENT ' +
+    'enforcement gap. Where no host publishes a scope (the console public ' +
     '`/f/:slug` route, and every non-form reader) the root is unbound, the predicate faults and ' +
     'the renderer falls back to VISIBLE (`resolveFieldRuleState` evaluates visibility with ' +
     '`fallback: true`), leaving the field the test was meant to hide showing for everyone. ' +
@@ -1632,7 +1682,7 @@ function faultOutcomeOf(site: FaultSite): (ExprFaultOutcome & NullGuardOutcome) 
  * select option's own `visibleWhen`.
  */
 
-type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen';
+type FieldTraversalSlot = 'requiredWhen' | 'readonlyWhen' | 'option visibleWhen' | 'visibleWhen';
 
 /** [#20078] A root a field-level predicate binds, with the record shape it binds. */
 interface FieldTraversalHolder {
@@ -1659,6 +1709,15 @@ const FIELD_TRAVERSAL_CONSEQUENCE: Record<FieldTraversalSlot, string> = {
   'option visibleWhen':
     'The server REFUSES every write by an acting user that picks this option — an option gate it ' +
     'cannot evaluate refuses the write, naming the option, the field and the fault (ADR-0137 D2)',
+  // [ADR-0113 D1, as amended] Judged only on a `required` field: the server
+  // reads that field's own `visibleWhen` to decide whether the requirement
+  // applies, and a predicate it cannot evaluate counts as SHOWN. A warning,
+  // not a refusal: the field keeps exactly the unconditional `required` it had
+  // before the amendment, so nothing gets worse; only the waiver never happens.
+  visibleWhen:
+    'This field is `required`, and the server judges that requirement by this predicate on every ' +
+    'write; a predicate it cannot evaluate counts as SHOWN (ADR-0113 D1), so the field stays required ' +
+    'on every record, the ones the form hides it on included, and a user who cannot see it cannot save',
 };
 
 /**
@@ -2610,6 +2669,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const fieldIndex = buildFieldIndex(servedObjects);
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(typedObjects);
+  const multiValueFieldIndex = buildMultiValueFieldIndex(typedObjects);
   const nullableIndex = buildNullableFieldIndex(typedObjects);
   // [#33435] The flow and hook condition sites also judge the injected
   // columns a stored row can hold `null` in, and a `beforeInsert` hook the two
@@ -2946,6 +3006,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * for byte what it was.
      */
     flowBare?: FlowBareNames,
+    /**
+     * [#36167] The source compiles to a query filter rather than being
+     * evaluated as CEL (a sharing rule's `condition`), handed to the shared
+     * validator as `ExprSchemaHint.filterCompiled`, so the `list-equality`
+     * prescription is the membership spelling that lowers there
+     * (`record.<field>.contains(…)`). Absent, the call is byte for byte what it was.
+     */
+    filterCompiled?: boolean,
   ): void => {
     if (raw == null) return;
     // Absent unless this is a served-row site on an object that declares a
@@ -2956,16 +3024,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `record.<field>` read at a `record` site; the bare name and its
     // `record.<field>` / `previous.<field>` read at a flattened one (#29959).
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
+    // [#36167] The list-valued fields, so a list compared with a scalar is refused.
+    const multiValueFields = objectName ? multiValueFieldIndex.get(objectName) : undefined;
     // Spread only when given, so every other site's hint is unchanged.
     const roots = extraRoots ? { roots: extraRoots } : {};
     const res = validatorRunByCaller ? VALIDATOR_RUN_BY_CALLER : validateExpression('predicate', raw as string | { dialect?: string; source?: string },
       objectName
         ? {
           objectName, fields, attachedOnRead, fieldTypes, scope, traversalHydration, ...roots,
+          ...(multiValueFields ? { multiValueFields } : {}),
           ...(faultOutcome ? { faultOutcome } : {}),
           ...(flowBare ? { flowVariables: flowBare.variables } : {}),
           ...(flowBare?.unproven ? { bareNamesUnproven: true } : {}),
           ...(flowBare?.timeRelativeSweep ? { timeRelativeSweep: true } : {}),
+          ...(filterCompiled ? { filterCompiled: true } : {}),
         }
         : { scope, ...roots });
     for (const e of res.errors) {
@@ -3015,6 +3087,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     slot: FieldTraversalSlot,
     raw: unknown,
     holders: readonly FieldTraversalHolder[],
+    // [ADR-0113 D1, as amended] `warning` for the one slot whose fault the
+    // server answers with the pre-amendment `required` instead of a refusal.
+    severity: 'error' | 'warning' = 'error',
   ): void => {
     const source = celSourceOf(raw);
     if (!source) return;
@@ -3030,7 +3105,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           where,
           message: fieldTraversalMessage(slot, root, field, fieldType, [...related].sort(), owner),
           source,
-          severity: 'error',
+          severity,
         });
       }
     }
@@ -3103,11 +3178,28 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * registers, and a malformed envelope used to be stored verbatim and rendered
    * by `notify` as JSON with nothing said at any layer.
    *
+   * [#34451] `fieldTypes`: the field types of the object the flow's run binds
+   * as `record` — the object its conditions are typed against (the start
+   * node's `objectName`, else a time-relative flow's swept object) — passed
+   * only where that binding holds: a record-triggered flow or a sweep of the
+   * typed object, rebinding neither `record` nor `previous` (the caller's
+   * `valueEnvelopeFieldTypes`). Handed on
+   * as `ExprSchemaHint.flowValueEnvelope`, which lets the date-text verdict
+   * family alone reach the envelope, over its `record.<field>` /
+   * `previous.<field>` reads: `timestamp(record.<date field>)` faults on the
+   * `YYYY-MM-DD` text on every run. The engine's `registerFlow` passes the
+   * same hint (`valueEnvelopeRefusals`), so the two doors refuse one set.
+   * Absent (no typed object), the call is byte for byte what it was.
+   *
    * @returns whether the slot was refused on SHAPE, so the caller can skip the
    *   root judgment (#22565) — a value that is not an envelope has no source to
    *   read roots from.
    */
-  const checkDeclaredValue = (where: string, raw: unknown): { refused: boolean } => {
+  const checkDeclaredValue = (
+    where: string,
+    raw: unknown,
+    fieldTypes?: Readonly<Record<string, string>>,
+  ): { refused: boolean } => {
     if (raw == null) return { refused: false };
     // `celSourceOf` — not a second read of `.source`: the same helper every
     // other slot in this file locates its finding with.
@@ -3118,9 +3210,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       for (const issue of shape.error.issues) issues.push({ where, message: issue.message, source, severity: 'error' });
       return { refused: true };
     }
-    const res = validateExpression('value', raw as { dialect?: string; source?: string });
+    const res = validateExpression(
+      'value',
+      raw as { dialect?: string; source?: string },
+      fieldTypes ? { fieldTypes, flowValueEnvelope: true } : undefined,
+    );
     for (const e of res.errors) {
-      issues.push({ where, message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}`, source: e.source, severity: 'error' });
+      const rewrite = fieldTypes && e.code && TYPED_VALUE_ENVELOPE_CODES.has(e.code) ? ` ${SHARED_STEPS_REWRITE}` : '';
+      issues.push({ where, message: `${VALUE_ENVELOPE_REFUSAL} ${e.message}${rewrite}`, source: e.source, severity: 'error' });
     }
     for (const w of res.warnings) {
       issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
@@ -3294,6 +3391,28 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       triggerKind,
       sweepsTypedObject: sweepObject !== undefined && sweepObject === objectName,
     });
+    // [#34451] The value envelopes' typing holds on the same flows: where the
+    // run's `record` IS a row of the typed object — the flows a condition has
+    // a proven outcome on — and only while the flow rebinds neither root the
+    // typing reads (`celScope` spreads the run's variables over the context,
+    // so an assigned or output `record` / `previous` is what an envelope
+    // reads): `record` by any row of `collectFlowVariableNames` (a declared
+    // one too), `previous` by a NODE row only — the collector asked without
+    // `flow.variables` — since `seedRunVariables` sets `previous` over a
+    // declared variable of that name. Elsewhere (an inbound hook, a schedule,
+    // a flow with no trigger of its own that a parent's `subflow` / `map` or a
+    // caller starts) `record` holds whatever the entrance handed the run, and
+    // the envelope is judged untyped. A flow with its own record trigger or
+    // sweep stays typed even when a parent also starts it: its own entrance
+    // still hands it the typed row on every run it starts, so the verdict
+    // stands, and its sentence names the rewrite ({@link SHARED_STEPS_REWRITE};
+    // ruling 7023700548). The engine's `registerFlow` judges the same set
+    // (`flow-registration-checks.ts` `flowRebindsRunRowRoots`).
+    const valueEnvelopeFieldTypes = flowFaultOutcome !== undefined && objectName
+      && !declaredVariables.has('record')
+      && !collectFlowVariableNames({}, graphs).has('previous')
+      ? fieldTypeIndex.get(objectName)
+      : undefined;
     // [#29959] The names the run binds over the flattening — its declared
     // variables and node ids, and the engine's own — which a bare read holds
     // instead of the field: the type check never types them as the field.
@@ -3521,7 +3640,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
           // design — there is no field reading to displace.
           if (found.entry.role === 'value') {
             const from = issues.length;
-            if (!checkDeclaredValue(slotWhere, found.value).refused) {
+            if (!checkDeclaredValue(slotWhere, found.value, valueEnvelopeFieldTypes).refused) {
               refuseUnboundRoots(slotWhere, found.value, from, 'value');
             }
             continue;
@@ -3809,6 +3928,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
               objectName,
               fields: fieldIndex.get(objectName),
               fieldTypes: fieldTypeIndex.get(objectName),
+              multiValueFields: multiValueFieldIndex.get(objectName),
               scope: 'record',
               traversalHydration: true,
               optionFields,
@@ -4290,6 +4410,47 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       ] as const) {
         refuseFieldTraversal(`object '${objectName}' · field '${fname}' ${slot}`, slot, raw, fieldRuleHolders);
       }
+      // [ADR-0113 D1, as amended] A `required` field's own `visibleWhen` is a
+      // server concept now: the write path judges the requirement by it
+      // (`rule-validator.ts`, `evaluateRequiredWhenShown`) with the field-rule
+      // slots' binding, and a fault there counts as SHOWN. Two shapes the author
+      // can see at build time keep the field required where the form hides it,
+      // so both are WARNINGS, never refusals — the field keeps the requirement
+      // it had before the amendment, nothing gets worse:
+      //
+      //  - a read THROUGH a reference field: never hydrated at the field level,
+      //    so it faults on every row (the roots the server cannot bind —
+      //    `features`, `app`, `page`, the acting user — are already refused for
+      //    every field `visibleWhen` above, `FIELD_RULE_BOUND_ROOTS`);
+      //  - `storage.notNull`: the column refuses the null the waiver admits, so
+      //    a record outside the condition still cannot be created. A parse
+      //    refusal like the `requiredWhen` rider's would break every pre-17
+      //    source the `field-required-notnull-explicit` conversion stamped.
+      // Literal member reads, like the gates above, for the #5017 scan.
+      if (f.required === true && f.visibleWhen != null) {
+        const visibleWhere = `object '${objectName}' · field '${fname}' visibleWhen`;
+        refuseFieldTraversal(visibleWhere, 'visibleWhen', f.visibleWhen, fieldRuleHolders, 'warning');
+        if ((f.storage as AnyRec | undefined)?.notNull === true) {
+          issues.push({
+            where: visibleWhere,
+            message:
+              `Field '${fname}' is \`required\` with a \`visibleWhen\`, so a write the predicate hides it on ` +
+              `does not need it (ADR-0113 D1) — but it also declares \`storage.notNull: true\`, and the column ` +
+              `refuses that null: a record outside the condition still cannot be created. Drop ` +
+              `\`storage.notNull\` (the write contract alone keeps shown rows filled), or drop \`visibleWhen\` ` +
+              `if the field applies to every record.`,
+            source: celSourceOf(f.visibleWhen) ?? '',
+            severity: 'warning',
+          });
+        }
+        // A `formula` the predicate reads that the form cannot compute: the
+        // form shows the field and keeps it required, and the server either
+        // cannot compute it either (required on every write) or computes it
+        // and can waive the field (`required-visible-when-formula-issue.ts`).
+        // A formula the form computes draws nothing: both sides agree.
+        const formulaRead = objectName ? requiredVisibleWhenFormulaIssue(objectName, fname, f, fieldDefs) : undefined;
+        if (formulaRead) issues.push(formulaRead);
+      }
       judgeFieldFormula(fname, f, { objectName, optionFields: optionFieldNames, fieldDefs });
     }
     // [#33100] A formula that reads its own value, itself or through the
@@ -4576,7 +4737,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // `sharing.zod.ts` maps it back to `condition` in its rejection message;
     // `predicate` is refused with no rename at all. #4984 removed exactly this
     // pair one file over; this was the same read left behind (#5017).
-    check(where, sharingRule.condition, ruleObj, 'record');
+    // [#36167] Compiled to a query filter (`compileCelToFilter`), never
+    // evaluated as CEL: the list-equality prescription is spelled to lower.
+    check(where, sharingRule.condition, ruleObj, 'record', undefined, undefined, undefined, undefined, undefined, undefined, true);
   }
 
   // ── Hook `condition` predicates (record-scoped gate) ───────────────
@@ -4675,6 +4838,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   // pages' action rows off an object write. Errors since #25680, a holeless
   // `${…}` sentence included since #25709.
   issues.push(...actionCopyTemplateIssues(stack, { actions: !objectWrite, objects: true, pages: !objectWrite }));
+  // [#34273] An action refusal sentence over declared `params` — the hook
+  // refusal's compile half, on the same collections the copy pass reads.
+  issues.push(...actionRefusalTemplateIssues(stack, { actions: !objectWrite, objects: true }));
 
   return issues;
 }

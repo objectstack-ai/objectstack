@@ -4,7 +4,8 @@
  * Field-group layout derivation — the single source of the `fieldGroups`
  * rendering semantics (ADR-0085 §5).
  *
- * An object's `fieldGroups` + each field's `Field.group` membership are a
+ * An object's `fieldGroups` (each group's own `fields` list, or else each
+ * field's older `Field.group`) are a
  * cross-surface semantic role: forms, detail pages, drawers and the designer
  * all render the SAME grouping. The rules live here — a pure, dependency-free
  * helper next to the schema that defines the keys (the ADR-0078 §2
@@ -14,6 +15,14 @@
  *
  * Rules (per the ObjectFieldGroupSchema contract):
  *   - sections come back in declared-group order;
+ *   - a group that lists `fields` holds those fields in list order (names the
+ *     object does not declare are skipped), then any field whose `Field.group`
+ *     names it that the list leaves out, in field declaration order; a group
+ *     without `fields` holds the fields whose `Field.group` names it, in field
+ *     declaration order (the older spelling, unchanged);
+ *   - un-parsed input that breaks the parse's agreement rules resolves
+ *     first-listing-wins: a field listed by two groups joins the first, and a
+ *     listed field joins the listing group whatever its own `group` says;
  *   - declared groups no visible field references are dropped;
  *   - fields without a (declared) group collect into a trailing untitled
  *     bucket, preserving field declaration order — EXCEPT audit/system
@@ -76,7 +85,7 @@ export interface FieldGroupSection {
   collapse: FieldGroupCollapse;
   /** Section visibility predicate, passed through verbatim; absent = always visible. Never present on the ungrouped bucket. */
   visibleWhen?: FieldGroupVisibleWhen;
-  /** Member field NAMES in field-declaration order. Renderers resolve defs themselves. */
+  /** Member field NAMES in display order (the group's `fields` list first, else field-declaration order). Renderers resolve defs themselves. */
   fields: string[];
 }
 
@@ -118,7 +127,7 @@ export const FIELD_GROUP_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
 type AnyRec = Record<string, unknown>;
 
 /** Normalize one declared group entry; null for malformed/keyless entries. */
-function readGroup(g: unknown): { key: string; label?: string; icon?: string; description?: string; collapse: FieldGroupCollapse; visibleWhen?: FieldGroupVisibleWhen } | null {
+function readGroup(g: unknown): { key: string; label?: string; icon?: string; description?: string; collapse: FieldGroupCollapse; visibleWhen?: FieldGroupVisibleWhen; members?: string[] } | null {
   if (!g || typeof g !== 'object' || Array.isArray(g)) return null;
   const grp = g as AnyRec;
   if (typeof grp.key !== 'string' || grp.key.length === 0) return null;
@@ -142,14 +151,75 @@ function readGroup(g: unknown): { key: string; label?: string; icon?: string; de
     // Deprecated spec flag.
     collapse = grp.defaultExpanded ? 'expanded' : 'collapsed';
   }
+  // A group's own member list (`fields`). A group placing a related list holds
+  // no fields (the parse refuses a list there), so a list on one is not read.
+  const members = Array.isArray(grp.fields) && typeof grp.relatedList !== 'string'
+    ? grp.fields.filter((n): n is string => typeof n === 'string' && n.length > 0)
+    : undefined;
   return {
     key: grp.key,
+    ...(members !== undefined ? { members } : {}),
     label: typeof grp.label === 'string' ? grp.label : undefined,
     icon: typeof grp.icon === 'string' ? grp.icon : undefined,
     description: typeof grp.description === 'string' ? grp.description : undefined,
     collapse,
     ...(visibleWhen !== undefined ? { visibleWhen } : {}),
   };
+}
+
+/** Which declared group each field belongs to, and each group's members in display order. */
+export interface FieldGroupMembership {
+  /** Group key → member field names in display order (hidden fields included). */
+  members: Map<string, string[]>;
+  /** Field name → the key of the group it belongs to. A field absent here is ungrouped. */
+  groupOf: Map<string, string>;
+}
+
+function resolveFieldGroupMembership(
+  declared: ReadonlyArray<{ key: string; members?: string[] }>,
+  fields: Record<string, AnyRec | undefined>,
+): FieldGroupMembership {
+  const members = new Map<string, string[]>();
+  const groupOf = new Map<string, string>();
+  for (const g of declared) members.set(g.key, []);
+  // The lists speak first: a listed name joins its first listing group.
+  for (const g of declared) {
+    if (!g.members) continue;
+    for (const name of g.members) {
+      if (groupOf.has(name) || !Object.prototype.hasOwnProperty.call(fields, name)) continue;
+      groupOf.set(name, g.key);
+      members.get(g.key)!.push(name);
+    }
+  }
+  // Then the older spelling, in field declaration order: a field no list names
+  // joins the group its `group` names — after that group's listed members.
+  for (const [name, f] of Object.entries(fields)) {
+    if (groupOf.has(name)) continue;
+    const g = typeof f?.group === 'string' ? f.group : undefined;
+    if (g === undefined || !members.has(g)) continue;
+    groupOf.set(name, g);
+    members.get(g)!.push(name);
+  }
+  return { members, groupOf };
+}
+
+/**
+ * Field-group membership of an object definition (or any bare metadata record
+ * shaped like one): each declared group's members in display order, and the
+ * group of each member. The same resolution {@link deriveFieldGroupLayout}
+ * places sections from, before it filters hidden fields and drops empty
+ * groups, so an editor that shows every field (hidden ones included) agrees
+ * with the rendered layout on who belongs where and in what order.
+ */
+export function readFieldGroupMembership(def: unknown): FieldGroupMembership {
+  const obj = def && typeof def === 'object' && !Array.isArray(def) ? (def as AnyRec) : {};
+  const declared = (Array.isArray(obj.fieldGroups) ? obj.fieldGroups : [])
+    .map(readGroup)
+    .filter((g): g is NonNullable<ReturnType<typeof readGroup>> => g !== null);
+  const fields = (obj.fields && typeof obj.fields === 'object' && !Array.isArray(obj.fields))
+    ? (obj.fields as Record<string, AnyRec | undefined>)
+    : {};
+  return resolveFieldGroupMembership(declared, fields);
 }
 
 /**
@@ -166,24 +236,23 @@ export function deriveFieldGroupLayout(def: unknown): FieldGroupSection[] | null
     .filter((g): g is NonNullable<ReturnType<typeof readGroup>> => g !== null);
   if (declared.length === 0) return null;
 
-  const declaredKeys = new Set(declared.map((g) => g.key));
   const fields = (obj.fields && typeof obj.fields === 'object' && !Array.isArray(obj.fields))
     ? (obj.fields as Record<string, AnyRec | undefined>)
     : {};
 
+  const membership = resolveFieldGroupMembership(declared, fields);
   const buckets = new Map<string, string[]>();
   for (const g of declared) buckets.set(g.key, []);
   const ungrouped: string[] = [];
   let anyGrouped = false;
+  for (const [key, names] of membership.members) {
+    const visible = names.filter((name) => fields[name]?.hidden !== true);
+    buckets.set(key, visible);
+    if (visible.length > 0) anyGrouped = true;
+  }
   for (const [name, f] of Object.entries(fields)) {
-    if (f?.hidden === true) continue;
-    const g = typeof f?.group === 'string' && declaredKeys.has(f.group) ? (f.group as string) : null;
-    if (g) {
-      buckets.get(g)!.push(name);
-      anyGrouped = true;
-    } else if (!FIELD_GROUP_SYSTEM_FIELDS.has(name)) {
-      ungrouped.push(name);
-    }
+    if (f?.hidden === true || membership.groupOf.has(name)) continue;
+    if (!FIELD_GROUP_SYSTEM_FIELDS.has(name)) ungrouped.push(name);
   }
   // No visible field references a declared group → grouping doesn't apply.
   if (!anyGrouped) return null;

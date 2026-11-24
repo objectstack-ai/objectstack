@@ -15,7 +15,7 @@ export type {
   AnalyticsDriverCapabilities,
 } from '@objectstack/spec/contracts';
 
-import type { FilterCondition, ValueShapeFieldDef } from '@objectstack/spec/data';
+import type { FilterCondition, FixedReadLeaf, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { IObjectQLEngine, StrategyContext } from '@objectstack/spec/contracts';
 import type { DATASET_DURATION_AGGREGATES, DatasetDurationUnit } from '@objectstack/spec/ui';
 
@@ -26,6 +26,17 @@ import type { DATASET_DURATION_AGGREGATES, DatasetDurationUnit } from '@objectst
  * package's hook as a compile error instead of as drift (#4251).
  */
 type EngineJudgeFilter = NonNullable<IObjectQLEngine['judgeFilter']>;
+
+/**
+ * [ADR-0155 D4] The answer {@link DatasetScopedStrategyContext.fixedReadLeafClassOf}
+ * gives: the class a leaf falls in (`'other-datasource'` or
+ * `'registration-by-name'`, with what names it), `null` for neither, or
+ * `undefined` when the host cannot say.
+ */
+export type FixedReadLeafClassAnswer =
+  | { readonly class: 'other-datasource' | 'registration-by-name' }
+  | null
+  | undefined;
 
 /**
  * [#19995] A host's answer to "would the ENGINE admit this `where`?": the
@@ -270,6 +281,32 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    */
   hasObjectMiddleware?(objectName: string): boolean | undefined;
   /**
+   * [ADR-0155 D4, plan step 5] The engine seam's recognition of D4's two
+   * classes for a fixed-read leaf (`SharedRecordIds`) a read scope carries
+   * (`@objectstack/objectql`'s `fixedReadLeafClassOfEngine`): an object naming
+   * the class when the leaf's object is bound to another datasource than its
+   * inner table, or a middleware or find hook is registered for that table by
+   * name; `null` when neither applies; `undefined` when the host cannot say.
+   *
+   * `NativeSQLStrategy` compiles the leaf itself (Q2 as ruled), so it asks this
+   * before it compiles and declines a query to the ObjectQL strategy on a
+   * class, and on `undefined` too: a class it cannot see is not one it may
+   * read around. The engine's seam then gives the class its answer. ⛔ No
+   * second copy of either class in this package.
+   *
+   * `AnalyticsService` passes through `AnalyticsServiceConfig.fixedReadLeafClassOf`.
+   * Declared HERE for the reason `getDatasetScope` is: nothing about it is an
+   * authorable surface. A context built without the hook declines every scope
+   * that carries the leaf.
+   */
+  fixedReadLeafClassOf?(leaf: FixedReadLeaf): FixedReadLeafClassAnswer;
+  /**
+   * [ADR-0155 D4] Where this service logs a fixed-read leaf its read-scope
+   * compiler or merges refuse, once per evaluator (`read-scope-sql.ts`'s
+   * `FixedReadLeafRefusalSink`). Absent, the refusal is thrown unlogged.
+   */
+  fixedReadLeafRefusal?: { readonly logger: { error?(message: string): void; warn(message: string): void } | undefined; readonly state: { logged: boolean } };
+  /**
    * The data engine's aggregate of `objectName`, grouped ALSO by attributes of
    * related records (one {@link RelationGroupAggregateRelation} per relation),
    * which a SQL driver answers as one `LEFT JOIN … GROUP BY` — or `undefined`
@@ -294,7 +331,40 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
     options: Parameters<NonNullable<StrategyContext['executeAggregate']>>[1],
     relations: readonly RelationGroupAggregateRelation[],
   ): Promise<RelationGroupAggregateAnswer>;
+  /**
+   * The data engine's aggregate of `objectName` ordered by `cut.orderBy` (the
+   * aggregated row's columns), cut to `cut.limit` groups and counted before
+   * the cut, all in the driver's own statement (objectql
+   * `aggregate-order-cut.ts`) — or `undefined` when the host cannot run it.
+   *
+   * `ObjectQLStrategy` reads a top-N through it first. The request is
+   * declinable: where the engine cannot serve the cut (a driver that compiles
+   * none, an aggregate it computes in memory, a `having`) it reads nothing and
+   * answers `served: false`, and the strategy reads every group and cuts in
+   * memory, as before. `AnalyticsServicePlugin` wires it only when it bridges
+   * `executeAggregate` itself, to the same engine. Declared HERE rather than on
+   * the spec's {@link StrategyContext} for the reason `getDatasetScope` is:
+   * nothing about it is an authorable surface.
+   */
+  executeOrderCutAggregate?(
+    objectName: string,
+    options: Parameters<NonNullable<StrategyContext['executeAggregate']>>[1],
+    cut: OrderCutAggregateRequest,
+  ): Promise<OrderCutAggregateAnswer>;
 }
+
+/** The order and cut a {@link DatasetScopedStrategyContext.executeOrderCutAggregate} asks of the engine. */
+export interface OrderCutAggregateRequest {
+  /** Aggregated-row columns (a group key's column, a measure's alias), in priority order. */
+  readonly orderBy: ReadonlyArray<{ readonly field: string; readonly order: 'asc' | 'desc' }>;
+  /** The most groups to answer, 1 or more. */
+  readonly limit: number;
+}
+
+/** The engine's answer: the cut rows and the count of groups before the cut, or why it declined (nothing read). */
+export type OrderCutAggregateAnswer =
+  | { readonly served: true; readonly rows: Record<string, unknown>[]; readonly totalGroups: number }
+  | { readonly served: false; readonly reason: string };
 
 /** One relation a {@link DatasetScopedStrategyContext.executeRelationGroupAggregate} groups through. */
 export interface RelationGroupAggregateRelation {

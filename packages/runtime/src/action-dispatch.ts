@@ -65,6 +65,7 @@ import * as actionExec from './action-execution.js';
 import type { ActionExecutionDeps } from './action-execution.js';
 import {
     actionInvocationBranch,
+    actionInvocationBulkReading,
     actionInvocationForwardedFrom,
     actionInvocationTarget,
     recordActionInvocation,
@@ -248,6 +249,12 @@ export interface AdmittedActionCall {
     objectName: string;
     actionName: string;
     recordId: unknown;
+    /**
+     * [#34292] The params bag the call was admitted with, read for its
+     * `_selectedIds` by the invocation row's bulk counts
+     * (`actionInvocationBulkReading`).
+     */
+    params: Record<string, unknown>;
 }
 
 /** What {@link runResolvedAction} answers. */
@@ -305,7 +312,10 @@ export async function runResolvedAction(
     }
     const outcome = await dispatchAdmittedAction(deps, requestContext, call, admission);
     return {
-        admitted: { actionDef: admission.actionDef, objectName: call.objectName, actionName: call.actionName, recordId: admission.recordId },
+        admitted: {
+            actionDef: admission.actionDef, objectName: call.objectName, actionName: call.actionName,
+            recordId: admission.recordId, params: admission.params,
+        },
         outcome,
     };
 }
@@ -316,8 +326,22 @@ interface Admission {
     recordId: any;
     params: Record<string, unknown>;
     subject: actionExec.ActionSubjectRecordLoad;
+    /**
+     * The caller-scope read of the call's `params._selectedIds`
+     * (`actionExec.loadActionSelectionRecords`); absent when the call carries
+     * none or its arm is not read (`actionExec.actionSelectionIsRead`).
+     */
+    selection?: actionExec.ActionSelectionLoad;
     /** [#33690] The call is handed to the person, never dispatched ({@link ResolvedActionCall.confirmationHandOff}). */
     handOff: boolean;
+    /**
+     * [ADR-0150 D4] The package coordinate the owner gate judged: the
+     * declaration's own, or the attributed holder's
+     * (`actionExec.attributeActionHandler`). `undefined`: none.
+     */
+    dispatchPackageId?: string;
+    /** [ADR-0150 D4] Whose handler the script dispatch runs, when the declaration names no package and its holder is attributed: that holder's handler, or none. */
+    holder?: actionExec.ActionHandlerHolder;
 }
 
 /**
@@ -351,6 +375,7 @@ async function subjectVerdictRefusal(
     try {
         await actionExec.refuseDeniedSubjectBeforeHandOff(deps, requestContext, admission.actionDef, {
             objectName, recordId: subjectRecordIdOf(admission.recordId), subject: admission.subject, ec: wiring.ec, envId: wiring.envId,
+            ...(admission.selection !== undefined ? { selection: admission.selection } : {}),
         });
     } catch (error) {
         const thrown = error as Error & { code?: unknown; status?: unknown };
@@ -524,6 +549,33 @@ async function admitResolvedAction(
         return refuse({ message: activationRefusal.message, status: activationRefusal.status, details: { code: activationRefusal.code } });
     }
 
+    // [ADR-0150 D4] Whose handler the script dispatch runs, so it is the
+    // declared item's: the resolved declaration's package, else — for a
+    // declaration that names none — the holder `attributeActionHandler`
+    // attributes. Asked after D4 and the activation consult (it may read the
+    // store), before the owner gate, which judges the handler this dispatch runs.
+    const candidates = actionExec.resolveActionHandlerKeys(actionDef, actionName);
+    const attribution: actionExec.ActionHandlerAttribution = declaration.packageId !== undefined
+        ? { packageId: declaration.packageId }
+        : await actionExec.attributeActionHandler(ql, {
+            action: actionDef, objectName, candidates, obj: actionSchema,
+            readServiceActions: async () => {
+                const meta = await deps.resolveService(requestContext, 'metadata', wiring.envId);
+                return typeof meta?.loadMany === 'function' ? ((await meta.loadMany('action')) ?? []) : undefined;
+            },
+        });
+    if ('degraded' in attribution) {
+        return refuse({
+            message:
+                `Cannot verify which declared action owns the handler that action '${actionName}' on '${objectName}' ` +
+                `dispatches to — the metadata plane is unavailable (${attribution.reason}). ` +
+                'Refusing rather than running it ungated.',
+            status: 503,
+            details: { code: standardErrorCodeForHttpStatus(503) },
+        });
+    }
+    const dispatchPackageId = attribution.packageId;
+
     // The handler the dispatch reaches may be one a DIFFERENT declared action
     // owns: that owner's gates apply too. The candidates are the ones the
     // script arm hands `executeRegisteredAction`.
@@ -531,11 +583,11 @@ async function admitResolvedAction(
         ql,
         action: actionDef,
         objectName,
-        candidates: actionExec.resolveActionHandlerKeys(actionDef, actionName),
+        candidates,
         ec: wiring.ec,
         envId: wiring.envId,
         obj: actionSchema,
-        ...(declaration.packageId !== undefined ? { packageId: declaration.packageId } : {}),
+        ...(dispatchPackageId !== undefined ? { packageId: dispatchPackageId } : {}),
     });
     if (ownerRefusal) {
         return refuse({ message: ownerRefusal.message, status: ownerRefusal.status, details: { code: ownerRefusal.code } });
@@ -582,6 +634,19 @@ async function admitResolvedAction(
         return invalidBody(`Invalid action body — ${message}`, { field: 'recordId', code: 'invalid_type', message });
     }
     const params: Record<string, unknown> = reqBody.params ?? {};
+    // A selection names records by id, as `recordId` names one: its shape is
+    // judged here, beside the record key's, on every arm that reads it.
+    let selectionIds: string[] | undefined;
+    if (actionExec.actionSelectionIsRead(actionDef, wiring.ec)) {
+        try {
+            selectionIds = actionExec.actionSelectionIdsOrRefuse(objectName, params);
+        } catch (error) {
+            const failure = validationFailureDetails(error);
+            if (!failure) throw error;
+            const message = (error as Error).message;
+            return refuse({ message: `Invalid action body — ${message}`, status: VALIDATION_FAILED_STATUS, details: failure as unknown as ActionRefusal['details'] });
+        }
+    }
 
     // [ADR-0104 D2] The declared param contract, before the handler runs.
     const paramError = actionExec.enforceActionParams(deps, actionDef, actionSchema, params, { objectName, actionName });
@@ -626,7 +691,18 @@ async function admitResolvedAction(
     // CALLER's own scope delivered the row (commit f19475c0a).
     const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
         wiring.callData('get', { object: objectName, id: recordId }, wiring.driver, wiring.envId, wiring.ec));
-    return { actionDef, actionType, recordId, params, subject, handOff };
+    // …and each id of its selection the same way, with the same read, in the
+    // caller's own scope; the dispatch consumes the verdict as the subject load's.
+    const selection = selectionIds !== undefined && selectionIds.length > 0
+        ? await actionExec.loadActionSelectionRecords(objectName, selectionIds, (id) =>
+            wiring.callData('get', { object: objectName, id }, wiring.driver, wiring.envId, wiring.ec))
+        : undefined;
+    return {
+        actionDef, actionType, recordId, params, subject, handOff,
+        ...(selection !== undefined ? { selection } : {}),
+        ...(dispatchPackageId !== undefined ? { dispatchPackageId } : {}),
+        ...(attribution.holder !== undefined ? { holder: attribution.holder } : {}),
+    };
 }
 
 /**
@@ -659,7 +735,10 @@ async function dispatchAdmittedAction(
         // implementation of the rule (#16370), ahead of everything that builds
         // a trusted context. [#28657] Except ahead of an api forward that needs
         // nothing from the row: its target authorizes the caller itself.
-        actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject);
+        actionExec.refuseDeniedSubjectLoadBeforeDispatch(actionDef, objectName, recordId, subject, ec);
+        // The selection's verdict, at the same point: a selection the caller's
+        // scope did not deliver whole runs nothing (an api action is not read).
+        actionExec.refuseUndeliveredActionSelection(objectName, admission.selection, ec);
 
         // ── api forward (#27506) ── a same-origin `type: 'api'` action is
         // forwarded IN-PROCESS to its declared `target` with the caller's own
@@ -761,20 +840,19 @@ async function dispatchAdmittedAction(
         };
         // [ADR-0110 D2] "resolve, then address": the handler KEY is derived from
         // the resolved declaration; [ADR-0150 D4] the resolved holder's package
-        // picks its own handler.
-        const dispatch = await actionExec.executeRegisteredAction(
-            deps, ql, objectName,
-            actionExec.resolveActionHandlerKeys(actionDef, actionName),
-            actionContext,
-            call.declaration.packageId,
-        );
-        if (!dispatch.dispatched) {
-            // No key carried a handler: a routing miss, not a server fault.
-            return {
-                kind: 'refused',
-                refusal: { message: `Action '${actionName}' on object '${objectName}' not found`, status: 404 },
-            };
-        }
+        // picks its own handler, and an attributed holder its own.
+        const candidates = actionExec.resolveActionHandlerKeys(actionDef, actionName);
+        // No key carried a handler: a routing miss, not a server fault.
+        const notFound: ActionDispatchOutcome = {
+            kind: 'refused',
+            refusal: { message: `Action '${actionName}' on object '${objectName}' not found`, status: 404 },
+        };
+        // [ADR-0150 D4] An attributed holder runs its own handler or none: the
+        // entry is chosen and run in one synchronous step.
+        const dispatch = admission.holder !== undefined
+            ? await actionExec.executeAttributedAction(ql, objectName, candidates, actionContext, admission.holder)
+            : await actionExec.executeRegisteredAction(deps, ql, objectName, candidates, actionContext, admission.dispatchPackageId);
+        if (!dispatch.dispatched) return notFound;
         // [#11519] Doubled post-success navigation — observe LOUDLY, never
         // rewrite the wire.
         const doubled = actionExec.doubledPostSuccessNavigationWarning(deps, actionDef, dispatch.result, objectName);
@@ -923,6 +1001,11 @@ export async function runResolvedActionAsRest(
         // An api forward's two rows name each other (`action-invocation-audit.ts`).
         target: actionInvocationTarget(actionDef, actionExec.isDeclarativeUpdateAction(actionDef)),
         forwardedFrom: actionInvocationForwardedFrom(requestContext, actionExec.API_FORWARD_MARK_HEADER),
+        // [#34292] An answered call that carried `_selectedIds`: the per-row
+        // counts its resolve value reads as. The outcome stays `succeeded`.
+        bulk: ok && run.outcome.kind === 'answered'
+            ? actionInvocationBulkReading(run.admitted.params, run.outcome.result)
+            : undefined,
     });
     return { handled: true, response };
 }
@@ -1048,6 +1131,15 @@ export interface ActionResumeRequest extends AIActionConfirmation {
     runId: string;
     /** The screen's field values the handed-off call carried (`ActionConfirmationHandOff.run.values`). */
     values?: Record<string, unknown>;
+    /**
+     * [#34515] The screen the handed-off call was given on
+     * (`ActionConfirmationHandOff.run.screenNodeId`), which binds the approval
+     * to it: a run no longer paused on that screen (a wizard that moved on,
+     * by an earlier approval of the same call or in the app) is refused
+     * `409 RESOURCE_CONFLICT` and stays where it is. Omitted, the run's
+     * current screen is resumed, whichever it is.
+     */
+    screenNodeId?: string;
 }
 
 /**

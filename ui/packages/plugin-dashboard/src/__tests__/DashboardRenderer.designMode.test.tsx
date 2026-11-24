@@ -399,3 +399,56 @@ describe('DashboardRenderer design mode', () => {
     });
   });
 });
+
+/**
+ * objectstack#36372 — the in-page edit state's two renderer affordances: the
+ * corner handle that resizes a card by whole grid tracks, and the filter
+ * bar's "Add filter". Both are design mode's only, and only when the host
+ * hands their handler.
+ */
+describe('DashboardRenderer design mode — resize and add filter (objectstack#36372)', () => {
+  it('draws a corner handle on every card when the host takes resizes', () => {
+    render(
+      <DashboardRenderer schema={DASHBOARD_WITH_WIDGETS} designMode onWidgetClick={vi.fn()} onWidgetResize={vi.fn()} />,
+    );
+    expect(screen.getAllByTestId('dashboard-widget-resize-handle')).toHaveLength(3);
+  });
+
+  it('draws no handle without a resize handler, nor outside design mode', () => {
+    const { unmount } = render(<DashboardRenderer schema={DASHBOARD_WITH_WIDGETS} designMode onWidgetClick={vi.fn()} />);
+    expect(screen.queryByTestId('dashboard-widget-resize-handle')).not.toBeInTheDocument();
+    unmount();
+    render(<DashboardRenderer schema={DASHBOARD_WITH_WIDGETS} onWidgetResize={vi.fn()} />);
+    expect(screen.queryByTestId('dashboard-widget-resize-handle')).not.toBeInTheDocument();
+  });
+
+  it('the handle grows and shrinks the card by one track from the keyboard, within the columns, without selecting it', () => {
+    const onWidgetResize = vi.fn();
+    const onWidgetClick = vi.fn();
+    const schema: DashboardComponentSchema = {
+      ...DASHBOARD_WITH_WIDGETS,
+      widgets: [{ id: 'w1', title: 'Revenue', type: 'bar', layout: { x: 0, y: 0, w: 1, h: 2 } } as any],
+    };
+    render(<DashboardRenderer schema={schema} designMode onWidgetClick={onWidgetClick} onWidgetResize={onWidgetResize} />);
+    const handle = screen.getByTestId('dashboard-widget-resize-handle');
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(onWidgetResize).toHaveBeenLastCalledWith('w1', { w: 2, h: 2 });
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(onWidgetResize).toHaveBeenLastCalledWith('w1', { w: 1, h: 1 });
+    fireEvent.click(handle);
+    expect(onWidgetClick).not.toHaveBeenCalled();
+  });
+
+  it('draws the filter bar with "Add filter" in design mode, even before any filter exists', () => {
+    const onAddFilter = vi.fn();
+    render(<DashboardRenderer schema={DASHBOARD_WITH_WIDGETS} designMode onWidgetClick={vi.fn()} onAddFilter={onAddFilter} />);
+    fireEvent.click(screen.getByTestId('dashboard-filter-add'));
+    expect(onAddFilter).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws no "Add filter" outside design mode', () => {
+    render(<DashboardRenderer schema={DASHBOARD_WITH_WIDGETS} onAddFilter={vi.fn()} />);
+    expect(screen.queryByTestId('dashboard-filter-add')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-filter-bar')).not.toBeInTheDocument();
+  });
+});

@@ -1,0 +1,8 @@
+{
+  "file": "packages/drivers/driver-turso/src/remote-transport.ts",
+  "adrs": [
+    "ADR-0139",
+    "ADR-0155"
+  ],
+  "invariant": "ADR-0155 D2, D4: `fixedInnerReadSQL` is the remote twin of `SqlDriver#fixedReadLeafSubquery`, compiled from the same predicates (`fixedInnerReadPredicates`, `@objectstack/driver-sql`), every value bound and with no tenant scope (① ruled A); `TursoDriver` declares `fixedReadLeaves` in remote mode only because this compiles it. A resolved `ReadableIds` semi-join (ADR-0139 D3) carries the tenant wall the driver handed over; the fixed inner read carries none."
+}

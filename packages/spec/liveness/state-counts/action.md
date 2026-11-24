@@ -12,4 +12,4 @@ committed anywhere: `check:liveness` sums the shards when it reads them.
 
 | Type | live | exp | elsewhere | dead | planned | classified |
 |---|---|---|---|---|---|---|
-| `action` | 82 | 0 | 0 | 1 | 2 | 85 |
+| `action` | 88 | 0 | 0 | 1 | 2 | 91 |

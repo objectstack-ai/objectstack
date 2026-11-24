@@ -39,8 +39,9 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
 // A read-only base's customization read (ADR-0146 D3) is not under test here:
 // it stays pending, so no request leaves the file.
-vi.mock('./packageCustomizations-io', () => ({
-  fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
+vi.mock('./packageCustomizations-io', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./packageCustomizations-io')>()),
+  fetchPackageCustomizations: vi.fn(() => new Promise<never>(() => {})),
 }));
 
 vi.mock('./packageSurfaces', async (importOriginal) => {

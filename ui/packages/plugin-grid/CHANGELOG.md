@@ -1,5 +1,296 @@
 # @object-ui/plugin-grid
 
+## 18.6.0
+
+### Patch Changes
+
+- 159757a: fix(plugin-grid): Tab leaves the import wizard's "Save current" reason again
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the import wizard's mapping step with no column mapped, "Save current" is disabled and a focusable wrapper around it gives the reason in a tooltip. Pressing Tab on that wrapper sent focus to the dialog itself, and the next Tab started over at the template select: a keyboard user could not reach the column-mapping selects, Next, Cancel, Back or Close, and could leave only with Escape. The tooltip's content was mounted inside the dialog and unmounted as the wrapper lost focus; the dialog's focus trap read that removal as the focused element disappearing and pulled focus to the dialog. The dialog's focus trap no longer reads that removal as focus lost, so Tab and Shift+Tab walk every control in order and the reason is still read out when the wrapper is focused.
+- e08aad7: fix(console): four Console surfaces name things by their label, not their machine name
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Anything shown to a person uses the label; the machine name appears at most as secondary text.
+  
+  - Studio → Access: the suggested-binding banner, its Grant and Dismiss toasts and the state line a resolved suggestion keeps name the permission set by the label the rail shows for it, not by its machine name. A set with no label is still named by its machine name.
+  - Studio → Access → Record sharing: a "Controlled by parent" row reads `By parent → ` and the master object's label: this package's own object as the table reads it, else the served object's label, else its machine name.
+  - Setup → Audit Log: the Record column names the audited record by its display name, through the same batched resolver a list grid's `referenceVia` pointer column uses. The raw id is the tooltip; a record no read answers reads as `OBJECT · record unavailable` (its object's label). `@object-ui/plugin-grid` now exports that resolver's face, `RecordPointerCell`.
+  - Studio flow editor → Entry condition: the subject list offers each field by its label, with its path (`status`, `previous.status`) beside it.
+- ea6de74: fix(console): Tab no longer gets stuck in a dialog on a control whose tooltip closes as it loses focus
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Inside a dialog, sheet or alert dialog, pressing Tab on a control that shows a tooltip while focused sent focus back to the dialog itself, and the next Tab started over at the first control. In the Manage Views dialog a keyboard user could not get past the first view's Pin button: the other views, their Set-as-default and menu buttons, and Done were unreachable. The tooltip closes as the control loses focus, and the dialog's focus trap read the closing tooltip as the focused control disappearing. The trap now pulls focus back only when the control that had focus really is gone, so Tab and Shift+Tab move on from every such control, in every dialog. The import wizard's own workaround for the same problem, which rendered its "Save current" tooltip outside the dialog, is removed: the tooltip renders inline again and Tab still moves on.
+- 31eb2ae: fix(plugin-grid): a rejected aggregate bulk action reports one outcome for the selection and refreshes the list
+  
+  Clause-②: yes (widening) — optional member userMessage on ActionResult (@object-ui/types) and ActionResponseOutcome (@object-ui/core); nothing removed or renamed
+  Metadata-protocol: none
+  
+  An aggregate bulk action (`bulkActionDefs` entry with `execution: 'aggregate'`) is one call for the whole selection. When that call rejected, the result dialog printed the rejection's platform `message` against every selected record, read "Succeeded 0 / N" even when the handler had already changed some of them, and the list kept showing the old values until a manual reload.
+  
+  A rejected aggregate run is now one outcome for the selection. The dialog says the action did not complete for the selected records and shows the rejection's message once: its `userMessage` when the handler threw one (the text it wrote for the user, already in the request's locale), else its `message`. It shows no per-record count and no per-record failure list, because one call cannot say which records it changed before it stopped, nor whether it kept those changes; it says only that some records may already have been changed. When the dialog is closed at the result step, the list re-reads its rows, whether the action resolved or rejected, and the selection stays after a rejection for a re-run. The per-record dispatch (`bulkActions: ['NAME']`) reports exactly as before.
+  
+  To carry the text, a failed script/server action dispatch now relays the refusal's `error.userMessage` on `ActionResult.userMessage` (`@object-ui/types`), read by `createServerActionHandler` (`@object-ui/core`); `error` stays the whole text. The new dialog sentence is translated in every locale pack.
+- 2c296cf: feat(fields): the lookup picker reads `{ $record }` lookupFilters values from the record being edited and sends `orEmpty`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A `lookupFilters` entry may compare a candidate column with a value of the record being edited, written `{ $record: 'quote_date' }` or, one lookup hop away, `{ $record: 'account.cb_market' }`, and may add `orEmpty: true` so a candidate whose column is null also matches. The schema has accepted both since the previous release; the lookup picker now honours them.
+  
+  - **The value.** Before the candidate query leaves the browser, the picker puts the value the reference names in its place: the quick-select popover, the table picker and the search-first people picker all send it. A one-hop path reads the lookup's target row once per id, its hop fields alone, unless the record already holds that row expanded. The query waits for that read and goes out once, with the value in it.
+  - **An empty value.** While the referenced value is empty (null, unset, an empty string, or an unset hop lookup) or cannot be read (the hop's row or field does not come back, no object is named for the hop, or the host has no single-row reader), the entry is left out, the rule an unset `dependsOn` parent follows. A reference that was never resolved is never sent.
+  - **Re-query.** Changing a referenced field re-queries the open picker once, with the new value. Changing any other field of the record does not.
+  - **orEmpty.** An entry with `orEmpty: true` is sent as an `$or` of its comparison and a null match on the same column. Several such entries each keep their own alternative.
+  - **Record forms opt in.** `ObjectForm` and authored form sections stamp such a lookup as drawn for a single record being edited, naming the object each hop's lookup points at (`withRecordBeingEdited`, exported from `@object-ui/fields`), through the spec's `referenceTargetOf`, so a hop through a `user` field, whose target the type fixes, resolves too. The picker resolves `{ $record }` only on that stamp. Any other host, such as a bulk action dialog that hands the widget its sibling parameters, leaves every `{ $record }` entry out. A bulk action parameter cannot claim the stamp by writing it: the bulk dialog never carries `recordBeingEdited` from a parameter onto its widget.
+  - **Spec.** The `value`, `orEmpty` and `lookupFilters` describes on `FieldSchema` lose their `[PLANNED — not enforced]` markers and say what the picker does. The no-record example now names a bulk action over selected rows in place of a filter panel, which reads no `lookupFilters`.
+  
+  Literal entries and `dependsOn` query exactly as before.
+- 22bcc76: fix(plugin-grid): a list asks for its rows' Edit / Delete verdicts when the row actions are first used, not on first paint
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Every list view with rows sent two `POST /api/v1/security/explain` requests right after its data arrived, one for `update` and one for `delete`, to decide whether each row's menu offers Edit and Delete. Each costs the server tens of milliseconds and dozens of queries, and on a hosted page they were the last layer of the page load. The answer only matters to items a row shows inside its menus, so the grid now asks when a row's actions are first reached for: a pointer or the focus on the actions cell, the row's "⋮" opening, or the row context menu opening. That first use asks once for the whole page, one batch per operation. Opening another row's menu asks nothing new. Once asked, the list keeps the verdicts current as before, on a new page or after a data change.
+  
+  Until the answer lands, every row keeps the object-level verdict, as it did before the answer arrived. A menu opened in that window shows Edit and Delete inert, so neither can be clicked into a write the answer is about to refuse. An item the answer refuses then goes. A failed or missing answer keeps the object-level verdict.
+  
+  The exported `RowActionMenu` takes two new optional props: `onActionsDemand`, called when the row's actions are reached for, and `crudVerdictPending`, which shows the built-in Edit or Delete inert. A menu that passes neither behaves as before.
+- 5a75579: fix(core, plugin-grid): an action's failure toast and a per-record bulk run's failed row show the handler's userMessage
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A handler that refuses with a `userMessage` (the text it wrote for the user, already in the request's locale) now has those words shown where a single action reports its failure. The failure toast of `ActionRunner` (`@object-ui/core`) shows the action's authored `errorMessage` when it declares one, else the refusal's `userMessage`, else the error's own message; before, it went straight from `errorMessage` to the platform's error text. An action that sets `errorMessage` keeps its text.
+  
+  The per-record bulk run (`bulkActions: ['NAME']`, `@object-ui/plugin-grid`) lists each failed record with its refusal's `userMessage` when the handler threw one, else the error's message, as the aggregate run already does for its one outcome. The error CSV keeps each failure's whole message. A blank `userMessage` is no marking and changes nothing.
+- 6c7d730: fix(ui): CSV files the Console builds in the browser start with a UTF-8 byte-order mark, so Excel shows Chinese and other non-ASCII text correctly
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Excel reads a CSV file that has no byte-order mark in the computer's own code page, so Chinese names and other non-ASCII values opened as garbled text. The server export already writes the mark. Six Console downloads build their CSV in the browser and did not:
+  
+  - the list view's export when the data source cannot export on the server;
+  - the grid's export in the same case;
+  - the data table's Export CSV button;
+  - a report's CSV export;
+  - the bulk action's Download error CSV;
+  - the temporary-password CSV after an identity import.
+  
+  All six now build their file with the new `csvBlob(text)` from `@object-ui/core`. It puts one mark (U+FEFF, the bytes EF BB BF) before the text and types the file `text/csv;charset=utf-8`. The core package also exports the mark as `UTF8_BYTE_ORDER_MARK`. The CSV import already removes one leading mark, so a downloaded file can still be imported again. The data table's file is now typed with `charset=utf-8` too.
+- e47c1cb: fix(ui): a phone list card shows its amount in full, and a form's tab strip no longer widens a phone screen
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - Phone list cards: the card's amount is the first shown column whose field type is `currency`. It used to share the subtitle line with the next column and was truncated with it (`CN¥1,2…`). It now has a line of its own under the subtitle, right-aligned and never truncated, with the status chip at that line's left. The subtitle shows the next shown column in its place. A list with no currency column draws its cards as before.
+  - Form field tabs (`fieldTabs`, also used by tabbed modal and tabbed forms): below the `sm` breakpoint a horizontal tab strip is capped at its container's width, and tabs that do not fit scroll sideways with no scrollbar drawn, so the page no longer scrolls sideways. The active tab is kept in view: on a tap, on `defaultFieldTab`, and when a failed submit jumps to the tab with the first error, whose red dot stays on the trigger. Desktop strips and vertical strips are unchanged.
+- 97cd541: fix(plugin-grid): a grouped grid under draft preview no longer asks the data door for fields only the draft declares
+  
+  Clause-②: yes — one new locale key (the visible "this grouping waits for publish" note the card's Expected names), locale-only; no spec, no new exported prop
+  Metadata-protocol: none
+  
+  Under the console's draft preview (`?preview=draft`) the object definition marks each field only the draft adds with `_draftOnly`, while the data door still checks every requested field against the published object. A grouped grid built its own requests from that definition, so a draft-only column went into every group's row request and every group showed `INVALID_FIELD`, and a grouping on a draft-only field went out as the header query's `groupBy` and the whole grid showed "Error loading grid".
+  
+  The grid now leaves a draft-only field out of its row `$select` and `$expand`, on the flat fetch and on every group's row page; the column still draws, empty, under its draft label. A grouping entry on a draft-only field is dropped the way a masked grouping key is: the grid groups by the published entries left, or draws ungrouped, and one note above the rows (`grid.grouping.draftOnly`, new in every locale pack) names the field and says grouping by it waits for publish. After Publish the marker is gone, and the grouping and the column work on the next definition read without a reload. Outside the preview no field carries the marker and nothing changes.
+- 2487242: fix(objectql, metadata-protocol, console): a list view column on a field a disabled package adds no longer fails the whole list
+  
+  Clause-②: yes (widening: the view save door accepts withheld names; one spec read-decoration member; one locale key; one optional security-service member, add-only)
+  Metadata-protocol: none
+  
+  A package can add fields to another package's object. While that package is disabled, the platform leaves those fields out of the served object, and the data door refuses every request that names one (`400 INVALID_FIELD`, or `400 INVALID_SORT` for a sort). The owner's views still named the field, so a view with such a column, sort, filter, grouping level or searchable field failed for everyone. Saving the view (a rename, a pin, a Studio edit) was refused too (`422`, `list-view-field-unknown` / `sort-field-unknown`).
+  
+  - **The served object read names what is withheld.** `GET /api/v1/meta/object/:name` and the object list read carry `_withheldFields: { [field]: { packageId } }` when a disabled package withholds a field from the object. It is a read decoration (`METADATA_READ_DECORATIONS`), so the save door strips it, and the execution face and the layered editor read do not carry it. The registry gains `getWithheldExtensionFields(name)`.
+  - **A caller who may not read a withheld field is not told it exists.** The object-schema projection (ADR-0106) keeps a `_withheldFields` entry only for a caller the security service admits. `ISecurityService` gains an optional member, `getMetadataReadableWithheldFields(object, context)`, which answers the withheld names the caller may read; `@objectstack/plugin-security` implements it from each field's stored definition: the permission set's field entry, the field's own `requiredPermissions`, the fallback set for a caller with no set, and the on-behalf-of delegator. A security service without the member, an `undefined` answer or a throw drops every entry. Each dropped entry moves the caller's ETag, so two callers who are told different things never share a `304`. A caller exempt from the projection (a platform admin, a system context) is served every entry, as before.
+  - **The view save door judges a view against the stored object.** A `view` write is judged against the object with every disabled package's extension folded in (the new fold option `includeDisabledExtensions`). A withheld field is a real stored field, so the view saves and keeps its column and sort. A misspelled field is still refused. Other writes are still judged against the served object, so a page or flow that names a withheld field is still refused while the package is off. A served view's `_diagnostics` is judged against the same stored object, so it no longer warns `list-view-field-unknown` or `form-field-unknown` on a withheld name the save door accepts; a misspelled field still warns.
+  - **The console leaves withheld names out.** The list view and the grid leave a withheld field out of `$select`, `$filter`, `$orderby`, `$searchFields` and `groupBy`, and do not draw its column. A line above the rows names it (`list.withheldFieldsLeftOut`). Nothing is written to the view or to the user's list preferences, and a sort the user saves keeps the withheld entry. Once the package is enabled, the column, the sort and the grouping come back without any write.
+- 2ce9c7f: fix(plugin-grid): a named import mapping's summary names fields by their labels, and its preview survives loading a second file
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two defects in the import wizard when a saved (named) import mapping is active, both measured in a zh-CN organization:
+  
+  - The mapping step's read-only summary listed each target by its API name (`supply_week`, `lead_source`). Every other wizard screen names a field by the label the server serves, which is the translated one in a localized organization. The summary now resolves each target, including each target of a split entry, to that served label. A target the wizard has no field for keeps its name.
+  - Going Back to the upload step and loading a file again kept the mapping selected: the summary still showed it, and the import still named it and ran correctly. But the preview grid was rebuilt by auto-matching the new headers to field names, which the server never applies. When the source headers did not resemble the field names, the preview showed no columns, so every row looked blank. A file loaded while a named mapping is active now derives the preview from that mapping, exactly as picking it does.
+  
+  Translating the mapping's own label is not part of this change.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [0e2ead3]
+- Updated dependencies [b1efa37]
+- Updated dependencies [ffa6db1]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [b019048]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [a78781a]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [1078c73]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [39fa82b]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [b4eea88]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [adccc24]
+- Updated dependencies [8436f67]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [5a75579]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [6a7403b]
+- Updated dependencies [04e7b90]
+- Updated dependencies [3b1307e]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [dc54c60]
+- Updated dependencies [a8e794f]
+- Updated dependencies [d57d6ee]
+- Updated dependencies [bdd5176]
+- Updated dependencies [22bf910]
+- Updated dependencies [2b267b7]
+- Updated dependencies [046c224]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [518baca]
+- Updated dependencies [066177b]
+- Updated dependencies [6c7d730]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [646b13e]
+- Updated dependencies [b86331d]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e2d3514]
+- Updated dependencies [e95210d]
+- Updated dependencies [26cab15]
+- Updated dependencies [0d0a088]
+- Updated dependencies [e9f65a3]
+- Updated dependencies [13c62a6]
+- Updated dependencies [77b42a1]
+- Updated dependencies [4db3750]
+- Updated dependencies [2e29287]
+- Updated dependencies [8bc0808]
+- Updated dependencies [e61af97]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [a931063]
+- Updated dependencies [14619f5]
+- Updated dependencies [d83a275]
+- Updated dependencies [e47c1cb]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [aa5a7d0]
+- Updated dependencies [9c70c16]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [81ea504]
+- Updated dependencies [c81f498]
+- Updated dependencies [4bdbdac]
+- Updated dependencies [3bbda33]
+- Updated dependencies [d656d62]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [90f2b1c]
+- Updated dependencies [b633afe]
+- Updated dependencies [0584eb5]
+- Updated dependencies [ab44198]
+- Updated dependencies [94c9491]
+- Updated dependencies [fff0ad0]
+- Updated dependencies [65ec3c5]
+- Updated dependencies [4aeeca5]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [421f180]
+- Updated dependencies [2fcc9cf]
+- Updated dependencies [7b7272f]
+- Updated dependencies [cb7d514]
+- Updated dependencies [743308b]
+- Updated dependencies [97cd541]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [343c49c]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [92a5cac]
+- Updated dependencies [db1a05c]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [3c535ee]
+- Updated dependencies [59defa0]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @object-ui/i18n@18.6.0
+  - @objectstack/spec@18.6.0
+  - @object-ui/core@18.6.0
+  - @object-ui/types@18.6.0
+  - @object-ui/components@18.6.0
+  - @object-ui/plugin-detail@18.6.0
+  - @object-ui/fields@18.6.0
+  - @object-ui/permissions@18.6.0
+  - @object-ui/react@18.6.0
+  - @object-ui/mobile@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

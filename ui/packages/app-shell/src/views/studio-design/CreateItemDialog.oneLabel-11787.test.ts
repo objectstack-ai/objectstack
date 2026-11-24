@@ -1,17 +1,20 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#11787 — Studio's create dialogs say one thing: *Save as draft*.
+ * objectui#11787 — Studio's create dialogs say what the create does, in one
+ * word per act.
  *
- * Every `CreateItemDialog` in Studio writes a draft (an app, a page, a
- * dashboard, a report, an object, a flow, a permission set), so the submit
- * button names that one act with one string, `engine.studio.createDraft`. The
- * QA pass that filed the card found *New permission set* alone saying
- * *Create*.
+ * objectstack#36511 — the editors whose Save is live (an object, an
+ * automation, a permission set) create the item live: their dialogs say
+ * *Create* (`engine.studio.createLive`). Every other `CreateItemDialog` in
+ * Studio writes a draft (an app, a page, a dashboard, a report, a dataset) and
+ * says *Save as draft* (`engine.studio.createDraft`). The QA pass that filed
+ * objectui#11787 found *New permission set* alone saying *Create*, while every
+ * dialog wrote a draft.
  *
  * The call sites are ENUMERATED from this package's source, not listed here
  * (AGENTS.md #9): a dialog added later is asked the same question, and the
- * control below proves the enumeration reaches the site this card changed.
+ * controls below prove the enumeration reaches the sites of each label.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -60,20 +63,33 @@ function createDialogSites(): Site[] {
   return sites;
 }
 
-const ONE_LABEL = "t('engine.studio.createDraft', locale)";
+const DRAFT_LABEL = "t('engine.studio.createDraft', locale)";
+const LIVE_LABEL = "t('engine.studio.createLive', locale)";
 
-describe('Studio create dialogs carry one label (objectui#11787)', () => {
-  it('every CreateItemDialog submits as "Save as draft"', () => {
+/** The dialogs of the live editors, by their title key (objectstack#36511). */
+const LIVE_TITLES = ['engine.studio.data.newObject', 'engine.studio.auto.newTitle', 'engine.studio.access.new'];
+
+const titleKeyOf = (site: Site): string | undefined => site.props.match(/title=\{t\('([^']+)'/)?.[1];
+
+describe('Studio create dialogs say what the create does (objectui#11787, objectstack#36511)', () => {
+  it('a live editor\'s dialog says "Create"; every other one says "Save as draft"', () => {
     const sites = createDialogSites();
     expect(sites.length).toBeGreaterThan(0);
     for (const site of sites) {
-      expect({ file: site.file, submitLabel: site.submitLabel }).toEqual({ file: site.file, submitLabel: ONE_LABEL });
+      const expected = LIVE_TITLES.includes(titleKeyOf(site) ?? '') ? LIVE_LABEL : DRAFT_LABEL;
+      expect({ file: site.file, submitLabel: site.submitLabel }).toEqual({ file: site.file, submitLabel: expected });
     }
   });
 
-  it('CONTROL — the enumeration reaches the New permission set dialog, the one that said "Create"', () => {
-    const access = createDialogSites().filter((site) => /title=\{t\('engine\.studio\.access\.new'/.test(site.props));
-    expect(access).toHaveLength(1);
-    expect(access[0].submitLabel).toBe(ONE_LABEL);
+  it('CONTROL — the enumeration reaches each live dialog once, the New permission set one included', () => {
+    const live = createDialogSites().filter((site) => LIVE_TITLES.includes(titleKeyOf(site) ?? ''));
+    expect(live.map(titleKeyOf).sort()).toEqual([...LIVE_TITLES].sort());
+    for (const site of live) expect(site.submitLabel).toBe(LIVE_LABEL);
+  });
+
+  it('CONTROL — the enumeration reaches draft dialogs too', () => {
+    const drafts = createDialogSites().filter((site) => !LIVE_TITLES.includes(titleKeyOf(site) ?? ''));
+    expect(drafts.length).toBeGreaterThan(0);
+    for (const site of drafts) expect(site.submitLabel).toBe(DRAFT_LABEL);
   });
 });

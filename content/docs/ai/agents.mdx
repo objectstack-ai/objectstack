@@ -98,7 +98,8 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   `POST /api/v1/auth/service-account/register` with `name` and an optional
   `ownerId`): a user of kind `agent`, a plain member of the active
   organization, accountable to a named person who is a member there (the
-  caller by default). Its name carries its purpose. It never signs in: it has
+  caller by default) and whose own account is active: an account runs only
+  while its owner's does. Its name carries its purpose. It never signs in: it has
   no password and no session, and its email is a placeholder that is never
   delivered. Its owner, or an administrator of its organization, mints its
   key (*Create API Key* on the account, or
@@ -133,9 +134,16 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
     accountable owner. When the owner leaves the organization, the account is
     suspended, and it is not resumed until an administrator names a new owner.
     When the organization's directory (SCIM) deactivates or deletes the owner,
-    the account is suspended too, a re-activation of the owner does not resume
-    it, and `resume` refuses until the owner is re-activated or a new owner is
-    named.
+    or a platform administrator bans the owner, the account is suspended too,
+    each with a reason of its own, and an unban or a re-activation of the owner
+    does not resume it; a timed ban leaves it suspended after the ban expires.
+    `register`, `set-owner` and `resume` refuse an owner whose account is
+    disabled, whichever way it was disabled, so the account is resumed only
+    once the owner's account is active again or a new owner is named. A person
+    who is still accountable for an account is not deleted: the delete is
+    refused until a new owner is named. The OAuth applications and SCIM
+    credentials the owner registered are ended too (see
+    [What a ban, a deactivation or a removal ends](/docs/permissions/authentication#what-a-ban-a-deactivation-or-a-removal-ends)).
   - **`retire`** (an administrator) ends its membership and revokes every key
     for good; the account's record stays, so what it wrote still names it.
 

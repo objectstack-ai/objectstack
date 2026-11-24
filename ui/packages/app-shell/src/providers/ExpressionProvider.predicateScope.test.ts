@@ -160,11 +160,17 @@ describe('objectui#6493 — neither call site hand-writes a predicate bag any mo
     'console/AppContent.tsx': new URL('../console/AppContent.tsx', import.meta.url),
   };
 
+  // Since objectstack#35249 neither site evaluates a predicate itself: the
+  // field list reads the static `hidden` only, and every `visibleWhen` is
+  // judged by the form under the `ExpressionProvider` the site mounts. So the
+  // fence is that a site builds no bag of its own — by hand or otherwise — and
+  // that the provider is still where its scope comes from.
   for (const [label, url] of Object.entries(sources)) {
-    it(`${label} builds its evaluator through createExpressionEvaluator`, () => {
+    it(`${label} builds no predicate bag of its own; its scope is the ExpressionProvider it mounts`, () => {
       const src = readFileSync(url, 'utf8');
       expect(src).not.toMatch(/new\s+ExpressionEvaluator\s*\(/);
-      expect(src).toMatch(/createExpressionEvaluator\s*\(/);
+      expect(src).not.toMatch(/createExpressionEvaluator\s*\(/);
+      expect(src).toMatch(/<ExpressionProvider\b/);
     });
   }
 });

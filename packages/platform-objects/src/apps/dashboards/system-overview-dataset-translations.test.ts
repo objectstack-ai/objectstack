@@ -16,12 +16,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { translateDataset } from '@objectstack/spec/system';
+import { DatasetSchema, normalizeDatasetTerm } from '@objectstack/spec/ui';
 import { SystemOverviewDashboard } from './system_overview.dashboard.js';
 import { SystemOverviewDatasets } from './system.datasets.js';
 import { SetupAppTranslations } from '../translations/index.js';
 import { en } from '../translations/en.js';
 
-type Member = { name: string; label?: unknown };
+type Member = { name: string; label?: unknown; description?: unknown; synonyms?: readonly string[] };
 type Group = 'measures' | 'dimensions';
 
 const datasetsByName = new Map(SystemOverviewDatasets.map((d) => [d.name, d]));
@@ -104,6 +105,85 @@ describe('System Overview: every dataset label the board draws is translated', (
         }
       }
       expect(orphans).toEqual([]);
+    });
+  }
+});
+
+// ADR-0149 D1: each of the seven members carries the words an administrator
+// asks for it in (`synonyms`, every language in one authored array, never
+// bundled) and a one-sentence business definition (`description`, display
+// copy, translated beside the label). What `list_datasets` then answers for
+// those words is pinned where these datasets meet the dataset tools:
+// `packages/rest/src/system-overview-dataset-vocabulary.test.ts`.
+describe('System Overview: every dataset member carries its business vocabulary', () => {
+  const members = SystemOverviewDatasets.flatMap((d) =>
+    (['dimensions', 'measures'] as const).flatMap((group) =>
+      ((d[group] ?? []) as Member[]).map((m) => ({ dataset: d.name, group, member: m }))));
+
+  it('the seven members each declare synonyms in Chinese and English, and a description', () => {
+    expect(members.map(({ dataset, group, member }) => `${dataset}.${group}.${member.name}`)).toHaveLength(7);
+    for (const { dataset, group, member } of members) {
+      const at = `${dataset}.${group}.${member.name}`;
+      expect(member.description, at).toBeTypeOf('string');
+      const synonyms = member.synonyms ?? [];
+      expect(synonyms.some((s) => /\p{Script=Han}/u.test(s)), `${at}: a Chinese synonym`).toBe(true);
+      expect(synonyms.some((s) => /^[a-z ]+$/.test(s)), `${at}: an English synonym`).toBe(true);
+    }
+  });
+
+  it('each dataset survives a full parse, vocabulary rules included', () => {
+    for (const dataset of SystemOverviewDatasets) {
+      const parsed = DatasetSchema.safeParse(dataset);
+      expect(parsed.success, `${dataset.name}: ${parsed.success ? '' : parsed.error.message}`).toBe(true);
+    }
+  });
+
+  it('no synonym is a word of another measure in any of the five datasets, in any locale', () => {
+    // Two measures answering to one word make the tools ask which one is meant.
+    // The schema judges collisions within one dataset; this holds the five
+    // together, against the label each locale serves.
+    const collisions: string[] = [];
+    for (const locale of Object.keys(SetupAppTranslations)) {
+      const served = SystemOverviewDatasets.map((d) => translateDataset(d, SetupAppTranslations, { locale }));
+      const measureWords = served.flatMap((d) => ((d.measures ?? []) as Member[]).map((m) => ({
+        owner: `${d.name}.measures.${m.name}`,
+        words: [m.name, ...(typeof m.label === 'string' ? [m.label] : []), ...(m.synonyms ?? [])].map(normalizeDatasetTerm),
+      })));
+      for (const { dataset, group, member } of members) {
+        const owner = `${dataset}.${group}.${member.name}`;
+        for (const synonym of member.synonyms ?? []) {
+          for (const other of measureWords) {
+            if (other.owner !== owner && other.words.includes(normalizeDatasetTerm(synonym))) {
+              collisions.push(`${locale}: "${synonym}" of ${owner} is a word of ${other.owner}`);
+            }
+          }
+        }
+      }
+    }
+    expect(collisions).toEqual([]);
+  });
+
+  it('en: the bundle copies each member description from the declared source verbatim', () => {
+    const drift: string[] = [];
+    for (const { dataset, group, member } of members) {
+      const served = (en.datasets?.[dataset]?.[group] as Record<string, { description?: string }> | undefined)?.[member.name]?.description;
+      if (served !== member.description) {
+        drift.push(`datasets.${dataset}.${group}.${member.name}.description: ${JSON.stringify(served)} ≠ ${JSON.stringify(member.description)}`);
+      }
+    }
+    expect(drift).toEqual([]);
+  });
+
+  for (const locale of TRANSLATED_LOCALES) {
+    it(`${locale}: no member description resolves to the English source`, () => {
+      const english: string[] = [];
+      for (const { dataset, group, member } of members) {
+        const doc = datasetsByName.get(dataset)!;
+        const served = translateDataset(doc, SetupAppTranslations, { locale });
+        const description = ((served[group] ?? []) as Member[]).find((m) => m.name === member.name)?.description;
+        if (description === member.description) english.push(`datasets.${dataset}.${group}.${member.name}.description`);
+      }
+      expect(english, `untranslated dataset member descriptions under ${locale}`).toEqual([]);
     });
   }
 });

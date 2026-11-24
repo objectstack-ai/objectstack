@@ -3,9 +3,8 @@ title: v18
 description: "The v18 line: its GA release 18.0.0 and every minor since, how a breaking change reaches you on this line, and one page per release with its own upgrade checklist. The line carries ADR-0131, total organization ownership with no NULL organization_id."
 ---
 
-> **Release status: 18.4.0 is released**, the newest release of the v18 line,
-> published to npm's `latest` tag on 2026-11-13. 18.5.0 is the next release;
-> its notes are written ahead of its cut. The line opened with 18.0.0,
+> **Release status: 18.6.0 is released**, the newest release of the v18 line,
+> published to npm's `latest` tag on 2026-11-18. The line opened with 18.0.0,
 > released on 2026-10-20, which closed the `18.0.0-next.N` prerelease train.
 > A `^17` dependency range never moves to 18 by itself, and on this line a
 > `^18` range can move you to a release that breaks you: pin exact versions,
@@ -22,7 +21,8 @@ shipped them; every minor since carries the breaking changes that landed on
 
 | Release | Published to `latest` | Its page |
 | :--- | :--- | :--- |
-| 18.5.0 | not yet: written ahead of the cut | [18.5.0](/docs/releases/v18/18-5) |
+| 18.6.0 | 2026-11-18 | [18.6.0](/docs/releases/v18/18-6) |
+| 18.5.0 | 2026-11-15 | [18.5.0](/docs/releases/v18/18-5) |
 | 18.4.0 | 2026-11-13 | [18.4.0](/docs/releases/v18/18-4) |
 | 18.3.0 | 2026-11-03 | [18.3.0](/docs/releases/v18/18-3) |
 | 18.2.0 | 2026-10-27 | [18.2.0](/docs/releases/v18/18-2) |
@@ -106,12 +106,22 @@ Move to 18.0.0 first, then through each minor in order.
 Each release below is a self-contained page: what it changed, what breaks, and
 its own upgrade checklist.
 
+- **[18.6.0](/docs/releases/v18/18-6)** — outbound calls held to public
+  addresses, AI-door confirmation handed to the person, invitations that need
+  a verified address, read-only roll-ups, field security over computed
+  fields, and a disabled package that runs no flow. 68 of its 419 entries are
+  declared breaking: 53 need you to act and 15 carry an `os migrate meta`
+  entry. Written after the publish; its
+  [upgrade checklist](/docs/releases/v18/18-6#upgrade-checklist) moves an
+  18.5.0 app to 18.6.0, and the post-release smoke walked its first steps on
+  two small SQLite apps.
 - **[18.5.0](/docs/releases/v18/18-5)** — a 10 MiB request-body limit, SSO
   account linking held to the provider's proven domains, connectors and tools
   held per namespace, a disabled package that holds no name, and save
   refusals in the caller's language. 67 of its 284 entries are declared
-  breaking: 45 need you to act and 22 carry an `os migrate meta` entry. Written
-  ahead of the cut from the Version Packages pull request; its
+  breaking: 45 need you to act and 22 carry an `os migrate meta` entry.
+  Published on 2026-11-15; its notes were written ahead of the cut from the
+  Version Packages pull request, and its
   [upgrade checklist](/docs/releases/v18/18-5#upgrade-checklist) moves an
   18.4.0 app to 18.5.0 and has not been walked.
 - **[18.4.0](/docs/releases/v18/18-4)** — names held per namespace with

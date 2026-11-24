@@ -90,9 +90,9 @@ export const PROBE_DATASOURCE_FILE = '.objectstack/data/probe-primary.db';
  * A FEDERATED datasource (ADR-0015), write gate OPEN.
  *
  * It is here for one reader: `deriveCrudCases` builds a datasource-by-name map
- * and consults it for exactly ONE decision — whether a federated object's probe
- * insert is allowed through the double write gate — so the only way to watch
- * that map is to carry an external object whose gate depends on it. Declared in
+ * and consults it for exactly ONE decision — whether the reason it skips a
+ * federated object with names the double write gate open — so the only way to
+ * watch that map is to carry an external object whose gate depends on it. Declared in
  * the App package while the object it gates lives in the module package, so the
  * row watching it measures a CROSS-PACKAGE resolution and not a within-body
  * read.
@@ -106,7 +106,7 @@ export const PROBE_DATASOURCE_FILE = '.objectstack/data/probe-primary.db';
 export const PROBE_FEDERATED_DATASOURCE = 'probe_federated';
 /** Relative to the project root, same anchoring as the primary. */
 export const PROBE_FEDERATED_FILE = '.objectstack/data/probe-federated.db';
-/** The write-opted-in federated object the datasource gate above admits. */
+/** The write-opted-in federated object the datasource gate above opens (verify still never writes it). */
 export const PROBE_FEDERATED_OBJECT = 'probe_federated_order';
 /** The `isDefault` permission set `appSecurityPluginOptions` must resolve. */
 export const PROBE_DEFAULT_PERMISSION_SET = 'probe_default_profile';

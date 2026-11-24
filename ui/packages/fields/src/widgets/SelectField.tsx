@@ -18,6 +18,7 @@ import { MultiSelectField } from './MultiSelectField.js';
 import { OptionsEmptyState } from './OptionsEmptyState.js';
 import { toHostControlProps } from './toHostGroupProps.js';
 import { useCascadingOptions } from './useCascadingOptions.js';
+import { InCellOptionList } from './InCellOptionList.js';
 
 /**
  * SelectField - dropdown selection widget.
@@ -87,6 +88,8 @@ function SingleSelectField({
   dependsOn: dependsOnProp,
   emptyHint,
   dataSource: _dataSource,
+  inCell,
+  onCommit: _onCommit,
   ...props
 }: FieldWidgetComponentProps<string>) {
   const config = field as SelectFieldMetadata;
@@ -184,6 +187,22 @@ function SingleSelectField({
   //   interaction and the hidden select together); forwarding the raw prop to
   //   the trigger as well would give the state a second, OR-merged author.
   const { name: domName, disabled: _domDisabled, ...triggerDomProps } = toDomProps(props);
+
+  // The grid's cell editor (objectstack#35688): the list is open from the
+  // start and filters as the user types; a pick goes to `onChange`, which the
+  // grid commits.
+  if (inCell && !props.disabled) {
+    return (
+      <InCellOptionList
+        options={options.map((o) => ({ value: String(o.value), label: optionDisplayLabel(o) }))}
+        selected={value == null || (value as unknown) === '' ? [] : [String(value)]}
+        multiple={false}
+        onPick={(v) => onChange(v)}
+        testId={fieldName ? `select-in-cell-${fieldName}` : undefined}
+        inputProps={{ id: triggerDomProps.id, 'aria-describedby': triggerDomProps['aria-describedby'], 'aria-invalid': !!error }}
+      />
+    );
+  }
 
   // `null` is how an empty value arrives — the cascade clear above emits it
   // (objectui#10291), and so does a record whose column is empty. Radix shows

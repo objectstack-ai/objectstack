@@ -16,6 +16,13 @@
  *
  * Harness: the one `PageView.editInStudioOpensStudio-12540` uses. Every case is
  * a caller who passes the authoring gate (`PageView.editInStudioNeedsAuthoring-10899`).
+ *
+ * objectstack#36111 — the floating pencil is the phone's face since the page
+ * header and the shell's button group arrived: from the phone breakpoint up
+ * the top bar's 「Edit app」 (and the group's, once the shell turns it on)
+ * opens the same surface through the same gate
+ * (`ShellPageActions-36111`). So this file reads the pencil at a
+ * phone's width.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -134,11 +141,14 @@ function expectNoPencil() {
 }
 
 beforeEach(() => {
+  // The pencil's face: a phone (objectstack#36111).
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
   navigateSpy.mockClear();
   serve(async () => ({ ok: true, status: 200, body: PACKAGES }));
 });
 
 afterEach(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
   cleanup();
   vi.unstubAllGlobals();
 });

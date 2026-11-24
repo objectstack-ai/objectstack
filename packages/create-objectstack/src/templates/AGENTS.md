@@ -127,19 +127,15 @@ is not committed, so a fresh clone of the project has none.
 ⛔ Do not use `--agent '*'`: it copies the catalog into dozens of agent
 directories at once, and all of them then land in your next commit.
 
-Skills are triggered automatically based on task context:
+## How this project runs
 
-| Skill | Trigger Context |
-|:------|:----------------|
-| **objectstack-platform** | Project setup, defineStack(), driver/adapter selection, plugin lifecycle, DI, services, kernel hooks/events |
-| **objectstack-data** | Define objects, fields, relationships, validations, indexes, lifecycle hooks, permissions/RLS, seed fixtures (`defineDataset`) |
-| **objectstack-query** | Filters, sorting, pagination, aggregation, ObjectQL |
-| **objectstack-ui** | Views, dashboards, apps, reports, actions, navigation |
-| **objectstack-api** | REST endpoints, authentication, service contracts |
-| **objectstack-automation** | Flows, workflows, triggers, approvals, state machines |
-| **objectstack-ai** | Agents, tools, skills, RAG pipelines, LLM config |
-| **objectstack-i18n** | Translation bundles, locale config, coverage detection |
-| **objectstack-formula** | CEL formula fields, predicates, conditions, dynamic seed values |
+Read the **objectstack-project** skill (`.claude/skills/objectstack-project/SKILL.md`,
+or the same path under the runtime you synced to) before you decide where a
+change belongs or what to write first, write a test, open a PR, cut a release or
+bump `@objectstack/*`. It says
+whether a change belongs in this app or in the platform, what the app tests and
+what `validate`, `lint` and `verify` already check, and how a change reaches
+customers. Its last section names the skill for each kind of metadata.
 
 ## Learn More
 

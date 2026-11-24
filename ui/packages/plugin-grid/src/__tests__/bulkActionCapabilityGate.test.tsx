@@ -31,7 +31,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { ActionProvider, PredicateScopeProvider } from '@object-ui/react';
 import type { BulkActionDef } from '@object-ui/types';
-import { BulkActionBar } from '../components/BulkActionBar';
+import { BulkActionBar } from '../components/SelectionBar';
 
 const GATED: BulkActionDef = {
   name: 'push_down',

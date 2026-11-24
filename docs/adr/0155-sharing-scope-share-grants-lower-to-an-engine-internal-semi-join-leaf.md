@@ -157,7 +157,7 @@ Three things were the maintainer's, put with a recommendation each, and the main
   organization. The security middleware passes a system context through, and
   `packages/objectql/src/engine-driver-options.ts#driverReadScope` projects no driver tenant scope for such a
   context. So the read runs outside the tenant wall, and it returns the user's rows for the object whatever
-  organization each row carries. `packages/plugins/plugin-sharing/src/sharing-service.ts#grantedRecordIds` drops a
+  organization each row carries. `grantedRecordIds` drops a
   nullish `record_id`, stringifies the rest and drops the empty string.
 - **The approval arm.** `packages/plugins/plugin-sharing/src/sharing-service.ts#pendingApproverReadGrants` asks the
   approvals service for the records a pending step waits on the caller for. They grant read only, none to a delegated
@@ -193,6 +193,15 @@ Three things were the maintainer's, put with a recommendation each, and the main
   it: the object has an owner field, the caller is below `org` depth, and the object is not open to the caller on
   that side (a `private` model for a read; a `private` or `public_read` model for a predicate update; for an external
   principal, whatever the external floor leaves closed).
+
+> **Note (2026-11-21, #33787) — `grantedRecordIds` is gone; its filter is the leaf's blank-id guard.** Plan step 6
+> removed the grant read above, and `grantedRecordIds` with it, from
+> `packages/plugins/plugin-sharing/src/sharing-service.ts`: the sharing scopes carry the share arm as the
+> `SharedRecordIds` leaf, and no grant is read into a list. What `grantedRecordIds` did to a grant row, dropping a
+> nullish or empty `record_id`, is now the blank-id guard every evaluator owes the leaf's inner read, declared with
+> `packages/spec/src/data/fixed-read-leaf.ts#FixedInnerRead` (D2's blank-id guard bullet). The grant-read bullet
+> above anchored the removed symbol; it now names the symbol bare, as D2 does, and this note carries the live
+> anchor. The bullet otherwise stands as written, a reading of `b8ac0e24`.
 
 ### Why no existing form serves
 
@@ -519,6 +528,18 @@ recommended column, which does not hold this row, so the row stands as stated he
 The rest of the census is ②, ruled row by row in [Q2](#q2--an-evaluator-that-cannot-run-the-leaf): `driver-mongodb`,
 `driver-odata`, a driver this repository does not ship, an object on another datasource, the analytics read-scope
 compilers, the explainer's record pass, and the host class D4 recognises.
+
+> **Note (2026-11-21, #33787) — the switch landed before plan step 4, so `driver-memory` takes R2 until a driver
+> declares the leaf.** Plan step 4 (#35873, `driver-memory`'s in-process evaluation) is on hold. Ruling
+> [`7045701086`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-7045701086) made it no
+> prerequisite of plan step 6, and seat 7's call in claim amendment
+> [`7060526112`](https://github.com/objectstack-ai/objectstack/issues/33787#issuecomment-7060526112) confirmed what
+> `driver-memory` answers meanwhile. It declares no `fixedReadLeaves`, so from the switch on it answers as ②'s R2 row
+> does: its share grants go inert, stop counting and fail closed (neither scope carries the share arm, and the edit
+> gate reads no grant), and the grant door and the sharing-rule save door refuse with `SHARING_NOT_ENABLED` / 422.
+> The `driver-memory` row above, Q2's closing sentence and plan step 6's "lands last" record the order the plan
+> expected. They stand as written, and this note records the order that happened. Once plan step 4 lands and the
+> driver declares the leaf, share grants on `driver-memory` count again, with no change to plugin-sharing.
 
 ### D6 — What the switch must show
 

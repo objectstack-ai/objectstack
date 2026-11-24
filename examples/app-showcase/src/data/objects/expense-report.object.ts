@@ -49,6 +49,7 @@ export const ExpenseReport = ObjectSchema.create({
   label: 'Expense Report',
   pluralLabel: 'Expense Reports',
   icon: 'wallet',
+  color: 'green',
   description: 'An expense report whose parent totals are filtered roll-ups of its line items.',
 
   fields: {
@@ -141,8 +142,11 @@ export const ExpenseReport = ObjectSchema.create({
   // ADR-0085 §5: the form, detail and drawer layout is derived from these
   // groups, so each field is placed in a named section rather than left to the
   // untitled fallback, which the field-no-consumers rule credits to no one (#32168).
+  // [#35889] `lines` places the expense lines' table between the report and
+  // its totals on the record page, and inlines it in the New / Edit form.
   fieldGroups: [
     { key: 'report', label: 'Report' },
+    { key: 'lines', label: 'Expense Lines', relatedList: 'showcase_expense_line' },
     { key: 'totals', label: 'Totals' },
   ],
 });
@@ -153,6 +157,7 @@ export const ExpenseLine = ObjectSchema.create({
   label: 'Expense Line',
   pluralLabel: 'Expense Lines',
   icon: 'receipt',
+  color: 'green',
   description: 'A single expense on a report; the parent report rolls these up with filters.',
 
   // ADR-0055: a line's access is CONTROLLED BY ITS PARENT report — the same

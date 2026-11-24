@@ -27,6 +27,7 @@ import {
 import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
+import { judgeItemAlone, resolveItemType } from '../lint/item-lint.js';
 import {
   printHeader,
   printSuccess,
@@ -449,56 +450,13 @@ export interface LintConfigOptions {
 }
 
 /**
- * `os lint`'s whole rubric: the hand-written checks below plus the shared
- * author-time rule registry (#4409), over the stack the author DECLARED.
- *
- * ## Why the fold is here, at the entry, and not at the registry call alone
- *
- * #17069 taught the registry call inside this function to resolve `packages[]`
- * and scoped itself the way `compile.ts` scopes it, writing down exactly what
- * it left behind: "the hand-written checks above and `scoreMetadata` (which
- * reaches `lintConfig` through `lint/score.js`) keep reading the caller's own
- * stack". This is the other half of that staged change, not a reversal of it.
- *
- * The half it left was the sharper one. Under ADR-0130 D4 / option B every
- * definition lives in `packages[]` and the top level carries none, so the
- * hand-written family read an EMPTY stack: a project with a lower-case object
- * label and no name field got `✓ All checks passed`, while the byte-identical
- * top-level spelling of the same metadata got `convention/label-case` and
- * `object/missing-name-field`. `scoreMetadata` reaches this same function, so
- * an option-B project's metadata-quality rubric was computed over nothing and
- * published `100/100 (A)` — the #15658 shape ("the linter found nothing" and
- * "the linter never ran" collapsed into the better-looking one) arriving
- * through the INPUT this time rather than through a swallowed crash.
- *
- * ## Why {@link authoringRuleUnionStack} and not a second fold
- *
- * `stack-collections.ts` is the ONE place this package resolves a
- * package-owned collection, and its rule is present-wins: a key the top level
- * already carries wins, because in today's additive shape that array already
- * IS the union. A stack that carries its collections comes back BY IDENTITY,
- * so every single-package project lints byte-identically to before. A second
- * fold written here could not have that property without re-deriving it, and
- * two folds that disagree is a worse defect than the one being removed.
- *
- * ## What this does NOT decide
- *
- * It does not choose between a per-project and a per-package metadata score.
- * `scoreMetadata` already scores the whole project and always has: its schema
- * half parses the artifact whole and reports `packages.0.manifest.objects.0:
- * …` on an option-B stack today, with no fold anywhere, and on today's
- * additive multi-package shape its lint half already reads the flattened union
- * across every package. This fold makes the option-B shape agree with the
- * additive one — the same thing computed, over a stack that is no longer
- * empty — and raises no new scoping question.
+ * [#34777] `os lint`'s per-entry conventions — snake_case names, labels and
+ * their case, an object's fields — over the objects, views, apps, flows and
+ * agents of `stack`. Each check reads ONE entry and nothing beside it, which is
+ * why `os lint --item` runs this function on a one-item stack. Called by
+ * `lintConfig` at the head of its own rubric, in the order it always ran.
  */
-export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue[] {
-  // The stack as DECLARED, whichever ADR-0130 D4 shape it arrived in. ⛔ Never
-  // read `config.KEY` below this line — a check that skipped the fold is
-  // exactly the defect #17528 removed, and it would be invisible in every
-  // other check, because the run still exits 0 and still prints a score.
-  const stack: any = authoringRuleUnionStack(config as Record<string, unknown>);
-
+export function entryConventionIssues(stack: any): LintIssue[] {
   const issues: LintIssue[] = [];
 
   const push = (issue: LintIssue | null) => {
@@ -611,6 +569,68 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
       push(checkSnakeCase(agent.name, `${agentPath}.name`, 'Agent name'));
     }
   }
+
+  return issues;
+}
+
+/**
+ * `os lint`'s whole rubric: the hand-written checks below plus the shared
+ * author-time rule registry (#4409), over the stack the author DECLARED.
+ *
+ * ## Why the fold is here, at the entry, and not at the registry call alone
+ *
+ * #17069 taught the registry call inside this function to resolve `packages[]`
+ * and scoped itself the way `compile.ts` scopes it, writing down exactly what
+ * it left behind: "the hand-written checks above and `scoreMetadata` (which
+ * reaches `lintConfig` through `lint/score.js`) keep reading the caller's own
+ * stack". This is the other half of that staged change, not a reversal of it.
+ *
+ * The half it left was the sharper one. Under ADR-0130 D4 / option B every
+ * definition lives in `packages[]` and the top level carries none, so the
+ * hand-written family read an EMPTY stack: a project with a lower-case object
+ * label and no name field got `✓ All checks passed`, while the byte-identical
+ * top-level spelling of the same metadata got `convention/label-case` and
+ * `object/missing-name-field`. `scoreMetadata` reaches this same function, so
+ * an option-B project's metadata-quality rubric was computed over nothing and
+ * published `100/100 (A)` — the #15658 shape ("the linter found nothing" and
+ * "the linter never ran" collapsed into the better-looking one) arriving
+ * through the INPUT this time rather than through a swallowed crash.
+ *
+ * ## Why {@link authoringRuleUnionStack} and not a second fold
+ *
+ * `stack-collections.ts` is the ONE place this package resolves a
+ * package-owned collection, and its rule is present-wins: a key the top level
+ * already carries wins, because in today's additive shape that array already
+ * IS the union. A stack that carries its collections comes back BY IDENTITY,
+ * so every single-package project lints byte-identically to before. A second
+ * fold written here could not have that property without re-deriving it, and
+ * two folds that disagree is a worse defect than the one being removed.
+ *
+ * ## What this does NOT decide
+ *
+ * It does not choose between a per-project and a per-package metadata score.
+ * `scoreMetadata` already scores the whole project and always has: its schema
+ * half parses the artifact whole and reports `packages.0.manifest.objects.0:
+ * …` on an option-B stack today, with no fold anywhere, and on today's
+ * additive multi-package shape its lint half already reads the flattened union
+ * across every package. This fold makes the option-B shape agree with the
+ * additive one — the same thing computed, over a stack that is no longer
+ * empty — and raises no new scoping question.
+ */
+export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue[] {
+  // The stack as DECLARED, whichever ADR-0130 D4 shape it arrived in. ⛔ Never
+  // read `config.KEY` below this line — a check that skipped the fold is
+  // exactly the defect #17528 removed, and it would be invisible in every
+  // other check, because the run still exits 0 and still prints a score.
+  const stack: any = authoringRuleUnionStack(config as Record<string, unknown>);
+
+  const issues: LintIssue[] = [];
+
+  // ── Per-entry naming, label and structure conventions ──
+  // [#34777] One function, so `os lint --item` runs the same checks on one
+  // item: each reads one entry and nothing beside it.
+  issues.push(...entryConventionIssues(stack));
+  const objects: any[] = Array.isArray(stack.objects) ? stack.objects : [];
 
   // ── Package-namespace naming contract (ruling C on #30798, phase 2) ──
   //
@@ -940,6 +960,15 @@ export default class Lint extends Command {
       description:
         "Source locale for i18n coverage: the language inline labels are written in, which they satisfy and errors are raised against. Overrides the config's i18n.sourceLocale, else its i18n.defaultLocale, else 'en'.",
     }),
+    // [#34777] One item instead of a project: the JSON body `os meta register
+    // --data` takes, judged by the rules that need nothing beside it.
+    item: Flags.string({
+      description:
+        'Lint ONE metadata item instead of a project: a JSON file holding the item (the body `os meta register --data` takes). Runs the rules that can judge the item alone and names the ones that need the rest of the stack. Requires --type',
+    }),
+    type: Flags.string({
+      description: 'The metadata type of the --item file (object, view, flow, …). Requires --item',
+    }),
   };
 
   async run(): Promise<void> {
@@ -1014,6 +1043,30 @@ export default class Lint extends Command {
       if (flags.json) await emitJson({ error: message }, 0, { compact: true });
       else printError(message);
       process.exit(1);
+    }
+
+    // ── Item mode — one metadata item, judged without a project (#34777) ──
+    // Refused, never ignored, when combined with a flag it would not read —
+    // the `--generator` rule above, for the same reason.
+    if (flags.item !== undefined || flags.type !== undefined) {
+      const conflict = flags.item === undefined
+        ? '--type names the type of an --item file and means nothing without --item.'
+        : flags.type === undefined
+          ? '--item needs --type, the metadata type of the item (object, view, flow, …).'
+          : configPath !== undefined
+            ? `--item lints one item instead of a configuration; pass either --item or the configuration path ${configPath}, not both.`
+            : flags.eval
+              ? '--item lints one item; --eval scores the generation corpus. Run them separately.'
+              : flags.score
+                ? '--score grades a whole project; --item judges one item, which has no project score.'
+                : undefined;
+      if (conflict !== undefined) {
+        if (flags.json) await emitJson({ error: conflict }, 0, { compact: true });
+        else printError(conflict);
+        process.exit(1);
+      }
+      await this.runItem(flags, timer);
+      return;
     }
 
     // ── Eval mode — score generated metadata against the convention rubric ──
@@ -1335,6 +1388,117 @@ export default class Lint extends Command {
         console.log('');
         printError(error.message || String(error));
       }
+      process.exit(1);
+    }
+  }
+
+  /**
+   * [#34777] `os lint --item <file> --type <type>`: one item, judged by the
+   * rule-table entries that read nothing beside it (`lint/item-lint.ts` holds
+   * the classification and says how it is measured) and by `os lint`'s
+   * per-entry conventions. The entries and families that need the rest of the
+   * stack are NAMED, on both faces, and their findings are not reported. The
+   * exit code is read as a project run's: an error fails it, a warning fails
+   * it under `--strict`.
+   */
+  private async runItem(flags: any, timer: ReturnType<typeof createTimer>): Promise<void> {
+    const file = String(flags.item);
+    try {
+      const resolved = resolveItemType(String(flags.type));
+      if (!resolved.ok) throw new Error(resolved.message);
+      const { readFile } = await import('node:fs/promises');
+      const text = await readFile(file, 'utf-8');
+      let item: unknown;
+      try {
+        item = JSON.parse(text);
+      } catch (e) {
+        throw new Error(`Invalid JSON in ${file}: ${(e as Error).message}`);
+      }
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        throw new Error(`${file} must hold one metadata item, a JSON object.`);
+      }
+      const result = judgeItemAlone(item as Record<string, unknown>, resolved.type, resolved.stackKey);
+      const issues: LintIssue[] = [
+        ...entryConventionIssues(result.stack),
+        ...result.findings.map(authoringFindingToLintIssue),
+      ];
+
+      const strict = flags.strict ?? false;
+      const errors = issues.filter((i) => i.severity === 'error');
+      const warnings = issues.filter((i) => i.severity === 'warning');
+      const suggestions = issues.filter((i) => i.severity === 'suggestion');
+      const failing = errors.length + (strict ? warnings.length : 0);
+
+      if (flags.json) {
+        await emitJson({
+          passed: failing === 0,
+          item: file,
+          type: result.type,
+          total: issues.length,
+          errors: errors.length,
+          warnings: warnings.length,
+          suggestions: suggestions.length,
+          strict,
+          failing,
+          issues,
+          judged: result.judged,
+          notJudged: result.notJudged,
+          familiesNotRun: result.familiesNotRun,
+          conversions: result.conversions,
+          duration: timer.elapsed(),
+        }, failing > 0 ? 1 : 0);
+        return;
+      }
+
+      printHeader('Lint');
+      printInfo(`Item: ${chalk.white(file)} (${result.type})`);
+      for (const n of result.conversions) printWarning(formatConversionNotice(n));
+      console.log('');
+      if (issues.length === 0) {
+        printSuccess(`No findings from the rules that judged this item ${chalk.dim(`(${timer.display()})`)}`);
+      }
+      for (const issue of issues) {
+        const color = issue.severity === 'error' ? chalk.red : issue.severity === 'warning' ? chalk.yellow : chalk.blue;
+        const icon = issue.severity === 'error' ? '✗' : issue.severity === 'warning' ? '⚠' : 'ℹ';
+        console.log(`  ${color(icon)} ${color(issue.message)}`);
+        console.log(chalk.dim(`    ${issue.rule}  at ${issue.path}${explainPointer(issue.rule)}`));
+        if (flags.fix && issue.fix) console.log(chalk.green(`    → fix: ${issue.fix}`));
+      }
+      console.log('');
+      console.log(`  Judged by ${result.judged.length} shared rule(s) and os lint's per-entry conventions.`);
+      if (result.notJudged.length > 0 || result.familiesNotRun.length > 0) {
+        console.log(chalk.bold(
+          `  Not run without the rest of the stack (${result.notJudged.length + result.familiesNotRun.length}):`,
+        ));
+        for (const r of result.notJudged) {
+          console.log(chalk.dim(`    ${r.rule}  reads ${r.reads.join(', ')}`));
+        }
+        for (const f of result.familiesNotRun) {
+          console.log(chalk.dim(`    ${f.family}  ${f.reason}`));
+        }
+        console.log(chalk.dim('  Run `os lint` on the project, or publish the draft, for those.'));
+      }
+      if (issues.length > 0) {
+        const parts: string[] = [];
+        if (errors.length > 0) parts.push(chalk.red(`${errors.length} error(s)`));
+        if (warnings.length > 0) parts.push(chalk.yellow(`${warnings.length} warning(s)`));
+        if (suggestions.length > 0) parts.push(chalk.blue(`${suggestions.length} suggestion(s)`));
+        console.log(`  ${parts.join(', ')} ${chalk.dim(`(${timer.display()})`)}`);
+      }
+      if (strict && warnings.length > 0) {
+        printError(
+          `${warnings.length} warning(s) fail this run under --strict (a warning is advisory without the flag)`,
+        );
+      }
+      console.log('');
+      if (failing > 0) process.exit(1);
+    } catch (error: any) {
+      if (isExitSignal(error)) throw error;
+      if (flags.json) {
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
+        process.exit(1);
+      }
+      printError(error.message || String(error));
       process.exit(1);
     }
   }

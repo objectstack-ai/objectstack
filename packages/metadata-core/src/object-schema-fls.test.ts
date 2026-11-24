@@ -5,7 +5,7 @@
  * per-exit contract suites consume rather than re-derive.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
     ObjectSchemaMaskEvaluationError,
     actionObjectOverrideTargets,
@@ -719,5 +719,93 @@ describe('[decision 6840464379] an object whose owner declares a schemaReadDeleg
         // An engine with no registry read declares nothing.
         const bare = objectSchemaReadDelegateSource({ engine: () => undefined, service: () => undefined });
         expect(await bare.declaredDelegate('sys_request')).toBeUndefined();
+    });
+});
+
+describe('[ADR-0106 D1/D3, #34901] a disabled package\'s withheld fields, judged per caller', () => {
+    /** A served object read whose package-disabled extension withholds two fields. */
+    const SERVED = {
+        name: 'deal',
+        label: 'Deal',
+        fields: { id: { type: 'text' }, amount: { type: 'number' } },
+        _withheldFields: { crm_project: { packageId: 'com.acme.projects' }, crm_margin: { packageId: 'com.acme.projects' } },
+    };
+    const caller = { userId: 'u1', systemPermissions: [] as string[] };
+    /** A service that reads every live field and admits `admitted` of the withheld ones. */
+    const service = (admitted: string[] | undefined | (() => never)) => ({
+        getMetadataReadableFields: async () => ['id', 'amount'],
+        getMetadataReadableWithheldFields: async () => (typeof admitted === 'function' ? admitted() : admitted),
+    });
+    const servedTo = async (security: Record<string, unknown> | undefined, context: unknown = caller, telemetry?: Record<string, unknown>) => {
+        const posture = await resolveObjectSchemaMaskPosture({ objectName: 'deal', context, security: security as any, enabled: true, telemetry: telemetry as any });
+        return applyObjectSchemaMask(SERVED, posture);
+    };
+
+    it('drops every entry the member does not admit, and the decoration with the last one', async () => {
+        const some = await servedTo(service(['crm_margin']));
+        expect((some.document as any)._withheldFields).toEqual({ crm_margin: { packageId: 'com.acme.projects' } });
+        expect(some.document).not.toBe(SERVED);
+        expect(SERVED._withheldFields, 'the cached document is never mutated').toHaveProperty('crm_project');
+        const none = await servedTo(service([]));
+        expect('_withheldFields' in (none.document as object)).toBe(false);
+        // Nothing else moves: every live field, no denied field, not emptied.
+        expect(Object.keys((none.document as any).fields)).toEqual(['id', 'amount']);
+        expect({ denied: none.denied, emptied: none.emptied, hidden: none.hidden }).toEqual({ denied: [], emptied: false, hidden: false });
+    });
+
+    it('an admitted caller is served the decoration whole, by reference, with no fingerprint', async () => {
+        const all = await servedTo(service(['crm_project', 'crm_margin']));
+        expect(all.document).toBe(SERVED);
+        expect(all.fingerprint).toBe('');
+    });
+
+    it('fails closed: a service without the member, an undefined answer and a throw each drop every entry', async () => {
+        const warn = vi.fn();
+        const cases = {
+            'member absent': { getMetadataReadableFields: async () => ['id', 'amount'] },
+            'undefined answer': service(undefined),
+            throws: service(() => { throw new Error('security service unhealthy (test)'); }),
+        };
+        for (const [label, security] of Object.entries(cases)) {
+            const masked = await servedTo(security, caller, { warn });
+            expect('_withheldFields' in (masked.document as object), label).toBe(false);
+            expect(Object.keys((masked.document as any).fields), label).toEqual(['id', 'amount']);
+        }
+        // A throw is no D6 fault — nothing the caller needs depends on it — and is said once, at warn.
+        expect(warn.mock.calls.filter(([, meta]) => meta?.decision === 'drop-withheld-fields')).toHaveLength(1);
+    });
+
+    it('a passthrough posture keeps the decoration: a D4-exempt caller, no security service, the D8 switch', async () => {
+        const admin = { userId: 'u_admin', systemPermissions: [OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES[0]] };
+        expect((await servedTo(service([]), admin)).document).toBe(SERVED);
+        expect((await servedTo(undefined)).document).toBe(SERVED);
+        const disabled = await resolveObjectSchemaMaskPosture({ objectName: 'deal', context: caller, security: service([]) as any, enabled: false });
+        expect(applyObjectSchemaMask(SERVED, disabled).document).toBe(SERVED);
+    });
+
+    it('a project posture built without the answer drops every entry', () => {
+        const masked = applyObjectSchemaMask(SERVED, { kind: 'project', readable: new Set(['id', 'amount']) });
+        expect('_withheldFields' in (masked.document as object)).toBe(false);
+    });
+
+    it('[D3] the ETag fingerprint differs between callers who see different withheld sets, and is equal for the same set', async () => {
+        const a = await servedTo(service([]));
+        const b = await servedTo(service(['crm_margin']));
+        const c = await servedTo(service([]));
+        expect(a.fingerprint).not.toBe('');
+        expect(a.fingerprint).not.toBe(b.fingerprint);
+        expect(a.fingerprint).toBe(c.fingerprint);
+        // Qualified: a dropped withheld entry never hashes equal to a removed field of the same name.
+        expect(a.fingerprint).not.toBe(objectFieldVisibilityFingerprint(['crm_margin', 'crm_project']));
+        expect(foldVisibilityFingerprintIntoEtag('shared', a.fingerprint)).not.toBe(foldVisibilityFingerprintIntoEtag('shared', b.fingerprint));
+    });
+
+    it('the member is asked once per posture, with the caller\'s context', async () => {
+        const ask = vi.fn(async () => ['crm_margin']);
+        await resolveObjectSchemaMaskPosture({
+            objectName: 'deal', context: caller, enabled: true,
+            security: { getMetadataReadableFields: async () => ['id', 'amount'], getMetadataReadableWithheldFields: ask } as any,
+        });
+        expect(ask.mock.calls).toEqual([['deal', caller]]);
     });
 });

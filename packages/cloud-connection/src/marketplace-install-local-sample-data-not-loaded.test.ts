@@ -440,7 +440,9 @@ describe('reseed and purge on a loadable entry answer as before', () => {
         });
         const after = h.state();
         expect(after.translationsLoaded - before.translationsLoaded).toBe(2);
-        expect(after.seedDatasets - before.seedDatasets).toBe(1);
+        // The reseed merges the package's datasets again under its id, which replaces
+        // its entries on the shared list rather than adding a second copy (#35109).
+        expect(after.seedDatasets - before.seedDatasets).toBe(0);
         expect(recorded(dir, LOADED.id)).toEqual({ withSampleData: true, sampleDataPurged: false });
     });
 

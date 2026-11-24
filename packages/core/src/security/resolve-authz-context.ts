@@ -3341,8 +3341,11 @@ function watchedWriteState(
  * `{ current: number }` on some unrelated double would otherwise read as a live
  * invalidation seam and license caching against a counter that nothing ever
  * bumps — precisely the state this guard exists to keep unreachable.
+ *
+ * Exported for the request's session-read carrier (`request-session-read.ts`),
+ * which reads the same seam and must not grow a second check of it.
  */
-function readWriteEpoch(ql: unknown): number | undefined {
+export function readWriteEpoch(ql: unknown): number | undefined {
   if (!ql || typeof ql !== 'object') return undefined;
   const epoch = (ql as { writeEpoch?: unknown }).writeEpoch;
   if (!epoch || typeof epoch !== 'object') return undefined;

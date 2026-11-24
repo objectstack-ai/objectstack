@@ -20,3 +20,4 @@ export * from './refresh.js';
 export * from './screenshots.js';
 export * from './source.js';
 export * from './transcript.js';
+export * from './trial-package.js';

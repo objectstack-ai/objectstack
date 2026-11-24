@@ -101,6 +101,29 @@ async function invalidate() {
   });
 }
 
+/** The shape the ObjectStack adapter throws: status + code decorated on the Error. */
+function refusal(): Error {
+  const err = new Error(
+    'ApiDataSource: HTTP 403 Forbidden — {"error":"PERMISSION_DENIED: no read access to event"}',
+  ) as Error & { httpStatus?: number; code?: string };
+  err.httpStatus = 403;
+  err.code = 'PERMISSION_DENIED';
+  return err;
+}
+
+function serverError(): Error {
+  const err = new Error('ApiDataSource: HTTP 500 Internal Server Error') as Error & { httpStatus?: number };
+  err.httpStatus = 500;
+  return err;
+}
+
+async function failWith(d: Deferred<any>, err: Error) {
+  await act(async () => {
+    d.reject(err);
+    await Promise.resolve();
+  });
+}
+
 const CALENDAR = { startDateField: 'due', titleField: 'name' };
 const BLOCK = { type: 'object-calendar', objectName: 'event', calendar: CALENDAR };
 
@@ -209,5 +232,43 @@ describe('object-calendar clears its error when a later load commits rows (objec
 
     expect(anyErrorShown(), 'the error of a fetch whose rows are not drawn outlived the handed-over rows').toBe(false);
     expect(screen.getByText('Handed over')).toBeTruthy();
+  });
+});
+
+/**
+ * A refused read draws the calm no-access state, not the raw error.
+ *
+ * A reader who may open the page but not read the calendar's object used to see
+ * the transport's own string ("ApiDataSource: HTTP 403 Forbidden — ..."). The
+ * calendar now classifies a failed load with the shared `classifyLoadError` and,
+ * for a `forbidden` read, draws the shared `list.loadErrorForbidden*` sentence
+ * as a neutral `role="status"` panel. Every other failure keeps the existing
+ * error screen (CONTROL).
+ */
+describe('object-calendar: a refused read draws the no-access state', () => {
+  it('a 403 read draws the no-access state, with none of the server text', async () => {
+    const { dataSource, finds } = makeDeferredDataSource();
+    const { container } = mount(dataSource);
+    await waitFor(() => expect(finds).toHaveLength(1));
+    await failWith(finds[0], refusal());
+
+    const panel = await screen.findByTestId('calendar-no-access');
+    expect(panel.getAttribute('role')).toBe('status');
+    expect(panel.textContent).toContain('You don\u2019t have access');
+    expect(panel.textContent).toContain('You don\u2019t have permission to view these records.');
+    const text = container.textContent ?? '';
+    expect(text).not.toContain('Error');
+    expect(text).not.toContain('PERMISSION_DENIED');
+    expect(text).not.toContain('HTTP 403');
+  });
+
+  it('CONTROL: a 500 keeps the existing error screen', async () => {
+    const { dataSource, finds } = makeDeferredDataSource();
+    mount(dataSource);
+    await waitFor(() => expect(finds).toHaveLength(1));
+    await failWith(finds[0], serverError());
+
+    expect(errorShown('ApiDataSource: HTTP 500 Internal Server Error')).toBe(true);
+    expect(screen.queryByTestId('calendar-no-access')).toBeNull();
   });
 });

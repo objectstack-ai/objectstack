@@ -160,7 +160,7 @@ const flow = (ns: string, nodeType: NodeType) => `{
     type: 'autolaunched',
     nodes: [
       { id: 'start', type: 'start', label: 'Start' },
-      { id: 'call', type: '${nodeType}', label: 'Call', config: { url: 'https://example.com/hook' } },
+      { id: 'call', type: '${nodeType}', label: 'Call', timeoutMs: 10000, config: { url: 'https://example.com/hook' } },
       { id: 'end', type: 'end', label: 'End' },
     ],
     edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],

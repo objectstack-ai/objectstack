@@ -254,11 +254,44 @@ type CbpRelation = NonNullable<ReturnType<SecurityPlugin['resolveCbpRelation']>>
  * none — only where the master is OPTIONAL ({@link CbpRelation.optional}); a
  * required master's empty reference is refused there, as before. Each such row
  * carries its `id`, its master reference and, where the object has one, its
- * `owner_id`, read as system.
+ * `owner_id`, read as system. `rowIds` are the ids of the selected rows whose
+ * master reference was read: the rows `masterIds` and `nullMasterRows` were
+ * derived from, and so the rows the gate judges.
  */
 export interface CbpPredicateWriteSelection {
   masterIds: unknown[];
   nullMasterRows: Array<Record<string, unknown>>;
+  rowIds: unknown[];
+}
+
+/**
+ * [ADR-0055 §3 as amended 2026-11-22 · ruling record 7073030861] The rows a
+ * predicate write's master gate judged, keyed by the operation it judged.
+ *
+ * Written by {@link judgeControlledByParentWrite} once, at the end of a pass
+ * that refused nothing: every master those rows name passed the walk, every
+ * row naming none passed the owner rule, and a master the body names was
+ * asked. A pass that refuses writes nothing here, and neither does a by-id
+ * write, an insert, or a shape the engine does not route down its predicate
+ * path.
+ *
+ * Read by the engine middleware, straight after the CALLER's own pass, as the
+ * coverage vouch for the predicate path (`RlsFilterOptions.masterGateCoversThisWrite`)
+ * and as that write's row scope, so the rows the floor is handed over for are
+ * the rows the gate judged and no others
+ * ({@link predicateWriteRowIdsJudgedByMasterGate}).
+ */
+const PREDICATE_WRITE_JUDGED_ROW_IDS = new WeakMap<object, readonly unknown[]>();
+
+/**
+ * The ids {@link PREDICATE_WRITE_JUDGED_ROW_IDS} holds for `opCtx`: the rows
+ * the last pass of the master gate judged for this predicate write and
+ * admitted, or `null` when no pass did (the gate refused, did not run, or the
+ * write is not a predicate write of a `controlled_by_parent` detail).
+ */
+export function predicateWriteRowIdsJudgedByMasterGate(opCtx: unknown): readonly unknown[] | null {
+  if (opCtx === null || typeof opCtx !== 'object') return null;
+  return PREDICATE_WRITE_JUDGED_ROW_IDS.get(opCtx) ?? null;
 }
 
 /**
@@ -631,7 +664,7 @@ async function judgeControlledByParentWrite(
           : rlsOperationForVerb(operation) === 'delete' &&
             resolveEngineDeleteDispatch(opCtx.options as EngineDeleteDispatchInput | undefined).kind === 'multi';
       if (!predicatePath) return;
-      const { masterIds: predicateMasters, nullMasterRows } =
+      const { masterIds: predicateMasters, nullMasterRows, rowIds } =
         await this.controlledByParentPredicateWriteMasters(object, operation, rel, opCtx);
       for (const predicateMasterId of predicateMasters) {
         await this.assertControlledByParentChainEditable(
@@ -655,6 +688,10 @@ async function judgeControlledByParentWrite(
       // body names is asked (re-pointing a row under a master is that master's
       // question, whoever owns the row).
       if (predicateMasters.length > 0 || nullMasterRows.length > 0) await askBodyNamedMaster(predicateMasters);
+      // [ruling record 7073030861] Nothing above refused: these are the rows
+      // this pass judged, recorded for the middleware's coverage vouch
+      // ({@link PREDICATE_WRITE_JUDGED_ROW_IDS}).
+      if (opCtx !== null && typeof opCtx === 'object') PREDICATE_WRITE_JUDGED_ROW_IDS.set(opCtx, rowIds);
       return;
     }
     detailRecordId = targetId;
@@ -1077,7 +1114,7 @@ export async function controlledByParentPredicateWriteMasters(
   const ids = rows
     .map((r) => (r && typeof r === 'object' ? (r as { id?: unknown }).id : undefined))
     .filter((id) => id !== undefined && id !== null);
-  if (ids.length === 0) return { masterIds: [], nullMasterRows: [] };
+  if (ids.length === 0) return { masterIds: [], nullMasterRows: [], rowIds: [] };
   // [ADR-0055 §3 as amended · #30905 ruling A] An OPTIONAL master's row may
   // name none, and is then judged by its owner, so the owner column is read
   // beside the reference where the object carries one.
@@ -1090,19 +1127,25 @@ export async function controlledByParentPredicateWriteMasters(
   });
   const masterIds = new Set<unknown>();
   const nullMasterRows: Array<Record<string, unknown>> = [];
+  // The rows whose master reference was read here, which is what the gate
+  // judges: a selected row no longer stored by this second read names no
+  // master to judge, and is not among them.
+  const rowIds: unknown[] = [];
   for (const row of Array.isArray(stored) ? stored : []) {
     if (!row || typeof row !== 'object') continue;
     const masterId = (row as Record<string, unknown>)[rel.fk];
     if (masterId == null) {
       if (rel.optional) {
         nullMasterRows.push(row as Record<string, unknown>);
+        rowIds.push((row as { id?: unknown }).id);
         continue;
       }
       throw new MasterReferenceMissingError(object, operation, rel.fk, (row as { id?: unknown }).id);
     }
     masterIds.add(masterId);
+    rowIds.push((row as { id?: unknown }).id);
   }
-  return { masterIds: [...masterIds], nullMasterRows };
+  return { masterIds: [...masterIds], nullMasterRows, rowIds };
 }
 
 /** The body of `SecurityPlugin#assertMasterRowEditable`; the method's docblock there is its contract. */

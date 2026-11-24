@@ -23,6 +23,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 import { isMachineLocale, recordLocaleArgumentsAsync } from '@object-ui/test-support';
+import { formatDateTime } from '@object-ui/core';
 import type { ApprovalRequestLite } from '../hooks/useRecordApprovals';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
@@ -93,12 +94,13 @@ async function timelineUnder(locale: string): Promise<string> {
 describe('approval timeline times follow the declared session locale (objectui#9909)', () => {
   it('says the de-DE face under a de-DE session', async () => {
     const text = await timelineUnder('de-DE');
-    expect(text, `got: ${text}`).toMatch(/4\.3\.2020, 15:30:00/);
+    // The compact datetime face every `datetime` cell draws (objectstack#35415).
+    expect(text, `got: ${text}`).toMatch(/4\.3\.2020 3:30\spm/);
   });
 
   it('keeps its en face under an en session', async () => {
     const text = await timelineUnder('en');
-    expect(text, `got: ${text}`).toMatch(/3\/4\/2020, 3:30:00\sPM/);
+    expect(text, `got: ${text}`).toMatch(/3\/4\/2020 3:30\spm/);
   });
 
   /** ⭐ THE PIN: the runner's own locale cannot satisfy it. */
@@ -112,5 +114,13 @@ describe('approval timeline times follow the declared session locale (objectui#9
     });
     expect(calls.some((c) => c.locale === 'de-DE'), `saw: ${JSON.stringify(calls).slice(0, 2000)}`).toBe(true);
     expect(calls.filter(isMachineLocale), 'these call sites formatted in the machine locale').toEqual([]);
+  });
+});
+
+describe('approval timeline times read the record page\'s one datetime face (objectstack#35415)', () => {
+  it('a zh-CN session reads the compact face a `datetime` field draws: no seconds, the 12-hour clock', async () => {
+    const text = await timelineUnder('zh-CN');
+    expect(text, `got: ${text}`).toContain(formatDateTime(STORED, { locale: 'zh-CN', style: 'compact' }));
+    expect(text, `got: ${text}`).not.toMatch(/15:30:00/);
   });
 });

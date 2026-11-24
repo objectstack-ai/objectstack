@@ -97,6 +97,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => ({}) };
 });
 
+// Pay the dynamic `@objectstack/lint` load at collection, never inside a case's
+// clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { InterfacesPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
@@ -163,15 +166,15 @@ async function pick(inspector: HTMLElement, label: string, option: string | RegE
   fireEvent.click(screen.getByRole('option', { name: option }));
 }
 
-const orderClause = tFormat('engine.studio.held.listItemNeedsInput', 'en', { input: 'Order By', n: 1, list: 'Order' });
+const orderClause = tFormat('engine.studio.held.listItemNeedsInput', 'en', { input: 'Sort By', n: 1, list: 'Sort Order' });
 const heldLine = (clause: string) => tFormat('engine.studio.held.line', 'en', { clause });
 
 describe('an item just added to a report list property is held until it is filled in (objectstack#27785)', () => {
   it('Order → Add item, then a Label edit: nothing is sent, no red strip, the line names the Order By', async () => {
     const report = vi.fn();
     mountPillar(report);
-    const inspector = await ready('Order');
-    fireEvent.click(within(listRow(inspector, 'Order')).getByRole('button', { name: L('engine.form.addItem') }));
+    const inspector = await ready('Sort Order');
+    fireEvent.click(within(listRow(inspector, 'Sort Order')).getByRole('button', { name: L('engine.form.addItem') }));
     editLabel(inspector, 'Sales v2');
     await outlastDebounce();
 
@@ -184,8 +187,8 @@ describe('an item just added to a report list property is held until it is fille
 
   it('"Show me" focuses the list in the report properties', async () => {
     mountPillar();
-    const inspector = await ready('Order');
-    const row = listRow(inspector, 'Order');
+    const inspector = await ready('Sort Order');
+    const row = listRow(inspector, 'Sort Order');
     fireEvent.click(within(row).getByRole('button', { name: L('engine.form.addItem') }));
     const show = await within(await screen.findByTestId('studio-held')).findByRole('button', {
       name: L('engine.studio.refusal.show'),
@@ -198,14 +201,14 @@ describe('an item just added to a report list property is held until it is fille
   it('filling the Order By in sends one save carrying the item and the Label edit kept meanwhile', async () => {
     const report = vi.fn();
     mountPillar(report);
-    const inspector = await ready('Order');
-    const row = listRow(inspector, 'Order');
+    const inspector = await ready('Sort Order');
+    const row = listRow(inspector, 'Sort Order');
     fireEvent.click(within(row).getByRole('button', { name: L('engine.form.addItem') }));
     editLabel(inspector, 'Sales v2');
     await outlastDebounce();
     expect(reportSaves()).toEqual([]);
 
-    const by = within(row).getByLabelText('Order By');
+    const by = within(row).getByLabelText('Sort By');
     fireEvent.change(by, { target: { value: 'stage' } });
     fireEvent.blur(by);
     await waitFor(() => expect(reportSaves()).toHaveLength(1), { timeout: 4000 });
@@ -238,7 +241,7 @@ describe('an item just added to a report list property is held until it is fille
   // CONTROL: an edit to a report with nothing unfinished saves at once.
   it('a Label edit alone saves at once, with no line', async () => {
     mountPillar();
-    const inspector = await ready('Order');
+    const inspector = await ready('Sort Order');
     editLabel(inspector, 'Sales v2');
     await waitFor(() => expect(reportSaves()).toHaveLength(1), { timeout: 4000 });
     expect(reportSaves()[0].label).toBe('Sales v2');
@@ -253,8 +256,8 @@ describe('a chart type picked before its axes is held until both axes are picked
   it('nothing is sent while an axis is unset; the line names it, and "Show me" focuses its picker', async () => {
     const report = vi.fn();
     mountPillar(report);
-    const inspector = await ready('Order');
-    await pick(inspector, L('engine.inspector.report.chartType'), 'bar');
+    const inspector = await ready('Sort Order');
+    await pick(inspector, L('engine.inspector.report.chartType'), L('engine.inspector.widget.type.bar'));
     await outlastDebounce();
 
     const clauseX = tFormat('engine.studio.held.reportChartNeedsInput', 'en', { input: x });
@@ -267,7 +270,7 @@ describe('a chart type picked before its axes is held until both axes are picked
     fireEvent.click(within(screen.getByTestId('studio-held')).getByRole('button', { name: L('engine.studio.refusal.show') }));
     await waitFor(() => expect(document.activeElement).toBe(within(inspector).getByRole('combobox', { name: x })));
 
-    await pick(inspector, x, 'Stage (stage)');
+    await pick(inspector, x, 'Stage');
     await outlastDebounce();
     expect(reportSaves(), 'one axis is not enough').toEqual([]);
     expect(screen.getByTestId('studio-held-message')).toHaveTextContent(
@@ -278,9 +281,9 @@ describe('a chart type picked before its axes is held until both axes are picked
   it('both axes picked: one save carrying the whole chart, and the line clears', async () => {
     const report = vi.fn();
     mountPillar(report);
-    const inspector = await ready('Order');
-    await pick(inspector, L('engine.inspector.report.chartType'), 'bar');
-    await pick(inspector, x, 'Stage (stage)');
+    const inspector = await ready('Sort Order');
+    await pick(inspector, L('engine.inspector.report.chartType'), L('engine.inspector.widget.type.bar'));
+    await pick(inspector, x, 'Stage');
     await pick(inspector, y, /^Revenue/);
     await waitFor(() => expect(reportSaves()).toHaveLength(1), { timeout: 4000 });
     const [sent] = reportSaves();

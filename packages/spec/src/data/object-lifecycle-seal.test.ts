@@ -21,6 +21,8 @@ const ledger = (lifecycle: Record<string, unknown>, fields: Record<string, unkno
     created_at: { type: 'datetime', label: 'Created At' },
     action: { type: 'text', label: 'Action' },
     old_value: { type: 'textarea', label: 'Old Value' },
+    // The default chain column a seal that names no `chainField` needs (ADR-0154 D10 note).
+    tenant_id: { type: 'lookup', reference: 'sys_organization', label: 'Organization' },
     ...fields,
   },
   lifecycle,
@@ -73,7 +75,11 @@ describe('ObjectSchema lifecycle.seal — the declaration', () => {
   it('is a known key at the authoring factory, so `ObjectSchema.create()` takes it', () => {
     const created = ObjectSchema.create({
       name: 'compliance_ledger_probe',
-      fields: { id: { type: 'text', label: 'ID' }, old_value: { type: 'textarea', label: 'Old Value' } },
+      fields: {
+        id: { type: 'text', label: 'ID' },
+        old_value: { type: 'textarea', label: 'Old Value' },
+        tenant_id: { type: 'lookup', reference: 'sys_organization', label: 'Organization' },
+      },
       lifecycle: { class: 'audit', retention: { maxAge: '90d' }, seal: { valueFields: ['old_value'] } },
     });
     expect(created.lifecycle?.seal).toEqual({ valueFields: ['old_value'] });

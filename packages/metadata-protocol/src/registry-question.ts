@@ -62,7 +62,10 @@ export type RegistryQuestion = 'against-registry' | 'body-only';
  * dispatcher (`meta-dispatch`), and a datasource table's import
  * (`external-import`: each import saves ONE object and relays the save's
  * refusal to its caller, #32369 — not a batch). Each is stated at exactly one
- * call site.
+ * call site, except `meta-dispatch`, which the open MCP draft door
+ * (`packages/runtime/src/domains/mcp-authoring.ts`) also states for its
+ * structured `issues[]` channel; that door saves drafts only, so it asks the
+ * body-only question ({@link saveRegistryQuestion}).
  */
 export const AGAINST_REGISTRY_SAVE_FACES: ReadonlySet<MetadataWriteFace> = new Set<MetadataWriteFace>(['meta-envelope', 'meta-dispatch', 'external-import']);
 
@@ -104,6 +107,7 @@ export interface RegistryQuestionProducer {
 export const REGISTRY_QUESTION_PRODUCERS: readonly RegistryQuestionProducer[] = [
     { file: 'packages/rest/src/meta-item-write-routes.ts', callee: 'saveMetaItem', calls: 1, question: 'by-face', why: '`PUT /meta/:type/:name`, face `meta-envelope`: against the registry when published.' },
     { file: 'packages/runtime/src/domains/meta.ts', callee: 'saveMetaItem', calls: 1, question: 'by-face', why: 'the runtime `/meta` dispatcher, face `meta-dispatch`: against the registry when published.' },
+    { file: 'packages/runtime/src/domains/mcp-authoring.ts', callee: 'saveMetaItem', calls: 1, question: 'by-face', why: 'the open MCP draft door\'s `save_metadata_draft`, face `meta-dispatch` and always `mode: \'draft\'` (it has no publish tool): body-only; a person publishes in Studio, through a door that asks its own question.' },
     { file: 'packages/runtime/src/domains/automation.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'a flow clone writes a flow, never an object.' },
     { file: 'packages/runtime/src/domains/packages.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'a package publish/unpublish flips each of its apps\' visibility: writes an app, never an object.' },
     { file: 'packages/runtime/src/domains/permission-set-clone.ts', callee: 'saveMetaItem', calls: 1, question: 'body-only', why: 'a permission-set clone writes a permission set, never an object.' },

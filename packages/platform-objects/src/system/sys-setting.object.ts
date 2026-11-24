@@ -251,6 +251,7 @@ export const SysSetting = ObjectSchema.create({
     // layer when needed) to avoid bloating sys_history with churn from
     // feature flags and similar high-frequency toggles.
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: true,
     // Direct data API exposed for the admin grid view, but writes from

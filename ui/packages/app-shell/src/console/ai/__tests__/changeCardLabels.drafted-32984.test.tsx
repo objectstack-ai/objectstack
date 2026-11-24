@@ -8,7 +8,9 @@
  * (`?preview=draft`) when the published registry does not know them.
  */
 import { describe, it, expect, vi } from 'vitest';
+import type { ReactNode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
+import { createI18n, I18nProvider } from '@object-ui/i18n';
 import { useChangeCardLabels } from '../changeCardLabels';
 
 type Obj = { name: string; label?: string; fields?: Record<string, { label?: string }> };
@@ -57,13 +59,15 @@ describe('objectstack#32984 — change card labels for drafted objects and field
     await waitFor(() => expect(result.current.resolveFieldLabel('b6bl_quote_item', 'discount')).toBe('Discount'));
   });
 
-  it('control: a published object and field answer from the registry, without a draft read', () => {
+  it('control: a published object and field answer from the registry while the overlay has not answered', () => {
     const c = client([]);
     const { result } = renderHook(() => useChangeCardLabels(published([QUOTE_ITEM]), c.api, 0));
 
+    // objectstack#34629: a published name also asks the overlay (once), but its
+    // published label answers at once, before that read settles.
     expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Quote line');
     expect(result.current.resolveFieldLabel('b6bl_quote_item', 'line_total')).toBe('Subtotal');
-    expect(c.overlayGet).not.toHaveBeenCalled();
+    expect(c.overlayGet).toHaveBeenCalledTimes(1);
   });
 
   it('control: a name neither world knows keeps answering undefined, and is asked once', async () => {
@@ -157,5 +161,156 @@ describe('objectstack#32984 — a change applied later in the same conversation 
     expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Quote line');
     await settle();
     expect(c.overlayGet).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('objectstack#34629 — a published object or field the draft relabelled is named by its draft label', () => {
+  /** Settle the overlay reads in flight. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  /** The overlay answers the published definition with the draft's changes merged in. */
+  const RELABELLED: Obj = { name: 'b6bl_quote_item', label: 'Order line', fields: { line_total: { label: 'Line amount' } } };
+
+  it('a published object renamed in the draft shows the draft label', async () => {
+    const c = client([RELABELLED]);
+    const { result } = renderHook(() => useChangeCardLabels(published([QUOTE_ITEM]), c.api, 0));
+
+    result.current.resolveObjectLabel('b6bl_quote_item');
+    await waitFor(() => expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Order line'));
+    expect(c.withPreviewDrafts).toHaveBeenCalledWith(true);
+    expect(c.overlayGet).toHaveBeenCalledWith('object', 'b6bl_quote_item');
+  });
+
+  it('a published field relabelled in the draft shows the draft label', async () => {
+    const c = client([{ ...QUOTE_ITEM, fields: { line_total: { label: 'Line amount' } } }]);
+    const { result } = renderHook(() => useChangeCardLabels(published([QUOTE_ITEM]), c.api, 0));
+
+    result.current.resolveFieldLabel('b6bl_quote_item', 'line_total');
+    await waitFor(() => expect(result.current.resolveFieldLabel('b6bl_quote_item', 'line_total')).toBe('Line amount'));
+    // The object the draft did not rename keeps its published label.
+    expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Quote line');
+  });
+
+  it('control: a published name with no draft change shows its published label after the overlay answers', async () => {
+    const c = client([QUOTE_ITEM]);
+    const { result } = renderHook(() => useChangeCardLabels(published([QUOTE_ITEM]), c.api, 0));
+
+    result.current.resolveObjectLabel('b6bl_quote_item');
+    await waitFor(() => expect(c.overlayGet).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Quote line');
+    expect(result.current.resolveFieldLabel('b6bl_quote_item', 'line_total')).toBe('Subtotal');
+  });
+
+  it('control: a failed overlay read keeps the published label', async () => {
+    const c = client([]);
+    c.overlayGet.mockRejectedValueOnce(new Error('offline'));
+    const { result } = renderHook(() => useChangeCardLabels(published([QUOTE_ITEM]), c.api, 0));
+
+    result.current.resolveObjectLabel('b6bl_quote_item');
+    await waitFor(() => expect(c.overlayGet).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Quote line');
+  });
+
+  it('a relabel drafted later in the same conversation is named on a later card', async () => {
+    const drafts: Obj[] = [structuredClone(QUOTE_ITEM)];
+    const c = client(drafts);
+    const { result, rerender } = renderHook(({ rev }) => useChangeCardLabels(published([QUOTE_ITEM]), c.api, rev), {
+      initialProps: { rev: 0 },
+    });
+
+    // An earlier card names the object before the draft renames it.
+    result.current.resolveObjectLabel('b6bl_quote_item');
+    await waitFor(() => expect(c.overlayGet).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Quote line');
+
+    // A later change renames it; the conversation moves on and a later card names it.
+    drafts[0] = structuredClone(RELABELLED);
+    rerender({ rev: 1 });
+    result.current.resolveObjectLabel('b6bl_quote_item');
+    await waitFor(() => expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Order line'));
+    expect(c.overlayGet).toHaveBeenCalledTimes(2);
+  });
+
+  it('the bound: one overlay read per published object per revision, none while one is in flight', async () => {
+    let release: () => void = () => {};
+    const c = client([RELABELLED]);
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    c.overlayGet.mockImplementation(async (_type: string, name: string) => {
+      await gate;
+      return name === RELABELLED.name ? structuredClone(RELABELLED) : null;
+    });
+    const { result, rerender } = renderHook(({ rev }) => useChangeCardLabels(published([QUOTE_ITEM]), c.api, rev), {
+      initialProps: { rev: 0 },
+    });
+
+    // In flight: object and field asks across renders and a revision move add no read.
+    for (let i = 0; i < 5; i += 1) {
+      result.current.resolveObjectLabel('b6bl_quote_item');
+      result.current.resolveFieldLabel('b6bl_quote_item', 'line_total');
+      rerender({ rev: i < 3 ? 0 : 1 });
+    }
+    expect(c.overlayGet).toHaveBeenCalledTimes(1);
+
+    release();
+    await waitFor(() => expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Order line'));
+    // Settled at revision 0 was asked; revision 1 is now current and was never asked: one more read, then none.
+    for (let i = 0; i < 5; i += 1) {
+      result.current.resolveObjectLabel('b6bl_quote_item');
+      result.current.resolveFieldLabel('b6bl_quote_item', 'line_total');
+      await settle();
+      rerender({ rev: 1 });
+    }
+    expect(c.overlayGet).toHaveBeenCalledTimes(2);
+  });
+
+  describe('with a convention translation for the object and field', () => {
+    function withTranslation({ children }: { children: ReactNode }) {
+      const instance = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
+      instance.addResourceBundle(
+        'en',
+        'translation',
+        {
+          b6bl: {
+            objects: { b6bl_quote_item: { label: 'Quote line (translated)' } },
+            fields: { b6bl_quote_item: { line_total: 'Subtotal (translated)' } },
+          },
+        },
+        true,
+        true,
+      );
+      return (
+        <I18nProvider instance={instance} persistLanguage={false}>
+          {children}
+        </I18nProvider>
+      );
+    }
+
+    it('a draft relabel wins over the translation written for the published label', async () => {
+      const c = client([RELABELLED]);
+      const { result } = renderHook(() => useChangeCardLabels(published([QUOTE_ITEM]), c.api, 0), {
+        wrapper: withTranslation,
+      });
+
+      result.current.resolveObjectLabel('b6bl_quote_item');
+      await waitFor(() => expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Order line'));
+      expect(result.current.resolveFieldLabel('b6bl_quote_item', 'line_total')).toBe('Line amount');
+    });
+
+    it('control: a label the draft did not change still goes through the translation', async () => {
+      const c = client([QUOTE_ITEM]);
+      const { result } = renderHook(() => useChangeCardLabels(published([QUOTE_ITEM]), c.api, 0), {
+        wrapper: withTranslation,
+      });
+
+      result.current.resolveObjectLabel('b6bl_quote_item');
+      await waitFor(() => expect(c.overlayGet).toHaveBeenCalledTimes(1));
+      await settle();
+      expect(result.current.resolveObjectLabel('b6bl_quote_item')).toBe('Quote line (translated)');
+      expect(result.current.resolveFieldLabel('b6bl_quote_item', 'line_total')).toBe('Subtotal (translated)');
+    });
   });
 });

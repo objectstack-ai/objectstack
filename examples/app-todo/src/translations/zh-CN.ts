@@ -110,6 +110,29 @@ export const zhCN: TranslationData = {
     todo_completed_tasks: { label: '已完成任务', description: '所有已完成任务及其工时记录' },
     todo_time_tracking: { label: '工时跟踪报表', description: '预计工时与实际工时分析' },
   },
+  // The task dataset's business definitions (ADR-0149 D1), shown to whoever
+  // asks a question of it and handed to the assistant to choose a member by.
+  // `synonyms` are not here: they are matched in every language at once from
+  // the dataset's one authored list.
+  datasets: {
+    todo_task_metrics: {
+      dimensions: {
+        status: { description: '任务在生命周期中所处的状态：未开始、进行中、等待中、已完成或已推迟。' },
+        priority: { description: '任务的紧急程度：低、普通、高或紧急。' },
+        category: { description: '任务所属的生活领域：个人、工作、购物、健康、财务或其他。' },
+        owner: { description: '任务指派给的人；结果按姓名显示。' },
+        due_date: { description: '任务的截止日期；过了这一天仍未完成的任务即为逾期。' },
+        completed_date: {
+          description: '任务被标记为已完成的时间，由系统自动记录；未完成的任务此项为空，已完成的任务被重新打开时会清空。',
+        },
+      },
+      measures: {
+        task_count: { description: '任务的个数，不论状态：已完成和已推迟的任务也计入。' },
+        est_hours: { description: '各任务“预估工时”中计划工时的合计；未填写预估的任务不计入。' },
+        actual_hours: { description: '各任务实际花费工时的合计，以“实际工时”中填写的为准；未填写工时的任务不计入。' },
+      },
+    },
+  },
   // The quick-add wizard: the flow's name in the runner header and completion
   // toast, each screen's heading and each field label.
   flows: {

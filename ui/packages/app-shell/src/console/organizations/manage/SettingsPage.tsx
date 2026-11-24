@@ -294,7 +294,7 @@ export function SettingsPage() {
               <div className="flex items-center gap-3">
                 <Avatar className="size-16 rounded-md">
                   {logo ? (
-                    <AvatarImage src={logo} alt={name} className="object-cover" />
+                    <AvatarImage src={logo} alt={name} />
                   ) : null}
                   <AvatarFallback className="rounded-md text-base">
                     {(name || 'O').slice(0, 2).toUpperCase()}

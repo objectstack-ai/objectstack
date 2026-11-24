@@ -61,7 +61,7 @@ import { FormViewSchema } from '@objectstack/spec/ui';
  * (`sharing.enabled`, `allowAnonymous` and a `publicLink`; objectui#11545). The
  * Edit dialog writes `submitBehavior` back under `config`, beside `sharing`.
  */
-const { saveItem, ADAPTER } = vi.hoisted(() => {
+const { saveItem, ADAPTER, METADATA_CLIENT } = vi.hoisted(() => {
   const item = {
     name: 'showcase_task.public',
     label: 'Log Time',
@@ -83,12 +83,21 @@ const { saveItem, ADAPTER } = vi.hoisted(() => {
       },
     }),
   };
-  return { saveItem, ADAPTER };
+  // objectstack#35054 — the writers start from the layered read: here the
+  // stored item is the served one (no translation in play).
+  const METADATA_CLIENT = {
+    layered: async (_type: string, name: string) => {
+      const found = name === item.name ? item : null;
+      return { code: null, overlay: found, overlayScope: found ? 'env' : null, effective: found };
+    },
+  };
+  return { saveItem, ADAPTER, METADATA_CLIENT };
 });
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAdapter: () => ADAPTER,
+  useMetadataClient: () => METADATA_CLIENT,
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 

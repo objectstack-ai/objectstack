@@ -70,14 +70,31 @@ export interface ObjectFieldInfo {
    * saved a filter no record matches (`new` is what is stored).
    */
   options?: Array<{ value: string; label: string }>;
+  /**
+   * `true` when the object declares the field `multiple: true` — a
+   * multi-capable type (`select`, `lookup`, `user`, …) whose stored value is a
+   * list. Absent otherwise.
+   *
+   * With the type it decides which filter operators a condition row offers
+   * (`jsonColumnFilterOperators` in `@object-ui/components`) and which row of
+   * the spec's 「is empty」 table the field takes (`expandEmptyOperator`). The
+   * same served payload read once more; a caller that does not read the flag
+   * sees the list it always did.
+   */
+  multiple?: boolean;
 }
 
 /**
  * The declared choices of a served field definition, in the spec's own
  * `SelectOption` shape and only in it — an entry that is not `{ value, label }`
  * with string members is not a choice the builder can offer.
+ *
+ * The one reading of a served field's choices: every host that builds a
+ * filter-builder field list from a raw field definition (the generic editor's
+ * `objectCatalogOf`, the runtime view panel's `mapObjectFields`) reads them
+ * here, so the option picker is offered the same choices on every surface.
  */
-function declaredFieldOptions(def: Record<string, unknown>): Array<{ value: string; label: string }> | undefined {
+export function declaredFieldOptions(def: Record<string, unknown>): Array<{ value: string; label: string }> | undefined {
   if (!Array.isArray(def.options)) return undefined;
   const options = (def.options as unknown[]).flatMap((o) => {
     if (!o || typeof o !== 'object') return [];
@@ -175,6 +192,7 @@ export function useObjectFields(
             hidden: e.def.hidden === true,
             ...(e.def.system === true ? { system: true } : {}),
             ...(e.def.required === true ? { required: true } : {}),
+            ...(e.def.multiple === true ? { multiple: true } : {}),
             ...(options ? { options } : {}),
           };
         });

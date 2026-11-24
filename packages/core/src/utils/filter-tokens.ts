@@ -112,6 +112,16 @@
  * record" would otherwise come back as "about nobody", or, with the condition
  * gone, "about everybody".
  *
+ * # A period key resolves to its key, never to a date
+ *
+ * `{current_iso_week}` (`PERIOD_KEY_TOKENS` in `@objectstack/spec`) resolves
+ * to the ISO-8601 week key of the reference day, `2026-W47`: the label
+ * {@link bucketDateKey} writes for an analytics `week` bucket, in the
+ * request's reference timezone, so the two cannot disagree about a week. It
+ * is text. The temporal-comparand door judges a resolved DATE MACRO's year;
+ * a period key is not one, and this field-agnostic resolver never decides
+ * what a column makes of the key.
+ *
  * # A `{ $record }` comparand refuses here by name
  *
  * [#34199] The `lookupFilters` comparand `{ $record: 'path' }` reads the record
@@ -123,13 +133,16 @@
 
 import {
   classifyFilterToken,
+  isFixedReadLeaf,
+  isPeriodKeyToken,
   isReadableIds,
   isRecordContextToken,
   parseDateMacroParam,
   type DateMacroUnit,
+  type PeriodKeyToken,
 } from '@objectstack/spec/data';
 import type { StandardErrorCode } from '@objectstack/spec/api';
-import { calendarPartsInTzOrUtc, wallClockToUtcMs } from './datetime.js';
+import { bucketDateKey, calendarPartsInTzOrUtc, wallClockToUtcMs } from './datetime.js';
 import {
   isOutsideTemporalYearRange,
   SUPPORTED_TEMPORAL_YEARS,
@@ -185,8 +198,8 @@ export class UnknownFilterTokenError extends Error {
       (suggestion
         ? `Did you mean "{${suggestion}}"? `
         : 'Resolvable placeholders are the context tokens ({current_user_id}, ' +
-          '{current_org_id}) and the date macros ({today}, {current_quarter_start}, ' +
-          '{30_days_ago}, …). ') +
+          '{current_org_id}), the date macros ({today}, {current_quarter_start}, ' +
+          '{30_days_ago}, …) and the ISO week key {current_iso_week}. ') +
       'Sending it to the data engine verbatim would compare it as a literal ' +
       'string and match nothing, which is indistinguishable from an empty result.',
     );
@@ -447,6 +460,20 @@ function dateMacroInstant(
 }
 
 /**
+ * Each period-key token's resolver: the key of the period the reference
+ * instant falls in, as seen in the reference timezone. `satisfies` keeps it
+ * exhaustive: a token added to the spec's list without a resolver here fails
+ * to compile rather than resolving to nothing.
+ *
+ * `{current_iso_week}` is {@link bucketDateKey}'s `week` label, the one
+ * statement of the ISO week rule (Monday-start weeks, the ISO week-numbering
+ * year at the year edges).
+ */
+const PERIOD_KEY_RESOLVERS = {
+  current_iso_week: (now: Date, timezone: string | undefined) => bucketDateKey(now, 'week', timezone),
+} satisfies Record<PeriodKeyToken, (now: Date, timezone: string | undefined) => string | null>;
+
+/**
  * Resolve one token NAME (the bit inside the braces) to its concrete value.
  * Throws {@link UnresolvedFilterTokenError} for a vocabulary token the request
  * carries no value for, and [#21068] `INVALID_FILTER` / 400 for a date macro
@@ -501,6 +528,13 @@ export function resolveFilterToken(
     );
   }
 
+  // ── Period keys ───────────────────────────────────────────────────────
+  // A key such as `2026-W47`: text, never a day. `bucketDateKey` answers
+  // `null` only for an invalid instant, which is no key at all.
+  if (isPeriodKeyToken(token)) {
+    return PERIOD_KEY_RESOLVERS[token as PeriodKeyToken](now, ctx.timezone) ?? undefined;
+  }
+
   // ── Date macros ───────────────────────────────────────────────────────
   const macro = dateMacroInstant(token, now, ctx.timezone);
   if (macro === undefined) return undefined;
@@ -523,9 +557,9 @@ export function resolveFilterToken(
 function hasFilterToken(node: unknown): boolean {
   if (typeof node === 'string') return classifyFilterToken(node) !== null;
   if (Array.isArray(node)) return node.some(hasFilterToken);
-  // A `ReadableIds` leaf is a comparand value: its `object` names a table and
-  // is never a placeholder (see `resolveFilterTokens`).
-  if (isReadableIds(node)) return false;
+  // An engine-internal leaf is a comparand value: its inputs name a table and
+  // a principal and are never a placeholder (see `resolveFilterTokens`).
+  if (isEngineInternalLeaf(node)) return false;
   if (node && typeof node === 'object' && !(node instanceof Date)) {
     // [#25808] An unresolved `$now` anchor is a placeholder by construction.
     if (isUnresolvedNowAnchor(node)) return true;
@@ -595,10 +629,20 @@ function isRecordReference(node: unknown): node is Record<string, unknown> {
     && Object.prototype.hasOwnProperty.call(node, '$record');
 }
 
-/** A plain filter object (not a `Date`, not a branded `ReadableIds` leaf). */
+/**
+ * [ADR-0139 D1, ADR-0155 D1] A branded engine-internal comparand: a
+ * `ReadableIds` leaf or a fixed-read leaf (`SharedRecordIds`). Each is frozen,
+ * holds no placeholder, and keeps its meaning only while it keeps its
+ * non-enumerable brand, so every walk here hands it back by reference.
+ */
+function isEngineInternalLeaf(node: unknown): boolean {
+  return isReadableIds(node) || isFixedReadLeaf(node);
+}
+
+/** A plain filter object (not a `Date`, not a branded engine-internal leaf). */
 function isFilterObject(node: unknown): node is Record<string, unknown> {
   return !!node && typeof node === 'object' && !Array.isArray(node)
-    && !(node instanceof Date) && !isReadableIds(node);
+    && !(node instanceof Date) && !isEngineInternalLeaf(node);
 }
 
 /** An operator object: a field's value carrying at least one `$` key. */
@@ -765,6 +809,12 @@ function resolveNowAnchor(node: { $now: true; addDays?: unknown }, now: Date): R
  * placeholder would then reach the engine's executor boundary as a plain
  * object in a `$in` comparand, which the engine cannot compose. The leaf holds
  * no placeholder and is frozen, so returning it unchanged is exact.
+ *
+ * [ADR-0155 D1] A fixed-read leaf (`isFixedReadLeaf`, `SharedRecordIds`
+ * today) is returned by reference for the same reason: rebuilt, it would
+ * arrive unbranded and be refused at the comparand door as a non-list
+ * (`INVALID_FILTER` / 400), so a read scope carrying a placeholder beside the
+ * leaf would fail every read it scopes.
  */
 export function resolveFilterTokens<T>(
   filter: T,
@@ -793,8 +843,8 @@ export function resolveFilterTokens<T>(
       return resolved;
     }
     if (Array.isArray(node)) return node.map(walk);
-    // [ADR-0139 D1] The leaf by reference, brand intact (see above).
-    if (isReadableIds(node)) return node;
+    // [ADR-0139 D1, ADR-0155 D1] The leaf by reference, brand intact (see above).
+    if (isEngineInternalLeaf(node)) return node;
     if (node && typeof node === 'object') {
       // Dates and other class instances are comparands, not filter structure.
       if (node instanceof Date) return node;

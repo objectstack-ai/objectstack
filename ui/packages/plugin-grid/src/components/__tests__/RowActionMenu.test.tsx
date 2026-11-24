@@ -400,3 +400,88 @@ describe('a declared but not evaluable `visible` on a custom row action (objectu
     expect(screen.queryByTestId('row-action-inline-upgrade')).toBeNull();
   });
 });
+
+/**
+ * objectstack#35334 — a built-in row Edit / Delete greyed by its declared
+ * `disabledWhen` says why, the way the record page's Edit / Delete and the
+ * data-table's row items do: the generic `actions.notAvailableForRecord`
+ * sentence (`userActions` declares no reason key) as the item's visible second
+ * line and its accessible description, while its accessible name stays the
+ * label. Only the declared predicate earns it: an item that is on (no
+ * predicate, or one that does not hold) gives none, and neither does an item
+ * greyed only because its record-grained verdict is still on its way.
+ */
+describe('BuiltinRowActionItem — a disabledWhen-greyed item says why (objectstack#35334)', () => {
+  const REASON = 'Not available for this record';
+  const FROZEN = { id: 'r1', name: 'Check item A', frozen: true };
+  const DRAFT = { id: 'r2', name: 'Check item B', frozen: false };
+  const GATE = { disabledWhen: 'record.frozen == true' };
+  const describedBy = (el: HTMLElement) => {
+    const id = el.getAttribute('aria-describedby');
+    return id ? document.getElementById(id) : null;
+  };
+
+  function renderItem(props: {
+    predicates?: any;
+    row: any;
+    name?: 'edit' | 'delete';
+    verdictPending?: boolean;
+  }) {
+    const name = props.name ?? 'edit';
+    return render(
+      <PredicateScopeProvider scope={{}}>
+        <DropdownMenu open modal={false}>
+          <DropdownMenuTrigger>menu</DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <BuiltinRowActionItem
+              name={name}
+              icon={<Edit className="mr-2 h-4 w-4" />}
+              label={name === 'edit' ? 'Edit' : 'Delete'}
+              onSelect={() => {}}
+              predicates={props.predicates}
+              row={props.row}
+              verdictPending={props.verdictPending}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </PredicateScopeProvider>,
+    );
+  }
+
+  it.each(['edit', 'delete'] as const)('%s greyed by disabledWhen shows the reason as its second line and description', (name) => {
+    renderItem({ name, predicates: GATE, row: FROZEN });
+    const item = screen.getByTestId(`row-action-builtin-${name}`);
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    const reason = describedBy(item);
+    expect(reason).toHaveTextContent(REASON);
+    expect(reason).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: name === 'edit' ? 'Edit' : 'Delete' })).toBe(item);
+  });
+
+  it('control — an item with no predicate gives no reason', () => {
+    renderItem({ row: FROZEN });
+    const item = screen.getByTestId('row-action-builtin-edit');
+    expect(item).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText(REASON)).toBeNull();
+  });
+
+  it('control — an item whose disabledWhen does not hold gives no reason', () => {
+    renderItem({ predicates: GATE, row: DRAFT });
+    const item = screen.getByTestId('row-action-builtin-edit');
+    expect(item).not.toHaveAttribute('aria-disabled', 'true');
+    expect(item).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText(REASON)).toBeNull();
+  });
+
+  it.each([
+    ['no predicate', undefined],
+    ['a disabledWhen that does not hold', GATE],
+  ])('control — an item greyed only by a pending verdict (%s) gives no reason', (_case, predicates) => {
+    renderItem({ predicates, row: DRAFT, verdictPending: true });
+    const item = screen.getByTestId('row-action-builtin-edit');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveAttribute('aria-busy', 'true');
+    expect(item).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText(REASON)).toBeNull();
+  });
+});

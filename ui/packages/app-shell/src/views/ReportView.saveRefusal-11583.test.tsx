@@ -55,6 +55,23 @@ vi.mock('sonner', () => ({
 vi.mock('@object-ui/plugin-report', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ReportRenderer: () => null,
+  // objectstack#36374 — the report builder, reduced to one edit and its
+  // buttons; the host around it (`ReportBuilderHost`) is the real one.
+  ReportBuilder: ({ report, onChange, onSave, onClose, banner }: any) => (
+    <div data-testid="report-builder" data-label={String(report?.label)}>
+      {banner}
+      <button type="button" data-testid="stub-builder-edit" onClick={() => onChange({ ...report, label: 'Revenue EDITED' })}>
+        edit
+      </button>
+      <button type="button" data-testid="report-builder-save" onClick={() => onSave()}>save</button>
+      <button type="button" data-testid="report-builder-close" onClick={() => onClose()}>close</button>
+    </div>
+  ),
+}));
+// The builder host's catalog reads, answered empty: the stub draws no picker.
+vi.mock('./metadata-admin/previews/useDatasetCatalog', () => ({
+  useDatasetCatalog: () => ({ datasets: [], loading: false, error: null }),
+  useDatasetSemantics: () => ({ dimensions: [], measures: [], loading: false, error: null }),
 }));
 vi.mock('@object-ui/plugin-dashboard', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -101,16 +118,34 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
 }));
 
-import { ReportView } from './ReportView';
+// `ReportView` reaches a dynamic `import('@objectstack/lint')` (through the panel's
+// inspector): pay its load at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
+import { ReportView, opensInBuilder } from './ReportView';
 
 const refresh = vi.fn(async () => {});
 
-function mountReport() {
+/**
+ * The layered read the editor seeds its buffer from (objectstack#35008): the
+ * stored report, which here is the served one (no translation in play).
+ */
+function storedLayers() {
+  return vi.fn(async () => ({
+    code: null,
+    overlay: null,
+    overlayScope: null,
+    effective: { name: 'revenue_by_month', label: 'Revenue by Month', dataSource: { object: 'acct' } },
+    draft: null,
+  }));
+}
+
+function mountReport(report: Record<string, unknown> = { name: 'revenue_by_month', label: 'Revenue by Month', dataSource: { object: 'acct' } }) {
   meta.value = {
     apps: [],
     objects: [{ name: 'acct', label: 'Account', fields: { industry: { label: 'Industry', type: 'text' } } }],
     dashboards: [],
-    reports: [{ name: 'revenue_by_month', label: 'Revenue by Month', dataSource: { object: 'acct' } }],
+    reports: [report],
     pages: [],
     loading: false,
     error: null,
@@ -152,6 +187,9 @@ describe('the report editor\'s Save says a refused save (objectui#11583, ReportV
   it('a refused save raises the refusal, once per Save', async () => {
     client.value = {
       get: vi.fn(async () => null),
+      // objectstack#35054 — the served draft read the editor hands `authoredBuffer`: none pending.
+      getDraft: vi.fn(async () => null),
+      layered: storedLayers(),
       save: vi.fn(async () => {
         throw Object.assign(new Error('Saving reports requires the Manage Metadata permission'), { status: 403 });
       }),
@@ -163,7 +201,8 @@ describe('the report editor\'s Save says a refused save (objectui#11583, ReportV
     const [, options] = vi.mocked(toast.error).mock.calls[0] as [unknown, { description?: unknown } | undefined];
     expect(String(options?.description)).toContain('Saving reports requires the Manage Metadata permission');
     const [type, name, body, opts] = client.value.save.mock.calls[0];
-    expect([type, name, opts]).toEqual(['report', 'revenue_by_month', { mode: 'draft' }]);
+    // objectstack#36374 — Save stages the body and publishes it in the same press.
+    expect([type, name, opts]).toEqual(['report', 'revenue_by_month', { mode: 'draft', ifNoneMatch: '*' }]);
     expect(body).toMatchObject({ label: 'Revenue EDITED' });
     expect(refresh).not.toHaveBeenCalled();
     // The patch round: the editor stays open with the edit intact, and Save
@@ -175,7 +214,13 @@ describe('the report editor\'s Save says a refused save (objectui#11583, ReportV
   });
 
   it('a save that lands raises nothing and refreshes the read (control)', async () => {
-    client.value = { get: vi.fn(async () => null), save: vi.fn(async () => ({})) };
+    client.value = {
+      get: vi.fn(async () => null),
+      getDraft: vi.fn(async () => null),
+      layered: storedLayers(),
+      save: vi.fn(async () => ({})),
+      publish: vi.fn(async () => ({})),
+    };
     mountReport();
     await editThriceAndSave();
 
@@ -183,5 +228,124 @@ describe('the report editor\'s Save says a refused save (objectui#11583, ReportV
     expect(toast.error).not.toHaveBeenCalled();
     // A landed save closes the editor, as it always did.
     await waitFor(() => expect(screen.queryByTestId('report-config-panel')).toBeNull());
+  });
+});
+
+/** A dataset-bound report: the shape the report builder edits (objectstack#36374). */
+const DATASET_REPORT = {
+  name: 'revenue_by_month',
+  label: 'Revenue by Month',
+  type: 'summary',
+  dataset: 'revenue_metrics',
+  rows: ['month'],
+  values: ['revenue'],
+};
+
+function datasetClient(save: () => Promise<unknown>) {
+  return {
+    get: vi.fn(async () => null),
+    getDraft: vi.fn(async () => null),
+    layered: vi.fn(async () => ({ code: null, overlay: null, overlayScope: null, effective: DATASET_REPORT, draft: null })),
+    save: vi.fn(save),
+    publish: vi.fn(async () => ({})),
+    reset: vi.fn(async () => ({})),
+  };
+}
+
+async function openBuilderEditAndSave() {
+  fireEvent.click(await screen.findByTestId('report-edit-button'));
+  await screen.findByTestId('report-builder');
+  fireEvent.click(screen.getByTestId('stub-builder-edit'));
+  expect(client.value.save).not.toHaveBeenCalled();
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('report-builder-save'));
+  });
+  await waitFor(() => expect(client.value.save).toHaveBeenCalledTimes(1));
+}
+
+describe('the report builder\'s Save (objectstack#36374, ReportView)', () => {
+  it('a dataset-bound report opens in the builder; Save writes and publishes it, then closes', async () => {
+    client.value = datasetClient(async () => ({}));
+    mountReport(DATASET_REPORT);
+    await openBuilderEditAndSave();
+
+    const [type, name, body, opts] = client.value.save.mock.calls[0];
+    expect([type, name, opts]).toEqual(['report', 'revenue_by_month', { mode: 'draft', ifNoneMatch: '*' }]);
+    expect(body).toMatchObject({ label: 'Revenue EDITED', dataset: 'revenue_metrics' });
+    expect(client.value.publish).toHaveBeenCalledWith('report', 'revenue_by_month');
+    await waitFor(() => expect(screen.queryByTestId('report-builder')).toBeNull());
+    expect(toast.error).not.toHaveBeenCalled();
+    // Control: the inspector panel is not what opened.
+    expect(screen.queryByTestId('report-config-panel')).toBeNull();
+  });
+
+  it('a refused save says so and keeps the builder open with the edit', async () => {
+    client.value = datasetClient(async () => {
+      throw Object.assign(new Error('Saving reports requires the Manage Metadata permission'), { status: 403 });
+    });
+    mountReport(DATASET_REPORT);
+    await openBuilderEditAndSave();
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    const [, options] = vi.mocked(toast.error).mock.calls[0] as [unknown, { description?: unknown } | undefined];
+    expect(String(options?.description)).toContain('Saving reports requires the Manage Metadata permission');
+    expect(client.value.publish).not.toHaveBeenCalled();
+    expect(screen.getByTestId('report-builder')).toHaveAttribute('data-label', 'Revenue EDITED');
+  });
+
+  it('over a draft someone left pending nothing is written, and the builder stays open', async () => {
+    client.value = datasetClient(async () => {
+      throw Object.assign(new Error('A draft is already pending'), { status: 409, code: 'METADATA_CONFLICT' });
+    });
+    mountReport(DATASET_REPORT);
+    await openBuilderEditAndSave();
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(client.value.publish).not.toHaveBeenCalled();
+    expect(screen.getByTestId('report-builder')).toBeTruthy();
+  });
+
+  it('Close leaves the builder and saves nothing', async () => {
+    client.value = datasetClient(async () => ({}));
+    mountReport(DATASET_REPORT);
+    fireEvent.click(await screen.findByTestId('report-edit-button'));
+    await screen.findByTestId('report-builder');
+    fireEvent.click(screen.getByTestId('report-builder-close'));
+    await waitFor(() => expect(screen.queryByTestId('report-builder')).toBeNull());
+    expect(client.value.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('which reports open in the builder (objectstack#36374, opensInBuilder)', () => {
+  it('a dataset-bound report and a new one do; a joined or pre-dataset report keeps the panel', () => {
+    expect(opensInBuilder(DATASET_REPORT)).toBe(true);
+    expect(opensInBuilder({ name: '', label: '' })).toBe(true);
+    expect(opensInBuilder({ ...DATASET_REPORT, type: 'joined' })).toBe(false);
+    expect(opensInBuilder({ name: 'r', label: 'R', dataSource: { object: 'acct' } })).toBe(false);
+    expect(opensInBuilder({ name: 'r', label: 'R', objectName: 'acct' })).toBe(false);
+    expect(opensInBuilder({ name: 'r', label: 'R', data: [] })).toBe(false);
+    expect(opensInBuilder(null)).toBe(false);
+  });
+
+  it('a dataset report the builder has no setting for keeps the panel: a cross-tab, several values', () => {
+    expect(opensInBuilder({ ...DATASET_REPORT, columns: ['owner'] })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, columns: [] })).toBe(true);
+    expect(opensInBuilder({ ...DATASET_REPORT, values: ['a', 'b'] })).toBe(false);
+  });
+
+  it('a saved filter opens in the builder when its 「+ Filter」 can hold it, and keeps the panel when not (objectstack#36645)', () => {
+    // The rows the builder's filter edits: implicit equality, an operator map, a flat `$and`.
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { stage: 'won' } })).toBe(true);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { amount: { $gt: 100 } } })).toBe(true);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $and: [{ stage: 'won' }, { amount: { $gte: 5 } }] } })).toBe(true);
+    // Shapes it cannot hold stay in the panel, which edits them as written.
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $or: [{ stage: 'won' }, { stage: 'lost' }] } })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { amount: { $gt: 1, $lt: 9 } } })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $and: [{ $or: [{ stage: 'won' }] }] } })).toBe(false);
+    // `$and` beside other top-level keys is a valid spec shape the builder
+    // would narrow to the `$and` rows on the next edit: it keeps the panel.
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $and: [{ stage: 'won' }], amount: { $gt: 5 } } as never })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $and: [{ stage: 'won' }], $not: { stage: 'lost' } } as never })).toBe(false);
+    expect(opensInBuilder({ ...DATASET_REPORT, runtimeFilter: { $not: { stage: 'lost' } } as never })).toBe(false);
   });
 });

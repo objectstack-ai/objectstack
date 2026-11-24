@@ -74,6 +74,9 @@ export type {
     // method is barrel-reachable, so a host building a custom composition
     // needs the name to hand it the loader's set.
     PackagedFlowSource,
+    // [#34655] The reader `AutomationEngine.setPackagedFlowDefaultSource`
+    // takes, for the same reason: the package's own `defaultActive`.
+    PackagedFlowDefaultSource,
     // [ADR-0150 D3] The reader `AutomationEngine.setFlowNameResolver` takes —
     // barrel-reachable through that method, for a host composing its own
     // registry over the one package-scoped resolver.

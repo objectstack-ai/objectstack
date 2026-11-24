@@ -785,9 +785,10 @@ describe('#19403 round 6 — the composite blind spot, hook side, CLOSED', () =>
     // round 5 wrote down. Seven children sit enumerated and outside it — 9
     // since #26835, when the `refusals` record's `message` / `status` joined,
     // and 12 since #33657, when its `reasons` (with `reasons.message`) and
-    // `params` joined.
+    // `params` joined, and 14 since #34575, when the `texts` record's
+    // `message` / `params` joined.
     expect(HOOK_ENUMERATED.covered.length, 'hookForm enumerates no repeater row properties').toBe(0);
-    expect(HOOK_ENUMERATED.skipped.length).toBe(12);
+    expect(HOOK_ENUMERATED.skipped.length).toBe(14);
     for (const child of SHARED_BODY_CHILDREN) expect(HOOK_ENUMERATED.skipped).toContain(`body.${child}`);
     expect(HOOK_ENUMERATED.skipped).toContain('retryPolicy.maxRetries');
     expect(HOOK_ENUMERATED.skipped).toContain('retryPolicy.backoffMs');

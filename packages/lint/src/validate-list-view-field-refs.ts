@@ -163,7 +163,7 @@
  *    through `resolvePath(record, fieldName)`, which walks dots. Excluded.
  *  - **Every renderer binding** (`kanban` / `calendar` / `timeline` /
  *    `gallery` / `map` / `tree` scalars, `rowColor.field`, `hiddenFields`,
- *    `fieldOrder`, `grouping.fields`, `columns[].summary.field`,
+ *    `fieldOrder`, `grouping.fields`, `columns[].summary.field`, `kanban.summary.field`,
  *    `columns[].prefix.field`). These reach no door this card measured. A
  *    dotted name at one of them is very likely still wrong — the gantt
  *    scalars, for instance, read `record[startDateField]` flat — but "likely
@@ -372,6 +372,14 @@
  * door, and judged by this module's {@link columnSummaryRefusal}, under this
  * rule id.
  *
+ * [#35702] The boolean yes / no counts `count_true` / `count_false` ride
+ * `SUM(field)` (and `COUNT(field)`), which the door ACCEPTS over a number as
+ * well — where it answers a total, not a count of true cells. So they are
+ * judged by the spec's member × field-type table instead
+ * (`COLUMN_SUMMARY_FIELD_TYPES` through `isColumnSummaryCompatibleWithFieldType`,
+ * the boolean class only), under the same rule id: the footer would print a
+ * total labelled as a count, with no refusal anywhere to say so.
+ *
  * Not judged: `none`; `count` (fieldless, `COUNT(*)`); the four DERIVED
  * members (`count_filled` / `count_empty` / `percent_filled` /
  * `percent_empty`), which ride one `COUNT(field)` node and so compare no
@@ -466,7 +474,13 @@ import {
   isAggregateCompatibleWithFieldType,
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
-import { COLUMN_SUMMARY_AGGREGATION, ListViewSchema, type ColumnSummary } from '@objectstack/spec/ui';
+import {
+  COLUMN_SUMMARY_AGGREGATION,
+  COLUMN_SUMMARY_FIELD_TYPES,
+  ListViewSchema,
+  isColumnSummaryCompatibleWithFieldType,
+  type ColumnSummary,
+} from '@objectstack/spec/ui';
 
 import {
   aggregateAcceptsDeclaration,
@@ -833,6 +847,16 @@ const POSITIONS: Record<string, BlockPositions> = {
     scalars: { parentField: 'error', labelField: 'warning' },
     lists: { fields: 'warning' },
   },
+  timesheet: {
+    // [#34382] Every key is the grid's binding, and every one is WRITTEN: a
+    // typed cell creates a record carrying the row field values, the day and
+    // the value. A stale date field places no record on a day (an empty
+    // week); a stale value field sums nothing; a stale row field keys every
+    // record to one blank row. Each new record then writes the stale name and
+    // is refused at the door.
+    scalars: { dateField: 'error', valueField: 'error' },
+    lists: { rowFields: 'error' },
+  },
 };
 
 /**
@@ -914,9 +938,10 @@ export function columnSummaryRefusal(
   const member = typeof summary === 'string' ? summary : isRec(summary) ? summary.type : undefined;
   if (typeof member !== 'string' || !Object.prototype.hasOwnProperty.call(COLUMN_SUMMARY_AGGREGATION, member)) return undefined;
   const mapping = COLUMN_SUMMARY_AGGREGATION[member as ColumnSummary];
+  // A member the spec restricts to some field types (the boolean yes / no counts) is judged by that table.
+  const restricted = Object.prototype.hasOwnProperty.call(COLUMN_SUMMARY_FIELD_TYPES, member);
   // `none`, the fieldless `count` and the derived `COUNT(field)` members compare no value.
-  if (mapping.kind !== 'aggregate' || mapping.fieldless) return undefined;
-  const fn = mapping.function;
+  if (!restricted && (mapping.kind !== 'aggregate' || mapping.fieldless)) return undefined;
   const field = strName(isRec(summary) && summary.field !== undefined ? summary.field : column.field);
   if (!field || field.includes('.')) return undefined;
   const verdict = resolveFieldPath(graph, object, field);
@@ -924,12 +949,77 @@ export function columnSummaryRefusal(
   const fieldType = verdict.meta?.type;
   if (!isJudgeableAggregateType(fieldType)) return undefined;
   const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
+  if (restricted) {
+    if (isColumnSummaryCompatibleWithFieldType(member, fieldType)) return undefined;
+    return {
+      message:
+        `summary "${member}" over "${field}" (${declaredAs(shape)}) is a true / false count, for a ` +
+        'boolean or toggle field only: here it would print a total as a count',
+      hint: `Point "${member}" at a boolean or toggle field, or count "${field}" with count_filled or count_empty.`,
+    };
+  }
+  if (mapping.kind !== 'aggregate') return undefined;
+  const fn = mapping.function;
   if (aggregateAcceptsDeclaration(fn, shape)) return undefined;
   return {
     message:
       `summary "${member}" over "${field}" (${declaredAs(shape)}) is refused by the aggregate door ` +
       '(400 INVALID_FIELD); a one-page browser footer is no exception',
     hint: refusedAggregateRemedy(fn, field, shape, summaryMemberOf),
+  };
+}
+
+/**
+ * [#36370] The field-naming position inside `kanban.summary`, the lane foot
+ * statistic. Its own table rather than a `POSITIONS` row: the key lives one
+ * record further down, as `columns[].summary.field` does. A stale name draws
+ * nothing: the board finds no such field on the object and every lane's foot
+ * goes blank, the statistic the author asked for gone without a word. The
+ * `columns[].summary.field` level, not `summarizeField`'s.
+ */
+const KANBAN_SUMMARY_POSITIONS: Array<{ key: string; severity: Sev }> = [{ key: 'field', severity: 'error' }];
+
+/**
+ * [#36370] The refusal a `kanban.summary` of type `sum` earns over the field it
+ * totals on `object`, or `undefined` when nothing is judged or the pair is
+ * accepted. The same verdict `columns[].summary` asks ({@link columnSummaryRefusal}):
+ * the aggregate × field-type table's `sum` row over the field's declaration,
+ * less the true / false class the board does not add. The board totals its loaded cards in the browser today, and a value that is
+ * no number blanks the lane's foot; the whole lane's figure is the server's
+ * `sum`, so the pair is judged by the door that will answer it. `count` and
+ * `none` compare no value.
+ */
+function kanbanSummaryRefusal(
+  summary: Record<string, unknown>,
+  graph: ObjectGraph,
+  object: string,
+): { message: string; hint: string } | undefined {
+  if (summary.type !== 'sum') return undefined;
+  const field = strName(summary.field);
+  if (!field || field.includes('.')) return undefined;
+  const verdict = resolveFieldPath(graph, object, field);
+  if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return undefined;
+  const fieldType = verdict.meta?.type;
+  if (!isJudgeableAggregateType(fieldType)) return undefined;
+  const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
+  // A true / false field the door would sum as a count of trues; the board
+  // totals numbers only (a `true` reads as no number and blanks the foot), so
+  // the board's picker leaves the class out and so does this verdict.
+  const yesNo = fieldType === 'boolean' || fieldType === 'toggle';
+  if (!yesNo && aggregateAcceptsDeclaration('sum', shape)) return undefined;
+  if (yesNo) {
+    return {
+      message:
+        `summary "sum" over "${field}" (${declaredAs(shape)}) totals no number: the board adds number values, ` +
+        'and a true / false value draws no figure at the lane\'s foot',
+      hint: `Total a number field of "${object}", or count each lane's cards with \`summary: { type: 'count' }\`.`,
+    };
+  }
+  return {
+    message:
+      `summary "sum" over "${field}" (${declaredAs(shape)}) totals no number: the aggregate door refuses ` +
+      'the pair (400 INVALID_FIELD), and the board\'s own total over its loaded cards draws no figure',
+    hint: `Total a number field of "${object}", or count each lane's cards with \`summary: { type: 'count' }\`.`,
   };
 }
 
@@ -998,6 +1088,7 @@ export function listViewWalkedPositions(): string[] {
     ),
     ...COLUMN_ENTRY_POSITIONS.map(({ block, key }) => `columns.${block}.${key}`),
     ...GROUPING_ENTRY_POSITIONS.map(({ key }) => `grouping.fields.${key}`),
+    ...KANBAN_SUMMARY_POSITIONS.map(({ key }) => `kanban.summary.${key}`),
   ];
 }
 
@@ -1531,6 +1622,25 @@ export function validateListViewFieldRefs(
     }
 
     checkKanbanLanes(listView, bound, where, path);
+
+    // [#36370] The lane foot statistic: the field it names, then the `sum`
+    // over that field's declaration.
+    const kanbanSummary = isRec(listView.kanban) ? listView.kanban.summary : undefined;
+    if (isRec(kanbanSummary)) {
+      for (const { key, severity } of KANBAN_SUMMARY_POSITIONS) {
+        check(kanbanSummary[key], bound, severity, `${where} › kanban.summary`, `${path}.kanban.summary.${key}`, `summary.${key}`);
+      }
+      const refusal = kanbanSummaryRefusal(kanbanSummary, graph, bound);
+      if (refusal !== undefined) {
+        findings.push({
+          severity: 'error',
+          rule: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
+          where: `${where} › kanban.summary`,
+          path: `${path}.kanban.summary`,
+          ...refusal,
+        });
+      }
+    }
 
     // ── Filter KEYS: the view's own filter and the tab presets inside
     // `userFilters`. `walkFilterFieldKeys` handles all three authored filter

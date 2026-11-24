@@ -1161,11 +1161,14 @@ describe('a single-object save is refused when the currency it follows is not th
 
 // ── [#33713, ADR-0144 D6 and D8 rule 5] A `dynamic` roll-up at the single-object save ──
 //
-// `defineStack`'s case (d) admits a `dynamic` summary only over a stored home
-// amount. The follow door asks the same of a single save, a batch writer's row
-// and a registration run's end, against the objects as served, in the same
-// words (`recordCurrencyDynamicRollupNotHomeError`, `@objectstack/spec/data`).
-describe('a single-object save is refused a `dynamic` roll-up over a child field that is not a stored home amount (case (d))', () => {
+// `defineStack`'s case (d) admits a `dynamic` summary only over an amount in
+// the home currency: a child `currency` field in `dynamic` mode, a stored home
+// amount included (seat ruling record 7000258793 widened #33659's home amount
+// alone). The follow door asks the same of a single save, a batch writer's row
+// and a registration run's end, against the objects as served, through the
+// same predicate (`isTenantCurrencyAmount`) and in the same words
+// (`recordCurrencyDynamicRollupNotHomeError`, `@objectstack/spec/data`).
+describe('a single-object save is refused a `dynamic` roll-up over a child field that is not an amount in the home currency (case (d))', () => {
   async function bootSealed() {
     const booted = await bootEngine();
     booted.engine.registry.sealBareNameHolders();
@@ -1193,6 +1196,8 @@ describe('a single-object save is refused a `dynamic` roll-up over a child field
       eur_amount: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } },
       plain: { type: 'number' },
       doubled: { type: 'formula', expression: 'plain * 2', returnType: 'number' },
+      cost: { type: 'currency' },
+      cost_dynamic: { type: 'currency', currencyConfig: { currencyMode: 'dynamic' } },
     },
   };
   /** The parent, rolling `fn(hr_expense.field)` up in `currencyConfig` (dynamic unless given; `null` declares none). */
@@ -1221,8 +1226,8 @@ describe('a single-object save is refused a `dynamic` roll-up over a child field
   it('a `dynamic` roll-up over a fixed EUR amount, a plain number or a formula is refused 422, whichever end registers second, in defineStack\'s words', async () => {
     for (const [field, says] of [
       ['eur_amount', 'is fixed to EUR'],
-      ['plain', 'is not a stored home amount'],
-      ['doubled', 'is not a stored home amount'],
+      ['plain', "is a 'number' field, not a `currency` field in `dynamic` mode"],
+      ['doubled', "is a 'formula' field, not a `currency` field in `dynamic` mode"],
     ] as const) {
       const parent = project(field);
       for (const order of [[EXPENSE, parent], [parent, EXPENSE]]) {
@@ -1262,6 +1267,22 @@ describe('a single-object save is refused a `dynamic` roll-up over a child field
     }
   });
 
+  it('a `dynamic` roll-up of a plain `dynamic` amount no `homeAmount` names registers in either order, as defineStack admits it', async () => {
+    for (const field of ['cost', 'cost_dynamic']) {
+      for (const [config, fn] of [[{ currencyMode: 'dynamic' }, 'sum'], [{}, 'sum'], [{ currencyMode: 'dynamic' }, 'min'], [{ currencyMode: 'dynamic' }, 'max'], [{ currencyMode: 'dynamic' }, 'avg']] as const) {
+        const parent = project(field, config, fn);
+        expect(() => defineStack({ manifest: { id: 'com.example.dyndoor', name: 'dyn-door', version: '1.0.0', type: 'app' }, objects: [parent, EXPENSE] } as Parameters<typeof defineStack>[0])).not.toThrow();
+        for (const order of [[EXPENSE, parent], [parent, EXPENSE]]) {
+          const { engine } = await bootSealed();
+          for (const o of order) save(engine, o);
+          const at = `${field} ${fn} ${JSON.stringify(config)}`;
+          expect((engine.registry.getObject('hr_project')?.fields as any)?.total?.currencyConfig, at).toEqual(config);
+          expect(engine.registry.getObject('hr_expense'), at).toBeDefined();
+        }
+      }
+    }
+  });
+
   it('CONTROL: the #33659 probe shape, a `dynamic` roll-up of the stored home amount, registers in either order', async () => {
     for (const fn of ['sum', 'min', 'max', 'avg']) {
       for (const order of [[EXPENSE, project('amount_home', undefined, fn)], [project('amount_home', undefined, fn), EXPENSE]]) {
@@ -1283,24 +1304,30 @@ describe('a single-object save is refused a `dynamic` roll-up over a child field
     }
   });
 
-  it('the child re-saved so that a registered `dynamic` roll-up no longer reads a home amount is refused, naming the roll-up; a run leaving a refused pair as it found it is not refused for it', async () => {
+  it('the child re-saved so that a registered `dynamic` roll-up no longer reads an amount in the home currency is refused, naming the roll-up; a run leaving a refused pair as it found it is not refused for it', async () => {
     const { engine } = await bootSealed();
     save(engine, EXPENSE);
     save(engine, project('amount_home'));
-    const dehomed = { ...EXPENSE, fields: { ...EXPENSE.fields, amount_home: { type: 'currency' } } };
+    // A writable plain amount is still in the home currency (seat ruling
+    // record 7000258793), so de-homing it alone moves nothing: the roll-up
+    // reads a `dynamic` amount either way.
+    const writable = { ...EXPENSE, fields: { ...EXPENSE.fields, amount_home: { type: 'currency' } } };
+    expect(engine.registry.objectRegistrationRefusal(writable as any, undefined, 'own', { againstRegistry: true })).toBeNull();
+    const dehomed = { ...EXPENSE, fields: { ...EXPENSE.fields, amount_home: { type: 'number', readonly: true } } };
     const err = await refusalOf(() => save(engine, dehomed));
     expect(envelopeOf(err)).toEqual(INVALID_METADATA);
     expect(err?.name).toBe(FOLLOW_REFUSED);
     expect(err?.objectName).toBe('hr_project');
     expect(err?.fieldName).toBe('total');
-    // `defineStack` never meets this pair: its object door refuses a writable home field first.
+    // `defineStack` never meets this pair: its object door refuses a home field that is no `currency` field first.
     expect(err?.message).toBe(recordCurrencyDynamicRollupNotHomeError(
       { object: 'hr_project', field: 'total', fn: 'sum', childObject: 'hr_expense', childField: 'amount_home' },
       dehomed.fields,
       dehomed.fields.amount_home,
     ));
-    expect(err?.message).toContain("'hr_expense' stores no home amount");
-    expect((engine.registry.getObject('hr_expense')?.fields as any)?.amount_home?.readonly).toBe(true);
+    expect(err?.message).toContain("'hr_expense.amount_home' is a 'number' field, not a `currency` field in `dynamic` mode");
+    expect(err?.message).toContain("The amounts of 'hr_expense' in the home currency are 'cost', 'cost_dynamic'; roll up one of them");
+    expect((engine.registry.getObject('hr_expense')?.fields as any)?.amount_home?.type).toBe('currency');
 
     // A roll-up registered past the door (a stored row's hydration): a run that
     // re-registers the child unchanged leaves the pair as it found it, so its
@@ -1312,7 +1339,7 @@ describe('a single-object save is refused a `dynamic` roll-up over a child field
     second.engine.registry.registerObject(project('amount_home') as any);
     const run = await refusalOf(() => second.engine.registry.restoringOnRefusal(() => second.engine.registry.registerObject(dehomed as any)));
     expect(run?.name).toBe(FOLLOW_REFUSED);
-    expect((second.engine.registry.getObject('hr_expense')?.fields as any)?.amount_home?.readonly).toBe(true);
+    expect((second.engine.registry.getObject('hr_expense')?.fields as any)?.amount_home?.type).toBe('currency');
   });
 
   it('[N6] an `object_extension` adding the roll-up to the parent is judged as the parent is served', async () => {

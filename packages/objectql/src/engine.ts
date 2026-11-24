@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { QueryAST, QueryInput, HookContext, ServiceObject } from '@objectstack/spec/data';
+import { QueryAST, QueryInput, HookContext, ServiceObject, type FixedReadLeaf } from '@objectstack/spec/data';
 // [commit 74155c735] The defaulting node schema `fillQueryAstDefaults` runs author input
 // through — the declared `.default()` stays in `packages/spec`, the engine
 // only invokes it.
@@ -52,6 +52,7 @@ import { negotiatedMessageLocale, objectDisplayLabel, validationMessageContext }
 // below hand each body the members it reads (`DatasourceRoutingHost`).
 import { getDriver, matchPattern, resolveDatasourceFromMapping } from './engine-datasource-routing.js';
 import { relationSemiJoinServes } from './relation-semi-join.js';
+import { fixedReadLeafClassAnswerOf } from './fixed-read-leaf-engine-answer.js';
 // [#25522 cut 3] The lifecycle health bodies; the methods of the same names
 // below hand each body the members it reads (`LifecycleHealthHost`).
 import { checkDriversHealth, resolvePrimaryDatasource } from './engine-lifecycle-health.js';
@@ -127,11 +128,10 @@ import { ExecutionContext, type InstalledPackageSource } from '@objectstack/spec
 // contract is new (#5945).
 import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 // [#20157] The judge-only filter-admission member's verdict and options.
-import type { EngineFilterJudgement, EngineFilterJudgementOptions, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
+import type { EngineFilterJudgement, EngineFilterJudgementOptions, EngineFixedReadLeafClass, IObjectQLEngine, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
-  type IObjectQLEngine,
   type EngineTransactionInfo,
   type EngineTransactionOptions,
   Logger,
@@ -246,6 +246,7 @@ import { stripReadonlyFields, staticReadonlyInsertSubject } from './validation/r
 // and points at `ctx.previous` — the module owns the measurement and the
 // reason the explanation cannot be composed any further downstream.
 import { UnscopedHookApi, SEED_USER_GRANTS, APP_AUTHORED_HOOK_API, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
+import { PLATFORM_SYSTEM_API } from './platform-system-api.js';
 import { DETACHED_HOOK_RUN, type UNIT_ROLLED_BACK, type UnitCommitQueue } from './unit-detach.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
@@ -1236,6 +1237,12 @@ export class ObjectQL implements IObjectQLEngine {
    * is the one place every refusal passes that holds the host's logger. It is
    * `info`, not `warn`: the refusal is handed to the caller, and nothing is
    * degraded (AGENTS.md "Degradation log levels").
+   *
+   * [#34724, ruling 6944409840] There are two sentences. An app's action is
+   * turned on again on the action in Studio. A platform action (its ledger
+   * row names a package whose installed manifest has scope `system` or
+   * `cloud`) has no switch in Studio, so its sentence names the activation
+   * door instead.
    */
   describeDisabledAction(actionName: string): string {
     // [#29986 codemod] The body moved to `engine-actions.ts` (see `ActionsHost`).
@@ -1908,6 +1915,9 @@ export class ObjectQL implements IObjectQLEngine {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
     return MiddlewareAndContextFacet.hasObjectMiddleware.call(middlewareAndContextHost.of(this), objectName);
   }
+
+  /** [ADR-0155 D4] `IObjectQLEngine.fixedReadLeafClassOf`: the seam's own recognition of D4's two classes for `leaf`, `null` for neither. */
+  fixedReadLeafClassOf(leaf: FixedReadLeaf): EngineFixedReadLeafClass | null { return fixedReadLeafClassAnswerOf(this, leaf); }
 
   private executeWithMiddleware(ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts`, its docblock with it (see `MiddlewareAndContextHost`).
@@ -2676,7 +2686,7 @@ export class ObjectQL implements IObjectQLEngine {
   private objectDisplayLabel(
     objectName: string,
     declaredLabel: unknown,
-    ctx: { locale?: string; translate?: (key: string, locale: string, params?: Record<string, unknown>) => string },
+    ctx: Pick<ValidationMessageContext, 'locale' | 'labelTranslation'>,
   ): string {
     // [#25522 cut 1] The body moved to `engine-validation-messages.ts`, its docblock with it; it reads no member.
     return objectDisplayLabel(objectName, declaredLabel, ctx);
@@ -2792,7 +2802,7 @@ export class ObjectQL implements IObjectQLEngine {
     context: ExecutionContext | undefined,
   ): Promise<{
     parents: Array<Record<string, unknown> | null>;
-    previousParents: Array<Record<string, unknown> | null | undefined>;
+    previousParents: Array<Record<string, unknown> | null | undefined>; servedColumns: Array<ReadonlySet<string> | null>;
   }> {
     // [#25522 cut 14] The body moved to `engine-master-detail-related.ts`, its docblock with it (see `MasterDetailRelatedHost`).
     const readLogger = () => this.logger;
@@ -4082,6 +4092,11 @@ export class ObjectQL implements IObjectQLEngine {
     return SummariesAndExpansionFacet.summaryForeignKeyColumns.call(summariesAndExpansionHost.of(this), childObject);
   }
 
+  private summaryDescriptorsReadByRules(childObject: string): SummaryDescriptor[] {
+    // [#34465] The body is in `engine-summaries-and-expansion.ts`, its docblock with it (see `SummariesAndExpansionHost`).
+    return SummariesAndExpansionFacet.summaryDescriptorsReadByRules.call(summariesAndExpansionHost.of(this), childObject);
+  }
+
   /** Roll-up descriptors for the summary fields `parentObject` OWNS (#5749) —
    *  i.e. the ones a NEW row of `parentObject` must have seeded.
    *
@@ -4655,6 +4670,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolvePredicateRelated: (...a) => this.resolvePredicateRelated(...a),
       resolveOptionPermissions: (...a) => this.resolveOptionPermissions(...a),
       getSummaryDescriptors: (...a) => this.getSummaryDescriptors(...a),
+      facade: this, getSchema: (...a) => this.getSchema(...a), resolveFormulaPermissions: (...a) => this.resolveFormulaPermissions(...a), resolveFormulaRelated: (...a) => this.resolveFormulaRelated(...a), formulaOptionLabels: (...a) => this.formulaOptionLabels(...a), // [#34821]
       assertReferencesResolve: (...a) => this.assertReferencesResolve(...a),
       previewHomeAmounts: (...a) => this.previewHomeAmounts(...a),
       homeAmountServing: (...a) => this.homeAmountServing(...a),
@@ -5269,18 +5285,16 @@ export class ObjectQL implements IObjectQLEngine {
    * column: the question plugin-auth's organization delete asks before
    * anything is deleted. Only objects holding at least one row are listed.
    *
-   * The relations read are the ones {@link refuseOrganizationDeleteWhileOwned}
-   * judges, through the same reader ({@link cascadeRelationBehavior}: a
-   * federated object's unprovisioned injected column is no relation), widened
-   * to every behaviour: a tenant column its author declared `restrict` blocks
-   * the delete too, and one declared `cascade` would delete records, which is
-   * not the organization's own structure either. A count, never a row: the
-   * read is a system-identity `count`, and a table never provisioned holds no
-   * row.
+   * The relations read are the ones {@link refuseOrganizationDeleteWhileOwned} judges, through the same
+   * reader ({@link cascadeRelationBehavior}: a federated object's unprovisioned injected column is no
+   * relation), widened to every behaviour: a tenant column its author declared `restrict` blocks the delete
+   * too, and one declared `cascade` would delete records, which is not the organization's own structure
+   * either. A count, never a row: a system-identity `count`, and a table never provisioned holds no row.
    *
-   * `exclude` names the objects the caller removes as part of the delete
-   * itself. An append-only or engine-owned object is never counted ({@link
-   * outlivesOrganization}), the same set the engine's own refusal leaves out.
+   * `exclude` names the objects the caller removes as part of the delete itself. An append-only or
+   * engine-owned object is never counted ({@link outlivesOrganization}), the same set the engine's own
+   * refusal leaves out, and neither is `sys_unit`: the engine's cascade removes the organization's units
+   * with it [ruling 7035627429, option B].
    */
   organizationOwnedRowCounts(
     organizationId: string,
@@ -5310,6 +5324,7 @@ export class ObjectQL implements IObjectQLEngine {
       buildDriverOptions: (...a) => this.buildDriverOptions(...a),
       composeReadableIdsAtBoundary: (...a) => this.composeReadableIdsAtBoundary(...a),
       find: (...a) => this.find(...a),
+      facade: this, logger: this.logger,
     };
     return count.call(host, object, query, options);
   }
@@ -5464,6 +5479,7 @@ export class ObjectQL implements IObjectQLEngine {
     objectName: string,
     driver: IDataDriver,
     operation: 'insert' | 'update' | 'delete',
+    explicitTransaction?: unknown,
   ): void {
     // [#25522 cut 7] The body moved to `engine-execute-transactions.ts`, its docblock with it (see `ExecuteTransactionsHost`).
     const readTxStore = () => this.txStore;
@@ -5472,9 +5488,10 @@ export class ObjectQL implements IObjectQLEngine {
       get txStore() { return readTxStore(); },
       datasourceNameOf: (...a) => this.datasourceNameOf(...a),
       isSystemLedgerObject: (...a) => this.isSystemLedgerObject(...a),
+      isClosedUnitHandle: (...a) => this.isClosedUnitHandle(...a),
       get logger() { return readLogger(); },
     };
-    return enforceTransactionOrigin.call(host, objectName, driver, operation);
+    return enforceTransactionOrigin.call(host, objectName, driver, operation, explicitTransaction);
   }
 
   // ============================================
@@ -5849,6 +5866,7 @@ export class ObjectQL implements IObjectQLEngine {
       buildSession: (...a) => engine.buildSession(...a),
       buildUser: (...a) => engine.buildUser(...a),
       cascadeDeleteRelations: (...a) => engine.cascadeDeleteRelations(...a),
+      get cascadeIssuedDeletes() { return engine.cascadeIssuedDeletes; },
       claimReferentialCascadeDelete: (...a) => engine.claimReferentialCascadeDelete(...a),
       composeReadableIdsAtBoundary: (...a) => engine.composeReadableIdsAtBoundary(...a),
       delete: (...a) => engine.delete(...a),
@@ -5899,6 +5917,7 @@ export class ObjectQL implements IObjectQLEngine {
       formulaFaultSink: (...a) => engine.formulaFaultSink(...a),
       formulaOptionLabels: (...a) => engine.formulaOptionLabels(...a),
       getDriver: (...a) => engine.getDriver(...a),
+      hasHooksFor: (...a) => engine.hasHooksFor(...a),
       get logger() { return engine.logger; },
       lowerRelationConditions: (...a) => engine.lowerRelationConditions(...a),
       maskSecretFields: (...a) => engine.maskSecretFields(...a),
@@ -6130,6 +6149,7 @@ export class ObjectQL implements IObjectQLEngine {
       get formulaHopReads() { return engine.formulaHopReads; },
       formulaOptionLabels: (...a) => engine.formulaOptionLabels(...a),
       hasObjectMiddleware: (...a) => engine.hasObjectMiddleware(...a),
+      get hooks() { return engine.hooks; },
       get i18nService() { return engine.i18nService; },
       get insertRecomputeListeners() { return engine.insertRecomputeListeners; },
       get logger() { return engine.logger; },
@@ -6228,6 +6248,7 @@ export class ObjectQL implements IObjectQLEngine {
       resolveOptionPermissions: (...a) => engine.resolveOptionPermissions(...a),
       resolvePredicateRelated: (...a) => engine.resolvePredicateRelated(...a),
       settleMasterDetailLanding: (...a) => engine.settleMasterDetailLanding(...a),
+      summaryDescriptorsReadByRules: (...a) => engine.summaryDescriptorsReadByRules(...a),
       summaryForeignKeyColumns: (...a) => engine.summaryForeignKeyColumns(...a),
       triggerHooks: (...a) => engine.triggerHooks(...a),
       update: (...a) => engine.update(...a),
@@ -6473,14 +6494,24 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   /**
    * Create an elevated (system) context.
    *
-   * [#25653] Platform code's `sudo()` carries no app-automation mark, so its
-   * writes to the four identity-assignment objects land. An app-authored
-   * hook's in-process `ctx.api.sudo()` is the hook's elevation: it carries
-   * the `'hook'` mark (unless the context already carries one).
+   * [#25653] Platform code's `sudo()` adds no app-automation mark but keeps
+   * one its context carries (a platform hook fired by an action body's write);
+   * the platform's own record of such a write uses {@link PLATFORM_SYSTEM_API}.
+   * An app-authored hook's in-process `ctx.api.sudo()` is the hook's
+   * elevation: it carries the `'hook'` mark unless the context carries one.
    */
   sudo(): ScopedContext {
     // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
     return ScopedContextFacet.sudo.call(scopedContextHost.of(this));
+  }
+
+  /**
+   * The platform's own system api; its contract, and where its guard stops, is
+   * `platform-system-api.ts`. Keyed on an unexported symbol: reached only
+   * through `platformSystemApi`.
+   */
+  [PLATFORM_SYSTEM_API](): ScopedContext {
+    return ScopedContextFacet.platformSystemApi.call(scopedContextHost.of(this));
   }
 
   /**

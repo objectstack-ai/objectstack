@@ -21,6 +21,7 @@ export const SysUserPreference = ObjectSchema.create({
   label: 'User Preference',
   pluralLabel: 'User Preferences',
   icon: 'settings',
+  color: 'green',
   isSystem: true,
   // [ADR-0103, #3355] Admin/user-writable DATA on a platform-defined schema:
   // preferences are per-user state authored from the user's own settings page
@@ -146,6 +147,7 @@ export const SysUserPreference = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: true,
     // No `apiMethods` — default-open (#3543 audit): the previous whitelist

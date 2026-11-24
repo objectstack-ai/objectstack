@@ -7,16 +7,18 @@ import type {
   IJobService,
   IObjectQLEngine,
 } from '@objectstack/spec/contracts';
-import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
+import { OWNERSHIP_QUEUE_SERVICE, WORK_CALENDAR_SERVICE } from '@objectstack/spec/contracts';
+import type { IWorkCalendarService } from '@objectstack/spec/contracts';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
 import { SysApprovalToken } from './sys-approval-token.object.js';
 import { SysApprovalDelegation } from './sys-approval-delegation.object.js';
 import { SysApprovalRequestDetailPage } from './sys-approval-request.page.js';
-import { renderConfirmPage, renderResultPage } from './action-link-pages.js';
+import { APPROVALS_INBOX_PATH, renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
   ApprovalService,
+  actionRedemptionPage,
   requestVisibilitySourceOf,
   slotLabelSourceOf,
   ESCALATION_JOB_NAME,
@@ -28,6 +30,7 @@ import {
 } from './approval-service.js';
 import {
   bindApprovalLockHook,
+  bindDetailRowLockHook,
   bindDelegationWriteGuard,
   bindRecordDeleteCancelHook,
   unbindAllHooks,
@@ -42,7 +45,7 @@ import { backfillActionSlots } from './action-slot-backfill.js';
 import { backfillApprovalDisplayLabels } from './display-label-backfill.js';
 import { backfillProcessPackages, logProcessPackageBackfill, type FlowHolderSource } from './stored-process-package-backfill.js';
 import { APPROVAL_EMAIL_TEMPLATES } from './approval-email-templates.js';
-import { resolvePublicBaseUrl } from './public-base-url.js';
+import { consolePageLink, resolvePublicBaseUrl } from './public-base-url.js';
 
 export interface ApprovalsPluginOptions {
   /** Disable runtime registration (schemas still register). */
@@ -127,6 +130,8 @@ export class ApprovalsServicePlugin implements Plugin {
 
   private readonly options: ApprovalsPluginOptions;
   private service?: ApprovalService;
+  /** [#34862] A Console page's link under the approval links' base and the Console's mount. */
+  private consoleLink?: (pagePath: string) => string;
   private engine?: IObjectQLEngine;
   private escalationJobScheduled = false;
   /**
@@ -249,10 +254,27 @@ export class ApprovalsServicePlugin implements Plugin {
       );
     }
 
+    // [#34862] The Console's mount, for the links that open a Console page:
+    // the auth service's Console page composer (`getConsoleUrl`, which reads
+    // `uiBasePath`), the one composer of Console page links in mail. Read at
+    // link time: the auth service is another plugin's and may start later.
+    // `getService` THROWS on an empty slot; no auth service, no mount.
+    const getConsoleUrl = (path: string): string | undefined => {
+      let auth: { getConsoleUrl?: (path: string) => string } | undefined;
+      try {
+        auth = ctx.getService<{ getConsoleUrl?: (path: string) => string }>('auth');
+      } catch {
+        return undefined;
+      }
+      return typeof auth?.getConsoleUrl === 'function' ? auth.getConsoleUrl(path) : undefined;
+    };
+    this.consoleLink = (pagePath) => consolePageLink(publicBase.url, getConsoleUrl, pagePath);
+
     this.service = new ApprovalService({
       engine: engine as ApprovalEngine,
       logger: ctx.logger,
       publicBaseUrl: publicBase.url,
+      getConsoleUrl,
       // [#8652] Read-only record-reader visibility. Default OFF — an absent
       // option reaches the service as an empty set. This is the host's half
       // only: an object's own `enable.approvalsVisibleToReaders` is read by
@@ -290,6 +312,18 @@ export class ApprovalsServicePlugin implements Plugin {
       // object labels in the reader's locale (`reader-locale-labels.ts`).
       // Without one, the door serves the labels as stored.
       i18nServiceSource: i18nService,
+      // [#35418] A position's declared label, for the timeline note that names
+      // an unheld position when the reader's pack holds no translation of it.
+      // Resolved LAZILY for the reason the providers above are; absent, the
+      // note names the position by its name.
+      positionLabelSource: async (positionName) => {
+        let metadata: { get?(type: string, name: string): Promise<unknown> } | undefined;
+        try { metadata = ctx.getService('metadata'); } catch { return undefined; }
+        if (typeof metadata?.get !== 'function') return undefined;
+        const item = await metadata.get('position', positionName);
+        const label = (item as { label?: unknown } | undefined)?.label;
+        return typeof label === 'string' && label.trim() ? label : undefined;
+      },
       // [ADR-0142 D6] The queue service a `queue` approver expands through.
       // Resolved LAZILY for the reason the providers above are: plugin-sharing
       // registers it and may start after this one. Absent, a queue approver
@@ -297,6 +331,17 @@ export class ApprovalsServicePlugin implements Plugin {
       ownershipQueues: () => {
         try {
           return ctx.getService<ApproverQueueSource>(OWNERSHIP_QUEUE_SERVICE);
+        } catch {
+          return undefined;
+        }
+      },
+      // [ADR-0157 D5] The working-calendar service a `clock: 'working_time'`
+      // escalation counts through. Resolved LAZILY for the reason the
+      // providers above are: objectql registers it and may start after this
+      // one. Absent, a working-time deadline is refused, never wall-clock.
+      workCalendar: () => {
+        try {
+          return ctx.getService<IWorkCalendarService>(WORK_CALENDAR_SERVICE);
         } catch {
           return undefined;
         }
@@ -369,6 +414,9 @@ export class ApprovalsServicePlugin implements Plugin {
         // …and it is worded in the writer's locale, with the object's label in
         // that locale, through the same lazily-read `i18n` service.
         bindApprovalLockHook(engine, ctx.logger, fieldVisibility, i18nService);
+        // Ruling A on the record-page edit card: a locked master's detail rows
+        // refuse insert / update / delete as well.
+        bindDetailRowLockHook(engine, ctx.logger, i18nService);
         bindRecordDeleteCancelHook(engine, this.service, ctx.logger);
         bindDelegationWriteGuard(engine, ctx.logger);
         // [#10749] Generic-door snapshot redaction. Registered here so the
@@ -513,10 +561,14 @@ export class ApprovalsServicePlugin implements Plugin {
         const ACT_PATH = '/api/v1/approvals/act';
         const html = (c: any, body: string, status = 200) =>
           c.body(body, status, { 'Content-Type': 'text/html; charset=utf-8' });
+        // [#34862] The inbox link under the Console's mount, as the service's
+        // `handleActionPage` door builds it, so both doors answer one page.
+        const consoleLink = this.consoleLink;
+        const inboxHref = () => (consoleLink ? consoleLink(APPROVALS_INBOX_PATH) : APPROVALS_INBOX_PATH);
         rawApp.get(ACT_PATH, async (c: any) => {
           const token = String(c.req.query('token') ?? '');
           const peek = await svc.peekActionToken(token);
-          if (!peek.ok) return html(c, renderResultPage(peek.reason, peek.request), 200);
+          if (!peek.ok) return html(c, renderResultPage(peek.reason, peek.request, inboxHref()), 200);
           return html(c, renderConfirmPage({
             request: peek.request, action: peek.action, approverId: peek.approverId,
             token, actPath: ACT_PATH,
@@ -524,13 +576,17 @@ export class ApprovalsServicePlugin implements Plugin {
         });
         rawApp.post(ACT_PATH, async (c: any) => {
           let token = '';
+          let comment: unknown;
           try {
             const body = await c.req.parseBody();
             token = String(body?.token ?? '');
+            comment = body?.comment;
           } catch { /* fall through to invalid */ }
-          const out = await svc.redeemActionToken(token);
-          if (!out.ok) return html(c, renderResultPage(out.reason, out.request), 200);
-          return html(c, renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request));
+          // [#35722] One page builder for both doors: a reject with no reason
+          // is answered the confirm page again, as `handleActionPage` answers it.
+          const out = await svc.redeemActionToken(token, { comment });
+          const page = actionRedemptionPage(out, { token, actPath: ACT_PATH, inboxHref: inboxHref() });
+          return html(c, page.html, page.status);
         });
         ctx.logger.info(`ApprovalsServicePlugin: actionable-link pages mounted at ${ACT_PATH}`);
       } catch { /* http server not installed */ }

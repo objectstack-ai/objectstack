@@ -44,6 +44,9 @@ import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { DatasetSchema, ListViewSchema, ViewItemSchema } from '@objectstack/spec/ui';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { MetadataClient } from '@object-ui/data-objectstack';
+// The draft preview bar's publish reaches `import('@objectstack/lint')`: paid at
+// collection, never inside a clocked case (`pnpm check:test-source-alias`).
+import '@objectstack/lint';
 
 /** A served dataset over THIS view's object: one dimension, two measures. */
 const DEAL_METRICS = {
@@ -223,8 +226,20 @@ beforeEach(() => {
   datasetLists.length = 0;
   wireFetch = wire();
   client = new MetadataClient({ baseUrl: 'http://localhost', fetch: wireFetch as any });
+  // objectstack#35624 — the create asks the package list where the app saves
+  // its views; the routed app `demo` is a writable package here. Every other
+  // page request goes on as before.
+  const pageFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input) === '/api/v1/packages'
+      ? new Response(
+          JSON.stringify({ success: true, data: { packages: [{ manifest: { id: 'demo', name: 'Demo' }, writable: true }] } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      : pageFetch(input, init)));
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 

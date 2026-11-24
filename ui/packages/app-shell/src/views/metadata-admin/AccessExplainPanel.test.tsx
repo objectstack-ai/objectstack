@@ -13,6 +13,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 const fetchSpy = vi.fn();
 // objectui#2600 B2 — package object list backing the object dropdown; a
@@ -38,6 +39,7 @@ vi.mock('@object-ui/fields', async (importOriginal) => ({
 }));
 
 import { AccessExplainPanel, type ExplainDecision } from './AccessExplainPanel';
+import { t } from './i18n';
 
 afterEach(() => {
   cleanup();
@@ -226,5 +228,53 @@ describe('AccessExplainPanel (ADR-0090 D6)', () => {
   it('falls back to a free-text object input without a package scope', async () => {
     renderPanel();
     expect(screen.getByLabelText('Object').tagName).toBe('INPUT');
+  });
+});
+
+/**
+ * objectstack#34865 — with no object chosen, Explain and the record Pick are
+ * disabled, and were bare disabled buttons: no reason on hover, Tab skipped
+ * them, nothing in the accessibility tree (Pick's only title was "Pick").
+ * Each now sits in a focusable wrapper described by the reason
+ * (`DisabledControlReason`, ux-conventions.disabled-control-reason), keeping
+ * its own name.
+ */
+describe('AccessExplainPanel — disabled Explain and Pick say an object is missing (objectstack#34865)', () => {
+  const describedBy = (el: HTMLElement) =>
+    document.getElementById(el.getAttribute('aria-describedby') ?? '') as HTMLElement | null;
+  const NEED_OBJECT = t('engine.studio.access.explain.needObject', 'en-US');
+  const explain = () => screen.getByRole('button', { name: /explain$/i });
+  const pick = () => screen.getByRole('button', { name: t('engine.studio.access.explain.pickRecord', 'en-US') });
+
+  it('no object: Tab from the record id reaches Pick, then Explain, each giving the reason', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    for (const button of [pick(), explain()]) {
+      expect(button).toBeDisabled();
+      expect(describedBy(button)).toHaveTextContent(NEED_OBJECT);
+    }
+    expect(pick()).not.toHaveAttribute('title');
+
+    screen.getByLabelText(/Record/i).focus();
+    await user.tab();
+    expect(pick().parentElement).toHaveFocus();
+    expect(describedBy(pick().parentElement as HTMLElement)).toHaveTextContent(NEED_OBJECT);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(NEED_OBJECT);
+
+    await user.tab();
+    expect(explain().parentElement).toHaveFocus();
+    expect(describedBy(explain().parentElement as HTMLElement)).toHaveTextContent(NEED_OBJECT);
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(NEED_OBJECT));
+  });
+
+  it('CONTROL — an object chosen: Explain and Pick are plain enabled buttons with no reason', () => {
+    renderPanel();
+    fireEvent.change(screen.getByLabelText('Object'), { target: { value: 'crm_lead' } });
+    for (const button of [pick(), explain()]) {
+      expect(button).toBeEnabled();
+      expect(button).not.toHaveAttribute('aria-describedby');
+      expect(button.parentElement).not.toHaveAttribute('data-disabled-reason');
+      expect(button.parentElement).not.toHaveAttribute('tabindex');
+    }
   });
 });

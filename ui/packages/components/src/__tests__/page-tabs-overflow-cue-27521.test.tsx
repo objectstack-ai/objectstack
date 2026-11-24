@@ -19,6 +19,9 @@ import { act, fireEvent, render } from '@testing-library/react';
 import React from 'react';
 import { SchemaRenderer } from '@object-ui/react';
 import '../renderers';
+// `react-page` reaches this dynamically; load it during collection, not in a
+// clocked case (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 const TABS = ['Details', 'Positions', 'Permission Sets', 'Sessions'].map((label) => ({
   label,
@@ -68,5 +71,57 @@ describe('page:tabs — the strip scrolls and cues its hidden edge (objectstack#
     const el = strip('left');
     expect(el.dataset.overflow).toBeUndefined();
     expect(el.className).not.toContain('overflow-x-auto');
+  });
+});
+
+/** The strip rendered inside a scroll container with the given top padding. */
+function stripInScroller(paddingTop: string, position?: 'left') {
+  const { container } = render(
+    <div data-testid="scroller" style={{ overflowY: 'auto', paddingTop }}>
+      <SchemaRenderer schema={{ type: 'page:tabs', items: TABS, ...(position ? { position } : {}) } as never} />
+    </div>,
+  );
+  return {
+    scroller: container.querySelector('[data-testid="scroller"]') as HTMLElement,
+    el: container.querySelector('[role="tablist"]') as HTMLElement,
+  };
+}
+
+describe('page:tabs — the stuck strip is a solid bar flush with its scroller top (objectstack#35414)', () => {
+  it('the horizontal strip sticks with the solid page-background token: no transparency, no blur', () => {
+    const el = strip();
+    const classes = el.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(['sticky', 'top-0', 'z-20', 'bg-background']));
+    // Neither an alpha-suffixed fill nor a blur may come back: either lets the
+    // content scrolling under the stuck strip show through its labels.
+    expect(classes.filter((c) => c.includes('bg-background/'))).toEqual([]);
+    expect(classes.filter((c) => c.includes('backdrop'))).toEqual([]);
+    // The bottom rule stays.
+    expect(el.className).toContain('shadow-[inset_0_-1px_0_var(--color-border)]');
+  });
+
+  it("a padded scroller: the strip stops its padding above top-0, so no strip of content shows above it", () => {
+    const { el } = stripInScroller('24px');
+    expect(el.style.top).toBe('-24px');
+  });
+
+  it('the inset is re-read when the scroller resizes (its padding changes at breakpoints)', () => {
+    const { el, scroller } = stripInScroller('24px');
+    scroller.style.paddingTop = '12px';
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(el.style.top).toBe('-12px');
+  });
+
+  it('CONTROL: an unpadded scroller leaves the strip at top-0', () => {
+    const { el } = stripInScroller('0px');
+    expect(el.style.top).toBe('');
+  });
+
+  it('CONTROL: a vertical strip is a sidebar, never sticky and never offset', () => {
+    const { el } = stripInScroller('24px', 'left');
+    expect(el.className).not.toContain('sticky');
+    expect(el.style.top).toBe('');
   });
 });

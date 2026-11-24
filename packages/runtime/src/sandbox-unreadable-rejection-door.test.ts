@@ -34,6 +34,9 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { HttpDispatcher } from './http-dispatcher.js';
 import { actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
+// Paid during collection, never inside a case's clocked window: the door's
+// reach loads this package lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 const PREFIX = '/api/v1';
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
@@ -158,5 +161,9 @@ describe('[#23723] CONTROL — the door\'s other answers stand', () => {
         const response = await postAction('never_settles');
         expect(response.status, JSON.stringify(response.body)).toBe(500);
         expect(response.body?.error?.code).toBe('INTERNAL_ERROR');
+        // The timeout names the action and its limit, never a refusal.
+        expect(response.body?.error?.message).toBe(
+            `Action 'never_settles' timed out: it exceeded its ${CEILING_MS} ms time limit while waiting on platform calls, and was stopped.`,
+        );
     });
 });

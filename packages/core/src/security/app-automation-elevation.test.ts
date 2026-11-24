@@ -14,6 +14,7 @@ import {
   appAutomationElevationOf,
   carryAppAutomationElevation,
   markAppAutomationElevation,
+  withoutAppAutomationElevation,
 } from './app-automation-elevation.js';
 
 describe('the app-automation elevation mark', () => {
@@ -58,5 +59,21 @@ describe('the app-automation elevation mark', () => {
 
     const unmarked = ExecutionContextSchema.parse({ isSystem: true });
     expect(carryAppAutomationElevation({ isSystem: true }, unmarked)).toBe(unmarked);
+  });
+
+  it('is taken off a fresh copy that keeps every other property, and an unmarked context is handed back as is', () => {
+    const transaction = {};
+    const marked = markAppAutomationElevation({ isSystem: true, userId: 'u1', transaction }, 'action');
+    const taken = withoutAppAutomationElevation(marked);
+    expect(taken).not.toBe(marked);
+    expect(appAutomationElevationOf(taken)).toBe(undefined);
+    expect(Object.getOwnPropertySymbols(taken)).toEqual([]);
+    expect(taken).toEqual({ isSystem: true, userId: 'u1', transaction });
+    expect((taken as { transaction?: unknown }).transaction).toBe(transaction);
+    expect(appAutomationElevationOf(marked)).toBe('action');
+
+    const unmarked = { isSystem: true };
+    expect(withoutAppAutomationElevation(unmarked)).toBe(unmarked);
+    expect(withoutAppAutomationElevation(null)).toBe(null);
   });
 });

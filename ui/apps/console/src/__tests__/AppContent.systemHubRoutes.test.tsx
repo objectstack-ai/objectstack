@@ -91,7 +91,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom';
 
 // AGENTS.md §测试纪律 — the lazily-imported page modules are stubbed so no
@@ -187,11 +187,14 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 // on that chrome-less screen (pinned in
 // `packages/app-shell/src/console/__tests__/AppContent.inaccessibleAppStrand.test.tsx`).
 // The legacy `/system/*` redirect targets this file measures are unchanged.
+// One function for every render, as `AuthProvider`'s `useCallback` gives
+// (objectstack#35981: the chrome waits for its answer).
+const getAuthConfig = vi.hoisted(() => async () => ({ features: {} }));
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({
     user: null,
-    getAuthConfig: async () => ({ features: {} }),
+    getAuthConfig,
     activeOrganization: null,
   }),
   useWorkspaceAdminStatus: () => ({ isAdmin: true, isResolved: true }),
@@ -287,20 +290,22 @@ describe('system-hub entries reach the framework system objects (objectui#3655)'
     expect(screen.queryByText('Page not found')).not.toBeInTheDocument();
   });
 
-  it('preserves the app prefix rather than stripping to the root', () => {
+  it('preserves the app prefix rather than stripping to the root', async () => {
     // `prefix` is cut with a regex off `location.pathname`; every case above
     // uses the same two-segment prefix, so a mistake there is invisible in them.
     renderConsoleAt('/apps/my-app/system/users');
 
-    expect(chain).toEqual(['/apps/my-app/system/users', '/apps/my-app/sys_user']);
+    // objectstack#35981 — the chrome (and the routes under it) mount once the
+    // deployment flags have answered, a promise even when answered at once.
+    await waitFor(() => expect(chain).toEqual(['/apps/my-app/system/users', '/apps/my-app/sys_user']));
   });
 
-  it('an app segment spelled `system` survives the rewrite', () => {
+  it('an app segment spelled `system` survives the rewrite', async () => {
     // The regex is end-anchored precisely so the LAST `/system/<seg>` is the
     // one removed. An unanchored cut would leave `/apps` here.
     renderConsoleAt('/apps/system/system/users');
 
-    expect(chain).toEqual(['/apps/system/system/users', '/apps/system/sys_user']);
+    await waitFor(() => expect(chain).toEqual(['/apps/system/system/users', '/apps/system/sys_user']));
   });
 
   /**

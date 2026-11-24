@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectOwnership, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
+import { ServiceObject, ObjectOwnership, type RelatedListsArrangement, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -35,6 +35,7 @@ import {
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion } from './search-companion.js';
+import type { ExtensionPlacementNote } from './registry-extension-placement.js';
 import { ObjectStackManifest, InstalledPackage, type InstalledPackageSource, customizationBasePackageId, type NamespaceObjectNameClash } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
 // [ADR-0130 D1] The ONE derivation of the key a package is installed under
@@ -215,6 +216,10 @@ export {
  *     tenant authored it — the same D9.2a rule as the scalars. A patch reaches
  *     the owner's own fields only (`ownFields`): one naming any other field,
  *     a field an extension adds included, is skipped here; the fold names it.
+ *   - `place` [#35901] is not read here: the fold applies every extension's
+ *     placements once, after this merge has run for all of them
+ *     (`applyExtensionPlacements`, registry-extension-placement.ts), so an
+ *     anchor names the object as served.
  *
  * **Every other top-level prop on `extension` is silently discarded.**
  * `merged` starts as `{ ...base }` and nothing outside the list above is ever
@@ -227,7 +232,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `priority`, so an `objectExtensions` entry
+ * `description` / `actionLayout` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -1458,7 +1463,7 @@ export class MisplacedDefaultPageError extends Error {
 }
 
 /**
- * Every package-held position and permission-set name the environment catalog
+ * Every package-held position, permission-set and capability name the environment catalog
  * also holds, read off `registry` — the conflicts the engine plugin's cold-boot
  * check refuses the boot with (`ObjectQLPlugin`, right after `sys_metadata`
  * hydration; the reading itself is the registry's private
@@ -1473,7 +1478,7 @@ export function findEnvironmentHeldSecurityCatalogNames(registry: SchemaRegistry
 }
 
 /**
- * Every position and permission-set name a package holds, with the packages
+ * Every position, permission-set and capability name a package holds, with the packages
  * that hold it, read off `registry` — the PACKAGE half of the reading the
  * cold-boot check refuses with ({@link findEnvironmentHeldSecurityCatalogNames}
  * is this list met with the environment catalog's bare slot, and nothing else).
@@ -2934,6 +2939,27 @@ export class SchemaRegistry {
     return ObjectRegistrationFacet.resolveStorageObject.call(objectRegistrationHost.of(this), fqn);
   }
 
+  /**
+   * [#34901] The fields a disabled package's `extend` contribution adds to
+   * `name` and the served fold therefore withholds, each with the package
+   * that adds it: `{ crm_project: { packageId: 'com.acme.projects' } }`.
+   * Empty when nothing is withheld (no disabled extender, or every field it
+   * adds is also declared by the owner or a served extension).
+   *
+   * The served object read stamps this as its `_withheldFields` read
+   * decoration, so a console can tell a name a switched-off package withholds
+   * from a name nothing declares, and leave it out of every query while the
+   * data door keeps refusing both. Accepts a short name or an FQN, as
+   * {@link getObject} does.
+   */
+  getWithheldExtensionFields(name: string): Record<string, { packageId: string }> {
+    return ObjectRegistrationFacet.getWithheldExtensionFields.call(objectRegistrationHost.of(this), name);
+  }
+
+  getRelatedListsArrangement(name: string): RelatedListsArrangement | undefined { // [ADR-0146 D10] contract: `ObjectRegistrationFacet.getRelatedListsArrangement`
+    return ObjectRegistrationFacet.getRelatedListsArrangement.call(objectRegistrationHost.of(this), name);
+  }
+
   private withholdDisabledExtensions(contributors: readonly ObjectContributor[], asEnabled?: string): WithheldExtensions | undefined {
     // [#33949 codemod] The body moved to `registry-object-registration.ts`, its docblock with it (see `ObjectRegistrationHost`).
     return ObjectRegistrationFacet.withholdDisabledExtensions.call(objectRegistrationHost.of(this), contributors, asEnabled);
@@ -2968,6 +2994,19 @@ export class SchemaRegistry {
    * {@link shadowedExtensionQueueWarned} gives.
    */
   private fieldPatchMissesWarned = new Set<string>();
+
+  /**
+   * [#35901] Placement notes already named (a placement not applied, an
+   * anchor missing, an item that is not the extension's own), keyed by the
+   * note. Per registry, for the reason {@link shadowedExtensionQueueWarned}
+   * gives.
+   */
+  private extensionPlacementNotesWarned = new Set<string>();
+
+  private reportExtensionPlacements(notes: readonly ExtensionPlacementNote[]): void {
+    // The body lives in `registry-object-registration.ts` (see `ObjectRegistrationHost`).
+    return ObjectRegistrationFacet.reportExtensionPlacements.call(objectRegistrationHost.of(this), notes);
+  }
 
   /**
    * [#28835] Field names already named as declared by more than one
@@ -3613,10 +3652,10 @@ export class SchemaRegistry {
    * and `/meta` served its label and option labels untranslated in every
    * locale while the extender's own pack carried them.
    *
-   * ⛔ Exactly those two widen: rules by name, and field NAMES the owner does
-   * not declare. The scalars stay the owner's, and so does every field the
-   * owner declares, even one an extender redeclares; an extender's
-   * `fieldPatches` are never folded in. Each must keep reading as diverged from
+   * ⛔ Exactly three widen: rules by name, field NAMES the owner does not declare, and the
+   * tabs a code extender places (#36528: the facet's `packagedPlacedRelatedLists`). The scalars
+   * stay the owner's, and so does every field the owner declares, even one an extender redeclares;
+   * an extender's `fieldPatches` are never folded in. Each must keep reading as diverged from
    * the packaged one, or the catalog — which translates the owner's text under
    * the owner's keys — takes back the case #8037 filed. A tenant overlay and an
    * extension of tenant provenance (`_provenance: 'org'`) add nothing here:
@@ -3625,12 +3664,42 @@ export class SchemaRegistry {
    * still reads every code extender, disabled ones included.)
    *
    * Returns the owner's definition BY REFERENCE when no code extender ships a
-   * rule or adds a field, and `undefined` exactly where
+   * rule, adds a field or places a list, and `undefined` exactly where
    * {@link getPackagedObjectOwner} does.
    */
   getPackagedObjectBase(name: string): ServiceObject | undefined {
     // [#33949 codemod] The body moved to `registry-platform-global.ts` (see `PlatformGlobalHost`).
     return PlatformGlobalFacet.getPackagedObjectBase.call(platformGlobalHost.of(this), name);
+  }
+
+  /**
+   * [#33952, ADR-0146 D10] For each CODE `extend` contributor of an object
+   * that patches its fields (`fieldPatches`), the packaged base
+   * ({@link getPackagedObjectBase}) with THAT package's patches applied and no
+   * other's — the text the package writes on each slot it patches — beside
+   * its package id. Highest precedence first: the fold applies contributors
+   * in ascending order, so where two packages patch one slot the first entry
+   * is the one the served object carries.
+   *
+   * The serving layer reads it to translate a patched slot from the patching
+   * package's own translations (`TranslateDocumentOptions.patchBundles` in
+   * `@objectstack/spec/system`), and asks of it only which package wrote the
+   * served value: the comparison that decides a slot is patched stays
+   * {@link getPackagedObjectBase}'s, which never folds a patch in. Nothing is
+   * stamped on the served document (ADR-0029 D9.2a): this is read off the
+   * contributors, by the filter {@link getPackagedObjectBase} reads added
+   * fields with — a code artifact body, a package that is not disabled. A
+   * tenant overlay and an extension of tenant provenance add nothing: their
+   * text is authored, and keeps its own. Each patch reaches the owner's own
+   * fields only, as the fold applies it; the tenant yield is not applied, so
+   * an entry carries what the package ships even where a tenant renamed the
+   * slot (the served value then matches no entry).
+   *
+   * `[]` where {@link getPackagedObjectOwner} answers `undefined`, and where no
+   * code extender patches a field.
+   */
+  getPackagedFieldPatchBases(name: string): Array<{ packageId: string; base: ServiceObject }> {
+    return PlatformGlobalFacet.getPackagedFieldPatchBases.call(platformGlobalHost.of(this), name);
   }
 
   /**
@@ -4507,6 +4576,9 @@ export class SchemaRegistry {
    */
   private readonly packageBodyItems = new Map<string, ReadonlySet<string>>();
 
+  /** [#35609] Package id → the extension layers its last body wrote, by object key (see `ItemsFacet`). */
+  private readonly packageBodyExtensions = new Map<string, ReadonlyMap<string, ObjectContributor>>();
+
   /** The body registration {@link replacingPackageBody} has open, while it runs. */
   private openPackageBody: { readonly packageId: string; readonly written: Set<string> } | undefined;
 
@@ -4535,8 +4607,12 @@ export class SchemaRegistry {
    * claim recorded before it is removed, so a refusal later in the run (a later
    * member of the artifact, the run-end record-currency door) puts them back
    * with the rest of the installed version. `register` throwing withdraws
-   * nothing. Objects and object extensions are not items and are not touched
-   * here.
+   * nothing. Owned objects are not items and are not touched here.
+   *
+   * [#35609] An extension the previous body registered for a target the new
+   * body no longer extends is withdrawn (`withdrawObjectExtension`), the whole
+   * layer with it; stored column data is not touched, and a layer another door
+   * put under the package id is kept.
    */
   replacingPackageBody<T>(packageId: string | undefined, manifest: ObjectStackManifest, register: () => T): T {
     // [#33949 codemod] The body moved to `registry-items.ts` (see `ItemsHost`).
@@ -6031,13 +6107,16 @@ export class SchemaRegistry {
       noteItem: (...a) => registry.noteItem(...a),
       noteItemOrder: (...a) => registry.noteItemOrder(...a),
       noteSecurityCatalogClaim: (...a) => registry.noteSecurityCatalogClaim(...a),
+      get objectContributors() { return registry.objectContributors; },
       get openPackageBody() { return registry.openPackageBody; },
       set openPackageBody(v) { registry.openPackageBody = v; },
       orderedOverlayTier: (...a) => registry.orderedOverlayTier(...a),
+      get packageBodyExtensions() { return registry.packageBodyExtensions; },
       get packageBodyItems() { return registry.packageBodyItems; },
       get restorePoint() { return registry.restorePoint; },
       get securityCatalogClaims() { return registry.securityCatalogClaims; },
       unregisterPicklistExtensionsByPackage: (...a) => registry.unregisterPicklistExtensionsByPackage(...a),
+      withdrawObjectExtension: (...a) => registry.withdrawObjectExtension(...a),
       withdrawPackageBodyItemsNotShipped: (...a) => registry.withdrawPackageBodyItemsNotShipped(...a),
       withdrawPackageClaimsNotDeclared: (...a) => registry.withdrawPackageClaimsNotDeclared(...a),
     }));
@@ -6070,6 +6149,7 @@ export class SchemaRegistry {
       declinedBaseLayerStamps: (...a) => registry.declinedBaseLayerStamps(...a),
       get deploymentPlatformGlobalObjects() { return registry.deploymentPlatformGlobalObjects; },
       extensionTargetKey: (...a) => registry.extensionTargetKey(...a),
+      get extensionPlacementNotesWarned() { return registry.extensionPlacementNotesWarned; },
       get fieldPatchMissesWarned() { return registry.fieldPatchMissesWarned; },
       finishServedObject: (...a) => registry.finishServedObject(...a),
       foldExtenders: (...a) => registry.foldExtenders(...a),
@@ -6079,6 +6159,7 @@ export class SchemaRegistry {
       getObject: (...a) => registry.getObject(...a),
       getObjectContributors: (...a) => registry.getObjectContributors(...a),
       getObjectOwner: (...a) => registry.getObjectOwner(...a),
+      getPackage: (...a) => registry.getPackage(...a),
       hasDisabledPackage: (...a) => registry.hasDisabledPackage(...a),
       isActionWithheldByDisabledPackage: (...a) => registry.isActionWithheldByDisabledPackage(...a),
       isPackageDisabled: (...a) => registry.isPackageDisabled(...a),
@@ -6098,6 +6179,7 @@ export class SchemaRegistry {
       refusePicklistItemArrival: (...a) => registry.refusePicklistItemArrival(...a),
       registerNamespace: (...a) => registry.registerNamespace(...a),
       reportChangedRuleCopies: (...a) => registry.reportChangedRuleCopies(...a),
+      reportExtensionPlacements: (...a) => registry.reportExtensionPlacements(...a),
       reportFieldPatchMisses: (...a) => registry.reportFieldPatchMisses(...a),
       reportRedeclaredFields: (...a) => registry.reportRedeclaredFields(...a),
       get reportedRuleCopyChanges() { return registry.reportedRuleCopyChanges; },
@@ -6175,6 +6257,7 @@ export class SchemaRegistry {
       noteItem: (...a) => registry.noteItem(...a),
       noteItemType: (...a) => registry.noteItemType(...a),
       get objectContributors() { return registry.objectContributors; },
+      get packageBodyExtensions() { return registry.packageBodyExtensions; },
       get packageBodyItems() { return registry.packageBodyItems; },
       recordBareNameClaims: (...a) => registry.recordBareNameClaims(...a),
       recordDefaultRecordPageClaims: (...a) => registry.recordDefaultRecordPageClaims(...a),
@@ -6244,6 +6327,7 @@ export class SchemaRegistry {
       get extensionSpellingWarned() { return registry.extensionSpellingWarned; },
       foldExtenders: (...a) => registry.foldExtenders(...a),
       getObjectOwner: (...a) => registry.getObjectOwner(...a),
+      getPackagedObjectBase: (...a) => registry.getPackagedObjectBase(...a),
       getPackagedObjectOwner: (...a) => registry.getPackagedObjectOwner(...a),
       invalidateAll: (...a) => registry.invalidateAll(...a),
       isPackageDisabled: (...a) => registry.isPackageDisabled(...a),
@@ -6252,6 +6336,7 @@ export class SchemaRegistry {
       get multiTenant() { return registry.multiTenant; },
       get objectContributors() { return registry.objectContributors; },
       get objectKeysByShortName() { return registry.objectKeysByShortName; },
+      noteObjectEntry: (...a) => registry.noteObjectEntry(...a),
       packagedRules: (...a) => registry.packagedRules(...a),
       registerObject: (...a) => registry.registerObject(...a),
       resolveObject: (...a) => registry.resolveObject(...a),

@@ -9,14 +9,16 @@
  * 1. Add to favorites / Remove from favorites, always, first.
  * 2. Open in new tab and Copy link, for an entry that goes somewhere (an
  *    `action` entry runs something and has no address to open or copy).
- * 3. Design, for an entry whose target has a designer: it opens what the app
- *    bar's Edit app opens for that item, the item's Studio surface
- *    ({@link sidebarItemDesignPath}, objectui#12520). Shown on the rule the app
- *    bar's Edit app follows, `useStudioDesignGate` (objectui#12615): to a
- *    principal who may author metadata, for a package Studio lists as
- *    writable. A read-only package and the console's own system apps get no
- *    Design entry. The server refuses the write either way; this is the
- *    presentational half.
+ * 3. Object settings, for an `object` entry (objectstack#36487): it opens the
+ *    object in Studio, where its fields are ({@link sidebarItemDesignPath}),
+ *    the entry the list page's ⋮ leads with ({@link ObjectSettingsMenuItem}).
+ *    Shown on the rule the app bar's Studio entry follows,
+ *    `useStudioEntryGate` (objectui#12615, #27356 row 12): to a principal who
+ *    may author metadata, for a package Studio lists, writable (built here) or
+ *    read-only (installed). The console's own system apps get none. A
+ *    dashboard, page or report entry gets no Studio entry here any more: each
+ *    is edited on its own page. The server refuses a write either way; this
+ *    is the presentational half.
  *
  * The trigger is hover-revealed, as the pin icon it replaces was
  * (objectui#1055): nothing is permanently visible. A right-click anywhere on the
@@ -38,101 +40,122 @@ import {
   DropdownMenuTrigger,
   SidebarMenuAction,
 } from '@object-ui/components';
-import { ExternalLink, Link2, MoreHorizontal, PencilRuler, Star, StarOff } from 'lucide-react';
+import { ExternalLink, Link2, MoreHorizontal, Settings2, Star, StarOff } from 'lucide-react';
 import { toast } from 'sonner';
 import type { NavigationItem } from '@object-ui/types';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { useStudioDesignGate } from '../hooks/useStudioDesignGate.js';
+import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
 import { useFavorites } from '../hooks/useFavorites.js';
 import { useNavPins } from '../hooks/useNavPins.js';
 import { useNavMemberGates, navEntriesShownToMember } from '../hooks/useNavMemberGates.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment } from '../utils/index.js';
-import { appStudioRoutePath } from '../utils/appRoute.js';
+import { appStudioObjectPath } from '../utils/appRoute.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 
 /**
- * The route an entry of a designable type opens, in the shape the app bar reads
- * a route in: `type` is the first segment after `/apps/<app>/`, `name` the
- * second. An object's list is `/apps/<app>/<object>`, so its first segment IS
- * the object's name; a dashboard is `/apps/<app>/dashboard/<name>` and a page
- * `/apps/<app>/page/<name>`. Any other type, and an entry naming no target, has
- * no designer here: `null`.
- */
-function designableRoute(
-  type: string,
-  name: string | undefined,
-): { type: string; name?: string } | null {
-  if (!name) return null;
-  if (type === 'object') return { type: name };
-  if (type === 'dashboard' || type === 'page') return { type, name };
-  return null;
-}
-
-/**
- * Where Design takes an item of `app`: the path the app bar's Edit app opens on
- * the item's own route, through the one derivation both controls share,
- * `appStudioRoutePath` (objectui#12520). An `object` opens Studio's Data
- * surface (`surface=object:NAME`), a `dashboard` or a `page` its Interfaces
- * surface (`surface=dashboard:NAME`, `surface=page:NAME`). `null` when the app
- * has no owning package Studio can open, so the entry hides as the app bar's
- * pencil does; there is no other destination to fall back to.
+ * Where Object settings takes an object of `app` (objectstack#36487): the
+ * object in Studio's Data surface (`surface=object:NAME`), through the
+ * derivation the app bar's Studio entry reads on the object's list,
+ * `appStudioObjectPath` (objectui#12520). `null` when the app has no owning
+ * package Studio can open, or names no object, so the entry hides as the app
+ * bar's does; there is no other destination to fall back to.
  *
- * The gate is not read here: `SidebarItemMenu` reads it where the entry is
- * drawn (`useStudioDesignGate`, the app bar's), so this answers for a principal
- * and a package that pass it.
+ * The gate is not read here: the menu that draws the entry reads it
+ * ({@link useObjectSettingsGate}), so this answers for a principal and a
+ * package that pass it.
  */
-function studioDesignPath(
-  app: NavApp | null | undefined,
-  type: string,
-  name: string | undefined,
-): string | null {
-  const route = designableRoute(type, name);
-  if (!route) return null;
-  return appStudioRoutePath(app, true, route);
+function objectSettingsPath(app: NavApp | null | undefined, objectName: string | undefined): string | null {
+  return appStudioObjectPath(app, true, objectName);
 }
 
 /**
- * The designer of what a navigation entry opens, in the app whose navigation
- * draws it ({@link studioDesignPath}), or `null` when the entry's type has no
- * designer: only `object`, `dashboard` and `page` entries have one. Every other
- * type (`url`, `component`, `separator`, `group`, `action`, and the types
- * objectui#12427 left undecided) has none.
+ * The Object settings path of a navigation entry, in the app whose navigation
+ * draws it ({@link objectSettingsPath}), or `null`: only an `object` entry has
+ * one (objectstack#36487). A `dashboard`, `page` or `report` entry has none —
+ * each is edited on its own page — and neither has any other type (`url`,
+ * `component`, `separator`, `group`, `action`).
  */
 export function sidebarItemDesignPath(
   item: NavigationItem,
   app: NavApp | null | undefined,
 ): string | null {
-  const name =
-    item.type === 'object'
-      ? item.objectName
-      : item.type === 'dashboard'
-        ? item.dashboardName
-        : item.type === 'page'
-          ? item.pageName
-          : undefined;
-  return studioDesignPath(app, item.type, name);
+  return item.type === 'object' ? objectSettingsPath(app, item.objectName) : null;
 }
 
 /**
- * The designer of a favorite that is not a navigation entry, read from its id
- * (`object:NAME`, `dashboard:NAME`, `page:NAME`), in the app the favorite opens:
- * the one its `href` names (`/apps/<app>/...`), which need not be the app the
- * sidebar is drawn in. Any other id (a record, a report, an app) has none. The
- * id, not the stored `type`, decides: an app favorite is stored with
- * `type: 'object'` and an `app:` id, and has no object to design. A favorite
- * whose `href` names no app in `apps` has none either.
+ * The Object settings path of a favorite that is not a navigation entry, read
+ * from its id (`object:NAME`), in the app the favorite opens: the one its
+ * `href` names (`/apps/<app>/...`), which need not be the app the sidebar is
+ * drawn in. Any other id (a record, a dashboard, a page, a report, an app) has
+ * none (objectstack#36487). The id, not the stored `type`, decides: an app
+ * favorite is stored with `type: 'object'` and an `app:` id, and has no object
+ * to open. A favorite whose `href` names no app in `apps` has none either.
  */
 export function favoriteDesignPath(
   favorite: { id: string; href: string },
   apps: readonly NavApp[] | null | undefined,
 ): string | null {
-  const match = /^(object|dashboard|page):(.+)$/.exec(favorite.id);
+  const match = /^object:(.+)$/.exec(favorite.id);
   if (!match) return null;
   const segment = /^\/apps\/([^/?#]+)/.exec(favorite.href)?.[1];
   const app = matchAppBySegment(apps ?? [], segment);
   if (!app) return null;
-  return studioDesignPath(app, match[1], match[2]);
+  return objectSettingsPath(app, match[1]);
+}
+
+/**
+ * objectstack#36487 — `path` when this principal may open the object it names
+ * in Studio, else `null`: the app bar's own gate (`useStudioEntryGate`,
+ * objectui#12615), in either posture. A workspace admin who may author
+ * metadata gets it for a package Studio lists writable (an app built here)
+ * and for one it lists read-only (an installed app), which Studio opens to
+ * look at; a member, and the console's own system apps, get none.
+ * ⛔ Never a second admin check: the gate is read here, once, for every menu
+ * that draws the entry.
+ */
+export function useObjectSettingsGate(path: string | null | undefined): string | null {
+  return useStudioEntryGate(path)?.path ?? null;
+}
+
+/**
+ * The Object settings path of the list of `objectName` in the app the route
+ * names (`appSegment`), before the gate ({@link useObjectSettingsGate}): the
+ * path the list page's ⋮ leads with, the one the sidebar's object entry opens.
+ */
+export function useObjectSettingsPath({
+  appSegment,
+  objectName,
+}: {
+  appSegment: string | undefined;
+  objectName: string | undefined;
+}): string | null {
+  const { apps } = useMetadata();
+  if (!appSegment || !objectName) return null;
+  const app = matchAppBySegment(
+    ((apps ?? []) as NavApp[]).filter((a) => a.active !== false),
+    appSegment,
+  );
+  return objectSettingsPath(app, objectName);
+}
+
+/**
+ * Object settings (objectstack#36487): the entry that opens an object in
+ * Studio, where its fields are. The list page's ⋮ leads with it and the
+ * sidebar's object entry carries it, so the two places say the same thing in
+ * the same words and open the same place. Hand it a path the gate passed
+ * ({@link useObjectSettingsGate}). Leaving asks first when the page holds
+ * unsaved edits (`confirmUnsavedLeave`, objectui#13231).
+ */
+export function ObjectSettingsMenuItem({ path, testId }: { path: string; testId?: string }) {
+  const { t } = useObjectTranslation();
+  const navigate = useNavigate();
+  return (
+    <DropdownMenuItem data-testid={testId} onSelect={() => confirmUnsavedLeave(() => navigate(path))}>
+      <Settings2 className="h-4 w-4" />
+      <span>{t('console.nav.objectSettings', { defaultValue: 'Object settings' })}</span>
+    </DropdownMenuItem>
+  );
 }
 
 /**
@@ -262,11 +285,12 @@ export interface SidebarItemMenuProps {
   /** Adds the entry to the Favorites section, or removes it. */
   onToggleFavorite: () => void;
   /**
-   * The router path of the entry's designer ({@link sidebarItemDesignPath}).
-   * The Design entry shows only when this is set AND the app bar's gate passes
-   * it (`useStudioDesignGate`: the viewer may author metadata, and the package
-   * the path opens is writable); the gate is read here, so no host can forget
-   * it.
+   * The router path the entry's Object settings opens
+   * ({@link sidebarItemDesignPath}, {@link favoriteDesignPath}). The entry
+   * shows only when this is set AND the app bar's gate passes it
+   * ({@link useObjectSettingsGate}: the viewer may author metadata, and Studio
+   * lists the package the path opens); the gate is read here, so no host can
+   * forget it.
    */
   designPath?: string | null;
 }
@@ -291,9 +315,8 @@ export function SidebarItemMenu({
   designPath,
 }: SidebarItemMenuProps) {
   const { t } = useObjectTranslation();
-  const navigate = useNavigate();
   // objectui#12615 — the app bar's own gate, on the package this path opens.
-  const gatedDesignPath = useStudioDesignGate(designPath);
+  const objectSettings = useObjectSettingsGate(designPath);
   // A router path is opened and copied as the href the row's own `Link`
   // renders for it, which carries the basename the host mounted the console
   // under (`/_console`): a new tab and a copied link resolve against the
@@ -360,15 +383,7 @@ export function SidebarItemMenu({
             <span>{t('console.nav.copyLink', { defaultValue: 'Copy link' })}</span>
           </DropdownMenuItem>
         )}
-        {gatedDesignPath && (
-          <DropdownMenuItem
-            data-testid="sidebar-item-menu-design"
-            onSelect={() => confirmUnsavedLeave(() => navigate(gatedDesignPath))}
-          >
-            <PencilRuler className="h-4 w-4" />
-            <span>{t('console.nav.design', { defaultValue: 'Design' })}</span>
-          </DropdownMenuItem>
-        )}
+        {objectSettings && <ObjectSettingsMenuItem path={objectSettings} testId="sidebar-item-menu-object-settings" />}
       </DropdownMenuContent>
     </DropdownMenu>
   );

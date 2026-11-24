@@ -62,9 +62,18 @@
  * action reached through `ctx.api.object(x).execute(y)` (`'action'`). A hook is
  * app-authored when it is bound through the hook binder (a metadata binding,
  * the line `skipAutomations` draws); a hook registered in code (audit,
- * security, any plugin's) is platform code. Platform code's `sudo()` and a
- * platform writer's bare system context carry no mark and pass as before. Under a hook's `runAs: 'user'` the context loses `isSystem`, and the
- * D12 gate judges the user it acts for, as for a `runAs: 'user'` run.
+ * security, any plugin's) is platform code. A platform writer's bare system
+ * context carries no mark and passes as before, and platform code's `sudo()`
+ * adds none. But `sudo()` spreads the context it is taken on, so a platform
+ * hook fired by a marked write (or by a flow run's) and elevating with its
+ * `ctx.api.sudo()` keeps that write's provenance, and its writes are judged as
+ * the automation's: the write it records was the automation's. The one
+ * exception is the platform's own record of the write — the audit writer's
+ * `sys_audit_log` row and its `sys_activity` mirror — written through the
+ * platform's own system api (`platformSystemApi`, objectql), which carries
+ * neither the mark nor the run. Under a hook's `runAs: 'user'` the context
+ * loses `isSystem`, and the D12 gate judges the user it acts for, as for a
+ * `runAs: 'user'` run.
  *
  * A context carrying both a run and a mark (a `runAs: 'system'` hook fired by a
  * system flow's write) is answered as the flow, exactly as before the family
@@ -100,17 +109,17 @@ export const FLOW_SYSTEM_IDENTITY_WRITE_OBJECTS: ReadonlySet<string> = new Set([
 const ASSIGNMENT_OBJECTS: ReadonlySet<string> = new Set(['sys_user_position', 'sys_user_permission_set']);
 
 /** Which elevation wrote: a flow run, or an app-automation mark. */
-type ElevationSource = 'flow' | AppAutomationElevation;
+export type ElevationSource = 'flow' | AppAutomationElevation;
 
 /** How each source is named in the refusal. */
-const SUBJECT: Readonly<Record<ElevationSource, string>> = {
+export const SUBJECT: Readonly<Record<ElevationSource, string>> = {
   flow: "a flow that runs as system (runAs: 'system')",
   hook: "a hook that runs as system (runAs: 'system', a system context it inherits, or ctx.api.sudo())",
   action: 'an action body (an action body runs as system)',
 };
 
 /** Whose elevation the refusal says does not lift the door. */
-const ELEVATION: Readonly<Record<ElevationSource, string>> = {
+export const ELEVATION: Readonly<Record<ElevationSource, string>> = {
   flow: "a flow's system elevation",
   hook: "a hook's system elevation",
   action: "an action body's system elevation",
@@ -136,9 +145,11 @@ const MEMBERSHIP_PRESCRIPTION =
 /**
  * The elevation a system context's write comes from — a flow run, a hook's
  * `runAs: 'system'`, an action body — or `undefined` for every other context
- * (a platform writer's, a user's).
+ * (a platform writer's, a user's). The one predicate every refusal of
+ * app-authored automation's elevation reads, the organization wall's
+ * (`app-automation-organization-wall.ts`) included.
  */
-function elevationSource(context: { isSystem?: unknown; flowRunId?: unknown } | null | undefined): ElevationSource | undefined {
+export function elevationSource(context: { isSystem?: unknown; flowRunId?: unknown } | null | undefined): ElevationSource | undefined {
   if (!context?.isSystem) return undefined;
   if (context.flowRunId) return 'flow';
   return appAutomationElevationOf(context);
@@ -209,7 +220,13 @@ export function assertFlowSystemIdentityWriteAllowed(opCtx: {
  *
  * The platform's own writers — the retention sweeper, the migrations and
  * backfills, the audit seal, every service writing under a system context of
- * its own — carry neither a run nor the mark, and pass as before.
+ * its own — carry neither a run nor the mark, and pass as before. So does the
+ * audit writer's ledger and activity row for an automation's write: it is
+ * written through the platform's own system api (`platformSystemApi`,
+ * objectql), not the `sudo()` of the write's hook api, which would keep the
+ * automation's provenance. The deprecation of an insert below therefore
+ * never names the platform's own rows; an automation's own insert into the
+ * same objects, through its `ctx.api` or `ctx.api.sudo()`, it still names.
  *
  * The answer is the standard catalog's `PERMISSION_DENIED` (403), the code
  * and status the identity refusal answers with; no code is minted.

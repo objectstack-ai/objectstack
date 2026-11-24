@@ -29,6 +29,10 @@ import {
     // `enforceApiAccess` asks beside the exposure decision, shared with the
     // runtime dispatcher's per-object gate.
     apiKeyManagementCredentialRefusal,
+    // The ONE environment-membership judgment, asked by the runtime dispatcher
+    // too: a signed-in non-member of the environment the host resolved is
+    // refused at every door of that host alike.
+    judgeEnvironmentMembership, type EnvironmentMembershipRefusal,
     // `isAudienceBindingSuggestionStatus` and `unknownAudienceBindingSuggestionStatusMessage`,
     // the suggested-binding `?status=` vocabulary (#7678), moved with `registerSecurityEndpoints`'
     // body to `security-routes.ts` (#23050 slice 6).
@@ -340,6 +344,7 @@ import {
 } from './security-routes.js';
 // [#30205] A user's assigned work: the per-object counts and the bounded hand-over.
 import { registerUserWorkEndpoints, type UserWorkRouteHost } from './user-work-routes.js';
+import { registerChangeOwnerEndpoints, type ChangeOwnerRouteHost } from './change-owner-routes.js';
 // [#30237] The recycle bin's doors under `{data}/:object/recycle-bin`.
 import { registerRecycleBinEndpoints, type RecycleBinRouteHost } from './recycle-bin-routes.js';
 // [#23050 slice 7] The discovery and OpenAPI routes' bodies moved to one module — see its header.
@@ -392,6 +397,8 @@ import {
     registerMetaRecordCurrencyBackfillRoute,
     type MetaRecordCurrencyBackfillRouteHost,
 } from './meta-record-currency-backfill-route.js';
+// [ADR-0158 U7 R1, Open item 12] The unit code backfill door, its twin — see its header.
+import { registerMetaUnitCodeBackfillRoute, type MetaUnitCodeBackfillRouteHost } from './meta-unit-code-backfill-route.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -2129,6 +2136,8 @@ export class RestServer {
      * that name.
      */
     private kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>;
+    /** Whether {@link computeExecCtx} asks the environment-membership judgment. */
+    private readonly environmentMembershipEnforced: boolean;
     /**
      * One-shot latch for the "no matcher wired" degradation notice below, so a
      * host that never wired {@link metadataServiceProvider} says so once per
@@ -2190,6 +2199,17 @@ export class RestServer {
          * resolved through.
          */
         kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>,
+        /**
+         * Appended LAST for the #15256 reason above: the host's
+         * environment-membership switch, resolved by the composition root
+         * (`rest-api-plugin`) through `resolveEnvironmentMembershipEnforcement`
+         * — the reading the runtime dispatcher's plugin makes of the same
+         * `api.enforceProjectMembership` / environment-scoping pair. The
+         * plugin is the one composition, and it always hands in that resolved
+         * value, so every data door of the host judges environment membership
+         * by the host's own switch.
+         */
+        environmentMembership?: { enforced: boolean },
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -2213,6 +2233,7 @@ export class RestServer {
         this.tenancyServiceProvider = tenancyServiceProvider;
         this.auditServiceProvider = auditServiceProvider;
         this.kernelServiceProvider = kernelServiceProvider;
+        this.environmentMembershipEnforced = environmentMembership?.enforced === true;
     }
 
     /**
@@ -2483,6 +2504,16 @@ export class RestServer {
     private readonly apiKeyLifecycleRefusals = new WeakMap<object, ApiKeyLifecycleRefusalError>();
 
     /**
+     * The environment-membership refusal {@link computeExecCtx} reached for a
+     * request, kept beside it for {@link enforceAuth} — the
+     * {@link apiKeyLifecycleRefusals} shape: the caller resolves no context, so
+     * every door keeps its fail-closed answer, and the door behind
+     * `enforceAuth` answers the judgment's own status and code. Weak, so it
+     * lives no longer than the request object.
+     */
+    private readonly environmentMembershipRefusals = new WeakMap<object, EnvironmentMembershipRefusal>();
+
+    /**
      * Reject anonymous requests with HTTP 401 — unconditionally (#3963: the
      * `api.requireAuth` opt-out is retired). Returns `true` if the response was
      * sent and the caller should stop
@@ -2538,6 +2569,22 @@ export class RestServer {
             const lifecycle = req && typeof req === 'object' ? this.apiKeyLifecycleRefusals.get(req) : undefined;
             if (lifecycle) {
                 res.status(lifecycle.status).json({ error: { code: lifecycle.code, message: lifecycle.message } });
+                return true;
+            }
+            // A signed-in caller who is not a member of the environment the
+            // request resolved to: the judgment's refusal, in the body the
+            // runtime dispatcher answers the same caller with.
+            const membership = req && typeof req === 'object' ? this.environmentMembershipRefusals.get(req) : undefined;
+            if (membership) {
+                res.status(membership.status).json({
+                    success: false,
+                    error: {
+                        code: membership.code,
+                        message: membership.message,
+                        httpStatus: membership.status,
+                        details: { environmentId: membership.environmentId, userId: membership.userId },
+                    },
+                });
                 return true;
             }
             res.status(ANONYMOUS_DENY_STATUS).json(ANONYMOUS_DENY_BODY);
@@ -3558,6 +3605,43 @@ export class RestServer {
             });
             if (!base) return undefined;
 
+            // The environment-membership judgment — the one the runtime
+            // dispatcher asks for the same caller on the same host
+            // (`judgeEnvironmentMembership`, `@objectstack/core`), on the
+            // environment's own engine, on every request. Asked only where the
+            // credential is anchored in the environment the request resolved
+            // to: a credential anchored elsewhere is refused by `enforceAuth`
+            // with the anonymous-deny response, which a membership answer
+            // naming the environment must not pre-empt. `undefined` and
+            // `'platform'` are not environments on this server (see
+            // `credentialAnchoredElsewhere`). A session the ADR-0069 gate
+            // holds is not judged here, for two reasons: `enforceAuth` reads
+            // the gate off the context, so a refusal here (no context) would
+            // replace the gate's own code — the remediation a gated user
+            // acts on — with the membership one; and the dispatcher orders
+            // its two gates the same way, so a gated caller gets the gate's
+            // answer at both doors. The gate itself refuses that session on
+            // every data door. A read that cannot answer throws the loud
+            // outage, re-raised by the net below.
+            if (
+                this.environmentMembershipEnforced
+                && environmentId !== undefined && environmentId !== 'platform'
+                && authEnvironmentId === environmentId
+                && typeof base.userId === 'string' && base.userId !== ''
+                && !base.authGate
+            ) {
+                const refusal = await judgeEnvironmentMembership({
+                    environmentId,
+                    userId: base.userId,
+                    activeOrganizationId: base.tenantId,
+                    engine: ql,
+                });
+                if (refusal) {
+                    if (req && typeof req === 'object') this.environmentMembershipRefusals.set(req, refusal);
+                    return undefined;
+                }
+            }
+
             const execCtx = {
                 ...base,
                 // Internal: resolved kernel so the nav-serving path can probe
@@ -4451,8 +4535,34 @@ export class RestServer {
             RestServer.sendMetaReadRefusal(res, { reason: 'absent' });
             return;
         }
-        const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
-        const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
+        // [#36601] …and the published layer's version (`overlayVersion`), the
+        // `If-Match` a per-item publish at this address takes: a keyed token,
+        // served as the plain uncached read serves `version`.
+        const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller), withVersion: true };
+        let layered: unknown;
+        try {
+            layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
+        } catch (readError) {
+            // [ruling 6917064203 on #34398] The read gate answers before the
+            // `not-held-by-qualifier` refusal names any holder — the plain
+            // read's own question; a holder's item is read at its own address.
+            const gated = await metaReadGate.gateHolderNamingRefusal(
+                this.metaItemReadGateSources(environmentId, req, p, true),
+                RestServer.metaTypeSingular(req.params.type), req.params.name,
+                metaReadGate.STORED_VERSION_DOOR_POLICY, readError,
+                async (holder) => (await p.getMetaItem({
+                    type: req.params.type, name: req.params.name,
+                    ...(holder.kind === 'package' ? { packageId: holder.packageId } : {}),
+                    ...metaReadGate.metaMemberSelector(req.query),
+                    ...(environmentId ? { environmentId } : {}),
+                } as any) as { item?: unknown } | undefined)?.item,
+            );
+            if (gated) {
+                RestServer.sendMetaReadRefusal(res, gated);
+                return;
+            }
+            throw readError;
+        }
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
         // the shared chain. The stored-version doors honour the author
         // exemption, so the caller carries this transport's save-door
@@ -5041,6 +5151,10 @@ export class RestServer {
      * controls whether unscoped legacy routes remain available:
      *   - `required` → only scoped routes registered.
      *   - `optional` / `auto` → both scoped and unscoped routes registered.
+     *
+     * One route is never registered on the scoped base: the restriction
+     * profile, `GET {basePath}/discovery/restriction-profile`, is mounted on
+     * the unscoped base only, so a `required` server does not serve it.
      */
     registerRoutes(): void {
         const basePath = this.getApiBasePath();
@@ -5103,6 +5217,11 @@ export class RestServer {
                 this.registerRecycleBinEndpoints(bp);
             }
             this.registerDataActionEndpoints(bp);
+            // [#35402] The Change Owner doors: `POST {data}/:object/change-owner` is a
+            // two-segment literal beside the greedy CRUD matchers, so it registers
+            // before them, as the data actions do; `:id/change-owner` is a deeper
+            // literal under `:id`, like `:id/clone`.
+            this.registerChangeOwnerEndpoints(bp);
             // [#27627] `POST /data/:object/:id/page` — a deeper literal under
             // `:id`, like `:id/clone`, so it shadows no CRUD route either way.
             this.registerRecordPageEndpoints(bp);
@@ -5737,6 +5856,15 @@ export class RestServer {
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
         };
         registerMetaRecordCurrencyBackfillRoute.call(recordCurrencyBackfillHost, scope);
+        // [ADR-0158 U7 R1] …and its twin for unit codes (`POST {metaPath}/_migrate-unit-codes`),
+        // in `meta-unit-code-backfill-route.ts`, built the same way.
+        const unitCodeBackfillHost: MetaUnitCodeBackfillRouteHost = {
+            routeManager: this.routeManager,
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+        };
+        registerMetaUnitCodeBackfillRoute.call(unitCodeBackfillHost, scope);
 
         // [#23050 slice 13e] The published read (`GET {metaPath}/:type/:name/published`)
         // moved to `meta-item-history-routes.ts`, beside the history family, and is registered
@@ -6432,6 +6560,40 @@ export class RestServer {
             enforceAuth: (...a) => this.enforceAuth(...a),
         };
         registerUserWorkEndpoints.call(host, basePath);
+    }
+
+    /**
+     * [#35402] Register the Change Owner doors:
+     *
+     *   POST {basePath}/data/:object/:id/change-owner   body: { ownerId | queue, notify? }
+     *   POST {basePath}/data/:object/change-owner       body: { ids, ownerId | queue, notify? }
+     *
+     * The first hands one record to a person or an ownership queue, the second
+     * up to 500 records with a per-row report; both as the caller, each row by
+     * an ordinary by-id update, on an object that offers the action
+     * (`userActions.transfer`). `@objectstack/core`'s `change-record-owner.ts`
+     * holds the rules.
+     */
+    private registerChangeOwnerEndpoints(basePath: string): void {
+        // [#35402] The body lives in `change-owner-routes.ts`. This literal hands it
+        // every member it reads (see `ChangeOwnerRouteHost`); the engine provider
+        // FIELD goes as a getter, read when a handler reads it.
+        const readObjectQLProvider = () => this.objectQLProvider;
+        const host: ChangeOwnerRouteHost = {
+            config: this.config,
+            routeManager: this.routeManager,
+            get objectQLProvider() { return readObjectQLProvider(); },
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+            resolveMessagingService: async (environmentId, req) => {
+                if (!this.kernelServiceProvider) return undefined;
+                return this.kernelServiceProvider('messaging', await this.resolveRequestEnvironmentId(environmentId, req));
+            },
+        };
+        registerChangeOwnerEndpoints.call(host, basePath);
     }
 
     /**

@@ -188,3 +188,37 @@ describe('the request page moves on after a decision (objectstack#34586)', () =>
     expect(where()).toBe(pageOf('r1'));
   });
 });
+
+describe('the next request opens in the app the queue was opened from (objectstack#35412)', () => {
+  // The 「待我审批」 inbox an app's navigation mounts (`approvals:inbox`), under a
+  // business app whose segment is its package id.
+  const SALES = 'app.objectstack.hotcrm';
+  const SALES_INBOX = { pathname: `/apps/${SALES}/component/approvals/inbox`, label: 'Approvals Inbox' };
+  const salesPage = (id: string) => `/apps/${SALES}/sys_approval_request/record/${id}`;
+
+  function SalesHarness({ rows }: { rows: Record<string, Row> }) {
+    return (
+      <MemoryRouter
+        initialEntries={[SALES_INBOX.pathname, { pathname: salesPage('r1'), state: approvalQueueState(SALES_INBOX, QUEUE) }]}
+        initialIndex={1}
+      >
+        <Routes>
+          <Route path="/apps/:appName/component/approvals/inbox" element={<output data-testid="where">{SALES_INBOX.pathname}</output>} />
+          <Route path="/apps/:appName/:objectName/record/:recordId" element={<Page rows={rows} />} />
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+
+  it('a decision opens the next request under the same app, and the last one returns to that app\'s inbox', async () => {
+    const rows = { r1: pending('r1'), r2: pending('r2'), r3: pending('r3') };
+    const decided = (id: string): Row => ({ id, status: 'approved', viewer: { can_act: false } });
+    const { rerender } = render(<SalesHarness rows={rows} />);
+    rerender(<SalesHarness rows={{ ...rows, r1: decided('r1') }} />);
+    await waitFor(() => expect(where()).toBe(salesPage('r2')));
+    rerender(<SalesHarness rows={{ ...rows, r1: decided('r1'), r2: decided('r2') }} />);
+    await waitFor(() => expect(where()).toBe(salesPage('r3')));
+    rerender(<SalesHarness rows={{ r1: decided('r1'), r2: decided('r2'), r3: decided('r3') }} />);
+    await waitFor(() => expect(where()).toBe(SALES_INBOX.pathname));
+  });
+});

@@ -131,7 +131,7 @@ async function openPackageDoor(server: Server) {
     </MemoryRouter>,
   );
   await screen.findByText('a_account');
-  fireEvent.click(screen.getByRole('button', { name: /Row-Level Security/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Record Scope Rules/ }));
   fireEvent.click(await screen.findByRole('button', { name: /Add policy/ }));
 }
 

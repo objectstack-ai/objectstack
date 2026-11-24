@@ -8,7 +8,10 @@ import { openNativePicker } from './openNativePicker.js';
  * TimeField - Time picker input widget
  * Uses native time input for hour and minute selection
  */
-export function TimeField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<string>) {
+export function TimeField({ value, onChange, field, readonly, error, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<string>) {
+  // The grid's cell editor shows the browser's time picker as soon as the
+  // control takes focus, once per editor (objectstack#35688).
+  const pickerShownRef = React.useRef(false);
   if (readonly) {
     return <span className="text-sm">{value || <EmptyValue />}</span>;
   }
@@ -47,6 +50,13 @@ export function TimeField({ value, onChange, field, readonly, error, ...props }:
       onClick={(e) => {
         openNativePicker(e.currentTarget);
         domProps.onClick?.(e);
+      }}
+      onFocus={(e) => {
+        if (inCell && !pickerShownRef.current) {
+          pickerShownRef.current = true;
+          openNativePicker(e.currentTarget);
+        }
+        domProps.onFocus?.(e);
       }}
       disabled={readonly || domProps.disabled}
       aria-invalid={!!error}

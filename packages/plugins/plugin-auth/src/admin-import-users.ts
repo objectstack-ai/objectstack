@@ -143,6 +143,33 @@
  *    ⛔ no `rows[].code`, for {@link noteManagerFailure}'s reason. The import
  *    only ADDS assignments: ⛔ it never removes a position a user holds.
  *  - **The pass does not run on `dryRun`**, for the manager pass's reason.
+ *
+ * ## Current organization — each row joins it, as create-user's user does
+ *
+ * Maintainer ruling on #34535 (option B): in multi-org mode every row's user
+ * joins the importing administrator's CURRENT organization under create-user's
+ * own rule (ADR-0093 D3 amendment), read through the one settlement and the one
+ * join both doors import (`settleCurrentOrganizationJoin`,
+ * `joinCurrentOrganization`) — ⛔ never a copy.
+ *
+ *  - **Settled before any row is written**, dry run included: an administrator
+ *    with no current organization is refused whole, `400
+ *    NO_ACTIVE_ORGANIZATION`, and a host that cannot run the join inside an
+ *    account's unit of work `501 NOT_IMPLEMENTED` — create-user's codes and
+ *    sentences, with nothing created.
+ *  - **One unit of work per row.** A created row's account and its membership
+ *    are written in one `runAtomically`, so a refused join (the organization's
+ *    member cap, say) rolls that row's account back: the row fails with the
+ *    vendor's code, carries no temporary password and is sent no invitation
+ *    (both are recorded only once the unit committed, and the invitations go
+ *    out after `runImport`). The other rows go on.
+ *  - **A matched existing user joins too** (upsert): its profile update and its
+ *    join are one unit of work, so a refused join fails the row and leaves the
+ *    profile as it was. A user already in the organization is not added twice.
+ *  - **Single-org mode is unchanged**: no join here, the reconciler binds the
+ *    default organization as before.
+ *  - **The join does not run on `dryRun`**: nothing is written, so the vendor's
+ *    refusals cannot be asked.
  */
 
 import type {
@@ -158,9 +185,14 @@ import {
   normalizePhoneNumber,
   isLikelyEmail,
   mapAuthApiError,
+  joinCurrentOrganization,
+  settleCurrentOrganizationJoin,
+  CreationRefused,
   type AdminActor,
   type AdminCreateGrantSeam,
+  type AdminUserEndpointDeps,
   type AuthContextLike,
+  type CurrentOrganizationJoin,
   type EndpointResult,
 } from './admin-user-endpoints.js';
 import { readNameList } from './name-list-cell.js';
@@ -272,6 +304,20 @@ export interface IdentityImportDeps {
    * the users are still created; a request that names none never reads it.
    */
   createGrant?: AdminCreateGrantSeam;
+  /**
+   * ADR-0093 D3 amendment — the tenancy service, read for its
+   * `isolationActive` (the predicate behind `features.multiOrgEnabled`): in
+   * multi-org mode each row's user joins the administrator's current
+   * organization (see "Current organization" in the header). Absent ⇒ not
+   * multi-org ⇒ no join, as for create-user.
+   */
+  getTenancy?: AdminUserEndpointDeps['getTenancy'];
+  /**
+   * The CALLING administrator's current (active) organization, read from their
+   * session, or `null` when they have none — create-user's reader. Absent ⇒ no
+   * join.
+   */
+  getCallerActiveOrganizationId?(): Promise<string | null>;
   /** `error` receives, once, a failure answered with the generic message (`mapAuthApiError`). */
   logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
@@ -774,6 +820,42 @@ export async function runAdminImportUsers(
     return mapAuthApiError(error, 'import-users failed', deps.logger);
   }
 
+  // ADR-0093 D3 amendment (ruling on #34535, option B) — the multi-org join of
+  // the administrator's current organization, settled before any row is
+  // written, by create-user's own settlement: no current organization ⇒ the
+  // whole import is refused, as one creation is.
+  const settled = await settleCurrentOrganizationJoin({ ...deps, getAuthApi: async () => authApi });
+  if (settled && 'status' in settled) return settled;
+  const join: CurrentOrganizationJoin | undefined = settled;
+  const joinDeps = { getDataEngine: () => engine, ...(deps.logger ? { logger: deps.logger } : {}) };
+  /**
+   * Run one row's write and, in multi-org mode, its join as ONE unit of work.
+   * A refused join throws out of the unit, which rolls the row's write back,
+   * and is rethrown as the row's error: the vendor's code, the sentence that
+   * says what did not happen.
+   */
+  const inRowUnit = async <T,>(
+    account: 'created' | 'existing',
+    write: () => Promise<T>,
+    userIdOf: (written: T) => string,
+  ): Promise<T> => {
+    if (!join) return write();
+    try {
+      return await join.seam.runAtomically(async () => {
+        const written = await write();
+        await joinCurrentOrganization(joinDeps, join.addMember, userIdOf(written), join.organizationId, account);
+        return written;
+      });
+    } catch (error) {
+      if (!(error instanceof CreationRefused)) throw error;
+      const refusal = error.result.body.error;
+      throw Object.assign(new Error(refusal?.message ?? error.message), {
+        code: refusal?.code ?? 'INTERNAL_ERROR',
+        status: error.result.status,
+      });
+    }
+  };
+
   // [#33113] What the position assignments need, read once per request. A
   // host that cannot judge a grant, or a caller whose own access does not
   // resolve, does NOT refuse the import: the users land exactly as they did
@@ -880,18 +962,25 @@ export async function runAdminImportUsers(
       // set-initial-password / the reset flow, which creates it on demand.
       const password = plan.kind === 'temporary' ? generateTemporaryPassword(temporaryLength) : undefined;
 
-      const created = await authApi.createUser({
-        body: {
-          email,
-          name,
-          ...(password ? { password } : {}),
-          ...(role ? { role } : {}),
-          ...(phone ? { data: { phoneNumber: phone } } : {}),
-        },
-      });
-      const id = created?.user?.id != null ? String(created.user.id) : undefined;
-      if (!id) throw Object.assign(new Error('better-auth returned no user id'), { code: 'CREATE_FAILED' });
+      // The account and, in multi-org mode, its membership: one unit of work,
+      // so a refused join leaves no account behind (see "Current organization").
+      const id = await inRowUnit('created', async () => {
+        const created = await authApi.createUser({
+          body: {
+            email,
+            name,
+            ...(password ? { password } : {}),
+            ...(role ? { role } : {}),
+            ...(phone ? { data: { phoneNumber: phone } } : {}),
+          },
+        });
+        const userId = created?.user?.id != null ? String(created.user.id) : undefined;
+        if (!userId) throw Object.assign(new Error('better-auth returned no user id'), { code: 'CREATE_FAILED' });
+        return userId;
+      }, (userId) => userId);
 
+      // Recorded only once the row's unit committed: a row whose join was
+      // refused carries no temporary password and is sent no invitation.
       if (plan.kind === 'temporary') {
         temporaryPasswords.set(id, password as string);
         try {
@@ -908,14 +997,21 @@ export async function runAdminImportUsers(
     },
 
     // Upsert updates touch PROFILE fields only — never email, never anything
-    // credential- or system-managed. An empty filtered patch is a no-op.
+    // credential- or system-managed. An empty filtered patch writes nothing.
+    // In multi-org mode the matched user joins the current organization in the
+    // same unit of work as its update (see "Current organization").
     async updateData(args) {
       const patch: Record<string, any> = {};
       for (const [k, v] of Object.entries(args?.data ?? {})) {
         if (UPDATE_ALLOWED_FIELDS.has(k) && v !== undefined && v !== null && v !== '') patch[k] = v;
       }
-      if (Object.keys(patch).length === 0) return { id: args.id };
-      await engine.update('sys_user', { id: args.id, ...patch }, { context: SYSTEM_CTX } as any);
+      const id = String(args.id);
+      await inRowUnit('existing', async () => {
+        if (Object.keys(patch).length > 0) {
+          await engine.update('sys_user', { id: args.id, ...patch }, { context: SYSTEM_CTX } as any);
+        }
+        return id;
+      }, (userId) => userId);
       return { id: args.id };
     },
   };
@@ -1260,6 +1356,8 @@ export async function runAdminImportUsers(
             manager: managerLinks,
             // [#33113] And the position assignments.
             positions: positionLinks,
+            // [#34535] The organization a multi-org run joined its rows to.
+            ...(join ? { organizationId: join.organizationId } : {}),
           }),
         }, { context: SYSTEM_CTX } as any);
       } catch (e) {

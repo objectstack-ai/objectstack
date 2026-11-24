@@ -193,6 +193,7 @@ const EXPECTED_CENSUS: readonly FilterRow[] = [
   { owner: 'ObjectMapSchema', type: "SpecObjectMapProps['filter']" },
   // objectui#9549 — declared in the shape this card settled.
   { owner: 'ObjectTreeSchema', type: "QueryParams['$filter']" },
+  { owner: 'ObjectTimesheetSchema', type: "QueryParams['$filter']" },
   { owner: 'ObjectGanttSchema', type: "SpecObjectGanttProps['filter']" },
   { owner: 'ObjectCalendarSchema', type: "SpecObjectCalendarProps['filter']" },
   { owner: 'ObjectKanbanSchema', type: "SpecObjectKanbanProps['filter']" },

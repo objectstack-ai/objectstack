@@ -32,7 +32,7 @@ import {
   SelectValue,
   useIsMobile,
 } from '@object-ui/components';
-import { CalendarIcon, RotateCcw } from 'lucide-react';
+import { CalendarIcon, Plus, RotateCcw } from 'lucide-react';
 import { useSafeTranslate, useObjectTranslation, useSafeFieldLabel, pickLocalized } from '@object-ui/i18n';
 import { useDataInvalidation } from '@object-ui/react';
 import { DatasetQueryCoalescerContext } from './datasetQueryBatch';
@@ -91,10 +91,22 @@ import {
  * unchanged.
  */
 function useFilterLabel(def: DashboardFilterDef): string {
+  return useDashboardFilterLabeler()(def);
+}
+
+/**
+ * The rule {@link useFilterLabel} applies, as a function of the filter, for a
+ * caller that labels several filters in one render (a card's not-applied
+ * mark names every filter that does not reach it, objectstack#36372). One
+ * rule: the bar and the mark name a filter alike.
+ */
+export function useDashboardFilterLabeler(): (def: DashboardFilterDef) => string {
   const { language } = useObjectTranslation();
   const { fieldLabel } = useSafeFieldLabel();
-  const authored = pickLocalized(def.label, language);
-  return def.object ? fieldLabel(def.object, def.field, authored) : authored;
+  return (def) => {
+    const authored = pickLocalized(def.label, language);
+    return def.object ? fieldLabel(def.object, def.field, authored) : authored;
+  };
 }
 
 /** Sentinel for the Select's clear item (Radix Select forbids empty values). */
@@ -116,6 +128,12 @@ export interface DashboardFilterBarProps {
   onReset?: () => void;
   dataSource?: any;
   className?: string;
+  /**
+   * objectstack#36372 — the in-page editor's "Add filter": drawn at the end
+   * of the bar, and the bar is drawn for it even when the dashboard declares
+   * no filter yet. Absent, the bar is what it was.
+   */
+  onAddFilter?: () => void;
 }
 
 /** Format an ISO date (or macro token) for the trigger label. */
@@ -583,9 +601,9 @@ function TextFilter({ def, value, onChange }: { def: DashboardFilterDef; value: 
   );
 }
 
-export function DashboardFilterBar({ defs, values, onChange, onReset, dataSource, className }: DashboardFilterBarProps) {
+export function DashboardFilterBar({ defs, values, onChange, onReset, dataSource, className, onAddFilter }: DashboardFilterBarProps) {
   const tt = useSafeTranslate();
-  if (defs.length === 0) return null;
+  if (defs.length === 0 && !onAddFilter) return null;
 
   // The variables provider initializes undefined defaults to '' / {} by
   // type — normalize those to "empty" so a pristine bar shows no Reset.
@@ -620,6 +638,18 @@ export function DashboardFilterBar({ defs, values, onChange, onReset, dataSource
         <Button variant="ghost" size="sm" onClick={onReset} className={cn('text-muted-foreground', PHONE_TARGET)}>
           <RotateCcw className="size-3.5" />
           {tt('dashboard.filters.reset', 'Reset')}
+        </Button>
+      )}
+      {onAddFilter && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onAddFilter}
+          className={cn('text-muted-foreground', PHONE_TARGET)}
+          data-testid="dashboard-filter-add"
+        >
+          <Plus className="size-3.5" />
+          {tt('dashboard.filters.addFilter', 'Add filter')}
         </Button>
       )}
     </div>

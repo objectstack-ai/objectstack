@@ -72,6 +72,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Deve alterar a senha",
         help: "Quando ativado, o usuário precisa alterar a senha antes de continuar. É ativado quando um administrador cria ou importa a conta, ou redefine a senha dela; gerenciado pelo sistema."
       },
+      dev_seed_credential: {
+        label: "Credencial de seed de desenvolvimento",
+        help: "Definido em uma conta criada pelo seed de desenvolvimento. Enquanto a senha ainda for a senha do seed, um servidor de produção recusa o login e toda nova sessão; os user set-password define uma nova senha e o limpa. Gerenciado pelo sistema; nunca retornado em leituras."
+      },
       mfa_required_at: {
         label: "MFA exigida desde",
         help: "Quando a MFA obrigatória passou a valer para este usuário (relógio do período de carência). Base de mfa_required; gerenciado pelo sistema."
@@ -155,7 +159,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite enviado para {{ result.email }}",
         outcomeMessages: {
           sent: "Convite enviado para {{ result.email }}",
-          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         },
         params: {
           role: {
@@ -172,7 +176,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "Banir usuário",
-        description: "Banir este usuário? Ele será desconectado, não poderá entrar e suas chaves de API serão recusadas até o desbanimento, assim como seus tokens de acesso OAuth e as renovações de token. As chaves voltam a funcionar após o desbanimento.",
+        description: "Banir este usuário? Ele será desconectado, não poderá entrar e suas chaves de API serão recusadas até o desbanimento, assim como seus tokens de acesso OAuth e as renovações de token. As chaves voltam a funcionar após o desbanimento. O banimento também suspende as contas de serviço de IA pelas quais ele é responsável, desativa os aplicativos OAuth que ele registrou e revoga as credenciais SCIM que ele emitiu; o desbanimento não restaura nada disso.",
         successMessage: "Usuário banido",
         params: {
           banReason: {
@@ -240,6 +244,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Concluído",
           fields: {
             email: "E-mail",
+            pendingAgain: "Já pendente",
             notApplied: "Já pendente, então não aplicado (defina no registro)",
             managerError: "Gestor",
             "host.reason": "Convite não enviado"
@@ -260,11 +265,29 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Concluído",
           fields: {
             "summary.added": "Adicionados",
-            "summary.alreadyPending": "Já pendentes, avisados novamente",
+            "summary.alreadyPending": "Já pendentes",
             "summary.failed": "Não adicionados",
             rows: "Resultado por linha"
+          },
+          columns: {
+            rows: {
+              row: "Linha",
+              email: "E-mail",
+              ok: "Sucesso",
+              alreadyPending: "Já pendente",
+              "host.notified": "Organização de hospedagem avisada",
+              "host.reason": "Por que não foi avisada",
+              "error.message": "Não adicionado porque",
+              notApplied: "Não aplicado (defina no registro)",
+              managerError: "Gestor"
+            }
           }
         }
+      },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
       },
       set_user_password: {
         label: "Definir senha",
@@ -304,6 +327,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             helpText: "O usuário a quem esta pessoa se reporta. O servidor recusa um gestor de fora da organização dela, uma autoatribuição e um vínculo que fecharia ou aprofundaria demais a cadeia hierárquica."
           }
         }
+      },
+      remove_user_manager: {
+        label: "Remover gestor",
+        confirmText: "Remover o gestor deste usuário? Ele não se reportará a ninguém até que um gestor seja definido novamente; o roteamento de aprovações e o escopo de registros own_and_reports acompanham a mudança.",
+        successMessage: "Gestor removido"
       },
       list_platform_admins: {
         label: "Administradores da plataforma",
@@ -468,6 +496,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "Motivo da revogação",
         help: "Por que a sessão foi revogada (idle_timeout, absolute_max, concurrent_cap, ip_not_allowed, user_revoked, admin, organization_membership_ended, admin_password_reset, password_reset, …)."
+      },
+      sso_provider_id: {
+        label: "Provedor de SSO",
+        help: "O provedor de SSO pelo qual esta sessão foi iniciada, se houver. Excluir esse provedor encerra a sessão. Gerenciado pelo sistema."
       },
       active_organization_id: {
         label: "Organização ativa"
@@ -691,7 +723,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite enviado para {{ result.email }}",
         outcomeMessages: {
           sent: "Convite enviado para {{ result.email }}",
-          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         },
         params: {
           role: {
@@ -797,7 +829,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite enviado para {{ result.email }}",
         outcomeMessages: {
           sent: "Convite enviado para {{ result.email }}",
-          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         },
         params: {
           role: {
@@ -949,7 +981,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite enviado para {{ result.email }}",
         outcomeMessages: {
           sent: "Convite enviado para {{ result.email }}",
-          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite criado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         },
         params: {
           role: {
@@ -976,7 +1008,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Convite reenviado",
         outcomeMessages: {
           sent: "Convite reenviado para {{ result.email }}",
-          link_only: "Convite renovado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Use Copiar link do convite no convite para compartilhá-lo."
+          link_only: "Convite renovado para {{ result.email }}. O e-mail não está configurado neste servidor, portanto nenhuma mensagem foi enviada. Aceitar exige um endereço de e-mail verificado: sem e-mail, só pode aceitar um convidado cujo login social ou SSO verifique o endereço. Para qualquer outra pessoa, um administrador da plataforma cria a conta."
         }
       },
       copy_invitation_link: {
@@ -4396,6 +4428,202 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         emptyState: {
           title: "Nenhuma taxa de câmbio ainda",
           message: "Adicione uma linha por moeda para cada data em que a taxa dela muda, por exemplo uma linha por moeda no início de cada mês."
+        }
+      }
+    }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "Calendário de trabalho",
+    pluralLabel: "Calendários de trabalho",
+    description: "Calendários de trabalho: o horário semanal, o fuso horário em que ele vale e até quando os feriados estão mantidos. Prazos contados em tempo útil os leem.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Código",
+        help: "Código de máquina pelo qual fórmulas, escalonamentos de aprovação e pacotes nomeiam este calendário, por exemplo cn_standard: letras minúsculas, dígitos e sublinhados."
+      },
+      name: {
+        label: "Nome"
+      },
+      timezone: {
+        label: "Fuso horário",
+        help: "Fuso horário IANA em que os períodos de trabalho valem, por exemplo Asia/Shanghai. O formulário de criação abre com o fuso horário da organização (Configurações → Localização), e uma criação que o omite recebe o mesmo fuso."
+      },
+      is_default: {
+        label: "Padrão",
+        help: "O calendário que um prazo usa quando não indica nenhum. Um por organização."
+      },
+      maintained_from: {
+        label: "Mantido desde",
+        help: "Primeira data a partir da qual feriados e dias úteis de compensação estão cadastrados. Um cálculo que precise de uma data anterior é recusado."
+      },
+      maintained_through: {
+        label: "Mantido até",
+        help: "Última data até a qual feriados e dias úteis de compensação estão cadastrados. Um cálculo que precise de uma data posterior é recusado: cadastre os feriados do próximo ano e depois mova esta data."
+      },
+      monday_periods: {
+        label: "Segunda-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      tuesday_periods: {
+        label: "Terça-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      wednesday_periods: {
+        label: "Quarta-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      thursday_periods: {
+        label: "Quinta-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      friday_periods: {
+        label: "Sexta-feira",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      saturday_periods: {
+        label: "Sábado",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      sunday_periods: {
+        label: "Domingo",
+        help: "Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "Todas",
+        emptyState: {
+          title: "Nenhum calendário de trabalho ainda",
+          message: "Adicione um calendário com seu horário semanal e marque um como padrão; depois cadastre seus feriados e dias úteis de compensação."
+        }
+      },
+      needs_maintenance: {
+        label: "Precisa de manutenção",
+        emptyState: {
+          title: "Todos os calendários estão mantidos com antecedência",
+          message: "Um calendário aparece aqui quando seus feriados acabam nos próximos 60 dias; prazos além dessa data são recusados."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "O código deve começar com uma letra minúscula e usar apenas letras minúsculas, dígitos e sublinhados, por exemplo cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "Exceção de calendário",
+    pluralLabel: "Exceções de calendário",
+    description: "Exceções datadas de um calendário de trabalho: feriados, dias úteis de compensação e paralisações. Um dia útil traz seus períodos de trabalho completos.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      calendar: {
+        label: "Calendário"
+      },
+      date: {
+        label: "Data"
+      },
+      kind: {
+        label: "Tipo",
+        help: "Folga: a data inteira é de folga. Dia útil: a data é trabalhada com os períodos abaixo, por exemplo um dia útil de compensação.",
+        options: {
+          off: "Folga",
+          on: "Dia útil"
+        }
+      },
+      periods: {
+        label: "Períodos",
+        help: "Para um dia útil, todas as horas dessa data; nunca são herdadas do dia da semana. Períodos de trabalho nesse dia no fuso horário do calendário, HH:mm-HH:mm separados por vírgulas, por exemplo 09:00-12:00, 13:00-18:00. Um período termina depois de começar, no mesmo dia; 24:00 é o término mais tardio. Deixe em branco para um dia de folga."
+      },
+      note: {
+        label: "Observação",
+        help: "O que é a data, por exemplo o Dia Nacional ou um dia útil de compensação do Festival da Primavera."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "Todas",
+        emptyState: {
+          title: "Nenhuma exceção de calendário ainda",
+          message: "Adicione uma linha por feriado ou dia útil de compensação, ou importe um ano deles de um arquivo."
         }
       }
     }

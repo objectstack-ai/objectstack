@@ -1,8 +1,9 @@
 /**
  * Object Data Page — the parameterized bare data surface (ADR-0055, #2251).
  *
- * Route: `/apps/:appName/:objectName/data` (± `filter[<field>]=<value>` and
- * `uf_<field>` search params).
+ * Route: `/apps/:appName/:objectName/data` (± `filter[<field>]=<value>`,
+ * `uf_<field>` and the list-state `uf__search` / `uf__sort` / `uf__group` /
+ * `uf__filter` search params).
  *
  * Where ObjectView anchors to a saved list view (default or `/view/:viewId`),
  * this surface is deliberately UNANCHORED — "the URL is the view":
@@ -15,6 +16,10 @@
  *   • no saved-view tab bar — switching to a saved view is an explicit
  *     navigation to `/view/:viewId` ("Save as view" is the exit);
  *   • nothing here writes back to any saved view;
+ *   • the list's own state — its search, sort, grouping and Filter panel —
+ *     lives in the address too (objectstack#36408), under the keys ObjectView
+ *     uses, so opening a record and closing it, or a reload, returns the list
+ *     as the reader left it (see `listSeedRef`);
  *   • the visualization switcher (grid/kanban/...) is ListView-internal, so
  *     switching presentation never touches the URL — filter state survives;
  *   • the common filter bar (ADR-0047 `userFilters` + `uf_*` persistence) is
@@ -28,7 +33,7 @@
  */
 
 import * as React from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { ListView } from '@object-ui/plugin-list';
 import { useNavigationOverlay, useRowPredicate } from '@object-ui/react';
 import {
@@ -41,8 +46,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  ObjectIconTile,
 } from '@object-ui/components';
-import { Database, Lock, MoreHorizontal, Plus, Save, X } from 'lucide-react';
+import { Database, Lock, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -51,7 +57,16 @@ import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { resolveAffordance, resolveFilterPlaceholders, type SchemaLike } from '@object-ui/core';
 import { normalizeFilterOperator, ViewFilterRuleSchema } from '@objectstack/spec/ui';
 import type { ViewFilterRule } from '@objectstack/spec/ui';
-import { parseUserFilterParams, applyUserFilterParams } from './userFilterUrlState.js';
+import {
+  parseUserFilterParams,
+  applyUserFilterParams,
+  parseListStateParams,
+  applyListStateParams,
+  LIST_FILTER_PARAM,
+  type ListStatePatch,
+  type ListUrlFieldGate,
+  type ListUrlState,
+} from './userFilterUrlState.js';
 import {
   parseUrlFilterTriples,
   groupFilterChips,
@@ -67,10 +82,14 @@ import {
   defaultGalleryFromObject,
 } from './InterfaceListPage.js';
 import { RecordDetailView } from './RecordDetailView.js';
+import { OpenInSidePanelButton } from './objectViewOpenAsPage.js';
+import { listOriginOf, listShownRowsOf, type ListShownRows } from './objectViewRecordNavigation.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
 import { PageHeader } from '../layout/PageHeader.js';
-import { getIcon } from '../utils/getIcon.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import { useRuntimeCreateApp } from './objectViewViewCrud.js';
 import { buildNewViewSpec } from './newViewSpec.js';
 import { CreateViewDialog } from './CreateViewDialog.js';
 import {
@@ -78,10 +97,43 @@ import {
   PREVIEW_QUERY_FLAG,
   PREVIEW_QUERY_VALUE,
 } from '../preview/PreviewModeContext.js';
+import { usePreviewListDataSource } from '../preview/unpublishedObjectReads.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
+import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
+import { mayManageViews } from './objectViewViewSharing.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
+import {
+  RECORD_FORM_LINK_PARAM,
+  RECORD_FORM_OBJECT_PARAM,
+  RECORD_FORM_PARAM,
+  RECORD_DRAWER_PARAM,
+  RECORD_TRAIL_PARAM,
+  buildRecordTrailHref,
+  decodeRecordTrail,
+  type RecordTrailEntry,
+} from '../urlParams.js';
+
+/**
+ * The relationship field of `objectDef` that points at the source record of a
+ * list opened from that record's related list (objectstack#35601): its one
+ * single-valued `lookup` / `master_detail` whose `reference` is the source's
+ * object. `undefined` when there is none, or more than one (the source alone
+ * does not say which).
+ */
+export function sourceRelationshipField(objectDef: any, source: RecordTrailEntry | undefined): string | undefined {
+  if (!source || !objectDef?.fields || typeof objectDef.fields !== 'object') return undefined;
+  const entries: Array<[string, any]> = Array.isArray(objectDef.fields)
+    ? objectDef.fields.map((f: any) => [f?.name, f])
+    : Object.entries(objectDef.fields);
+  const hits = entries.filter(([name, def]) =>
+    typeof name === 'string'
+    && (def?.type === 'lookup' || def?.type === 'master_detail')
+    && def?.reference === source.o
+    && def?.multiple !== true);
+  return hits.length === 1 ? hits[0][0] : undefined;
+}
 
 /** Field types the auto-derived user-filter bar offers as dropdowns. */
 const USER_FILTER_TYPES = new Set(['select', 'multiselect', 'radio', 'enum', 'boolean']);
@@ -238,9 +290,42 @@ export function buildSaveAsViewSpec(
   });
 }
 
+/**
+ * objectstack#36408 — this page's own list defaults, for `ListView`'s
+ * `viewDefaults`: no sort and no grouping (the page has no view to declare
+ * either), the hidden fields and row height its `schema` never sets. The
+ * sort and grouping `schema` carries are the address's, never a default the
+ * list should offer to return to.
+ */
+const DATA_PAGE_LIST_DEFAULTS = { hiddenFields: undefined, rowHeight: undefined, sort: undefined, grouping: undefined };
+
+/**
+ * How many conditions the address's `uf__filter` carries, read from the
+ * envelope itself before any check: `0` for no param, or for a value that is
+ * not the `{ logic, conditions }` envelope at all (the address then carries no
+ * panel filter to refuse). The same count `ObjectView` judges a link's filter
+ * by (objectstack#31869), so a filter is refused whole on both lists.
+ */
+function addressPanelFilterConditionCount(searchParams: URLSearchParams): number {
+  const raw = searchParams.get(LIST_FILTER_PARAM);
+  if (!raw) return 0;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 0;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 0;
+  const { logic, conditions } = parsed as { logic?: unknown; conditions?: unknown };
+  if (logic !== 'and' && logic !== 'or') return 0;
+  return Array.isArray(conditions) ? conditions.length : 0;
+}
+
 export function ObjectDataPage({ dataSource, objects }: any) {
   const { appName, objectName } = useParams();
   const { t, language } = useObjectTranslation();
+  // objectstack#35624 — the app Save as view saves the new view into.
+  const createApp = useRuntimeCreateApp(t);
   const { objectLabel, objectPluralLabel, fieldLabel } = useObjectLabel();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -249,6 +334,11 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const { canRead } = useFieldPermissions(objectName ?? '');
   const { user, activeOrganization } = useAuth();
   const { isAdmin } = useWorkspaceAdminStatus();
+  // objectstack#36448 — "Save as view" writes `view` metadata, which the
+  // server refuses without `manage_metadata`: offered to an administrator
+  // holding it (`mayManageViews`), never to one the save would answer 403.
+  const canAuthorMetadata = useCanAuthorMetadata();
+  const canSaveAsView = mayManageViews(isAdmin, canAuthorMetadata);
   const metadataClient = useMetadataClient();
   // ADR-0105: group posture appends a trailing organization_id attribution
   // column to the auto-derived columns (reads span all the user's orgs).
@@ -262,19 +352,120 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     () => (objects || []).find((o: any) => o.name === objectName),
     [objects, objectName],
   );
+  // objectstack#34807 — in the draft preview the list reads its object
+  // definition with the draft-only fields marked, so a column on one is drawn
+  // empty instead of refusing the whole list query; outside it, the adapter.
+  const listDataSource = usePreviewListDataSource(dataSource, objectDef);
 
-  // ADR-0047 filter persistence — same wiring as InterfaceListPage: restore
-  // `uf_*` once at mount, mirror selection changes back (replace, no history
-  // spam).
-  const [initialUfSelections] = React.useState<Record<string, string[]> | undefined>(
-    () => parseUserFilterParams(new URLSearchParams(window.location.search)),
-  );
+  // ADR-0047 filter persistence — same wiring as InterfaceListPage: the
+  // `uf_*` chips are restored with the list's seed (below), once per object
+  // and list generation, and selection changes are mirrored back (replace,
+  // no history spam).
   const handleUserFilterSelectionsChange = React.useCallback(
     (selections: Record<string, Array<string | number | boolean>>) => {
       setSearchParams((prev) => applyUserFilterParams(prev, selections), { replace: true });
     },
     [setSearchParams],
   );
+
+  /**
+   * objectstack#36408 — the list's own state in the address: the search term,
+   * the sort, the grouping and the Filter panel's conditions, under the keys
+   * `ObjectView` keeps them in (`uf__search`, `uf__sort`, `uf__group`,
+   * `uf__filter`; `userFilterUrlState` owns their names and shapes). Opening a
+   * record carries this address as the record page's origin, so its close —
+   * and a reload, and a copied link — open the list as the reader left it.
+   *
+   * Two layers, never one rewriting the other: `filter[...]` stays this page's
+   * own address conditions (the 「Filtered by」 tags, what 「Reset」 puts back
+   * to the source, what "Save as view" saves), and `uf__filter` is the Filter
+   * panel on top of them, exactly as `ObjectView` keeps the panel on top of its
+   * view's filter. The list applies both (the conditions AND the panel).
+   *
+   * The SEED — what the list opens with — is read from the address once per
+   * object and list generation, and the list is keyed on the same pair
+   * (`ListView` takes its search, panel and chips once, at mount): a move
+   * straight from one object's data page to another's — a link, the history —
+   * keeps this page mounted, so the list remounts on the new address's seed
+   * instead of keeping the previous object's (objectstack#36577). Unlike `ObjectView`, a reload is not a reset here: this page has
+   * no view to return to, and its address is the list ("the URL is the view").
+   * Each piece passes `ObjectView`'s field gate: a field the object does not
+   * declare, or one this user cannot read once permissions are loaded, is
+   * dropped; a panel filter that loses any condition to the checks is refused
+   * whole, with `ObjectView`'s notice (objectstack#31869). The seed is then
+   * written back (replace), so the address shows what the list shows.
+   *
+   * 「Reset」 to the source (`resetToSource`) clears every `uf_` param, these
+   * included, and moves the generation: the list remounts on an empty seed, so
+   * it no longer searches, sorts, groups or filters by what the address lost.
+   */
+  const [listGeneration, setListGeneration] = React.useState(0);
+  const listResetPendingRef = React.useRef(false);
+  const listSeedRef = React.useRef<{
+    key: string;
+    state: ListUrlState;
+    /** The `uf_<field>` chips' selections (ADR-0047), read with the rest. */
+    userFilterSelections?: Record<string, string[]>;
+    /** Taken by a 「Reset」, which wrote the address itself. */
+    reset?: boolean;
+    refusedPanelFilter?: boolean;
+  } | undefined>(undefined);
+  const listSeedKey = objectDef ? `${objectDef.name}~${listGeneration}` : undefined;
+  if (objectDef && listSeedKey && listSeedRef.current?.key !== listSeedKey) {
+    const reset = listResetPendingRef.current;
+    listResetPendingRef.current = false;
+    if (reset) {
+      listSeedRef.current = { key: listSeedKey, state: {}, reset: true };
+    } else {
+      const acceptField: ListUrlFieldGate = (field: string) =>
+        !!objectDef.fields?.[field]
+        && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
+      const state = parseListStateParams(searchParams, acceptField);
+      const carried = addressPanelFilterConditionCount(searchParams);
+      const refusedPanelFilter = carried > 0 && (state.filters?.conditions.length ?? 0) < carried;
+      if (refusedPanelFilter) delete state.filters;
+      listSeedRef.current = {
+        key: listSeedKey,
+        state,
+        userFilterSelections: parseUserFilterParams(searchParams),
+        refusedPanelFilter,
+      };
+    }
+  }
+  const listSeedEntry = listSeedRef.current?.key === listSeedKey ? listSeedRef.current : undefined;
+  const listSeed = listSeedEntry?.state;
+  React.useEffect(() => {
+    const seed = listSeedRef.current;
+    // A 「Reset」's seed writes nothing: the reset already cleared the
+    // address, and the location this render read may still be the one before
+    // it (the router commits a navigation in a transition), so a write from
+    // it would put the cleared conditions back.
+    if (!seed || seed.key !== listSeedKey || seed.reset) return;
+    const next = applyListStateParams(searchParams, {
+      filters: seed.state.filters ?? null,
+      search: seed.state.search ?? null,
+      sort: seed.state.sort ?? null,
+      grouping: seed.state.grouping ?? null,
+    });
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+    if (seed.refusedPanelFilter) {
+      seed.refusedPanelFilter = false;
+      toast.warning(t('console.objectView.linkFilterRefused'));
+    }
+    // Once per seed, by design: later writes are the list's own changes,
+    // already on screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
+  }, [listSeedKey]);
+  /** Write the list's own change into the address — replace, never a history entry per keystroke. */
+  const writeListUrlState = React.useCallback(
+    (patch: ListStatePatch) => {
+      setSearchParams((prev) => applyListStateParams(prev, patch), { replace: true });
+    },
+    [setSearchParams],
+  );
+  // The chips' selections the list mounts with: the seed's address's; none
+  // after a 「Reset」, which cleared their params.
+  const listUserFilterSelections = listSeedEntry?.userFilterSelections;
 
   // URL filter triples, trimmed to readable fields. Predicates on unreadable
   // fields are dropped here for UX honesty; the SERVER is the actual
@@ -306,6 +497,43 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   // (>= start, < end) collapse into a single "start → end" chip (objectstack-ai/objectstack#1752).
   const filterChips = React.useMemo(() => groupFilterChips(urlFilters), [urlFilters]);
 
+  /**
+   * objectstack#35601 — a list opened by a record's related list (「↗」)
+   * carries that record as its SOURCE, in the record trail (`?from=`, the last
+   * entry): the breadcrumb names it, the source condition's chip names the
+   * record instead of its id, 「Reset」 puts that condition back, and New
+   * creates a record linked to it. The condition itself stays an ordinary URL
+   * filter, removable like any other: the source only names it.
+   */
+  const sourceTrail = React.useMemo(
+    () => decodeRecordTrail(searchParams.get(RECORD_TRAIL_PARAM)),
+    [searchParams],
+  );
+  const source = sourceTrail.length > 0 ? sourceTrail[sourceTrail.length - 1] : undefined;
+  const sourceField = React.useMemo(() => sourceRelationshipField(objectDef, source), [objectDef, source]);
+  const sourceDef = sourceField ? (objects || []).find((o: any) => o?.name === source?.o) : undefined;
+  const sourceConditionOn = !!source && !!sourceField
+    && urlFilters.some(([field, op, value]) => field === sourceField && op === '=' && String(value) === source.i);
+  const sourceFilterKey = sourceField ? `filter[${sourceField}]` : undefined;
+  const conditionsAreSourced = sourceConditionOn
+    && Array.from(searchParams.keys()).every((k) => k === sourceFilterKey || !(k.startsWith('filter[') || k.startsWith('uf_')));
+  const resetToSource = React.useCallback(() => {
+    if (!source || !sourceFilterKey) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams();
+      for (const [k, v] of prev.entries()) {
+        if (k.startsWith('filter[') || k.startsWith('uf_')) continue;
+        next.append(k, v);
+      }
+      next.set(sourceFilterKey, source.i);
+      return next;
+    });
+    // objectstack#36408 — the list's own state left with its `uf_` params:
+    // the list remounts on an empty seed (see `listSeedRef`).
+    listResetPendingRef.current = true;
+    setListGeneration((g) => g + 1);
+  }, [source, sourceFilterKey, setSearchParams]);
+
   const removeUrlFilter = React.useCallback(
     (field: string) => {
       // Clears the equality param AND both range-bound operator params for the field.
@@ -324,11 +552,20 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     return picks.length > 0 ? { element: 'dropdown' as const, fields: picks } : undefined;
   }, [objectDef, canRead]);
 
-  // Record open behavior — URL-driven drawer, same convention as ObjectView
-  // and InterfaceListPage (`?recordId=…` is shareable and refresh-safe). An
-  // object the server does not read one record of (`servesRecordRead`, a
-  // list-only object) has no record surface: its rows open nothing.
+  // Record open behavior — the console's one rule for a list
+  // (objectstack#35854), the same as `ObjectView`'s: the record's name (and a
+  // card, and a touch tap on a row) opens the record's full page, carrying
+  // this page as its origin (`from`: this URL with its conditions, the page's
+  // name, the rows it shows and the count it matched), so the page's ✕ comes
+  // back here and its ↑ ↓ step through these rows. The name cell's hover icon
+  // 「在侧边打开」 opens the side drawer over the list instead, URL-driven
+  // (`?recordId=…` is shareable and refresh-safe), and that drawer's ⤢ opens
+  // the same full page with the same origin. A click on any other cell
+  // selects it and opens nothing (the grid's select-first model). An object
+  // the server does not read one record of (`servesRecordRead`, a list-only
+  // object) has no record surface: its rows open nothing.
   const recordServed = servesRecordRead(objectName, perms);
+  const phone = usePhoneViewport();
   const recordUrl = React.useCallback(
     (id: string | number) =>
       `/apps/${appName}/${objectName}/record/${encodeURIComponent(String(id))}`,
@@ -339,23 +576,94 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     objectName: objectName ?? '',
     onNavigate: (id) => navigate(recordUrl(id)),
   });
-  const drawerRecordId = searchParams.get('recordId');
+  const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
+  // Read when a record opens, never a render input of the list: the list's
+  // URL, its name, the rows it shows and the count it matched.
+  const location = useLocation();
+  const locationRef = React.useRef(location);
+  locationRef.current = location;
+  const listLabel = objectDef ? servedObjectPluralLabel(objectDef, language, objectPluralLabel) : '';
+  const listLabelRef = React.useRef(listLabel);
+  listLabelRef.current = listLabel;
+  const listRowsRef = React.useRef<ListShownRows>(listShownRowsOf([]));
+  const listTotalRef = React.useRef<number | undefined>(undefined);
+  const handleListRowsChange = React.useCallback(
+    (rows: ReadonlyArray<Record<string, unknown>>, groups?: ReadonlyArray<{ label: string; rows: ReadonlyArray<Record<string, unknown>> }>) => {
+      listRowsRef.current = listShownRowsOf(rows, groups);
+    },
+    [],
+  );
+  const handleListTotalChange = React.useCallback((total: number) => {
+    listTotalRef.current = total;
+  }, []);
+  // The record's full page, with this page as its origin: the one way to it,
+  // from the name and from the side drawer's ⤢ alike (objectstack#36300).
+  const openRecordPage = React.useCallback(
+    (id: string | number) => {
+      const { pathname, search } = locationRef.current;
+      navigate(recordUrl(id), {
+        state: {
+          from: listOriginOf({
+            pathname,
+            search,
+            label: listLabelRef.current,
+            rows: listRowsRef.current,
+            total: listTotalRef.current,
+            recordId: String(id),
+          }),
+          // A phone pushes the page over this list, so the page's 「‹」 goes
+          // back in the history to this list's entry, as the object list's
+          // page does (`useObjectViewRecordNavigation`).
+          ...(phone ? { [RECORD_PAGE_PUSHED_STATE]: true } : {}),
+        },
+      });
+    },
+    [recordUrl, navigate, phone],
+  );
   const handleRecordClick = React.useCallback(
     (record: any, event?: any) => {
       if (!recordServed) return;
       const id = record?.id ?? record?._id;
+      if (id == null || id === '') return;
       const isMod = !!(event && (event.metaKey || event.ctrlKey || event.button === 1));
-      if (isMod && id != null) { window.open(recordUrl(id), '_blank'); return; }
-      if (id != null) {
-        setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('recordId', String(id)); return n; });
-      }
+      if (isMod) { window.open(recordUrl(id), '_blank'); return; }
+      openRecordPage(id);
     },
-    [recordServed, recordUrl, setSearchParams],
+    [recordServed, recordUrl, openRecordPage],
+  );
+  // The name cell's 「在侧边打开」: the record in the side drawer over the list,
+  // for a row with a record surface on a desktop. A phone opens every record
+  // as its page, so it draws no icon.
+  const openRowInPanel = React.useCallback(
+    (id: string | number) => {
+      setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set(RECORD_DRAWER_PARAM, String(id)); return n; });
+    },
+    [setSearchParams],
+  );
+  const openInPanelLabel = t('console.objectView.openInSidePanel', { defaultValue: 'Open in side panel' });
+  const recordLinkAdornment = React.useMemo(
+    () => (recordServed && !phone
+      ? (row: Record<string, unknown>) => {
+        const id = row?.id ?? row?._id;
+        return (typeof id === 'string' && id !== '') || typeof id === 'number'
+          ? <OpenInSidePanelButton recordId={id} label={openInPanelLabel} onOpen={openRowInPanel} />
+          : null;
+      }
+      : undefined),
+    [recordServed, phone, openInPanelLabel, openRowInPanel],
   );
   const closeRecordDrawer = React.useCallback(() => {
-    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('recordId'); return n; });
+    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete(RECORD_DRAWER_PARAM); return n; });
   }, [setSearchParams]);
   const openedRecordId = recordServed ? drawerRecordId : null;
+  // The drawer bar's ⤢ 「Open as full page」, as the object list's drawer
+  // draws it (objectstack#36300): the drawer closes and the record's full page
+  // opens with the same origin a name click carries, so its ✕ comes back here.
+  const openDrawerRecordAsPage = React.useCallback(() => {
+    if (!openedRecordId) return;
+    closeRecordDrawer();
+    openRecordPage(openedRecordId);
+  }, [openedRecordId, closeRecordDrawer, openRecordPage]);
   React.useEffect(() => {
     if (openedRecordId && !navOverlay.isOpen) navOverlay.open({ id: openedRecordId });
     else if (!openedRecordId && navOverlay.isOpen) navOverlay.close();
@@ -385,6 +693,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       viewType: 'grid' as const,
       columns,
       ...(urlFilters.length ? { filter: urlFilters } : {}),
+      // objectstack#36408 — the sort and the grouping the address carries
+      // (`uf__sort`, `uf__group`), read once per seed (see `listSeedRef`).
+      ...(listSeed?.sort ? { sort: listSeed.sort } : {}),
+      ...(listSeed?.grouping ? { grouping: listSeed.grouping } : {}),
       kanban,
       calendar,
       gallery,
@@ -409,10 +721,12 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         hideFields: true,
       },
       showRecordCount: true,
-      // Deliberately NO onSortChange/onFilterChange persistence hooks: this
-      // surface never writes back to any saved view (#2251).
+      // Deliberately NO `onSortChange` / `onFilterChange` persistence hooks in
+      // the schema: this surface never writes back to any saved view (#2251).
+      // The list's own changes go to the ADDRESS only, through `ListView`'s
+      // host callbacks below (objectstack#36408).
     };
-  }, [objectDef, columns, urlFilters, kanban, calendar, gallery, userFilters, allowedVisualizations]);
+  }, [objectDef, columns, urlFilters, listSeed, kanban, calendar, gallery, userFilters, allowedVisualizations]);
 
   // "Save as view" — the one exit into the workspace: materialize the current
   // URL conditions as a new saved view, then navigate to it. Resolves whether
@@ -437,6 +751,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           metadataClient,
           dataSource,
           objectName,
+          // objectstack#35624 — saved into the app it was made in.
+          app: createApp,
         });
         if (createdId) {
           const previewSuffix = previewDrafts
@@ -457,7 +773,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         return false;
       }
     },
-    [columns, urlFilters, metadataClient, dataSource, navigate, objectName, previewDrafts, t],
+    [columns, urlFilters, metadataClient, dataSource, navigate, objectName, previewDrafts, t, createApp],
   );
 
   // ─── The CRUD affordance matrix for this surface (#5164) ──────────────
@@ -534,7 +850,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
 
   if (!objectDef) {
     return (
-      <div className="h-full flex items-center justify-center p-8">
+      <div className="h-full flex items-center justify-center p-8" data-testid="object-not-found">
         <Empty>
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
             <Database className="h-6 w-6 text-muted-foreground" />
@@ -578,7 +894,19 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const newButton = objectCanCreate && createVisible ? (
     <Button
       size="sm"
-      onClick={() => navigate('../new', { relative: 'path' })}
+      onClick={() => {
+        // objectstack#35601 — under a source, New is that record's child:
+        // the record form overlay, linked to it (as the related list's New).
+        if (source && sourceField) {
+          const sp = new URLSearchParams(searchParams);
+          sp.set(RECORD_FORM_PARAM, 'new');
+          sp.set(RECORD_FORM_OBJECT_PARAM, objectDef.name);
+          sp.set(RECORD_FORM_LINK_PARAM, `${sourceField}:${source.i}`);
+          setSearchParams(sp);
+          return;
+        }
+        navigate('../new', { relative: 'path' });
+      }}
       disabled={createDisabled}
       className="shadow-none gap-1.5 h-8 sm:h-9"
       data-testid="object-data-new-button"
@@ -587,7 +915,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       <span className="hidden sm:inline">{t('console.objectView.new')}</span>
     </Button>
   ) : null;
-  const saveAsViewButton = isAdmin ? (
+  const saveAsViewButton = canSaveAsView ? (
     <Button
       size="sm"
       variant="outline"
@@ -602,8 +930,32 @@ export function ObjectDataPage({ dataSource, objects }: any) {
     </Button>
   ) : null;
 
+  // objectstack#35601 — 「Object / Record / this list」: the way back to the
+  // record whose related list opened this one.
+  const sourceCrumbs = source && sourceField && appName ? (
+    <nav
+      className="flex min-w-0 items-center gap-1 px-3 pt-2 text-xs text-muted-foreground sm:px-4"
+      data-testid="object-data-source-crumbs"
+    >
+      <Link className="truncate hover:text-foreground hover:underline" to={`/apps/${appName}/${source.o}`}>
+        {sourceDef ? servedObjectPluralLabel(sourceDef, language, objectPluralLabel) : source.o}
+      </Link>
+      <span aria-hidden="true">/</span>
+      <Link
+        className="truncate hover:text-foreground hover:underline"
+        to={buildRecordTrailHref(`/apps/${appName}`, source, sourceTrail.slice(0, -1))}
+        data-testid="object-data-source-record"
+      >
+        {source.t || source.i}
+      </Link>
+      <span aria-hidden="true">/</span>
+      <span className="truncate text-foreground">{servedObjectPluralLabel(objectDef, language, objectPluralLabel)}</span>
+    </nav>
+  ) : null;
+
   return (
     <div className="h-full flex flex-col bg-background min-w-0 overflow-hidden" data-testid="object-data-page">
+      {sourceCrumbs}
       <div className="hidden sm:block">
         <PageHeader
           title={
@@ -613,7 +965,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
                   record drawer below keeps the singular. */}
               {/* A served object's label is already translated (objectstack#30311): drawn as given. */}
               <span className="truncate">{servedObjectPluralLabel(objectDef, language, objectPluralLabel)}</span>
-              <span className="rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="rounded border px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 {t('console.objectData.badge', { defaultValue: 'Data' })}
               </span>
             </span>
@@ -621,7 +973,8 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           subtitle={t('console.objectData.description', {
             defaultValue: 'URL-defined data slice — not bound to any saved view.',
           })}
-          icon={React.createElement(getIcon((objectDef as any)?.icon), { className: 'h-4 w-4' })}
+          // The object's tile, in the colour the menu draws it in (objectstack#35985).
+          iconTile={<ObjectIconTile size="lg" icon={(objectDef as any)?.icon} color={(objectDef as any)?.color} />}
           actions={
             <>
               {newButton}
@@ -635,7 +988,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
           foldedActions={
             newButton && <>
               {newButton}
-              {isAdmin && (
+              {canSaveAsView && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -663,7 +1016,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       {/* URL filter chips — visible + individually removable (unlike Odoo's
           invisible action domain). Removal rewrites the URL, which is the
           single source of truth for this surface. */}
-      {urlFilters.length > 0 && (
+      {(urlFilters.length > 0 || (source && sourceField)) && (
         <div
           className="flex flex-wrap items-center gap-1.5 border-b px-3 sm:px-4 py-2 shrink-0"
           data-testid="object-data-filter-chips"
@@ -688,7 +1041,9 @@ export function ObjectDataPage({ dataSource, objects }: any) {
                 (objectui#3469 deleted exactly that pattern from this console).
               */}
               <span className="text-muted-foreground">
-                {textKey && text !== undefined ? `${t(textKey)} ${text}` : textKey ? t(textKey) : text}
+                {field === sourceField && sourceConditionOn
+                  ? source?.t || text
+                  : textKey && text !== undefined ? `${t(textKey)} ${text}` : textKey ? t(textKey) : text}
               </span>
               <button
                 type="button"
@@ -704,20 +1059,60 @@ export function ObjectDataPage({ dataSource, objects }: any) {
               </button>
             </span>
           ))}
+          {source && sourceField && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-6 gap-1 px-1.5 text-xs text-muted-foreground"
+              onClick={resetToSource}
+              disabled={conditionsAreSourced}
+              data-testid="object-data-reset-source"
+            >
+              <RotateCcw className="h-3 w-3" aria-hidden="true" />
+              {t('common.reset')}
+            </Button>
+          )}
         </div>
       )}
 
       <div className="flex-1 min-h-0 overflow-auto">
         {schema && (
           <ListView
+            // objectstack#36577 — one list per seed: a new object or a
+            // 「Reset」 remounts it on the address it was seeded from.
+            key={listSeedKey}
             schema={schema as any}
-            dataSource={dataSource}
-            userFilterSelections={initialUfSelections}
+            dataSource={listDataSource}
+            userFilterSelections={listUserFilterSelections}
             onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
+            // objectstack#36408 — the list's search, Filter panel, sort and
+            // grouping: opened from the address, and every change written
+            // back to it (replace). `schema` carries the address's sort and
+            // grouping, so this page's own defaults — no sort, no grouping —
+            // are handed apart: the address's sort is no default this page
+            // declares (the list draws no 「Reset to default」 for it).
+            initialSearchTerm={listSeed?.search}
+            initialFilters={listSeed?.filters}
+            viewDefaults={DATA_PAGE_LIST_DEFAULTS}
+            onSearchChange={(search: string) => writeListUrlState({ search })}
+            onFilterChange={(filters) => writeListUrlState({ filters })}
+            // No sort is this page's own default, so a cleared sort leaves the address.
+            onSortChange={(sort) => writeListUrlState({ sort: sort.length > 0 ? sort : null })}
+            onGroupingChange={(grouping) => writeListUrlState({ grouping: grouping ?? null })}
             onRowClick={handleRecordClick}
+            // objectstack#35854 — the name opens the full page; the icon
+            // beside it, on hover, opens the record in the side drawer.
+            recordLinkAdornment={recordLinkAdornment}
+            onRowsChange={handleListRowsChange}
+            onTotalChange={handleListTotalChange}
             // objectstack#33317 — a list-only object's rows open nothing, so
             // the grid draws them no record link and no Open.
             rowOpensRecord={recordServed}
+            // objectstack#35727 — the address conditions are this page's own
+            // 「Filtered by」 tags; the list filters on them and draws no
+            // second, locked chip for them.
+            hostDrawnConditionFields={urlFilters.map(([field]) => field)}
           />
         )}
       </div>
@@ -726,6 +1121,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         <NavigationOverlay
           {...navOverlay}
           setIsOpen={(open: boolean) => { if (!open) closeRecordDrawer(); }}
+          onExpand={openedRecordId ? openDrawerRecordAsPage : undefined}
           title={servedObjectLabel(objectDef, language, objectLabel)}
         >
           {(record: any) => (
@@ -741,7 +1137,7 @@ export function ObjectDataPage({ dataSource, objects }: any) {
         </NavigationOverlay>
       )}
 
-      {isAdmin && (
+      {canSaveAsView && (
         <CreateViewDialog
           open={showCreateViewDialog}
           onOpenChange={setShowCreateViewDialog}

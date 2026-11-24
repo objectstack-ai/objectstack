@@ -9,7 +9,8 @@
  * for a given object. Walks the metadata cache exposed by `<MetadataProvider>`,
  * keeps the PageSchemas whose `type === 'record'` and `object` matches the
  * requested name, and returns the object's DEFAULT record page among them
- * (`isDefault: true`), else the first of them.
+ * (`isDefault: true`), else the first of them that is not a print page
+ * (a page that declares `print`).
  *
  * Returns a discriminated result by `PageSchema.kind`:
  *   - `kind === 'full'` (default): the schema fully describes the page;
@@ -21,7 +22,8 @@
  *
  * Selection, in order: the page scoped to the app the record opens in
  * (`PageSchema.apps`, when the caller names that app), then the declared
- * `PageSchema.isDefault`, then DECLARATION ORDER among the remaining pages.
+ * `PageSchema.isDefault`, then DECLARATION ORDER among the remaining pages
+ * that do not declare `print`.
  * The spec allows one record page per object per app and one default record
  * page per object, so neither slot needs a tie-break here, and with neither
  * the first matching page wins. No match returns null, so callers can
@@ -103,6 +105,15 @@ export function isRecordPageOf(page: unknown, objectName: string | undefined | n
   if (!page || typeof page !== 'object' || !objectName) return false;
   const p = page as { type?: unknown; object?: unknown };
   return p.type === 'record' && p.object === objectName;
+}
+
+/**
+ * True when `page` declares `print` (`PageSchema.print`), which makes it a
+ * print page: the reading the spec's print composition check applies, a
+ * `print` value that is an object.
+ */
+function declaresPrint(page: { print?: unknown }): boolean {
+  return page.print !== null && typeof page.print === 'object';
 }
 
 function matchesAssignment(_page: any, _opts: PageAssignmentOptions): boolean {
@@ -215,14 +226,26 @@ export function usePageAssignment(
     // only order it has, so the first default served wins.
     //
     // Among pages that are not the default, declaration order is the last
-    // resort: the first match wins. This used to sort on a `priority` key read
+    // resort: the first match that is not a PRINT PAGE wins (objectstack#35250).
+    // A page that declares `print` is a document authored in printable blocks
+    // only (no path, no tabs, no related lists, no edit flow): it opens on the
+    // named record page route, which asks for it by name, and in the slots its
+    // author declared above (`isDefault`, `apps`), never as the record page an
+    // object falls back to. With no other candidate the hook answers null and
+    // the record route draws the synthesized default page.
+    //
+    // This used to sort on a `priority` key read
     // off the candidate. No author could ever set it: `PageSchema` is a
     // `strictObject` and does not declare `priority`, so a page carrying one is
     // a HARD PARSE ERROR, not a page that sorts first. Every candidate therefore
     // read `0`, the comparator returned `0` for every pair, and a stable sort
     // left declaration order untouched — the sort documented an affordance the
     // schema refuses (objectui#7298).
-    return candidates.find(p => defaultRecordPageObject(p) === objectName) ?? candidates[0];
+    return (
+      candidates.find(p => defaultRecordPageObject(p) === objectName)
+      ?? candidates.find(p => !declaresPrint(p))
+      ?? null
+    );
   }, [meta.pages, objectName, opts.pageName, opts.recordType, opts.profile, opts.app, opts.formFactor]);
 
   // Discriminate by `kind`: full pages populate `page`, slotted pages

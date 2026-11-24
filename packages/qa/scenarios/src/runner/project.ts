@@ -115,11 +115,15 @@ export interface DevServer {
  * `/api/v1/health`. `--fresh` gives an ephemeral home and seeds the dev admin
  * (`admin@objectos.ai` / `admin123`), which the runner signs in as.
  */
-export async function bootDev(dir: string, timeoutMs = 180_000): Promise<DevServer> {
+export async function bootDev(
+  dir: string,
+  timeoutMs = 180_000,
+  env: Readonly<Record<string, string>> = {},
+): Promise<DevServer> {
   const port = await freePort();
   const child: ChildProcess = spawn('npx', ['objectstack', 'dev', '--fresh', '--no-watch', '-p', String(port)], {
     cwd: dir,
-    env: subscriptionOnlyEnv(),
+    env: { ...subscriptionOnlyEnv(), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   });

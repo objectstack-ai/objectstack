@@ -61,6 +61,7 @@ const DECLARED_MEMBERS = {
   getReadFilter: 'required',
   getReadableFields: 'required',
   getMetadataReadableFields: 'optional',
+  getMetadataReadableWithheldFields: 'optional',
   getQueryableFields: 'optional',
   getWritableFields: 'optional',
   getRecordFieldAccess: 'optional',

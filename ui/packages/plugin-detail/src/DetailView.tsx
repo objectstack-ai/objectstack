@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { DetailSection } from './DetailSection';
 import { EmptySectionsFold, EmptySectionsLine } from './EmptySectionsFold';
-import { useDefaultRecordPage } from './defaultRecordPage';
+import { EmptySectionsLineContext, useApprovalBandOnce, useDefaultRecordPage } from './defaultRecordPage';
 import { DetailTabs } from './DetailTabs';
 import { SectionGroup } from './SectionGroup';
 import { HeaderHighlight } from './HeaderHighlight';
@@ -45,8 +45,9 @@ import { RecordComments } from './RecordComments';
 import { ActivityTimeline } from './ActivityTimeline';
 import { HistoryTimeline } from './HistoryTimeline';
 import { RecordMetaFooter } from './RecordMetaFooter';
+import { useRecordFieldList } from './recordFieldList';
 import { RecordPageProvenanceContext } from './recordPageProvenance';
-import { SchemaRenderer, SchemaErrorBoundary, toRenderableSchema, useSafeFieldLabel, useDataInvalidation, useInlineEdit, useRowPredicate, resolveApprovalLock, usePrintPage, useRecordContext } from '@object-ui/react';
+import { SchemaRenderer, SchemaErrorBoundary, toRenderableSchema, useSafeFieldLabel, useDataInvalidation, useInlineEdit, useRowPredicate, resolveApprovalLock, usePrintPage, useRecordContext, usePredicateScope } from '@object-ui/react';
 import { buildExpandFields, declaredNameField, getRecordDisplayName, formatTitleTemplate, recordDelete, recordDisplayValueAt, resolveAffordance, toDisplayDate, userActionPredicates, withoutDeniedFields } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyPath } from '@object-ui/i18n';
@@ -56,9 +57,11 @@ import { useRecordEditable } from './useRecordEditable';
 import { getCellRenderer, resolveCellRendererType, coerceToSafeValue, formatPercent, percentCellScale } from '@object-ui/fields';
 import { resolveFieldScale } from '@objectstack/spec/data';
 import { hasCellValue } from './emptiness';
+import { dropFieldPredicateHidden, lazyPredicateRecord, type FieldPredicateGate } from './fieldPredicateVisibility';
 import { enrichDetailField } from './fieldEnrichment';
 import { chipTakesCellRenderer } from './summaryChipRenderers';
 import { summaryChipPercentPoints } from './summaryChipPercent';
+import { formulaReadsAsFieldType } from './formulaFieldType';
 
 
 /** Stable empty draft so the section `data`-merge identity is preserved when
@@ -325,9 +328,23 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // approval band below is live, per-viewer workflow state, not document
   // content, so it does not print.
   const isPrintPage = usePrintPage() !== null;
-  // objectstack#27055 — the synthesized default record page folds its
-  // entirely empty sections into one line (`EmptySectionsLine`).
+  // objectstack#35253, objectstack#35483, objectstack#35484 — the approval
+  // band is the record's, drawn once per page: under a page's
+  // `ApprovalBandOnceScope` the first body to reach the band's place draws it.
+  const approvalBandOnce = useApprovalBandOnce();
+  // objectstack#27055, objectstack#35019 — a record page's details body folds
+  // its entirely empty sections into one line (`EmptySectionsLine`): every
+  // `record:details` body, authored page or synthesized default page alike,
+  // and anything else the default page draws. Every other body keeps the
+  // whole-body fold (`EmptySectionsFold`).
+  const inRecordDetailsBody = React.useContext(EmptySectionsLineContext);
   const onDefaultRecordPage = useDefaultRecordPage();
+  // objectstack#36147 — in the laid-out record page's field list every
+  // section folds its own empty rows into the list's one last row, so this
+  // body draws its sections as they are, with neither fold.
+  const fieldList = useRecordFieldList();
+  const foldsIntoFieldList = fieldList !== null && onDefaultRecordPage && !isPrintPage;
+  const emptySectionsAsLine = (inRecordDetailsBody || onDefaultRecordPage) && !foldsIntoFieldList;
   const isInlineEditing = inline?.editing ?? false;
   const editedValues = inline?.draft ?? EMPTY_DRAFT;
   const autoFocusField = inline?.autoFocusField ?? null;
@@ -578,6 +595,39 @@ export const DetailView: React.FC<DetailViewProps> = ({
     ],
   );
 
+
+  /**
+   * The field lists this view DRAWS: `schema`'s, less every field whose own
+   * `visibleWhen` is false for this record — judged by
+   * `dropFieldPredicateHidden` (`./fieldPredicateVisibility`), the one
+   * implementation the details body and the highlights strip call too, so the
+   * drawer and the `detail-view` node hide what the form hides (fail-open on a
+   * predicate that cannot be evaluated). The predicate is the object's
+   * declaration, so nothing is hidden before the object schema is known.
+   *
+   * Render-only: the record read above keeps `schema`'s lists (a `$expand`
+   * built from what is drawn would refetch whenever the verdict moved), and
+   * the verdict is the SAVED record's, as on the details body.
+   */
+  const predicateScope = usePredicateScope();
+  const drawn = React.useMemo(() => {
+    const gate: FieldPredicateGate = {
+      objectFields,
+      record: lazyPredicateRecord(data, objectFields),
+      scope: predicateScope,
+      where: (n) => `field '${n}' of detail-view on object '${schema.objectName ?? ''}'`,
+    };
+    const dropSection = <S extends { fields: unknown[] }>(section: S): S => ({
+      ...section,
+      fields: dropFieldPredicateHidden(section.fields, gate),
+    });
+    return {
+      fields: dropFieldPredicateHidden(schema.fields, gate),
+      sections: schema.sections?.map(dropSection),
+      sectionGroups: schema.sectionGroups?.map((group) => ({ ...group, sections: group.sections.map(dropSection) })),
+      shows: (name: string) => dropFieldPredicateHidden([name], gate).length === 1,
+    };
+  }, [schema.fields, schema.sections, schema.sectionGroups, schema.objectName, objectFields, data, predicateScope]);
 
   // Fire onDataLoaded whenever the record changes so hosts can publish it
   // (e.g. to the navigation breadcrumb or document title).
@@ -1160,9 +1210,9 @@ export const DetailView: React.FC<DetailViewProps> = ({
   // for the whole body (`EmptySectionsFold`). Only when the sections ARE the
   // body: section groups draw fields of their own beside them.
   const foldEmptySections = (rendered: React.ReactNode) =>
-    schema.sectionGroups?.length ? rendered : (
+    drawn.sectionGroups?.length || foldsIntoFieldList ? rendered : (
       <EmptySectionsFold
-        sections={schema.sections ?? []}
+        sections={drawn.sections ?? []}
         data={{ ...data, ...editedValues }}
         isEditing={isInlineEditing}
       >
@@ -1222,7 +1272,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 <h1 className="text-xl sm:text-2xl font-bold truncate">
                   {resolveDisplayTitle(titleRow, schema, objectSchema, t('detail.details'))}
                 </h1>
-                {effectiveSummaryFields.map((fieldName) => {
+                {effectiveSummaryFields.filter(drawn.shows).map((fieldName) => {
                   const val = data?.[fieldName];
                   // Same definition as `has` above and as every other band of
                   // the page (`./emptiness`, objectui#8376/#8394). A raw test
@@ -1238,6 +1288,16 @@ export const DetailView: React.FC<DetailViewProps> = ({
                     .find((f) => f.name === fieldName);
                   const objField = objectSchema?.fields?.[fieldName];
                   const ftype = sectionField?.type || objField?.type;
+                  // The type whose formatting ARM this chip takes. A `formula`
+                  // declaring a return type the header reads as a field type
+                  // (`currency`, `percent`, `date`) takes that type's arm, over
+                  // its own definition — its `currencyConfig`, `scale`, `max` —
+                  // so it reads as the highlights strip and the list cell read
+                  // it (objectstack#35798). One spelling for both bands:
+                  // `./formulaFieldType`. Every other type, and every other
+                  // formula, is its own arm, as before.
+                  const armType =
+                    formulaReadsAsFieldType(ftype, { ...(objField as any), ...(sectionField as any) }.returnType) ?? ftype;
                   // ── The chip's NAME half ──────────────────────────────────
                   //
                   // The chip carries no visible label, so what follows is the
@@ -1297,7 +1357,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                     // `EN_CONTROL_ROWS` in `summaryChip.displayLocale-9453.test.tsx`
                     // is what holds that line: those rows are green before this change
                     // and after it, and go red the moment one of those options moves.
-                    if (ftype === 'currency') {
+                    if (armType === 'currency') {
                       const num = Number(val);
                       if (!Number.isNaN(num)) {
                         // A `record`-mode amount (ADR-0144 D2) reads this record's code field.
@@ -1312,18 +1372,18 @@ export const DetailView: React.FC<DetailViewProps> = ({
                               maximumFractionDigits: 0,
                             }).format(num);
                       }
-                    } else if (ftype === 'date' || ftype === 'datetime') {
+                    } else if (armType === 'date' || armType === 'datetime') {
                       // The shared parse step, never `new Date(val)`: a
                       // date-only value is UTC midnight to the engine and read
                       // back here in the viewer's zone, one day early west of
                       // UTC (objectui#10183). The face stays this chip's own.
                       const d = toDisplayDate(val);
                       if (!Number.isNaN(d.getTime())) {
-                        display = ftype === 'datetime'
+                        display = armType === 'datetime'
                           ? d.toLocaleString(displayLocale, { dateStyle: 'medium', timeStyle: 'short' })
                           : d.toLocaleDateString(displayLocale, { dateStyle: 'medium' } as any);
                       }
-                    } else if (ftype === 'percent') {
+                    } else if (armType === 'percent') {
                       const num = Number(val);
                       if (!Number.isNaN(num)) {
                         // ── ONE number, ONE spelling, and neither is this
@@ -1369,8 +1429,9 @@ export const DetailView: React.FC<DetailViewProps> = ({
                         // the grid footer and the edit widget ask the same
                         // function, so one undeclared stored value reads one
                         // width on every face — ⛔ no `?? N` here or there. The
-                        // type asked about is `ftype`, the one this branch
-                        // renders, rather than the merged bag's.
+                        // type asked about is `armType`, the one this branch
+                        // renders (`percent`, for a percent formula too),
+                        // rather than the merged bag's.
                         //
                         // ⭐ The MEMBER moved and the AUTHORITY did not
                         // (objectui#9295). This read was `precision ?? 0` until
@@ -1385,17 +1446,26 @@ export const DetailView: React.FC<DetailViewProps> = ({
                         // on `precision` is what would have BROKEN that ruling,
                         // not what would have kept it. Whatever the cell reads,
                         // this reads; that is the whole of the coupling.
-                        const scale = resolveFieldScale({ type: ftype, scale: percentField.scale });
+                        const scale = resolveFieldScale({ type: armType, scale: percentField.scale });
                         // The STORAGE is the field's too (objectui#11475):
                         // `percentCellScale` is the spec's `percentScaleOf`
                         // over the same merged bag (its `max`), the answer the
                         // list cell reads, so a fraction-stored `1` reads
                         // `100%` on both faces and a whole-stored `50` reads
                         // `50%`. Text and bar take the one answer.
-                        const percentScale = percentCellScale({ type: ftype, max: percentField.max });
+                        const percentScale = percentCellScale({ type: armType, max: percentField.max });
                         display = formatPercent(num, percentScale, scale, displayLocale);
-                        const points = summaryChipPercentPoints(num, percentScale);
-                        percentValue = Math.max(0, Math.min(100, points));
+                        // The field's read-only face, `percentDisplay` in
+                        // `@objectstack/spec`: `plain` is a rate or a
+                        // probability, not progress, so the chip states the
+                        // percentage alone and draws no bar; absent or `bar`
+                        // keeps it. The same literal test `PercentCellRenderer`
+                        // applies, read off the same merged bag (view over
+                        // object), so a percent formula's own key counts too.
+                        if (percentField.percentDisplay !== 'plain') {
+                          const points = summaryChipPercentPoints(num, percentScale);
+                          percentValue = Math.max(0, Math.min(100, points));
+                        }
                       }
                     } else if (ftype === 'select' || ftype === 'status' || ftype === 'multiselect') {
                       // Resolve raw option label from field metadata as
@@ -1698,8 +1768,13 @@ export const DetailView: React.FC<DetailViewProps> = ({
           `record:approval_decision` inside a print page. A printed record
           that should say where its approval stands prints the record's own
           status field through `record:details`, the way `record:path` leaves
-          the current stage to it. */}
-      {inlineEdit && schema.showHeader === false && !isPrintPage && (() => {
+          the current stage to it.
+
+          objectstack#35253 — and once per page: under the page's
+          `ApprovalBandOnceScope`, by the first details body that reaches
+          this place (objectstack#35483, objectstack#35484). */}
+      {inlineEdit && schema.showHeader === false && !isPrintPage && approvalBandOnce.mark}
+      {inlineEdit && schema.showHeader === false && !isPrintPage && approvalBandOnce.draws && (() => {
         // Two independent facts, not one (objectui#2902):
         //
         //   isPending — an approval is running on this record.
@@ -1792,6 +1867,10 @@ export const DetailView: React.FC<DetailViewProps> = ({
         <div className="flex flex-col items-end gap-1">
           {isPending && (
             <div className="flex items-center justify-end gap-2">
+              {/* objectstack#35593 — a host whose header names the approval
+                  (its 「待你审批」 / 「审批中」 tag) has said why the record is
+                  locked; an APPROVAL lock draws no second badge here. */}
+              {!(isLocked && inline?.approvalTagDrawnByHost) && (
               <span
                 role="status"
                 className={
@@ -1806,6 +1885,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 {isLocked ? <Lock className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
                 <span>{t(pendingLabelKey)}</span>
               </span>
+              )}
               {/* Recall belongs to the approval, not to the lock: an editable
                   pending approval is just as recallable as a locked one.
 
@@ -1877,7 +1957,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 aria-label={t('detail.approvalProgressLabel')}
                 className="flex items-center gap-2 w-full justify-end"
               >
-                <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
                   {progress.behavior === 'per_group'
                     ? t('detail.approvalProgressGroups', { got: progress.got, need: progress.need })
                     : t('detail.approvalProgress', { got: progress.got, need: progress.need })}
@@ -1907,7 +1987,7 @@ export const DetailView: React.FC<DetailViewProps> = ({
                       key={g.group}
                       title={`${g.got}/${g.need}`}
                       className={cn(
-                        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]',
+                        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs',
                         g.satisfied
                           ? 'border-emerald-300 text-emerald-700'
                           : 'border-border text-muted-foreground',
@@ -1959,8 +2039,8 @@ export const DetailView: React.FC<DetailViewProps> = ({
         const detailsContent = (
           <div className="space-y-3 sm:space-y-4">
             {/* Section Groups */}
-            {schema.sectionGroups && schema.sectionGroups.length > 0 && (
-              schema.sectionGroups.map((group, index) => (
+            {drawn.sectionGroups && drawn.sectionGroups.length > 0 && (
+              drawn.sectionGroups.map((group, index) => (
                 <SectionGroup
                   key={index}
                   group={group}
@@ -1975,8 +2055,8 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 />
               ))
             )}
-            {schema.sections && schema.sections.length > 0 && foldEmptySections(
-              schema.sections.map((section, index) => (
+            {drawn.sections && drawn.sections.length > 0 && foldEmptySections(
+              drawn.sections.map((section, index) => (
                 <SectionBoundary key={index} section={section} index={index}>
                   <DetailSection
                     section={section}
@@ -1992,10 +2072,10 @@ export const DetailView: React.FC<DetailViewProps> = ({
                 </SectionBoundary>
               ))
             )}
-            {schema.fields && schema.fields.length > 0 && !schema.sections?.length && (
+            {drawn.fields && drawn.fields.length > 0 && !drawn.sections?.length && (
               <DetailSection
                 section={{
-                  fields: schema.fields,
+                  fields: drawn.fields,
                   columns: schema.columns,
                 }}
                 data={{ ...data, ...editedValues }}
@@ -2102,9 +2182,9 @@ export const DetailView: React.FC<DetailViewProps> = ({
       })() : (
         <>
           {/* Section Groups */}
-          {schema.sectionGroups && schema.sectionGroups.length > 0 && (
+          {drawn.sectionGroups && drawn.sectionGroups.length > 0 && (
             <div className="space-y-3 sm:space-y-4">
-              {schema.sectionGroups.map((group, index) => (
+              {drawn.sectionGroups.map((group, index) => (
                 <SectionGroup
                   key={index}
                   group={group}
@@ -2122,10 +2202,10 @@ export const DetailView: React.FC<DetailViewProps> = ({
           )}
 
           {/* Sections */}
-          {schema.sections && schema.sections.length > 0 && (
+          {drawn.sections && drawn.sections.length > 0 && (
             <div className="space-y-3 sm:space-y-4">
               {(() => {
-                const renderSectionAt = (section: NonNullable<typeof schema.sections>[number], index: number) => (
+                const renderSectionAt = (section: NonNullable<typeof drawn.sections>[number], index: number) => (
                   <SectionBoundary key={index} section={section} index={index}>
                     <DetailSection
                       section={section}
@@ -2140,23 +2220,24 @@ export const DetailView: React.FC<DetailViewProps> = ({
                     />
                   </SectionBoundary>
                 );
-                return onDefaultRecordPage && !schema.sectionGroups?.length ? (
+                return emptySectionsAsLine && !drawn.sectionGroups?.length ? (
                   <EmptySectionsLine
-                    sections={schema.sections ?? []}
+                    sections={drawn.sections ?? []}
                     data={{ ...data, ...editedValues }}
                     isEditing={isInlineEditing}
+                    objectName={schema.objectName}
                     renderSection={renderSectionAt}
                   />
-                ) : foldEmptySections(schema.sections!.map(renderSectionAt));
+                ) : foldEmptySections(drawn.sections!.map(renderSectionAt));
               })()}
             </div>
           )}
 
           {/* Direct Fields (if no sections) */}
-          {schema.fields && schema.fields.length > 0 && !schema.sections?.length && (
+          {drawn.fields && drawn.fields.length > 0 && !drawn.sections?.length && (
             <DetailSection
               section={{
-                fields: schema.fields,
+                fields: drawn.fields,
                 columns: schema.columns,
               }}
               data={{ ...data, ...editedValues }}

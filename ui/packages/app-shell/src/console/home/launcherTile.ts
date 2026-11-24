@@ -4,41 +4,24 @@
  * The look of one launcher tile, shared by the console home's apps strip
  * (`HomeAppsStrip`) and the `tile-grid` page block (objectui#12197), so the two
  * draw one tile and cannot drift apart: the 112 px box, the 56 px icon square,
- * and the deterministic icon gradient.
- *
- * Moved here from `HomeAppsStrip.tsx` unchanged, string for string.
+ * and the solid colour of a tile that declares none (objectstack#36157; the
+ * ten-gradient table it replaces is gone).
  *
  * @module
  */
 
-// iOS-springboard icon tints: a vibrant gradient per app, assigned
-// deterministically by name so an app keeps its colour across sessions.
-// (Literal class strings so Tailwind's source scan emits them.)
-const ICON_GRADIENTS = [
-  'from-blue-500 to-indigo-600',
-  'from-violet-500 to-purple-600',
-  'from-pink-500 to-rose-600',
-  'from-amber-400 to-orange-500',
-  'from-emerald-500 to-teal-600',
-  'from-sky-500 to-cyan-600',
-  'from-fuchsia-500 to-pink-600',
-  'from-orange-500 to-red-600',
-  'from-indigo-500 to-blue-600',
-  'from-teal-500 to-green-600',
-];
-
-function hashStr(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
+import { OBJECT_COLOR_TILE_CLASS } from '@object-ui/components';
+import { autoTileColor } from '../../layout/appTileColors.js';
 
 /**
- * The icon gradient for a tile, chosen by a stable key (an app's `name`). An
- * app tile draws it only when the app declares no branding (`HomeAppsStrip`).
+ * The solid tile colour for a launcher entry with no colour of its own,
+ * chosen by a stable key (objectstack#36157): the apps strip passes nothing
+ * here (an app's tile is `appTileFace`'s), the `tile-grid` block keys its
+ * tiles by their `href` (else label). The same palette and pick as an app
+ * without a declared colour, so a block's tile and Home's tile are one look.
  */
-export function launcherIconGradient(key: string): string {
-  return ICON_GRADIENTS[hashStr(key) % ICON_GRADIENTS.length];
+export function launcherTileColorClasses(key: string): string {
+  return `text-white ${OBJECT_COLOR_TILE_CLASS[autoTileColor(key)]}`;
 }
 
 /** One tile's box: 112 px wide, the 56 px icon above a one-line name. */

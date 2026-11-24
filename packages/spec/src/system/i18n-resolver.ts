@@ -24,11 +24,15 @@
  *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
  *   objects.<object>._actions.<action_name>.params.<param_name>.options.<value>
  *   objects.<object>._tabs.<tab_name>.label
+ *   objects.<object>._relatedLists.<list>.label
  *   objects.<object>._sections.<section_name>.label
  *   objects.<object>._sections.<section_name>.description
  *   objects.<object>._sections.<section_name>.fields.<field>.label
  *   objects.<object>._sections.<section_name>.fields.<field>.placeholder
  *   objects.<object>._sections.<section_name>.fields.<field>.helpText
+ *
+ * `<list>` is the literal `list` of an object-form `relatedLists` entry on that
+ * object (`object.field` is one key), see `translateObject`.
  *
  * `<section_name>` is a form section's own `name` — the served form view's
  * `config.sections[]`, see {@link translateView}. A section authored without a
@@ -51,7 +55,7 @@
  *   globalActions.<action_name>.label / .description / .confirmText /
  *     .successMessage / .disabledReason / .submitText / .cancelText /
  *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.* /
- *     .preflight.fields.<path>
+ *     .preflight.fields.<path> / .preflight.columns.<path>.<column_path>
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
  * translations are for object-less actions. A `globalActions` entry that names
@@ -87,7 +91,7 @@ import { mapFlowNodeList } from '../conversions/walk.js';
 import { flowScreenFieldOptionKey } from '../automation/flow-screen-option-key.js';
 import { pageComponentSlotPositions } from '../ui/component.zod.js';
 import { templateSlotSource } from '../automation/flow-text-slot-template.js';
-import { platformLocaleTagOf } from './platform-locales.js';
+import { PLATFORM_LOCALE_TAGS, platformLocaleTagOf } from './platform-locales.js';
 
 import type {
   PlatformTranslationBundle,
@@ -293,21 +297,35 @@ export interface ActionParamLike {
   [key: string]: unknown;
 }
 
+/**
+ * One row of the fields an action shows from a server answer — the
+ * `{ path, label?, columns? }` row `resultDialog.fields` and
+ * `preflight.fields` share. `columns` is a `format: 'table'` field's cells,
+ * each with its own header `label` (#34652).
+ */
+interface AnswerFieldLike {
+  path: string;
+  label?: string;
+  columns?: Array<{ path: string; label?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
 /** Minimal result-dialog shape consumed by `resolveActionResultDialog`. */
 export interface ResultDialogLike {
   title?: string;
   description?: string;
   acknowledge?: string;
-  fields?: Array<{ path: string; label?: string; [key: string]: unknown }>;
+  fields?: AnswerFieldLike[];
   [key: string]: unknown;
 }
 
 /**
  * Minimal preflight shape consumed by `resolveActionPreflight` — the panel's
- * `fields` rows, the same `{ path, label? }` row `resultDialog.fields` carries.
+ * `fields` rows, the same `{ path, label?, columns? }` row `resultDialog.fields`
+ * carries.
  */
 export interface PreflightLike {
-  fields?: Array<{ path: string; label?: string; [key: string]: unknown }>;
+  fields?: AnswerFieldLike[];
   [key: string]: unknown;
 }
 
@@ -385,9 +403,17 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * layer shipped that rule name, and its `fields` also carry each field a
    * code extender ADDS under a name the owner does not declare, as that
    * extender ships it — the catalog rows for such a field can only translate
-   * what its extender ships. Its scalars and every field the owner declares
+   * what its extender ships, and, where the owner declares `relatedLists`,
+   * those `relatedLists` carry each entry a code extender's list placement
+   * (`place`) splices in, as the fold splices it, so a placed tab's `label`
+   * reads the catalog. Its scalars and every field the owner declares
    * stay the owner's: an extension's `fieldPatches` are never folded in, so a
-   * patched owner field still reads as diverged.
+   * patched owner field still reads as diverged. Whether a placement applies
+   * is judged on the OWNER here and on the served object's base layer (a
+   * tenant overlay's own `relatedLists`, else the owner's) by the fold: where
+   * only a tenant overlay declares `relatedLists`, the served placed tab has
+   * no packaged counterpart, so it reads as authored and the deployment
+   * catalog does not translate its `label`.
    *
    * Supplied by the serving layer, which is the only one that knows it; when
    * it is absent the translators behave exactly as they did before #8284 (the
@@ -419,6 +445,38 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * Absent, every translator answers exactly as it does without it.
    */
   pairBundle?: TranslationBundle;
+  /**
+   * [#33952, ADR-0146 D10] The translations each CODE package that patches
+   * the served object's fields (`objectExtensions[].fieldPatches`) ships
+   * itself, one entry per such package, the one whose patch the served object
+   * carries first:
+   *
+   *  - `patchedBase` — {@link packagedBase} with THAT package's `fieldPatches`
+   *    applied and no other's: the text the package writes on each slot it
+   *    patches;
+   *  - `bundle` — that package's own translations, locale-keyed as `bundle`
+   *    is, its package kept.
+   *
+   * Needed for the reason {@link pairBundle} is: `bundle` is every package's
+   * translations deep-merged with the package ids dropped, so the key a
+   * patching package translates its patch under
+   * (`objects.<object>.fields.<field>.label`) is the key the owner translates
+   * its own text under, and which one the merged catalog holds is load order.
+   * Only {@link translateObject} reads it, and only on a field slot the served
+   * value changed against {@link packagedBase}: when that value is exactly
+   * what an entry's `patchedBase` carries (the one comparison,
+   * {@link scalarOverridesPackagedBase}'s), the slot reads that package's
+   * translations below the pair's ({@link labelCatalogs}' order gains the
+   * middle rank: the pair's translation, then the patching package's, then
+   * the served text). The owner's translation never applies to a patched
+   * slot. A value no entry carries (a tenant's rename) keeps the order
+   * without it.
+   *
+   * Supplied by the serving layer, which reads which package patches what
+   * off the registry; nothing is stamped on the document (ADR-0029 D9.2a).
+   * Absent or empty, every translator answers exactly as it does without it.
+   */
+  patchBundles?: ReadonlyArray<{ readonly patchedBase: unknown; readonly bundle: TranslationBundle }>;
 }
 
 /**
@@ -463,11 +521,21 @@ interface LabelCatalogs {
  *    pair that ships only `en` never displaces the base's `zh-CN` on a string
  *    it left alone.
  *
+ * [#33952] A field slot of an object that a code package's `fieldPatches`
+ * changed sits one rank lower in the same order: the pair's translation, then
+ * that patching package's own ({@link TranslateDocumentOptions.patchBundles},
+ * read by {@link translateObject} through {@link patchCatalogsOf}), then the
+ * served text.
+ *
  * With no `pairBundle` — or one that answers none of the chain's locales — the
  * unchanged catalog IS `bundle` (the same reference) and the changed one is
  * empty, which is exactly what every translator did
  * before the option existed: a changed string keeps its text, an unchanged
  * one reads `bundle`. With no `packagedBase` nothing counts as changed.
+ *
+ * [#36373] For a report `label` / `description` and a widget `title`, an
+ * inline locale map whose entry for the requested locale differs from the
+ * base's also counts as changed ({@link slotRead}).
  */
 function labelCatalogs(
   bundle: TranslationBundle | undefined,
@@ -495,6 +563,36 @@ function labelCatalogs(
 /** The catalog a string is read from: {@link labelCatalogs}' rule, by whether the override changed it. */
 function catalogFor(catalogs: LabelCatalogs, changed: boolean): TranslationBundle | undefined {
   return changed ? catalogs.changed : catalogs.unchanged;
+}
+
+/**
+ * [#33952] One {@link TranslateDocumentOptions.patchBundles} entry, ready to
+ * read: the patching package's base, and the catalog a slot carrying its text
+ * reads — the pair's translations laid over that package's, locale by locale
+ * along the chain, as {@link labelCatalogs} lays the pair over the deployment
+ * catalog (so the pair keeps its first rank, and a pair that ships only `en`
+ * never displaces the package's `zh-CN`).
+ */
+interface PatchCatalog {
+  readonly base: Record<string, unknown>;
+  readonly catalog: TranslationBundle | undefined;
+}
+
+/**
+ * The {@link PatchCatalog}s of `opts`, in its order. An entry with no object
+ * base is dropped: with no base, nothing can show that a slot carries its
+ * package's text.
+ */
+function patchCatalogsOf(opts: TranslateDocumentOptions | undefined): readonly PatchCatalog[] {
+  const sources = opts?.patchBundles;
+  if (!Array.isArray(sources) || sources.length === 0) return [];
+  const out: PatchCatalog[] = [];
+  for (const source of sources) {
+    const base = asRecord(source?.patchedBase);
+    if (base === undefined) continue;
+    out.push({ base, catalog: labelCatalogs(source.bundle, opts).unchanged });
+  }
+  return out;
 }
 
 /**
@@ -915,13 +1013,42 @@ export function resolveActionConfirm(
  * Look up the translated `resultDialog` node for an action in a single
  * locale's data, at the action's one address ({@link actionTranslationNode}).
  * The node's `fields` record is keyed by the LITERAL result-field path
- * (`"user.email"`), so it is indexed directly — never split on `.`.
+ * (`"user.email"`), and its `columns` record by that path and then the
+ * column's literal path, so both are indexed directly — never split on `.`.
  */
 function lookupActionResultDialogNode(
   data: TranslationData | undefined,
   action: ActionLike,
-): { title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> } | undefined {
+):
+  | {
+      title?: string;
+      description?: string;
+      acknowledge?: string;
+      fields?: Record<string, string>;
+      columns?: Record<string, Record<string, string>>;
+    }
+  | undefined {
   return actionTranslationNode(data, action)?.resultDialog;
+}
+
+/**
+ * [#34652] Overlay a `format: 'table'` field's column header labels, each
+ * looked up by the column's literal `path` through `lookup` (which walks the
+ * locale chain). A column with no translated string keeps its authored
+ * `label` — an inline per-locale map included — and a field that declares no
+ * `columns` is answered as the same reference.
+ */
+function overlayAnswerColumnLabels<F extends AnswerFieldLike>(
+  field: F,
+  lookup: (columnPath: string) => string | undefined,
+): F {
+  if (!Array.isArray(field.columns)) return field;
+  const columns = field.columns.map((column) => {
+    if (!column || typeof column.path !== 'string') return column;
+    const label = lookup(column.path);
+    return label !== undefined ? { ...column, label } : column;
+  });
+  return { ...field, columns };
 }
 
 function lookupActionResultDialogText(
@@ -942,10 +1069,12 @@ function lookupActionResultDialogText(
 
 /**
  * Resolve a translated copy of an action's `resultDialog`, overlaying
- * `title` / `description` / `acknowledge` and per-field `label`s (keyed by
- * the literal field path) when translations exist. Returns the original
- * spec untouched (same reference) when the action has no `resultDialog`;
- * otherwise a shallow copy with translated strings merged in.
+ * `title` / `description` / `acknowledge`, per-field `label`s (keyed by
+ * the literal field path) and a table field's column header `label`s (from
+ * `resultDialog.columns.<path>.<column_path>`, #34652) when translations
+ * exist. Returns the original spec untouched (same reference) when the action
+ * has no `resultDialog`; otherwise a shallow copy with translated strings
+ * merged in.
  */
 export function resolveActionResultDialog<T extends ResultDialogLike>(
   bundle: TranslationBundle | undefined,
@@ -965,7 +1094,10 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
         const label =
           lookupActionResultDialogText(bundle, action, (n) => n.fields?.[field.path], opts) ??
           field.label;
-        return label !== undefined ? { ...field, label } : field;
+        const withColumns = overlayAnswerColumnLabels(field, (columnPath) =>
+          lookupActionResultDialogText(bundle, action, (n) => n.columns?.[field.path]?.[columnPath], opts),
+        );
+        return label !== undefined ? { ...withColumns, label } : withColumns;
       })
     : spec.fields;
   return {
@@ -980,8 +1112,10 @@ export function resolveActionResultDialog<T extends ResultDialogLike>(
 /**
  * Resolve a translated copy of an action's `preflight`, overlaying each
  * declared field's `label` from `…preflight.fields.<path>` (keyed by the
- * literal field path, indexed directly and never split on `.`), exactly as
- * {@link resolveActionResultDialog} overlays `resultDialog.fields`. Returns the
+ * literal field path, indexed directly and never split on `.`) and a table
+ * field's column header labels from `…preflight.columns.<path>.<column_path>`,
+ * exactly as {@link resolveActionResultDialog} overlays `resultDialog.fields`
+ * and `resultDialog.columns`. Returns the
  * original spec untouched (same reference) when the action has no `preflight`
  * or it declares no `fields` — the panel then shows the answer as JSON and
  * reads no label; otherwise a shallow copy with translated labels merged in.
@@ -995,21 +1129,27 @@ export function resolveActionPreflight<T extends PreflightLike>(
   if (!spec || !Array.isArray(spec.fields)) return spec;
   const fields = spec.fields.map((field) => {
     if (!field || typeof field.path !== 'string') return field;
-    const label = lookupActionPreflightFieldLabel(bundle, action, field.path, opts) ?? field.label;
-    return label !== undefined ? { ...field, label } : field;
+    const label =
+      lookupActionPreflightText(bundle, action, (n) => n.fields?.[field.path], opts) ?? field.label;
+    const withColumns = overlayAnswerColumnLabels(field, (columnPath) =>
+      lookupActionPreflightText(bundle, action, (n) => n.columns?.[field.path]?.[columnPath], opts),
+    );
+    return label !== undefined ? { ...withColumns, label } : withColumns;
   });
   return { ...spec, fields };
 }
 
-function lookupActionPreflightFieldLabel(
+function lookupActionPreflightText(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  path: string,
+  pick: (node: NonNullable<NonNullable<ReturnType<typeof actionTranslationNode>>['preflight']>) => string | undefined,
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
   for (const code of localeChain(opts)) {
-    const value = actionTranslationNode(pickData(bundle, code), action)?.preflight?.fields?.[path];
+    const node = actionTranslationNode(pickData(bundle, code), action)?.preflight;
+    if (!node) continue;
+    const value = pick(node);
     if (typeof value === 'string' && value.length > 0) return value;
   }
   return undefined;
@@ -1919,6 +2059,10 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   // its sidebar from `GET /meta/book`, and the tree route translates the book
   // it resolves through this same table (`createMetaBookTreeAnswer`).
   book: translateBook,
+  // A named import mapping's label: the console's import wizard offers each
+  // mapping by label from `GET /meta/mapping`, so registering here is the
+  // whole wiring.
+  mapping: translateMapping,
 };
 
 /**
@@ -2408,6 +2552,10 @@ function lookupWidgetAttr(
  * does not carry was authored after the fact and counts as diverged (the
  * object rule's "a base that declares no such scalar"). No base supplied is
  * the pre-#20680 behaviour, unchanged: the catalog applies.
+ *
+ * [#36373] A widget `title` written as an inline locale map whose entry for
+ * the requested locale differs from the base's counts as changed too
+ * ({@link slotRead}), so the base's translation never replaces it.
  */
 export function translateDashboard<T extends DashboardLike>(
   doc: T,
@@ -2450,10 +2598,12 @@ export function translateDashboard<T extends DashboardLike>(
         if (!w || typeof w !== 'object' || typeof w.id !== 'string') return w;
         const next: WidgetLike = { ...w };
         const packagedWidget = packagedPart(base, 'widgets', (candidate) => candidate.id === w.id);
-        const title = lookupWidgetAttr(
-          catalogFor(catalogs, valueOverridesPackagedBase(packagedWidget, 'title', w.title)),
-          name, w.id, 'title', opts,
-        );
+        // A widget title's inline entry for the requested locale, where it is
+        // the customer's text, counts as changed (`translateReport`'s rule):
+        // the pair's translation for that locale still answers first, the
+        // base's never.
+        const titleRead = slotRead(catalogs, packagedWidget, 'title', w.title, opts);
+        const title = lookupWidgetAttr(titleRead.bundle, name, w.id, 'title', titleRead.opts);
         if (title) next.title = title;
         const desc = lookupWidgetAttr(
           catalogFor(catalogs, valueOverridesPackagedBase(packagedWidget, 'description', w.description)),
@@ -2854,6 +3004,70 @@ export function translateBook<T extends BookLike>(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Import mapping resolver (label)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal import-mapping shape consumed by {@link translateMapping}. */
+export interface MappingLike {
+  name: string;
+  label?: string;
+  [key: string]: any;
+}
+
+function lookupMappingLabel(
+  bundle: TranslationBundle | undefined,
+  mappingName: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.mappings?.[mappingName]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Apply the active locale to an import-mapping metadata document — its
+ * `label` against `mappings.<name>.label`. The input document is not mutated;
+ * it comes back as the same reference when the bundle carries no label for
+ * it, and then the authored label stands.
+ *
+ * Registered in {@link METADATA_DOCUMENT_TRANSLATORS}, so the REST boundary
+ * localizes every served mapping (`GET /meta/mapping`, list and item) — the
+ * list the console's import wizard offers by name in its saved-mapping
+ * selector. A mapping's `fieldMapping` is not copy (column names and field
+ * names) and is left alone.
+ *
+ * ## An override's own label — ADR-0146 D2
+ *
+ * A mapping is overridable from its base's paired `.custom` package, and the
+ * catalog translates the BASE's label. So the label follows
+ * {@link labelCatalogs}' order, judged against
+ * {@link TranslateDocumentOptions.packagedBase} by
+ * {@link valueOverridesPackagedBase}: a label the override changed reads only
+ * the pair's translations and otherwise keeps its own text; a label it left
+ * alone takes the pair's translation, then the base's. No base supplied: the
+ * catalog applies.
+ */
+export function translateMapping<T extends MappingLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: TranslateDocumentOptions,
+): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const mappingName = doc.name;
+  const catalogs = labelCatalogs(bundle, opts);
+  if (typeof mappingName !== 'string' || mappingName.length === 0 || !catalogs.unchanged) return doc;
+  const base = asRecord(opts?.packagedBase);
+  const label = lookupMappingLabel(
+    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), mappingName, opts,
+  );
+  if (label === undefined) return doc;
+  return { ...doc, label };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Report metadata resolver (label + description)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -2973,7 +3187,12 @@ function translateReportBlocks(
  *
  * `label` and `description` are `I18nLabelSchema` at the authoring site, so
  * either may be an inline locale map; a key the bundle does not carry leaves
- * that map intact rather than flattening it to one language.
+ * that map intact rather than flattening it to one language. [#36373] A map
+ * whose entry for the requested locale differs from the base's counts as
+ * changed, as a re-authored string does ({@link slotRead}): the pair's
+ * translation for that locale still answers first, the base's translation
+ * never, and with neither the reader shows that entry. With no packaged base nothing counts
+ * as changed, so the bundle answers ahead of the entry.
  */
 export function translateReport<T extends ReportLike>(
   doc: T,
@@ -2986,12 +3205,16 @@ export function translateReport<T extends ReportLike>(
   if (typeof name !== 'string' || name.length === 0 || !catalogs.unchanged) return doc;
 
   const base = asRecord(opts?.packagedBase);
-  const label = lookupReportAttr(
-    catalogFor(catalogs, valueOverridesPackagedBase(base, 'label', doc.label)), name, 'label', opts,
-  );
-  const description = lookupReportAttr(
-    catalogFor(catalogs, valueOverridesPackagedBase(base, 'description', doc.description)), name, 'description', opts,
-  );
+  // An inline map's own entry for the requested locale, where it is the
+  // customer's text, counts as changed ({@link slotRead}): the slot reads the
+  // pair's translation for that locale only, so a translation the paired
+  // `.custom` package ships for it still answers first (ruling record
+  // 6631250894, rank 1) and the base's translation never does. No pair answer
+  // for that locale leaves the map as served, and the reader picks that entry.
+  const labelRead = slotRead(catalogs, base, 'label', doc.label, opts);
+  const label = lookupReportAttr(labelRead.bundle, name, 'label', labelRead.opts);
+  const descriptionRead = slotRead(catalogs, base, 'description', doc.description, opts);
+  const description = lookupReportAttr(descriptionRead.bundle, name, 'description', descriptionRead.opts);
   const blocks = translateReportBlocks(doc.blocks, catalogs, name, base, opts);
   if (label === undefined && description === undefined && blocks === undefined) return doc;
   return {
@@ -4461,6 +4684,62 @@ export function hookTextMessageKey(hookName: string, key: string): string {
 }
 
 /**
+ * Dot-notation i18n key for an action's declared refusal message (#34273,
+ * `ActionSchema.refusals`) — the action twin of {@link hookRefusalMessageKey},
+ * at the address every action translation is read at
+ * ({@link actionTranslationNode}):
+ *
+ *  - a bound action: `objects.<object>._actions.<action>.refusals.<CODE>.message`;
+ *  - an object-less action: `globalActions.<action>.refusals.<CODE>.message`;
+ *
+ * and, given a declared reason under the code,
+ * `….refusals.<CODE>.reasons.<REASON>.message`.
+ *
+ * Used by the action body runner, which answers a throw of a declared code
+ * with this translation in the caller's locale (`ExecutionContext.locale`),
+ * the declared sentence on a miss. `objectName` is the action's OWN object —
+ * `objectName` on its declaration, or the object that declares it inline —
+ * never the object a caller routed it under, so a bound action never reads
+ * `globalActions` and an object-less one never reads an object's group.
+ */
+export function actionRefusalMessageKey(
+  objectName: string | undefined,
+  actionName: string,
+  code: string,
+  reason?: string,
+): string {
+  const node = actionTranslationNodeKey(objectName, actionName);
+  return reason === undefined
+    ? `${node}.refusals.${code}.message`
+    : `${node}.refusals.${code}.reasons.${reason}.message`;
+}
+
+/**
+ * Dot-notation i18n key for an action's declared text (#34374 PR2, ruling
+ * 6913660232 parameter 7, `ActionSchema.texts`) — the action twin of
+ * {@link hookTextMessageKey}, at the address every action translation is read
+ * at, beside the action's refusals:
+ *
+ *  - a bound action: `objects.<object>._actions.<action>.texts.<key>.message`;
+ *  - an object-less action: `globalActions.<action>.texts.<key>.message`.
+ *
+ * Used by the action body runner, which answers `ctx.text(key, params)` with
+ * this translation in the ORGANIZATION's language (never the caller's), the
+ * declared sentence on a miss, and fills its holes after. `objectName` is the
+ * action's OWN object, as for {@link actionRefusalMessageKey}.
+ */
+export function actionTextMessageKey(objectName: string | undefined, actionName: string, key: string): string {
+  return `${actionTranslationNodeKey(objectName, actionName)}.texts.${key}.message`;
+}
+
+/** The translation node of an action: `objects.<object>._actions.<action>`, or `globalActions.<action>` with no object. */
+function actionTranslationNodeKey(objectName: string | undefined, actionName: string): string {
+  return typeof objectName === 'string' && objectName.length > 0
+    ? `objects.${objectName}._actions.${actionName}`
+    : `globalActions.${actionName}`;
+}
+
+/**
  * Dot-notation i18n key for a screen's heading or body text —
  * `flows.<flow>.screens.<node_id>.title` / `.description` (#22507).
  *
@@ -4701,6 +4980,142 @@ function valueOverridesPackagedBase(base: unknown, key: string, value: unknown):
 }
 
 /**
+ * The entry of an inline locale map that belongs to the REQUESTED locale: the
+ * entry the console's writer (`localeWriteKey` beside `pickLocalized` in
+ * `ui/packages/i18n/src/pickLocalized.ts`) replaces for an edit made in that
+ * locale, so the entry an edit lands in is the entry this gate asks about.
+ *
+ *  1. the exact tag;
+ *  2. where the platform table splits the base language by script (`zh` into
+ *     `zh-Hans` and `zh-Hant`): the bare base, then the first sibling, that
+ *     mean the locale's own script ({@link platformLocaleTagOf}), and nothing
+ *     else, so a `zh-TW` request never takes a Simplified `zh` or `zh-CN`
+ *     entry for its own;
+ *  3. otherwise the bare base (`pt` for `pt-BR`), then the first sibling
+ *     sharing it, in key order.
+ *
+ * Own string properties only, and never an empty one. ⛔ Never `default` and
+ * never an entry of another script: those are display fallbacks for a locale
+ * the map has no entry for, and are no statement about the requested locale.
+ */
+function inlineEntryFor(value: unknown, locale: string | undefined): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const lang = (locale ?? '').trim();
+  if (!lang) return undefined;
+  const map = value as Record<string, unknown>;
+  const usable = (key: string): boolean =>
+    Object.prototype.hasOwnProperty.call(map, key) && typeof map[key] === 'string' && (map[key] as string).length > 0;
+  const key = inlineEntryKeyFor(lang, usable, Object.keys(map));
+  return key === undefined ? undefined : (map[key] as string);
+}
+
+/** {@link inlineEntryFor}'s selection, as a key. */
+function inlineEntryKeyFor(
+  lang: string,
+  usable: (key: string) => boolean,
+  keys: readonly string[],
+): string | undefined {
+  if (usable(lang)) return lang;
+  const base = lang.split('-')[0];
+  const siblings = keys.filter((k) => k.split('-')[0] === base && usable(k));
+  const script = platformLocaleTagOf(lang);
+  const splitsByScript =
+    script !== undefined && PLATFORM_LOCALE_TAGS.filter((t) => t.split('-')[0] === script.split('-')[0]).length > 1;
+  if (splitsByScript) {
+    if (usable(base) && platformLocaleTagOf(base) === script) return base;
+    return siblings.find((k) => platformLocaleTagOf(k) === script);
+  }
+  if (usable(base)) return base;
+  return siblings[0];
+}
+
+/**
+ * Whether an inline locale map's entry for the requested locale is a
+ * customer's own text that the BASE's translation must not replace — the
+ * map-valued twin of {@link valueOverridesPackagedBase}, which answers the
+ * same question for a plain string (`false` for any map). A separate function,
+ * not a second limb of that one: the exported {@link scalarOverridesPackagedBase}
+ * and the object fold that imports it compare strings only, and stay so.
+ *
+ * `true` only when the map carries an entry for the requested locale
+ * ({@link inlineEntryFor}) AND that entry differs from the packaged base's own
+ * entry for the locale: a map equal to the package's own map changes nothing,
+ * so a package that ships inline maps keeps reading its bundle exactly as
+ * before. No packaged base supplied: `false`, as the string rule answers. A
+ * locale the map has no entry for keeps reading the catalog, so a third
+ * language still reads its bundle translation, never another locale's entry.
+ *
+ * Read through {@link slotRead} by {@link translateReport} (name,
+ * description) and {@link translateDashboard} (a widget's title), the label
+ * slots the console's report and dashboard panels edit in the current
+ * language.
+ */
+function inlineEntryOverridesPackagedBase(
+  base: unknown,
+  key: string,
+  value: unknown,
+  locale: string | undefined,
+): boolean {
+  if (!base || typeof base !== 'object') return false;
+  const entry = inlineEntryFor(value, locale);
+  if (entry === undefined) return false;
+  return inlineEntryFor((base as Record<string, unknown>)[key], locale) !== entry;
+}
+
+/**
+ * [#36373] What a report `label` / `description` or a widget `title` is read
+ * from, and along which locales:
+ *
+ *  - a plain string the override changed ({@link valueOverridesPackagedBase}):
+ *    the pair's own translations along the whole locale chain, as every
+ *    changed string reads ({@link catalogFor}); the override's text has no
+ *    locale, so any translation of it is a better answer;
+ *  - an inline map whose entry for the requested locale is the customer's own
+ *    ({@link inlineEntryOverridesPackagedBase}): the pair's translation for
+ *    the REQUESTED language only (the same tag, case aside, or another
+ *    spelling of the same platform-table tag), with no fallback chain and no
+ *    regional variant of another script. The map states its text for that locale,
+ *    so a pair translation for another one (`en` down the chain, `zh-TW` for
+ *    a `zh-CN` request) is no better answer than it. Rank 1 of ruling record
+ *    6631250894 is kept for the locale it speaks about; the base's
+ *    translation never answers;
+ *  - otherwise: the unchanged catalog, as before.
+ */
+function slotRead(
+  catalogs: LabelCatalogs,
+  base: unknown,
+  key: string,
+  value: unknown,
+  opts: TranslateDocumentOptions | undefined,
+): { bundle: TranslationBundle | undefined; opts: TranslateDocumentOptions | undefined } {
+  if (valueOverridesPackagedBase(base, key, value)) return { bundle: catalogs.changed, opts };
+  if (!inlineEntryOverridesPackagedBase(base, key, value, opts?.locale)) return { bundle: catalogs.unchanged, opts };
+  const locale = (opts?.locale ?? '').trim();
+  const pair = catalogs.changed;
+  const own = pair && locale ? samelanguagePairKey(Object.keys(pair), locale) : undefined;
+  return {
+    bundle: own === undefined ? undefined : ({ [locale]: pair![own] } as TranslationBundle),
+    opts: { ...opts, locale, fallbackChain: [] },
+  };
+}
+
+/**
+ * The key of a pair bundle that holds the REQUESTED language, for
+ * {@link slotRead}: the same tag (case aside), else a key that names the same
+ * platform-table tag ({@link platformLocaleTagOf}: a `zh-CN` request reads a
+ * row stored under `zh-Hans`, `ja-JP` one under `ja`). It stops there, before
+ * the base-language and regional-variant steps of `pickData`, so a `zh-TW`
+ * key never answers a `zh-CN` request.
+ */
+function samelanguagePairKey(keys: readonly string[], locale: string): string | undefined {
+  const folded = locale.toLowerCase();
+  const exact = keys.find((code) => code.toLowerCase() === folded);
+  if (exact !== undefined) return exact;
+  const tag = platformLocaleTagOf(locale);
+  return tag === undefined ? undefined : keys.find((code) => platformLocaleTagOf(code) === tag);
+}
+
+/**
  * Whether a field authors help text on `inlineHelpText` — a non-empty string,
  * as the i18n extractor and the console's `inlineHelpText || description`
  * read it (`''` is absent). {@link translateObject} asks it of the served
@@ -4885,6 +5300,90 @@ function translateObjectValidations(
 }
 
 /**
+ * `objects.<object>._relatedLists.<list>.label` along the locale chain, the
+ * `list` indexed directly (a dotted `object.field` is one key, never split);
+ * `undefined` when no locale of the chain carries a non-empty entry.
+ */
+function lookupRelatedListLabel(
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  list: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.objects?.[objectName]?._relatedLists?.[list]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay `objects.<object>._relatedLists.<list>.label` onto the `label` of
+ * each object-form entry of an object document's `relatedLists` — the record
+ * page's tab title and table heading for that list — returning the SAME array
+ * reference when nothing matched, so {@link translateObject} can leave
+ * `relatedLists` off its copy.
+ *
+ * ## The entry's own label, and nothing in its place
+ *
+ * Only an entry that AUTHORS a non-empty `label` is translated. A bare-string
+ * entry, a built-in tab and an object entry with no `label` keep exactly what
+ * they serve without a bundle: the console then titles the list from the child
+ * FK's `relatedListTitle` (translated on the child, see {@link translateObject})
+ * or the child object's plural label. A bundle translates an attribute and
+ * never swaps another in, the rule the field-level `inlineTitle` and
+ * `relatedListTitle` overlays follow.
+ *
+ * The address is keyed by the PARENT (the object that declares the entry) and
+ * the entry's literal `list` value, `object.field` included as one key. Each
+ * locale of the chain is asked in order, as `_tabs` is.
+ *
+ * ## The catalog loses to an explicit override — ADR-0029 D9.2a
+ *
+ * The catalog translates the PACKAGED entry, so the label is judged by
+ * {@link valueOverridesPackagedBase} (⛔ never a second comparison) against the
+ * entry naming the same `list` in {@link TranslateDocumentOptions.packagedBase}'s
+ * `relatedLists`. An entry the base does not carry was authored after the fact
+ * and its label counts as diverged; no base supplied means nothing is inferred
+ * and the catalog applies — {@link translateObjectListViews}' edges, unchanged.
+ */
+function translateObjectRelatedLists(
+  relatedLists: unknown,
+  catalogs: LabelCatalogs,
+  objectName: string,
+  opts: TranslateDocumentOptions | undefined,
+): unknown {
+  if (!Array.isArray(relatedLists) || !catalogs.unchanged) return relatedLists;
+  const base = asRecord(opts?.packagedBase);
+  // The base's own object-form entries — `[]` when the base is known but
+  // declares none, so every labelled entry on the served document then counts
+  // as authored.
+  const packagedEntries = base === undefined
+    ? undefined
+    : (Array.isArray(base.relatedLists) ? base.relatedLists : []).map(asRecord);
+  let changed = false;
+  const next = relatedLists.map((raw) => {
+    const entry = asRecord(raw);
+    if (entry === undefined) return raw;
+    const list = entry.list;
+    if (typeof list !== 'string' || list.length === 0) return raw;
+    if (typeof entry.label !== 'string' || entry.label.length === 0) return raw;
+    const packagedEntry = packagedEntries === undefined
+      ? undefined
+      : packagedEntries.find((candidate) => candidate?.list === list) ?? {};
+    const translated = lookupRelatedListLabel(
+      catalogFor(catalogs, valueOverridesPackagedBase(packagedEntry, 'label', entry.label)),
+      objectName, list, opts,
+    );
+    if (translated === undefined || translated === entry.label) return raw;
+    changed = true;
+    return { ...entry, label: translated };
+  });
+  return changed ? next : relatedLists;
+}
+
+/**
  * The packaged object's validation rules by `name`, each `conditional` branch
  * under its own name to {@link MAX_VALIDATION_DEPTH}, for
  * {@link translateObjectValidations}' divergence test — empty when no base is
@@ -4973,6 +5472,15 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * {@link TranslateDocumentOptions.packagedBase} — so this is a field a tenant
  * overlay or a tenant-provenance extension authored); the
  * built-in system-field labels apply only where the catalog may.
+ *
+ * [#33952] A changed field slot is not left to its served text alone when a
+ * code package's `fieldPatches` wrote it: if the served value is exactly what
+ * one entry of {@link TranslateDocumentOptions.patchBundles} writes on that
+ * slot (the field's `label`, its help slot, an option's `label`, judged by the
+ * same comparison against that entry's `patchedBase`), the slot reads that
+ * package's own translations, under the pair's. The deployment catalog still
+ * never applies there: its row under the same key may be the owner's
+ * translation of the text the patch replaced.
  * The embedded `listViews` follow the VIEW translator's
  * application of the same rule (ADR-0029 D9.2a, as {@link translateView}
  * applies it), judged per view against the packaged object's own `listViews` —
@@ -5040,6 +5548,14 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * related list (side card or full-width table) from the served child field.
  * An authored title with no entry keeps its text; the child's label is never
  * swapped in for it.
+ *
+ * ## A `relatedLists` entry's `label` — the title the parent declares
+ *
+ * `objects.<object>._relatedLists.<list>.label` overlays the `label` of the
+ * object-form `relatedLists` entry naming `<list>` on THIS object, the parent:
+ * that label wins over the child FK's `relatedListTitle` on the record page,
+ * and the console reads it off the served parent. Only an authored label is
+ * translated — see {@link translateObjectRelatedLists}.
  */
 export function translateObject<T extends ObjectLike>(
   doc: T,
@@ -5070,22 +5586,42 @@ export function translateObject<T extends ObjectLike>(
   const pluralLabel = resolveScalar('pluralLabel', doc.pluralLabel);
   const description = resolveScalar('description', doc.description);
   const packagedObject = asRecord(opts?.packagedBase);
+  const patchCatalogs = patchCatalogsOf(opts);
 
   const translateField = (name: string, def: ObjectFieldLike): ObjectFieldLike => {
     const next: ObjectFieldLike = { ...def };
     const packagedField = packagedObjectField(packagedObject, name);
-    // Each slot reads the catalog `labelCatalogs` assigns by whether its
-    // served value diverged from the packaged field's (ADR-0029 D9.2a,
-    // ADR-0146 D2; see the docblock).
+    // [#33952] The same field as each patching package writes it.
+    const patchedFields = patchCatalogs.map((patch) => packagedObjectField(patch.base, name));
+    // The catalog one slot reads, by whether its served value diverged from
+    // its packaged counterpart (ADR-0029 D9.2a, ADR-0146 D2; see the
+    // docblock): unchanged, the deployment catalog under the pair's; changed,
+    // the catalog of the first patching package whose patch wrote exactly
+    // that value (the pair's over that package's, #33952), else the pair's
+    // alone. `patched(field)` finds the slot's owner in one patching
+    // package's field, as `packaged` was found in the packaged field.
+    const partCatalog = (
+      packaged: unknown,
+      patched: (field: Record<string, unknown> | undefined) => unknown,
+      slot: string,
+      value: unknown,
+    ): TranslationBundle | undefined => {
+      if (!valueOverridesPackagedBase(packaged, slot, value)) return catalogs.unchanged;
+      for (let index = 0; index < patchCatalogs.length; index += 1) {
+        const part = patched(patchedFields[index]);
+        if (part !== undefined && !valueOverridesPackagedBase(part, slot, value)) return patchCatalogs[index].catalog;
+      }
+      return catalogs.changed;
+    };
     const slotCatalog = (slot: string, value: unknown): TranslationBundle | undefined =>
-      catalogFor(catalogs, valueOverridesPackagedBase(packagedField, slot, value));
+      partCatalog(packagedField, (field) => field, slot, value);
     // The field `label`: a value that diverged from the packaged field's — an
     // extension's `fieldPatches` label, a tenant's rename — reads only the
-    // pair's catalog, and the built-in system-field labels apply only where
-    // the deployment catalog may.
+    // catalog `slotCatalog` assigns a changed slot, and the built-in
+    // system-field labels apply only where the deployment catalog may.
     const labelChanged = valueOverridesPackagedBase(packagedField, 'label', def.label);
     const translatedLabel = labelChanged
-      ? lookupObjectFieldAttr(catalogs.changed, objectName, name, 'label', opts)
+      ? lookupObjectFieldAttr(slotCatalog('label', def.label), objectName, name, 'label', opts)
       : lookupObjectFieldAttr(catalogs.unchanged, objectName, name, 'label', opts) ??
         builtinSystemFieldLabel(name, def.label, opts);
     if (translatedLabel) next.label = translatedLabel;
@@ -5135,12 +5671,15 @@ export function translateObject<T extends ObjectLike>(
       const packagedOptionsOwner = picklist === undefined ? packagedField : undefined;
       next.options = def.options.map((opt) => {
         if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
-        const packagedOption = packagedPart(
-          packagedOptionsOwner,
-          'options',
-          (candidate) => isOptionValue(candidate.value) && String(candidate.value) === String(opt.value),
+        const sameValue = (candidate: Record<string, any>): boolean =>
+          isOptionValue(candidate.value) && String(candidate.value) === String(opt.value);
+        const packagedOption = packagedPart(packagedOptionsOwner, 'options', sameValue);
+        const catalog = partCatalog(
+          packagedOption,
+          (field) => (picklist === undefined ? packagedPart(field, 'options', sameValue) : undefined),
+          'label',
+          opt.label,
         );
-        const catalog = catalogFor(catalogs, valueOverridesPackagedBase(packagedOption, 'label', opt.label));
         const translated =
           lookupObjectFieldOption(catalog, objectName, name, opt.value, opts) ??
           (picklist !== undefined ? lookupPicklistOption(catalog, picklist, opt.value, opts) : undefined);
@@ -5181,6 +5720,8 @@ export function translateObject<T extends ObjectLike>(
   const listViews = translateObjectListViews(doc.listViews, catalogs, objectName, opts);
   const authoredValidations = (doc as { validations?: unknown }).validations;
   const validations = translateObjectValidations(authoredValidations, bundle, objectName, opts);
+  const authoredRelatedLists = (doc as { relatedLists?: unknown }).relatedLists;
+  const relatedLists = translateObjectRelatedLists(authoredRelatedLists, catalogs, objectName, opts);
 
   return {
     ...doc,
@@ -5191,6 +5732,7 @@ export function translateObject<T extends ObjectLike>(
     ...(actions !== undefined ? { actions } : {}),
     ...(listViews !== doc.listViews ? { listViews } : {}),
     ...(validations !== authoredValidations ? { validations } : {}),
+    ...(relatedLists !== authoredRelatedLists ? { relatedLists } : {}),
   };
 }
 
@@ -6260,6 +6802,50 @@ export function resolveFlowScreenTitle(
     return literal;
   }
   return lookupFlowScreenCopy(bundle, flowName, screen.nodeId, opts)?.title ?? literal;
+}
+
+/**
+ * [#35384] Resolve an approval step's label against
+ * `flows.<flow_name>.approvals.<node_id>.label` — the `approvals` group's one
+ * key, which overlays the `approval` node's own `FlowNode.label` (the step
+ * name an approval request snapshots as `current_step_label`) — falling back
+ * to `literal`, and to `undefined` when none is given: the same
+ * bundle-then-literal order {@link resolveFlowScreenTitle} follows, across the
+ * same locale chain ({@link ResolveOptions}: the requested locale, then the
+ * DECLARED fallback chain, unless the requested locale is the authored one).
+ *
+ * Takes the flow's name and the node's id, not a flow document, because its
+ * reader holds no document: an approval request row carries the flow's name
+ * (`process_name` without its `flow:` prefix) and the node's id
+ * (`current_step`), and a list read must not read a flow per row. A caller
+ * holding a document passes the node's authored `label` as `literal`.
+ *
+ * Every depth: the key is addressed by `FlowNode.id` alone, so an approval
+ * node inside an ADR-0031 region resolves like a top-level one.
+ *
+ * ⛔ Not folded into {@link translateFlow}: that translator leaves every
+ * node's `label` alone (the Studio canvas draws it), and its document readers
+ * hand it a name-and-label stub, so a node overlay there would reach no
+ * reader of this key.
+ */
+export function resolveFlowApprovalStepLabel(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  nodeId: string,
+  literal?: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle || !flowName || typeof nodeId !== 'string' || nodeId.length === 0) return literal;
+  for (const code of localeChain(opts)) {
+    const entry = pickData(bundle, code)?.flows?.[flowName]?.approvals;
+    if (!entry || typeof entry !== 'object') continue;
+    // Own keys only: a node id that reads as `toString` must not resolve to
+    // the map's prototype member.
+    if (!Object.prototype.hasOwnProperty.call(entry, nodeId)) continue;
+    const candidate = (entry as Record<string, { label?: unknown } | undefined>)[nodeId]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return literal;
 }
 
 /**

@@ -97,19 +97,25 @@ interface Reading {
   sha256: string;
 }
 
-/** Measured at `98d4108a2` through `measure()` below. See the header. */
+/**
+ * Measured at `98d4108a2` through `measure()` below. See the header. The
+ * gradient defs scale with the default palette (two `linearGradient`s per
+ * entry): re-measured through the same `measure()` when the theme palette grew
+ * from five to ten `--chart-N` tokens, which added 10 gradients, 20 stops and
+ * 30 elements per fixture and left the text hash unchanged.
+ */
 const PRE_REPAIR: Record<(typeof NAMES)[number], Reading> = {
   'advanced-line-chart': {
-    elements: 136,
-    tags: { DIV: 9, STYLE: 1, svg: 1, title: 1, desc: 1, g: 48, line: 5, defs: 2, clipPath: 1, rect: 1, linearGradient: 14, stop: 28, path: 2, text: 11, tspan: 11 },
+    elements: 166,
+    tags: { DIV: 9, STYLE: 1, svg: 1, title: 1, desc: 1, g: 48, line: 5, defs: 2, clipPath: 1, rect: 1, linearGradient: 24, stop: 48, path: 2, text: 11, tspan: 11 },
     lines: 2,
     areas: 0,
     xTicks: 6,
     sha256: 'dd56a5f8c25242bb737db18308f2952c3f5dabbe1dcb6eb9e0b71cdb3a3bbccd',
   },
   'area-chart': {
-    elements: 127,
-    tags: { DIV: 7, STYLE: 1, svg: 1, title: 1, desc: 1, g: 47, line: 5, defs: 2, clipPath: 1, rect: 1, linearGradient: 12, stop: 24, path: 2, text: 11, tspan: 11 },
+    elements: 157,
+    tags: { DIV: 7, STYLE: 1, svg: 1, title: 1, desc: 1, g: 47, line: 5, defs: 2, clipPath: 1, rect: 1, linearGradient: 22, stop: 44, path: 2, text: 11, tspan: 11 },
     lines: 0,
     areas: 1,
     xTicks: 6,

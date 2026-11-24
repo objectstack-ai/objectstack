@@ -22,6 +22,9 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { signUpEmail } from 'better-auth/api';
 import { AuthManager } from './auth-manager.js';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 import { authIdentityObjects } from './manifest.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { createCopyInvitationLinkHandler } from './invitation-link-action.js';
@@ -119,6 +122,18 @@ async function rows(engine: ObjectQL, object: string, where: Record<string, unkn
   return (Array.isArray(found) ? found : []) as Array<Record<string, unknown>>;
 }
 
+/**
+ * Mark an address verified, as completing the verification mail does.
+ * Accepting, reading or listing an invitation needs a verified address
+ * (`invitation-acceptance-verified-address.test.ts` holds that rule at every
+ * door); the presented id admits the sign-up only.
+ */
+async function verifyAddress(engine: ObjectQL, email: string) {
+  const [user] = await rows(engine, 'sys_user', { email });
+  expect(user, `no account for ${email}`).toBeDefined();
+  await engine.update('sys_user', { id: user.id, email_verified: true } as never, SYSTEM);
+}
+
 /** Status, code and message of a refusal, in either envelope. */
 async function verdict(res: Response): Promise<{ status: number; code?: unknown; message?: unknown }> {
   const body = (await res.clone().json().catch(() => ({}))) as {
@@ -152,7 +167,7 @@ async function deployment(config: Record<string, unknown> = {}) {
 }
 
 describe('under invite_only, a self-serve sign-up is admitted only by the invitation it presents', () => {
-  it('admits the sign-up that presents its invitation, and the invitee accepts it with the invited role', async () => {
+  it('admits the sign-up that presents its invitation, and the invitee, once verified, accepts it with the invited role', async () => {
     const d = await deployment();
     const invitationId = await d.invite(INVITEE, 'admin');
 
@@ -163,6 +178,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     // The presented id never becomes a column of the account.
     expect(Object.keys(invitee)).not.toContain(SIGN_UP_INVITATION_ID_FIELD);
 
+    await verifyAddress(d.engine, INVITEE);
     const accept = await send(d.manager, 'POST', '/organization/accept-invitation', { invitationId }, cookieFrom(res));
     expect(accept.status, await accept.clone().text()).toBe(200);
     const members = await rows(d.engine, 'sys_member', { user_id: invitee.id, organization_id: ORG });
@@ -233,7 +249,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     expect(res.status, await res.clone().text()).toBe(200);
   });
 
-  it('an address-only attempt does not spend the invitation: the invitee still signs up with the link, and accepts', async () => {
+  it('an address-only attempt does not spend the invitation: the invitee still signs up with the link, and, once verified, accepts', async () => {
     const d = await deployment();
     const invitationId = await d.invite(INVITEE);
 
@@ -243,6 +259,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
 
     const invitee = await signUp(d.manager, INVITEE, { invitationId });
     expect(invitee.status, await invitee.clone().text()).toBe(200);
+    await verifyAddress(d.engine, INVITEE);
     const accept = await send(d.manager, 'POST', '/organization/accept-invitation', { invitationId }, cookieFrom(invitee));
     expect(accept.status, await accept.clone().text()).toBe(200);
     expect((await rows(d.engine, 'sys_invitation', { id: invitationId }))[0]?.status).toBe('accepted');
@@ -264,7 +281,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     expect(res.status, await res.clone().text()).toBe(200);
   });
 
-  it('a pending invitation lists in the session it admitted, its own and another organization\'s alike', async () => {
+  it('a pending invitation lists in the session it admitted once its address is verified, its own and another organization\'s alike', async () => {
     const d = await deployment();
     const invitationId = await d.invite(INVITEE);
     await d.engine.insert('sys_organization', { id: 'org_partner', name: 'Partner', slug: 'partner' }, SYSTEM);
@@ -283,6 +300,7 @@ describe('under invite_only, a self-serve sign-up is admitted only by the invita
     );
     const invitee = await signUp(d.manager, INVITEE, { invitationId });
     expect(invitee.status, await invitee.clone().text()).toBe(200);
+    await verifyAddress(d.engine, INVITEE);
 
     const listed = await send(d.manager, 'GET', '/organization/list-user-invitations', undefined, cookieFrom(invitee));
     expect(listed.status, await listed.clone().text()).toBe(200);
@@ -330,7 +348,7 @@ describe('under invite_only, the other creation doors', () => {
   });
 });
 
-describe('open and email_domain match an invitation by address, as before', () => {
+describe('email_domain matches an invitation by address, as before', () => {
   const gate = (manager: AuthManager, email: string) =>
     (manager as unknown as {
       validateAudienceAdmission(data: unknown, ctx?: unknown): Promise<{ error: string } | undefined>;
@@ -339,20 +357,23 @@ describe('open and email_domain match an invitation by address, as before', () =
       { body: {} },
     );
 
-  // Under `open` an uninvited sign-up is admitted WITH the declared set, which
-  // this store cannot resolve (it would answer AUTH_CONFIG_ERROR), and under
-  // `email_domain` this address is off the list: so `undefined` below can only
-  // be the invitation carve-out, matched by address.
-  for (const audience of [
-    { posture: 'open', selfRegistrationPermissionSet: 'member_default' },
-    { posture: 'email_domain', allowedEmailDomains: ['elsewhere.example'], selfRegistrationPermissionSet: 'member_default' },
-  ]) {
-    it(`${audience.posture}: an email-and-password sign-up holding an invitation is admitted with no id`, async () => {
-      const d = await deployment();
-      await d.invite(INVITEE);
-      const manager = makeManager(d.engine, { audience });
-      expect(await gate(manager, INVITEE)).toBeUndefined();
-      expect((await gate(manager, OTHER))?.error).not.toBeUndefined();
-    });
-  }
+  // This address is off the list, and this store cannot resolve the declared
+  // set (a sign-up the posture's rule admits would answer AUTH_CONFIG_ERROR):
+  // so `undefined` below can only be the invitation carve-out, matched by
+  // address, which asks for no set. Under `open` the posture's rule admits
+  // every address, so an invitation decides nothing there: an invited sign-up
+  // asks for the declared set like an uninvited one, and an unresolvable set
+  // refuses both (`audience-posture.test.ts`, the end of the chain).
+  const audience = {
+    posture: 'email_domain',
+    allowedEmailDomains: ['elsewhere.example'],
+    selfRegistrationPermissionSet: 'member_default',
+  };
+  it('email_domain: an email-and-password sign-up off the list holding an invitation is admitted with no id', async () => {
+    const d = await deployment();
+    await d.invite(INVITEE);
+    const manager = makeManager(d.engine, { audience });
+    expect(await gate(manager, INVITEE)).toBeUndefined();
+    expect((await gate(manager, OTHER))?.error).not.toBeUndefined();
+  });
 });

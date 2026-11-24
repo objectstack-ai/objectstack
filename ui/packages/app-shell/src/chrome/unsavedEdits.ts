@@ -58,6 +58,18 @@ import { useEffect } from 'react';
 interface Registration {
   /** The question asked before this page's edits are dropped, already translated. */
   readonly message: string;
+  /**
+   * The in-app addresses a link may open without dropping these edits: a
+   * holder that outlives the page (the shell's design mode, which keeps its
+   * changes from page to page of one app) names the pages it keeps them on.
+   * Absent, every other page drops them.
+   */
+  readonly keeps?: (url: URL) => boolean;
+}
+
+/** How a registration is made: see {@link Registration.keeps}. */
+export interface UnsavedEditsOptions {
+  readonly keeps?: (url: URL) => boolean;
 }
 
 /** In registration order: the last one is the page shown most recently. */
@@ -71,35 +83,39 @@ const registrations = new Set<Registration>();
  */
 let leaveConfirmed = false;
 
-function latestMessage(): string | undefined {
+/** The question of the most recent registration that `url` would drop, every one when no `url`. */
+function latestMessage(url?: URL): string | undefined {
   let message: string | undefined;
-  for (const registration of registrations) message = registration.message;
+  for (const registration of registrations) {
+    if (url && registration.keeps?.(url)) continue;
+    message = registration.message;
+  }
   return message;
 }
 
 /**
- * Whether a click on the document would take the user to another page of this
- * app. Mirrors what the router itself skips: a modified or non-primary click
+ * The page a click on the document would take the user to, in this app, or
+ * `null` when it stays. Mirrors what the router itself skips: a modified or non-primary click
  * (new tab / window), a link that opens elsewhere or downloads, a link to
  * another origin (the `beforeunload` prompt covers that one), and a link to the
  * page already shown — the view stays mounted and keeps its edits.
  */
-function leavesThisPage(e: MouseEvent): boolean {
-  if (e.defaultPrevented) return false;
-  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return false;
+function leavesThisPage(e: MouseEvent): URL | null {
+  if (e.defaultPrevented) return null;
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
   const target = e.target instanceof Element ? e.target : null;
   const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
-  if (!anchor) return false;
-  if (anchor.target && anchor.target !== '_self') return false;
-  if (anchor.hasAttribute('download')) return false;
+  if (!anchor) return null;
+  if (anchor.target && anchor.target !== '_self') return null;
+  if (anchor.hasAttribute('download')) return null;
   try {
     const url = new URL(anchor.href, window.location.href);
-    if (url.origin !== window.location.origin) return false;
-    if (url.pathname === window.location.pathname) return false;
+    if (url.origin !== window.location.origin) return null;
+    if (url.pathname === window.location.pathname) return null;
+    return url;
   } catch {
-    return false;
+    return null;
   }
-  return true;
 }
 
 function onBeforeUnload(e: BeforeUnloadEvent): void {
@@ -110,8 +126,11 @@ function onBeforeUnload(e: BeforeUnloadEvent): void {
 }
 
 function onDocumentClick(e: MouseEvent): void {
-  const message = latestMessage();
-  if (message === undefined || !leavesThisPage(e)) return;
+  if (registrations.size === 0) return;
+  const url = leavesThisPage(e);
+  if (!url) return;
+  const message = latestMessage(url);
+  if (message === undefined) return;
   if (window.confirm(message)) return;
   // Kept: the router never sees the click, so the URL and the edits stay.
   e.preventDefault();
@@ -133,8 +152,8 @@ function uninstall(): void {
  * any registration is held, every departure the seam sees asks `message`
  * first. Prefer {@link useRegisterUnsavedEdits} in a component.
  */
-export function registerUnsavedEdits(message: string): () => void {
-  const registration: Registration = { message };
+export function registerUnsavedEdits(message: string, options?: UnsavedEditsOptions): () => void {
+  const registration: Registration = { message, keeps: options?.keeps };
   if (registrations.size === 0) install();
   registrations.add(registration);
   let released = false;

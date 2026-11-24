@@ -156,10 +156,10 @@ export const PolicyChangeLog = ObjectSchema.create({
 seal: { valueFields: ['created_at'] }
 ```
 
-Also refused: `seal` off class `audit`, an undeclared `valueFields` name, and
-beside `seal` any `onlyWhen`, a `ttl` not on `created_at`, or rotation
-`storage`. Not sealed, reported at `error` hourly: no declared `id` or
-`tenant_id` (the injected tenant column is `organization_id`); a `password`,
+Also refused: `seal` off class `audit`, an undeclared `valueFields` name, no
+text `tenant_id` outside `valueFields` (or `chainField: 'organization_id'`),
+and beside `seal` any `onlyWhen`, a `ttl` not on `created_at`, or rotation
+`storage`. Unsealed, `error` hourly: no declared `id`; a `password`,
 `secret`, `formula`, `summary`, `image`, `file`, `avatar`, `video` or `audio`
 column; no `cryptoProvider` on `AuditPlugin`. Not built yet (ADR-0154): a
 verifier, so a break is recorded but not reported; expiry (P4), so the sweeper

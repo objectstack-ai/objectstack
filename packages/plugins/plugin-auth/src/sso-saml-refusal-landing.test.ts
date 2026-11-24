@@ -36,6 +36,8 @@ import 'better-auth';
 import 'better-auth/plugins';
 import 'better-auth/plugins/organization';
 import '@better-auth/sso';
+// The egress guard the SSO discovery reaches is loaded at module top, never inside a clocked case.
+import '@objectstack/core/egress';
 
 // The IdP side uses the `samlify` the installed `@better-auth/sso` resolves,
 // so the Response is built by the same library version that parses it.
@@ -169,6 +171,8 @@ const cookiesOf = (res: Response): string =>
 interface SignIn {
   callbackURL?: string;
   errorCallbackURL?: string;
+  /** The provider signed in through, when not {@link PROVIDER_ID} (one {@link addSamlProvider} stored). */
+  providerId?: string;
 }
 
 /** Who answers as the IdP, when not the configured one: another entity id, another signing key, assertion attributes. */
@@ -235,11 +239,12 @@ async function signInThroughIdp(
   shapeResponse: (samlResponse: string) => string = (r) => r,
   idpAs: IdpAs = {},
 ): Promise<Response> {
+  const providerId = body.providerId ?? PROVIDER_ID;
   const start = await rp.manager.handleRequest(
     new Request(`${AUTH}/sign-in/sso`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: BASE },
-      body: JSON.stringify({ providerId: PROVIDER_ID, ...body }),
+      body: JSON.stringify({ ...body, providerId }),
     }),
   );
   const started: any = await start.clone().json().catch(() => null);
@@ -251,7 +256,7 @@ async function signInThroughIdp(
   expect(relayState && requestId, `no RelayState / AuthnRequest ID in ${started.url}`).toBeTruthy();
 
   const spMetadata = await (await rp.manager.handleRequest(
-    new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`),
+    new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${providerId}`),
   )).text();
   const sp = samlify.ServiceProvider({ metadata: spMetadata });
   const entityID = idpAs.entityID ?? IDP_ENTITY;
@@ -266,7 +271,7 @@ async function signInThroughIdp(
   const { context } = await idp.createLoginResponse(sp, { extract: { request: { id: requestId } } }, 'post', { email }, custom);
 
   return rp.manager.handleRequest(
-    new Request(ACS, {
+    new Request(providerId === PROVIDER_ID ? ACS : `${AUTH}/sso/saml2/sp/acs/${providerId}`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: cookiesOf(start) },
       body: new URLSearchParams({ SAMLResponse: shapeResponse(context), RelayState: relayState! }).toString(),
@@ -1506,5 +1511,104 @@ describe('sign out of the company sign-in too: SAML single logout', () => {
     expect(await metadataOf(await makeRp({ provider: { signOutOfIdp: true }, samlConfig: withLogoutAddress }))).toContain(
       'SingleLogoutService',
     );
+  });
+});
+
+// ── Deleting an identity provider ends the sessions a sign-in through it opened ──
+// `sso-provider-lifecycle.ts` ("Deleting a provider"): a real sign-in through
+// each provider, a real delete through the vendor's own door, then each first
+// session cookie presented again.
+
+describe('deleting an identity provider ends the sessions signed in through it', () => {
+  const OTHER = 'globex-okta';
+
+  /** A second SAML provider, answered by the same test IdP, under its own id and ACS. */
+  async function addSamlProvider(rp: Rp, providerId: string, domain: string, extra: Record<string, unknown> = {}) {
+    const ctx = await ((await rp.manager.getAuthInstance()) as any).$context;
+    await ctx.adapter.create({
+      model: 'ssoProvider',
+      data: {
+        providerId,
+        issuer: IDP_ENTITY,
+        domain,
+        samlConfig: JSON.stringify({
+          issuer: IDP_ENTITY,
+          entryPoint: IDP_SSO,
+          cert: idpCert,
+          callbackUrl: `${AUTH}/sso/saml2/sp/acs/${providerId}`,
+          identifierFormat: EMAIL_FORMAT,
+          idpMetadata: { entityID: IDP_ENTITY },
+          spMetadata: { entityID: `${AUTH}/sso/saml2/sp/metadata?providerId=${providerId}` },
+        }),
+        ...extra,
+      },
+    });
+  }
+
+  /** The vendor admits a delete by the provider's owner: make `userId` it. */
+  async function ownProvider(rp: Rp, providerId: string, userId: string) {
+    const ctx = await ((await rp.manager.getAuthInstance()) as any).$context;
+    await ctx.adapter.update({ model: 'ssoProvider', where: [{ field: 'providerId', value: providerId }], update: { userId } });
+  }
+
+  const sessionOf = async (rp: Rp, cookie: string): Promise<{ user?: { id?: string; email?: string } } | null> => {
+    const res = await rp.manager.handleRequest(new Request(`${AUTH}/get-session`, { headers: { cookie } }));
+    const body = (await res.json().catch(() => null)) as { user?: { id?: string; email?: string } } | null;
+    return body?.user ? body : null;
+  };
+
+  const remove = (rp: Rp, providerId: string, cookie: string): Promise<Response> =>
+    rp.manager.handleRequest(
+      new Request(`${AUTH}/sso/delete-provider`, {
+        method: 'POST',
+        headers: { cookie, origin: BASE, 'content-type': 'application/json' },
+        body: JSON.stringify({ providerId }),
+      }),
+    );
+
+  async function twoProviders() {
+    const rp = await makeRp({ provider: { allowJit: true } });
+    await addSamlProvider(rp, OTHER, 'globex.com', { allowJit: true });
+    const member = cookiesOf(await signInThroughIdp(rp, 'p.member@acme.com'));
+    const operator = cookiesOf(
+      await signInThroughIdp(rp, 'q.operator@globex.com', { callbackURL: AFTER, errorCallbackURL: FAILED, providerId: OTHER }),
+    );
+    const memberSession = await sessionOf(rp, member);
+    const operatorSession = await sessionOf(rp, operator);
+    expect(memberSession?.user?.email).toBe('p.member@acme.com');
+    expect(operatorSession?.user?.email).toBe('q.operator@globex.com');
+    await ownProvider(rp, PROVIDER_ID, operatorSession!.user!.id!);
+    return { rp, member, operator };
+  }
+
+  const sessionRows = (rp: Rp) => (rp.engine.tables.get('sys_session') ?? []) as Array<Record<string, any>>;
+
+  it('the session signed in through the deleted provider ends; one signed in through another provider does not', async () => {
+    const { rp, member, operator } = await twoProviders();
+    // A returning sign-in through the same provider: its session is that provider's too.
+    const again = cookiesOf(await signInThroughIdp(rp, 'p.member@acme.com'));
+    expect((await sessionOf(rp, again))?.user?.email).toBe('p.member@acme.com');
+    expect(sessionRows(rp).map((r) => r.sso_provider_id).sort()).toEqual([PROVIDER_ID, PROVIDER_ID, OTHER]);
+
+    const res = await remove(rp, PROVIDER_ID, operator);
+    const body = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body.data).toMatchObject({ providerId: PROVIDER_ID, revokedSessions: 2, dependentsRemoved: true });
+
+    expect(await sessionOf(rp, member)).toBeNull();
+    expect(await sessionOf(rp, again)).toBeNull();
+    expect((await sessionOf(rp, operator))?.user?.email).toBe('q.operator@globex.com');
+    const ended = sessionRows(rp).filter((r) => r.sso_provider_id === PROVIDER_ID);
+    expect(ended.map((r) => r.revoke_reason)).toEqual(['sso_provider_deleted', 'sso_provider_deleted']);
+    expect(sessionRows(rp).find((r) => r.sso_provider_id === OTHER)?.revoked_at).toBeFalsy();
+  });
+
+  it('CONTROL: a delete the vendor refuses ends no session', async () => {
+    const { rp, member, operator } = await twoProviders();
+    // The member does not own the other provider: the vendor refuses the delete.
+    const res = await remove(rp, OTHER, member);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect((await sessionOf(rp, member))?.user?.email).toBe('p.member@acme.com');
+    expect((await sessionOf(rp, operator))?.user?.email).toBe('q.operator@globex.com');
   });
 });

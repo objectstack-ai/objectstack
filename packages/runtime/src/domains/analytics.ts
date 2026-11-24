@@ -97,6 +97,46 @@ function assertAnalyticsQueryBody(body: unknown): void {
         }
         throw validationFailure(message, fields);
     }
+    assertAnalyticsQuerySelectsSomething(parsed.data);
+}
+
+/** The sentence an empty projection is refused with. */
+const ANALYTICS_EMPTY_PROJECTION_MESSAGE =
+    'Select at least one measure or dimension: this query names no `measures`, no `dimensions` and no '
+    + '`timeDimensions` entry with a `granularity`, so it selects nothing.';
+
+/**
+ * Refuse a query that SELECTS NOTHING at the entry, with the same
+ * `400 VALIDATION_FAILED` + `fields[]` the schema refusals above answer.
+ *
+ * The schema accepts `measures: []` on purpose — a dimension-only query is
+ * legal and answers its distinct groups — and has no cross-field rule, so a
+ * body with no measure and no dimension passed this door and reached the
+ * engine, where the native SQL strategy assembled `SELECT  FROM "<table>"`
+ * and the driver's syntax error came back as `500 DATABASE_ERROR`: a client
+ * input mistake answered as a server fault. `/analytics/sql` echoed the same
+ * broken statement as a 200.
+ *
+ * What counts as a projection is what the strategies group or aggregate by:
+ * a measure, a dimension, or a `timeDimensions` entry carrying a
+ * `granularity` (the ObjectQL strategy turns each into a bucketed group key).
+ * A `timeDimensions` entry without one is only a date-range filter, so it
+ * selects nothing on its own. Validation only — the body is still forwarded
+ * untouched by the caller.
+ */
+function assertAnalyticsQuerySelectsSomething(query: {
+    measures?: readonly unknown[];
+    dimensions?: readonly unknown[];
+    timeDimensions?: ReadonlyArray<{ granularity?: unknown }>;
+}): void {
+    const selectsMeasure = (query.measures?.length ?? 0) > 0;
+    const selectsDimension = (query.dimensions?.length ?? 0) > 0;
+    const selectsBucket = (query.timeDimensions ?? []).some((td) => !!td.granularity);
+    if (selectsMeasure || selectsDimension || selectsBucket) return;
+    throw validationFailure(
+        `Invalid AnalyticsQuery body: measures: ${ANALYTICS_EMPTY_PROJECTION_MESSAGE}`,
+        [{ field: 'measures', code: 'min_items', message: ANALYTICS_EMPTY_PROJECTION_MESSAGE }],
+    );
 }
 
 export function createAnalyticsDomain(deps: DomainHandlerDeps): DomainRoute {

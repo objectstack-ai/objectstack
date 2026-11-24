@@ -1,5 +1,482 @@
 # @objectstack/cli
 
+## 18.6.0
+
+### Minor Changes
+
+- d10f652: feat(spec, metadata-protocol): a seed dataset can declare `dependsOn`, the objects it loads after, for an order no lookup field gives
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #34277 — `skills/objectstack-data/references/seeds.md` (its relationship section and its best-practice table tell the author to order seeds parent before child in the exported array, which orders nothing; `dependsOn` is not taught)
+  
+  The seed loader orders a load's datasets by the `lookup`, `master_detail` and `user` fields between their objects; the order of the stack's `data` array only breaks ties. A dataset whose `beforeInsert` hook reads another seeded object had no way to say so, and its hook ran against whatever that object held at the moment, which an unrelated dataset could change. A rating scored from seeded bands, ordered by its one lookup to its rule, was written a wave before the bands and scored every row as if none existed.
+  
+  - **`Seed.dependsOn: string[]` names objects.** Each name adds an edge to the same dependency graph the lookup fields feed, so the dataset's object loads after the named object's rows: `defineSeed(CustomerRating, { dependsOn: ['crm_rating_band'], records })`. The edges of several datasets of one object are pooled onto that object, and the returned `dependencyGraph.nodes[].dependsOn` lists them beside the lookup edges.
+  - **A load that declares none keeps its order exactly.** Nothing changes for an app that does not write the key.
+  - **A declaration the load cannot honour refuses the whole load, before any row is written.** The load answers `success: false` with one `errors[]` entry per refused declaration (`field: 'dependsOn'`, `sourceObject` the declaring object, `targetObject` the named one), and every caller reports it the way it reports any failed load. Three cases: a name that is the dataset's own object; a name no other dataset of the same load seeds (a misspelling, or an object whose datasets `env` or `locale` scoped out of this load, which the message says); and a declared edge that closes a cycle with the other edges, lookups included, with the cycle spelled out object by object. A cycle made of lookup fields alone still loads in deferred passes, as before.
+  - **A refused boot seed reads as a failed seed.** The single-tenant boot seed (`AppPlugin`) counts each error of a load refused before any dataset ran as a rejected row in the outcome it records, so `os dev` / `os serve` print the source with a warning on the banner's `Seeds:` line and the `objectstack:seed-settled` message answers `ok: false`; before, a refused load wrote nothing and read clean on both.
+  - **`defineSeed` refuses a dataset that names its own object** when it runs. The other two cases need the whole load, so only the loader can judge them.
+  
+  A seed published on its own (a draft publish) is its own load, so a published seed whose `dependsOn` names an object seeded by another item is refused until the two are published together.
+- d4b2a75: feat(spec): a named import mapping's label is translatable at `mappings.NAME.label`
+  
+  Clause-②: yes (widening) — a new optional translation group `mappings` (one key per mapping, `label`) on `TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema` and `TranslationItemSchema`, a new `translateMapping` export from `@objectstack/spec/system` registered for the `mapping` type, and a new `ObjectStackProtocolImplementation.getPackagedMappingBase`; nothing that parsed before is refused
+  Metadata-protocol: added
+  Skills-docs: follow-up owed — #34962 (skills/objectstack-i18n/SKILL.md group list)
+  
+  An import mapping's `label` is the name the import wizard offers it by, and until now it showed the authored text in every locale: the bundle had no key for it. A bundle now translates it:
+  
+  ```ts
+  'zh-CN': { mappings: { crm_lead_feed: { label: '线索导入' } } }
+  ```
+  
+  - `GET /meta/mapping` (list and item) serves the label in the reader's locale. A shipped mapping overridden through its `.custom` pair follows the ADR-0146 D2 order every other translated label follows: a label the override changed keeps its own text unless the pair translates it, and a label it left alone takes the pair's translation, then the package's. The packaged base is now available for `mapping` (`getPackagedMappingBase`), so the override's label is judged against it.
+  - Only `label` has a key. A mapping declares no `description`, and its `fieldMapping` holds column and field names rather than copy — the refusal for either names where to translate instead (a target field's label is `objects.OBJECT.fields.FIELD.label`). The singular `mapping` and the label aliases `name` / `title` are refused with the declared spelling named.
+  - `os i18n extract` scaffolds the key, `os i18n check` reports a gap as `i18n/missing-mapping`, and `os validate` reports a key naming no mapping of the stack as `translation-target-unknown`, with the nearest name suggested.
+  - Studio's translation preview shows the group as **Import Mappings** (导入映射), and the Studio translation table walks it.
+
+### Patch Changes
+
+- 35c9a30: feat(plugin-audit, cli)!: an `os migrate audit-* --apply` run holds the audit seal lock for its whole run, each sealer pass skips while it is held, and where the database offers no session lock a run on a sealed object needs `--sealer-stopped`
+  
+  Clause-②: yes (narrowing) — narrowed: `os migrate audit-key-material`, `os migrate audit-mail-bodies` and `os migrate audit-metadata-bodies` with `--apply` now refuse a run that rewrites an object declaring `lifecycle.seal` when that object's database offers no session lock (SQLite, Turso) unless `--sealer-stopped` is passed, and on Postgres or MySQL refuse when a sealer pass or another run still holds the audit seal lock after ten minutes; 18.4.0 ran both. `os migrate audit-side-copies`, new in this release, holds the lock and takes the flag from its first release. Widened: the `--sealer-stopped` flag, and new exports — `@objectstack/objectql` `acquireDatabaseSessionLock`, `tryDatabaseSessionLock`, `databaseSessionLockPgKey` and the types `DatabaseSessionLock`, `DatabaseSessionLockRunOptions`, `DatabaseSessionLockWait`; `@objectstack/plugin-audit` `holdAuditSealLock`, `AUDIT_SEAL_LOCK_NAME`, `AUDIT_SEAL_LOCK_WAIT_MS`, `STORED_METADATA_BODY_REWRITTEN_OBJECTS` and the types `AuditSealLockEngine`, `AuditSealLockFinish`, `AuditSealLockHold`.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answer is whether an os migrate audit-* --apply run may proceed while a sealer could be sealing the rows it rewrites. The one-line fix for a refused run is in the body: stop the servers that seal the database and pass --sealer-stopped, or let the sealer pass finish. -->
+  
+  **BREAKING** for an `os migrate audit-* --apply` run on a deployment where an app declared `lifecycle.seal`. On SQLite or Turso the run now stops before writing anything and names the flag: stop every server that seals the database, then re-run with `--sealer-stopped`. On Postgres or MySQL the run waits up to ten minutes for a sealer pass in flight, then refuses, having changed nothing: run it again once that pass has finished. A run that rewrites no sealed object is unchanged on every database, and so is every dry run. No object declares `lifecycle.seal` by default, so a deployment that did not opt in sees no change.
+  
+  **The audit seal lock (ADR-0154 D3, as amended 2026-11-14).** A sealer pass and an `os migrate audit-*` rewrite no longer work on a sealed object at the same time. That race let a pass seal a row's old value while the rewrite redacted it, and `os audit verify` then reported the sanctioned redaction as a modified row. The lock is a database session lock named `objectstack:audit-seal`, a Postgres advisory lock or a MySQL `GET_LOCK` on a connection of its own, taken on the database that holds each sealed object's rows (its hot store, where that differs from the primary database).
+  
+  - Each sealer pass takes it beside the cluster lock `audit.sealer`. While another session holds it, the pass seals nothing and says so at `info`, once an hour while it lasts; the next pass tries again. A checkpoint is written only while both locks still stand: a lock whose database session ended fails the object's pass, and the seed it had sealed is dropped.
+  - An `--apply` rewrite (`os migrate audit-key-material`, `audit-mail-bodies`, `audit-metadata-bodies` and `audit-side-copies`) holds it from before its first write to after its last, archive runs included. A run whose lock's database session ended before it finished says so, names `os audit verify`, and exits non-zero.
+  - Two replicas with no cluster service now also keep their passes apart through this lock on Postgres and MySQL.
+  - Two datasources that reach one lock namespace — one Postgres database, or two schemas of one MySQL server — share one lock: a pass or a run takes it once there and never waits on itself.
+  - On MySQL, lock names are server-wide: a rewrite on one database of a server makes the sealer of another database on that server skip its passes while it runs.
+  
+  **`@objectstack/objectql`.** The schema-migration lock and the audit seal lock share one implementation of a named database session lock, now exported: `acquireDatabaseSessionLock` (wait, then refuse), `tryDatabaseSessionLock` (once, never waiting: the lock, `'held'`, or `null` where the database offers none) and `databaseSessionLockPgKey`. A held lock's `isHeld()` asks its own session whether it still stands. With `ownLocks` (`DatabaseSessionLockRunOptions`), a run that locks several datasources marks each session it opens, and a lock it finds held by one of its own sessions in the same database answers that lock instead of `'held'` or a wait. `acquireSchemaMigrationLock` takes the same statements, prints the same lines and refuses with the same message as before.
+- 895783a: fix(cli): `os migrate` boots a stack that declares queues and assignment rules
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A stack that declares `queues` or `assignmentRules` needs the `ownership-queue` service, and the engine refuses to boot without it. `os serve` mounts it, because sharing is on its always-on slate. The one-shot boot that every `os migrate` subcommand takes did not, so on a queue-using app `os migrate summary-nulls` and the rest of the data family refused to start with "declares queues (N) and assignmentRules (N), but no 'ownership-queue' service is registered". No data migration could run on such an app.
+  
+  When the boot carries no sharing provider, it now registers the ownership-queue service itself. This is the same `OwnershipQueueService` that `SharingServicePlugin` registers under `os serve`, and the boot registers nothing else of sharing. No sharing object is declared, so the tables a migration examines and creates do not change. No sharing read filter, share-rule hook, record-share hook or boot backfill is armed. A composition that already brings the provider, such as the served platform that `os migrate plan` and `apply` compose, is left as it was.
+  
+  On this boot a declared queue resolves as it does under `os serve`. Authored queues and members (`sys_queue`, `sys_queue_member`) are not readable here, so the service warns once and answers from the declarations. Only an insert into an object with assignment rules reaches it. An update never evaluates a rule, so `summary-nulls` routes nothing.
+  
+  Nothing to change in an app or its configuration.
+- 04d4114: fix(cli): `os datasource introspect --out` judges where the write really lands, so an in-tree symlink no longer lets the server-generated draft leave the current directory
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `--out` check compared the spelled path with the current directory and then wrote through `writeFile`, which follows symlinks. A path such as `objects/lnk/x.object.ts`, with `objects/lnk` a symlink to a directory outside the project, passed the check and wrote the draft outside the tree with exit 0. The same held for an `--out` that was itself a symlink, even one pointing at a file that did not exist yet.
+  
+  The command now also refuses an `--out` that is an existing symlink, and resolves symlinks in both the current directory and the nearest existing directory above the target, refusing when the second is not under the first. Both refusals print the message absolute and `../` paths already get (`--out must be a relative path within the current directory`) and exit 2. Plain relative paths inside the tree write as before, including from a current directory reached through a symlink. A missing intermediate directory is still not created; the write fails as it did.
+- d5e6b20: fix(metadata-core,objectql,cloud-connection,cli)!: the package upgrade plan counts the fields a package adds through `objectExtensions`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped and no stored row changes: what moves is which fields the package upgrade comparison reads from each version, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for an upgrade that changes a field the package adds to an object through `objectExtensions`. Four kinds of upgrade that installed without a question before are now refused, exactly as the same change to a field of an object the package declares is:
+  
+  - an extension field retyped to a `needs_confirm` or `destructive` type: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`;
+  - an extension field dropped while another stored extension field of the same object is added, with no `renamedFrom` linking them: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, as a suspected rename;
+  - a stored field dropped from an object's own declaration in the upgraded version while an extension of the same object adds a stored field, or an extension field dropped while the object's own declaration adds one: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, as a suspected rename. The owned and the extension fields of one object are now one field map, so the two pair; before, they were never compared;
+  - an extension field that declares `renamedFrom` and whose new type stores no column (a `formula`, for example): `422 VALIDATION_ERROR` with `details.refusals[].reason: 'destructive_type'`, before anything is written, as for an owned field. No token answers this refusal.
+  
+  The package upgrade plan (`comparePackageVersions`) read only a version's `objects` and `data`. A field an `objectExtensions` entry adds, retypes or drops was therefore missing from the upgrade preview, from the rows counted per touched column, and from the schema upgrade verdict. A preview of an upgrade that added seven columns through extensions listed no added field, and its rollback listed no removed one.
+  
+  Now each side of the comparison is the objects as the registry serves them from that version: the owner's declaration, with every extension's `fields` merged over it by name, in ascending `priority` (`200` when none is declared). The existing rules then apply to an extension field unchanged:
+  
+  - an extension field added is listed in `plan.fields.added`, and one dropped in `plan.fields.removed`, with the rows holding a value counted in `environment.columns`;
+  - an extension field retyped is a type change; `needs_confirm` and `destructive` changes need the confirmation, and a `safe` one does not;
+  - an extension field dropped while another stored field of the same object is added, with no `renamedFrom` linking them, is a suspected rename and needs the confirmation; a field dropped alone is listed and refused by nothing, as an owned one is.
+  
+  An object a version reaches only through an extension (another package owns it) is compared by the fields the extension adds. It is never listed in `plan.objects.added` or `plan.objects.removed`, because the upgrade neither creates nor drops it. `os diff` prints the field changes of such an object under `objects.<name>.fields`.
+  
+  `PackageUpgradeSide` (`@objectstack/metadata-core`) gains an optional `objectExtensions` list. A caller that builds a side itself passes the version's `objectExtensions` beside its `objects`, read with the same collection reader; a side without the key compares as before.
+  
+  Who moves, and the fix for each:
+  
+  - An installer upgrading a package whose new version retypes an extension field, or drops a field of an object while another stored field of the same object is added (extension or owned, in either pairing): the `409`. Confirm the findings with the token the refusal names (`--confirm-upgrade <token>` on `os deploy` and `os package install`); for a suspected rename the refusal names the other way forward too.
+  - A package author whose new version renames an extension field with `renamedFrom` into a type that stores no column: the `422`. `--confirm-upgrade` does not answer it. Keep a stored type for the renamed field, or carry the values by hand, as the refusal's message says.
+  
+  Unchanged: a plan over packages that declare no `objectExtensions` is the same plan as before; seed datasets are compared as before; `fieldPatches` changes display properties only and stays out of the comparison.
+- f6836ca: fix(cli): an app's `onEnable` and its job, hook and action handlers run from one evaluation of its config module
+  
+  Clause-②: no
+  Metadata-protocol: none (boot composition; no authorable key changes; the dev confirms against the diff)
+  
+  A boot that serves the compiled artifact took the handlers from the artifact's runtime module (`dist/objectstack-runtime.*.mjs`). That module is a bundle of the same config source, so it is a second evaluation of it. `onEnable` came from the config module the boot had loaded. State that `onEnable` sets at module scope, such as a data engine a job reads, was therefore missing when the handler ran. Under `os dev` on a host config, a job that read it failed on every run with "no data engine", while `os start` served the same project.
+  
+  `os start` and `os serve` on a config without its own plugin instances (a non-host config) had the same split, because they boot from the compiled artifact too and add the config's `onEnable` the same way.
+  
+  Every handler the runtime module supplies now runs from the config module this boot loaded, the same module as `onEnable`. This covers `os dev` on any config and `os start` / `os serve` on a non-host config. A boot from an artifact alone, with no config, is unchanged: it has no `onEnable` to run. Handlers are matched by the ref the build gave them. Metadata still comes from the artifact. If the artifact names a handler that the config no longer has (for example `os dev --no-compile` over an older build), that handler still runs from the runtime module. The boot warns once and names it.
+- d4c0c12: fix(cli): `objectstack start` leaves nothing of its process group behind when it exits on SIGTERM
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a project with an `objectstack.config.ts`, a SIGTERM sent to the `objectstack start` process made it forward the signal to its `serve` child and exit with the child's code, as before, but one process of its group was still alive at that moment: the esbuild service `serve` started to bundle the config. esbuild keeps that service process for the life of its caller and it leaves only after the caller has exited, so a supervisor that read the group right after `start` exited (a container runtime, systemd, a drill reading `kill(-pid, 0)`) found a leftover process.
+  
+  `serve` now stops the esbuild service as soon as the config module has loaded, at boot. The service exits while `serve` is still alive to reap it, so when `start` exits on SIGTERM no process of its group is left. Boots from `--artifact` or `--prebuilt` never started the service and are unchanged.
+- ed45eb9: fix(cli): an `os migrate audit-*` run stops when the host's checkpoint signer or sink is registered but fails to resolve, instead of amending under the local key
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The four `os migrate audit-*` ledger-copy rewrites amend a sealed row before they rewrite it (ADR-0154 D7), signing the amendment with the host's `audit.checkpointSigner` when one is registered and the local key otherwise. The CLI read that slot, and `audit.checkpointSink`, through a helper that turned every resolution error into "not registered". A host signer whose factory threw (a KMS client that cannot start, a missing credential) was therefore replaced by the local key, and a failing sink dropped the export, with nothing said. A signer registered as a factory was never built at all.
+  
+  The run now follows the rule the sealer follows since #34280. No host signer registered still amends under the local key, and no sink exports nothing, as before. A registered signer or sink that resolves is used, including one registered as a factory. One that is registered and fails to resolve stops the run before any row is amended or rewritten: it prints `Audit redaction seal: the '<slot>' service is registered but could not be resolved (<cause>)` and exits 1. A working host sees no change.
+- d576509: feat(lint): a dataset measure or dimension that declares neither `synonyms` nor a `description` is advised
+  
+  Clause-②: yes (widening) — @objectstack/lint gains three exports on its "." entry: validateDatasetMemberVocabulary, DATASET_MEMBER_NO_VOCABULARY and the DatasetMemberVocabularyFinding type; nothing accepted before is refused
+  Metadata-protocol: none
+  
+  A dataset member answers a business question through its vocabulary (ADR-0149 D1): `synonyms`, the words a person types for it, and `description`, a short business definition. Both keys are optional, so a dataset that declares neither on a member passes every check, and that member then answers only to its own name and label. A person who asks in other words, or in another language, matches nothing and gets a number from a plain object query instead of the governed metric.
+  
+  `@objectstack/lint` adds one advisory rule, `dataset-member-no-vocabulary` (`warning`). It reports once per measure or dimension that has no non-blank `synonyms` entry and no non-blank `description`, names the dataset and the member, and says what is lost. One of the two keys is enough to silence it. It runs at `os validate`, `os build` and `os lint`, and at the metadata publish door for a `dataset` write, where it is an advisory on the save response. Nothing is refused: a dataset that only feeds charts loses nothing by leaving both keys out. `os explain dataset-member-no-vocabulary` prints the full reasoning.
+  
+  The author-time rule count the CLI prints (`Running author-time rules (N)`) rises by one, to 70 for `os validate` and `os build`.
+  
+  `@objectstack/lint` exports `validateDatasetMemberVocabulary`, `DATASET_MEMBER_NO_VOCABULARY` and the `DatasetMemberVocabularyFinding` type.
+  
+  `@objectstack/cli`: `os generate dataset` now writes one `synonyms` entry on each member it scaffolds, seeded from a label the stack already declares (the title field's label on the dimension, the object's plural label on the record count), in whatever language that label is written in, under a comment that says to replace the seed with the words your users type and to add a `description`. A fresh scaffold therefore draws no finding. When a seed would answer to two members (a title field labelled like the object), the scaffold picks the next candidate, so the dataset it writes always parses.
+  
+  `@objectstack/skills`: the `objectstack-ui` dashboards rule now says, for every dataset member, to write `synonyms` as the words a person types, in the language of the brief, and a one-sentence business `description`; that one word names one member; and that a member with neither draws the new warning. Its dataset example gives the dimension a synonym too, and the skill's evals gain a case for a dataset authored from a Chinese brief.
+- 0c60897: feat(cli): `os skills install | update | status` install, update and check the published skills catalog at the server's version, with or without a project
+  
+  Clause-②: yes (widening: a new published CLI command group, `os skills install | update | status`)
+  Metadata-protocol: none
+  
+  Nothing installed the published skills catalog except `create-objectstack`'s scaffold-time sync, so a user who only connected an MCP client had no way to install it, and a project had no command to refresh it after an upgrade.
+  
+  - **`os skills install`** copies `@objectstack/skills` at one version into the agent's skills directory (`.claude/skills/` under the current directory, or `--dir`), in an empty directory or in a project; no `package.json` is read or written. The version is `--version` (exact), else the target environment's (`--target`, a URL or a restriction profile file, read exactly as `os validate --target` reads it), else the CLI's own version (the two are released together); the output names which. The tarball is read with `npm pack` from the registry the environment configures, and only `dist/skills/<name>/` is copied. A version the registry does not publish is refused, naming it. What was written is recorded in `.objectstack-skills.json` beside the skills.
+  - **`os skills update`** moves the recorded catalog to another version: it replaces the catalog's skills, removes those the new version dropped, and never writes, replaces or removes a skill directory it did not install. A catalog skill changed locally is refused unless `--force`.
+  - **`os skills status`** reports the installed version against the expected one, plus missing, modified and extra skills; it exits `0`, or `1` on a mismatch with `--check`. All three take `--json`.
+  
+  `@objectstack/mcp`: the open server's `initialize` skills install line now names `os skills install --version <version>` (and its `npx -p @objectstack/cli@<version>` form for a machine without the CLI) instead of `pnpm add -D @objectstack/skills@<version>`, which needed a project.
+- 23c42c4: fix(driver-sql): boot converges legacy text `'true'` / `'false'` in a SQLite boolean column to `1` / `0`, so boolean filters, sorts and groups find those rows
+  
+  Clause-②: yes (widening: `@objectstack/driver-sql` exports `PendingSchemaWorkKind` from its index, and the CLI consumes it, so the union gains one published value, `normalize_boolean_storage`; boolean filters, sorts and groupBy on SQLite now answer legacy text rows as their boolean)
+  Metadata-protocol: none
+  
+  Before the engine stored the boolean a reading spells, a door that sent the text `'true'` / `'false'` (the console's inline grid) left that text in a SQLite `Field.boolean` or `Field.toggle` column. Since the previous release those rows read back as the right boolean, but every comparison ran against the raw text: `won = false` missed a stored `'false'`, `won = true` missed a stored `'true'`, `$in`, `$ne` and `$nin` answered wrongly, ORDER BY sorted the text after every integer, and an aggregate groupBy presented a text `'false'` as `true`.
+  
+  Schema sync now converges those cells at boot, the fourth storage convergence beside the datetime, time and JSON backfills (`backfillCanonicalBooleans`):
+  
+  - **SQLite only.** Postgres, MSSQL, MySQL and Oracle coerce or refuse the text, so no other dialect can hold such a row.
+  - **One guarded `UPDATE` per column**: `'true'` becomes `1` and `'false'` becomes `0`, and nothing else is written. A second boot converts 0 rows.
+  - **Other text is never rewritten.** A value such as `'yes'` or `'TRUE'` names no boolean the driver can read without guessing; it is counted and logged at `warn`, and boolean filters keep missing it until the value is corrected at the source.
+  - **The record** is an `info` line per table and field with the rows converted and up to five of their ids. There is no down step: a text row already reads as its integer, so an undo would only restore the form the filters miss.
+  - **Dry run.** Under `os migrate plan` the step is listed in place as `normalize_boolean_storage`, with its row count, and nothing is written; `os migrate apply` runs it after the confirmation. `OS_SKIP_SCHEMA_SYNC=1` skips it, as it skips every other schema-sync step.
+  
+  `os migrate plan`'s summary line now reads `N column(s) to converge in place` instead of `N temporal column(s) …`, because a boolean column is counted there too.
+- Updated dependencies [e53e02e]
+- Updated dependencies [35c9a30]
+- Updated dependencies [9404cb1]
+- Updated dependencies [d0737f6]
+- Updated dependencies [661ede2]
+- Updated dependencies [1f923d7]
+- Updated dependencies [4f20614]
+- Updated dependencies [a00b422]
+- Updated dependencies [64c4285]
+- Updated dependencies [36c0e96]
+- Updated dependencies [3cf26c1]
+- Updated dependencies [7d06248]
+- Updated dependencies [b1efa37]
+- Updated dependencies [afba96e]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [99a6ec0]
+- Updated dependencies [69783b7]
+- Updated dependencies [329f2f7]
+- Updated dependencies [5af956f]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [66f6638]
+- Updated dependencies [a061708]
+- Updated dependencies [68e726d]
+- Updated dependencies [b820e16]
+- Updated dependencies [b109659]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [568f214]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [9a7f8c1]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [8f052e9]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [54f8e16]
+- Updated dependencies [1381f08]
+- Updated dependencies [60fca0f]
+- Updated dependencies [64807a9]
+- Updated dependencies [bb3c163]
+- Updated dependencies [479d1e4]
+- Updated dependencies [3c2fb32]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [4176c95]
+- Updated dependencies [d6b1c2e]
+- Updated dependencies [63e47fe]
+- Updated dependencies [69949ae]
+- Updated dependencies [b005638]
+- Updated dependencies [b4ce310]
+- Updated dependencies [7d42ba0]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [ef1ebad]
+- Updated dependencies [568d416]
+- Updated dependencies [85f2ac5]
+- Updated dependencies [d01f399]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [5092581]
+- Updated dependencies [d6d0090]
+- Updated dependencies [ee90935]
+- Updated dependencies [0bbb211]
+- Updated dependencies [6091b64]
+- Updated dependencies [f53bcce]
+- Updated dependencies [6844e6b]
+- Updated dependencies [021abd4]
+- Updated dependencies [374bad3]
+- Updated dependencies [44fc2fc]
+- Updated dependencies [61ded62]
+- Updated dependencies [0d1443d]
+- Updated dependencies [0d1443d]
+- Updated dependencies [d3bea96]
+- Updated dependencies [44fc2fc]
+- Updated dependencies [888c3e1]
+- Updated dependencies [18194fb]
+- Updated dependencies [18194fb]
+- Updated dependencies [18194fb]
+- Updated dependencies [614b9b5]
+- Updated dependencies [c47e4ea]
+- Updated dependencies [5c0b6f6]
+- Updated dependencies [75ab117]
+- Updated dependencies [6080387]
+- Updated dependencies [8fd5004]
+- Updated dependencies [071323e]
+- Updated dependencies [ea6de74]
+- Updated dependencies [898655a]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [01598d9]
+- Updated dependencies [6cc3f97]
+- Updated dependencies [183a89e]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [803f909]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [20bf222]
+- Updated dependencies [162fe54]
+- Updated dependencies [c9ef653]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [43dd565]
+- Updated dependencies [24b6ae5]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [80cdbd4]
+- Updated dependencies [89d5a41]
+- Updated dependencies [842637a]
+- Updated dependencies [c4c0794]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [23a07c8]
+- Updated dependencies [12b69e1]
+- Updated dependencies [857941d]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [b6a22b1]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [e3ef29f]
+- Updated dependencies [c77f8ca]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [1a30a17]
+- Updated dependencies [2becfd6]
+- Updated dependencies [1e4656d]
+- Updated dependencies [fe19c97]
+- Updated dependencies [a8e09bb]
+- Updated dependencies [ecf6a5f]
+- Updated dependencies [c5fd012]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [d0348cf]
+- Updated dependencies [b91cefa]
+- Updated dependencies [4fb8790]
+- Updated dependencies [36af6b0]
+- Updated dependencies [4ec9cc2]
+- Updated dependencies [a1082f3]
+- Updated dependencies [d9fabb2]
+- Updated dependencies [f8d016c]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [d947a93]
+- Updated dependencies [e95210d]
+- Updated dependencies [e61af97]
+- Updated dependencies [3dc3599]
+- Updated dependencies [d9e05f9]
+- Updated dependencies [f6f5b50]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [583bbf3]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [cc5472e]
+- Updated dependencies [a825152]
+- Updated dependencies [c513d62]
+- Updated dependencies [c6ecd1f]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [d576509]
+- Updated dependencies [4771d66]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [4c8e853]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [44c7a4a]
+- Updated dependencies [0c60897]
+- Updated dependencies [6320abb]
+- Updated dependencies [842b468]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [e556e3a]
+- Updated dependencies [46991d0]
+- Updated dependencies [a841e26]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [0465f4a]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [c0665c0]
+- Updated dependencies [3a78b89]
+- Updated dependencies [92a5cac]
+- Updated dependencies [6932cb8]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [bcfc8e4]
+- Updated dependencies [23c42c4]
+- Updated dependencies [80d474b]
+- Updated dependencies [3b4ffb2]
+- Updated dependencies [0ad377c]
+- Updated dependencies [3db857b]
+- Updated dependencies [1ee3bb8]
+- Updated dependencies [047f37b]
+- Updated dependencies [348fbc0]
+- Updated dependencies [ea1edf9]
+- Updated dependencies [0ff3b14]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [f84dc19]
+- Updated dependencies [6dd5716]
+- Updated dependencies [5d01679]
+- Updated dependencies [c37e47a]
+- Updated dependencies [3f5ffe7]
+- Updated dependencies [8319820]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [8b7c5d5]
+- Updated dependencies [6880b04]
+- Updated dependencies [d18d54b]
+- Updated dependencies [1354d2a]
+- Updated dependencies [0593356]
+- Updated dependencies [e735892]
+- Updated dependencies [a2bb7d5]
+- Updated dependencies [6aeb665]
+- Updated dependencies [6eceb46]
+- Updated dependencies [6feea4e]
+- Updated dependencies [a8261ce]
+- Updated dependencies [c1ec627]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/plugin-auth@18.6.0
+  - @objectstack/plugin-audit@18.6.0
+  - @objectstack/objectql@18.6.0
+  - @objectstack/metadata-protocol@18.6.0
+  - @objectstack/rest@18.6.0
+  - @objectstack/runtime@18.6.0
+  - @objectstack/plugin-security@18.6.0
+  - @objectstack/service-settings@18.6.0
+  - @objectstack/plugin-email@18.6.0
+  - @objectstack/lint@18.6.0
+  - @objectstack/service-automation@18.6.0
+  - @objectstack/service-analytics@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/service-storage@18.6.0
+  - @objectstack/driver-sql@18.6.0
+  - @objectstack/plugin-sharing@18.6.0
+  - @objectstack/mcp@18.6.0
+  - @objectstack/driver-turso@18.6.0
+  - @objectstack/driver-memory@18.6.0
+  - @objectstack/service-messaging@18.6.0
+  - @objectstack/cloud-connection@18.6.0
+  - @objectstack/console@18.6.0
+  - @objectstack/service-job@18.6.0
+  - @objectstack/plugin-approvals@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/plugin-webhooks@18.6.0
+  - @objectstack/client@18.6.0
+  - @objectstack/metadata@18.6.0
+  - @objectstack/formula@18.6.0
+  - @objectstack/plugin-hono-server@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/verify@18.6.0
+  - @objectstack/account@18.6.0
+  - @objectstack/setup@18.6.0
+  - @objectstack/plugin-pinyin-search@18.6.0
+  - @objectstack/service-datasource@18.6.0
+  - @objectstack/service-mailbox@18.6.0
+  - @objectstack/service-queue@18.6.0
+  - @objectstack/service-realtime@18.6.0
+  - create-objectstack@18.6.0
+  - @objectstack/driver-mongodb@18.6.0
+  - @objectstack/driver-sqlite-wasm@18.6.0
+  - @objectstack/observability@18.6.0
+  - @objectstack/service-cache@18.6.0
+  - @objectstack/service-package@18.6.0
+  - @objectstack/service-push@18.6.0
+  - @objectstack/service-sms@18.6.0
+  - @objectstack/trigger-api@18.6.0
+  - @objectstack/trigger-record-change@18.6.0
+  - @objectstack/trigger-schedule@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

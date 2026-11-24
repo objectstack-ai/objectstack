@@ -643,6 +643,7 @@ export const DesignerFieldDefinitionSchema = z.looseObject({
   isSystem: z.boolean().optional().describe('Whether this is a system field'),
   externalId: z.boolean().optional().describe('External ID flag'),
   trackHistory: z.boolean().optional().describe('Track field history'),
+  fieldHistory: z.boolean().optional().describe("This field's old → new values on the record activity; absent follows the platform default"),
   referenceTo: z.string().optional().describe('Lookup reference object (for lookup type)'),
 });
 

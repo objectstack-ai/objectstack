@@ -132,8 +132,16 @@ const VALID: Record<string, unknown> = {
 const blankTyped = (v: string) => Object.fromEntries(TYPED.map((t) => [f(t), v]));
 const STR_BLANK = { c_text: '', c_lookup: '', c_select: '' };
 
+// [#34672] A `summary` column is read-only on create and on update for an
+// ordinary caller: a caller's value for it, a blank included, is dropped
+// before the driver, so no write here sends `f_summary` at all (this fixture's
+// roll-up declares no `summaryOperations`, so the create seed has nothing to
+// fill it with either). Every other typed column still lands null.
+const WRITABLE_TYPED = TYPED.filter((t) => t !== 'summary');
+
 function expectTypedNull(data: Record<string, unknown>) {
-  for (const t of TYPED) expect(data[f(t)], t).toBeNull();
+  for (const t of WRITABLE_TYPED) expect(data[f(t)], t).toBeNull();
+  expect(data).not.toHaveProperty(f('summary'));
 }
 
 describe('engine write doors: a blank on a non-string-typed column reaches the driver as null (#20308)', () => {
@@ -188,10 +196,14 @@ describe('engine write doors: a blank on a non-string-typed column reaches the d
     expectTypedNull(last('updateMany'));
   });
 
-  it('a valid value on every typed column — falsy ones included — is unchanged', async () => {
+  it('a valid value on every typed column — falsy ones included — is unchanged (the roll-up\'s is dropped)', async () => {
     await engine.insert('blank_door', { id: 'v1', ...VALID });
     const sent = last('create');
-    for (const [k, v] of Object.entries(VALID)) expect(sent[k], k).toStrictEqual(v);
+    for (const [k, v] of Object.entries(VALID)) {
+      if (k === f('summary')) continue;
+      expect(sent[k], k).toStrictEqual(v);
+    }
+    expect(sent).not.toHaveProperty(f('summary'));
   });
 
   it('required refuses a blank exactly as it refuses null — insert and update', async () => {
@@ -230,7 +242,9 @@ describe('engine write doors: a blank on a non-string-typed column reaches the d
 
   it('a readonlyWhen lock still holds against a caller blank — the snapshot it judges is the normalised one', async () => {
     await engine.insert('blank_req', { id: 'l1', r_number: 1, status: 'closed', locked_amount: 10 });
-    await engine.update('blank_req', { id: 'l1', locked_amount: '' });
+    // `status` (unchanged, writable) survives the strip, so the write reaches
+    // the driver: an update whose every caller key is dropped writes nothing.
+    await engine.update('blank_req', { id: 'l1', status: 'closed', locked_amount: '' });
     const sent = last('update');
     expect('locked_amount' in sent).toBe(false);
     expect(stub.rows.get('l1')?.locked_amount).toBe(10);

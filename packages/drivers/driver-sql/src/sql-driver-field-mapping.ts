@@ -66,22 +66,30 @@ export interface FieldMappingHost {
 /** The bodies of the "Field mapping" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class FieldMappingFacet {
   /** The body of `SqlDriver#primeOracleRawUuidColumns`; the method's docblock there is its contract. */
-  static async primeOracleRawUuidColumns(this: Pick<FieldMappingHost, 'columnFieldByObject' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'physicalSchemaByObject' | 'physicalTableByObject' | 'readOracleRawUuidColumns'>, object: string): Promise<void> {
-    if (!this.isOracle || this.oracleRawUuidFieldsByObject.has(object)) return;
-    // Only a federated object names a remote table; a platform-created table
-    // never holds a RAW(16) uuid column, so there is nothing to read.
-    const remoteTable = this.physicalTableByObject[object];
-    if (remoteTable === undefined) return;
-    let columns: string[];
-    try {
-      columns = await this.readOracleRawUuidColumns(remoteTable, this.physicalSchemaByObject[object]);
-    } catch {
-      // A catalog that cannot be read leaves nothing recorded: every value
-      // keeps today's text bind, and the next door asks again.
-      return;
+  static async primeOracleRawUuidColumns(this: Pick<FieldMappingHost, 'columnFieldByObject' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'physicalSchemaByObject' | 'physicalTableByObject' | 'readOracleRawUuidColumns'>, object: string, where?: unknown): Promise<void> {
+    if (!this.isOracle) return;
+    // The door's own object, and the object of every composed `ReadableIds`
+    // leaf in its `where`: each leaf's scope compiles against that object's
+    // own table, so its comparands bind by that table's columns.
+    const objects = new Set<string>([object]);
+    collectTextMatchObjects(where, objects);
+    for (const target of objects) {
+      if (this.oracleRawUuidFieldsByObject.has(target)) continue;
+      // Only a federated object names a remote table; a platform-created table
+      // never holds a RAW(16) uuid column, so there is nothing to read.
+      const remoteTable = this.physicalTableByObject[target];
+      if (remoteTable === undefined) continue;
+      let columns: string[];
+      try {
+        columns = await this.readOracleRawUuidColumns(remoteTable, this.physicalSchemaByObject[target]);
+      } catch {
+        // A catalog that cannot be read leaves nothing recorded: every value
+        // keeps today's text bind, and the next door asks again.
+        continue;
+      }
+      const colToField = this.columnFieldByObject[target];
+      this.oracleRawUuidFieldsByObject.set(target, new Set(columns.map((column) => colToField?.[column] ?? column)));
     }
-    const colToField = this.columnFieldByObject[object];
-    this.oracleRawUuidFieldsByObject.set(object, new Set(columns.map((column) => colToField?.[column] ?? column)));
   }
 
   /** The body of `SqlDriver#readOracleRawUuidColumns`; the method's docblock there is its contract. */
@@ -220,7 +228,9 @@ export class FieldMappingFacet {
  * [#31395] Walk a `where` tree for what {@link FieldMappingFacet.primeMssqlGuidColumns}
  * needs: whether any key in it is a text operator (`TEXT_OPERATORS`), and the
  * object of every composed `ReadableIds` leaf in it, added to `objects` (each
- * leaf's subquery compiles its scope against that object's own table). Reads
+ * leaf's subquery compiles its scope against that object's own table).
+ * {@link FieldMappingFacet.primeOracleRawUuidColumns} reads the same objects
+ * and ignores the answer: one walk names the tables a scope compiles against. Reads
  * plain objects and arrays only; a `Date`, a binary comparand or any other
  * value is a comparand, not a node. Answers whether a text operator was found.
  */

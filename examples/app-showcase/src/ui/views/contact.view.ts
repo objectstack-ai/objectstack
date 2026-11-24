@@ -5,7 +5,17 @@ import { defineView } from '@objectstack/spec';
 const data = { provider: 'object' as const, object: 'showcase_contact' };
 
 /**
- * Contact views — the "create form ≠ edit form" pattern.
+ * Contact views — the "create form ≠ edit form" pattern, as it was authored
+ * before #36425.
+ *
+ * Since #36425 the Console's create and edit surfaces no longer load either
+ * form below: they lay the record out by the object's `fieldGroups` and follow
+ * the rules on its fields, and a field marked `showOnCreate: false` is left out
+ * of create only. Both forms are inert there (lint:
+ * form-view-internal-not-loaded, allow-listed with its reason in
+ * test/author-time-advisories.test.ts) and stay because test/seed.test.ts and
+ * the section translations read them. The text below describes what they
+ * declare, not what the Console draws.
  *
  * Scenario guide: content/docs/guides/solutions/create-vs-edit-form.mdx
  * Decision record: ADR-0047 (object UI run modes — derive-default + override).
@@ -41,9 +51,9 @@ const data = { provider: 'object' as const, object: 'showcase_contact' };
  *     default — self-fills), `notes` (edit-time only). Nothing here restates a
  *     field's type or rules; it only chooses WHICH fields appear and WHERE.
  *
- * The list's Add button opens that form by convention: the create entry uses
- * `formViews.create` when the container declares it, else the default `form`.
- * Nothing on `addRecord` names it (`mode` / `formView` were retired, #24692).
+ * The list's Add button opens the object's create form, laid out by its
+ * `fieldGroups`; nothing on `addRecord` names a form (`mode` / `formView` were
+ * retired, #24692).
  */
 export const ContactViews = defineView({
   // Default list — carries `data` so the view registrar can resolve the object.
@@ -57,8 +67,8 @@ export const ContactViews = defineView({
       { field: 'company' },
       { field: 'stage' },
     ],
-    // The Add button opens the create form — `formViews.create` below, the
-    // slim, hand-shaped form, rather than the full edit form.
+    // The Add button opens the object's create form (its fieldGroups, minus
+    // any `showOnCreate: false` field); `formViews.create` below is not loaded.
     addRecord: { enabled: true },
   },
 

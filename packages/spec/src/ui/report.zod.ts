@@ -104,7 +104,7 @@ export const ReportSortSchema = lazySchema(() => strictObject({
   },
 }, {
   /** A dimension (`rows`/`columns`) or measure (`values`) name this report selects. */
-  by: z.string().describe('Dimension or measure name to order by (must be selected by this report)').meta({ title: 'Order By' }),
+  by: z.string().describe('Dimension or measure name to order by (must be selected by this report)').meta({ title: 'Sort By' }),
   /** Sort direction. Null/empty cells sort LAST in both directions. */
   direction: z.enum(['asc', 'desc']).default('asc').describe('Sort direction (default ascending)').meta({ title: 'Direction' }),
 }));
@@ -437,13 +437,13 @@ export const JoinedReportBlockSchema = lazySchema(() => strictObject({
    * else would feed the block's query. It stays optional on this shape only
    * because `blocks` is read on a `joined` report alone.
    */
-  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021); a joined report refuses a block without one').meta({ title: 'Dataset' }),
+  dataset: SnakeCaseIdentifierSchema.optional().describe('Dataset name to bind (ADR-0021); a joined report refuses a block without one').meta({ title: 'Data Source' }),
   /** Dimension names (from the dataset) to group rows by. Dataset-bound only. */
-  rows: z.array(z.string()).optional().describe('Dimension names down (dataset-bound)').meta({ title: 'Rows' }),
+  rows: z.array(z.string()).optional().describe('Dimension names down (dataset-bound)').meta({ title: 'Group By' }),
   /** Dimension names across — matrix blocks pivot rows × columns (ADR-0021 D2). */
-  columns: z.array(z.string()).optional().describe('Dimension names across (matrix, dataset-bound)').meta({ title: 'Columns' }),
+  columns: z.array(z.string()).optional().describe('Dimension names across (matrix, dataset-bound)').meta({ title: 'Group Columns By' }),
   /** Measure names (from the dataset) to display. Dataset-bound only. */
-  values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)').meta({ title: 'Values' }),
+  values: z.array(z.string()).optional().describe('Measure names to show (dataset-bound)').meta({ title: 'Metrics' }),
   /**
    * Render-time scope filter, ANDed at query time. Dataset-bound only.
    * [#20116] Charted through the analytics `where` door, so it is an analytics
@@ -453,7 +453,7 @@ export const JoinedReportBlockSchema = lazySchema(() => strictObject({
    */
   runtimeFilter: analyticsCarrierFilter().describe('Render-time scope filter (dataset-bound)').meta({ title: 'Runtime Filter' }),
   /** Result ordering for this block, most significant key first (framework#3916). */
-  order: z.array(ReportSortSchema).optional().describe('Result ordering, most significant key first').meta({ title: 'Order' }),
+  order: z.array(ReportSortSchema).optional().describe('Result ordering, most significant key first').meta({ title: 'Sort Order' }),
 }).superRefine(checkReportOrder));
 
 /**

@@ -1,5 +1,262 @@
 # @objectstack/core
 
+## 18.6.0
+
+### Minor Changes
+
+- 2068e03: feat(i18n): the serving layer reads `i18n.sourceLocale` as the authored label's language
+  
+  Clause-②: yes
+  Metadata-protocol: semantic
+  
+  `II18nService` (`@objectstack/spec/contracts`) gains an optional `getSourceLocale()` / `setSourceLocale(locale)` pair, shaped like the fallback pair; `FileI18nAdapter` and the kernel's in-memory fallback implement both.
+  
+  An app authored in one language that defaults its users to another now serves its inline labels to a request in the authored language. Take `defaultLocale: 'zh-CN'`, `sourceLocale: 'en'`, English inline labels, a `zh-CN` bundle and no `fallbackLocale`:
+  
+  - Before: an `en` request was not treated as the authored language, walked the fallback chain (`zh-CN`) ahead of the inline text and was served the Chinese bundle row, unless the stack also declared `fallbackLocale: 'en'`.
+  - Now: an `en` request answers the English inline label; a `zh-CN` request answers the `zh-CN` row; any other locale walks the declared fallback chain exactly as before.
+  
+  `AppPlugin` threads the declared `i18n.sourceLocale` into the i18n service, and every metadata-document translation (the REST metadata reads, a formula's `label()`, an email template's `option` hole, analytics select-option labels and the upload-link page) passes `getSourceLocale()`, else `getDefaultLocale()`, as `ResolveOptions.defaultLocale`. A stack that declares no `sourceLocale` is served exactly as before. A `fallbackLocale: 'en'` added only to work around this can stay; it is no longer needed for the `en` request.
+  
+  Writing your own i18n provider: implement `setSourceLocale` to receive the declaration and `getSourceLocale` to report it, answering `undefined` when nothing was declared — never `defaultLocale`; the serving layer does that collapse itself.
+- 3e49033: fix(core, plugin-security, lint)!: a permission set's own field-mask row binds its own holders over that set's View All vote
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-own-field-mask-binds-over-own-view-all -->
+  
+  **BREAKING** for the holders of a permission set that grants View All (`viewAllRecords`) on an object and declares `readable: false` on a field of that object in its own `fields`. Per ADR-0066 D2 ⑧ as amended on 2026-11-15 (the maintainer's ruling on the card), that row wins over the same set's View All field vote: the set casts no read vote on the field, so a holder reads it only when another set they hold casts a read vote on it (that set's own `readable: true` row, or its View All or Modify All on the object). A co-held set that says nothing about the field does not restore it. Every reader of the field merge answers the same: the data doors, through `PermissionEvaluator.getFieldPermissions`, and the `fields` slot of `/auth/me/permissions`. Until this release the set's own View All voted the field readable, so the row bound none of the set's holders (the ADR's note of 2026-11-02).
+  
+  **Not moved.** Another set's View All or Modify All on the object still makes the field readable (and, under Modify All, editable) for a caller who holds both sets. A View All set still votes on every field it does not mask itself. An omitted `readable` parses to `true` and is not a mask. View All never granted an edit, so an edit lock beside it binds as before. Modify All is unchanged: a set holding `modifyAllRecords` on the object votes `readable: true` and `editable: true` on every field of it, its own rows included. The row-level bypass is untouched.
+  
+  **Who moves:** an administrator whose set pairs View All on an object with its own `readable: false` row for a field of that object, and whose holders are expected to keep reading the field. The row now hides the field from them, as it reads. Where the field is meant to be read, the row is the thing to delete. No default permission set the platform ships carries the pair.
+  
+  `@objectstack/lint`: `security-superuser-field-mask-inert` reports only a row that its own set's Modify All unbinds (a `readable: false`, an edit lock, or both). A `readable: false` beside the set's own View All is no longer reported, because it binds. The finding's `userTextParams` no longer carry `bypass` (Modify All is the only bypass the rule reports), and its message, hint and user sentence name Modify All. `security-controlled-by-parent-master-reference-hidden` is skipped only beside Modify All and is reported beside View All, and the roll-up source visibility rule reads a View All set's own mask as hiding the field. The rule ids are unchanged.
+  
+  `@objectstack/core`: the exported `superuserFieldVote(sets, objectName)` takes an optional third argument, the field name, and reads the `fields` of the sets it is given. Called with two arguments it answers the object-wide vote, as before.
+  
+  `@objectstack/spec`: the doc comment above `FieldPermissionSchema` states the exception, and the upgrade guide gains the semantic entry `permission-own-field-mask-binds-over-own-view-all`, which tells an administrator how to find the pair and what to decide. No schema, description or generated artifact changes.
+- 0e2e4f5: feat(automation): a flow writes a field marked as text in the organization's language
+  
+  Clause-②: yes (widening) — `create_record` / `update_record` `fields` values now also take the text envelope `{ dialect: 'template', source }` (`FlowRecordFieldValueSchema`), and the translation face gains `flows.<flow>.records.<node_id>.fields.<field>`; every value accepted before is accepted and written as before
+  Metadata-protocol: added
+  Skills-docs: follow-up #34434 — skills/objectstack-automation/SKILL.md (the record write's field values: the text envelope beside the CEL envelope and the literal), skills/objectstack-i18n/SKILL.md (the `flows.<flow>.records.<node_id>.fields.<field>` key and the organization-language rule)
+  
+  A `create_record` / `update_record` field value can now be marked as text: `{ dialect: 'template', source: 'Auto-escalated: {{ record.priority }} priority' }`. The node writes that sentence in the organization's language, because everyone in the organization reads the record. It picks the translated template at `flows.<flow>.records.<node_id>.fields.<field>` first, then fills its `{{ }}` holes. The language is the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person who started the run, so a run started by a button writes the same text as a record-change run.
+  
+  - A missing translation, or no language to pick, writes the authored text, and the run goes on.
+  - A bare string is still a literal and is written as spelled. Only the `fields` map of these two nodes takes the text envelope; every other value slot still refuses it. The source is judged as a text slot: a single-brace `{token}` is refused with its `{{ }}` spelling.
+  - A Localization setting that cannot be read fails the node and writes nothing, so another language is never stored over a choice that may exist. A `fault` edge routes the failure. A host that registers no `localization` setting has none set, so the app's declared default answers.
+  - The Studio flow inspector judges a record node's `fields` cells by the same rule (`FlowRecordFieldValueSchema`), so a text envelope there reads as valid and a malformed value still shows the spec's refusal. Fixes #34445.
+  - `os i18n extract` scaffolds the key, and the existing coverage check reports it missing against `supportedLocales`. `objectstack validate` refuses a key over an unknown node, over a node that is not a record write, or over a field the node does not mark as text.
+  - Text is picked when it is written. Records already written are not changed.
+  
+  `@objectstack/core` exports `resolveOrganizationLocale` and `readOrganizationLocaleSetting`: one reader of the organization's language, for text the platform writes on the organization's behalf. `@objectstack/runtime`'s seed-locale resolver now reads its organization-setting rung through `readOrganizationLocaleSetting`; its answers are unchanged.
+- fa9d695: fix(core): an unresolved `{ $record }` lookup-filter comparand is refused by name before any driver sees it
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A `lookupFilters` entry may read the record being edited as `{ $record: "field" }` or `{ $record: "lookup_field.field" }`; only the record picker of the form editing that record can replace it with a value. When one reaches a server unresolved as a field's comparand (the field's own value, or the value of an operator on that field), the engine's token pass (`resolveFilterTokens`) now refuses it with `INVALID_FILTER` / 400, and the message names the field, the `$record` path and its position, for example:
+  
+  `A { "$record": "account.cb_market" } comparand on field "cb_market" at filter.cb_market reached the server unresolved, and is refused rather than compared.`
+  
+  - Before: the eq shorthand `{ cb_market: { $record: "account.cb_market" } }` reached the driver, which refused it in its own words: driver-memory as an unsupported operator `"$record"`, driver-sql with the operator and field withheld. Both were already `INVALID_FILTER` / 400 (driver-mongodb refuses an unknown operator the same way), so on the built-in drivers no filter that answered rows now refuses: the pass judges only a field's comparand, never a value inside one (see Unchanged).
+  - Now: that shape is refused by name before any driver is asked, on every engine verb and in the analytics service, whether or not the filter also holds a string placeholder. On the engine's object path the other five operators (`{ valid_from: { $lte: { $record: "…" } } }`) and the eq shorthand on a date, datetime or time column are still refused one door earlier, in that door's own words, as before. The engine lowers a `[field, op, value]` array `where` before the pass, so there the array spelling is judged as its object form; the analytics service hands the pass its `where` unlowered, and the pass leaves a tuple to the doors that judged it before.
+  - Unchanged: a `{ $record }` deeper inside a comparand is a deep-equality literal (or a nested-relation condition) and passes through as before, in either spelling: the object form `{ attachment: { meta: { $record: "x" } } }`, which driver-memory still compares whole, and the tuple `['attachment', '=', { meta: { $record: "x" } }]`, whose third member is a comparand, never a filter node. Both come back from the pass by reference (pinned as CONTROLs on `resolveFilterTokens`).
+  
+  The `value` and `lookupFilters` describes now say what holds on the server: an unresolved `{ $record }` is refused with `INVALID_FILTER`, never read as null, and, in `lookupFilters`, by name on the eq shorthand of a column other than a date, datetime or time column. Their picker sentences (a record form sends the referenced value; every other picker host leaves the entry out) are not changed by this entry.
+- 11e0441: feat(hooks): a hook writes the sentences it declares in the organization's language
+  
+  Clause-②: yes (widening) — a hook may now declare `texts` and its code may call `ctx.text`; translation bundles accept `hooks.<hook>.texts.<key>.message`; `@objectstack/core` exports `readOrganizationTextLocale`. Nothing that was accepted before is refused
+  Metadata-protocol: added
+  Skills-docs: follow-up #34546
+  
+  A hook can now declare the sentences it writes into records for people to read, and ask for one by key: `texts: { follow_up_subject: { message: 'Follow up with qualified lead: {{ lead }}', params: ['lead'] } }`, then `await ctx.text('follow_up_subject', { lead })`. The answer is in the organization's language, because everyone in the organization reads the record: the Localization setting (`localization.locale`) when somebody set it, else the app's declared `i18n.defaultLocale`. It is never the language of the person whose save fired the hook. The translation `hooks.<hook>.texts.<key>.message` is picked first, then its `{{ }}` holes are filled from `params`.
+  
+  - A missing translation, or no language to pick, answers the declared sentence, and the hook goes on.
+  - A Localization setting that cannot be read rejects the call, so another language is never stored over a choice that may exist. A host that registers no `localization` setting has none set, so the app's declared default answers.
+  - Only declared text is translated: a string the hook builds itself is written as it is. A key `texts` does not declare is refused when the hook is saved if the hook asks for it literally (`ctx.text('key')`), otherwise when the hook runs, as a fault naming the hook and the key. `texts` on an `expression` body, or on a hook with neither a body nor a handler, is refused. A text with no `params` is plain text, and a `{{ }}` hole in it is refused.
+  - A text with `params` is compiled like a declared refusal's sentence: a hole over another name is refused when the hook is saved, and `objectstack validate`, `compile` and the publish gate refuse a hole holding logic, an unknown formatter, an empty hole and `{{ amount | currency }}` with no code. A translation whose holes do not render at run time is dropped for the declared sentence, filled.
+  - `ctx.text` is the same on a sandboxed `js` body and on an in-process `handler`.
+  - `os i18n extract` scaffolds the key, and the existing coverage check counts it. `objectstack validate` refuses a `hooks.<hook>.texts.<key>` translation over a key the hook does not declare.
+  - Text is picked when it is written. Records already written are not changed.
+  
+  `@objectstack/core` exports `readOrganizationTextLocale`: the one reading of the organization's language that every writer of such text shares, with an unregistered Localization setting answered as not set. The flow record write (`@objectstack/service-automation`) now reads through it; its answers are unchanged.
+
+### Patch Changes
+
+- f7b2d02: feat(automation): `IAutomationService.dryRun` runs an unpublished flow definition once, unarmed, as a named user
+  
+  Clause-②: yes (widening) — `AutomationEngine.dryRun` admits a `runAs: 'system'` self-triggered draft for the named user (ruling B); `@objectstack/core` exports the shared flow-start rules (`aiAccountElevatedStartRefusal`, `requiredPermissionsStartRefusal`, `requiredPermissionsRefusal`, `missingCapabilities`, `isAiServiceAccount`, `AI_ACCOUNT_ELEVATED_START_REFUSAL`, `FlowStartPermissionRefusal`); plugin-security's registered `security` service serves `canWriteObject`
+  Metadata-protocol: none
+  
+  The automation service now implements `dryRun(definition, { userId, record, … })`, the method the `IAutomationService` contract declares. A dry run admits the definition by the checks `registerFlow` asks, then by the rules that admit a start by name, and then runs it once against the supplied record as the named user. It registers nothing and arms no trigger, and it writes, sends and pauses nothing:
+  
+  - Record writes (`create_record`, `update_record`, `delete_record`) are simulated. The step shows the values the run would write and a placeholder id for a new record. The named user's object-level write permission is judged as allowed, refused or not judged. A later read by id in the same run sees the simulated row.
+  - Routing and computing nodes (`assignment`, `decision`, gateways, loops, parallel branches, try/catch) run on the engine's own executors. A decision step shows the branch taken and the expressions it evaluated.
+  - Outbound nodes (`http`, email and the like) are never executed. The step shows the payload they would send.
+  - The run stops at a node that pauses (`approval`, `wait`, `screen`, a subflow) and names why. A node type the dry run cannot simulate stops it as `not_simulated`.
+  
+  Under maintainer ruling B (record 6917953931), a draft declaring `runAs: 'system'` whose type starts on its own trigger is admitted to a dry run for the named user, and the run is never elevated. The contract's admission text says so. A by-name start of a published flow keeps refusing such a flow.
+  
+  The AI service account rule and the flow's own `requiredPermissions` rule now live in `@objectstack/core`. The by-name start doors and the dry run both ask that one copy. `@objectstack/runtime` re-exports every symbol under the name it had. The registered `security` service now also exposes `canWriteObject`, so a dry run can judge a write without performing it.
+- f02f4f6: fix(core): a composed artifact whose packages depend on each other in a cycle is refused as `422 CYCLIC_ARTIFACT_PACKAGES` naming the cycle, and install-local answers every artifact-resolver refusal instead of a 500
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - `@objectstack/core`: `resolveArtifactPackageEntries` / `resolveArtifactPackageOrder` refuse packages that depend on each other in a cycle with the ADR-0112 envelope their other refusals carry: `code: 'CYCLIC_ARTIFACT_PACKAGES'`, `status: 422`, and `details.cycle` listing the package ids along the cycle (each depends on the next, the first repeated last). Before, the cycle was a bare `Error` with no `code` or `status`. A caller that matched on the old message still finds `Circular dependency detected` in it. `resolvePluginOrder` now throws its cycle as `PluginOrderCycleError`, a new exported `Error` subclass that carries `cycle`. Its message is unchanged and it carries no `code`, so a kernel boot that hits a plugin cycle reads exactly as before.
+  - `@objectstack/spec`: `CYCLIC_ARTIFACT_PACKAGES` is registered in `ERROR_CODE_LEDGER` under `@objectstack/core`, so `ErrorCode` accepts it.
+  - `@objectstack/cloud-connection`: `POST /api/v1/marketplace/install-local` answered `500 INTERNAL_ERROR` with no reason for a composed artifact the resolver refuses: a `packages` that is not a list, a malformed entry, a duplicate package id, or a dependency cycle. On a real runtime, the step that judges the package's jobs and hooks reads the packages first and let the refusal escape. That step now answers the refusal itself, with its own status, code and `details`, and nothing is written. Every other step that reads the packages already did.
+- 9cf74ae: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  Four refusals the platform writes now carry a `userMessage` in the caller's language (the request locale, else the workspace default), beside a code, status and `message` that do not change. Before this a zh-CN user read each of them in English.
+  
+  - `404 RECORD_NOT_FOUND`: "This record does not exist, or you do not have access to it." (`record_not_found`). It names no id and no API name, and it says both causes because the by-id doors answer an unreadable id exactly as a missing one.
+  - `403 PERMISSION_DENIED` for a query that filters, sorts or groups by a field the caller may not read (`query_field_not_readable`), from all four producers of that refusal: plugin-security, the approval snapshot guard, the audit parent-field guard and analytics. It names no field. The aggregate refusal is unchanged.
+  - `403 DELEGATION_SCOPE_VIOLATION`, a delegated administrator's write outside their own scope (`delegation_scope_violation`). The gate's reason stays in `message`.
+  - `409 RECORD_LOCKED` from an approval's record lock: the localized sentence is now also the `userMessage`, without the `RECORD_LOCKED: ` prefix. The bound refusals that name an API name for the developer mark none.
+  
+  The three sentences are new keys of the shared operation-message catalog (`BUILTIN_OPERATION_MESSAGES`, in `en`, `zh-CN`, `ja-JP` and `es-ES`), so a deployment can override them under `errors.<key>` where the producer holds an i18n service. The widening: `@objectstack/spec` adds the catalog keys `record_not_found`, `query_field_not_readable` and `delegation_scope_violation`; `@objectstack/core` exports `operationUserMessage(messageKey, caller)` and its caller type `UserMessageCaller` for producers that hold no i18n service, and `recordNotFoundError` takes the caller as an optional third argument. Every door that holds the caller's execution context passes it, the action door's subject load, the flow-start door's row admission and the bulk update faces' existence check included, so the same miss reads in the same language at the data, action and flow-start doors.
+- bb169c3: fix(plugin-security): a record an action body inserts is owned by the user who ran the action
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  An action body's `ctx.api` (and `ctx.engine`) runs the invoking user's context elevated to system. The security middleware's system bypass skipped the owner stamp a direct create gets, so a row the body inserted with `ctx.api.object(X).insert({...})` was stored with `owner_id` null, while `created_by` named the invoker. On an object with `sharingModel: 'private'` a non-admin invoker then could not read or update the record their own action had just created: `get` by the returned id answered not-found.
+  
+  An action body's insert now fills an EMPTY `owner_id` with the invoker, as a direct create by that user does:
+  
+  - every row of a batch insert whose owner is empty is stamped;
+  - an `owner_id` the body sets itself is kept, another user's included (the body is trusted code, as before);
+  - a guest invoker is stamped with nothing (ADR-0138 D1);
+  - under delegation the stamp names the same principal a direct create under that context names (ADR-0090 D10);
+  - a body that names an ownership queue and supplies `owner_id` empty beside it parks the row unowned in the queue; a body that names a queue and leaves `owner_id` out gets an owned row with that home queue (ADR-0142 D3).
+  
+  This covers every handler an action door dispatches, not only a script body's `ctx.api`. A host code action handler and an action reached through `ObjectRepository.execute` run under the same action context, and their inserts are stamped the same way.
+  
+  Assignment rules (ADR-0142 D5) route only a row whose `owner_id` and `queue` are both still empty. An action-body insert is now the invoker's own record, as a direct create by that user already was, so assignment rules route neither. Before this release, an action body's unowned, queue-less insert on an object a rule reaches was routed by the rule. It now goes to the invoker. A body has no spelling today that asks a rule to route its row.
+  
+  `@objectstack/core`: the header of the app-automation elevation mark (shipped in its type declarations) now names the owner stamp as a second reader beside the refusals.
+  
+  Unchanged: flows (`runAs: 'system'` or not), hooks with `runAs: 'system'`, seed, boot and import writes, and any other system context. They still store the owner they write, or none, and an unowned, queue-less insert from one of them is still routed by assignment rules. Rows stored before this release keep `owner_id` null; an administrator can assign their owners.
+- c37e47a: feat(spec, core, service-messaging, service-automation, plugin-webhooks)!: webhook deliveries and the flow `http` node reach only public addresses unless the operator allowlists the target, and never a link-local or cloud metadata address
+  
+  Clause-②: no (narrowing) — webhook deliveries and flow `http` node requests aimed at an address that is not public (loopback, private, carrier-grade NAT, link-local, unique-local, multicast, broadcast, unspecified, documentation, benchmarking, any other special-purpose range that is not globally reachable, and any IPv6 address outside global unicast) are refused unless `OS_EGRESS_ALLOWED_TARGETS` lists the target; link-local and cloud metadata addresses are refused whatever it lists; a malformed or over-broad allowlist fails the boot.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed: a webhook row and a flow http node are authored and stored exactly as before, and nothing stored is rewritten. What moves is the deployment's outbound policy, decided by the operator's environment at boot, so no metadata migration exists to register. -->
+  
+  **BREAKING** for deployments whose webhooks or flows send requests to internal addresses. Webhook deliveries and flow `http` node requests now reach only public addresses: every address in a range that is not globally reachable is refused, and so is any IPv6 address outside global unicast. Cloud metadata addresses — every cloud's link-local endpoints, the IPv6 metadata endpoints, and the metadata and host-platform addresses outside link-local space — are never reachable. The rule applies to the address the connection is actually made to: after DNS resolution, for a literal IP in the url, for IPv6 forms that carry an IPv4 address, on the connected socket itself, and on every redirect hop. A host name with several addresses is judged on all of them and then dialled in turn, so a public target that answers on only some of its addresses is still reached.
+  
+  **Who moves.** Operators whose webhooks or flows target internal addresses (a service on `localhost`, a host on a private network, an internal DNS name that resolves to one): set `OS_EGRESS_ALLOWED_TARGETS` to the exact host names, IP addresses or CIDR blocks those requests may reach, comma-separated, and restart. Link-local and cloud metadata addresses cannot be listed. These requests connect directly to the address the guard judged, so an HTTP proxy configured through the environment is not used for them. Nothing else changes, and requests to public targets are unaffected.
+  
+  **Runtime.** `@objectstack/core/egress`, and with it `@objectstack/service-messaging`, `@objectstack/service-automation` and `@objectstack/plugin-webhooks`, now load `undici`, `node:dns` and `node:net` when they are imported, so these packages need a Node.js runtime. At install the guard proves that the requests it sends are judged by it; in a runtime where that cannot be proven (one whose fetch does not honour undici's dispatcher), the boot fails and every webhook delivery and flow `http` request is refused.
+  
+  **What a refusal looks like.** A webhook delivery whose target is refused dead-letters on its first attempt with an error starting `EGRESS_REFUSED`; it does not walk the retry schedule, since a retry cannot change the verdict. A flow `http` node whose target is refused fails with `http: EGRESS_REFUSED: …`, and a `durable: true` callout dead-letters in the outbox the same way as a webhook. The refusal text names the requested host and the rule, and reads the same for a host name that does not resolve (which is still retried); the server log adds the resolved address and its class, or the lookup failure, for the operator.
+  
+  **The boot.** One line says the guard is active and how many targets `OS_EGRESS_ALLOWED_TARGETS` lists. The webhook plugin then logs once how many stored `sys_webhook` rows target an address the guard will refuse. A malformed or over-broad allowlist (an entry with a scheme, port, path or wildcard, host bits set, a prefix under `/8` such as `0.0.0.0/0`, or a link-local or metadata address) fails the boot, naming every bad entry.
+  
+  **For hosts.** `@objectstack/core/egress` exports the policy seam (`EgressPolicy`, decided per connected address, host name, organization and source), the open-core default (`createEnvEgressPolicy`) and the guarded fetch. The error-code ledger registers `EGRESS_REFUSED` and `EGRESS_ALLOWLIST_INVALID` under `@objectstack/core`. `MessagingServicePlugin`, `AutomationServicePlugin` and `WebhookOutboxPlugin` take an `egressPolicy` option for a stricter policy.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

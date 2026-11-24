@@ -682,10 +682,11 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
   describe('a name the platform requests by its spelling keeps one holder per deployment, whatever the namespaces', () => {
     const RESET = 'auth.password_reset';
 
-    it('the eight auth mails are the platform-requested email template names', () => {
+    it('the ten auth mails are the platform-requested email template names', () => {
       expect([...(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template ?? [])].sort()).toEqual([
         'auth.account_invitation', 'auth.email_change_notice', 'auth.existing_account_sign_up', 'auth.invitation',
-        'auth.magic_link', 'auth.password_reset', 'auth.two_factor_otp', 'auth.verify_email',
+        'auth.magic_link', 'auth.password_changed_notice', 'auth.password_reset', 'auth.password_reset_notice',
+        'auth.two_factor_otp', 'auth.verify_email',
       ]);
       expect(bareNameHoldersMeet(type, 'alpha', 'beta', RESET)).toBe(true);
       expect(bareNameHoldersMeet(type, 'alpha', 'beta', name)).toBe(false);

@@ -18,7 +18,7 @@ import { runCli } from '../../src/bin.js';
 import { checkGallery, FINDING_CODES, LOCAL_PATH, renderFinding, type FindingCode, type GalleryFinding } from '../../src/export/check.js';
 import { mainCheck } from '../../src/export/check-cli.js';
 import { main as exportCliMain } from '../../src/export/cli.js';
-import { APP_LAYOUT } from '../../src/export/contract.js';
+import { APP_LAYOUT, SAMPLE_DATA_FILE, SAMPLE_DATA_SPECIFIER } from '../../src/export/contract.js';
 import { exportGallery } from '../../src/export/exporter.js';
 import { parseIndex, serializeIndex, type GalleryApp } from '../../src/export/manifest.js';
 import type { CaptureScreenshots } from '../../src/export/screenshots.js';
@@ -154,6 +154,50 @@ describe('checkGallery — complete app directories', () => {
   });
 });
 
+describe('checkGallery — sample data: a gallery app arrives with it', () => {
+  const SOURCE = `${APP}/${APP_LAYOUT.source}`;
+  const DATA = `${SOURCE}/${SAMPLE_DATA_FILE}`;
+
+  it('⛔ an app with no sample-data file — the tree an exporter before the trial package wrote — is one finding', () => {
+    const dir = tree();
+    rmSync(join(dir, DATA));
+    expect(check(dir).findings).toEqual([
+      {
+        kind: 'app-sample-data',
+        path: DATA,
+        message: `a gallery app is a package a customer installs to try, and it arrives with the card's seed rows as its sample data in ${APP_LAYOUT.source}/${SAMPLE_DATA_FILE}; this one has none`,
+      },
+    ]);
+  });
+
+  it('a sample-data file that is not JSON, or not a non-empty list', () => {
+    for (const [text, why] of [['[{', /^not JSON: /], ['[]', /non-empty list/], ['{"object":"democrm_account"}', /non-empty list/]] as const) {
+      const dir = tree();
+      writeFileSync(join(dir, DATA), text);
+      const fs = only(check(dir).findings, 'app-sample-data');
+      expect(fs.map((f) => f.path), text).toEqual([DATA]);
+      expect(fs[0]!.message, text).toMatch(why);
+    }
+  });
+
+  it("a dataset the spec's SeedSchema refuses, and one with no record, each located by its index", () => {
+    const dir = tree();
+    const data = JSON.parse(readFileSync(join(dir, DATA), 'utf8')) as Array<Record<string, unknown>>;
+    data[0] = { ...data[0], object: 'Democrm Account' };
+    data[1] = { ...data[1], records: [] };
+    writeFileSync(join(dir, DATA), JSON.stringify(data));
+    const fs = only(check(dir).findings, 'app-sample-data');
+    expect(fs.map((f) => f.message.split(':')[0])).toEqual(['[0].object', '[1] (`democrm_contact`) holds no record']);
+  });
+
+  it('a config that does not import the sample data into its `data:`', () => {
+    const dir = tree();
+    const config = join(dir, SOURCE, 'objectstack.config.ts');
+    writeFileSync(config, readFileSync(config, 'utf8').replace(SAMPLE_DATA_SPECIFIER, './src/other.json'));
+    expect(only(check(dir).findings, 'app-sample-data').map((f) => f.path)).toEqual([`${SOURCE}/objectstack.config.ts`]);
+  });
+});
+
 describe('checkGallery — screenshots', () => {
   it('⛔ an entry with no screenshot fails, and the file it no longer lists is named too', () => {
     const dir = tree();
@@ -251,7 +295,7 @@ describe('checkGallery — stray files, anywhere in the tree', () => {
 
 describe('every finding code has a case above', () => {
   it('the codes are the ones the header lists', () => {
-    expect([...FINDING_CODES]).toEqual(['index-json', 'app-missing', 'app-incomplete', 'app-screenshots', 'app-unlisted', 'framework-version', 'env-file', 'node-modules', 'symbolic-link', 'local-path']);
+    expect([...FINDING_CODES]).toEqual(['index-json', 'app-missing', 'app-incomplete', 'app-sample-data', 'app-screenshots', 'app-unlisted', 'framework-version', 'env-file', 'node-modules', 'symbolic-link', 'local-path']);
   });
 });
 

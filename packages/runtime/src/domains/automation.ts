@@ -58,7 +58,8 @@ import {
 } from '../validation-failure.js';
 import { ExecutionStatus, collectFlowGraphs, type FlowNodeParsed } from '@objectstack/spec/automation';
 import { nearestName } from '@objectstack/formula';
-import { ListRunsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { ListRunsRequestSchema, RecordUpdateStartsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { recordNotFoundError } from '@objectstack/metadata-protocol';
 import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
@@ -3719,6 +3720,111 @@ export async function classifyResumeResult(
     };
 }
 
+/** [#35928] The record-update preview's literal segment (`NAMESPACE_POSITION_LITERALS.automation`). */
+const RECORD_UPDATE_STARTS_SEGMENT = '_record-starts';
+
+/** [#35928] The preview's closed query set: it reads none, so any parameter is refused. */
+const RECORD_UPDATE_STARTS_QUERY_PARAMS: readonly string[] = [];
+
+/**
+ * [#35928] `POST /automation/_record-starts` — which flows a proposed update of
+ * one record would start, for the stage-change confirms (ruling record
+ * 7073655354: a caller who can read the record sees the flows' labels; hooks
+ * are never listed; no new capability).
+ *
+ * Order: the closed query set, the body (`RecordUpdateStartsRequestSchema`,
+ * `400 VALIDATION_FAILED` located on the member), then the record, read AS
+ * THE CALLER through the `/data` door's own read (`callData` `get`): an object
+ * the caller may not address, or a record they cannot read, answers that
+ * read's refusal (`404 RECORD_NOT_FOUND` for an unreadable or absent record),
+ * so this door tells a caller nothing the record read would not. A read that
+ * answers no record is refused the same `404`, never previewed over an empty
+ * row. Then every `changes` key must be a declared field of `object` (its own
+ * key in the registry's `fields`); any other key is refused
+ * `400 VALIDATION_FAILED`, located on the key, and the engine is not asked.
+ * Only then the engine, handed the record as read (`previous`) and with the
+ * proposed fields applied (`record`), and the caller as the writer. An engine
+ * without the optional member answers 501, never a guess.
+ */
+/**
+ * [#35928] The `changes` keys of a record-update preview that are not declared
+ * fields of `object`: an own key of the registry object's `fields` map is
+ * declared, anything else is not. With no registry, or no object under the
+ * name, nothing is declared and every key is answered back, so the door
+ * refuses rather than previews.
+ */
+async function undeclaredChangeKeys(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    object: string,
+    changes: Record<string, unknown>,
+): Promise<string[]> {
+    let fields: unknown;
+    try {
+        const ql: any = typeof deps.getObjectQL === 'function' ? await deps.getObjectQL(context) : undefined;
+        fields = ql?.registry?.getObject?.(object)?.fields;
+    } catch {
+        fields = undefined;
+    }
+    const declared = fields && typeof fields === 'object' && !Array.isArray(fields) ? fields : undefined;
+    return Object.keys(changes).filter((key) => !(declared && Object.prototype.hasOwnProperty.call(declared, key)));
+}
+
+async function respondToRecordUpdateStarts(
+    deps: DomainHandlerDeps,
+    automationService: unknown,
+    body: unknown,
+    query: unknown,
+    context: HttpProtocolContext,
+): Promise<HttpDispatcherResult> {
+    const queryRefusal = unknownQueryParamRefusalMessage(query, RECORD_UPDATE_STARTS_QUERY_PARAMS);
+    if (queryRefusal !== undefined) {
+        return { handled: true, response: deps.error(queryRefusal, 400, { code: 'VALIDATION_ERROR' }) };
+    }
+    const parsed = RecordUpdateStartsRequestSchema.safeParse(body);
+    if (!parsed.success) {
+        const fields = fieldsFromZodIssues(parsed.error.issues, body);
+        const message = `Invalid record-update preview request: ${fields.map((f) => `${f.field}: ${f.message}`).join('; ')}`;
+        return { handled: true, response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS) };
+    }
+    const { object, recordId, changes } = parsed.data;
+    const svc = automationService as Pick<IAutomationService, 'listRecordUpdateStarts'>;
+    if (typeof svc.listRecordUpdateStarts !== 'function') return capabilityUnavailable(deps, 'automation');
+    let stored: Record<string, unknown>;
+    try {
+        const read = await callData(
+            deps, context, 'get', { object, id: recordId },
+            context?.dataDriver, context?.environmentId, context?.executionContext,
+        );
+        const row = (read as { record?: unknown } | null | undefined)?.record;
+        if (!row || typeof row !== 'object' || Array.isArray(row)) {
+            return { handled: true, response: deps.errorFromThrown(recordNotFoundError(object, recordId), 404) };
+        }
+        stored = row as Record<string, unknown>;
+    } catch (err) {
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
+    const undeclared = await undeclaredChangeKeys(deps, context, object, changes);
+    if (undeclared.length > 0) {
+        const fields = undeclared.map((key) => ({
+            field: `changes.${key}`,
+            code: 'unknown_field',
+            message: `not a field of \`${object}\``,
+        }));
+        const message = `Invalid record-update preview request: ${undeclared.map((key) => `\`${key}\``).join(', ')} ${undeclared.length > 1 ? 'are not fields' : 'is not a field'} of \`${object}\``;
+        return { handled: true, response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS) };
+    }
+    const ec: any = (context as any)?.executionContext;
+    const flows = svc.listRecordUpdateStarts({
+        object,
+        previous: stored,
+        record: { ...stored, ...changes },
+        ...(typeof ec?.userId === 'string' ? { userId: ec.userId } : {}),
+        ...(typeof ec?.tenantId === 'string' ? { tenantId: ec.tenantId } : {}),
+    });
+    return { handled: true, response: deps.success({ flows }) };
+}
+
 /**
  * Handles Automation requests
  * path: sub-path after /automation/
@@ -3781,7 +3887,15 @@ export async function classifyResumeResult(
  *                                  activation ledger. A flow no package ships → 409
  *                                  `RESOURCE_CONFLICT` naming that flow's own switch,
  *                                  its `status` ('obsolete' / 'active') published
- *                                  through `PUT /:name`; nothing changes (#20726)
+ *                                  through `PUT /:name`; nothing changes (#20726).
+ *                                  Switching ON a packaged flow whose own `status`
+ *                                  disables it → 409 `RESOURCE_CONFLICT` naming the
+ *                                  status; nothing changes. 200 answers
+ *                                  `{ name, enabled }` with `enabled` read back from
+ *                                  `getFlowRuntimeStates` while the name has one
+ *                                  row there (echoed by a service that does not
+ *                                  implement that read, and for a name two packages
+ *                                  hold, which reads one row per holder)
  *                                  ⚑ authoring write — `manage_metadata` (commit 266436a7f):
  *                                    enablement is environment-wide, so an
  *                                    unentitled toggle reached every organization
@@ -4338,6 +4452,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         return { handled: true, response: deps.success({ flows: [], total: 0 }) };
     }
 
+    // [#35928] POST /_record-starts → which flows a proposed update of one
+    // record would start (`listRecordUpdateStarts`). Underscore-prefixed so no
+    // flow name can shadow it; ahead of the `/:name` arms for that reason.
+    if (parts[0] === RECORD_UPDATE_STARTS_SEGMENT && parts.length === 1 && m === 'POST') {
+        return respondToRecordUpdateStarts(deps, automationService, body, query, context);
+    }
+
     // Routes with :name
     if (parts.length >= 1) {
         const name = parts[0];
@@ -4422,7 +4543,31 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // [#26474] Who asked, so the ledger row and its audit row name
                 // them. The id only: this door has already judged the caller.
                 await automationService.toggleFlow(name, enabled, activationCaller(context));
-                return { handled: true, response: deps.success({ name, enabled }) };
+                // [ADR-0126 §7.2] The answer is the engine's state read back,
+                // never the request echoed: the switch moves only the ledger
+                // bit, and the flow's `status` is a second dimension it does
+                // not move, so "the write landed" and "the flow is on" are two
+                // facts. Read through `getFlowRuntimeStates`, the one reading
+                // `GET /_status` serves, so the two doors cannot disagree.
+                // That reading names the switched flow only while the name
+                // has ONE row. A name two packages hold reaches here too: by
+                // its address, or bare with one served holder left, through
+                // `flowSlotView`, whose `toggleFlow` switches one slot while
+                // the engine still reads one row per slot under the bare
+                // name ([ADR-0150 D4], `getFlowRuntimeStates`). A row picked
+                // by name there may be the other holder's, so two or more
+                // rows read back nothing. Then, as for a service that does
+                // not implement the read or holds no row of the name, the
+                // request is echoed, the legacy answer; for the engine's own
+                // service (the only one with slots) that echo is true by
+                // construction, since every toggle entry refuses switching
+                // on a flow its status keeps off.
+                const svc = automationService as Pick<IAutomationService, 'getFlowRuntimeStates'>;
+                const rows = typeof svc.getFlowRuntimeStates === 'function'
+                    ? svc.getFlowRuntimeStates().filter((s) => s.name === name)
+                    : [];
+                const state = rows.length === 1 ? rows[0] : undefined;
+                return { handled: true, response: deps.success({ name, enabled: state ? state.enabled : enabled }) };
             }
         }
 

@@ -636,6 +636,20 @@ const FAILURE_PROPAGATION_SITES = new Map([
                 + "(#22985); `schema-migration-plugins.test.ts` pins the refusal note and the failed count.",
         },
     ],
+    [
+        'packages/runtime/src/domains/mcp-authoring.ts::execute',
+        {
+            callees: [['refusalFromThrown', 'return']],
+            why:
+                "`refusalFromThrown()` is the open draft door's tool-call refusal: it builds the MCP tool result "
+                + 'with `isError: true` and an ADR-0112 `{ code, message, status }` envelope FROM the caught error, '
+                + 'keeping a coded 4xx refusal whole and answering any other throw `500 INTERNAL_ERROR`. The tool '
+                + 'switch\'s outer catch returns it on its only path, so the agent that asked for the draft save is '
+                + 'told, in the same reply, that the draft did not land. Scoped to this one function because the '
+                + 'name is a closure local to it (#34766); `mcp-authoring.test.ts` pins the coded refusal and the '
+                + 'uncoded fault answered without its text.',
+        },
+    ],
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────

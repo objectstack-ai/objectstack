@@ -71,6 +71,10 @@ vi.mock('../previews/useObjectFields', () => ({
   }),
 }));
 
+// The inspectors reach `celAuthoring`'s and the object picker's dynamic
+// `@objectstack/lint` import; its first load is paid here, at collection,
+// never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { t, tFormat } from '../i18n';
 import { DashboardWidgetInspector } from './DashboardWidgetInspector';
 import { DashboardDefaultInspector } from './DashboardDefaultInspector';
@@ -508,6 +512,9 @@ function mountScopedEdge(lang: Lang) {
       locale={LOCALE[lang]}
     />
   ));
+  // objectstack#34818 — an empty guard on a record-triggered flow opens as
+  // field rows; the data-picker is the formula input's, one click away.
+  fireEvent.click(screen.getByTestId('flow-edge-condition-to-formula'));
 }
 
 /**
@@ -599,10 +606,12 @@ describe('the variable data-picker — section headings and reference details (o
       expect(d.get('note')).toBe(t('engine.flowScope.detail.variable', L));
       expect(d.get('record')).toBe(tFormat('engine.flowScope.detail.triggerRecord', L, { object: 'account' }));
       expect(d.get('previous')).toBe(t('engine.flowScope.detail.previousRecord', L));
-      expect(d.get('previous.amount')).toBe(tFormat('engine.flowScope.detail.priorOf', L, { detail: 'Amount' }));
+      // objectstack#34818 — a labelled field is offered BY its label (its
+      // prior value by the same row), the token muted beside it.
+      expect(d.get(tFormat('engine.flowScope.detail.priorOf', L, { detail: 'Amount' }))).toBe('previous.amount');
       expect(d.get('previous.code')).toBe(t('engine.flowScope.detail.priorValue', L));
       // Lit control on the same list: author data passes through as it was.
-      expect(d.get('record.amount')).toBe('Amount');
+      expect(d.get('Amount')).toBe('record.amount');
       expect(d.get('acct')).toBe('Fetch');
     });
   }

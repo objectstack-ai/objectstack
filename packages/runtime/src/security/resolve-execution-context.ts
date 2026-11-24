@@ -234,10 +234,11 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     anonymous: 'guest',
     // [ADR-0069 / #7280] WITHHELD, on the record. This face enforces the
     // authentication-policy gate at its OWN seam: `HttpDispatcher.enforceAuthGate`
-    // re-reads the session and calls `evaluateAuthGate(session.user, path)`
-    // there, and nothing on this path ever reads `context.authGate`. [#23287]
-    // The key-admission seam's answer reaches that gate through
-    // `opts.onAdmission`, not through this field.
+    // calls `evaluateAuthGate` there, and nothing on this path ever reads
+    // `context.authGate`. [#23287] The posture decided for whichever credential
+    // admitted the caller (the key-admission seam's answer, or the posture off
+    // THIS session read) reaches that gate through `opts.onAdmission`, not
+    // through this field, so the gate reads no second session for it.
     authGate: 'withhold',
     credentials: 'api-key-and-session',
     // This door admits an API key whether or not an auth service is wired.

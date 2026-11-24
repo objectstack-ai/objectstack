@@ -1,0 +1,3 @@
+- **A user can now:** <!-- one sentence, in the user's words -->
+- **Checked by:** <!-- the path walked, as which user; validate, lint, typecheck and test pass -->
+- **Docs:** <!-- the user docs this PR changed, or why none changed -->

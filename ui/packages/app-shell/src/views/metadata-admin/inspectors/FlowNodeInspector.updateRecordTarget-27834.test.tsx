@@ -143,11 +143,11 @@ describe('objectstack#27834 — the triggering record as the Update Records targ
   it('one press writes the id match, the line says so, and the saved flow passes the publish verdict', () => {
     const { config, flow } = mount({ id: 'write', type: 'update_record', label: 'Write', config: { objectName: 'ticket' } });
     const filter = block('Filter');
-    expect(within(filter.parentElement!).getByText('Targets the ticket record that started this flow.')).toBeInTheDocument();
+    expect(within(filter.parentElement!).getByText('Targets the “ticket” record that started this flow.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: TARGET }));
     expect(config()).toEqual({ objectName: 'ticket', filter: TRIGGERING_FILTER });
     expect(screen.queryByRole('button', { name: TARGET })).toBeNull();
-    expect(screen.getByText('Updates the ticket record that started this flow.')).toBeInTheDocument();
+    expect(screen.getByText('Updates the “ticket” record that started this flow.')).toBeInTheDocument();
     // The row is an ordinary filter row: the key `id`, the value a CEL expression.
     expect(within(block('Filter')).getByDisplayValue('record.id')).toBeInTheDocument();
 
@@ -181,7 +181,7 @@ describe('objectstack#27834 — the triggering record as the Update Records targ
       config: { objectName: 'ticket', filter: { status: 'open' } },
     });
     expect(screen.queryByRole('button', { name: TARGET })).toBeNull();
-    expect(screen.queryByText('Updates the ticket record that started this flow.')).toBeNull();
+    expect(screen.queryByText('Updates the “ticket” record that started this flow.')).toBeNull();
     expect(onPatch).not.toHaveBeenCalled();
     expect(config()).toEqual({ objectName: 'ticket', filter: { status: 'open' } });
   });

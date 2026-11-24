@@ -144,6 +144,48 @@ function resolveScoped(
   return scope ? resolveRef(referenceObject, display, meta, scope) : resolveRef(referenceObject, display, meta);
 }
 
+/**
+ * [#36159] A row column a lookup cell was scoped by: the column's label and its
+ * cell as the importer typed it. Carried beside the scope (whose keys are the
+ * TARGET's fields and whose values are coerced ids) so a refusal can name what
+ * the importer wrote.
+ */
+interface ScopedBy {
+  label: string;
+  value: string;
+}
+
+/**
+ * [#36159] The refusal for a reference cell that matched nothing. A scoped
+ * miss is asked once more WITHOUT the scope, through the same resolver: when
+ * the value matches a record there (one or several), the row's own scope is
+ * why nothing matched, and the sentence names the scoping columns and the
+ * values the row gave them, e.g. `Contract: no record matches "CTR-0006"
+ * (Account = "Acme")`. A value that matches nothing at all keeps the plain
+ * sentence. The reason stays `reference_not_found`.
+ *
+ * The probe is the caller's own read: the resolver runs every lookup as the
+ * importing principal, so it can find only a record that principal can already
+ * read by the same value, and the sentence says nothing of that record. The
+ * qualifier is composed from labels, cells and punctuation only, so it reads
+ * the same under every locale the catalog sentence is rendered in.
+ */
+async function referenceNotFound(
+  meta: ExportFieldMeta,
+  field: string,
+  value: string,
+  ctx: CoerceContext,
+  scope: Readonly<Record<string, unknown>> | undefined,
+  scopedBy: readonly ScopedBy[] | undefined,
+): Promise<{ error: FieldCoerceError }> {
+  const refusal = coerceError(meta, field, 'reference_not_found', 'import_reference_not_found', value, ctx);
+  if (!scope || !scopedBy || scopedBy.length === 0 || !ctx.resolveRef || !meta.reference) return refusal;
+  const unscoped = normalizeRefMatch(await ctx.resolveRef(meta.reference, value, meta));
+  if (unscoped.id === undefined && !unscoped.ambiguous) return refusal;
+  const qualifier = scopedBy.map((s) => `${s.label} = "${s.value}"`).join(', ');
+  return { error: { ...refusal.error, message: `${refusal.error.message} (${qualifier})` } };
+}
+
 /** Normalise a resolver result (legacy string or structured) to a RefMatch. */
 function normalizeRefMatch(result: string | undefined | RefMatch): RefMatch {
   if (result == null) return {};
@@ -348,8 +390,10 @@ function pad2(n: number): string {
  * read back unchanged, and it reads `07/15/2026 10:00` through `Date.parse`
  * in the host's zone and rolls `2026-02-30T10:00:00Z` over to March 2, both of
  * which the verdict refuses. A `{placeholder}` is filter vocabulary, which the
- * verdict steps around rather than judges, so it is refused here, as the write
- * door refuses it.
+ * verdict does not refuse whole: it steps around a date macro and an unknown or
+ * record-context token, and judges only a period key and a context token as
+ * written. So every placeholder is refused here first, by
+ * `classifyFilterToken`, as the write door refuses it.
  *
  * This replaced a private pattern with no fractional part, which refused the
  * `10:00:00.250` that `/export` writes for a `time` with milliseconds, so such
@@ -759,6 +803,20 @@ export async function coerceFieldValue(
   ctx: CoerceContext,
   scope?: Readonly<Record<string, unknown>>,
 ): Promise<{ value?: unknown; keptOptionValues?: string[] } | { error: FieldCoerceError }> {
+  return coerceCell(raw, meta, ctx, scope);
+}
+
+/**
+ * {@link coerceFieldValue}, plus the row columns its scope came from
+ * ({@link ScopedBy}), which only {@link coerceRow} knows.
+ */
+async function coerceCell(
+  raw: unknown,
+  meta: ExportFieldMeta | undefined,
+  ctx: CoerceContext,
+  scope?: Readonly<Record<string, unknown>>,
+  scopedBy?: readonly ScopedBy[],
+): Promise<{ value?: unknown; keptOptionValues?: string[] } | { error: FieldCoerceError }> {
   const trim = ctx.trimWhitespace !== false;
   const field = meta?.name ?? '';
 
@@ -848,9 +906,7 @@ export async function coerceFieldValue(
         if (m.ambiguous) {
           return coerceError(meta, field, 'reference_ambiguous', 'import_reference_ambiguous', token, ctx);
         }
-        if (m.id === undefined) {
-          return coerceError(meta, field, 'reference_not_found', 'import_reference_not_found', token, ctx);
-        }
+        if (m.id === undefined) return referenceNotFound(meta, field, token, ctx, scope, scopedBy);
         out.push(m.id);
       }
       return { value: out };
@@ -864,9 +920,7 @@ export async function coerceFieldValue(
     if (match.ambiguous) {
       return coerceError(meta, field, 'reference_ambiguous', 'import_reference_ambiguous', display, ctx);
     }
-    if (match.id === undefined) {
-      return coerceError(meta, field, 'reference_not_found', 'import_reference_not_found', display, ctx);
-    }
+    if (match.id === undefined) return referenceNotFound(meta, field, display, ctx, scope, scopedBy);
     return { value: match.id };
   }
 
@@ -1024,13 +1078,20 @@ export async function coerceRow(
       const ready = pending.filter((k) => scoped.get(k)!.every((s) => settled(s.field)));
       for (const key of ready.length > 0 ? ready : pending) {
         let scope: Record<string, unknown> | undefined;
+        const scopedBy: ScopedBy[] = [];
         if (ready.length > 0) {
           for (const s of scoped.get(key)!) {
             const v = await sourceValue(s.field);
-            if (v !== undefined) (scope ??= {})[s.param] = v;
+            if (v === undefined) continue;
+            (scope ??= {})[s.param] = v;
+            // [#36159] What the importer wrote in the scoping column, by its label.
+            scopedBy.push({
+              label: metaMap.get(s.field)?.label?.trim() || s.field,
+              value: String(sourceRow[s.field]).trim(),
+            });
           }
         }
-        outcomes.set(key, await coerceFieldValue(rawRow[key], metaMap.get(key), ctx, scope));
+        outcomes.set(key, await coerceCell(rawRow[key], metaMap.get(key), ctx, scope, scopedBy));
       }
       pending = pending.filter((k) => !outcomes.has(k));
     }

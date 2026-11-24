@@ -8,7 +8,7 @@ A **View** defines how records of an Object are displayed to users. ObjectStack 
 
 ## The `defineView` Container
 
-Views are authored **per object** inside a `defineView({ ... })` container — the default `list`, named `listViews`, the default `form`, and named `formViews` all live in one document. The loader expands the container into independently addressable `<object>.<key>` view items that power the view switcher.
+Views are authored **per object** inside a `defineView({ ... })` container — the default `list`, named `listViews` and named `formViews` all live in one document. The loader expands the container into independently addressable `<object>.<key>` view items that power the view switcher.
 
 {/* os:check */}
 ```typescript
@@ -43,13 +43,17 @@ export const TaskViews = defineView({
     },
   },
 
-  // The default form — the create and edit surfaces render it
-  form: {
-    type: 'simple',
-    data,
-    sections: [
-      { name: 'task', label: 'Task', columns: 2, fields: ['title', 'status', 'assignee', 'due_date'] },
-    ],
+  // A named form, opened by a form action that targets `task.quick_triage`.
+  // The object's own create and edit forms need no form view: they lay out
+  // by the object's `fieldGroups` (see Form View below).
+  formViews: {
+    quick_triage: {
+      type: 'simple',
+      data,
+      sections: [
+        { name: 'triage', label: 'Triage', columns: 2, fields: ['status', 'assignee', 'due_date'] },
+      ],
+    },
   },
 });
 ```
@@ -89,6 +93,7 @@ A List View controls how a collection of records is presented. It supports multi
 | `map` | Geographic map pins | Location-based data |
 | `chart` | Aggregate chart visualization | Dashboards and summaries |
 | `tree` | Self-referencing hierarchy (tree-grid) | Org charts, category trees |
+| `timesheet` | Editable row × weekday entry grid | Weekly time entry, daily quantities |
 
 ### List View Properties
 
@@ -227,7 +232,7 @@ columns: [
 | `sortable` | `boolean` | Allow column sorting |
 | `resizable` | `boolean` | Allow column resize |
 | `wrap` | `boolean` | Allow text wrapping |
-| `summary` | `enum \| { type, field? }` | Footer aggregation: `none`, `count`, `count_empty`, `count_filled`, `count_unique`, `percent_empty`, `percent_filled`, `sum`, `avg`, `min`, `max`. The object form aggregates a different field than the column's own |
+| `summary` | `enum \| { type, field? }` | Footer aggregation: `none`, `count`, `count_empty`, `count_filled`, `count_unique`, `percent_empty`, `percent_filled`, `count_true`, `count_false` (a boolean column's yes / no counts; a cell with no value is neither), `sum`, `avg`, `min`, `max`. The object form aggregates a different field than the column's own |
 | `prefix` | `{ field, type?: 'badge' \| 'text' }` | Compound cell — render another field's value inline before this cell's value |
 | `align` | `'left' \| 'center' \| 'right'` | Text alignment |
 | `link` | `boolean` | Cell functions as the primary navigation link |
@@ -253,11 +258,21 @@ bulkActionDefs: [
 ```
 
 An aggregate dispatch delivers the selection to the handler as
-`params._selectedIds: string[]` — read that, **not** `recordId`. Results are
-all-or-nothing: a handler that cannot cover the whole selection must reject,
-and per-row retry is replaced by re-running the action. `batchSize` does not
-apply (the call is never chunked); set `maxRecords` when the server work is
-expensive.
+`params._selectedIds: string[]` — read that, **not** `recordId`. Per-row retry
+is replaced by re-running the action. `batchSize` does not apply (the call is
+never chunked); set `maxRecords` when the server work is expensive.
+
+A handler that moved some rows and refused others resolves with a
+`BulkActionResult` (`@objectstack/spec/ui`) as its whole return value:
+`{ succeeded: string[], failed: { id, message }[] }`. The result dialog then
+counts the moved rows, lists each refused row under its record with its
+`message`, and lists every selected row named in neither list as **not
+confirmed** — never as succeeded. Ids are read against `_selectedIds`: one
+outside the selection is dropped, a duplicate counts once, an id in both lists
+counts as failed. A return value with neither member (nothing, a summary, a
+download link) counts as covering the whole selection; one that carries
+`succeeded` or `failed` in any other form (counts, only one list) is reported
+as an unreadable result, never as full success.
 
 A rejection is reported as **one outcome for the whole selection**: the result
 dialog says the action did not complete for the selected records and shows the
@@ -358,7 +373,7 @@ see [Element data sources](/docs/ui/pages#element-data-sources).
 
 Each non-grid visualization reads its settings from a **nested config block
 named after the type** (`kanban`, `calendar`, `gantt`, `gallery`, `timeline`,
-`chart`, `tree`) — not from top-level keys.
+`chart`, `tree`, `timesheet`) — not from top-level keys.
 
 #### Kanban
 
@@ -397,6 +412,38 @@ gantt: {
 }
 ```
 
+#### Timesheet
+
+A timesheet pivots detail records into rows × the days of one week, and every cell is
+editable. Each record lands in the row its `rowFields` values name and the day its
+`dateField` falls on; the cell shows its `valueField`.
+
+```typescript
+type: 'timesheet',
+columns: ['project', 'task', 'work_date', 'hours'],
+timesheet: {
+  rowFields: ['project', 'task'],   // 1–3 fields; one row per distinct combination
+  dateField: 'work_date',           // date or datetime; places the record on a day
+  valueField: 'hours',              // number, currency or percent; the cell value
+}
+```
+
+- **One record per cell.** Typing into an empty cell creates a record carrying the row's
+  field values, the day and the number; changing a cell updates that record; clearing it
+  deletes the record. Each cell is its own call on the record API, so the object's hooks,
+  validation rules and permissions judge it, and a refusal stays on that cell with the
+  server's message.
+- **A cell holding several records** shows their sum and is read-only; edit those records
+  in a grid view.
+- **The week** starts on the viewer's locale first day, with previous / this / next
+  navigation. Row, day and week totals are always shown.
+- **Add row** asks for the row field values first; the row is kept until a typed cell
+  creates its first record. The view's `filter` applies to the week's query, so a row the
+  filter excludes disappears on the next read.
+
+All three keys are required: a `timesheet` view without them shows "Timesheet
+configuration required", and `os validate` warns (`view/layout-without-binding`).
+
 ### Switching views
 
 In the Console the list's title is the view switcher: it reads the open view's `label` and a
@@ -426,18 +473,26 @@ The split pane beside an open record keeps the same switcher.
   `sys_personal_view` object, not view metadata, so a package never carries them. A user the
   server grants that object nothing (an external member, today) is offered neither the section
   nor the save.
+- **Shared views** are seen by everyone who can see the list, and only an administrator makes
+  one: a user whose session holds `manage_metadata`, the capability the view's write door
+  (`PUT /api/v1/meta/view/:name`) asks, so the server refuses everyone else whatever the
+  Console shows. For that administrator **Add view** offers **Shared** beside **My view**
+  (**My view** stays the default). A view created shared is published at once: there is no
+  draft to publish first. A user who opens a view that has since been deleted is told so, and
+  the list shows its default view.
 
 ## Form View
 
-A Form View defines how a single record is displayed for viewing or editing. It lives in the same `defineView` container as the object's list views:
+A Form View is a hand-shaped form for a record. It lives in the same `defineView` container as the object's list views, and it is served only where it is asked for by name:
 
-- `form` is the object's **default form** — the create and edit surfaces render it.
-- `formViews` holds **additional named forms**. Each one is served only where it is asked for by name: a form action's `target` (`<object>.<key>`) or a public `sharing.publicLink`. One key is read by convention: `formViews.create`, when declared, is the form every create entry opens (the list's Add button and the object's New). A named form never becomes the default — a container with no `form` has no default form, even when it declares named ones.
+- `formViews` holds **named forms**. Each one loads where something names it: a form action's `target` (`<object>.<key>`) or a public form (`sharing.enabled: true`) at its own link.
+- The Console's **create and edit forms load no form view**. They lay the record out by the object's `fieldGroups` and the field rules, and leave out of create every field marked `showOnCreate: false`; see [Create form vs edit form](/docs/ui/create-vs-edit-form). A non-public `form`, `formViews.default` or `formViews.create` still parses but changes nothing, and `os validate` reports it as `form-view-internal-not-loaded`.
 
 ### Basic Structure
 
 ```typescript
-form: {
+// One entry of `formViews`
+review: {
   type: 'simple',
   data: { provider: 'object', object: 'task' },
   sections: [
@@ -475,8 +530,8 @@ form: {
 | `wizard` | Multi-step wizard |
 
 `type` is the form's layout only. Where a form opens is not part of the form:
-a list opens a clicked record as its `navigation.mode` says (the drawer by
-default), and the console's New and Edit entries open the record form
+a list opens a clicked record by its name (the full page) or by the side-panel icon beside
+it (the drawer), and the console's New and Edit entries open the record form
 themselves. The old `split`, `drawer` and `modal` values were removed in
 `@objectstack/spec` 18.3.0 and are refused with the fix; run
 `os migrate meta --from 17` to rewrite existing sources.
@@ -541,24 +596,31 @@ app page or action, where `features.*` stays bound and stays legal. A record *fi
 
 ## How a list opens a record
 
-Clicking a row, card, node, bar or event opens the record the one way its object declares:
-in the **drawer**, which expands to the full page, unless the view's `navigation.mode` is
-`page`, declared only for an object whose record should open as a full page (`new_window`
-and `none` are the other two values). Every list-type view (grid, tree, kanban, calendar,
-gantt, list, gallery, map and timeline) opens the same record page, so a record reads with
-its declared labels and typed values, without its `hidden` fields, whichever view it came
-from. `modal`, `split` and `popover` were removed in @objectstack/spec 18.3.0 (ADR-0087 D2):
-a stored value is refused with its fix, and `os migrate meta --from 17` drops it. On a phone
-every record opens as a page, whatever the view declares.
+In the console an object's list opens a record one way, for every reader and every view:
+the record's **name** opens the full page, and the **side-panel icon** shown beside the name
+while the row is hovered opens the record in a drawer over the list, which keeps its full
+width. There is no setting to choose between them. Every list-type view (grid, tree, kanban,
+calendar, gantt, list, gallery, map and timeline) opens the same record page, so a record
+reads with its declared labels and typed values, without its `hidden` fields, whichever view
+it came from. On a phone, or any touch screen without hover, there is no icon: the name opens
+the page. A ⌘/Ctrl or middle click on the name opens the page in a new tab.
 
-Whether a row opens the drawer or the full page is the reader's choice, not the view's. The
-list's **Display** menu offers **Open records**: **Drawer** (the default) draws the record over
-the list, which keeps its full width, and **Full page** navigates. The choice is kept in the
-browser for every drawer-mode object, and is not offered for an object declared to open as a
-page; a record's **↗** always opens the full page. The reader also drags the drawer's edge,
-**⤢** maximizes it in place, **Open as full page** leaves the drawer, and **Collapse to
-drawer** returns to the stack it left. The `size` bucket on `navigation` sets only the
-drawer's starting width; `width` is deprecated.
+`navigation.mode` is **deprecated** and no longer picks this: on an object's list `drawer`,
+`page` and `new_window` still parse and change nothing, so a view that declares one behaves as
+one that declares nothing. `none` keeps its meaning, the rows open nothing; prefer
+`navigation: { preventNavigation: true }` for that. Omit the key. `modal`, `split` and `popover`
+were removed in @objectstack/spec 18.3.0 (ADR-0087 D2): a stored value is refused with its fix,
+and `os migrate meta --from 17` drops it.
+
+The page a list opens remembers that list: its top bar counts the record among the list's
+rows (**N of M**, M being the records the list matched), steps to the previous and next of
+them, and its **✕** returns to the list as it was left (view, filters, sort, search, grouping
+and scroll position). This rides in the browser's history entry, so it survives a reload of
+the tab; a page opened any other way (a shared link, a notification, a search) has none.
+
+The drawer is a card floating over the list. The reader drags its edge to resize it, and its
+**⤢** opens the full page; there is no wider state. The `size` bucket on `navigation` sets
+only the drawer's starting width; `width` is deprecated.
 
 The record opened from a list is addressable: `?recordId=` on the list's URL, so a
 reload, a shared link or Back reopens it. A record opened inside the drawer (a related
@@ -569,24 +631,55 @@ reader's right-column and panel choices on it, are described in
 
 ### A user's list state never writes the view
 
-A header sort, a column drag or resize, a filter change, a density change, Hide Fields
-and a Manage Views drag are saved for that user (`sys_user_preference`, key
-`ui.list.<object>`), never to the view metadata, so they work even where the tenant's
-metadata is read-only. What you author (`sort`, filters, columns, `rowHeight`,
-`hiddenFields`, the views' order) is the default for every user with no state of their own.
+A header sort, a filter change, grouping, the search, Hide Fields, an added field, a
+column drag, a footer calculation picked under a column, and the Display panel's layout and
+row color apply at once and are a **draft**: they are kept nowhere and never write the view
+metadata, so they work even where the tenant's metadata is read-only. While the list holds a
+draft, **Discard** and **Save** sit at the end of the condition row (one **Save** whose menu
+also holds Discard on a narrow list or a phone).
 
-- A link carrying list state (`uf_*` parameters) wins over the stored state.
+- **Save** names what is unsaved and keeps the sort, filters, columns, hidden fields, footer
+  calculations, layout and row color: **Save to this view**, or **Save as my view**, which
+  asks a name first (the view's name with "copy") and then opens the new view. Either says
+  "Saved", and the buttons go while the conditions stay. A view the user cannot change in
+  place (one an app package ships, or a shared view they may not edit) offers **Save as my
+  view** alone.
+- **Save to this view** on a view of the user's own saves it at once. On a shared view it is
+  offered to a user who may edit the view (an administrator, on a stored view whose package
+  takes saves; while the Console has not yet read which packages take saves, it is not
+  offered). It asks once ("everyone who uses this view will see these changes"), then
+  saves the view and publishes it in the same step, so every user sees it on their next read,
+  and says "Saved, visible to everyone". It never writes the user's row height or column
+  widths into the view. When the view already has unpublished changes (a draft saved from
+  the view settings, by anyone), nothing is saved: the Console says so and points to the view
+  settings to publish or discard that draft first. Every other change to a shared view still
+  goes to a draft that the view settings publish. A view settings save is pinned to the draft
+  the settings opened, so one that lands while a Save to this view is between its save and its
+  publish is refused, never published with it: the settings say the draft changed and offer
+  to reload it, overwrite it or keep editing.
+- A footer calculation is offered on every column the saved view would carry: the columns
+  the list draws and the fields the user added. Picking the view's own calculation again
+  takes that column out of the draft.
+- When the server refuses to save a view an app package ships, the list says so in the
+  user's language (it cannot be changed directly; save it as your own view), never the
+  server's own text.
+- **Discard** puts the list back as its view declares it, the Display panel's layout and row
+  color included, and removes the list's `uf_*` parameters from the address bar.
+- The draft survives opening a record and coming back. Opening another view or object,
+  or reloading the list's page, drops it, so that reload opens the view as it is declared.
+- Column widths, the row height (density) and the views' order are not a draft: they are
+  remembered in this browser only, per signed-in user and object (localStorage
+  `list-layout:<user id>:<object>`). Nothing is sent to the server, another browser or device
+  opens the view's own layout, and signing out clears them with the rest of this browser's
+  Console state. Earlier Consoles kept them, with a stored sort and filters, in the user's
+  `sys_user_preference` row `ui.list.<object>`; nothing reads that row now.
+- A link carrying list state (`uf_*` parameters) applies it as a draft, whether it opens in a
+  new tab or in-app (an AI answer's list link, after a reload of the chat page too).
 - When a session ends, the sign-in page's return link keeps the list's path but never its
-  `uf_*` state, so whoever signs in next opens their own stored state or the view's default.
+  `uf_*` state, so whoever signs in next opens the view's default.
 - A user's hidden fields only subtract from the columns the view shows, never add one.
-- While a user's list differs from the view, a **Personalized** marker sits beside the list
-  title (an icon alone on a phone). Opening it names what differs: filters, search, sort,
-  grouping, column layout, hidden fields, density, and the Display panel's layout, row
-  color, row numbers and inline editing. Its **Reset to view** is the one way back: it
-  drops the active view's stored state and cached search, and removes the list's `uf_*`
-  parameters from the address bar, so the list is the view's own again after a reload too.
-  Pinned views, favorites, how records open and a "View all" link's `filter[...]` scope are
-  not list state and stay. Nothing about the marker is configurable.
+- Pinned views, favorites, how records open and a "View all" link's `filter[...]` scope are
+  not part of a draft and stay. Nothing about Discard and Save is configurable.
 
 ### A view the user may not open
 
@@ -597,7 +690,7 @@ server's sentence, not "not found". A name that does not exist still reads "not 
 
 ## Complete Example
 
-One container covering a default grid, a kanban saved view, and a tabbed default form — mirroring `examples/app-showcase/src/ui/views/task.view.ts`:
+One container covering a default grid, a kanban saved view, and a tabbed named form that a form action opens:
 
 {/* os:check */}
 ```typescript
@@ -632,35 +725,37 @@ export const TaskViews = defineView({
     },
   },
 
-  form: {
-    type: 'tabbed',
-    data,
-    sections: [
-      {
-        name: 'details',
-        label: 'Details',
-        columns: 2,
-        fields: [
-          { field: 'title', span: 'full', required: true },
-          { field: 'status' },
-          { field: 'priority' },
-          { field: 'assignee' },
-          { field: 'due_date' },
-          { field: 'description', span: 'full' },
-        ],
-      },
-      {
-        name: 'system',
-        label: 'System',
-        collapsible: true,
-        collapsed: true,
-        columns: 2,
-        fields: [
-          { field: 'created_at', readonly: true },
-          { field: 'updated_at', readonly: true },
-        ],
-      },
-    ],
+  formViews: {
+    full_review: {
+      type: 'tabbed',
+      data,
+      sections: [
+        {
+          name: 'details',
+          label: 'Details',
+          columns: 2,
+          fields: [
+            { field: 'title', span: 'full', required: true },
+            { field: 'status' },
+            { field: 'priority' },
+            { field: 'assignee' },
+            { field: 'due_date' },
+            { field: 'description', span: 'full' },
+          ],
+        },
+        {
+          name: 'system',
+          label: 'System',
+          collapsible: true,
+          collapsed: true,
+          columns: 2,
+          fields: [
+            { field: 'created_at', readonly: true },
+            { field: 'updated_at', readonly: true },
+          ],
+        },
+      ],
+    },
   },
 });
 ```

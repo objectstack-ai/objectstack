@@ -280,9 +280,15 @@
  *     `draft` for the versions; `ADVISORY_TRANSITIONS` for a state change:
  *     `draft` from `triage` or `closed`, `closed` from `triage` or `draft`,
  *     `published` from `draft` alone, a target the table does not name from
- *     nothing), a list the versions may not replace whole, or a publish whose
- *     versions are not set (the `versions` fence) stops the action with the
- *     PATCH NOT SENT: its row says `not sent`, zero writes, exit 5.
+ *     nothing), a list the versions may not replace whole, a publish whose
+ *     versions are not set (the `versions` fence), or a publish whose
+ *     description still carries a seat signature line (the `notes` fence,
+ *     `advisoryNoteSectionCount` — the count named, never the text), or one
+ *     whose description is neither text nor none, stops the action with the
+ *     PATCH NOT SENT: its row says `not sent`, zero writes, exit 5. A
+ *     publish's residual window is its one read: a note landing between that
+ *     GET and the PATCH is published, because the read-back judges the state
+ *     and the versions, never the description.
  *     The collaborators' logins are merged case-insensitively
  *     (`advisoryCollaboratorPlan`): when every login asked for is already a
  *     collaborator nothing is sent, the row `not sent` and its result saying
@@ -365,8 +371,11 @@
  * FAILED, naming the status alone, with
  * `ADVISORY_LIST_ACCESS_REMEDY` on a refusal; a page that never reached the
  * platform ⇒ FAILED with `ADVISORY_LIST_UNREACHED` and the row status
- * `not reached`; every page's `Link` is read through `advisoryListNextCursor`,
- * and a link it refuses ⇒ FAILED; a short page whose link names no next page,
+ * `not reached`; every page's `Link` is read through `advisoryListNextCursor`:
+ * a link naming the collection by numeric id has the repository's own id read
+ * once (`GET /repos/{repo}`, `advisoryListRepoIdOf`; unread ⇒ FAILED naming
+ * its status), and a link it refuses ⇒ FAILED with the link's shape beside the
+ * sentence (`advisoryListLinkShape`, ⛔ never a value); a short page whose link names no next page,
  * or a full one whose link names none, ends the walk, and a short page that
  * still names one ⇒ FAILED with `ADVISORY_LIST_SHORT_PAGE_NEXT`; a full page
  * with a next link is followed only on the cursor it admits, ⛔ never the link
@@ -426,6 +435,32 @@
  * description or the key. The self-test serves both texts with a marker and
  * finds it — as text, URI-encoded, hex or base64 — in no line, row, summary,
  * annotation, pace line or real process's output.
+ *
+ * ## The rewrite — `advisory_rewrite`, opened through the note's door, replaced once and read back (`advisoryRewriteAction`)
+ *
+ * The note's path, step for step, on the note's key and envelope (`ops.mjs`,
+ * "The one row that REPLACES an advisory's text"): the key judged first; the
+ * advisory's GET and `ADVISORY_REWRITE_FENCES` — the note's fences with
+ * `ADVISORY_REWRITE_STATES` (`triage`, `draft`, `closed`; never published or
+ * withdrawn) and a summary that is text or null; the open under the
+ * REWRITE's associated data (a note's seal is `ADVISORY_NOTE_OPEN_FAILED`
+ * here); the text judged again (`advisoryRewriteFailure`), then every line of
+ * each field masked; a SECOND fenced GET immediately before the write,
+ * refused if its state left the fence or the summary or the description
+ * changed since the first. Then ONE PATCH of exactly the fields sealed and
+ * the read-back (`advisoryRewriteReadBack`): the PATCH's answer, then a GET
+ * after it, each holding every field sent byte for byte and the field not
+ * sent as read. A PATCH that threw is UNCONFIRMED and a read-back that fails
+ * is FAILED, each saying `ADVISORY_REWRITE_NOT_RESENT`. Its ONE notice is the
+ * note's spelling, op `advisory_rewrite`: the sealed text's byte count and
+ * the keyed digest of the text the GET after the PATCH STORES
+ * (`advisoryRewriteStoredDigest`). Residual window, the note's: a write or a
+ * state move landing between the second GET and the PATCH is not seen before
+ * the write (about one round trip); the read-back judges the text, not the
+ * state, so a publish inside that window lands the row and prints the state
+ * it read. ⛔ It prints what the note prints — the call, the status, the id,
+ * the state, byte counts and that digest — and never a byte of the summary
+ * or the description, old or new.
  *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
@@ -518,6 +553,24 @@
  * card), a mixed pull or a repository outside `lowRisk.repos` requests exactly
  * as the path-only plan, and the verdict row says why.
  *
+ * The `.claude/**` declaration split (maintainer ruling 2026-11-19 on #35321):
+ * the plan chains `applyRuleChangeSplit` last, as the register's
+ * `governedTierFor` does, so the path-only plan reads a `.claude/**` pull
+ * Tier H — a path list cannot say what its body declares. When EVERY governed
+ * hit is a row carrying `ruleChange` for the target and no path sits under
+ * `.claude/settings*.json` or `.claude/hooks/` (`ruleChangeReadable`), the
+ * follow-up reads the body off the pull answer (`pullLowRiskReading`) and,
+ * when the body declares a seat value (`none`, or `ruled` with its
+ * `Ruling-ref:` line), the record stage through the queue guard's one reader
+ * (`readLowRiskRecordStage`, card labels left unread) — the record must stand
+ * at its tier, read a clean PASS and carry the same `Rule-change-verified:`
+ * value (`ruleChangeReadingFor`). Only then does it request nobody. ⛔ Fail
+ * closed: `Rule-change: yes`, no line, a settings or hooks path, a record
+ * absent, unread or not verifying, a mixed pull, or a repository outside
+ * `ruleChange.repos` requests exactly as the path-only plan, and the verdict
+ * row says why. A record carried from an older head is refused here (no
+ * checkout diffs the hops), so it requests too.
+ *
  * ## The step summary — what a person reads back
  *
  * `$GITHUB_STEP_SUMMARY` gets one table per run: request id · sender and its
@@ -575,6 +628,7 @@ import { isEntrypoint } from '../../invoked-as.mjs';
 // The register and the approver list, READ — never restated here (the ops.mjs header, "The governed-review follow-up").
 import {
   applyLowRiskArm,
+  applyRuleChangeSplit,
   applyWorkflowSplit,
   fetchTimelineOver,
   GOVERNED_TIER_H,
@@ -592,6 +646,7 @@ import {
   pullPathsFrom,
   readWorkflowDiff,
   repoIdForSlug,
+  RULE_CHANGE_RULING,
   slugFromRemote,
 } from '../check-governed-merges.mjs';
 import {
@@ -653,6 +708,17 @@ import {
   advisoryNoteLandedText,
   advisoryNotePrivateKey,
   advisoryNoteReadBack,
+  ADVISORY_REWRITE_FIELDS,
+  ADVISORY_REWRITE_NOT_RESENT,
+  ADVISORY_REWRITE_STATES,
+  advisoryRewriteFailure,
+  advisoryRewriteFenceFailures,
+  advisoryRewriteLandedText,
+  advisoryRewriteOf,
+  advisoryRewriteReadBack,
+  advisoryRewriteStoredDigest,
+  advisoryRewriteText,
+  advisorySummaryOf,
   codePoints,
   openAdvisoryNote,
   sealAdvisoryNote,
@@ -675,12 +741,15 @@ import {
   ADVISORY_READ_SENDER_GATES,
   advisoryListCall,
   advisoryListDisplay,
+  advisoryListLinkShape,
   advisoryListNextCursor,
   advisoryListPadded,
   advisoryListPageFailure,
   advisoryListPagePath,
   advisoryListPlaintext,
   advisoryListProjection,
+  advisoryListRepoIdOf,
+  advisoryListRepoIdUnreadText,
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
@@ -850,6 +919,13 @@ export function requestLanded(req, { status, json } = {}) {
         return { ok: false, why: `HTTP ${status}, but the answer lists ${listed.length ? listed.join(', ') : 'no requested reviewers'} — ${missing.join(', ')} not requested (the endpoint answers the pull with its pending review requests, so a login it lacks was not written; read the pull on the board before anything else)` };
       }
     }
+    // The issue type (`issue_patch` with `type`): the answer is the issue; a type it does not name did not land.
+    if (typeof req.typed === 'string') {
+      const named = typeof json?.type?.name === 'string' ? json.type.name : null;
+      if (named !== req.typed) {
+        return { ok: false, why: `HTTP ${status}, but the answer names ${named === null ? 'no issue type' : `the issue type ${named}`} — ${req.typed} not set (the endpoint answers the issue itself, so a type it does not name was not written)` };
+      }
+    }
     // The labels leg (header): the answer is the pull's whole label set; a name sent and not listed did not land.
     if (Array.isArray(req.labelled)) {
       const listed = labelNames(json);
@@ -912,21 +988,27 @@ export function reviewedLogins(json) {
  * keeps them H, so a path-only call answers as before. `lowRiskVerdict` is that verdict, or null when no arm row
  * was hit, for the row's words.
  *
+ * The same reading is handed to `applyRuleChangeSplit` LAST (the `.claude/**` declaration split): with no reading the
+ * split row is Tier H, so a path-only call requests the approvers for a `.claude/**` pull; only a reading whose body
+ * declares a seat value and whose record verifies it moves that row to S. `ruleChangeVerdict` is the split's
+ * verdict, or null when no split row was hit.
+ *
  * Logins are matched as GitHub matches them, case-insensitively; the answer keeps `approvers`' own spelling and order.
  */
 export function governedReviewPlan({ paths, repo, author = null, requested = [], assigned = [], reviewed = [], approvers = GOVERNED_APPROVERS, workflowDiff = null, lowRisk = null } = {}) {
   const repoId = repoIdForSlug(repo);
   const matched = repoId ? governedPathsIn(Array.isArray(paths) ? paths : [], repoId) : [];
-  const read = matched.length === 0 ? [] : applyLowRiskArm(applyWorkflowSplit(matched, repoId, workflowDiff), repoId, lowRisk);
+  const read = matched.length === 0 ? [] : applyRuleChangeSplit(applyLowRiskArm(applyWorkflowSplit(matched, repoId, workflowDiff), repoId, lowRisk), repoId, lowRisk);
   const tier = matched.length === 0 ? null : landingTierOf(read);
   const lowRiskVerdict = read.find((s) => s?.lowRiskVerdict)?.lowRiskVerdict ?? null;
+  const ruleChangeVerdict = read.find((s) => s?.ruleChangeVerdict)?.ruleChangeVerdict ?? null;
   const lower = (list) => (Array.isArray(list) ? list : []).map((l) => String(l).toLowerCase());
   const have = new Set([...lower(requested), ...lower(assigned), ...lower(reviewed)]);
   const list = Array.isArray(approvers) ? approvers : [];
   const covered = list.filter((a) => have.has(a.toLowerCase()));
   const missing = tier === GOVERNED_TIER_H ? list.filter((a) => !have.has(a.toLowerCase())) : [];
   const isAuthor = (a) => typeof author === 'string' && a.toLowerCase() === author.toLowerCase();
-  return { repoId, matched, tier, lowRiskVerdict, covered, toRequest: missing.filter((a) => !isAuthor(a)), toAssign: missing.filter(isAuthor) };
+  return { repoId, matched, tier, lowRiskVerdict, ruleChangeVerdict, covered, toRequest: missing.filter((a) => !isAuthor(a)), toAssign: missing.filter(isAuthor) };
 }
 
 /** The words the follow-up's verdict row prints for a plan — what was hit, who is covered, what will be sent. Pure. */
@@ -973,6 +1055,24 @@ export function lowRiskArmReadable(plan) {
   if (others.length > 0) return { read: false, why: `another governed row is hit too (${others.map((s) => `\`${s.glob}\``).join(', ')}), so the path-only tier stands` };
   const outside = armRows.filter((s) => !(Array.isArray(s.lowRisk.repos) && s.lowRisk.repos.includes(plan.repoId)));
   if (outside.length > 0) return { read: false, why: `${plan.repoId} is not in the row's lowRisk.repos (${(outside[0].lowRisk.repos ?? []).join(', ')}), so the path-only tier stands` };
+  return { read: true, why: null };
+}
+
+/**
+ * Whether the `.claude/**` declaration split may be READ for this plan (header: "The governed-review follow-up"): a
+ * Tier H plan whose EVERY governed hit is a row carrying `ruleChange` for this repository, and whose split did not
+ * already decide by path (a settings or hooks file). Pure; the same `{ read, why }` shape as `lowRiskArmReadable`,
+ * and a cost gate only — it can keep a plan H, never move one to S.
+ */
+export function ruleChangeReadable(plan) {
+  const hits = Array.isArray(plan?.matched) ? plan.matched : [];
+  const splitRows = hits.filter((s) => s?.ruleChange);
+  if (plan?.tier !== GOVERNED_TIER_H || splitRows.length === 0) return { read: false, why: null };
+  const others = hits.filter((s) => !s?.ruleChange);
+  if (others.length > 0) return { read: false, why: `another governed row is hit too (${others.map((s) => `\`${s.glob}\``).join(', ')}), so the path-only tier stands` };
+  const outside = splitRows.filter((s) => !(Array.isArray(s.ruleChange.repos) && s.ruleChange.repos.includes(plan.repoId)));
+  if (outside.length > 0) return { read: false, why: `${plan.repoId} is not in the row's ruleChange.repos (${(outside[0].ruleChange.repos ?? []).join(', ')}), so the path-only tier stands` };
+  if (plan.ruleChangeVerdict?.byPath === true) return { read: false, why: `${plan.ruleChangeVerdict.reasons.join('; ')}` };
   return { read: true, why: null };
 }
 
@@ -1088,6 +1188,48 @@ export async function lowRiskReadingFor({ repo, pull, paths, files, pr, api, t, 
     fetchTimeline: makeTimelineReader(reader),
   });
   return pullLowRiskReading(pr, paths, { timeline, changesets, catalogFiles, record: stage.record, cardLabels: stage.cardLabels });
+}
+
+/**
+ * The `.claude/**` declaration split's reading for ONE pull (header: "The governed-review follow-up"): the body off
+ * the pull answer `pr` (`pullLowRiskReading`, the reading the register's split takes), and — only when that body
+ * leaves the split's RECORD STAGE pending, so a `yes` or an absent line pays for nothing — the record stage through
+ * the queue guard's `readLowRiskRecordStage`, imported, ⛔ no second reader, over the guard's own comment reader on
+ * the relay's token, card labels left unread (they are the low-risk arm's conjunct, not this split's). No checkout is
+ * handed to it, so a record carried from an older head is refused, never re-tested here. A recogniser load that
+ * fails or a thread that does not read is NOT MEASURED, so Tier H. Never throws.
+ */
+export async function ruleChangeReadingFor({ repo, pull, paths, pr, api, t, loadRecognisers = loadRecordRecognisers }) {
+  const first = pullLowRiskReading(pr, paths);
+  const plan = governedReviewPlan({ paths, repo, lowRisk: first });
+  if (plan.ruleChangeVerdict?.recordStage !== LOW_RISK_RECORD_STAGE.pending) return first;
+  let recognisers;
+  try {
+    recognisers = await loadRecognisers();
+  } catch (error) {
+    recognisers = { available: false, reason: `the recogniser load threw: ${String(error?.message ?? error).split('\n')[0]}` };
+  }
+  const reader = { apiUrl: api, slug: repo, token: t?.token ?? '', fetchImpl: t?.fetch ?? globalThis.fetch };
+  const stage = await readLowRiskRecordStage({
+    pr: pull,
+    pull: pr,
+    headSha: pr?.head?.sha ?? null,
+    paths,
+    repo: plan.repoId,
+    recognisers,
+    fetchComments: makeCommentReader(reader),
+    withCardLabels: false,
+  });
+  return pullLowRiskReading(pr, paths, { record: stage.record });
+}
+
+/** The words the split's verdict adds to the verdict row: Tier S and the ruling, or every reason it is H. Pure. */
+export function ruleChangeReadingText(plan) {
+  const v = plan?.ruleChangeVerdict;
+  if (!v) return '';
+  if (v.tier === GOVERNED_TIER_S) return ` · \`.claude/**\` declaration split read: Tier S on \`Rule-change: ${v.declared}\`, verified on the record (${RULE_CHANGE_RULING})`;
+  const reasons = v.measured ? v.reasons : [v.reason];
+  return ` · \`.claude/**\` declaration split read: Tier H, fail closed — ${reasons.join('; ')}`;
 }
 
 /**
@@ -1837,6 +1979,8 @@ export async function advisoryListAction(req, { payload, index, api, t, seal = s
   const items = [];
   const seen = new Set();
   let status = null;
+  // The repository's own numeric id, read at most once, and only when a next link names the collection by one.
+  let repoId = null;
   for (const state of ADVISORY_LIST_STATES) {
     let after = null;
     let ended = false;
@@ -1856,8 +2000,17 @@ export async function advisoryListAction(req, { payload, index, api, t, seal = s
         items.push(item);
       }
       // Every page's Link is read, a short one's too: a short page that still names a next page is not the last.
-      const next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state });
-      if (next.fail) return { ok: false, status: r.status, why: next.fail, notes: [] };
+      let next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state, repoId });
+      if (next.needsRepoId) {
+        // The link names the collection by a numeric id: read the repository's own id ONCE, never trust the link's.
+        const own = await rest(api, `/repos/${payload.repo}`, { method: 'GET' }, t);
+        if (own.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, why: ADVISORY_LIST_UNREACHED, notes: [] };
+        repoId = advisoryListRepoIdOf(own, payload.repo);
+        if (repoId === null) return { ok: false, status: own.status, why: advisoryListRepoIdUnreadText(own.status), notes: [] };
+        next = advisoryListNextCursor(r.link ?? null, { api, repo: payload.repo, state, repoId });
+      }
+      // A refusal prints the link's SHAPE beside the fixed sentence (`advisoryListLinkShape`): ⛔ never a value of it.
+      if (next.fail) return { ok: false, status: r.status, why: `${next.fail}; ${advisoryListLinkShape(r.link ?? null, { api, repo: payload.repo, state, repoId })}`, notes: [] };
       if (r.json.length < ADVISORY_LIST_PAGE_SIZE) {
         if (next.after !== null) return { ok: false, status: r.status, why: ADVISORY_LIST_SHORT_PAGE_NEXT, notes: [] };
         ended = true;
@@ -1981,6 +2134,92 @@ export async function advisoryNoteAction(req, { payload, index, api, t, privateK
   }
 }
 
+/** What a rewrite whose GET never reached the platform prints — ⛔ never the exception's message, which carries the path. */
+export const ADVISORY_REWRITE_UNREACHED =
+  "REFUSED, nothing sent: a read of the advisory did not reach the platform (the runner's call threw before any answer) — re-send the rewrite, which reads it afresh";
+
+/**
+ * The rewrite (header: "The rewrite"): the note's key, the advisory's GET and the rewrite's fences, the open under the
+ * rewrite's associated data, the text judged again, the mask, the concurrency read, ONE PATCH of the fields sealed and
+ * the read-back — `ops.mjs`'s seven steps, in order. Returns `advisoryNoteAction`'s shape, `{ ok, status, call, result,
+ * why, note }` — `note` the ONE notice a landing emits: its action, the sealed text's byte count and the keyed digest
+ * of what the advisory STORES (`advisoryRewriteStoredDigest`). ⛔ No string it returns carries a byte of the summary or
+ * the description, old or new. Never throws.
+ */
+export async function advisoryRewriteAction(req, { payload, index, api, t, privateKey = '', relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY, mask = () => {} }) {
+  const { ghsaId, sealedNote } = req.advisoryRewrite;
+  const call = `${req.verb} ${req.path}`;
+  const notSent = (why) => ({ ok: false, status: 'not sent', call, why, note: null });
+  // 1. The note's key — before any request.
+  const keyWhy = advisoryNoteKeyFailure(privateKey, relayPublicKey);
+  if (keyWhy) return notSent(`REFUSED before any request: ${keyWhy}, so nothing was opened, read or sent`);
+  // 2. The advisory's GET and the rewrite's fences: the advisory named, unpublished, a summary and a description that are text.
+  const fenced = async (which) => {
+    const r = await rest(api, req.path, {}, t);
+    if (r.status === 0) return { fail: ADVISORY_REWRITE_UNREACHED };
+    const failures = advisoryRewriteFenceFailures({ ghsaId, answer: r, from: ADVISORY_REWRITE_STATES });
+    if (failures.length === 0) return { read: r };
+    const refused = !(r.status >= 200 && r.status < 300);
+    return { fail: `REFUSED at the relay's fence on ${ghsaId} (${which}), nothing sent — ${advisoryFenceText(failures)}${refused ? `${advisoryPlatformText(r.detail)}; ${ADVISORY_ACCESS_REMEDY}` : ''}` };
+  };
+  const first = await fenced('its read');
+  if (first.fail) return notSent(first.fail);
+  // 3. The open, under the rewrite's own associated data: a note's seal never opens here.
+  let opened;
+  try {
+    opened = openAdvisoryNote({ sealed: sealedNote, privateKey: advisoryNotePrivateKey(privateKey), aad: advisorySealAad({ requestId: payload.request_id, action: index, op: 'advisory_rewrite', ghsaId }) });
+  } catch {
+    return notSent(`FAILED, nothing sent: ${ADVISORY_NOTE_OPEN_FAILED}`);
+  }
+  const { section: text, digestKey } = opened;
+  try {
+    // 4. The text judged again: the seat's check is never trusted alone — before any of it reaches the runner.
+    const unfit = advisoryRewriteFailure(text);
+    if (unfit) return notSent(`REFUSED after the open, nothing sent: the seal holds no rewrite this relay writes — ${unfit}`);
+    const sent = advisoryRewriteOf(text);
+    const fields = ADVISORY_REWRITE_FIELDS.filter((k) => sent[k] !== undefined);
+    const noteBytes = Buffer.byteLength(text, 'utf8');
+    // The mask — the runner's net behind the first, that nothing below prints the text — every line of each field,
+    // sparing what the notice's fixed words print (`advisoryNoteMaskValues`), so the runner never stars the one line
+    // the seat confirms from. The digest it will carry is the stored text's, known only after the read-back.
+    const notice = annotationCommand({ action: index, op: 'advisory_rewrite', noteBytes, noteDigest: '' });
+    for (const value of advisoryNoteMaskValues(fields.map((k) => sent[k]).join('\n'), notice)) mask(value);
+    // 5. The concurrency read, immediately before the PATCH: the platform offers no conditional write on it.
+    const second = await fenced('its second read, just before the write');
+    if (second.fail) return notSent(second.fail);
+    for (const read of [advisorySummaryOf, advisoryDescriptionOf]) {
+      const was = read(first.read.json);
+      const now = read(second.read.json);
+      if (now !== was) {
+        return notSent(`REFUSED, nothing sent: ${ghsaId}'s ${read === advisorySummaryOf ? 'summary' : 'description'} changed between the relay's two reads (${Buffer.byteLength(was, 'utf8')} → ${Buffer.byteLength(now, 'utf8')} bytes) — another write is at work; re-send the rewrite, which reads it afresh`);
+      }
+    }
+    // 6. ONE PATCH of the fields sealed, and nothing else.
+    const body = Object.fromEntries(fields.map((k) => [k, sent[k]]));
+    const before = second.read.json;
+    const r = await rest(api, req.path, { method: 'PATCH', body }, t);
+    if (r.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, call, why: `UNCONFIRMED: the PATCH's call threw before any answer — ${ADVISORY_REWRITE_NOT_RESENT}`, note: null };
+    if (!(r.status >= 200 && r.status < 300)) return { ok: false, status: r.status, call, why: `HTTP ${r.status}${advisoryPlatformText(r.detail)}; ${ADVISORY_ACCESS_REMEDY}`, note: null };
+    // 7. The read-back: the PATCH's answer, then a GET after it — each field sent byte for byte, the other as read.
+    const answered = advisoryRewriteReadBack({ ghsaId, sent: body, before, answer: r, read: 'the PATCH answer' });
+    if (!answered.ok) return { ok: false, status: r.status, call, why: `NOT STORED as sent: ${answered.why} — ${ADVISORY_REWRITE_NOT_RESENT}`, note: null };
+    const after = await rest(api, req.path, {}, t);
+    const stored = advisoryRewriteReadBack({ ghsaId, sent: body, before, answer: after, read: 'the GET after the PATCH' });
+    if (!stored.ok) return { ok: false, status: r.status, call, why: `${stored.why} — ${ADVISORY_REWRITE_NOT_RESENT}`, note: null };
+    // The digest is the STORED text's, so the seat's match is a read-back of what the advisory holds.
+    const noteDigest = advisoryRewriteStoredDigest({ digestKey, json: after.json, fields });
+    const result = advisoryRewriteLandedText({
+      ghsaId,
+      state: after.json.state,
+      fields: fields.map((k) => ({ key: k, beforeBytes: Buffer.byteLength(k === 'summary' ? advisorySummaryOf(before) : advisoryDescriptionOf(before), 'utf8'), afterBytes: Buffer.byteLength(body[k], 'utf8') })),
+      digest: noteDigest,
+    });
+    return { ok: true, status: r.status, call, result, why: '', note: { action: index, op: 'advisory_rewrite', noteBytes, noteDigest } };
+  } finally {
+    digestKey.fill(0);
+  }
+}
+
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
 export function resultOf(req, json, status = null) {
   if (status === 204 && (json === null || json === undefined)) return 'accepted (HTTP 204, no body)';
@@ -1998,6 +2237,8 @@ export function resultOf(req, json, status = null) {
   if (Number.isInteger(json.number)) bits.push(`#${json.number}`);
   else if (Number.isInteger(json.id)) bits.push(`id ${json.id}`);
   if (typeof json.html_url === 'string') bits.push(json.html_url);
+  // An `issue_patch` that set the type prints it as the platform names it.
+  if (typeof req.typed === 'string') bits.push(`· type ${json.type?.name ?? 'none'}`);
   // The assignees leg's row prints the assignees as the platform lists them (header).
   if (Array.isArray(req.assigned)) bits.push(`· assignees ${assigneeLogins(json).join(', ') || 'none'}`);
   // The governed-review request's row prints the pull's pending requests as the platform lists them (header).
@@ -2264,6 +2505,22 @@ async function requestGovernedReview({ index, op, pull, payload, api, t, log, ro
       return { ok: true };
     }
   }
+  // The `.claude/**` declaration split (header): read only when every governed hit is that row in its ruleChange.repos
+  // and no settings or hooks path decided it; a body declaring a seat value over a record that verifies it sends
+  // nothing, and every other outcome — `yes`, no line, a record that does not verify, unread — requests as before.
+  const splitReadable = ruleChangeReadable(plan);
+  if (splitReadable.why) readingWords += ` · \`.claude/**\` declaration split not read: ${splitReadable.why}`;
+  if (splitReadable.read) {
+    lowRisk = await ruleChangeReadingFor({ repo, pull, paths, pr: pr.json, api, t });
+    plan = governedReviewPlan({ approvers, paths, repo, workflowDiff: reading, lowRisk });
+    readingWords += scrub(ruleChangeReadingText(plan), [token]);
+    if (plan.tier !== GOVERNED_TIER_H) {
+      const text = `${governedReviewText(plan, { approvers, repo, files: read.files.length })}${readingWords}`;
+      rows.push({ action: index, op, call: FILES, status: 200, result: text });
+      log(`  · action ${index} ${op}: ${text}${renamed}`);
+      return { ok: true };
+    }
+  }
   const reviews = await rest(api, `/repos/${repo}/pulls/${pull}/reviews?per_page=100`, {}, t);
   if (reviews.status !== 200 || !Array.isArray(reviews.json)) {
     return failed(`GET /repos/${repo}/pulls/${pull}/reviews`, reviews.status, `${reviews.call} -> HTTP ${reviews.status}${reviews.detail ? ` (${reviews.detail})` : ''}: the pull's reviews could not be read, so who has already reviewed is unknown and no review was requested — its diff hits a Tier H surface; read it on the board and request by hand`);
@@ -2479,6 +2736,22 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         log(annotationCommand(noted.note));
         continue;
       }
+      // The rewrite (header): the note's door — the key, two fenced reads, the open and the mask, ONE PATCH of the
+      // fields sealed and their byte read-back; its notice names the action, the sealed text's byte count and the keyed
+      // digest of what the advisory stores.
+      if (req.advisoryRewrite) {
+        const rewritten = await advisoryRewriteAction(req, { payload, index: i + 1, api, t, privateKey: deps.advisoryNoteKey ?? '', mask: deps.mask ?? maskLine, ...(deps.advisoryNote ?? {}) });
+        rows.push({ action: i + 1, op: action.op, call: rewritten.call, status: rewritten.status, result: rewritten.ok ? scrub(rewritten.result, [token]) : `FAILED: ${scrub(rewritten.why, [token])}` });
+        if (!rewritten.ok) {
+          stoppedAt = { action: i + 1, op: action.op, why: scrub(rewritten.why, [token]) };
+          log(`  ✗ action ${i + 1} ${action.op}: ${rewritten.call} -> ${stoppedAt.why}`);
+          break;
+        }
+        log(`  ✓ action ${i + 1} ${action.op}: ${rewritten.call} -> HTTP ${rewritten.status} · ${rows[rows.length - 1].result}`);
+        annotations.push(rewritten.note);
+        log(annotationCommand(rewritten.note));
+        continue;
+      }
       // The advisory PATCHes (header): the advisory's fences, judged HERE on its own GET before the PATCH — refused, NOT SENT.
       const adv = req.advisoryCollaborators || req.advisoryVersions || req.advisoryState ? await advisoryPreflight(req, payload, api, t) : null;
       if (adv?.fail) {
@@ -2582,7 +2855,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
 
 const SELF_TEST_BATTERIES = Object.freeze({
   'the sender gate: write, maintain and admin pass; read, triage, none and a stranger are refused with zero writes': 9,
-  'the requests: every op becomes the endpoint, verb and body the table declares, with the App token': 7,
+  'the requests: every op becomes the endpoint, verb and body the table declares, with the App token': 10,
   'the run: actions in order, stop at the first failure, later actions never attempted': 6,
   'the idempotent removal: a 404 on a directed label DELETE is success': 2,
   'the GraphQL ops: the node id first, then the mutation; an errors array is a failure': 5,
@@ -2607,7 +2880,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 45 → 50 with the arm's record stage on the relay: nine H variants of the stage in one plan case, twelve in one run case (the record
   // without its line first), the record on the card thread, the recogniser seam, and the stage's cost on a pull-read H.
   // 50 → 52 with every card the pull names: five H variants of a second card in one run case, and its clean control.
-  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; a skills-only pull in lowRisk.repos is judged by the low-risk arm's own reading — pull, file statuses, timeline, changesets and catalog modes, then the review record's `Security-touching:` line and the card's labels — and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 52,
+  // 52 → 62 (#35612): the `.claude/**` declaration split on the plan — `none` over a verifying record plans nobody, and
+  // `yes`, no line, settings/hooks, an unread, non-verifying or FAIL record, a mixed pull each plan both; the readable
+  // gate, the words, four runs, and hotcrm on the `workflows` row (its plan and its run).
+  "the governed-review follow-up: after pr_ready alone — a pr_create summons NOBODY and never reads the pull's files, because a human is asked only at the seat's hand-off (pr_request_reviewers after ACCEPT + a same-head PASS); after pr_ready the pull's file list is read in full, a Tier H hit requests review from every GOVERNED_APPROVERS account not already requested, assigned or reviewed — the pull's own author assigned instead, never requested; a Tier S or ungoverned diff sends nothing and says so; a workflow-only pull in split.repos is judged by the queue guard's reading, merge base → head, and requests only when it says H or cannot be read; a skills-only pull in lowRisk.repos is judged by the low-risk arm's own reading — pull, file statuses, timeline, changesets and catalog modes, then the review record's `Security-touching:` line and the card's labels — and requests only when it says H or cannot be read; an unreadable or truncated list, an unreadable pull or review list, or a refused write is a FAILED action": 62,
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the pr_enqueue_front: the pull's own GET, its whole file list and its base's queue read immediately before ONE enqueuePullRequest mutation with jump true and the expected head — open, ready, its head, not Version Packages, no governed path, at most the human-merge line count, a queue read whole with no jumped entry; each fence refused with the mutation not sent; GraphQL errors FAILED naming the missing grant; the 200 confirmed only by reading the queue back with the pull jumped and nothing ahead; queued without the jump or behind another is FAILED, never re-sent; the queue read unpaced; no annotation": 20,
@@ -2620,19 +2896,21 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 28 → 29 with a failed second pull read starting the pair over.
   "the pr_dequeue: the pull's own GET, its base's queue with each entry's merge-group rollup and, for seat-asks alone, its comments read before ONE audit comment and ONE dequeuePullRequest mutation — open, its head, not Version Packages, a queue read whole that lists it, and the cause holding on those reads (conflict: dirty; own-failure: UNMERGEABLE or a failing rollup, never an unread one; seat-asks: a relay comment signed by the landing seat its body's trailer names, under the dispatching session — another seat's comment refused); each fence refused with nothing written; no audit comment, no mutation; GraphQL errors FAILED naming the grant; the 200 confirmed only by reading the queue back without the pull and the pull still open and unmerged on two reads one interval apart, a merge or close inside the window FAILED, UNCONFIRMED after the window": 29,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
-  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 41,
+  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add, advisory_versions and advisory_state read the advisory first and send ONE PATCH — every existing login kept with the missing ones added, an all-present list a no-op, the versions entries alone, or the one state a legal transition reaches, the reopen and the publish among them — or nothing at all on a fence: an unread, other or wrong-state advisory, an illegal move, a list the versions may not replace or a publish whose versions are not set; each lands only when its answer shows the result, a publish only read back as published with the versions it was sent, and a landed publish alone is annotated with its id; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 42,
   "the mailbox branch delete: the pull's own answer, the open pulls on its head and the ref read immediately before ONE DELETE of the ref under the App token — an open, unlabelled, other-headed or forked pull, an open pull on that head, a ref moved off the pull's head, or a read that does not answer is zero writes with every failing fence named; the DELETE lands only when the ref reads back absent, a ref already gone an idempotent landing and one still there FAILED; and mailbox-open's close stroke — comment, close, delete — leaves no branch, while a head outside claude/mailbox-* sends no DELETE": 7,
   "an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the platform refuses it with a message quoting either — the row keeps the status, withholds that message and prints one that quotes nothing —, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone": 8,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
-  "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 22,
+  "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 27,
   "advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open, the section judged again and the mask (sparing the note's own notice), a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output": 25,
+  "advisory_rewrite: the note's key judged first; the advisory's GET and the rewrite's fences — a published or withdrawn advisory refused, triage, draft and closed landing; the open under the rewrite's own associated data, so a note's seal never opens as one; the text judged again and masked; a second GET immediately before ONE PATCH of exactly the fields sealed, byte for byte; the read-back of each field sent and of the one not sent; ONE notice whose keyed digest is of the text the advisory stores, read back by the seat's parser; and no byte of the new text or the old on any line, row, summary, annotation or pace line": 16,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
 // branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
 // pr_enqueue_front's, 26 → 27 with the cloud staging deploy's, 27 → 28 with advisory_note's: one battery, one row;
-// 28 → 30 with the jump's SIZE lift and pr_dequeue's.
-const SELF_TEST_BATTERY_FLOOR = 30;
+// 28 → 30 with the jump's SIZE lift and pr_dequeue's; 30 → 31 with advisory_rewrite's.
+const SELF_TEST_BATTERY_FLOOR = 31;
+const REWRITE_BATTERY = "advisory_rewrite: the note's key judged first; the advisory's GET and the rewrite's fences — a published or withdrawn advisory refused, triage, draft and closed landing; the open under the rewrite's own associated data, so a note's seal never opens as one; the text judged again and masked; a second GET immediately before ONE PATCH of exactly the fields sealed, byte for byte; the read-back of each field sent and of the one not sent; ONE notice whose keyed digest is of the text the advisory stores, read back by the seat's parser; and no byte of the new text or the old on any line, row, summary, annotation or pace line";
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2737,6 +3015,14 @@ export async function selfTest() {
         [`POST /repos/${REPO}/issues/2/assignees`, { assignees: ['u'] }],
         [`PATCH /repos/${REPO}/issues/2`, { state: 'closed', state_reason: 'not_planned' }],
       ]);
+      const TYPE_PATCH = `PATCH /repos/${REPO}/issues/3`;
+      const typeAnswer = (name) => ({ status: 200, json: { number: 3, html_url: 'https://github.test/i/3', type: name === null ? null : { name } } });
+      const setType = (answer, more = []) => run(base([{ op: 'issue_patch', issue: 3, type: 'Bug' }, ...more]), { ...allowed, [TYPE_PATCH]: answer, [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 78 } } }, { file: paceFile });
+      const typed = await setType(typeAnswer('Bug'));
+      t('issue_patch with a type is ONE PATCH of the issue carrying the name, and its row prints the type the platform answered', [typed.exit, writes(typed.seen).map((s) => [s.call, s.body]), typed.rows[0].result], [EXIT_OK, [[TYPE_PATCH, { type: 'Bug' }]], '#3 https://github.test/i/3 · type Bug']);
+      const untyped = await setType(typeAnswer(null), [{ op: 'comment', issue: 1, body: 'after' }]);
+      t('⛔ a 200 whose answer names no type, or another one, is a FAILED action naming the type not set — and the stroke stops there', [untyped.exit === EXIT_OK, untyped.rows[0]?.result.includes('Bug not set'), writes(untyped.seen).length, requestLanded({ verb: 'PATCH', path: '/x', typed: 'Bug' }, typeAnswer('Task')).why.includes('the issue type Task')], [false, true, 1, true]);
+      t('…and an issue_patch that sends no type is not judged for one', requestLanded({ verb: 'PATCH', path: '/x' }, typeAnswer(null)).ok, true);
       const pr = await run(base([{ op: 'pr_create', title: 'T', head: 'h', base: 'main' }, { op: 'issue_create', title: 'I', body: 'B', labels: ['l'] }]), {
         ...allowed,
         [`POST /repos/${REPO}/pulls`]: { status: 201, json: { number: 9, html_url: 'https://github.test/p/9' } },
@@ -2989,7 +3275,7 @@ export async function selfTest() {
       t("…the pull's own author, when it is an uncovered approver, is ASSIGNED and never requested — the other approver is requested as before", pick(planPair({ paths: ['AGENTS.md'], repo: REPO, author: A2 })), [GOVERNED_TIER_H, [A1], [A2], []]);
       t('…an approver already requested, assigned or holding a submitted review is covered — the H43 union — and matched case-insensitively', pick(planPair({ paths: ['skills/x/SKILL.md'], repo: REPO, author: A2, requested: [A1.toUpperCase()], assigned: [A2] })), [GOVERNED_TIER_H, [], [], [A1, A2]]);
       t("…a submitted review covers its author's slot; a pending (unsubmitted) one does not", [reviewedLogins([{ state: 'COMMENTED', user: { login: 'x' } }, { state: 'PENDING', user: { login: 'y' } }]), planPair({ paths: ['CLAUDE.md'], repo: REPO, reviewed: [A1] }).toRequest], [['x'], [A2]]);
-      t('…a Tier S diff (the .claude/** row alone) is tier S and sends nothing; an ungoverned diff is tier null; a mixed S+H diff is H', [planPair({ paths: ['.claude/skills/pm-dispatch/SKILL.md'], repo: REPO }), planPair({ paths: ['packages/core/src/a.ts'], repo: REPO }), planPair({ paths: ['.claude/agents/os-dev.md', 'docs/NORTH-STAR.md'], repo: REPO })].map((p) => [p.tier, p.toRequest.length + p.toAssign.length]), [[GOVERNED_TIER_S, 0], [null, 0], [GOVERNED_TIER_H, 2]]);
+      t('…a `.claude/**` diff on its path list alone is tier H and plans both (the declaration split, unread, fails closed — #35612); an ungoverned diff is tier null; a mixed diff is H', [planPair({ paths: ['.claude/skills/pm-dispatch/SKILL.md'], repo: REPO }), planPair({ paths: ['packages/core/src/a.ts'], repo: REPO }), planPair({ paths: ['.claude/agents/os-dev.md', 'docs/NORTH-STAR.md'], repo: REPO })].map((p) => [p.tier, p.toRequest.length + p.toAssign.length]), [[GOVERNED_TIER_H, 2], [null, 0], [GOVERNED_TIER_H, 2]]);
       t('…a target outside GOVERNED_REPOS has no governing row: repoId null, tier null, nothing to send', (({ repoId, tier, toRequest }) => [repoId, tier, toRequest])(planPair({ paths: ['docs/adr/0001-x.md'], repo: 'objectstack-ai/elsewhere' })), [null, null, []]);
       t('…the register is scoped per repository: a workflow path is Tier H on objectui and ungoverned on objectos', [planPair({ paths: ['.github/workflows/ci.yml'], repo: 'objectstack-ai/objectui' }).tier, planPair({ paths: ['.github/workflows/ci.yml'], repo: 'objectstack-ai/objectos' }).tier], [GOVERNED_TIER_H, null]);
       t('…a rename OUT of a governed path counts by its old name (pullPathsFrom reads previous_filename)', planPair({ paths: pullPathsFrom([{ filename: 'docs/agents.md', previous_filename: 'AGENTS.md' }]).paths, repo: REPO }).tier, GOVERNED_TIER_H);
@@ -3013,8 +3299,8 @@ export async function selfTest() {
       t('…the file list, the pull and its reviews were read first, in that order, and the rows say the verdict and the landing', [both.seen.map((s) => s.call), both.rows.slice(1).map((r) => [r.action, r.op, r.call, r.status, r.result])], [[PERM, PULL, GRAPHQL, FILES, PULL, REVIEWS, REQUEST], [[1, 'pr_ready', FILES, 200, `governed review: Tier H (\`docs/NORTH-STAR.md\`×1) — requesting \`${A1}\`, \`${A2}\``], [1, 'pr_ready', REQUEST, 201, `#${N} ${URL} · review requested from ${A1}, ${A2}`]]]);
       const none = await runPair(ready([{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: files('packages/core/src/a.ts', 'README.md'), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
       t('a non-governed diff: the file list is read, NOTHING is requested, the row says so, and the later action runs', [none.exit, writes(none.seen).map((s) => s.call), none.rows[1]?.result, none.seen.filter((s) => s.call === PULL).length], [EXIT_OK, [GRAPHQL, `POST /repos/${REPO}/issues/1/comments`], 'governed review: no governed row hit across 2 file(s) — no review requested', 1]);
-      const tierS = await runPair(ready(), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: files('.claude/skills/pm-dispatch/SKILL.md') });
-      t("a Tier S diff (.claude/** alone) requests nobody — it lands on a seat's review of record", [tierS.exit, writes(tierS.seen).map((s) => s.call), tierS.rows[1]?.result], [EXIT_OK, [GRAPHQL], "governed review: Tier S (`.claude/**`×1) lands on a seat's review of record — no review requested"]);
+      const tierS = await runPair(ready(), { ...allowed, [PULL]: pullOf(), ...readied, [FILES]: files('.claude/skills/pm-dispatch/SKILL.md'), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]) });
+      t('⛔ a `.claude/**` pull whose body declares no `Rule-change:` line requests BOTH — the declaration split reads it Tier H, and the row says why (#35612)', [tierS.exit, writes(tierS.seen).map((s) => s.call), tierS.rows[1]?.result.includes('· `.claude/**` declaration split read: Tier H, fail closed — the PR body carries no `Rule-change:` line')], [EXIT_OK, [GRAPHQL, REQUEST], true], tierS.rows[1]?.result);
       const authored = await runPair(ready(), { ...allowed, ...tierH, [PULL]: pullOf({ author: A2 }), [REQUEST]: requestedAnswer([A1]), [ASSIGN]: assignedAnswer([A2]) });
       t('⭐ the author-identity branch: a pull authored by an approver requests the OTHER approver and ASSIGNS the author — never a request naming the author', [authored.exit, writes(authored.seen).slice(1).map((s) => [s.call, s.body]), authored.rows.map((r) => r.result).slice(1)], [EXIT_OK, [[REQUEST, { reviewers: [A1] }], [ASSIGN, { assignees: [A2] }]], [`governed review: Tier H (\`docs/NORTH-STAR.md\`×1) — requesting \`${A1}\` and assigning the author \`${A2}\` (a request naming the author is a 422)`, `#${N} ${URL} · review requested from ${A1}`, `#${N} ${URL} · assignees ${A2}`]]);
       const covered = await runPair(ready(), { ...allowed, ...tierH, [PULL]: pullOf({ requested: [A1] }), [REVIEWS]: reviewsBy(A2) });
@@ -3099,7 +3385,7 @@ export async function selfTest() {
       t('⛔ unreadable-workflow-pull-requests: no checkout, a commit missing after the fetch, git throwing, a fetch that throws, a checkout of another repository or a refused compare — each requests BOTH approvers exactly as today, and its row says UNREAD with the fail-closed words', Object.entries(unreadable).map(([k, r]) => [k, r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.includes('workflow split UNREAD') && r.rows[1]?.result.includes('fail closed, the path-only tier H stands')]), Object.keys(unreadable).map((k) => [k, EXIT_OK, [GRAPHQL, REQUEST], true]), Object.values(unreadable).map((r) => r.rows[1]?.result).join(' | '));
       const mixedCalls = [];
       const mixed = await runPair(ready(), wfAnswers(HEAD_S, { [FILES]: files(WF, '.claude/agents/os-dev.md') }), { git: fakeGit(mixedCalls, { present: [MB, HEAD_S] }) });
-      t('⛔ mixed-workflow-pull-requests: a workflow edit beside another governed row (.claude/**) is never split — no compare, no git, both requested, the row naming the other row', [mixed.exit, mixed.seen.some((s) => s.call.includes('/compare/')), mixedCalls.length, writes(mixed.seen).map((s) => s.call), mixed.rows[1]?.result.endsWith('· workflow split not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], mixed.rows[1]?.result);
+      t('⛔ mixed-workflow-pull-requests: a workflow edit beside another governed row (.claude/**) is never split — no compare, no git, both requested, the row naming the other row', [mixed.exit, mixed.seen.some((s) => s.call.includes('/compare/')), mixedCalls.length, writes(mixed.seen).map((s) => s.call), mixed.rows[1]?.result.includes('· workflow split not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], mixed.rows[1]?.result);
       const UI = 'objectstack-ai/objectui';
       const uiN = (p) => p.replace(REPO, UI);
       const uiCalls = [];
@@ -3268,11 +3554,56 @@ export async function selfTest() {
       t('⛔ unreadable-skills-pull-requests: no checkout, an unread timeline, a refused compare, a head past the fetch cap, a checkout of another repository, a fetch that throws, a head the fetch cannot bring, or no head sha — each requests BOTH approvers exactly as today, and its row says Tier H, fail closed, with the reason', Object.entries(armUnread).map(([k, [r, why]]) => [k, r.exit, writes(r.seen).map((s) => s.call), r.rows[1]?.result.includes('low-risk skills arm read: Tier H, fail closed') && r.rows[1]?.result.includes(why)]), Object.keys(armUnread).map((k) => [k, EXIT_OK, [GRAPHQL, REQUEST], true]), Object.values(armUnread).map(([r]) => r.rows[1]?.result).join(' | '));
       const armMixedCalls = [];
       const armMixed = await runPair(ready(), armAnswers({ [FILES]: armFiles(SK, CS, '.claude/agents/os-dev.md') }), { git: armGit(armMixedCalls) });
-      t('⛔ mixed-skills-pull-requests: a skills edit beside another governed row (.claude/**) is not read — no timeline, no compare, no git, both requested, the row naming the other row', [armMixed.exit, armMixed.seen.some((s) => s.call === TIMELINE || s.call === ARM_COMPARE), armMixedCalls.length, writes(armMixed.seen).map((s) => s.call), armMixed.rows[1]?.result.endsWith('· low-risk skills arm not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], armMixed.rows[1]?.result);
+      t('⛔ mixed-skills-pull-requests: a skills edit beside another governed row (.claude/**) is not read — no timeline, no compare, no git, both requested, the row naming the other row', [armMixed.exit, armMixed.seen.some((s) => s.call === TIMELINE || s.call === ARM_COMPARE), armMixedCalls.length, writes(armMixed.seen).map((s) => s.call), armMixed.rows[1]?.result.includes('· low-risk skills arm not read: another governed row is hit too (`.claude/**`), so the path-only tier stands')], [EXIT_OK, false, 0, [GRAPHQL, REQUEST], true], armMixed.rows[1]?.result);
       const armUiCalls = [];
       const armUi = await runPair({ ...ready(), repo: UI_REPO }, { [uiRepo(PERM)]: allowed[PERM], ...readied, [uiRepo(PULL)]: { status: 200, json: armPullJson() }, [uiRepo(FILES)]: armFiles(SK, CS), [uiRepo(REVIEWS)]: reviewsBy(), [uiRepo(REQUEST)]: requestedAnswer([A1, A2]) }, { git: armGit(armUiCalls) });
       t('⛔ objectui-skills-pull-requests: a skills pull on a repository outside lowRisk.repos is not read — no timeline, no compare, no git, both requested, the row naming lowRisk.repos', [armUi.exit, armUi.seen.some((s) => s.call.includes('/timeline') || s.call.includes('/compare/')), armUiCalls.length, writes(armUi.seen).map((s) => s.call), armUi.rows[1]?.result.endsWith("· low-risk skills arm not read: objectui is not in the row's lowRisk.repos (objectstack), so the path-only tier stands")], [EXIT_OK, false, 0, [GRAPHQL, uiRepo(REQUEST)], true], armUi.rows[1]?.result);
       t('no annotation is emitted for the follow-up — pr_ready is not an annotated op', [both.annotations, authored.logs.some((l) => l.startsWith('::notice'))], [[], false]);
+
+      // ⚖️ The `.claude/**` declaration split on the relay (#35612): the plan chains `applyRuleChangeSplit` on the same
+      // reading, so a body declaring `yes`, nothing, or a settings/hooks path plans both approvers, and a declared `none`
+      // over a record that verifies it plans nobody. Each pinned with the control one step away.
+      const CL = '.claude/skills/pm-dispatch/SKILL.md';
+      const RC_BODY = (line) => `Fixes #1\n\nClause-②: no\nMetadata-protocol: none\n${line === null ? '' : `${line}\n`}`;
+      const rcRecord = (value = 'none', over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: null, ruleChangeVerified: value === null ? { state: 'missing' } : { state: 'read', value }, ruleChangeCarried: null, recordLeg: { state: 'stands', reason: null }, ...over });
+      const rcRead = (line, record = rcRecord()) => pullLowRiskReading(armPullJson({ body: RC_BODY(line) }), [CL], record === null ? {} : { record });
+      const rcPlan = (paths, reading) => planPair({ paths, repo: REPO, lowRisk: reading });
+      t('⭐ split plan: `Rule-change: none` over a record that verifies it is Tier S and plans NOBODY; the control — the same pull read on its path list alone — plans both', [rcPlan([CL], rcRead('Rule-change: none')), rcPlan([CL], null)].map((p) => [p.tier, p.toRequest, p.ruleChangeVerdict?.declared ?? null]), [[GOVERNED_TIER_S, [], 'none'], [GOVERNED_TIER_H, [A1, A2], null]]);
+      const rcVariants = {
+        'Rule-change: yes': [rcPlan([CL], rcRead('Rule-change: yes')), 'declares `Rule-change: yes`'],
+        'no Rule-change line': [rcPlan([CL], rcRead(null)), 'carries no `Rule-change:` line'],
+        'a settings path': [rcPlan(['.claude/settings.json'], rcRead('Rule-change: none')), 'the harness permission set'],
+        'a hooks path beside the wording': [rcPlan([CL, '.claude/hooks/guard-main-checkout.sh'], rcRead('Rule-change: none')), 'a harness hook'],
+        'none, the record not read yet': [rcPlan([CL], rcRead('Rule-change: none', null)), 'its contract-review record was not read'],
+        'none, the record verifying yes': [rcPlan([CL], rcRead('Rule-change: none', rcRecord('yes'))), 'reads `Rule-change-verified: yes`'],
+        'none, the record a FAIL': [rcPlan([CL], rcRead('Rule-change: none', rcRecord('none', { recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }))), 'does not read a clean PASS'],
+        'none, AGENTS.md beside it': [rcPlan([CL, 'AGENTS.md'], rcRead('Rule-change: none')), null],
+      };
+      t('⛔ split plan: `yes`, no line, a settings or hooks path, a record unread, verifying another value or a FAIL, or another Tier H row beside it plans BOTH, and the words name the reason', Object.entries(rcVariants).map(([k, [plan, why]]) => [k, plan.tier, plan.toRequest, why === null || ruleChangeReadingText(plan).includes(why)]), Object.keys(rcVariants).map((k) => [k, GOVERNED_TIER_H, [A1, A2], true]), Object.values(rcVariants).map(([plan]) => ruleChangeReadingText(plan)).join(' | '));
+      t('ruleChangeReadable: the split row alone in objectstack is read; another row beside it, a settings/hooks path, or a non-split plan is not — with the words why', [ruleChangeReadable(planPair({ paths: [CL], repo: REPO })), ruleChangeReadable(planPair({ paths: [CL, 'AGENTS.md'], repo: REPO })).why, ruleChangeReadable(planPair({ paths: ['.claude/hooks/x.sh'], repo: REPO })).why?.includes('a harness hook'), ruleChangeReadable(planPair({ paths: ['AGENTS.md'], repo: REPO })), ruleChangeReadable(planPair({ paths: ['ui/.claude/x.md'], repo: REPO }))], [{ read: true, why: null }, 'another governed row is hit too (`AGENTS.md`), so the path-only tier stands', true, { read: false, why: null }, { read: false, why: null }]);
+      t('the split words: Tier S names the declared value and the ruling; no split row adds nothing', [ruleChangeReadingText(rcPlan([CL], rcRead('Rule-change: none'))), ruleChangeReadingText(planPair({ paths: ['AGENTS.md'], repo: REPO }))], [` · \`.claude/**\` declaration split read: Tier S on \`Rule-change: none\`, verified on the record (${RULE_CHANGE_RULING})`, '']);
+
+      // The run: pr_ready on a `.claude/**` pull through the fake platform — the body off the pull answer, then the record
+      // off the pull's thread (and the card's) through the guard's own reader.
+      const rcAnswers = (line, rows, extra = {}) => ({ ...allowed, ...readied, [PULL]: { status: 200, json: armPullJson({ body: RC_BODY(line) }) }, [FILES]: files(CL), [REVIEWS]: reviewsBy(), [REQUEST]: requestedAnswer([A1, A2]), [THREAD(N)]: { status: 200, json: rows }, [THREAD(1)]: { status: 200, json: [] }, ...extra });
+      const rcNone = await runPair(ready(), rcAnswers('Rule-change: none', [reviewOfRecord('Rule-change-verified: none')]));
+      t('⭐ pr_ready on a `.claude/**` pull declaring `Rule-change: none`, its record on the head verifying it: NO request, both threads read, no card label, the row says Tier S on the declaration', [rcNone.exit, writes(rcNone.seen).map((s) => s.call), [THREAD(N), THREAD(1)].every((c) => rcNone.seen.some((s) => s.call === c)), rcNone.seen.some((s) => s.call === CARD_LABELS || s.call === REVIEWS), rcNone.rows[1]?.result.startsWith('governed review: Tier S (`.claude/**`×1)') && rcNone.rows[1]?.result.includes('declaration split read: Tier S on `Rule-change: none`')], [EXIT_OK, [GRAPHQL], true, false, true], rcNone.rows[1]?.result);
+      const rcYes = await runPair(ready(), rcAnswers('Rule-change: yes', [reviewOfRecord('Rule-change-verified: yes')]));
+      t('⛔ the control: the same pull declaring `Rule-change: yes` requests BOTH and reads no thread — the body alone decides it', [rcYes.exit, writes(rcYes.seen).map((s) => s.call), writes(rcYes.seen)[1]?.body, rcYes.seen.some((s) => s.call === THREAD(N)), rcYes.rows[1]?.result.includes('declares `Rule-change: yes`')], [EXIT_OK, [GRAPHQL, REQUEST], { reviewers: [A1, A2] }, false, true], rcYes.rows[1]?.result);
+      const rcUnverified = await runPair(ready(), rcAnswers('Rule-change: none', [reviewOfRecord('Rule-change-verified: yes')]));
+      t('⛔ `Rule-change: none` over a record that verifies `yes` requests BOTH, the row naming the record', [rcUnverified.exit, writes(rcUnverified.seen).map((s) => s.call), rcUnverified.rows[1]?.result.includes('reads `Rule-change-verified: yes`')], [EXIT_OK, [GRAPHQL, REQUEST], true], rcUnverified.rows[1]?.result);
+      const rcNoRecord = await runPair(ready(), rcAnswers('Rule-change: none', []));
+      t('⛔ `Rule-change: none` with no record on the head yet requests BOTH — the record is what lands it', [rcNoRecord.exit, writes(rcNoRecord.seen).map((s) => s.call), rcNoRecord.rows[1]?.result.includes('no contract-review record names this head')], [EXIT_OK, [GRAPHQL, REQUEST], true], rcNoRecord.rows[1]?.result);
+
+      // ⚖️ hotcrm on the `workflows` row (2026-11-19, card #35321 item 4): a hotcrm workflow pull is Tier H and outside
+      // split.repos, so the relay requests the approver there — the row naming split.repos — and the control: an
+      // ungoverned hotcrm path requests nobody (#35612 item 5).
+      const HOT = 'objectstack-ai/hotcrm';
+      const hot = (p) => p.replace(REPO, HOT);
+      const HOT_WF = '.github/workflows/ci.yml';
+      t('hotcrm plan: a workflow path is Tier H and plans both; an ungoverned path plans nobody', [planPair({ paths: [HOT_WF], repo: HOT }), planPair({ paths: ['packages/crm/src/a.ts'], repo: HOT })].map((p) => [p.repoId, p.tier, p.toRequest]), [['hotcrm', GOVERNED_TIER_H, [A1, A2]], ['hotcrm', null, []]]);
+      const hotRun = await runPair({ ...ready(), repo: HOT }, { [hot(PERM)]: allowed[PERM], ...readied, [hot(PULL)]: pullOf(), [hot(FILES)]: files(HOT_WF), [hot(REVIEWS)]: reviewsBy(), [hot(REQUEST)]: requestedAnswer([A1, A2]) });
+      t('⭐ hotcrm-workflow-pull-requests: pr_ready on a hotcrm workflow pull requests BOTH at the hotcrm pull, no compare read, the row naming split.repos', [hotRun.exit, writes(hotRun.seen).map((s) => s.call), writes(hotRun.seen)[1]?.body, hotRun.seen.some((s) => s.call.includes('/compare/')), hotRun.rows[1]?.result.endsWith("· workflow split not read: hotcrm is not in the row's split.repos (objectstack), so the path-only tier stands")], [EXIT_OK, [GRAPHQL, hot(REQUEST)], { reviewers: [A1, A2] }, false, true], hotRun.rows[1]?.result);
     }
 
     // ── the transfer ────────────────────────────────────────────────────────
@@ -4209,6 +4540,11 @@ export async function selfTest() {
       const publishLost = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: ready({ state: 'published', vulnerabilities: [] }) });
       const publishStill = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: ready() });
       t('⛔ a publish answer that lost the versions, or still reads draft, fails the action — ONE write, no annotation, ⛔ never re-sent', [publishLost.exit, writes(publishLost.seen).length, publishLost.rows[0]?.result, publishLost.annotations, publishStill.exit, publishStill.rows[0]?.result, publishStill.annotations], [EXIT_ACTION_FAILED, 1, 'FAILED: HTTP 200, the answer reads state published, but it lists 0 entries — 1 of the 1 entry read before the publish missing, 0 other — read the advisory before anything else, ⛔ do not re-send', [], EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer reads state draft, not published — read the advisory before anything else, ⛔ do not re-send', []]);
+      // ⛔ The notes fence: a publish makes the whole description public, so a seat note's signature line still in it refuses it.
+      const NOTED = `${MARKER} the working text\n\n---\n\ndomain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ\n2026-11-12T04:00:00Z\n\n${MARKER} a seat's analysis`;
+      const notedPublish = await advRun([move('published')], { ...allowed, [A_GET]: ready({ description: NOTED }), [A_PATCH]: ready({ state: 'published', description: NOTED }) });
+      const rewrittenPublish = await advRun([move('published')], { ...allowed, [A_GET]: ready({ description: `${MARKER} the public text` }), [A_PATCH]: ready({ state: 'published', description: `${MARKER} the public text` }) });
+      t("⛔ a publish of a draft whose description still carries a seat note's signature line sends NO PATCH — refused at the notes fence on the executor's own GET just before it, ONE GET, zero writes, no annotation, the count named and no byte of the text — while the same draft with its text rewritten publishes", [notedPublish.exit, writes(notedPublish.seen).length, notedPublish.seen.map((x) => x.call), notedPublish.rows[0]?.status, /fence `notes`: the advisory's description still carries 1 seat signature line\(s\)/.test(notedPublish.rows[0]?.result ?? ''), notedPublish.rows[0]?.result?.includes('MARKER'), notedPublish.annotations, rewrittenPublish.exit, writes(rewrittenPublish.seen).map((x) => x.body)], [EXIT_ACTION_FAILED, 0, [PERM, A_GET], 'not sent', true, false, [], EXIT_OK, [{ state: 'published' }]]);
       const publishRefused = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: refusal(403, 'Resource not accessible by integration') });
       const publishInvalid = await advRun([move('published')], { ...allowed, [A_GET]: ready(), [A_PATCH]: refusal(422, 'Invalid state transition from `closed` to `published`.') });
       t('⛔ a refused publish is a FAILED action naming its cause and the remedy — a token that cannot publish goes to the maintainer, never a wider grant — and earns no annotation', [publishRefused.exit, publishRefused.rows[0]?.result, publishRefused.annotations, publishInvalid.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 403; ${cause('Resource not accessible by integration')}; ${ADVISORY_ACCESS_REMEDY}`, [], `FAILED: HTTP 422; ${cause("Invalid state transition from 'closed' to 'published'.")}; ${ADVISORY_ACCESS_REMEDY}`]);
@@ -4245,7 +4581,7 @@ export async function selfTest() {
       // ── ⛔ the marker sweep: every run above, every channel this file emits on
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), JSON.stringify(r.annotations ?? []), ...paceLines].join('\n'));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
-      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, landed, unversioned, lost and refused publishes, set, fenced, lost and refused versions, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [73, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, landed, unversioned, noted, rewritten, lost and refused publishes, set, fenced, lost and refused versions, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [75, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
       // Positive controls: the marker was there to leak, and the needle finds it where it is.
       t('…positive control: every answer served carried the marker, the report\'s and the draft\'s POST carried it to the platform — where it belongs — and the fenced runs made their GET', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') || Object.keys(answers).length === 1), JSON.stringify(writes(filed.seen)[0]?.body).includes('ADVISORY MARKER') && JSON.stringify(writes(drafted.seen)[0]?.body).includes('ADVISORY MARKER'), [other, unread, ...[added, kept, present]].every((r) => r.seen.some((s) => s.call === A_GET))], [true, true, true]);
       t('…positive control: the generic row printer, given the same answer, WOULD print it — the advisory rows never reach it', resultOf({}, advisory().json).includes('ADVISORY MARKER'), true);
@@ -4432,6 +4768,11 @@ export async function selfTest() {
       const SEAT = pair();
       const list = (extra = {}) => ({ op: 'advisory_list', public_key: SEAT.spki, ...extra });
       const pageKey = (state, after = null) => `GET ${advisoryListPagePath(REPO, state, after)}`;
+      // A made-up repository id, answered by the repository's own read; the walk reads it only for a numeric next link.
+      const REPO_ID_NUMBER = 4242;
+      const REPO_ID = String(REPO_ID_NUMBER);
+      const REPO_READ = `GET /repos/${REPO}`;
+      const ownRepo = { [REPO_READ]: { status: 200, json: { id: REPO_ID_NUMBER, full_name: REPO, description: MARKER } } };
       // Made-up ids: `GHSA-<k in base 36>-2345-wxyz`, naming no real advisory.
       const idOf = (k) => `GHSA-${k.toString(36).padStart(4, '0')}-2345-wxyz`;
       // A listed advisory carrying the marker in every field but the five that cross.
@@ -4535,10 +4876,30 @@ export async function selfTest() {
       const offLinks = [`<https://evil.test/repos/${REPO}/security-advisories?state=draft&per_page=100&after=${encodeURIComponent(CURSOR)}>; rel="next"`, `<${API}/repositories/1/security-advisories?state=draft&per_page=100&after=${encodeURIComponent(CURSOR)}>; rel="next"`, nextLink('closed', CURSOR), nextLink('draft', `${CURSOR} ${MARKER}`)];
       const off = [];
       for (const link of offLinks) {
-        const r = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), link) });
-        off.push([r.exit, r.seen.filter((s) => s.call.includes('state=draft')).length, r.annotations.length, r.rows[0]?.result]);
+        const r = await listRun([list()], { ...allowed, ...ownRepo, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), link) });
+        off.push([r.exit, r.seen.filter((s) => s.call.includes('state=draft')).length, r.annotations.length, r.rows[0]?.result?.startsWith(`FAILED: ${ADVISORY_LIST_CURSOR_REFUSED}; link shape: 1 rel="next" link(s); `), r.logs.some((l) => l.includes('link shape: '))]);
       }
-      t("⛔ a next link off this API's collection — another host, the numeric repository path, another state, a cursor outside its shape — is FAILED with the one sentence: no second page asked, nothing sealed, no part", off, offLinks.map(() => [EXIT_ACTION_FAILED, 1, 0, `FAILED: ${ADVISORY_LIST_CURSOR_REFUSED}`]));
+      t("⛔ a next link off this API's collection — another host, the numeric path of another repository's id, another state, a cursor outside its shape — is FAILED with the one sentence and the link's shape beside it, in the row and the job log: no second page asked, nothing sealed, no part", off, offLinks.map(() => [EXIT_ACTION_FAILED, 1, 0, true, true]));
+      // ⭐ The REAL next-link shape: the collection by the repository's numeric id, per_page, state, the cursor and a page.
+      const realLink = (state, after, id = REPO_ID) => `<${API}/repositories/${id}/security-advisories?per_page=100&state=${state}&after=${encodeURIComponent(after)}&page=2>; rel="next"`;
+      const real = await listRun([list()], { ...allowed, ...ownRepo, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), realLink('triage', CURSOR)), [pageKey('triage', CURSOR)]: pageOf(items(110, 5, 'triage')), [pageKey('draft')]: pageOf(items(200, 100, 'draft'), realLink('draft', 'AAAA')), [pageKey('draft', 'AAAA')]: pageOf(items(300, 7, 'draft')) });
+      t("⭐ the REAL next-link shape — the collection named by the repository's numeric id — is followed on its cursor once the repository's own id, read ONCE for the whole listing, equals the link's: two states walk a second page each on the relay's own path, the listing lands sealed and emitted as ten parts, 212 listed", [real.exit, real.seen.map((s) => s.call), real.rows.map((x) => [x.call, x.status, x.result]), real.annotations.length, (() => {
+        try {
+          return JSON.parse(opens(real)).count;
+        } catch {
+          return null;
+        }
+      })(), writes(real.seen).length], [EXIT_OK, [PERM, pageKey('triage'), REPO_READ, pageKey('triage', CURSOR), pageKey('draft'), pageKey('draft', 'AAAA'), pageKey('closed')], [[CALL, 200, ADVISORY_LIST_LANDED]], ADVISORY_READ_MAX_PARTS, 212, 0]);
+      const otherId = await listRun([list()], { ...allowed, ...ownRepo, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), realLink('draft', CURSOR, '4243')) });
+      t("⛔ …and a numeric link naming ANY other id is FAILED with the one sentence and its shape saying the id is another repository's — the id read, no second page, nothing sealed — ⛔ the link's id is never taken", [otherId.exit, otherId.seen.map((s) => s.call), otherId.annotations.length, otherId.rows[0]?.result], [EXIT_ACTION_FAILED, [PERM, pageKey('triage'), pageKey('draft'), REPO_READ], 0, `FAILED: ${ADVISORY_LIST_CURSOR_REFUSED}; link shape: 1 rel="next" link(s); on the relay's API origin; path /repositories/ID/security-advisories (ID another repository's); query names [per_page,state,after,page]; state the walk's; after in its shape`]);
+      const idUnread = [];
+      for (const answer of [{ status: 403, json: { message: MARKER } }, { status: 200, json: { id: REPO_ID_NUMBER, full_name: 'someone/else' } }, { status: 200, json: { id: String(REPO_ID_NUMBER), full_name: REPO } }]) {
+        const r = await listRun([list()], { ...allowed, ...empty, [REPO_READ]: answer, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), realLink('draft', CURSOR)) });
+        idUnread.push([r.exit, r.seen.map((s) => s.call), r.annotations.length, r.rows[0]?.result]);
+      }
+      const idThrown = await listRun([list()], { ...allowed, ...empty, [REPO_READ]: { throws: `fetch failed holding ${MARKER}` }, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), realLink('draft', CURSOR)) });
+      t("⛔ a repository read that refuses, names another repository or carries no numeric id is FAILED naming its status alone, and one that never reached the platform is FAILED as unreached — no second page, nothing sealed, the answer's message printed nowhere", [idUnread, [idThrown.exit, idThrown.rows.map((x) => [x.status, x.result]), idThrown.annotations.length]], [[[EXIT_ACTION_FAILED, [PERM, pageKey('triage'), pageKey('draft'), REPO_READ], 0, `FAILED: ${advisoryListRepoIdUnreadText(403)}`], [EXIT_ACTION_FAILED, [PERM, pageKey('triage'), pageKey('draft'), REPO_READ], 0, `FAILED: ${advisoryListRepoIdUnreadText(200)}`], [EXIT_ACTION_FAILED, [PERM, pageKey('triage'), pageKey('draft'), REPO_READ], 0, `FAILED: ${advisoryListRepoIdUnreadText(200)}`]], [EXIT_ACTION_FAILED, [[ADVISORY_READ_UNREACHED_STATUS, `FAILED: ${ADVISORY_LIST_UNREACHED}`]], 0]]);
+      t("…the paged walk on the /repos/ spelling never reads the repository: the id is read only for a link that names the collection by one", [paged.seen.some((s) => s.call === REPO_READ), real.seen.filter((s) => s.call === REPO_READ).length], [false, 1]);
       const twice = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR)), [pageKey('draft', CURSOR)]: pageOf(items(109, 5, 'draft')) });
       t('⛔ an advisory listed twice across the pages is FAILED — the walk is not one listing — nothing sealed, no part', [twice.exit, twice.annotations.length, twice.rows[0]?.result], [EXIT_ACTION_FAILED, 0, `FAILED: ${ADVISORY_LIST_REPEATED}`]);
       const huge = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), nextLink('triage', 'AAAA')), [pageKey('triage', 'AAAA')]: pageOf(items(110, 100, 'triage'), nextLink('triage', 'BBBB')), [pageKey('triage', 'BBBB')]: pageOf(items(210, 50, 'triage')) });
@@ -4579,7 +4940,7 @@ export async function selfTest() {
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
       const ids = Array.from({ length: 400 }, (_, k) => idOf(k));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') || ids.some((id) => text.includes(id)) || text.includes(CURSOR) || text.includes(encodeURIComponent(CURSOR)) ? i : null)).filter((i) => i !== null);
-      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, short-with-next, any-case relation, field-fenced, null-dated, empty and large, capped, off-link, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [40, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
+      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, short-with-next, any-case relation, field-fenced, null-dated, empty and large, capped, off-link with its shape, the real numeric shape, another id, an unread or unreached repository id, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [46, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
       t('…positive control: the answers served carried the marker, the ids and the cursor, the cursor reached the platform on the second page — where it belongs — and the generic row printer, given a served item, WOULD print the marker and its id', [JSON.stringify(served).includes('ADVISORY MARKER') && JSON.stringify(served).includes(idOf(1)), paged.seen.some((s) => s.call.includes(encodeURIComponent(CURSOR))), resultOf({}, item(1, 'draft')).includes('ADVISORY MARKER') && resultOf({}, item(1, 'draft')).includes(idOf(1))], [true, true, true]);
     }
 
@@ -4734,6 +5095,96 @@ export async function selfTest() {
       t("⛔ …and the real processes: the validator accepting a note — its output minting repository-advisories WRITE and marking advisory_note=yes — and refusing one, and the executor stopping at its prerequisite with the relay's key in its environment, print neither marker nor the key — stdout, stderr, GITHUB_OUTPUT or the step summary", [cliRuns.map((r) => r.status), cliRuns[0].output.split('\n').filter((l) => /^(permission_repository_advisories|advisory_note)=/.test(l)), cliRuns.map((r) => ['MARKER', RELAY.text, RELAY.text.slice(21)].some((m) => r.text.includes(m)))], [[0, EXIT_REFUSED, EXIT_PREREQUISITE], ['permission_repository_advisories=write', 'advisory_note=yes'], [false, false, false]]);
     }
 
+    // ── advisory_rewrite ────────────────────────────────────────────────────
+    battery(REWRITE_BATTERY);
+    {
+      const { generateKeyPairSync } = await import('node:crypto');
+      // Made-up ids: the fixture names no real advisory.
+      const GHSA = 'GHSA-abcd-2345-wxyz';
+      const MARKER = 'REWRITE MARKER: the public text, never to be logged';
+      const WORKING = 'WORKING MARKER: the working text, never to be logged';
+      const ADV = `/repos/${REPO}/security-advisories/${GHSA}`;
+      const A_GET = `GET ${ADV}`;
+      const A_PATCH = `PATCH ${ADV}`;
+      const pair = () => {
+        const k = generateKeyPairSync('x25519');
+        return { text: k.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'), spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+      };
+      const RELAY = pair();
+      const SUMMARY = `${MARKER} — the summary, 漢字`;
+      const DESCRIPTION = `${MARKER}\n\n## Impact\nline two — 🎉, a quote " and a backslash \\`;
+      const DIGEST_KEY = Buffer.alloc(32, 3);
+      const sealFor = (text, { op = 'advisory_rewrite' } = {}) => sealAdvisoryNote({ section: text, digestKey: Buffer.from(DIGEST_KEY), publicKey: RELAY.spki, aad: advisorySealAad({ requestId: 'fw-test-1', action: 1, op, ghsaId: GHSA }) });
+      const BOTH = advisoryRewriteText({ summary: SUMMARY, description: DESCRIPTION });
+      const rewrite = (text = BOTH, extra = {}) => ({ op: 'advisory_rewrite', ghsa_id: GHSA, sealed_note: sealFor(text), ...extra });
+      const bytes = (s) => Buffer.byteLength(s, 'utf8');
+      const advisory = (extra = {}, status = 200) => ({ status, json: { ghsa_id: GHSA, state: 'draft', summary: WORKING, description: `${WORKING}\nmore`, ...extra } });
+      const notices = (r) => r.logs.filter((l) => l.startsWith('::notice '));
+      const swept = [];
+      const rewriteRun = async (actions, answers, { key = RELAY.text, relayPublicKey = RELAY.spki } = {}) => {
+        const paceLines = [];
+        const masked = [];
+        const file = join(dir, `pace-rewrite-${paceCase++}.jsonl`);
+        const r = await run(base(actions), answers, { file, pace: { ...paceFor(file), log: (l) => paceLines.push(l) }, advisoryNoteKey: key, advisoryNote: { relayPublicKey }, mask: (v) => masked.push(v) });
+        swept.push({ r, paceLines, answers });
+        return { ...r, masked };
+      };
+      const stored = (fields = { summary: SUMMARY, description: DESCRIPTION }, extra = {}) => advisory({ ...fields, ...extra });
+      const lands = (fields, extra = {}) => ({ ...allowed, [A_GET]: [advisory(extra), advisory(extra), stored(fields, extra)], [A_PATCH]: stored(fields, extra) });
+      const failed = (r) => [r.exit, r.rows.length, r.rows[0]?.status, r.annotations?.length ?? 0, notices(r).length];
+      // ⭐ Landed: both fields.
+      const landed = await rewriteRun([rewrite()], lands());
+      const patch = landed.seen.find((s) => s.call === A_PATCH);
+      t("⭐ a rewrite is the sender gate, the advisory's GET, a second GET, ONE PATCH and a GET after it, under the App token — exit 0, one write", [landed.exit, landed.seen.map((s) => s.call), landed.seen.every((s) => s.auth === `Bearer ${TOKEN}`), writes(landed.seen).length], [EXIT_OK, [PERM, A_GET, A_GET, A_PATCH, A_GET], true, 1]);
+      t('⭐ REPLACE: the PATCH carries { summary, description } and nothing else, each BYTE FOR BYTE as the seat sealed it (CJK, an emoji, a quote and a backslash among them) — the working text nowhere in it', [Object.keys(patch?.body ?? {}), Buffer.compare(Buffer.from(patch?.body?.summary ?? '', 'utf8'), Buffer.from(SUMMARY, 'utf8')), Buffer.compare(Buffer.from(patch?.body?.description ?? '', 'utf8'), Buffer.from(DESCRIPTION, 'utf8')), JSON.stringify(patch?.body ?? {}).includes('WORKING')], [['summary', 'description'], 0, 0, false]);
+      const digest = advisoryNoteDigest({ digestKey: DIGEST_KEY, section: BOTH });
+      t("⭐ its row: the PATCH call, its status and the landed text — the id, the state, each field's byte counts and the keyed digest", landed.rows, [{ action: 1, op: 'advisory_rewrite', call: A_PATCH, status: 200, result: advisoryRewriteLandedText({ ghsaId: GHSA, state: 'draft', fields: [{ key: 'summary', beforeBytes: bytes(WORKING), afterBytes: bytes(SUMMARY) }, { key: 'description', beforeBytes: bytes(`${WORKING}\nmore`), afterBytes: bytes(DESCRIPTION) }], digest }) }]);
+      const parsedBack = notices(landed).map((l) => parseRelayAdvisoryNoteAnnotation(l.slice(l.indexOf('::', 2) + 2)));
+      t("⭐ the round trip: ONE notice titled `fleet-write advisory_rewrite`, in the note's spelling, that the seat's own parser reads back as the action, the sealed text's byte count and a keyed digest of what the advisory STORES — equal to the seat's digest of what it sealed", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, parsedBack[0]?.noteDigest === digest], [['::notice title=fleet-write advisory_rewrite::'], [{ action: 1, op: 'advisory_rewrite', noteBytes: bytes(BOTH), noteDigest: digest }], true]);
+      t('the mask: every line of each field of six characters or more, trimmed, handed to the runner before the PATCH', [landed.masked], [[...new Set(`${SUMMARY}\n${DESCRIPTION}`.split('\n').map((l) => l.trim()).filter((l) => l.length >= ADVISORY_NOTE_MASK_MIN_CHARS))]]);
+      // A description alone: the summary left as read, and held to it.
+      const ALONE = advisoryRewriteText({ description: DESCRIPTION });
+      const alone = await rewriteRun([rewrite(ALONE)], lands({ summary: WORKING, description: DESCRIPTION }));
+      t('a description alone: the PATCH carries { description } alone, the summary left as read, and the notice digests the description stored', [alone.exit, Object.keys(alone.seen.find((s) => s.call === A_PATCH)?.body ?? {}), alone.annotations[0]?.noteDigest === advisoryNoteDigest({ digestKey: DIGEST_KEY, section: ALONE })], [EXIT_OK, ['description'], true]);
+      t('…and triage and closed pass the state fence as draft does — each lands', [(await rewriteRun([rewrite()], lands(undefined, { state: 'triage' }))).exit, (await rewriteRun([rewrite()], lands(undefined, { state: 'closed' }))).exit], [EXIT_OK, EXIT_OK]);
+      // ⛔ A published advisory, and the other fences.
+      const fenceRuns = [
+        await rewriteRun([rewrite()], { ...allowed, [A_GET]: advisory({ state: 'published' }) }),
+        await rewriteRun([rewrite()], { ...allowed, [A_GET]: advisory({ state: 'withdrawn' }) }),
+        await rewriteRun([rewrite()], { ...allowed, [A_GET]: advisory({ summary: { text: WORKING } }) }),
+        await rewriteRun([rewrite()], { ...allowed, [A_GET]: { status: 404, json: { message: MARKER } } }),
+      ];
+      t("⛔ a PUBLISHED advisory, a withdrawn one, a summary that is not text and a 404 — each FAILED with ONE GET, ZERO writes, nothing opened or masked, the published one naming the state fence", [fenceRuns.map((r) => [...failed(r), r.seen.map((s) => s.call), r.masked.length]), fenceRuns[0].rows[0].result.includes('fence `state`: the advisory reads state published'), fenceRuns[2].rows[0].result.includes('fence `summary`')], [fenceRuns.map(() => [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET], 0]), true, true]);
+      // ⛔ A note's seal never opens as a rewrite; the key first.
+      const asNote = await rewriteRun([rewrite(BOTH, { sealed_note: sealFor(BOTH, { op: 'advisory_note' }) })], lands());
+      const keyless = await rewriteRun([rewrite()], lands(), { key: '' });
+      t("⛔ a seal made for a note — the same key, request, action and advisory — does not open as a rewrite: FAILED after the one read with the fixed sentence, ZERO writes; and no relay key is FAILED before any read", [[...failed(asNote), asNote.seen.map((s) => s.call), asNote.rows[0]?.result], [...failed(keyless), keyless.seen.map((s) => s.call)]], [[EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET], `FAILED: FAILED, nothing sent: ${ADVISORY_NOTE_OPEN_FAILED}`], [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM]]]);
+      // ⛔ The text, judged again after the open.
+      const judged = [];
+      for (const text of [advisoryRewriteText({ description: '' }), advisoryRewriteText({ summary: `${MARKER}\ntwo lines` }), advisoryRewriteText({}), `${MARKER} not JSON`]) judged.push(await rewriteRun([rewrite(text)], lands()));
+      t("⛔ the text judged AGAIN after the open — an EMPTY description, a summary of two lines, no field and prose — each FAILED with ZERO writes and nothing masked", judged.map((r) => [...failed(r), writes(r.seen).length, r.masked.length, r.rows[0]?.result?.startsWith('FAILED: REFUSED after the open, nothing sent: the seal holds no rewrite this relay writes — ')]), judged.map(() => [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, 0, 0, true]));
+      t('…the empty description named as such', judged[0].rows[0].result.endsWith('the description is empty'), true);
+      // ⛔ The concurrency read.
+      const raced = await rewriteRun([rewrite()], { ...lands(), [A_GET]: [advisory(), advisory({ summary: `${WORKING} — edited between the reads` })] });
+      const racedText = await rewriteRun([rewrite()], { ...lands(), [A_GET]: [advisory(), advisory({ description: `${WORKING}\nmore — edited between the reads` })] });
+      t("⛔ the second read: a summary changed since the first, and a description changed since the first, are each FAILED with TWO GETs and ZERO writes, named by the field and its byte counts", [raced, racedText].map((r) => [...failed(r), r.seen.map((s) => s.call)]).concat([[raced.rows[0]?.result?.includes("summary changed between the relay's two reads"), racedText.rows[0]?.result?.includes("description changed between the relay's two reads")]]), [[EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET, A_GET]], [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET, A_GET]], [true, true]]);
+      // ⛔ The fence on the second read: the guard that makes "never published" true at the moment of the write.
+      const moved = [];
+      for (const state of ['published', 'withdrawn']) moved.push(await rewriteRun([rewrite()], { ...lands(), [A_GET]: [advisory(), advisory({ state })] }));
+      t("⛔ the second read, immediately before the PATCH, is fenced as the first: an advisory read as draft that reads published, or withdrawn, on the second GET is FAILED with TWO GETs and ZERO writes, naming the state fence on that read", moved.map((r) => [...failed(r), r.seen.map((s) => s.call), r.rows[0]?.result?.includes('(its second read, just before the write)') && r.rows[0]?.result?.includes('fence `state`')]), moved.map(() => [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, [PERM, A_GET, A_GET], true]));
+      // ⛔ The read-back.
+      const notStored = await rewriteRun([rewrite()], { ...lands(), [A_PATCH]: stored({ summary: SUMMARY, description: `${DESCRIPTION} ` }) });
+      const overtaken = await rewriteRun([rewrite(ALONE)], { ...lands({ summary: WORKING, description: DESCRIPTION }), [A_GET]: [advisory(), advisory(), stored({ summary: `${WORKING}x`, description: DESCRIPTION })] });
+      t('⛔ the read-back: a PATCH answer whose description is not the one sent is NOT STORED, with no GET after it; a GET after the PATCH whose summary — not sent — moved is a raced write; each FAILED at the 200, no notice, never re-sent', [notStored, overtaken].map((r) => [...failed(r), r.seen.map((s) => s.call).slice(3), r.rows[0]?.result?.includes(ADVISORY_REWRITE_NOT_RESENT)]), [[EXIT_ACTION_FAILED, 1, 200, 0, 0, [A_PATCH], true], [EXIT_ACTION_FAILED, 1, 200, 0, 0, [A_PATCH, A_GET], true]]);
+      // ⛔ The sweep.
+      const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => (n?.noteDigest ? relayAdvisoryNoteAnnotationMessage(n) : JSON.stringify(n))), ...paceLines].join('\n'));
+      const decodes = (text) => [...text.matchAll(/[A-Za-z0-9+/_-]{16,}={0,2}/g)].some(([m]) => ['base64', 'base64url'].some((enc) => Buffer.from(m, enc).toString('latin1').includes('MARKER')));
+      const hexOf = (s) => Buffer.from(s, 'utf8').toString('hex');
+      const leaks = emitted.map((text, i) => (['REWRITE MARKER', 'WORKING MARKER', encodeURIComponent(MARKER).slice(0, 20), hexOf('REWRITE MARKER'), hexOf('WORKING MARKER'), RELAY.text].some((m) => text.toLowerCase().includes(m.toLowerCase())) || decodes(text) ? i : null)).filter((i) => i !== null);
+      t("⛔ THE MARKER TEST: across every run of this battery — landed, alone, each state, fence, open, judgment, race and read-back failure — no log line, transcript line, step summary, row, annotation or pace line carries a byte of the new text or the old, as text, URI-encoded, hex or base64, nor the relay's key", leaks, [], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('MARKER'))).join(' | '));
+      t("…positive control: the answers served carried both markers, the PATCH carried the new text to the platform — where it belongs — and the mask was handed it", [['REWRITE MARKER', 'WORKING MARKER'].every((m) => JSON.stringify(swept[0].answers).includes(m)), patch?.body?.description?.includes('REWRITE MARKER'), landed.masked.some((v) => v.includes('REWRITE MARKER'))], [true, true, true]);
+    }
+
     // ── the CLI ─────────────────────────────────────────────────────────────
     battery('the CLI: the event file, environment inputs, the payload refusal, the exit ladder');
     {
@@ -4810,6 +5261,7 @@ export async function selfTest() {
       'for that key and read alone, no part on a failed seal, the marker and the id on no public surface and the marker not in the sealed answer, ' +
       "an advisory listing gated before its first GET, walked per state on the platform's own cursor under a page cap, projected to five fields, padded and sealed as exactly ten parts, " +
       "an advisory note opened with the relay's own key judged first, appended after two fenced reads by ONE PATCH and read back byte for byte, its text masked and printed nowhere, " +
+      "an advisory rewrite opened through the note's door under its own associated data, refused on a published advisory, its fields replaced by ONE PATCH and read back byte for byte, its notice digesting the stored text, " +
       'every failure emitting nothing and no id, count or cursor on any public surface, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +

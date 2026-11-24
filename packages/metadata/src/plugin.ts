@@ -14,6 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
+import { restoreWithheldSeedDatasets, withholdRetiredSeedModes, type WithheldSeedDataset } from './artifact-retired-seed-modes.js';
 import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
@@ -379,6 +380,52 @@ function claimedArtifactSlots(bodies: readonly unknown[]): (type: string, name: 
     return (type, name) => owned.get(type)?.has(name) === true;
 }
 
+/**
+ * Whether a top-level `objectExtensions` entry of a stack that carries
+ * `packages[]` is a package body's: a body carries an entry EQUAL to it by
+ * value. An extension has no slot of its own (it is keyed by `extend`, and its
+ * `name` spelling is a retired alias the schema refuses), so it is told from
+ * the residual by what it holds, never by its target: the flattened top level
+ * of a `composeStacks(…, { manifest: 'preserve' })` artifact repeats every
+ * body's entry, and a built artifact has lost the references, but each copy
+ * still holds exactly what its body's entry holds. An entry extending a target
+ * some body also extends, with other fields, is the residual's own.
+ *
+ * Equal by value is also the case where nothing is lost: the body's entry
+ * registers exactly what the copy holds. Keys set to `undefined` count as
+ * absent, as `deepEqualAuthored` (`@objectstack/spec`) and the composition
+ * door's mirror read them.
+ */
+function claimedArtifactExtensions(bodies: readonly unknown[]): (item: unknown) => boolean {
+    const declared: unknown[] = [];
+    for (const body of bodies) {
+        const items = (body as any)?.objectExtensions;
+        if (Array.isArray(items)) declared.push(...items);
+    }
+    return (item) => declared.some((entry) => entry === item || sameAuthoredValue(entry, item, 0));
+}
+
+/** Structural equality of two authored values; keys holding `undefined` count as absent. */
+function sameAuthoredValue(a: unknown, b: unknown, depth: number): boolean {
+    if (Object.is(a, b)) return true;
+    if (depth >= 32 || typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    if (Array.isArray(a) && Array.isArray(b)) {
+        return a.length === b.length && a.every((v, i) => sameAuthoredValue(v, b[i], depth + 1));
+    }
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const keys = Object.keys(left).filter((k) => left[k] !== undefined);
+    if (keys.length !== Object.keys(right).filter((k) => right[k] !== undefined).length) return false;
+    return keys.every((k) => sameAuthoredValue(left[k], right[k], depth + 1));
+}
+
+/** The object an `objectExtensions` entry extends, or `undefined` when it names none. */
+function extensionTarget(item: unknown): string | undefined {
+    const target = (item as { extend?: unknown } | null | undefined)?.extend;
+    return typeof target === 'string' && target !== '' ? target : undefined;
+}
+
 /** One top-level item of a multi-package stack that none of its package bodies declares. */
 export interface UnclaimedTopLevelItem {
     /** The stack collection the item sits in, e.g. `views`. */
@@ -418,7 +465,12 @@ export interface UnclaimedTopLevel {
  * An item is unclaimed when it occupies a registry slot (`artifactItemSlot`)
  * that no package body occupies (`claimedArtifactSlots`): a container is
  * compared on its own slot, every other item on its name. An item with no
- * derivable slot is registered by no door, so it is not listed.
+ * derivable slot is registered by no door, so it is not listed — with one
+ * exception: an `objectExtensions` entry, which has no slot, is listed (type
+ * `object_extension`) when it names a target and no body carries an entry
+ * equal to it (`claimedArtifactExtensions`). The metadata door registers no
+ * extension, a body's or the residual's (it has no slot to file one under);
+ * the engine registers the residual's under this id, as it does a body's.
  *
  * @returns `undefined` for a stack without `packages[]`: its top level IS its
  *   one package's body, so it has no residual.
@@ -427,11 +479,16 @@ export function unclaimedTopLevel(stack: unknown): UnclaimedTopLevel | undefined
     if (!Array.isArray((stack as any)?.packages)) return undefined;
     const bodies = resolveArtifactPackageOrder(stack);
     const claimed = claimedArtifactSlots(bodies);
+    const claimedExtension = claimedArtifactExtensions(bodies);
     const items: UnclaimedTopLevelItem[] = [];
     for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
         const collection = (stack as any)[field];
         if (!Array.isArray(collection)) continue;
         collection.forEach((item: unknown, index: number) => {
+            if (metaType === 'object_extension') {
+                if (extensionTarget(item) !== undefined && !claimedExtension(item)) items.push({ field, index, type: metaType, item });
+                return;
+            }
             const slot = artifactItemSlot(metaType, item);
             if (!slot) return;
             if (claimed(metaType, slot.container ? slot.object : slot.name)) return;
@@ -1380,22 +1437,33 @@ export class MetadataPlugin implements Plugin {
 
         let metadata: Record<string, unknown[]>;
 
+        // [#34613] A seed dataset declaring a retired mode is taken out before
+        // the strict parse and handed back after it, so the seed load refuses
+        // that dataset alone instead of this parse refusing the whole artifact
+        // (see `artifact-retired-seed-modes.ts`).
+        let withheld: WithheldSeedDataset[] = [];
+        const prepare = (definition: unknown): unknown => {
+            const split = withholdRetiredSeedModes(this._convertArtifactForward(ctx, definition, label));
+            withheld = split.withheld;
+            return split.definition;
+        };
+
         const obj = raw as any;
         if (obj?.schemaVersion && obj?.commitId && obj?.metadata !== undefined) {
             const artifact = EnvironmentArtifactSchema.parse({
                 ...obj,
-                metadata: this._convertArtifactForward(ctx, obj.metadata, label),
+                metadata: prepare(obj.metadata),
             });
             metadata = artifact.metadata as Record<string, unknown[]>;
         } else if (obj?.success && obj?.data?.metadata) {
             // Unwrap cloud API envelope: { success: true, data: { metadata: {...} } }
             const artifact = EnvironmentArtifactSchema.parse({
                 ...obj.data,
-                metadata: this._convertArtifactForward(ctx, obj.data.metadata, label),
+                metadata: prepare(obj.data.metadata),
             });
             metadata = artifact.metadata as Record<string, unknown[]>;
         } else {
-            const def = ObjectStackDefinitionSchema.parse(this._convertArtifactForward(ctx, obj, label));
+            const def = ObjectStackDefinitionSchema.parse(prepare(obj));
             const canonical = JSON.stringify(def, Object.keys(def).sort());
             const checksum = createHash('sha256').update(canonical).digest('hex');
             const environmentId = this.options.environmentId ?? 'env_local';
@@ -1407,6 +1475,18 @@ export class MetadataPlugin implements Plugin {
                 metadata: def,
             });
             metadata = def as Record<string, unknown[]>;
+        }
+
+        if (withheld.length > 0) {
+            restoreWithheldSeedDatasets(metadata, withheld);
+            for (const entry of withheld) {
+                ctx.logger.warn(
+                    `[MetadataPlugin] artifact '${label}': the seed dataset for '${entry.object}' declares the retired `
+                    + `mode '${entry.mode}'. Everything else in the artifact loads; the seed load refuses that dataset `
+                    + `and writes none of it. ${entry.prescription} Rebuild the artifact after the fix.`,
+                    { object: entry.object, mode: entry.mode },
+                );
+            }
         }
 
         this.lastParsedMetadata = metadata;

@@ -997,3 +997,66 @@ describe('[#33593] an extension\'s record-mode amount is judged against its obje
     expect(fieldOf(ql, 'suite_line', 'inv2')?.reference).toBe('suite_invoice');
   });
 });
+
+// ── [ADR-0144 D2] An extension's ONE-SEGMENT pointer, judged as its object is served, at the end of the run ──
+//
+// Pair (b) of the follow door: a record-mode amount an extension adds whose
+// `currencyField` is a sibling name is judged against the served object. A run
+// that adds a dangling one is refused; a run that leaves one as it found it
+// (one a cold boot admitted unasked) is not (R7); a run that breaks one is
+// refused naming the extension's package (R6).
+describe('an extension\'s sibling record-currency pointer is judged against its object as served, at the end of the run', () => {
+  /** The child, holding an ISO 4217 code of its own under `currency_code` (none when `withCode` is false). */
+  const coded = (withCode = true) => object('suite_line', {
+    fields: {
+      title: { type: 'text', label: 'Title' },
+      invoice: { type: 'master_detail', label: 'Invoice', reference: 'suite_invoice' },
+      ...(withCode ? { currency_code: CODE } : {}),
+    },
+  });
+
+  it('an extension-only install naming no field of the served object is refused 422, naming the candidates, and leaves nothing', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+    await manifest.register(billing([coded()]));
+
+    const err = await refusal(() => manifest.register(extender({ ext_amount: follows('zz_missing') }), { source: 'marketplace' }));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+    expect(String(err?.message)).toContain("'zz_missing'");
+    expect(String(err?.message)).toContain("candidates: 'currency_code'");
+    expect(extraOf(ql)).toBeUndefined();
+    expect(ql.registry.getPackage(EXTENDER)).toBeUndefined();
+  });
+
+  it('CONTROL: the extension naming the code field the owner declares installs', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+    await manifest.register(billing([coded()]));
+
+    await manifest.register(extender({ ext_amount: follows('currency_code') }), { source: 'marketplace' });
+
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('currency_code');
+  });
+
+  it('R7: a no-change upgrade of the owner, and of the extension, installs over a dangling pointer a cold boot admitted', async () => {
+    const { ql, manifest } = await bootWith([ledger('currency_code'), billing([coded()]), extender({ ext_amount: follows('zz_missing') })]);
+    expect(extraOf(ql)?.currencyConfig?.currencyField).toBe('zz_missing');
+
+    await manifest.register(billing([coded()], '1.0.1'));
+    await manifest.register(extender({ ext_amount: follows('zz_missing') }, '1.0.1'));
+
+    expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.0.1');
+    expect(ql.registry.getPackage(EXTENDER)?.manifest?.version).toBe('1.0.1');
+  });
+
+  it('R6: an owner upgrade that removes the code field an extension\'s amount names is refused, naming the extension\'s package', async () => {
+    const { ql, manifest } = await bootWith([ledger('currency_code'), billing([coded()]), extender({ ext_amount: follows('currency_code') })]);
+
+    const err = await refusal(() => manifest.register(billing([coded(false)], '1.0.1')));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'ext_amount' });
+    expect(String(err?.message)).toContain(`'${EXTENDER}'`);
+    expect(ql.registry.getPackage(BILLING)?.manifest?.version).toBe('1.0.0');
+  });
+});

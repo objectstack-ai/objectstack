@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS, AuthzStoreUnavailableError } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS, AuthzStoreUnavailableError, resolveEnvironmentMembershipEnforcement } from '@objectstack/core';
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, declaredRefusalMessage, demotedDeclaredCode, logServerFault, describeFaultRequest, inProcessSessionReadInput } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
@@ -10,6 +10,7 @@ import { deferRequestBody } from './deferred-request-body.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
 import { appEndpointMountPrefix, isAppEndpointPath, runAppEndpointStep } from './api-endpoint-step.js';
+import { matchForwardedDoorPath, sendWebResponse, toWebRequest } from './forwarded-door-fallback.js';
 import type { EndpointExecutorDeps } from './endpoint-executor.js';
 import { callData } from './action-execution.js';
 import { createEndpointRateLimiterRegistry } from './endpoint-policy.js';
@@ -20,8 +21,10 @@ import {
     type SecurityHeadersOptions,
 } from './security/index.js';
 import { resolveSessionData, resolveSessionPrincipalId } from './security/resolve-session-principal.js';
+import { sessionAdmittedPrincipal } from './security/admitting-credential.js';
 import { buildActorUser } from './security/actor-user.js';
 import { resolveKernelCache } from './security/kernel-cache.js';
+import { readTrustProxy, type ClientAddressTrust } from '@objectstack/plugin-auth/client-address';
 import {
     NoopMetricsRegistry,
     NoopErrorReporter,
@@ -149,8 +152,12 @@ export interface DispatcherPluginConfig {
     rateLimit?: {
         /** The authored `server.security.rateLimit` budget. */
         budget?: InboundRateLimitBudget;
-        /** The authored `server.trustProxy`. */
-        trustProxy?: boolean;
+        /**
+         * The authored `server.trustProxy`, either form, read once by
+         * `readTrustProxy` when the plugin is created: a malformed
+         * trusted-network form fails the boot instead of trusting nobody.
+         */
+        trustProxy?: ClientAddressTrust;
     };
 }
 
@@ -179,8 +186,12 @@ function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
  *  - No gate feature is active, or the probe is absent or throws: the answer
  *    is `undefined` and no session is read. The gate costs nothing while it
  *    is off, and a host whose probe faults never declared a gate.
- *  - The gate is active: a dedicated session read. The answer is its user, or
- *    `undefined` when there is no session. The API-key caller and the
+ *  - The gate is active and the request's own session admitted the principal
+ *    (`admitted`, read off the identity step's record): the posture decided
+ *    off that same read. ⛔ No second read: the request's session is read
+ *    once, and every seam of the request shares that read.
+ *  - The gate is active otherwise: a dedicated session read. The answer is its
+ *    user, or `undefined` when there is no session. The API-key caller and the
  *    anonymous caller have none, and no policy holds them.
  *  - The gate is active and the read FAILS: the branded authorization-store
  *    outage, answered `503 SERVICE_UNAVAILABLE` by the fallback's error exit.
@@ -194,6 +205,7 @@ function safeGetService<T>(ctx: PluginContext, name: string): T | undefined {
 async function readGatedSessionUser(
     authService: IAuthService | undefined,
     headers: Record<string, unknown>,
+    admitted?: { authGate: unknown },
 ): Promise<unknown> {
     let active = false;
     try {
@@ -202,6 +214,7 @@ async function readGatedSessionUser(
         active = false;
     }
     if (!authService || !active) return undefined;
+    if (admitted) return { authGate: admitted.authGate };
     try {
         const api = authService.api ?? (await authService.getApi?.());
         // A provider that mounts no session API has no session to hold.
@@ -878,6 +891,9 @@ function errorResponseBase(
  * ```
  */
 export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plugin {
+    // One reading of `server.trustProxy` for both limiters below, so the
+    // trusted-network form reaches each of them as authored.
+    const trustProxy = readTrustProxy(config.rateLimit?.trustProxy);
     return {
         name: 'com.objectstack.runtime.dispatcher',
         version: '1.0.0',
@@ -906,11 +922,16 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // (see `HonoHttpServer.installMiddlewareSeam`).
             const rateLimitMiddleware = createInboundRateLimitMiddleware({
                 ...(config.rateLimit?.budget ? { budget: config.rateLimit.budget } : {}),
-                trustProxy: config.rateLimit?.trustProxy === true,
+                trustProxy,
+                // The read goes through the request's session-read carrier, with
+                // the engine the auth service reads through: the route's own
+                // identity step is answered by this read, so a request reads
+                // its session once with the limiter armed.
                 resolvePrincipalId: (headers) =>
                     resolveSessionPrincipalId(
                         safeGetService<IAuthService>(ctx, 'auth'),
                         headers as Record<string, unknown>,
+                        safeGetService<unknown>(ctx, 'objectql'),
                     ),
                 resolveCache: () => resolveKernelCache(ctx),
                 logger: ctx.logger,
@@ -929,7 +950,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         // `key: ***REDACTED***` tells an operator nothing about
                         // what the limit is actually keyed on.
                         keyedBy: 'principal, falling back to caller IP',
-                        trustProxy: config.rateLimit?.trustProxy === true,
+                        trustProxy,
                     });
                 } else {
                     // Absence must be loud (route-ownership rule 3): a stack
@@ -948,8 +969,12 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             const kernel = ctx.getKernel();
             // Default: enable membership enforcement iff environment-scoping is on.
             // Tests / single-tenant deploys can opt out via the explicit flag.
-            const enforceMembership =
-                config.enforceProjectMembership ?? (config.scoping?.enableProjectScoping ?? false);
+            // The ONE reading of the switch — the REST plugin reads it through
+            // the same function, so one host's doors are on or off together.
+            const enforceMembership = resolveEnvironmentMembershipEnforcement({
+                enforceProjectMembership: config.enforceProjectMembership,
+                enableProjectScoping: config.scoping?.enableProjectScoping,
+            });
             // [#3963] Anonymous callers are denied unconditionally on every
             // surface that reaches object data — the deployment-wide opt-out is
             // retired, so there is nothing to resolve or warn about here. The
@@ -1882,6 +1907,18 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     }
                 });
 
+                // [#35928] The record-update preview the stage-change confirms
+                // read; a literal, registered with `/_status` ahead of
+                // `/automation/:name` for the reason above.
+                server!.post(`${base}/automation/_record-starts`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch('POST', '/automation/_record-starts', deferRequestBody(req), req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+
                 server!.get(`${base}/automation/:name`, async (req: any, res: any) => {
                     try {
                         const result = await dispatcher.dispatch('GET', `/automation/${req.params.name}`, undefined, req.query, { request: req });
@@ -2434,6 +2471,30 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                             sendResult(result, res);
                             return;
                         }
+                        // ── [#36469] A forwarded door on a multi-tenant host ────
+                        // A door whose plugin lives on the per-environment
+                        // kernel (the comment doors) is mounted on no route table
+                        // here, and this host has no `createHonoApp` catch-all to
+                        // carry it into `dispatch()`. Exact door shapes only, so
+                        // a miss still writes nothing; multi-tenant only, so a
+                        // single-kernel host keeps today's answers byte for byte.
+                        // See `forwarded-door-fallback.ts`.
+                        if (dispatcher.isMultiTenantHost() && matchForwardedDoorPath(req.method, path, prefix)) {
+                            const result = await dispatcher.dispatch(
+                                req.method,
+                                path.substring(prefix.length),
+                                undefined,
+                                req.query,
+                                { request: await toWebRequest(req) },
+                                prefix,
+                            );
+                            if (result.handled && result.result instanceof Response) {
+                                await sendWebResponse(result.result, res);
+                                return;
+                            }
+                            sendResult(result, res);
+                            return;
+                        }
                         // ── Scoping test FIRST, before any resolution ────────
                         // Everything below costs something (a kernel resolve, a
                         // session lookup), and an unmatched request that is not
@@ -2524,11 +2585,20 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                 // and the dispatcher's route mounts make (#4910).
                                 // Two answers to "who is calling" eventually
                                 // disagree about what counts as authenticated.
-                                resolvePrincipalId: (headers) =>
-                                    resolveSessionPrincipalId(
-                                        safeGetService<IAuthService>(ctx, 'auth'),
-                                        headers as Record<string, unknown>,
-                                    ),
+                                //
+                                // A principal this request's own session read
+                                // already admitted (the identity step above,
+                                // `resolveRequestScope`) is answered from that
+                                // read: the session is read once per request.
+                                resolvePrincipalId: (headers) => {
+                                    const admitted = sessionAdmittedPrincipal(protocolContext);
+                                    return admitted
+                                        ? Promise.resolve(admitted.userId)
+                                        : resolveSessionPrincipalId(
+                                            safeGetService<IAuthService>(ctx, 'auth'),
+                                            headers as Record<string, unknown>,
+                                        );
+                                },
                                 // ADR-0069: the session the authentication-policy
                                 // gate is asked about, read only while a gate feature
                                 // is active. Same `auth` occupant as the lookup above.
@@ -2545,13 +2615,17 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                         : readGatedSessionUser(
                                             safeGetService<IAuthService>(ctx, 'auth'),
                                             headers as Record<string, unknown>,
+                                            // The posture off the identity step's
+                                            // read, for a principal the request's
+                                            // own session admitted: no second read.
+                                            sessionAdmittedPrincipal(protocolContext),
                                         ),
                                 limiters: endpointLimiters,
                                 // The authored `server.trustProxy`, read from the
                                 // same declaration the server-level limiter reads.
                                 // A second trust switch is a second answer to
                                 // "may I believe X-Forwarded-For".
-                                trustProxy: config.rateLimit?.trustProxy === true,
+                                trustProxy,
                                 logger: ctx.logger,
                             },
                             execution: {

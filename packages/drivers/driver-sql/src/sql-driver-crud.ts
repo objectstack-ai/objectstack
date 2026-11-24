@@ -41,6 +41,8 @@ import {
 import type { SqlDriver } from './sql-driver.js';
 import { oracleUuidReadForm } from './sql-driver-oracle-dialect.js';
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { latestPerDirectiveOf, latestPerIdSubquery } from './sql-driver-latest-per.js';
+import { primeFixedReadLeafKeyTypes } from './fixed-read-leaf-key-type.js';
 
 /**
  * [`DriverOptions.lockRows`] Lock the rows a `find()` returns until its
@@ -154,21 +156,27 @@ export class CrudFacet {
    * cited that as agreement, which it was not; objectstack#4419.) The
    * obligation the contract states is on `find`, and this keeps it there.
    */
-  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlGuidColumns' | 'primeMssqlPagingKey' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
+  static async findRows(this: Pick<CrudHost, 'applyFilters' | 'applyTenantScope' | 'backendStatementFault' | 'formatOutput' | 'getBuilder' | 'isMssql' | 'isOracle' | 'knex' | 'mapSortField' | 'orderKeysFor' | 'primeMssqlGuidColumns' | 'primeMssqlPagingKey' | 'primeOracleRawUuidColumns' | 'remoteColumn' | 'unresolvableFilterColumnRefusal'>, object: string, query: DriverQuery, options?: DriverOptions, singleRowLookup = false): Promise<any[]> {
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
-    if (this.isOracle) await this.primeOracleRawUuidColumns(object);
+    if (this.isOracle) await this.primeOracleRawUuidColumns(object, query.where);
     // [#31327] On SQL Server a federated object's paging key is read from the
     // remote catalog before the ORDER BY is decided (`primeMssqlPagingKey`).
     if (this.isMssql) await this.primeMssqlPagingKey(object);
     // [#31395] …and which of its columns are GUIDs, before a text operator compiles.
     if (this.isMssql) await this.primeMssqlGuidColumns(object, query.where);
+    // [ADR-0155 O2] PostgreSQL: the key type a fixed-read leaf's inner read is cast to.
+    await primeFixedReadLeafKeyTypes(this, object, query.where, options);
     // The whole ORDER BY, decided once: the caller's keys plus whatever this
     // driver has to add to make a paged read deterministic. Derived out here
     // rather than inside `buildBase` so the recovery ladder below can ask
     // whether the statement HAS a sort to drop, instead of asking whether the
     // caller supplied one — since #4363 those are different questions.
     const orderKeys = this.orderKeysFor(object, query, { singleRowLookup });
+    // [latest per group] One row per group, when the engine handed the window
+    // directive (`sql-driver-latest-per.ts`): one more predicate on the same
+    // statement, so every clause below holds for it unchanged.
+    const latestPer = latestPerDirectiveOf(query);
 
     // Build everything EXCEPT the SELECT list, so the unknown-column retry
     // below can rebuild without re-deriving where/order/pagination.
@@ -180,6 +188,12 @@ export class CrudFacet {
       // WHERE
       if (query.where) {
         this.applyFilters(b, query.where, options);
+      }
+      if (latestPer !== undefined) {
+        b.whereIn(
+          this.remoteColumn(object, 'id', 'id'),
+          latestPerIdSubquery.call(this, object, query.where, latestPer, options),
+        );
       }
 
       // ORDER BY

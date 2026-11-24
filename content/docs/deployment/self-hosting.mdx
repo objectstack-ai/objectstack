@@ -110,7 +110,7 @@ docker run -p 8080:8080 \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET \
   -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:18.5.0
+  ghcr.io/objectstack-ai/objectstack:18.6.0
 ```
 
 (`OS_ARTIFACT_PATH` also accepts an `https://` URL, so the artifact can come
@@ -128,7 +128,7 @@ docker run -p 8080:8080 \
   -e OS_ARTIFACT_URL="https://releases.example.com/hotcrm-2.2.2.json#sha256=<64 hex chars>" \
   -e OS_DATABASE_URL="postgres://user:pass@db-host:5432/myapp" \
   -e OS_AUTH_SECRET -e OS_SECRET_KEY \
-  ghcr.io/objectstack-ai/objectstack:18.5.0
+  ghcr.io/objectstack-ai/objectstack:18.6.0
 ```
 
 Both schemes work: `https://…` is fetched at boot, `file:///…` is read directly
@@ -150,6 +150,7 @@ rotate. Two variables would make "URL updated, hash not" a state you can reach.
 | `#sha256=` present, artifact host unreachable | Falls back to the cached copy **only** if it still hashes to the pin, with a loud warning that the instance is running on cached content. |
 | Artifact's `engines.protocol` excludes this runtime | **Refuses to boot** — the safety belt of the two-axis split. Repoint the reference, or run a matching image version. |
 | The artifact needs a destructive schema change | Safe migrations run at boot; a destructive one **refuses to boot** and names each change. Run `os migrate apply --allow-destructive` deliberately, then restart. Never skipped in silence. |
+| The app's stack lists code plugins (`plugins: [new XPlugin()]`) | Boots **without them**: an artifact carries the app's metadata and hook handlers, not its code plugins, so nothing those plugins register exists. The boot warns once, naming each listed plugin the kernel does not run. To run them, boot a host config that loads the artifact and lists the plugins in its own `plugins`, or package them as a plugin (`os plugin build`, then `os plugin install`). |
 
 **Recommended production discipline** (convention, not enforced by the runtime):
 publish immutable, version-named objects; give only CI write access to the
@@ -185,7 +186,7 @@ COPY . .
 RUN npx os build              # → dist/objectstack.json
 
 # ── Runtime: the official ObjectStack runtime image ──────────────────
-FROM ghcr.io/objectstack-ai/objectstack:18.5.0
+FROM ghcr.io/objectstack-ai/objectstack:18.6.0
 COPY --from=build --chown=node:node /app/dist/objectstack.json /srv/app/objectstack.json
 ```
 
@@ -208,7 +209,7 @@ FROM node:22-slim
 RUN npm install --prefix /tmp/os-installer-npm --no-save --no-audit --no-fund "npm@11.21.0" \
  && export PATH="/tmp/os-installer-npm/node_modules/.bin:$PATH" \
  && test "$(npm --version)" = "11.21.0" \
- && npm install -g @objectstack/cli@18.5.0 "pg@^8.0.0" "mysql2@^3.0.0" \
+ && npm install -g @objectstack/cli@18.6.0 "pg@^8.0.0" "mysql2@^3.0.0" \
  && npm cache clean --force \
  && rm -rf /tmp/os-installer-npm
 
@@ -497,6 +498,27 @@ a named volume), set `OS_STORAGE_LOCAL_ROOT_SHARED=true`. That variable is a
 declaration, not a check. A `ReadWriteOnce` volume, as on Kubernetes, cannot be
 shared across replicas: use S3 there.
 
+**An S3 bucket needs a CORS rule for browser uploads and file previews.** With
+S3 or an S3-compatible store (R2, MinIO), the browser talks to the bucket
+directly: an upload `PUT`s the file to a presigned URL, and the in-page preview
+of a text or CSV file reads it with a `GET` on its signed download link. Both
+are cross-origin requests from the Console's origin, so the bucket's CORS
+configuration must allow them:
+
+| CORS field | Value |
+|:---|:---|
+| `AllowedOrigins` | the Console's public origin, exactly (`https://app.example.com`) — never `*` |
+| `AllowedMethods` | `GET`, `HEAD`, `PUT` |
+| `AllowedHeaders` | `content-type` (or `*`) |
+| `ExposeHeaders` | `Content-Length`, `Content-Type`, `Content-Disposition`, `ETag` |
+| `MaxAgeSeconds` | `3000` |
+
+A PDF preview needs no CORS: the Console shows it in a frame, and its
+content-security-policy already allows frames from the bucket's origin, the same
+origin it allows uploads to. Without the rule, uploads to the bucket fail, and a
+text or CSV preview cannot read the file: the preview then offers to open the
+file in a new tab, which needs neither CORS nor a frame source.
+
 **`/ready` reports the cluster driver's health once replicas are declared.**
 When the deployment declares itself multi-node — `OS_EXPECT_MULTI_NODE=true` or
 `OS_CLUSTER_REPLICAS` greater than 1; `OS_CLUSTER_DRIVER` alone is not a
@@ -617,6 +639,37 @@ on empty development databases. That seed is hard-gated to
 `NODE_ENV=development`: it is a development convenience, never a production
 recovery path.
 
+Nor does a server outside development mode **accept** a development seed
+credential. A sign-in with the development seed password is refused on every
+account, and an account `os dev` seeded (its admin and the stack's `demoStaff`)
+opens no session while it still has the password it was seeded with. If you
+serve a database `os dev` wrote, set each seeded account's password on the
+server with [`os user set-password`](/docs/deployment/cli#os-user-set-password)
+first; the refusal names that command.
+
+Nothing the development seed issued keeps acting once the deployment leaves
+development mode. At every boot outside development mode, before the server
+serves a request, it retires what each seeded account still on its seed
+password was issued: its sessions, including any it opened acting as another
+account, its API keys, the apps authorized to it and
+its device sign-ins, its outstanding password-reset links, any sign-in account
+linked to it, the OAuth applications it registered (disabled) and the SCIM
+credentials it minted (revoked). A retired session or key answers exactly as a
+revoked one does, and the log names each account and what was retired. When
+the host supplies a `secondaryStorage` that holds the sessions, the server ends
+them there too, which `os user set-password` cannot reach. An
+account whose password was set since the seed (by `os user set-password`, by
+an administrator, or by its own reset) holds a credential the seed did not
+issue and is untouched, as is every account the seed did not create. A boot in
+development mode retires nothing. There is no switch.
+
+If the retirement cannot complete (the database refuses a read or a write),
+the server does not start, and the error names the accounts; fix the database
+access, or run `os user set-password` on each of them, and start it again.
+`os user set-password` itself ends the account's own sessions, keys and
+grants when it sets the password, and from then on the boot leaves that
+account alone.
+
 ### A seeded directory opens no bootstrap window
 
 Both paths above assume the deployment's **first login** is still ahead of it.
@@ -662,8 +715,10 @@ dead end this section describes.
 directly against the store the deployment reads, then have that person register
 through the ordinary sign-up endpoint, sending the row's `id` as `invitationId`
 beside the email — under `invite_only` a sign-up is admitted only by the
-invitation it presents. The invitation carve-out admits that one creation under
-every posture, so the `invite_only` default stays where it is. One
+invitation it presents. That one creation is admitted under every posture — by
+the invitation under `invite_only` and off an `email_domain` list, by the
+posture's own rule, read first, under `open` and on the list — so the `invite_only` default stays where
+it is. One
 `sys_invitation` row:
 
 | Column | Value |
@@ -755,26 +810,73 @@ presents.** The sign-up sends the invitation's `id`, the last segment of its
 `/accept-invitation/` link, as `invitationId` beside the email: the Console's
 register page does this for an invitee who arrived from the link, and
 `os register --invitation` does it from a terminal. An address alone gets the
-same `403 SELF_REGISTRATION_CLOSED` as an address nobody invited. The link
-reaches the invitee in the invitation mail; on a deployment with no mail
-transport, an administrator hands it over with the invitation's **Copy Invite
-Link** action. The first account of a new deployment needs no invitation.
+same `403 SELF_REGISTRATION_CLOSED` as an address nobody invited. The first
+account of a new deployment needs no invitation. Admission is all the
+invitation's `id` grants: the account it admits joins no organization until it
+accepts the invitation, and accepting needs a verified address.
 
-**While the mail transport is live, accepting an invitation needs a verified
-address.** `POST /api/v1/auth/organization/accept-invitation` from a session
-whose address was never verified answers `403
-EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION` and
-writes nothing: an unverified address does not prove the person holds the
-invited mailbox. The Console's accept page sends the person to the
-verification-mail screen for their address, and the link in that mail brings
-them back to accept. A visitor who is not signed in and opens the invitation's
-link from the invitation mail itself needs no separate step: the accept page
-offers the one-step form, which verifies the address as it accepts. A visitor
-already signed in to an unverified account who opens that link is sent to
-verify first, like any other unverified session. Reading, listing and declining an invitation are not affected. On a
-deployment with no live transport (none configured, or the log transport)
-nothing can verify an address, so acceptance stays open to an unverified
-address, as before.
+**Under `email_domain`, an invitation admits an address off the allowlist, and
+grants nothing more.** A pending invitation addressed to an address outside
+the list admits that address's sign-up. Verification is forced on under this
+posture, and while the account's address is unverified it joins no
+organization: it joins by accepting the invitation once the address is
+verified, and the acceptance writes the membership the invitation names. Verifying the address binds nothing by itself.
+An address on the list is admitted by its domain, invitation or not: the
+membership policy binds it at creation as before, it receives the declared
+`selfRegistrationPermissionSet` like an uninvited sign-up, and a pending
+invitation still places it as the invitation names once it accepts. Both admissions have one
+exception: under this posture a sign-in through a social provider creates an
+account only when the provider reports the address verified, and is otherwise
+refused `403 SELF_REGISTRATION_CLOSED`, whatever the list or an invitation
+says ([Authentication](/docs/permissions/authentication#2-handle-callback)).
+Once the provider verifies the address, the next sign-in is admitted.
+Under `open` every address is admitted by the posture, invitation or not, so an
+invited sign-up likewise receives the declared set beside its invitation — except
+a sign-in through a social provider whose address the provider did not verify
+while email verification is in force, which is refused
+`403 SELF_REGISTRATION_CLOSED` as above.
+
+**A sign-up the posture admits needs its declared set, invited or not.** When
+`selfRegistrationPermissionSet` cannot be resolved (no such set, or the set is
+switched off), every sign-up the posture's own rule admits is refused
+`403 AUTH_CONFIG_ERROR`, and the message names the set: any address under
+`open`, an address on the list under `email_domain`, with or without a pending
+invitation. Nothing is created, and the deployment logs the same reason at
+error level. Correct the setting, or switch the set on, and the next sign-up is
+admitted. A pending invitation does not admit such a sign-up without the set.
+The two admissions an invitation makes alone, under `invite_only` and for an
+address off the list under `email_domain`, ask for no set and are unaffected.
+
+**Accepting, declining and listing an invitation need a verified email
+address, on every deployment.** The invitation's `id`, which its link carries,
+proves nothing about the mailbox. From a session whose address is not
+verified, `POST /api/v1/auth/organization/accept-invitation` and
+`POST /api/v1/auth/organization/reject-invitation` answer `403
+EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION` and write
+nothing, and `GET /api/v1/auth/organization/list-user-invitations` answers `403
+EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION`. Reading one invitation by its id
+(`get-invitation`) stays open, so the accept page can show it. A password
+account verifies through the verification mail; an account a social or SSO
+sign-in made counts only when its provider verified the address. The Console's
+accept page sends an unverified person to the verification-mail screen, and
+the link in that mail brings them back to accept. A visitor who is not signed
+in and opens the link from the invitation mail itself needs no separate step:
+the accept page offers the one-step form, which verifies the address as it
+accepts. No setting relaxes this rule.
+
+**A deployment without a live mail transport cannot onboard a password
+account by invitation link.** With no transport configured, or the log
+transport, no verification mail and no invitation mail reaches anyone, so an
+invitee who signs up with a password cannot verify the address or accept; a
+link handed over with the invitation's **Copy Invite Link** action admits the
+sign-up and nothing more. The one exception is an invitee who signs in through
+a social or SSO provider that verifies the address: that account counts as
+verified, so it can accept a copied link without any mail. To bring anyone
+else in there, a platform administrator creates the account
+(`POST /api/v1/auth/admin/create-user`), or attaches an account that already
+exists with the member list's **Add Member** action. Add Member is open to
+platform administrators only, and it attaches existing accounts only: it
+creates no account and sends no invitation.
 
 **What decides it on `open` and `email_domain`.** A sign-up for an address that
 already has an account gets the same answer as a successful new sign-up, and
@@ -823,6 +925,12 @@ on `open`, keep verification on and connect a mail transport.
   `emailAndPassword.requireEmailVerification: false` in the stack config. A
   sign-up is then signed in at once and no verification mail is sent.
 
+Under `email_domain`, and under `open` while verification is in force, a new
+account through a social provider is created only when the provider reports
+the address verified; otherwise the sign-in is refused
+`403 SELF_REGISTRATION_CLOSED` and nothing is written
+([Authentication](/docs/permissions/authentication#2-handle-callback)).
+
 The `open` opt-out is for a deployment with no mail transport that trusts
 whoever can reach it, such as a pre-production environment. It is loud and it
 has a cost:
@@ -831,7 +939,7 @@ has a cost:
   `/api/v1/auth/config` reports `requireEmailVerification: false` — the value
   actually wired.
 - Anyone can register an address they do not control. An organization
-  invitation sent to that address can then be accepted by that account.
+  invitation sent to that address still waits for the address to be verified.
 - It is the deployment's to declare. A `false` stored only through the
   settings console is refused under `open`, and verification stays on.
 

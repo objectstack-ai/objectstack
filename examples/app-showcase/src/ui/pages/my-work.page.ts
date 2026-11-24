@@ -22,7 +22,9 @@ export const MyWorkPage = definePage({
       name: 'header',
       width: 'full',
       components: [
-        { type: 'page:header', properties: { title: 'My Work', subtitle: 'Your queue, the team’s throughput, and what needs attention.' } },
+        // No `title`: the console's page header names the page from its
+        // `label` (objectstack#36111), so a title here said 「My Work」 twice.
+        { type: 'page:header', properties: { subtitle: 'Your queue, the team’s throughput, and what needs attention.' } },
       ],
     },
     {

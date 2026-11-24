@@ -114,11 +114,16 @@ function renderPage(page: keyof typeof PAGES, client: AuthClient, search: string
 const withRedirect = (redirect: string) => `?redirect=${encodeURIComponent(redirect)}`;
 const routerLocation = () => screen.getByTestId('router-location').textContent;
 
-/** The prompt's query as `/login` and `/register` build it today: `email`, then `redirect`. */
-const promptAt = (redirect: string) => {
+/**
+ * The prompt's query as `/login` and `/register` build it today: `email`, then
+ * `redirect`, then — from `/register` alone, whose sign-up sent the mail —
+ * `sent` (objectstack#34706).
+ */
+const promptAt = (redirect: string, sent = false) => {
   const sp = new URLSearchParams();
   sp.set('email', EMAIL);
   sp.set('redirect', redirect);
+  if (sent) sp.set('sent', '1');
   return `/verify-email-prompt?${sp.toString()}`;
 };
 
@@ -151,7 +156,7 @@ describe('the verification mail returns a hand-off sign-up to "go back to the ap
 
   it('/verify-email-prompt: the resent mail', async () => {
     const client = createMockClient();
-    renderPage('verify-email-prompt', client, `?email=${encodeURIComponent(EMAIL)}&redirect=${encodeURIComponent(HANDOFF)}`);
+    renderPage('verify-email-prompt', client, `?email=${encodeURIComponent(EMAIL)}&redirect=${encodeURIComponent(HANDOFF)}&sent=1`);
     await userEvent.click(await screen.findByRole('button', { name: /Resend verification email/ }));
     await waitFor(() => expect(client.sendVerificationEmail).toHaveBeenCalledTimes(1));
     expect(client.sendVerificationEmail.mock.calls[0]).toEqual([EMAIL, '/_console/verify-email?handoff=verified']);
@@ -162,7 +167,7 @@ describe('the verification mail returns a hand-off sign-up to "go back to the ap
     await signUpUnverified(client, INVITE, MARK);
     expect(client.signUp.mock.calls[0][0].callbackURL).toBe('/_console/accept-invitation/inv_1');
     cleanup();
-    renderPage('verify-email-prompt', client, `?email=${encodeURIComponent(EMAIL)}&redirect=${encodeURIComponent(INVITE)}`);
+    renderPage('verify-email-prompt', client, `?email=${encodeURIComponent(EMAIL)}&redirect=${encodeURIComponent(INVITE)}&sent=1`);
     await userEvent.click(await screen.findByRole('button', { name: /Resend verification email/ }));
     await waitFor(() => expect(client.sendVerificationEmail).toHaveBeenCalledTimes(1));
     expect(client.sendVerificationEmail.mock.calls[0]).toEqual([EMAIL, '/_console/accept-invitation/inv_1']);
@@ -177,7 +182,7 @@ describe('the route\'s refusal time survives the hops through /verify-email-prom
 
   it('/register: verification required carries it to the prompt', async () => {
     await signUpUnverified(createMockClient(), HANDOFF, MARK);
-    expect(routerLocation()).toBe(`${promptAt(HANDOFF)}${MARK}`);
+    expect(routerLocation()).toBe(`${promptAt(HANDOFF, true)}${MARK}`);
   });
 
   it('/verify-email-prompt: "Back to login" carries it', async () => {
@@ -191,7 +196,7 @@ describe('the route\'s refusal time survives the hops through /verify-email-prom
     expect(routerLocation()).toBe(promptAt(INVITE));
     cleanup();
     await signUpUnverified(createMockClient(), INVITE, MARK);
-    expect(routerLocation()).toBe(promptAt(INVITE));
+    expect(routerLocation()).toBe(promptAt(INVITE, true));
     cleanup();
     renderPage('verify-email-prompt', createMockClient(), `?redirect=${encodeURIComponent(INVITE)}${MARK}`);
     await userEvent.click(await screen.findByRole('button', { name: 'Back to login' }));

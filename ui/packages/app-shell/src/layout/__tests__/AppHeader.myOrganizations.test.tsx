@@ -25,7 +25,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 
 const navigate = vi.fn();
 
@@ -81,6 +81,9 @@ vi.mock('@object-ui/components', async (importOriginal) => {
     DropdownMenuLabel: Pass,
     DropdownMenuSeparator: () => null,
     DropdownMenuGroup: Pass,
+    DropdownMenuSub: Pass,
+    DropdownMenuSubTrigger: Pass,
+    DropdownMenuSubContent: Pass,
     Avatar: Pass,
     AvatarImage: () => null,
     AvatarFallback: Pass,
@@ -127,10 +130,11 @@ vi.mock('../LocalizedSidebarTrigger', () => ({ LocalizedSidebarTrigger: () => nu
 vi.mock('../PreviewBadge', () => ({ PreviewBadge: () => null }));
 
 /**
- * The REAL WorkspaceSwitcher, deliberately — mocking it away would erase the
- * precondition under test. Its `orgList.length <= 1` early return is what
- * leaves the avatar menu as the only door, so the cases below get to assert
- * that it renders nothing while the avatar entry is present.
+ * The REAL WorkspaceSwitcher and WorkspaceSwitcherMenu, deliberately — mocking
+ * them away would erase the preconditions under test: the switcher's
+ * one-membership early return is what leaves "My Organizations" as the only
+ * door, and the top bar's switcher drawing nothing in a browser is what the
+ * deployment-posture cases below assert.
  */
 vi.mock('../../providers/MetadataProvider', () => ({
   useMetadata: () => ({ apps: [], dashboards: [], pages: [], reports: [] }),
@@ -140,8 +144,8 @@ const ONE_ORG = { id: 'org_1', name: 'Acme', slug: 'acme' };
 
 /** Orgs the mocked `useAuth` reports for the current case. */
 let organizations: Array<Record<string, unknown>> = [ONE_ORG];
-/** `features.multiOrgEnabled` the mocked auth config resolves with. */
-let multiOrgEnabled = true;
+/** The served `features` the mocked auth config resolves with. */
+let features: Record<string, unknown> = { multiOrgEnabled: true };
 
 vi.mock('@object-ui/auth', async (importOriginal) => {
   /**
@@ -153,7 +157,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => {
    * V8 OOM during collection, not a test assertion). Reading the `let` at CALL
    * time keeps per-case control without touching identity.
    */
-  const getAuthConfig = () => Promise.resolve({ features: { multiOrgEnabled } });
+  const getAuthConfig = () => Promise.resolve({ features });
   return {
     ...(await importOriginal<Record<string, unknown>>()),
     useAuth: () => ({
@@ -190,7 +194,7 @@ import { AppHeader } from '../AppHeader';
 beforeEach(() => {
   navigate.mockClear();
   organizations = [ONE_ORG];
-  multiOrgEnabled = true;
+  features = { multiOrgEnabled: true };
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 404 }))));
 });
 
@@ -224,19 +228,6 @@ describe('AppHeader avatar menu — the single-org door to workspace management 
     expect(screen.getByTestId('header-my-organizations')).toBeInTheDocument();
   });
 
-  it('survives multi-org self-service being disabled — that flag governs CREATE only', async () => {
-    multiOrgEnabled = false;
-    render(<AppHeader variant="home" />);
-
-    // Where creation is off this entry is the only way into the manage pages,
-    // so gating it on the same flag as "Create workspace" would re-close the
-    // door. Await a tick so the async `getAuthConfig` gate has resolved.
-    await vi.waitFor(() =>
-      expect(screen.queryByTestId('header-create-workspace')).not.toBeInTheDocument(),
-    );
-    expect(screen.getByTestId('header-my-organizations')).toBeInTheDocument();
-  });
-
   it('still offers it to a multi-org user (the switcher is a duplicate, not a replacement)', () => {
     organizations = [ONE_ORG, { id: 'org_2', name: 'Globex', slug: 'globex' }];
     render(<AppHeader variant="home" />);
@@ -251,5 +242,142 @@ describe('AppHeader avatar menu trigger — an accessible name (objectui#13461)'
     // The mocked `t` returns the call's `defaultValue`: the key is `user.accountMenu`.
     const trigger = screen.getByRole('button', { name: 'Account menu' });
     expect(trigger).toHaveTextContent('ZS');
+  });
+});
+
+/** Lets the async config read resolve and React flush before reading an absence. */
+async function settle() {
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+}
+
+const TWO_ORGS = [ONE_ORG, { id: 'org_2', name: 'Globex', slug: 'globex' }];
+
+/** Which of the avatar menu's organization entries render, and whether the top bar draws a switcher. */
+function orgEntries() {
+  return {
+    myOrganizations: !!screen.queryByTestId('header-my-organizations'),
+    switchOrganization: !!screen.queryByTestId('header-switch-organization'),
+    createOrganization: !!screen.queryByTestId('header-create-workspace'),
+    topBarSwitcher: !!screen.queryByTestId('workspace-switcher'),
+  };
+}
+
+/*
+ * objectstack-ai/objectstack#34591, ruling 6937513776: the avatar menu's
+ * organization entries follow the served deployment signals
+ * (`features.multiOrgEnabled`, `features.cloudManaged`,
+ * `features.tenancyPosture`), with no Setup override; the web switcher moves
+ * from the top bar into the avatar menu.
+ */
+describe('AppHeader avatar menu — organization entries follow the deployment posture (#34591)', () => {
+  it('single-tenant: no organization entry and no top-bar switcher', async () => {
+    features = { multiOrgEnabled: false, tenancyPosture: 'single' };
+    organizations = TWO_ORGS;
+    render(<AppHeader variant="home" />);
+    await settle();
+
+    // Member management for the one organization is Setup → Organization
+    // (ruling 6384629949), so the avatar menu closes no door here.
+    expect(orgEntries()).toEqual({
+      myOrganizations: false,
+      switchOrganization: false,
+      createOrganization: false,
+      topBarSwitcher: false,
+    });
+    // Counter-probe: the menu itself rendered.
+    expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+  });
+
+  it('multi-organization, one membership: My Organizations and Create, no Switch organization', async () => {
+    features = { multiOrgEnabled: true, tenancyPosture: 'isolated' };
+    render(<AppHeader variant="home" />);
+    await settle();
+
+    expect(orgEntries()).toEqual({
+      myOrganizations: true,
+      switchOrganization: false,
+      createOrganization: true,
+      topBarSwitcher: false,
+    });
+  });
+
+  it('multi-organization, two memberships: Switch organization joins the menu; the top bar draws none', async () => {
+    features = { multiOrgEnabled: true, tenancyPosture: 'isolated' };
+    organizations = TWO_ORGS;
+    render(<AppHeader variant="home" />);
+    await settle();
+
+    expect(orgEntries()).toEqual({
+      myOrganizations: true,
+      switchOrganization: true,
+      createOrganization: true,
+      topBarSwitcher: false,
+    });
+    expect(screen.getByTestId('workspace-switcher-org-org_2')).toHaveTextContent('Globex');
+  });
+
+  it('cloud-managed: no Create organization (organizations are created on the cloud)', async () => {
+    features = { multiOrgEnabled: true, tenancyPosture: 'isolated', cloudManaged: true };
+    organizations = TWO_ORGS;
+    render(<AppHeader variant="home" />);
+    await settle();
+
+    expect(orgEntries()).toEqual({
+      myOrganizations: true,
+      switchOrganization: true,
+      createOrganization: false,
+      topBarSwitcher: false,
+    });
+  });
+
+  it('cloud-managed single-tenant: nothing', async () => {
+    features = { multiOrgEnabled: false, tenancyPosture: 'single', cloudManaged: true };
+    render(<AppHeader variant="home" />);
+    await settle();
+
+    expect(orgEntries()).toEqual({
+      myOrganizations: false,
+      switchOrganization: false,
+      createOrganization: false,
+      topBarSwitcher: false,
+    });
+  });
+
+  it('a server that serves no flags reads the spec defaults: multi-organization on, not managed', async () => {
+    features = {};
+    render(<AppHeader variant="home" />);
+    await settle();
+
+    expect(orgEntries()).toEqual({
+      myOrganizations: true,
+      switchOrganization: false,
+      createOrganization: true,
+      topBarSwitcher: false,
+    });
+  });
+
+  it('group posture: the switcher stays reachable as the write context (ADR-0105) and says so', async () => {
+    features = { multiOrgEnabled: true, tenancyPosture: 'group' };
+    organizations = TWO_ORGS;
+    render(<AppHeader variant="home" />);
+    await settle();
+
+    expect(screen.getByTestId('header-switch-organization')).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-switcher-group-hint')).toBeInTheDocument();
+  });
+
+  it('walled posture: the active organization is named under My Organizations; not on a posture-less server', async () => {
+    features = { multiOrgEnabled: true, tenancyPosture: 'isolated' };
+    organizations = TWO_ORGS;
+    const walled = render(<AppHeader variant="home" />);
+    await settle();
+    expect(screen.getByTestId('header-my-organizations-current')).toHaveTextContent('Acme');
+    walled.unmount();
+
+    features = { multiOrgEnabled: true };
+    render(<AppHeader variant="home" />);
+    await settle();
+    expect(screen.getByTestId('header-my-organizations')).toBeInTheDocument();
+    expect(screen.queryByTestId('header-my-organizations-current')).not.toBeInTheDocument();
   });
 });

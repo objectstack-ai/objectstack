@@ -52,6 +52,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Ícone",
         helpText: "Nome do ícone Lucide (por exemplo \"building\", \"users\")"
       },
+      color: {
+        label: "Cor",
+        helpText: "Cor do quadrado em que o ícone é desenhado, da paleta fixa. Sem valor, usa cinza."
+      },
       description: {
         label: "Descrição",
         helpText: "Documentação para desenvolvedores"
@@ -70,11 +74,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "Campos em destaque",
-        helpText: "Nomes de campos deste objeto, os mais importantes primeiro — a primeira entrada vence onde só cabe uma (ADR-0085). Define as colunas padrão da lista, os cartões, as pré-visualizações de registros filhos e a faixa de destaque do detalhe. Um nome que não seja um campo deste objeto é recusado na publicação."
+        helpText: "Nomes de campos deste objeto, os mais importantes primeiro — a primeira entrada vence onde só cabe uma (ADR-0085). Define as colunas padrão das listas e das listas relacionadas, os cartões, as pré-visualizações de registros filhos, o cartão flutuante do registro e o seletor de registros. Um nome que não seja um campo deste objeto é recusado na publicação."
       },
       relatedLists: {
-        label: "Listas relacionadas",
-        helpText: "Ordem de negócio das listas relacionadas deste objeto na página do registro, as mais importantes primeiro. Cada entrada é o nome de um objeto filho (por exemplo task), ou objeto.campo quando esse filho tem mais de um relacionamento com este objeto. As listas indicadas vêm primeiro; as demais seguem na ordem derivada. Um nome que não corresponde a nenhum relacionamento que aponte para este objeto não posiciona nada, por isso salvar ou validar o objeto o recusa."
+        label: "Abas da página do registro",
+        helpText: "As abas da página do registro depois da visão geral, em ordem. Cada entrada é o nome de um objeto filho (por exemplo task), object.field quando esse filho tem mais de uma relação com este objeto, uma aba integrada (sys_attachment, sys_approval_request, sys_activity) ou uma entrada com título e colunas próprios, definida nas configurações do objeto no Studio. Assim que algo é listado, uma lista relacionada que nenhuma entrada nomeia não mostra aba, inclusive uma lista que outro pacote adiciona, até que este objeto a nomeie; os anexos só aparecem quando listados. Vazio: todas as listas aparecem na ordem padrão. Um nome que não corresponde a nenhuma relação que aponte para este objeto é recusado ao salvar o objeto."
       },
       searchableFields: {
         label: "Campos pesquisáveis",
@@ -86,11 +90,15 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Chave",
-        helpText: "Chave de máquina em snake_case, única dentro deste objeto — o esquema recusa qualquer outra coisa. Os campos entram no grupo ao nomear esta chave, portanto renomeá-la os deixa sem grupo."
+        helpText: "Chave de máquina em snake_case, única dentro deste objeto — o esquema recusa qualquer outra coisa. Os campos que o grupo lista em Campos continuam nele quando a chave é renomeada; um campo que entra ao nomear esta chave na sua própria configuração de grupo fica sem grupo."
       },
       "fieldGroups.label": {
         label: "Rótulo",
         helpText: "Texto do cabeçalho da seção do grupo."
+      },
+      "fieldGroups.fields": {
+        label: "Campos",
+        helpText: "Os campos que este grupo exibe, na ordem de exibição (nomes de campo). Preenchida, a lista define a ordem dentro do grupo sem mover nenhum campo. Um campo citado aqui não pode indicar outro grupo na sua própria configuração de grupo, e um campo só pode ser listado por um grupo. Não permitido junto com Lista relacionada."
       },
       "fieldGroups.icon": {
         label: "Ícone",
@@ -102,11 +110,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "Lista relacionada",
-        helpText: "Faz desta entrada a tabela de uma lista relacionada em vez de uma seção de campos: nomeie o objeto filho (ou objeto.campo) cuja lista é desenhada nesta posição na coluna de detalhes do registro. Esse grupo não contém campos; um campo que o nomeia como seu grupo é recusado, assim como um nome que não corresponde a nenhum relacionamento que aponte para este objeto. A página do registro ainda não desenha este posicionamento."
+        helpText: "Faz desta entrada a tabela de uma lista relacionada em vez de uma seção de campos: nomeie o objeto filho (ou objeto.campo) cuja lista é desenhada nesta posição na coluna de detalhes do registro. Esse grupo não contém campos; um campo que o nomeia como seu grupo é recusado, assim como um nome que não corresponde a nenhum relacionamento que aponte para este objeto. Os formulários de criação e edição do pai também exibem a tabela embutida, e \"Editar\" na página do registro salva o registro e suas linhas juntos."
       },
       "fieldGroups.collapse": {
         label: "Recolher",
-        helpText: "Se a seção pode ser recolhida, no formulário de entrada e na página de detalhes do registro. Não definido: nenhuma."
+        helpText: "Se a seção pode ser recolhida. O formulário de entrada segue a configuração. Na página de registro padrão, o leitor pode recolher qualquer grupo com título, então ali ela define só o estado inicial: Collapsed começa recolhida e as demais, abertas. Não definido: nenhuma."
       },
       "fieldGroups.visibleWhen": {
         label: "Visível quando",
@@ -232,6 +240,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
       },
+      "fields.transferBehavior": {
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
+      },
       "fields.multiple": {
         label: "Múltiplo",
         helpText: "Permitir selecionar vários registros"
@@ -268,9 +280,13 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Linguagem",
         helpText: "Linguagem do editor (por exemplo sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Um campo de credencial nunca mostra valores, e se o próprio objeto desligar, vale o objeto."
+      },
       "fields.trackHistory": {
         label: "Acompanhar histórico",
-        helpText: "Resumir este campo na linha do tempo de atividades do registro"
+        helpText: "Faz um campo de mídia ou JSON (imagem, arquivo, json, …) mostrar valores antigo → novo na linha do tempo de atividades. Os outros campos já os mostram, e desligar não os oculta: use Valores de alterações de campo."
       },
       "fields.visibleWhen": {
         label: "Visível quando",
@@ -290,6 +306,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "Acompanhar histórico"
+      },
+      "enable.fieldHistory": {
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo dos campos alterados na linha do tempo de atividades do registro. Padrão é ligado. Desligado deixa de mostrar valores em todo o objeto, seja o que for que um campo diga."
       },
       "enable.searchable": {
         label: "Pesquisável"
@@ -427,7 +447,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "Ações do usuário",
-        helpText: "Quais entradas genéricas (Novo, Importar, Editar, Excluir, Exportar) os clientes de interface oferecem nos registros deste objeto, substituindo o padrão do managedBy uma entrada por vez. Uma entrada não definida mantém esse padrão: platform oferece as cinco; config e system-data todas menos Importar; engine-owned, append-only e better-auth apenas Exportar. Um interruptor não tocado não grava nada, portanto aparece desativado mesmo onde o padrão oferece a entrada. Em um objeto engine-owned ou append-only, ativar uma entrada também permite que os usuários façam essa gravação pela API de dados. Os usuários ainda precisam da permissão correspondente."
+        helpText: "Quais entradas genéricas (Novo, Importar, Editar, Excluir, Exportar) os clientes de interface oferecem nos registros deste objeto, substituindo o padrão do managedBy uma entrada por vez. Uma entrada não definida mantém esse padrão: platform oferece as cinco; config e system-data todas menos Importar; engine-owned, append-only e better-auth apenas Exportar. Um interruptor não tocado não grava nada, portanto aparece desativado mesmo onde o padrão oferece a entrada. Em um objeto engine-owned ou append-only, ativar uma entrada também permite que os usuários façam essa gravação pela API de dados. Os usuários ainda precisam da permissão correspondente. Alterar proprietário não faz parte dessa matriz: seu padrão segue o modelo de compartilhamento (veja sua entrada)."
       },
       "userActions.create": {
         label: "Criar",
@@ -448,6 +468,22 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "Exportar CSV",
         helpText: "A entrada de exportação CSV. Não definido: exibida, pois todas as categorias do managedBy oferecem exportação."
+      },
+      "userActions.transfer": {
+        label: "Alterar proprietário",
+        helpText: "A ação Alterar proprietário, individual e em massa: ativada, é oferecida; desativada, fica oculta. Não definida: ativada, exceto desativada em um objeto de detalhe controlled_by_parent. Oferecida apenas em um objeto cujos registros têm um proprietário reatribuível (ownership user ou não definido, sem managedBy, não é um objeto sys_, owner_id não é somente leitura e, em um objeto externo, está declarado ou mapeado); ativá-la em qualquer outro objeto é recusado. Controla apenas a ação, não uma edição simples de owner_id. Um objeto {enabled, visibleWhen, disabledWhen} armazenado é editado chave por chave; escreva um no código-fonte para condicionar a ação a cada registro."
+      },
+      actionLayout: {
+        label: "Disposição das ações",
+        helpText: "A ordem das ações deste objeto e quais são botões, por escopo: pinned (no máximo 3 botões, em ordem) e more (a ordem do menu Mais; uma ação não nomeada em nenhum dos dois segue na sua ordem padrão). Sem definir: cada superfície escolhe seus botões pela ordem das ações, como antes."
+      },
+      "actionLayout.list": {
+        label: "Lista",
+        helpText: "A barra de ferramentas da página de lista, como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas na barra da lista; $import / $export apenas em pinned. No máximo 3 fixadas. Sem fixar, a página ainda mostra seu próprio menu Importar / Exportar. O os validate recusa um nome que não é uma ação deste objeto ou que não está na barra da lista; esse nome não desenha nada."
+      },
+      "actionLayout.record": {
+        label: "Registro",
+        helpText: "O cabeçalho do registro (página do registro, pré-visualização lateral, barra inferior do celular), como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas no cabeçalho do registro ou no seu menu Mais. No máximo 3 fixadas. O os validate recusa um nome que não é uma ação deste objeto ou que não está na página do registro; esse nome não desenha nada."
       },
       editMode: {
         label: "Modo de edição",
@@ -737,6 +773,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
       },
+      transferBehavior: {
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
+      },
       relatedListFilter: {
         label: "Filtro da lista relacionada",
         helpText: "Filtro padrão da lista relacionada deste relacionamento na página de detalhes do pai — combinado com AND com a correspondência ao registro pai, e o indicador da aba conta o mesmo conjunto"
@@ -783,7 +823,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "Colunas embutidas",
-        helpText: "Colunas da grade embutida no formulário do pai, na ordem de exibição; usadas apenas quando este campo define inlineEdit, que é escrito no código-fonte. Não definido: derivadas dos campos editáveis deste objeto, e a partir da sexta as demais começam no seletor de colunas da grade. Uma entrada que nomeia apenas um campo herda dele o tipo, as opções e as regras; as outras chaves de coluna, a começar por type, são escritas no código-fonte."
+        helpText: "Colunas da grade embutida no formulário do pai, na ordem de exibição; usadas apenas quando um grupo de campos do pai nomeia este objeto filho (fieldGroups[].relatedList). Não definido: derivadas dos campos editáveis deste objeto, e a partir da sexta as demais começam no seletor de colunas da grade. Uma entrada que nomeia apenas um campo herda dele o tipo, as opções e as regras; as outras chaves de coluna, a começar por type, são escritas no código-fonte."
       },
       "inlineColumns.name": {
         label: "Nome",
@@ -853,6 +893,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Oculto",
         helpText: "Ocultar o campo nas visualizações padrão da interface"
       },
+      showOnCreate: {
+        label: "Mostrar ao criar",
+        helpText: "Pedir este campo ao criar um registro. Desligado: a caixa de criação, a criação em página inteira e uma criação aberta por uma ação o omitem; a edição, a página do registro e as listas continuam a mostrá-lo. Um campo obrigatório é sempre pedido, por isso não pode ser desligado."
+      },
       searchable: {
         label: "Pesquisável",
         helpText: "Incluir nos resultados da busca global"
@@ -885,9 +929,13 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Interno",
         helpText: "Nunca retornar o valor deste campo pelo caminho de dados genérico: o mecanismo omite a chave dos resultados de find/findOne e dos corpos de resposta de criação e atualização, na projeção padrão e quando um cliente nomeia o campo em ?select=. O armazenamento, a filtragem e a indexação não são afetados."
       },
+      fieldHistory: {
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Um campo de credencial nunca mostra valores, e se o próprio objeto desligar, vale o objeto."
+      },
       trackHistory: {
         label: "Acompanhar histórico",
-        helpText: "Exibir as alterações de valor deste campo como entradas na linha do tempo de atividades do registro (ADR-0052 §5b). Ativação opcional por campo."
+        helpText: "Faz um campo de mídia ou JSON (imagem, arquivo, json, …) mostrar valores antigo → novo na linha do tempo de atividades. Os outros campos já os mostram, e desligar não os oculta: use Valores de alterações de campo."
       },
       widget: {
         label: "Widget",
@@ -988,6 +1036,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "refusals.params": {
         label: "Parâmetros",
         helpText: "Nomes que as frases podem preencher (por exemplo state): o corpo lança { code, params: { state } } e um marcador {{ state }} mostra o valor. Ausente: as frases são texto simples"
+      },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que o hook escreve nos registros, indexadas pela chave snake_case que o código dele pede com ctx.text (por exemplo follow_up_subject). O hook recebe a mensagem declarada no idioma da organização, traduzida, com a mensagem declarada como alternativa. Para um corpo JavaScript (L2) ou um handler; recusado em um corpo de expressão"
+      },
+      "texts.message": {
+        label: "Mensagem",
+        helpText: "A frase que o hook escreve quando o código dele pede esta chave. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
+      },
+      "texts.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que a frase pode preencher (por exemplo lead): o código pede ctx.text(key, { lead }) e um marcador {{ lead }} mostra o valor. Ausente: a frase é texto simples"
       },
       handler: {
         label: "Handler",
@@ -1331,10 +1391,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "Navegação",
-        helpText: "Configuração da navegação ao clicar em um item (painel lateral por padrão, page, new_window ou none)"
+        helpText: "Configuração da navegação ao clicar em um item: o tamanho do painel lateral e `preventNavigation` para uma lista cujas linhas não abrem nada (`mode` está obsoleto: o nome do registro abre a página completa; o ícone ao passar o cursor, o painel lateral)"
       },
       "navigation.mode": {
-        label: "Modo"
+        label: "Modo",
+        helpText: "[OBSOLETO] Na lista de um objeto (uma visualização de lista, os `listViews` de um objeto), não define mais como um registro é aberto: no console, para todos os leitores, o nome do registro abre a página completa e o ícone que aparece ao lado dele ao passar o cursor abre o painel lateral. Ali, `drawer`, `page` e `new_window` continuam sendo analisados e não mudam nada, então omita a chave; `none` continua significando que as linhas não abrem nada (prefira `preventNavigation: true`). Um bloco de página que traz `navigation` (um bloco de lista, a linha do tempo, uma visualização incorporada) continua respeitando todos os valores."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegação",
@@ -1881,6 +1942,42 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Memória (MB)",
         helpText: "Limite de memória por invocação (MB, máx. 256)"
       },
+      refusals: {
+        label: "Recusas",
+        helpText: "Catálogo de recusas, indexado pelo código SCREAMING_SNAKE que o corpo da ação lança (por exemplo SIGN_IN_REQUIRED). O chamador lê a mensagem declarada, traduzida para o idioma dele, com o status declarado. Para o corpo JavaScript (L2) de uma ação script; recusado em um corpo de expressão"
+      },
+      "refusals.message": {
+        label: "Mensagem",
+        helpText: "A frase que o usuário lê quando o corpo lança este código. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
+      },
+      "refusals.status": {
+        label: "Status",
+        helpText: "Status HTTP da recusa (400–499). Ausente: 400"
+      },
+      "refusals.reasons": {
+        label: "Motivos",
+        helpText: "Outras frases sob este mesmo código, indexadas pelo motivo snake_case que o corpo lança junto com o código ({ code, reason }). O código e o status enviados continuam sendo os desta entrada; um motivo não declarado aqui é recusado. Ausente: um motivo lançado não é lido"
+      },
+      "refusals.reasons.message": {
+        label: "Mensagem",
+        helpText: "A frase que o usuário lê quando o corpo lança este motivo sob o código. Seus marcadores {{ }} seguem os params da entrada"
+      },
+      "refusals.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que as frases podem preencher (por exemplo state): o corpo lança { code, params: { state } } e um marcador {{ state }} mostra o valor. Ausente: as frases são texto simples"
+      },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que a ação escreve nos registros, indexadas pela chave snake_case que o corpo dela pede com ctx.text (por exemplo email_subject). O corpo recebe a mensagem declarada no idioma da organização, traduzida, com a mensagem declarada como alternativa. Para o corpo JavaScript (L2) de uma ação script; recusado em um corpo de expressão"
+      },
+      "texts.message": {
+        label: "Mensagem",
+        helpText: "A frase que a ação escreve quando o corpo dela pede esta chave. Texto simples, a menos que a entrada declare params: então um marcador {{ name }} é preenchido com um parâmetro declarado"
+      },
+      "texts.params": {
+        label: "Parâmetros",
+        helpText: "Nomes que a frase pode preencher (por exemplo subject): o corpo pede ctx.text(key, { subject }) e um marcador {{ subject }} mostra o valor. Ausente: a frase é texto simples"
+      },
       params: {
         label: "Parâmetros",
         helpText: "Parâmetros de entrada do usuário (mostrar um formulário antes de executar)"
@@ -2101,7 +2198,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rótulo"
       },
       description: {
-        label: "Descrição"
+        label: "Descrição",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Tipo",
@@ -2183,9 +2281,33 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Intervalo de datas",
         helpText: "Período padrão e opção de intervalo personalizado. A dimensão deve ser uma dimensão de data do conjunto de dados; deixe-a em branco quando o conjunto de dados tiver exatamente uma."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Opções de exportação",
         helpText: "Formatos de download (csv, xlsx) e nome do arquivo. Quem pode baixar é definido pela permissão de exportação no objeto do conjunto de dados."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

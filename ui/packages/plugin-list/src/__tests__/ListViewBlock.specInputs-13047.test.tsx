@@ -68,6 +68,7 @@ import { LocalizationProvider } from '@object-ui/i18n';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 // Registers the REAL `list-view` (and the `object-gallery` this file replaces below).
 import '../index';
+import { openAdvancedFilter } from './conditionPanels';
 
 const OBJECT = 'crm_task';
 
@@ -116,6 +117,7 @@ const CHILD_VIEWS = [
   'object-map',
   'object-tree',
   'object-chart',
+  'object-timesheet',
 ] as const;
 type ChildView = (typeof CHILD_VIEWS)[number];
 
@@ -270,23 +272,23 @@ describe('objectui#13047 — the toolbar and chrome keys, drawn by `ListView` it
   it('`userActions`: `sort: false` takes the Sort control off the toolbar; absent keeps it', async () => {
     const control = mount();
     await loaded(control.dataSource);
-    expect(screen.queryByTestId('toolbar-sort-trigger')).not.toBeNull();
+    expect(screen.queryByTestId('condition-sort')).not.toBeNull();
     cleanup();
 
     const { dataSource } = mount({ userActions: { sort: false } });
     await loaded(dataSource);
-    expect(screen.queryByTestId('toolbar-sort-trigger')).toBeNull();
+    expect(screen.queryByTestId('condition-sort')).toBeNull();
     // Only the member it names: Filter stays.
-    expect(screen.queryByTestId('toolbar-filter-trigger')).not.toBeNull();
+    expect(screen.queryByTestId('condition-add-filter')).not.toBeNull();
   });
 
-  it('`compactToolbar: false` puts the inline-edit toggle back on the toolbar; the default keeps it in the Display form', async () => {
-    const control = mount({ inlineEdit: false });
+  it('`compactToolbar: false` puts the wide buttons back on the toolbar; the default keeps them in the Display form', async () => {
+    const control = mount({});
     await loaded(control.dataSource);
     const compactButtons = control.container.querySelectorAll('[data-print-hide] button').length;
     cleanup();
 
-    const { dataSource, container } = mount({ inlineEdit: false, compactToolbar: false });
+    const { dataSource, container } = mount({ compactToolbar: false });
     await loaded(dataSource);
     expect(container.querySelectorAll('[data-print-hide] button').length).toBeGreaterThan(compactButtons);
   });
@@ -584,9 +586,10 @@ describe('objectui#13047 — the grid keys, handed to the `object-grid` node `Li
     expect((await gridFor({ conditionalFormatting: rules })).conditionalFormatting).toEqual(rules);
   });
 
-  it('`inlineEdit: true` renders the grid editable', async () => {
-    expect((await controlGrid()).editable).toBe(false);
+  it('`inlineEdit` folds into the editable grid: absent and `true` edit, `false` does not (objectstack#35684)', async () => {
+    expect((await controlGrid()).editable).toBe(true);
     expect((await gridFor({ inlineEdit: true })).editable).toBe(true);
+    expect((await gridFor({ inlineEdit: false })).editable).toBe(false);
   });
 
   it('`navigation.mode: \'drawer\'` opens the record in a drawer titled by the list\'s `label` when a row is clicked', async () => {
@@ -728,6 +731,17 @@ describe('objectui#13047 — each kind\'s own block, handed to the node of the v
     expect(tree.labelField).toBe('owner');
   });
 
+  it('`timesheet`: the `rowFields` / `dateField` / `valueField` binding reaches the grid', async () => {
+    // No block-less control here: the spec refuses `type: 'timesheet'` without a
+    // `timesheet` block (checkListViewTimesheetBinding), so, as for `chart`, the
+    // fixture always carries one.
+    const block = { rowFields: ['owner'], dateField: 'due', valueField: 'amount' };
+    const { dataSource } = mount({ type: 'timesheet', timesheet: block });
+    await handedTo('object-timesheet');
+    await loaded(dataSource);
+    expect(lastHanded('object-timesheet').timesheet).toEqual(block);
+  });
+
   it('`chart`: the `dataset` binding and its `values` / `dimensions` reach the chart', async () => {
     const { dataSource } = mount({
       type: 'chart',
@@ -793,7 +807,7 @@ describe('objectui#13047 — measured NOT honoured on a page `list-view` node (h
   it('`filterableFields`: RETIRED (objectui#13118) — the list does not read it as the Filter panel\'s field list, so "Add filter" starts where it does without the key', async () => {
     const firstFilterField = async (): Promise<string> => {
       fireEvent.click(screen.getByRole('button', { name: /^filter/i }));
-      await screen.findByText('Filter Records');
+      await openAdvancedFilter();
       const panel = screen.getByText('Filter Records').closest('[role="dialog"]') as HTMLElement;
       fireEvent.click(within(panel).getByRole('button', { name: /add filter/i }));
       let text = '';

@@ -20,6 +20,12 @@
  * platform locale table's languages, so an out-of-table app locale like `th`
  * is no longer offered: it still boots on the loader's credit, and the
  * self-heal then reverts and purges it once the app's list lands.
+ *
+ * objectstack#35425 (maintainer ruling option A) widened the menu back to
+ * every table language whatever the app ships, so the sign-in page and the
+ * in-app menu offer one list. The app's list now feeds `appContentLanguages`,
+ * the languages a menu does NOT mark as "app content shows in the default
+ * language".
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
@@ -59,7 +65,8 @@ describe('app-locale restore (lockstep with the switcher)', () => {
     const { result } = mountConsole();
 
     expect(result.current.language).toBe('th');
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh-Hans']));
+    await waitFor(() => expect(result.current.appContentLanguages).toEqual(['en', 'zh-Hans']));
+    expect(result.current.offerableLanguages).not.toContain('th');
     await waitFor(() => expect(result.current.language).toBe('en'));
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBeNull();
   });
@@ -69,9 +76,23 @@ describe('app-locale restore (lockstep with the switcher)', () => {
 
     const { result } = mountConsole({}, ['en', 'zh-CN']);
 
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh-Hans']));
+    await waitFor(() => expect(result.current.appContentLanguages).toEqual(['en', 'zh-Hans']));
     expect(result.current.language).toBe('zh-CN');
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('zh-CN');
+  });
+
+  it('keeps a stored table language the app ships no translation for (objectstack#35425)', async () => {
+    // Picked on the sign-in page, where no app list is read; the signed-in
+    // page load then learns the app ships only `en` + `zh-CN`. The pick
+    // stands: the interface renders in German, the app content in the default.
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, 'de');
+
+    const { result } = mountConsole({}, ['en', 'zh-CN']);
+
+    await waitFor(() => expect(result.current.appContentLanguages).toEqual(['en', 'zh-Hans']));
+    expect(result.current.offerableLanguages).toContain('de');
+    expect(result.current.language).toBe('de');
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('de');
   });
 
   it('restores it in the BOOTSTRAP language, not as a late correction', () => {
@@ -168,35 +189,83 @@ describe('app-locale restore (lockstep with the switcher)', () => {
   });
 });
 
-describe('offerableLanguages — the intersection the switcher renders', () => {
-  it('is the platform locale table ∩ the app list, as table tags in the app order', async () => {
+describe('offerableLanguages — every table language, whatever the app ships', () => {
+  it('is the platform locale table for an app that ships four (objectstack#35425)', async () => {
+    const { result } = mountConsole({}, ['en', 'zh-CN', 'ja-JP', 'es-ES']);
+
+    await waitFor(() => expect(result.current.appContentLanguages).not.toBeNull());
+    expect(result.current.offerableLanguages).toEqual(PLATFORM_LOCALE_TAGS);
+  });
+
+  it('is the table while the app list is in flight, with nothing to wait for', () => {
+    const { result } = mountConsole({ loadLocales: () => new Promise<string[]>(() => {}) });
+
+    expect(result.current.offerableLanguages).toEqual(PLATFORM_LOCALE_TAGS);
+  });
+
+  it('is the table when no locale list is wired (control)', () => {
+    const { result } = mountConsole({}, null);
+
+    expect(result.current.offerableLanguages).toEqual(PLATFORM_LOCALE_TAGS);
+  });
+});
+
+describe('appContentLanguages — the table languages the app list covers', () => {
+  it('is the table ∩ the app list, as table tags in the app order', async () => {
     // `zh` and `zh-CN` are two spellings of `zh-Hans`: one entry. `th` lands
-    // on no table tag: not offered, although the loader could fetch it.
+    // on no table tag: not a menu language, so not in this list either.
     const { result } = mountConsole({}, ['ja-JP', 'en', 'zh', 'zh-CN', 'th']);
 
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['ja', 'en', 'zh-Hans']));
+    await waitFor(() => expect(result.current.appContentLanguages).toEqual(['ja', 'en', 'zh-Hans']));
   });
 
   it('reads region variants through the table, as the pack that serves them', async () => {
     const { result } = mountConsole({}, ['de-AT', 'zh-TW', 'en-GB']);
 
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['de', 'zh-Hant', 'en']));
+    await waitFor(() => expect(result.current.appContentLanguages).toEqual(['de', 'zh-Hant', 'en']));
   });
 
-  it('falls back to the table when the app lists no table language', async () => {
-    const { result } = mountConsole({}, ['th']);
+  it('is null ("not known") when the app lists no table language', async () => {
+    const calls = { n: 0 };
+    const { result } = mountConsole({
+      loadLocales: async () => {
+        calls.n += 1;
+        return ['th'];
+      },
+    });
 
-    await waitFor(() => expect(result.current.offerableLanguages).not.toBeNull());
-    expect(result.current.offerableLanguages).toEqual(PLATFORM_LOCALE_TAGS);
+    await waitFor(() => expect(calls.n).toBe(1));
+    await act(async () => {});
+    expect(result.current.appContentLanguages).toBeNull();
   });
 
-  it('offers the table tags when no locale list is wired (control)', () => {
+  it('is null when the app answers with nothing (signed out, failed read)', async () => {
+    const calls = { n: 0 };
+    const { result } = mountConsole({
+      loadLocales: async () => {
+        calls.n += 1;
+        return [];
+      },
+    });
+
+    await waitFor(() => expect(calls.n).toBe(1));
+    await act(async () => {});
+    expect(result.current.appContentLanguages).toBeNull();
+  });
+
+  it('is null while the app list is in flight', () => {
+    const { result } = mountConsole({ loadLocales: () => new Promise<string[]>(() => {}) });
+
+    expect(result.current.appContentLanguages).toBeNull();
+  });
+
+  it('is null when no locale list is wired (control)', () => {
     const { result } = mountConsole({}, null);
 
-    expect(result.current.offerableLanguages).toEqual(PLATFORM_LOCALE_TAGS);
+    expect(result.current.appContentLanguages).toBeNull();
   });
 
-  it('drops an app locale this renderer cannot produce', async () => {
+  it('drops an app locale outside the table even with no loader', async () => {
     const wrapper = ({ children }: { children: React.ReactNode }) =>
       React.createElement(I18nProvider, {
         config: { defaultLanguage: 'en', detectBrowserLanguage: false },
@@ -205,15 +274,7 @@ describe('offerableLanguages — the intersection the switcher renders', () => {
       });
     const { result } = renderHook(() => useObjectTranslation(), { wrapper });
 
-    // No loader and no `config.resources`: `th` is in the app's list but this
-    // renderer has no way to produce a single string of it.
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh-Hans']));
-  });
-
-  it('is null while the app list is in flight', () => {
-    const { result } = mountConsole({ loadLocales: () => new Promise<string[]>(() => {}) });
-
-    expect(result.current.offerableLanguages).toBeNull();
+    await waitFor(() => expect(result.current.appContentLanguages).toEqual(['en', 'zh-Hans']));
   });
 
   it('asks the app exactly once, under StrictMode and re-renders alike', async () => {
@@ -238,7 +299,7 @@ describe('offerableLanguages — the intersection the switcher renders', () => {
       );
     const { result, rerender } = renderHook(() => useObjectTranslation(), { wrapper });
 
-    await waitFor(() => expect(result.current.offerableLanguages).toEqual(['en', 'zh-Hans']));
+    await waitFor(() => expect(result.current.appContentLanguages).toEqual(['en', 'zh-Hans']));
     rerender();
     rerender();
     expect(calls.n).toBe(1);

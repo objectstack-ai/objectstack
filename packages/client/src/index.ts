@@ -140,6 +140,9 @@ import {
   EnsureCustomizationPackageResponse,
   CloneFlowRequest,
   CloneFlowResponse,
+  // [#35928] The record-update preview's request and its payload.
+  RecordUpdateStartsRequest,
+  RecordUpdateStartsResponse,
   ValidateDataIssue,
 } from '@objectstack/spec/api';
 // [#17536] The element the two `/packages` READ doors are declared to serve.
@@ -236,6 +239,19 @@ export type { QualifiedAddressOptions } from './package-address';
 export type ApiRouteType = keyof ApiRoutes;
 
 /**
+ * The options of `meta.getItems` (`GET /meta/:type`). `packageId` scopes the
+ * list to one package (`?package=`); `names` narrows it to those items in one
+ * request (`?names=a,b,c`); `include` asks for what the list omits by default
+ * (`?include=`): `'content'` keeps each `doc`'s body (ADR-0046), `'grants'`
+ * adds each `position`'s grants.
+ */
+export interface MetaItemsListOptions {
+  packageId?: string;
+  names?: readonly string[];
+  include?: 'content' | 'grants';
+}
+
+/**
  * [#30205] `security.assignedWork.count`'s answer: per object and user field,
  * how many records hold the user, as the caller can read them.
  */
@@ -261,6 +277,75 @@ export interface UserWorkTransferReport {
   updated: number;
   failed: number;
   remaining: number;
+}
+
+/**
+ * [#35402] Who takes the records in `data.changeOwner` / `data.changeOwnerMany`:
+ * a person (`ownerId`), or an ownership queue (`queue`, ADR-0142) — exactly
+ * one. `notify` tells a person target; a queue target refuses it.
+ */
+export type ChangeOwnerRequest =
+  | { ownerId: string; queue?: undefined; notify?: boolean; cascade?: ChangeOwnerCascadeRelation[] }
+  | { queue: string; ownerId?: undefined; notify?: undefined; cascade?: undefined };
+
+/**
+ * [#35315 phase 2] One relationship a Change Owner cascades along: the child
+ * object, and its reference field to the parent, which declares
+ * `transferBehavior: 'cascade'`. A request naming any other is refused `400`.
+ */
+export interface ChangeOwnerCascadeRelation {
+  object: string;
+  field: string;
+}
+
+/** [#35315 phase 2] A declared cascade `data.changeOwnerCascades` lists, with the labels the child serves. */
+export interface ChangeOwnerCascadeCandidate extends ChangeOwnerCascadeRelation {
+  label: string;
+  fieldLabel: string;
+}
+
+/**
+ * [#35315 phase 2] One cascaded relationship's outcome: the child rows owned by
+ * the parent's previous owner that moved, every one refused listed with its
+ * code and sentence, and those the row cap left with the previous owner.
+ */
+export interface ChangeOwnerCascadeOutcome {
+  object: string;
+  field: string;
+  updated: number;
+  failed: number;
+  failures: Array<{ id: string; code: string; message: string }>;
+  remaining: number;
+  readFailure?: { code: string; message: string };
+}
+
+/** [#35402] `data.changeOwner`'s answer: the record's new owner, or the queue it now sits in. */
+export interface ChangeOwnerResult {
+  object: string;
+  id: string;
+  /** `null` when the record now sits in `queue`. */
+  ownerId: string | null;
+  queue?: string;
+  notified: boolean;
+  /** One outcome per relationship the request named in `cascade`; absent when it named none. */
+  cascade?: ChangeOwnerCascadeOutcome[];
+}
+
+/**
+ * [#35402] `data.changeOwnerMany`'s answer — the #30205 hand-over's per-object
+ * outcome, with every row that did not move listed by id.
+ */
+export interface ChangeOwnerReport {
+  object: string;
+  field: string;
+  ownerId: string | null;
+  queue?: string;
+  updated: number;
+  failed: number;
+  failures: Array<{ id: string; code: string; message: string }>;
+  notified: boolean;
+  /** One outcome per relationship the request named in `cascade`; absent when it named none. */
+  cascade?: ChangeOwnerCascadeOutcome[];
 }
 
 /**
@@ -2083,12 +2168,16 @@ export class ObjectStackClient {
      *   (sent as `?names=a,b,c`). A name that matches no item is simply absent
      *   from the answer. An empty `names` array is sent as an empty filter,
      *   which the server refuses with `400`; leave `names` out to list every item.
+     *   `include` asks for what the list leaves out by default (`?include=`):
+     *   `'content'` keeps each `doc`'s body (ADR-0046), `'grants'` adds each
+     *   `position`'s grants.
      */
-    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
+    getItems: async (type: string, options?: MetaItemsListOptions): Promise<GetMetaItemsResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         if (options?.names !== undefined) params.set('names', options.names.join(','));
+        if (options?.include) params.set('include', options.include);
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${type}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -2127,17 +2216,27 @@ export class ObjectStackClient {
      * named like one of the door's sub-resources (`history`, `audit`, `diff`,
      * …) has no qualified path, so a `namespace` for it is refused before any
      * request with `400 VALIDATION_ERROR`: read it with `packageId`.
+     *
+     * [#34777] `state: 'draft'` (`?state=draft`) reads the item's pending
+     * DRAFT row instead of the published one: the strict draft read Studio's
+     * editor opens, whose `item._diagnostics` carries what publishing that
+     * draft would refuse (the runtime gate's verdict, #26707). Beside
+     * `packageId` it reads that package's draft. `'active'` is the default
+     * said out loud and sends nothing, as on `deleteItem`'s `state`: the door
+     * reads `state=draft` alone, so a call without it is byte-identical to
+     * what this method sent before the member existed.
      */
     getItem: async (
         type: string,
         name: string,
-        options?: { packageId?: string; callerPackage?: string } & QualifiedAddressOptions,
+        options?: { packageId?: string; callerPackage?: string; state?: 'active' | 'draft' } & QualifiedAddressOptions,
     ): Promise<GetMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const qualifier = metaItemQualifier(type, name, options);
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
         if (options?.callerPackage) params.set('callerPackage', options.callerPackage);
+        if (options?.state === 'draft') params.set('state', 'draft');
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -6319,6 +6418,23 @@ export class ObjectStackClient {
       },
 
       /**
+       * [#35928] Which flows a proposed update of one record would start —
+       * `POST /automation/_record-starts`, the preview a stage-change confirm
+       * shows before the reader confirms the save. Answered to a caller who
+       * can read the record (an unreadable or absent record is 404
+       * `RECORD_NOT_FOUND`); each flow is its name, authored label and
+       * whether it starts an approval. Nothing runs and nothing is written.
+       */
+      listRecordUpdateStarts: async (request: RecordUpdateStartsRequest): Promise<RecordUpdateStartsResponse['data']> => {
+          const route = this.getRoute('automation');
+          const res = await this.fetch(`${this.baseUrl}${route}/_record-starts`, {
+              method: 'POST',
+              body: JSON.stringify(request),
+          });
+          return this.unwrapResponse(res);
+      },
+
+      /**
        * Enable or disable a PACKAGED flow — one a code package ships.
        *
        * [#20726, ADR-0126 §7.2] `POST /automation/:name/toggle` records the
@@ -7035,6 +7151,26 @@ export class ObjectStackClient {
     },
 
     /**
+     * Whether each of a page of records of one object is held by a locking
+     * approval, in one request (`IApprovalService.getRecordLocks`): entry `i`
+     * answers `recordIds[i]` with what {@link getRecordLock} answers for that
+     * id, a record the caller cannot read (or that does not exist) as
+     * `locked: null`. At most `APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS` ids per
+     * call, else 400; a deployment without the read answers 501.
+     */
+    getRecordLocks: async (
+      object: string,
+      recordIds: readonly string[],
+    ): Promise<{ records: Array<{ recordId: string; locked: boolean | null }> }> => {
+      const route = this.getRoute('approvals');
+      const res = await this.fetch(`${this.baseUrl}${route}/records/${encodeURIComponent(object)}/locks`, {
+        method: 'POST',
+        body: JSON.stringify({ recordIds: [...recordIds] }),
+      });
+      return this.unwrapResponse<{ records: Array<{ recordId: string; locked: boolean | null }> }>(res);
+    },
+
+    /**
      * Record an approve decision on a request. Finalises the request when the
      * node's behaviour is satisfied and resumes the owning flow run.
      */
@@ -7049,9 +7185,10 @@ export class ObjectStackClient {
 
     /**
      * Record a reject decision on a request. Resumes the owning flow run down
-     * the `reject` edge.
+     * the `reject` edge. A reject carries its reason: `comment` is required,
+     * and a blank one is refused with `400 VALIDATION_ERROR`.
      */
-    reject: async (requestId: string, decision?: { actorId?: string; comment?: string; attachments?: string[] }): Promise<ApprovalDecisionResult> => {
+    reject: async (requestId: string, decision: { actorId?: string; comment: string; attachments?: string[] }): Promise<ApprovalDecisionResult> => {
       const route = this.getRoute('approvals');
       const res = await this.fetch(`${this.baseUrl}${route}/requests/${encodeURIComponent(requestId)}/reject`, {
         method: 'POST',
@@ -8228,6 +8365,58 @@ export class ObjectStackClient {
     },
 
     /**
+     * [#35402] Change Owner on ONE record — `POST /data/:object/:id/change-owner`:
+     * hand it to a person (`ownerId`) or move it to an ownership queue
+     * (`queue`), as the caller. Refused `403 CHANGE_OWNER_DISABLED` on an object
+     * that does not offer the action (`userActions.transfer`); a caller without
+     * the transfer grant on the record gets the `/data` write door's own `403`,
+     * and a record out of reach its `404`.
+     */
+    changeOwner: async (object: string, id: string, request: ChangeOwnerRequest): Promise<ChangeOwnerResult> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/${encodeURIComponent(id)}/change-owner`,
+            { method: 'POST', body: JSON.stringify(request) },
+        );
+        return this.unwrapResponse<ChangeOwnerResult>(res);
+    },
+
+    /**
+     * [#35402] Change Owner on a list of up to 500 records —
+     * `POST /data/:object/change-owner`: each moves by its own update as the
+     * caller, and the answer lists every row that did not move with its code
+     * and sentence. The whole call is refused before any write on an object
+     * that does not offer the action, a repeated or empty id list, a list past
+     * the cap, and an unknown or banned person.
+     */
+    changeOwnerMany: async (object: string, ids: string[], request: ChangeOwnerRequest): Promise<ChangeOwnerReport> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/change-owner`,
+            { method: 'POST', body: JSON.stringify({ ...request, ids }) },
+        );
+        return this.unwrapResponse<ChangeOwnerReport>(res);
+    },
+
+    /**
+     * [#35315 phase 2] The relationships a Change Owner of `object` may cascade
+     * to — `GET /data/:object/change-owner/cascades`: each child reference
+     * field to `object` that declares `transferBehavior: 'cascade'`, on a child
+     * that offers Change Owner itself. Whether the caller may transfer on each
+     * child is the explain engine's `transfer` operation, asked separately; the
+     * write path judges every cascaded row again. Refused `403
+     * CHANGE_OWNER_DISABLED` on an object that does not offer the action.
+     */
+    changeOwnerCascades: async (object: string): Promise<{ object: string; cascades: ChangeOwnerCascadeCandidate[] }> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/change-owner/cascades`,
+            { method: 'GET' },
+        );
+        return this.unwrapResponse<{ object: string; cascades: ChangeOwnerCascadeCandidate[] }>(res);
+    },
+
+    /**
      * [#26594] The field projection of ONE record —
      * `GET /data/:object/:id/field-access`, declared by
      * `GetRecordFieldAccessResponseSchema` (`@objectstack/spec/api`): the
@@ -8685,11 +8874,12 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(this.metaUrl(''));
       return this.parent._unwrap<GetMetaTypesResponse>(res);
     },
-    /** The unscoped surface's `getItems`, `names` included (one `?names=a,b,c` request). */
-    getItems: async (type: string, options?: { packageId?: string; names?: readonly string[] }): Promise<GetMetaItemsResponse> => {
+    /** The unscoped surface's `getItems`, `names` and `include` included (one `?names=a,b,c` request). */
+    getItems: async (type: string, options?: MetaItemsListOptions): Promise<GetMetaItemsResponse> => {
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       if (options?.names !== undefined) params.set('names', options.names.join(','));
+      if (options?.include) params.set('include', options.include);
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${type}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemsResponse>(res);
@@ -8697,17 +8887,19 @@ export class ScopedEnvironmentClient {
     /**
      * Same `{ type, name, item }` envelope as the unscoped surface (#5563),
      * and the same qualifiers: `packageId` or `namespace` (ADR-0150 D5), and
-     * the same caller arm, `callerPackage` (ADR-0150 D3).
+     * the same caller arm, `callerPackage` (ADR-0150 D3), and the same draft
+     * read, `state: 'draft'` (`?state=draft`, #34777).
      */
     getItem: async (
       type: string,
       name: string,
-      options?: { packageId?: string; callerPackage?: string } & QualifiedAddressOptions,
+      options?: { packageId?: string; callerPackage?: string; state?: 'active' | 'draft' } & QualifiedAddressOptions,
     ): Promise<GetMetaItemResponse> => {
       const qualifier = metaItemQualifier(type, name, options);
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
       if (options?.callerPackage) params.set('callerPackage', options.callerPackage);
+      if (options?.state === 'draft') params.set('state', 'draft');
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);

@@ -140,7 +140,7 @@ export function ResourceWorkload({
               <span
                 data-testid={`resource-peak-${r.key}`}
                 data-overloaded={r.overloadedCount > 0 ? 'true' : undefined}
-                style={{ fontSize: 10, color: r.overloadedCount > 0 ? 'hsl(var(--destructive))' : 'hsl(var(--muted-foreground))' }}
+                style={{ fontSize: 10, color: r.overloadedCount > 0 ? 'hsl(var(--destructive-text, var(--destructive)))' : 'hsl(var(--muted-foreground))' }}
               >
                 {t('gantt.resource.peak')}: {Math.round(r.peak * 100) / 100} / {r.capacity}
                 {r.overloadedCount > 0 ? ` · ${r.overloadedCount} ${t('gantt.resource.over')}` : ''}

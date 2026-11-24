@@ -19,6 +19,9 @@ import { useAssistant } from '../assistant/assistantBus.js';
 import { useChatDockState, ChatDockPanel, ChatDockMobileSheet } from './ChatDock.js';
 import { matchChatDockShortcut, DOCK_EXPANDED_STORAGE_KEY } from './chatDockState.js';
 import {
+  ambientAppPackage,
+  dockTargetFollowsApp,
+  placeDockTarget,
   readBuilderHandoffState,
   readStoredDockTarget,
   sameDockTarget,
@@ -75,11 +78,35 @@ export function useConsoleChatDock({
   const navigate = useNavigate();
 
   // What the drawer shows: per tab, so it survives navigation and a reload.
-  const [target, setTargetState] = React.useState<ChatDockTarget | undefined>(readStoredDockTarget);
+  // objectstack#35014 — and per app: every target is stamped with the app it
+  // was opened in, and is shown only there or in the app it names
+  // (`dockTargetFollowsApp`). Moving to another app shows that app's ambient
+  // thread, automatically and with no prompt (the maintainer's ruling); the
+  // target stays stored, so coming back shows it again. The app is read at the
+  // moment of the call, not from a closure: a child's effect (the build that
+  // binds a package and moves the page) can call in the commit that changes it.
+  // A layout effect, because every layout effect of a commit runs before any
+  // passive one, the children's included.
+  const ambientApp = ambientAppPackage(appPackageId);
+  const ambientAppRef = React.useRef(ambientApp);
+  React.useLayoutEffect(() => {
+    ambientAppRef.current = ambientApp;
+  }, [ambientApp]);
+  const [target, setTargetState] = React.useState<ChatDockTarget | undefined>(() =>
+    placeDockTarget(readStoredDockTarget(), ambientApp),
+  );
   const setTarget = React.useCallback((next: ChatDockTarget | undefined) => {
-    setTargetState((prev) => (sameDockTarget(prev, next) ? prev : next));
-    writeStoredDockTarget(next);
+    const placed = placeDockTarget(next, ambientAppRef.current);
+    setTargetState((prev) => (sameDockTarget(prev, placed) ? prev : placed));
+    writeStoredDockTarget(placed);
   }, []);
+  // A target this host found unplaced (an old `/ai…` link, stored before the
+  // redirect knew its landing) is placed in the app it was first read in;
+  // record that, so a later host (Home, another app) reads it as placed.
+  React.useEffect(() => {
+    if (target && !sameDockTarget(target, readStoredDockTarget())) writeStoredDockTarget(target);
+  }, [target]);
+  const shownTarget = target && dockTargetFollowsApp(target, ambientApp) ? target : undefined;
   // A Builder handoff is held in memory only (objectui#12493).
   const [handoff, setHandoff] = React.useState<ChatDockHandoff | undefined>(undefined);
   const handoffSeqRef = React.useRef(0);
@@ -154,7 +181,7 @@ export function useConsoleChatDock({
     [enabled, expanded, fullWindow, toggle, open],
   );
 
-  const thread = { target, onTargetChange: setTarget, handoff };
+  const thread = { target: shownTarget, onTargetChange: setTarget, handoff };
   const rail =
     enabled && expanded && !isMobile ? (
       <ChatDockPanel

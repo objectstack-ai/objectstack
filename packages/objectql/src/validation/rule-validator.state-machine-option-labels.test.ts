@@ -57,6 +57,22 @@ const quoteSchema = (message: string, options?: unknown[]) => ({
 const service = (entries: Record<string, string>) => (key: string, locale: string) =>
   entries[`${locale}|${key}`] ?? key;
 
+/**
+ * [#34030] The same `locale|key` map as the deployment's bundle with the
+ * metadata route's `ResolveOptions` — what a refusal's LABELS are read off.
+ */
+const labels = (entries: Record<string, string>, locale: string) => () => {
+  const bundle: Record<string, any> = {};
+  for (const [address, value] of Object.entries(entries)) {
+    const [code, key] = address.split('|');
+    const parts = key.split('.');
+    let cur = (bundle[code] ??= {});
+    for (const part of parts.slice(0, -1)) cur = cur[part] ??= {};
+    cur[parts[parts.length - 1]] = value;
+  }
+  return { bundle, options: { locale } };
+};
+
 describe('state_machine invalid_transition — the built-in sentence names option labels', () => {
   it('names the states by their declared option labels; constraint keeps the raw values', () => {
     const [err] = failing(quoteSchema(''), { status: 'draft' }, { previous: { status: 'presented' } });
@@ -67,14 +83,14 @@ describe('state_machine invalid_transition — the built-in sentence names optio
   });
 
   it('names the states by their TRANSLATED option labels under a non-English locale', () => {
-    const translate = service({
+    const entries = {
       'zh-CN|objects.quote.fields.status.label': '状态',
       'zh-CN|objects.quote.fields.status.options.presented': '已提交',
       'zh-CN|objects.quote.fields.status.options.draft': '草稿',
-    });
+    };
     const [err] = failing(quoteSchema(''), { status: 'draft' }, {
       previous: { status: 'presented' },
-      messages: { locale: 'zh-CN', objectName: 'quote', translate },
+      messages: { locale: 'zh-CN', objectName: 'quote', translate: service({}), labelTranslation: labels(entries, 'zh-CN') },
     });
     expect(err.message).toBe('状态不允许从 已提交 变更为 草稿');
     expect(err.constraint).toEqual({ from: 'presented', to: 'draft' });
@@ -83,16 +99,16 @@ describe('state_machine invalid_transition — the built-in sentence names optio
   it('falls back to the picklist\'s translated option label for a picklist-bound field', () => {
     const schema = quoteSchema('');
     (schema.fields.status as any).picklist = 'quote_status';
-    const translate = service({
+    const entries = {
       // A field-level entry is the more specific and wins …
       'zh-CN|objects.quote.fields.status.options.draft': '草稿',
       // … and the shared list answers for an option the field does not translate.
       'zh-CN|picklists.quote_status.options.draft': 'WRONG — the field entry wins',
       'zh-CN|picklists.quote_status.options.presented': '已提交',
-    });
+    };
     const [err] = failing(schema, { status: 'draft' }, {
       previous: { status: 'presented' },
-      messages: { locale: 'zh-CN', objectName: 'quote', translate },
+      messages: { locale: 'zh-CN', objectName: 'quote', translate: service({}), labelTranslation: labels(entries, 'zh-CN') },
     });
     expect(err.message).toBe('Status不允许从 已提交 变更为 草稿');
   });
@@ -118,7 +134,12 @@ describe('state_machine invalid_transition — the built-in sentence names optio
   it('survives a throwing i18n service — the declared label stands, a 400 never becomes a 500', () => {
     const [err] = failing(quoteSchema(''), { status: 'draft' }, {
       previous: { status: 'presented' },
-      messages: { locale: 'zh-CN', objectName: 'quote', translate: () => { throw new Error('i18n exploded'); } },
+      messages: {
+        locale: 'zh-CN',
+        objectName: 'quote',
+        translate: () => { throw new Error('i18n exploded'); },
+        labelTranslation: () => { throw new Error('i18n exploded'); },
+      },
     });
     expect(err.message).toBe('Status不允许从 Presented 变更为 Draft');
   });

@@ -37,9 +37,16 @@
  *     `@next` keeps resolving and never to something older than `@latest`;
  *   - a pre-release tag AT or ABOVE REFERENCE is a cycle in progress (say
  *     `next` = 19.0.0-next.1 over `latest` = 18.1.0) and is left alone;
- *   - a tag on a STABLE version is not a pre-release tag -- a maintenance line
- *     someone pinned on purpose -- and is left alone, as is anything that is
- *     not semver at all; `latest` itself is never written;
+ *   - a tag in `CHANNEL_TAGS` (`next`) whose version is STABLE and below
+ *     REFERENCE is stale too, and moves to REFERENCE. The previous sweep put it
+ *     there: moving `next` up to 18.5.0 leaves it on a stable version, and the
+ *     18.6.0 sweep must still carry it to 18.6.0, or `@next` resolves below
+ *     `@latest` until the next pre-release publish. A stable `next` AT
+ *     REFERENCE is already where it belongs, and stays;
+ *   - any OTHER tag on a STABLE version is not a pre-release tag -- a
+ *     maintenance line someone pinned on purpose (`v17` = 17.5.0) -- and is
+ *     left alone, as is anything that is not semver at all; `latest` itself is
+ *     never written;
  *   - a tag in `RETIRED_TAGS` is REMOVED (`npm dist-tag rm`), whatever version
  *     it points at. The release channels are `latest` (stable) and `next`
  *     (pre-release, published by release.yml in pre mode); `rc` is retired, so
@@ -128,6 +135,16 @@ const USER_AGENT = 'objectstack-release-dist-tags';
  */
 export const RETIRED_TAGS = Object.freeze(['rc']);
 
+/**
+ * Dist-tags of the live release channels other than `latest`. A channel tag
+ * follows `latest` from a STABLE version as well as from a pre-release one:
+ * every sweep that moves it lands it on a stable version, so treating a stable
+ * channel value as a maintenance line would freeze the channel one release
+ * behind from the second stable publish on. Any tag not listed here that sits
+ * on a stable version stays a maintenance line.
+ */
+export const CHANNEL_TAGS = Object.freeze(['next']);
+
 /** Per-request ceiling, so one hung socket cannot hold the step. */
 export const REQUEST_TIMEOUT_MS = 15 * 1000;
 
@@ -153,11 +170,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '5. End to end: a stub registry and a stub npm on PATH': 7,
   '6. The release.yml wiring: after the publish, non-blocking, no token': 9,
   '7. Retired channels: removed, never moved, and only those': 9,
+  '8. Channel tags: a stable next below latest follows it; maintenance lines stay': 9,
 });
 
 // Deleting an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 const batteryCases = new Map();
@@ -220,9 +238,10 @@ export class RegistryUnreadable extends Error {}
  * @param {Record<string, string>} tags  the package's dist-tags
  * @param {string} reference             a stable semver version
  * @param {readonly string[]} [retired]  tags to remove rather than move
+ * @param {readonly string[]} [channels] tags that follow `latest` from a stable version too
  * @returns {{ moves: { tag: string, from: string, to: string }[], removes: { tag: string, from: unknown }[], kept: { tag: string, version: string }[] }}
  */
-export function planTags(tags, reference, retired = RETIRED_TAGS) {
+export function planTags(tags, reference, retired = RETIRED_TAGS, channels = CHANNEL_TAGS) {
   const moves = [];
   const removes = [];
   const kept = [];
@@ -235,9 +254,12 @@ export function planTags(tags, reference, retired = RETIRED_TAGS) {
       continue;
     }
     if (typeof version !== 'string' || !semver.valid(version)) continue;
-    if (semver.prerelease(version) === null) continue;
+    const stable = semver.prerelease(version) === null;
+    // A stable version is a maintenance line, unless the tag is a channel that
+    // an earlier sweep left on the stable release it then followed.
+    if (stable && !channels.includes(tag)) continue;
     if (semver.lt(version, reference)) moves.push({ tag, from: version, to: reference });
-    else kept.push({ tag, version });
+    else if (!stable) kept.push({ tag, version });
   }
   return { moves, removes, kept };
 }
@@ -747,6 +769,38 @@ export async function selfTest() {
     t('--apply removes rc through the remover and never adds it', JSON.stringify(rms) === '["rc"]' && !adds.includes('rc') && JSON.stringify(adds) === '["next"]', JSON.stringify({ adds, rms }));
   }
 
+  // ── 8. Channel tags ───────────────────────────────────────────────────────
+  battery('8. Channel tags: a stable next below latest follows it; maintenance lines stay');
+  {
+    // The registry state measured after the 18.6.0 publish, for every package of the group.
+    const LEFT_BEHIND = { latest: '18.6.0', next: '18.5.0' };
+    t('the channel list is exactly next, frozen, and shares nothing with latest or the retired list', JSON.stringify(CHANNEL_TAGS) === '["next"]' && Object.isFrozen(CHANNEL_TAGS) && !CHANNEL_TAGS.includes('latest') && !CHANNEL_TAGS.some((c) => RETIRED_TAGS.includes(c)), JSON.stringify(CHANNEL_TAGS));
+    const behind = planTags(LEFT_BEHIND, '18.6.0');
+    t('a next on a STABLE version below latest moves to latest', JSON.stringify(behind.moves) === '[{"tag":"next","from":"18.5.0","to":"18.6.0"}]' && behind.kept.length === 0, JSON.stringify(behind));
+    const besideV17 = planTags({ ...LEFT_BEHIND, v17: '17.5.0' }, '18.6.0');
+    t('control: a stable maintenance line beside it is untouched', JSON.stringify(besideV17.moves.map((m) => m.tag)) === '["next"]' && besideV17.kept.length === 0 && besideV17.removes.length === 0, JSON.stringify(besideV17));
+    const cycle = planTags({ latest: '18.6.0', next: '19.0.0-next.1' }, '18.6.0');
+    t('control: a pre-release next AHEAD of latest is still a cycle in progress, kept', cycle.moves.length === 0 && cycle.kept.length === 1 && cycle.kept[0].tag === 'next', JSON.stringify(cycle));
+    const atRef = planTags({ latest: '18.6.0', next: '18.6.0' }, '18.6.0');
+    t('control: a stable next AT latest is where it belongs, neither moved nor kept', atRef.moves.length === 0 && atRef.kept.length === 0, JSON.stringify(atRef));
+    const above = planTags({ latest: '18.6.0', next: '19.0.0' }, '18.6.0');
+    t('control: a stable next ABOVE latest is never moved down', above.moves.length === 0 && above.kept.length === 0, JSON.stringify(above));
+    const unlisted = planTags(LEFT_BEHIND, '18.6.0', RETIRED_TAGS, []);
+    t('control: the list decides — with no channel tags, a stable next is a maintenance line', unlisted.moves.length === 0, JSON.stringify(unlisted));
+
+    // Two stable publishes in a row against one registry: the first sweep is
+    // what leaves next on a stable version, the second must still carry it.
+    const registry = { latest: '18.5.0', next: '18.5.0-next.2' };
+    const adds = [];
+    const write = async (m) => { adds.push(`${m.tag}@${m.to}`); registry[m.tag] = m.to; return null; };
+    const first = await sweep({ names: ['x'], releaseVersion: '18.5.0', apply: true, read: async () => ({ ...registry }), write, remove: async () => 'must not be called', sleep: async () => {}, log: quiet });
+    registry.latest = '18.6.0';
+    const lines = [];
+    const second = await sweep({ names: ['x'], releaseVersion: '18.6.0', apply: true, read: async () => ({ ...registry }), write, remove: async () => 'must not be called', sleep: async () => {}, log: (l) => lines.push(l) });
+    t('two stable publishes in a row: next follows latest both times', first.failures.length === 0 && second.failures.length === 0 && JSON.stringify(adds) === '["next@18.5.0","next@18.6.0"]' && registry.next === '18.6.0', JSON.stringify({ adds, registry, first, second }));
+    t('... and the second move is logged from the stable version it left', lines.some((l) => /^ {2}moved {2}x next: 18\.5\.0 → 18\.6\.0$/.test(l)), JSON.stringify(lines));
+  }
+
   for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
 
   const failed = cases.filter((c) => !c.ok);
@@ -757,7 +811,8 @@ export async function selfTest() {
   }
   console.log(
     `OK release-dist-tags self-test: ${cases.length} cases pass across ${Object.keys(SELF_TEST_BATTERIES).length} batteries `
-      + '(stale next moved to latest, retired rc removed, a cycle in progress kept, nothing moved below a latest the run did not set, '
+      + '(stale next moved to latest, from a stable version too, retired rc removed, a cycle in progress and maintenance lines kept, '
+      + 'nothing moved below a latest the run did not set, '
       + 'failures named without stopping the rest, and the release.yml step wired after the publish, non-blocking).',
   );
   selfTestReachedVerdict = true;

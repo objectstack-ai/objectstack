@@ -409,7 +409,7 @@ export const MappingSchema = lazySchema(() => strictObject({
 }, {
   /** Identity */
   name: SnakeCaseIdentifierSchema.describe('Mapping unique name (lowercase snake_case)'),
-  label: z.string().optional(),
+  label: z.string().optional().describe('Display label, shown where the mapping is offered by name (the import wizard); translated per locale at `mappings.<name>.label` in the translation bundle'),
 
   /** Scope */
   sourceFormat: z.enum(['csv', 'json', 'xml', 'sql']).default('csv'),

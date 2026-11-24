@@ -79,7 +79,6 @@ import {
 import { toast } from 'sonner';
 import { useAuth } from '@object-ui/auth';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
-import { isSystemManagedField } from '@object-ui/types';
 import { APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 import {
   CheckCircle2,
@@ -108,7 +107,7 @@ import {
   isUnresolvableRecordReference,
   useUnresolvableRecordReferenceLabel,
 } from './unresolvableRecordReference';
-import { useHiddenFieldsByObject } from './hiddenFields';
+import { useInboxFigureFieldByObject } from './hiddenFields';
 
 type TabKey = 'pending' | 'submitted' | 'all';
 
@@ -307,19 +306,6 @@ function slaState(dueAt: string | null | undefined, now: number): { overdue: boo
   return { overdue: due < now, ms: Math.abs(now - due) };
 }
 
-/**
- * Whether a snapshot key is a framework-managed column rather than a business
- * field of the record — `@object-ui/types`' `isSystemManagedField`, the one
- * classifier the default list columns, record pickers and related lists use
- * to keep bookkeeping out of business surfaces. The queue reads the snapshot
- * without the object's field declarations, so it judges by name: the
- * classifier's name list, which includes `owner_id`, the injected ownership
- * column (objectui#11677).
- */
-function isBookkeepingKey(key: string): boolean {
-  return isSystemManagedField(key);
-}
-
 function prettifyKey(k: string): string {
   const tokens = k.split('_').filter(Boolean);
   // Drop a trailing `id` token so a resolved lookup key reads as its subject —
@@ -330,59 +316,43 @@ function prettifyKey(k: string): string {
 }
 
 /**
- * Amount-like keys worth surfacing in the queue so a reviewer can triage
- * without opening each request (#2762 P1-3). Deliberately narrow — a decision
- * turns on the amount/total/budget, not on every numeric field.
- */
-const AMOUNT_KEY_RE = /(amount|total|price|value|cost|sum|budget|salary|fee|revenue|balance|金额|总额|价格|费用|预算|金额)/i;
-
-/**
- * The one decision-relevant numeric field (amount/total/…) of the snapshot,
- * for the inline list display and amount sort. Prefers the server-formatted
+ * The row's figure: the value of the field its object declares as its inbox
+ * figure (`figureField`, the first numeric `highlightFields` entry the author
+ * did not declare `hidden: true` — see `hiddenFields.ts`), for the inline
+ * queue display and the amount sort. Prefers the server-formatted
  * `payload_display` value (currency, etc.) but always keeps the raw number for
- * ordering. Null when the snapshot has no such field.
+ * ordering.
  *
- * `hiddenKeys` is the fields THIS request's object declares `hidden: true`, and
- * it is **required** on purpose (objectui#6020). It was optional when
- * objectui#5565 added it, and four of the five call sites simply did not pass
- * it — a filter that lives in the function body but is unpassed at the call
- * site reads exactly like a fixed defect. Required, the compiler asks the one
- * question that matters at every present and future call site: *whose* hidden
- * keys?
+ * Null when the object declares no figure, or when the snapshot holds no
+ * number for it. ⛔ Never chosen by a field's NAME: an object that declares no
+ * numeric highlight shows no figure (ADR-0085 — one curated list, every
+ * surface).
  *
- * An empty set means "nothing known to be hidden" — including the case where
- * the metadata read has not answered — and yields today's amount. See
- * `hiddenFields.ts` on why this presentation filter fails open.
+ * A declared figure of 0 is shown: it is the value of the field the author
+ * chose, not a guess.
  *
- * The first key whose NAME matches {@link AMOUNT_KEY_RE} and whose value is not
- * zero leads (objectui#12110 item 6). A name match is a guess about what the
- * key means, and a zero from a guessed key (HotCRM's `child_account_revenue`
- * roll-up, finding C-18 of the HotCRM browser pass) is not the request's
- * amount, so it never leads.
+ * `figureField` is **required** on purpose: the queue spans many objects, and
+ * the compiler asks at every call site *whose* figure field.
  */
-function decisionAmountEntry(
+function declaredFigureEntry(
   r: ApprovalRequestRow,
-  hiddenKeys: ReadonlySet<string>,
+  figureField: string | null,
   locale: string,
 ): { key: string; label: string; value: number; display: string } | null {
+  if (figureField === null) return null;
   const payload = r.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
-    if (isBookkeepingKey(k)) continue;
-    if (hiddenKeys.has(k)) continue; // author declared `hidden: true` (#5565)
-    if (!AMOUNT_KEY_RE.test(k)) continue;
-    const num = typeof v === 'number'
-      ? v
-      : (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
-    if (num == null || !Number.isFinite(num) || num === 0) continue;
-    return {
-      key: k,
-      label: r.payload_labels?.[k] ?? prettifyKey(k),
-      value: num,
-      display: r.payload_display?.[k] ?? num.toLocaleString(locale),
-    };
-  }
-  return null;
+  const v = (payload as Record<string, unknown>)[figureField];
+  const num = typeof v === 'number'
+    ? v
+    : (typeof v === 'string' && v.trim() !== '' ? Number(v) : null);
+  if (num == null || !Number.isFinite(num)) return null;
+  return {
+    key: figureField,
+    label: r.payload_labels?.[figureField] ?? prettifyKey(figureField),
+    value: num,
+    display: r.payload_display?.[figureField] ?? num.toLocaleString(locale),
+  };
 }
 
 /** The page's scoped translator, as the row cells receive it. */
@@ -428,14 +398,16 @@ function RequestCell({ r, tr }: { r: ApprovalRequestRow; tr: Translate }) {
 
 /**
  * The `comment` member of a decision body: the trimmed reason, or nothing when
- * the approver left it empty, so an unexplained decision sends what it always did.
+ * there is none. A reject always has one — its confirmation stays disabled
+ * until the reason is non-blank, and the approvals door refuses a reject
+ * without it; an approve may leave it out.
  */
 function decisionComment(comment: string | undefined): { comment?: string } {
   const text = (comment ?? '').trim();
   return text ? { comment: text } : {};
 }
 
-/** The optional reason box a Reject confirmation carries. */
+/** The reason box a Reject confirmation carries; the reject waits on it. */
 function RejectCommentField({ id, label, value, onChange }: {
   id: string;
   label: string;
@@ -445,7 +417,7 @@ function RejectCommentField({ id, label, value, onChange }: {
   return (
     <div className="space-y-1.5">
       <label htmlFor={id} className="text-sm font-medium">{label}</label>
-      <Textarea id={id} rows={3} value={value} onChange={(e) => onChange(e.target.value)} />
+      <Textarea id={id} rows={3} required value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   );
 }
@@ -480,9 +452,9 @@ function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
 }) {
   const [approveTarget, setApproveTarget] = useState<ApprovalRequestRow | null>(null);
   const [rejectTarget, setRejectTarget] = useState<ApprovalRequestRow | null>(null);
-  // The optional reason a Reject confirmation collects, sent as the reject
-  // call's `comment` (the approvals door records it on the timeline). Each
-  // dialog starts empty: closing one clears what it held.
+  // The reason a Reject confirmation collects, sent as the reject call's
+  // `comment` (the approvals door requires it and records it on the
+  // timeline). Each dialog starts empty: closing one clears what it held.
   const [rejectComment, setRejectComment] = useState('');
   useImperativeHandle(ref, () => ({ openApprove: setApproveTarget, openReject: setRejectTarget }), []);
   // The size alone (`variant: null`): each button keeps its own variant.
@@ -532,13 +504,14 @@ function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
           </AlertDialogHeader>
           <RejectCommentField
             id="approvals-reject-comment"
-            label={tr('comment', 'Comment (optional)')}
+            label={tr('comment', 'Comment')}
             value={rejectComment}
             onChange={setRejectComment}
           />
           <AlertDialogFooter>
             <AlertDialogCancel className={footerButton}>{tr('cancel', 'Cancel')}</AlertDialogCancel>
             <AlertDialogAction
+              disabled={!rejectComment.trim()}
               onClick={() => {
                 const r = rejectTarget;
                 const comment = rejectComment;
@@ -563,7 +536,7 @@ function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
  */
 function SelfSubmittedBadge({ label }: { label: string }) {
   return (
-    <Badge variant="outline" className="shrink-0 whitespace-nowrap px-1.5 py-0 text-[10px] font-normal">
+    <Badge variant="outline" className="shrink-0 whitespace-nowrap px-1.5 py-0 text-xs font-normal">
       {label}
     </Badge>
   );
@@ -574,11 +547,11 @@ function SelfSubmittedBadge({ label }: { label: string }) {
  * readable/unreadable decision and the URL are ONE prop so the two cannot be
  * handed in disagreeing with each other.
  *
- * `hiddenKeys` belongs to THIS row's object (objectui#6020). The queue spans
- * many objects, so it is a per-row prop and not something this cell could
- * resolve for itself — see the page body, which drives it off one lookup.
+ * `figureField` belongs to THIS row's object. The queue spans many objects, so
+ * it is a per-row prop and not something this cell could resolve for itself —
+ * see the page body, which drives it off one lookup.
  */
-function RecordCell({ r, href, linkState, hiddenKeys, deadLabel, unresolvableLabel }: {
+function RecordCell({ r, href, linkState, figureField, deadLabel, unresolvableLabel }: {
   r: ApprovalRequestRow;
   href: string | null;
   /**
@@ -587,15 +560,14 @@ function RecordCell({ r, href, linkState, hiddenKeys, deadLabel, unresolvableLab
    * an app whose navigation does not list its object still leads back here.
    */
   linkState: { from: { pathname: string; label: string } };
-  hiddenKeys: ReadonlySet<string>;
+  figureField: string | null;
   deadLabel: string | null;
   unresolvableLabel: string | null;
 }) {
   const displayLocale = useDisplayLocale();
-  // Surface the decision-relevant amount inline so a reviewer can triage the
-  // queue without opening each request (#2762 P1-3) — minus anything the
-  // author declared `hidden: true` (objectui#6020).
-  const amount = decisionAmountEntry(r, hiddenKeys, displayLocale);
+  // Surface the object's declared figure inline so a reviewer can triage the
+  // queue without opening each request.
+  const amount = declaredFigureEntry(r, figureField, displayLocale);
   // objectui#5211: no link into a record this viewer cannot open. The title
   // still shows — it comes from the request's own payload snapshot, which the
   // approver was already given — it just stops being an anchor.
@@ -729,14 +701,13 @@ function InlineActions({
  * `sys_approval_request`, where `RecordDetailView` mounts the page objectstack
  * serves for it (`sys_approval_request_detail`).
  *
- * The app segment is the app that owns the request's RECORD
- * (`objectHostAppSegment`, objectstack#32667): the app it is asked from when
- * that app lists the record's object, else the first app that does, else
- * Setup. A request opened under an app whose navigation never names the
- * record's object drew that app's sidebar around it, and its record card could
- * not reach the record. Only when the reader can open no such app, nor Setup,
- * does the request stay in the app it was asked from (or `setup` outside one,
- * as the row's record link falls back).
+ * The app segment is the app that owns the request's RECORD when one does: the
+ * app it is asked from when that app lists the record's object, else the first
+ * app that does (`objectHostAppSegment` without its Setup step). When no app
+ * lists the object the request stays in the app it is asked from, which for an
+ * open with no source app is the current, last used or first app
+ * (`resolveApprovalsHostSegment`, objectstack#35505): Setup only when it is
+ * that app. An inbox with no app segment (the zero-app route set) keeps `setup`.
  */
 function requestPagePath(
   apps: readonly Record<string, unknown>[] | undefined,
@@ -744,8 +715,31 @@ function requestPagePath(
   appName: string | undefined,
   requestId: string,
 ): string {
-  const segment = objectHostAppSegment(apps, objectName, appName) ?? (appName || 'setup');
-  return `/apps/${segment}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(requestId)}`;
+  return `/apps/${requestPageSegment(apps, objectName, appName)}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(requestId)}`;
+}
+
+function requestPageSegment(
+  apps: readonly Record<string, unknown>[] | undefined,
+  objectName: string | null | undefined,
+  appName: string | undefined,
+): string {
+  return objectHostAppSegment(apps, objectName, appName, { orSetup: false }) ?? (appName || 'setup');
+}
+
+/**
+ * The history state a deep link opens the request page with: the way back is
+ * the approvals inbox of the app the page opens in, never the object's raw
+ * `sys_approval_request` list (objectstack#35505). The page's ✕ and the phone's
+ * ‹ follow `from.pathname`. A queue handed in by the opener (Home's 我的工作,
+ * the bell: `approvalQueueState`) rides along, so 「处理后打开下一条」 moves on
+ * through it; an open that hands none (a notification, the e-mail link) carries
+ * the way back alone.
+ */
+function deepLinkRequestState(incoming: unknown, inboxPath: string, inboxLabel: string): Record<string, unknown> {
+  const base = incoming && typeof incoming === 'object' ? (incoming as Record<string, unknown>) : {};
+  const from = base.from && typeof base.from === 'object' ? (base.from as Record<string, unknown>) : {};
+  const label = typeof from.label === 'string' && from.label ? from.label : inboxLabel;
+  return { ...base, from: { ...from, pathname: inboxPath, label } };
 }
 
 /**
@@ -773,6 +767,8 @@ export function ApprovalsInboxPage() {
  */
 function RequestDeepLink({ requestId }: { requestId: string }) {
   const { appName } = useParams<{ appName?: string }>();
+  const location = useLocation();
+  const { t } = useObjectTranslation();
   const { apps, loading } = useMetadata();
   const catalog = Array.isArray(apps) ? (apps as Record<string, unknown>[]) : undefined;
   const choose = !loading && !!catalog && catalog.length > 0;
@@ -797,9 +793,15 @@ function RequestDeepLink({ requestId }: { requestId: string }) {
   }, [choose, requestId]);
 
   if (loading) return null;
-  if (!choose) return <Navigate to={requestPagePath(catalog, null, appName, requestId)} replace />;
-  if (answer?.requestId !== requestId) return null;
-  return <Navigate to={requestPagePath(catalog, answer.objectName, appName, requestId)} replace />;
+  if (choose && answer?.requestId !== requestId) return null;
+  const objectName = choose ? (answer?.objectName ?? null) : null;
+  const segment = requestPageSegment(catalog, objectName, appName);
+  const state = deepLinkRequestState(
+    location.state,
+    `/apps/${segment}/system/approvals`,
+    String(t('approvalsInbox.title', { defaultValue: 'Approvals Inbox' })),
+  );
+  return <Navigate to={requestPagePath(catalog, objectName, appName, requestId)} replace state={state} />;
 }
 
 function ApprovalsQueue() {
@@ -895,6 +897,27 @@ function ApprovalsQueue() {
       sla.overdue
         ? tr('slaOverdue', 'SLA overdue {{dur}}', { dur: compactDuration(sla.ms) })
         : tr('slaRemaining', 'SLA {{dur}} left', { dur: compactDuration(sla.ms) }),
+    [tr],
+  );
+
+  /**
+   * Why the SLA has no due time (ADR-0157 D9): 「日历算不出」 and the reason,
+   * from the refusal's code. A code or reason this page does not know reads as
+   * a calendar to fix, never as no SLA.
+   */
+  const slaRefusalLabel = useCallback(
+    (refusal: NonNullable<ApprovalRequestRow['sla_due_refusal']>): string => {
+      if (refusal.code === 'ERR_WORK_CALENDAR_NOT_MAINTAINED' && refusal.date) {
+        return tr('slaCalendarNotMaintained', 'Calendar can\'t compute: not maintained for {{date}}', { date: refusal.date });
+      }
+      if (refusal.code === 'ERR_WORK_CALENDAR_UNRESOLVED' && refusal.reason === 'not_found' && refusal.calendar) {
+        return tr('slaCalendarNotFound', 'Calendar can\'t compute: no calendar "{{calendar}}"', { calendar: refusal.calendar });
+      }
+      if (refusal.code === 'ERR_WORK_CALENDAR_UNRESOLVED' && refusal.reason === 'no_default') {
+        return tr('slaCalendarNoDefault', 'Calendar can\'t compute: no default calendar');
+      }
+      return tr('slaCalendarUnusable', 'Calendar can\'t compute: fix the calendar in Setup');
+    },
     [tr],
   );
 
@@ -1006,26 +1029,22 @@ function ApprovalsQueue() {
   );
 
   /**
-   * objectui#5565 + objectui#6020 — the fields each object on screen declares
-   * `hidden: true`. `hidden` is a UI contract (objectstack#10749: "`hidden:
-   * true` stays UI-only; `internal: true` is the serialization primitive"), and
-   * every surface below is default UI, so all of them must honour it: the
-   * queue rows, the mobile cards, and the amount sort (#6020).
+   * The figure field each object on screen declares — the first numeric
+   * `highlightFields` entry it did not declare `hidden: true` (ADR-0085; see
+   * `hiddenFields.ts`). The queue rows, the mobile cards and the amount sort
+   * all read it.
    *
-   * ⛔ It is keyed BY OBJECT and not a single set. The queue is N rows spanning
-   * K objects; threading one object's set into the rows would apply one
-   * object's declarations to every row — hiding fields on rows whose object
-   * never declared them, missing fields on rows whose object did, and looking
-   * fixed while doing it. Every consumer asks with its OWN `object_name`.
+   * ⛔ It is keyed BY OBJECT. The queue is N rows spanning K objects, each with
+   * its own declarations; every consumer asks with its OWN `object_name`.
    *
-   * One cached metadata read per distinct object per mount, empty until it
-   * answers — see `hiddenFields.ts` for the cost model and why this fails open.
+   * One cached metadata read per distinct object per mount, `null` (no
+   * figure) until it answers.
    */
-  const hiddenFieldObjects = useMemo(
+  const figureObjects = useMemo(
     () => rows.map((t) => t.object_name),
     [rows],
   );
-  const hiddenFields = useHiddenFieldsByObject(hiddenFieldObjects);
+  const figureFields = useInboxFigureFieldByObject(figureObjects);
 
   // Search + filters. On the paginated tabs (submitted/all) the free-text
   // query is debounced and pushed to the server; the pending tab keeps
@@ -1222,18 +1241,16 @@ function ApprovalsQueue() {
     if (sortKey === 'recent') return matched; // server order is already newest-first
     const sorted = [...matched];
     if (sortKey === 'amount') {
-      // Highest amount first; rows without a detectable amount sink to the
-      // bottom (keeping their relative newest-first order).
+      // Highest figure first; rows without a figure sink to the bottom
+      // (keeping their relative newest-first order).
       //
-      // objectui#6020: a row whose amount field its object declares
-      // `hidden: true` has no amount HERE either, so it sinks with them. An
-      // ordering IS a disclosure — it leaks the relative magnitude of a hidden
-      // figure to a viewer who never sees the figure — so the queue must not
-      // order on a value it declines to render. Each row is asked about its
-      // own object; a page spanning several objects gets several answers.
+      // The queue orders on exactly the figure it renders: an object that
+      // declares no figure, or whose figure would be a field it declares
+      // `hidden: true`, has none HERE either — an ordering IS a disclosure of
+      // relative magnitude. Each row is asked about its own object.
       sorted.sort((a, b) => {
-        const av = decisionAmountEntry(a, hiddenFields.forObject(a.object_name), displayLocale)?.value;
-        const bv = decisionAmountEntry(b, hiddenFields.forObject(b.object_name), displayLocale)?.value;
+        const av = declaredFigureEntry(a, figureFields.forObject(a.object_name), displayLocale)?.value;
+        const bv = declaredFigureEntry(b, figureFields.forObject(b.object_name), displayLocale)?.value;
         if (av == null && bv == null) return 0;
         if (av == null) return 1;
         if (bv == null) return -1;
@@ -1244,13 +1261,19 @@ function ApprovalsQueue() {
       sorted.sort((a, b) => (submittedAt(a) || '').localeCompare(submittedAt(b) || ''));
     }
     return sorted;
-  }, [rows, deferredQuery, processFilter, objectFilter, statusFilter, tab, sortKey, hiddenFields, displayLocale]);
+  }, [rows, deferredQuery, processFilter, objectFilter, statusFilter, tab, sortKey, figureFields, displayLocale]);
 
   /**
    * Open a request on its page (objectui#12484): the page objectstack serves
    * for it, on the standard record route. A navigation, so Back returns to the
-   * queue with its tab, filters and scroll as they were. It opens under the
-   * app that owns the row's record (`requestPagePath`).
+   * queue with its tab, filters and scroll as they were.
+   *
+   * objectstack#35412 — a row opens in the app the inbox is mounted in: the
+   * inbox an app's navigation draws is that app's, and the reader stays in it
+   * (its name, its sidebar, its path). The record card on the request page
+   * still links the record under the app that owns it. Only an inbox with no
+   * app segment asks `requestPagePath`, as the deep link does for the opens
+   * that come from no app (Home, a notification, an email).
    *
    * objectstack#34586 — from 「待我审批」 the page is handed the queue as this
    * list shows it, filtered and sorted (`approvalQueueState`): its top bar
@@ -1261,12 +1284,14 @@ function ApprovalsQueue() {
   const openRequest = useCallback(
     (r: ApprovalRequestRow) =>
       navigate(
-        requestPagePath(
-          Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
-          r.object_name,
-          appName,
-          r.id,
-        ),
+        appName
+          ? `/apps/${appName}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(r.id)}`
+          : requestPagePath(
+              Array.isArray(metadataApps) ? (metadataApps as Record<string, unknown>[]) : undefined,
+              r.object_name,
+              appName,
+              r.id,
+            ),
         tab === 'pending'
           ? {
               state: approvalQueueState(
@@ -1549,7 +1574,7 @@ function ApprovalsQueue() {
                       // a live-looking link for the first paint.
                       href={deadLabelFor(r) !== null || readability.isUnreadable(r) ? null : recordHref(r)}
                       linkState={recordLinkState}
-                      hiddenKeys={hiddenFields.forObject(r.object_name)}
+                      figureField={figureFields.forObject(r.object_name)}
                       deadLabel={deadLabelFor(r)}
                       unresolvableLabel={unresolvableLabelFor(r)}
                     />
@@ -1581,9 +1606,18 @@ function ApprovalsQueue() {
                     {formatRelative(submittedAt(r))}
                     {r.status === 'pending' && (() => {
                       const sla = slaState(r.sla_due_at, now);
+                      if (!sla && r.sla_due_refusal) {
+                        // ADR-0157 D9: the working calendar cannot count the
+                        // deadline, so the request waits; say why in its place.
+                        return (
+                          <div className="mt-0.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                            {slaRefusalLabel(r.sla_due_refusal)}
+                          </div>
+                        );
+                      }
                       return sla ? (
                         <div className={cn(
-                          'mt-0.5 text-[10px] font-medium',
+                          'mt-0.5 text-xs font-medium',
                           sla.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground',
                         )}>
                           {slaLabel(sla)}
@@ -1656,8 +1690,8 @@ function ApprovalsQueue() {
                       <span className="text-muted-foreground text-xs ml-1.5">· {r.record_title}</span>
                     )}
                     {(() => {
-                      // objectui#6020: this row's OWN object decides.
-                      const amount = decisionAmountEntry(r, hiddenFields.forObject(r.object_name), displayLocale);
+                      // This row's OWN object decides.
+                      const amount = declaredFigureEntry(r, figureFields.forObject(r.object_name), displayLocale);
                       return amount ? (
                         <span className="text-xs ml-1.5 font-medium" title={amount.label}>· {amount.display}</span>
                       ) : null;
@@ -1713,9 +1747,9 @@ function ApprovalsQueue() {
     </>
   ), [
     tab, allSelected, toggleAll, allFilteredSelectable, tr, filteredRows, focusIndex, openRequest,
-    selectedRowIds, toggleRow, deadLabelFor, readability, recordHref, recordLinkState, hiddenFields,
+    selectedRowIds, toggleRow, deadLabelFor, readability, recordHref, recordLinkState, figureFields,
     unresolvableLabelFor, statusLabel, now, displayLocale, formatRelative, isActionable, inlineActing,
-    needsDecisionInputs, openApprove, openReject, slaLabel,
+    needsDecisionInputs, openApprove, openReject, slaLabel, slaRefusalLabel,
   ]);
 
   const hasFilters = !!query || processFilter !== 'all' || objectFilter !== 'all' || statusFilter !== 'all';
@@ -1916,13 +1950,14 @@ function ApprovalsQueue() {
                     </AlertDialogHeader>
                     <RejectCommentField
                       id="approvals-bulk-reject-comment"
-                      label={tr('comment', 'Comment (optional)')}
+                      label={tr('comment', 'Comment')}
                       value={bulkRejectComment}
                       onChange={setBulkRejectComment}
                     />
                     <AlertDialogFooter>
                       <AlertDialogCancel>{tr('cancel', 'Cancel')}</AlertDialogCancel>
                       <AlertDialogAction
+                        disabled={!bulkRejectComment.trim()}
                         onClick={() => runBulk('reject', bulkRejectComment)}
                         className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                       >
@@ -1999,7 +2034,7 @@ function ApprovalsQueue() {
                 </div>
               )}
 
-              <div className="hidden md:block text-[11px] text-muted-foreground">
+              <div className="hidden md:block text-xs text-muted-foreground">
                 {tr('keyboardHint', 'Keyboard: j/k move · Enter open · x select · a approve · r reject')}
               </div>
             </>

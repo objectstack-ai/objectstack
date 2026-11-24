@@ -98,8 +98,24 @@ export interface ApprovalRequestRow {
   payload_display?: Record<string, string>;
   /** Display labels for `payload` fields (field key → target object's field label). */
   payload_labels?: Record<string, string>;
-  /** SLA deadline (`created_at + escalation.timeoutHours`), display-only. */
+  /**
+   * SLA deadline: `created_at + escalation.timeoutHours` on the wall clock, or
+   * that many working hours on a working calendar under `clock: 'working_time'`.
+   */
   sla_due_at?: string;
+  /**
+   * Why a working-time escalation has no `sla_due_at`: its working calendar
+   * cannot count the deadline (ADR-0157 D9). The request does not escalate
+   * until the calendar is fixed; the inbox shows the reason in place of the
+   * SLA countdown.
+   */
+  sla_due_refusal?: {
+    code: 'ERR_WORK_CALENDAR_UNRESOLVED' | 'ERR_WORK_CALENDAR_NOT_MAINTAINED' | 'ERR_WORK_CALENDAR_INVALID';
+    reason?: 'not_found' | 'no_default' | 'ambiguous' | 'no_organization';
+    calendar?: string;
+    date?: string;
+    message: string;
+  };
   /**
    * Owning flow's approval steps (single reads only): one trunk of the graph,
    * not this request's route past a decision, so nothing draws it.

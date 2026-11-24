@@ -57,6 +57,7 @@ import { audiencePermitsSelfRegistration } from '@objectstack/spec/system';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { readAccountInvitation, settleImportResetDelivery } from './account-invitation-marker.js';
 import { withLockoutRefusal } from './sign-in-lockout-refusal.js';
+import { refuseDevSeedPasswordSignIn, withDevSeedPasswordRefusal } from './dev-seed-credential.js';
 import { resolveEmailVerificationRequirement } from './audience-posture.js';
 import { globalAfterHook, type AfterHookHost } from './auth-manager-after-hook.js';
 import { globalBeforeHook, type BeforeHookHost } from './auth-manager-before-hook.js';
@@ -80,6 +81,7 @@ import { createBetterAuthLogSink } from './sso-oidc-refusal-cause.js';
 import { withSystemReadContext } from './objectql-adapter.js';
 import { refuseSsoAccountOutsideProvenDomain, refuseSsoAccountWithoutAddress } from './sso-account-at-proven-domain.js';
 import { refuseSamlAccountKeyContradiction } from './sso-saml-account-key.js';
+import { stageSsoSignInProvider } from './sso-session-provider.js';
 import { acceptEachTotpCodeOnce } from './totp-code-single-use.js';
 
 /** The path better-auth declares for the email sign-up endpoint. */
@@ -178,6 +180,8 @@ export interface AuthInstanceHost {
   resolvePasswordHasher: AuthManager['resolvePasswordHasher'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
+  sendPasswordChangeReminder: AuthManager['sendPasswordChangeReminder'];
+  sendPasswordResetNotice: AuthManager['sendPasswordResetNotice'];
   sendExistingAccountSignUpNotice: AuthManager['sendExistingAccountSignUpNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
@@ -372,6 +376,9 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // (`sso-saml-account-key.ts`).
       validateUserInfo: async (data: any, ctx: any) => {
         this.idpLocale.stage(data, ctx);
+        // The provider an SSO sign-in comes through is staged too, refusing
+        // nothing; the session it mints records it (`sso-session-provider.ts`).
+        stageSsoSignInProvider(data, ctx);
         const contradicted = refuseSamlAccountKeyContradiction(data, this.config.logger);
         if (contradicted) return contradicted;
         const provenDomain = {
@@ -460,7 +467,12 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
         : (disableSignUpFromEnv ?? this.config.emailAndPassword?.disableSignUp);
       return {
         enabled: this.config.emailAndPassword?.enabled ?? true,
-        password: passwordHasher,
+        // A server outside development mode never accepts a development seed
+        // credential at any password check (`dev-seed-credential.ts`).
+        password: withDevSeedPasswordRefusal(passwordHasher, {
+          engine: () => this.config.dataEngine as never,
+          logger: () => this.config.logger,
+        }),
         ...(effectiveDisableSignUp != null
           ? { disableSignUp: effectiveDisableSignUp } : {}),
         // [#11739] Invariant: a posture that permits self-registration
@@ -837,7 +849,11 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
       // [#25224 cut 13] The body moved to `auth-manager-before-hook.ts`; this
       // arrow hands it the members it reads (`BeforeHookHost`) and the one
       // local it read, `setShouldSkipSessionRefresh`.
-      before: createAuthMiddleware((ctx: any) => {
+      before: createAuthMiddleware(async (ctx: any) => {
+        // A password sign-in that submits the development seed password is
+        // refused outside development mode, before any account is read
+        // (`dev-seed-credential.ts`).
+        await refuseDevSeedPasswordSignIn(ctx);
         const readConfig = () => this.config;
         const host: BeforeHookHost = {
           admitSignInAttempt: (...a) => this.admitSignInAttempt(...a),
@@ -878,11 +894,14 @@ export async function createAuthInstance(this: AuthInstanceHost): Promise<Auth<a
           auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
           enforceConcurrentCap: (...a) => this.enforceConcurrentCap(...a),
           externalDirectoryDoorDeps: (...a) => this.externalDirectoryDoorDeps(...a),
+          getDataEngine: (...a) => this.getDataEngine(...a),
           isEmailDeliveryLive: (...a) => this.isEmailDeliveryLive(...a),
           logDurabilityDegradation: (...a) => this.logDurabilityDegradation(...a),
           recordPasswordHistory: (...a) => this.recordPasswordHistory(...a),
           roleChangeGrantDeps: (...a) => this.roleChangeGrantDeps(...a),
           sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
+          sendPasswordChangeReminder: (...a) => this.sendPasswordChangeReminder(...a),
+          sendPasswordResetNotice: (...a) => this.sendPasswordResetNotice(...a),
           settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
           settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
           settleSsoSignOutOfIdp: (...a) => this.settleSsoSignOutOfIdp(...a),

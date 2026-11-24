@@ -105,7 +105,13 @@ function renderForm(opts: {
 }
 
 const saveButton = () => screen.getByTestId('md-form-submit') as HTMLButtonElement;
-const qtyInputs = () => screen.getAllByLabelText('Qty') as HTMLInputElement[];
+const qtyInputs = () => screen.queryAllByLabelText('Qty') as HTMLInputElement[];
+/** Press the grid's Add: the grid draws no trailing entry row (objectstack#35507). */
+const addLine = async () => {
+  await act(async () => {
+    fireEvent.click(screen.getByTestId('line-items-add'));
+  });
+};
 
 /** The parent form has its values and the stored lines have landed. */
 async function ready(container: HTMLElement, mode: 'create' | 'edit', storedLines: number) {
@@ -114,8 +120,9 @@ async function ready(container: HTMLElement, mode: 'create' | 'edit', storedLine
     if (!ref) throw new Error('parent form not ready');
     if (mode === 'edit' && ref.value !== 'PO-1') throw new Error('parent record not loaded');
   });
-  // Every stored line plus the grid's trailing ghost row.
-  await waitFor(() => expect(qtyInputs()).toHaveLength(storedLines + 1));
+  // The grid is drawn, with every stored line (and no entry row below them).
+  await waitFor(() => expect(screen.getByTestId('line-items-add')).toBeTruthy());
+  await waitFor(() => expect(qtyInputs()).toHaveLength(storedLines));
   await waitFor(() => expect(saveButton().disabled).toBe(false));
 }
 
@@ -144,7 +151,8 @@ describe('a mounted master-detail edit form: the next save diffs against what th
     const { container, onSuccess } = renderForm({ batchTransaction: batch });
     await ready(container, 'edit', 0);
 
-    await change(qtyInputs()[0], '5'); // type into the ghost row
+    await addLine();
+    await change(qtyInputs()[0], '5');
     await save(() => batch.mock.calls.length);
     expect(onSuccess).toHaveBeenCalledTimes(1);
     expect(childOps(batch, 0)).toEqual([
@@ -154,7 +162,7 @@ describe('a mounted master-detail edit form: the next save diffs against what th
     // Nothing changed: no child operation at all — not a second create.
     await save(() => batch.mock.calls.length);
     expect(childOps(batch, 1)).toEqual([]);
-    expect(qtyInputs()).toHaveLength(2); // the one line, and the ghost row
+    expect(qtyInputs()).toHaveLength(1); // the one line
 
     // The created row carries the server's id now: editing it is an update.
     await change(qtyInputs()[0], '6');
@@ -196,6 +204,7 @@ describe('a mounted master-detail edit form: the next save diffs against what th
     const { container, onSuccess } = renderForm({ batchTransaction: batch });
     await ready(container, 'edit', 0);
 
+    await addLine();
     await change(qtyInputs()[0], '5');
     await act(async () => {
       fireEvent.click(saveButton());
@@ -252,7 +261,8 @@ describe('a FAILED save advances neither baseline: the retry carries every opera
 
     await change(container.querySelector('input[name="ref"]') as HTMLElement, 'PO-2');
     await change(qtyInputs()[0], '2');
-    await change(qtyInputs()[1], '7'); // the ghost row
+    await addLine();
+    await change(qtyInputs()[1], '7');
     await save(() => batch.mock.calls.length);
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onSuccess).not.toHaveBeenCalled();
@@ -294,6 +304,7 @@ describe('a FAILED save advances neither baseline: the retry carries every opera
 
     await change(container.querySelector('input[name="ref"]') as HTMLElement, 'PO-2');
     await change(qtyInputs()[0], '2');
+    await addLine();
     await change(qtyInputs()[1], '7');
     await save(() => create.mock.calls.length);
     expect(onError).toHaveBeenCalledTimes(1);
@@ -316,6 +327,7 @@ describe('create mode is unchanged (control)', () => {
     const batch = echoBatch();
     const { container, onSuccess } = renderForm({ mode: 'create', batchTransaction: batch });
     await ready(container, 'create', 0);
+    await addLine();
 
     await change(container.querySelector('input[name="ref"]') as HTMLElement, 'PO-9');
     await change(qtyInputs()[0], '5');
@@ -326,9 +338,8 @@ describe('create mode is unchanged (control)', () => {
       { object: 'po_line', action: 'create', data: { qty: 5, po: { $ref: 0 } } },
     ]);
 
-    // Lines back to the lone ghost row, header cleared.
-    await waitFor(() => expect(qtyInputs()).toHaveLength(1));
-    expect(qtyInputs()[0].value).toBe('');
+    // Lines back to none, header cleared.
+    await waitFor(() => expect(qtyInputs()).toHaveLength(0));
     await waitFor(() =>
       expect((container.querySelector('input[name="ref"]') as HTMLInputElement).value).toBe(''),
     );

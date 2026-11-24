@@ -84,7 +84,8 @@ export default class EnvironmentsBind extends Command {
           { stdio: 'inherit', env: process.env },
         );
         if (r.status !== 0) {
-          printError('Compile failed — fix errors above before binding');
+          // Neutral wording, never a classification (ruling record 6998194814).
+          printError('objectstack.config did not load or compile — the reason is printed above; fix it before binding');
           this.exit(1);
         }
       }

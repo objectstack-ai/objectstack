@@ -226,6 +226,36 @@ makes ObjectOS Cloud the target again.
 For the full command reference — every flag, every subcommand — see the
 [CLI reference](/docs/deployment/cli).
 
+### What an install or upgrade does with existing rows
+
+An upgrade changes the definition the rows are read through, not the rows
+themselves, with two exceptions the install performs once, at the install:
+
+- **A declared rename carries its column.** A field declaring `renamedFrom`
+  takes the old column's values; an undeclared rename or a risky type change
+  stops the upgrade before anything is written (see `--confirm-upgrade` in the
+  [CLI reference](/docs/deployment/cli)).
+- **A stored computed field is filled.** When the version you install adds a
+  stored computed field (a non-`formula` field declaring `expression`), changes
+  one's expression, stored type or scale, or turns a `formula` field into one,
+  the install writes every existing row of that object with the value its
+  expression computes — every organization's rows, keeping each row's
+  `updated_at`. The answer's `advisories` reports each field:
+  `stored-expression-filled` with the rows written, or
+  `stored-expression-fill-incomplete` naming what is left and the command that
+  fills it. A version that changes no stored computed field, an install that is
+  refused, and a fresh install whose tables are new write no row and report
+  nothing.
+
+So turning a `formula` field into a stored one is safe to ship in a package
+version: the rows a tenant already holds read the computed value as soon as the
+install answers. A boot or a restart never fills: a definition changed in the
+repository and booted, rather than installed, leaves existing rows `NULL` (or
+holding the old expression's value) until each is next written, and the boot
+log names the field.
+[`os migrate stored-expressions`](/docs/deployment/cli) fills those, and any
+row an install's fill could not write.
+
 ---
 
 ## 4. Preview patterns

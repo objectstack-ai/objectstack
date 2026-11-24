@@ -822,6 +822,22 @@ in 17.1). Both the app and `branding` are strict: a top-level `logo` or `theme` 
 refused with a pointer to `branding`, and a misspelled key inside `branding` is
 refused rather than dropped.
 
+### The app's icon
+
+An app looks the same wherever the Console draws its icon — Home's app tiles, the
+app switcher and its pill, the phone's app list and drawer header, Studio's package
+chip and the command palette's "Switch app" items:
+
+- **`branding.logo`** is drawn when declared.
+- Otherwise the app's **`icon`** is drawn as a glyph on a solid square: the hex
+  `branding.primaryColor` when declared, else a colour of the app's own, picked from
+  the objects' palette (`OBJECT_COLORS` without `gray`) by the app's `name`. The same
+  name gets the same colour on every load, for every viewer and in every environment.
+
+The picked colour is for the icon only and is never written back: an app without a
+`primaryColor` keeps the platform's default `--primary` on its buttons. To choose the
+colour, declare `branding.primaryColor`.
+
 ## Contributing navigation to another app
 
 A package can add menu entries to an app it does not own with
@@ -888,7 +904,7 @@ The Setup app's anchors:
 | `group_people_org` | Users, organizations, business units, teams, invitations |
 | `group_access_control` | Positions, permission sets, sharing rules, API keys |
 | `group_approvals` | Approvals inbox, requests, history, delegations |
-| `group_configuration` | Settings, localization, exchange rates, authentication, email, storage, AI, branding |
+| `group_configuration` | Settings, localization, exchange rates, working calendars, authentication, email, storage, AI, branding |
 | `group_diagnostics` | Sessions, notification events, audit log |
 | `group_integrations` | Webhooks, cloud connection |
 | `group_advanced` | OAuth applications |
@@ -898,6 +914,17 @@ its administrators. One row means 1 unit of the home currency (Localization → 
 of the row's currency, from its effective date until a later row for that currency. To record a month's rates,
 add one row per currency with the first day of the month as the effective date; a correction is an edit to that
 row, and every change lands in the audit log.
+
+**Working Calendars** (`sys_work_calendar`, after Exchange Rates) holds an organization's working calendars
+(ADR-0157): each one's working periods per weekday, in the calendar's time zone; the span its holidays are
+entered for (Maintained From to Maintained Through); and whether it is the default, which a calculation that
+names no calendar uses. The create form opens with the organization's time zone (Localization → Default
+timezone) in the Time Zone field. The **Needs Maintenance** list shows every calendar whose span ends within 60
+days, so next year's holidays are entered before they are needed. **Calendar Exceptions**
+(`sys_work_calendar_exception`) holds a calendar's dated overrides, one row per calendar and date: a Day Off, or
+a Working Day carrying that date's full periods, such as a make-up workday. Its list page imports a year of
+holidays from a file whose `calendar` column names the calendar by its code or name. Both pages need a grant on
+their object, and every change lands in the audit log.
 
 Setup is for platform administration and needs `setup.access`. For
 project-specific administration pages, declare an app of your own.

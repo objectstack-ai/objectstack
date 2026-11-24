@@ -8,7 +8,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { adminRescueNoteOf, adminRescueNoteText, adminRescueReason, type ApprovalSentenceRender } from './admin-rescue-note.js';
+import {
+  adminRescueNoteOf, adminRescueNoteText, adminRescuePositions, adminRescueReason, type ApprovalSentenceRender,
+} from './admin-rescue-note.js';
 import { approvalMessages } from './translations/messages.js';
 
 /** A render over one shipped locale of the catalog, `{{hole}}` filled the `t()` way. */
@@ -46,6 +48,22 @@ describe('[#25576] the admin_rescue note', () => {
       "审批人名单未指向任何人，因此已转交本组织管理员处理：position 'sales_manager' has no holder。",
     );
     expect(adminRescueNoteText(note, renderIn('zh-CN', ['approvalAdminRescueNote']))).toBeUndefined();
+  });
+
+  it('[#35418] names an unheld position by the label the reader is given, and only a position', () => {
+    const note = { abandoned: ['position:crm_sales_manager', 'position:crm_sales_director', 'team:crm_sales_manager'] };
+    const label = (name: string) => (name === 'crm_sales_manager' ? '销售经理' : undefined);
+    expect(adminRescueNoteText(note, renderIn('zh-CN'), label)).toBe(
+      '审批人名单未指向任何人，因此已转交本组织管理员处理：岗位「销售经理」无人任职；'
+      + '岗位「crm_sales_director」无人任职；team「crm_sales_manager」未解析到任何人。',
+    );
+    // A clause the pack lacks falls back to its English, labelled the same way.
+    expect(adminRescueNoteText({ abandoned: ['position:crm_sales_manager'] }, renderIn('zh-CN', ['approvalAdminRescuePositionUnheld']), label))
+      .toBe("审批人名单未指向任何人，因此已转交本组织管理员处理：position '销售经理' has no holder。");
+    // The stored English keeps the name.
+    expect(adminRescueNoteText(note)).toContain("position 'crm_sales_manager' has no holder");
+    expect(adminRescuePositions({ abandoned: ['position:a', 'team:b', 'position:a', 'position:', 'u_1', 'position:c'] }))
+      .toEqual(['a', 'c']);
   });
 
   it('reads only the shape it writes', () => {

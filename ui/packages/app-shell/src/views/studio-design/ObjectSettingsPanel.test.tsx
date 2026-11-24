@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, cleanup } from '@testing-library/react';
 import React from 'react';
 import { t } from '../metadata-admin/i18n';
 import { ObjectSettingsPanel } from './ObjectSettingsPanel';
@@ -38,18 +38,18 @@ describe('ObjectSettingsPanel — record sharing (OWD)', () => {
   it('exposes the sharing model control with the four canonical OWD options', async () => {
     renderPanel(baseDraft);
     // The section header is present.
-    expect(screen.getByText('Record sharing (OWD)')).toBeTruthy();
+    expect(screen.getByText('Who can see which records')).toBeTruthy();
     // Canonical OWD options are all offered.
     const internal = await openDial('owd-internal-select');
-    expect(internal.getByRole('option', { name: 'Private — owner only' })).toBeTruthy();
+    expect(internal.getByRole('option', { name: 'Only the owner can see' })).toBeTruthy();
     expect(
-      internal.getByRole('option', { name: 'Public read — everyone reads, only the owner writes' }),
+      internal.getByRole('option', { name: 'Everyone can see' }),
     ).toBeTruthy();
     expect(
-      internal.getByRole('option', { name: 'Public read/write — everyone reads and writes' }),
+      internal.getByRole('option', { name: 'Everyone can see and edit' }),
     ).toBeTruthy();
     expect(
-      internal.getByRole('option', { name: 'Controlled by parent — inherited from the master record' }),
+      internal.getByRole('option', { name: 'Follows its parent record' }),
     ).toBeTruthy();
   });
 
@@ -66,10 +66,12 @@ describe('ObjectSettingsPanel — record sharing (OWD)', () => {
     renderPanel(baseDraft);
     const desc = screen.getByTestId('owd-internal-desc');
     expect(desc.textContent).toMatch(/refused/i);
-    expect(desc.textContent).toMatch(/security-owd-unset/);
+    // objectstack#36512 — the warning speaks the author's language: no rule
+    // code or ADR number on the page.
+    expect(desc.textContent).not.toMatch(/security-owd-unset|ADR-/);
     // The runtime fallback is still stated — it is what makes `private` the
     // safe pick — but as context, not as an all-clear.
-    expect(desc.textContent).toMatch(/Private/);
+    expect(desc.textContent).toMatch(/Only the owner can see/);
     // Styled as a problem.
     expect(desc.className).toMatch(/amber/);
   });
@@ -83,13 +85,13 @@ describe('ObjectSettingsPanel — record sharing (OWD)', () => {
 
   it('patches sharingModel when a model is picked', async () => {
     const onPatch = renderPanel(baseDraft);
-    fireEvent.click((await openDial('owd-internal-select')).getByRole('option', { name: 'Private — owner only' }));
+    fireEvent.click((await openDial('owd-internal-select')).getByRole('option', { name: 'Only the owner can see' }));
     expect(onPatch).toHaveBeenCalledWith({ sharingModel: 'private' });
   });
 
   it('clears sharingModel back to unset', async () => {
     const onPatch = renderPanel({ ...baseDraft, sharingModel: 'private' });
-    expect(screen.getByTestId('owd-internal-select').textContent).toBe('Private — owner only');
+    expect(screen.getByTestId('owd-internal-select').textContent).toBe('Only the owner can see');
     fireEvent.click(
       (await openDial('owd-internal-select')).getByRole('option', { name: t('engine.studio.settings.sharingUnset', 'en-US') }),
     );
@@ -114,7 +116,7 @@ describe('ObjectSettingsPanel — no external OWD dial (objectui#12353)', () => 
     expect(screen.queryByTestId('owd-external-select')).toBeNull();
     expect(screen.queryByTestId('owd-external-desc')).toBeNull();
     expect(document.body.textContent).not.toMatch(/externalSharingModel/);
-    fireEvent.click((await openDial('owd-internal-select')).getByRole('option', { name: 'Private — owner only' }));
+    fireEvent.click((await openDial('owd-internal-select')).getByRole('option', { name: 'Only the owner can see' }));
     expect(onPatch.mock.calls).toEqual([[{ sharingModel: 'private' }]]);
   });
 });
@@ -156,5 +158,44 @@ describe('ObjectSettingsPanel — capabilities (enable.*, framework#2707/#2727)'
     const onPatch = renderPanel(baseDraft);
     fireEvent.click(screen.getByTestId('cap-trackHistory'));
     expect(onPatch).toHaveBeenCalledWith({ enable: { trackHistory: true } });
+  });
+});
+
+/**
+ * objectstack-ai/objectstack#36290 (ruling 7076513167 point 1) — field change
+ * values show by default and an object can turn them off. `enable.fieldHistory`
+ * has no default: unset is on, so the switch writes `false` to turn values off
+ * and removes the key to turn them back on.
+ */
+describe('ObjectSettingsPanel — field change values (enable.fieldHistory, #36290)', () => {
+  const box = () => screen.getByTestId('cap-fieldHistory') as HTMLInputElement;
+
+  it('is on when the key is unset or true, off only on a literal false', () => {
+    renderPanel(baseDraft);
+    expect(box().checked).toBe(true);
+    cleanup();
+    renderPanel({ ...baseDraft, enable: { fieldHistory: true } });
+    expect(box().checked).toBe(true);
+    cleanup();
+    renderPanel({ ...baseDraft, enable: { fieldHistory: false } });
+    expect(box().checked).toBe(false);
+  });
+
+  it('turning it off writes enable.fieldHistory: false, preserving sibling keys', () => {
+    const onPatch = renderPanel({ ...baseDraft, enable: { trackHistory: true, files: true } });
+    fireEvent.click(box());
+    expect(onPatch.mock.calls).toEqual([[{ enable: { trackHistory: true, files: true, fieldHistory: false } }]]);
+  });
+
+  it('turning it back on removes the key rather than writing true, preserving sibling keys', () => {
+    const onPatch = renderPanel({ ...baseDraft, enable: { fieldHistory: false, feeds: false } });
+    fireEvent.click(box());
+    expect(onPatch.mock.calls).toEqual([[{ enable: { feeds: false } }]]);
+  });
+
+  it('is labelled by its title, separate from Field change history', () => {
+    renderPanel(baseDraft);
+    expect(screen.getByLabelText(t('engine.studio.settings.capFieldHistory', 'en-US'))).toBe(box());
+    expect(t('engine.studio.settings.capFieldHistory', 'en-US')).not.toBe(t('engine.studio.settings.capTrackHistory', 'en-US'));
   });
 });

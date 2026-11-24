@@ -51,7 +51,8 @@
  * Success is now a SINGLE wrap (`data` = the handler's return value), a
  * deliberate rejection (body `throw`, flow rejection, ValidationError) is a
  * 400 carrying `code`/`fields` in `details`, and a crash (`TypeError`, driver
- * class, sandbox timeout — told apart by the error's NAME, #3951) is a 500.
+ * class — told apart by the error's NAME, #3951) is a 500. A sandbox timeout
+ * is a 500 too, but not a crash: its message names the action and its limit.
  *
  *   did a handler run?       no → 404 / 403 / 400 / 503
  *   did it reject or crash?  reject → 400;  crash → 500

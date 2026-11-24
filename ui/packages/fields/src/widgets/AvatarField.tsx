@@ -19,6 +19,7 @@ import {
   type FileValueView,
 } from './file-value.js';
 import { useRestrictedFileText } from './file-affordance.js';
+import { getPersonInitials } from './personDisplay.js';
 
 /**
  * Avatar field widget - provides an avatar/profile picture uploader.
@@ -110,16 +111,9 @@ export function AvatarField({ value, onChange, field, readonly, onUploadingChang
     onChange('');
   };
 
-  // Extract initials for fallback
-  const getInitials = (): string => {
-    const name = avatarField?.defaultName || avatarField?.label || 'User';
-    return name
-      .split(' ')
-      .map((word: string) => word[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-  };
+  // The initials every person face draws, letters only (objectstack#36046).
+  const getInitials = (): string =>
+    getPersonInitials(avatarField?.defaultName || avatarField?.label || 'User');
 
   const fallback = restrictedView ? (
     <AvatarFallback title={restricted.hint} data-slot="file-restricted">

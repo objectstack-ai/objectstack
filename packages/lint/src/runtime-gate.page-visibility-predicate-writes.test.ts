@@ -146,6 +146,9 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
       'validatePrintPageBlocks',
       // #28663 — the page's `variables` declarations.
       'validatePageVariables',
+      // A full record page's header title or action order that differs from
+      // the standard page's (advisory; `validate-record-page-header.ts`).
+      'validateRecordPageHeader',
       // #28005 — an object-form's thank-you panel naming a field the engine
       // does not generate.
       'validateThankYouRecordFields',

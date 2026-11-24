@@ -110,8 +110,11 @@ describe('init scaffolds pass the author-time rules `dev` runs', () => {
 
   // The reported instance, pinned by name so a future template edit that drops
   // the field fails with the incident's own vocabulary rather than a bare count.
+  // Roster: every template that emits an object file. `empty` emits a starter
+  // test and no object (#35218), so "has srcFiles" no longer means "has objects".
   it.each(
-    Object.keys(TEMPLATES).filter((k) => Object.keys(TEMPLATES[k].srcFiles).length > 0),
+    Object.keys(TEMPLATES).filter((k) =>
+      Object.keys(TEMPLATES[k].srcFiles).some((f) => f.includes('src/objects/') && !f.endsWith('index.ts'))),
   )('template "%s" declares an authored OWD on every object it emits', (templateKey) => {
     const namespace = sanitizeNamespace(PROJECT_NAME);
     const objectSources = Object.entries(TEMPLATES[templateKey].srcFiles)

@@ -125,8 +125,10 @@ function expectVerdictKeys(run: Run, payload: Record<string, unknown>, label: st
 /**
  * One shape, four knobs. `engines` absent is one warning (`protocol/missing-
  * engines-range`); a master_detail without `required` is a second; omitting
- * its `deleteBehavior` / `inlineEdit` is two suggestions; an unknown list-view
- * column is an error. Each fixture below turns the knobs it needs and no other.
+ * its `deleteBehavior` and the parent field group that places the line items
+ * (`relatedList`; the FK's `inlineEdit` only picks the form factor) is two
+ * suggestions; an unknown list-view column is an error. Each fixture below
+ * turns the knobs it needs and no other.
  */
 function stack(
   ns: string,
@@ -135,6 +137,7 @@ function stack(
   const { engines = true, requireMaster = true, adviseMaster = true, unknownColumn = false } = opts;
   const enginesLine = engines ? `engines: { protocol: '>=1' },` : '';
   const masterAdvice = adviseMaster ? `deleteBehavior: 'cascade', inlineEdit: true,` : '';
+  const lineGroup = adviseMaster ? `fieldGroups: [{ key: 'lines', label: 'Lines', relatedList: '${ns}_line' }],` : '';
   const masterRequired = requireMaster ? `required: true,` : '';
   const columns = unknownColumn ? `'title', 'nope_missing'` : `'title'`;
   return `
@@ -147,6 +150,7 @@ export default {
       sharingModel: 'private',
       fields: { title: { type: 'text', label: 'Title' } },
       listViews: { all: { label: 'All', columns: [${columns}] } },
+      ${lineGroup}
     },
     {
       name: '${ns}_line',

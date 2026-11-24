@@ -336,7 +336,7 @@ describe('the submitted record heads its sections and links to them (objectstack
     expect(headings.map((h) => h.textContent)).toEqual(['Request', 'Delivery']);
     // The record page's section title: semibold, foreground, over a hairline; not the muted field-label grey.
     for (const h of headings) {
-      expect(h.className).toContain('font-semibold');
+      expect(h.className).toContain('font-medium');
       expect(h.className).toContain('text-foreground');
       expect(h.className).not.toContain('text-muted-foreground');
       expect(h.className).not.toContain('truncate');

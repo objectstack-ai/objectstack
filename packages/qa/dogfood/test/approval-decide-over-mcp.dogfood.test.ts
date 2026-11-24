@@ -317,4 +317,34 @@ describe('an approver\'s agent decides a pending approval request over MCP (#324
     }
     await expectUndecided(requestId, 'recall, send-back and resubmit over MCP');
   });
+
+  /**
+   * A reject through `approval_reject` always carries its reason: it declares its
+   * `comment` required, so the declared param contract (ADR-0104 D2) refuses a
+   * missing or blank one at the REST action door and at MCP `run_action`,
+   * before the confirmation gate and before the approvals route. CONTROL: the
+   * approver's REST reject with a reason rejects the request as before.
+   */
+  it('⭐ a reject with no reason, or a blank one, is refused at the REST action door and over MCP; with a reason it rejects', async () => {
+    const requestId = await openRequest('reject-reason');
+    const restReject = (params: Record<string, unknown>) =>
+      stack.apiAs(approver, 'POST', `/actions/${REQUEST}/approval_reject`, { recordId: requestId, params });
+    for (const params of [{}, { comment: '' }, { comment: '  \n\t ' }]) {
+      const res = await restReject(params);
+      const body: any = await res.json();
+      const label = `REST ${JSON.stringify(params)} → ${JSON.stringify(body)}`;
+      expect([res.status, body?.error?.code ?? body?.code], label).toEqual([400, 'VALIDATION_ERROR']);
+      expect(String(body?.error?.message), label).toMatch(/\bcomment\b/);
+      const viaMcp = await act({ bearer: approver }, 'approval_reject', requestId, false, String(params.comment ?? ''));
+      expect(viaMcp.isError, viaMcp.text).toBe(true);
+      expect([viaMcp.payload?.error?.status, viaMcp.payload?.error?.code], viaMcp.text).toEqual([400, 'VALIDATION_ERROR']);
+      expect(String(viaMcp.payload?.error?.message), viaMcp.text).toMatch(/\bcomment\b/);
+    }
+    await expectUndecided(requestId, 'a reject without a reason');
+
+    const res = await restReject({ comment: 'Over budget.' });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await requestRow(requestId)).status).toBe('rejected');
+    expect((await decisionsOn(requestId)).map((r) => [r.action, r.comment])).toEqual([['reject', 'Over budget.']]);
+  });
 });

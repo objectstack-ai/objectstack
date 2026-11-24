@@ -177,7 +177,16 @@ import { reduceFilterVerdict } from '@objectstack/spec/data';
 // pass names a row's inputs with (`storedExpressionReads`, objectql), so this
 // rule and the engine cannot disagree about which spellings read a field.
 import { analyzeRelationshipTraversals } from '@objectstack/formula';
-import { stripRegions, ownRegionKeys, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
+import {
+  stripRegions,
+  ownRegionKeys,
+  REGION_SLOTS,
+  MAX_REGION_DEPTH,
+  walkFlowNodes,
+  flowNodeLabel,
+  flowDisplayLabel,
+} from './flow-walk.js';
+import type { UserTextParams } from './finding-user-text.js';
 import { objectsAsServed, recordsOf } from './object-graph.js';
 
 export interface FlowLintFinding {
@@ -197,9 +206,35 @@ export interface FlowLintFinding {
    * rejects the same stack (#3782).
    */
   severity?: 'error' | 'warning';
+  /**
+   * The finding's document path (`flows[0].nodes[2]`), when the rule placed it
+   * on a node. Absent, the runtime gate's row spells the path as `where`, as
+   * every finding here did before; present, a draft's `_diagnostics` entry
+   * resolves onto that node, so the flow designer's Problems row selects it.
+   */
+  path?: string;
+  /**
+   * The names the finding's USER sentence interpolates, set only at push sites
+   * whose rule has an entry in `lint-flow-patterns.user-text.ts`; see
+   * `AuthoringFinding.userTextParams`. The builder-facing sentence names the
+   * flow and its nodes by their labels; `where`, `message` and `hint` keep the
+   * machine names for `os validate`, logs and AI authors.
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
+
+/**
+ * Where a flow's nodes sit, for the findings that name one in a user sentence
+ * and place it by path: the flow's display label, and each node's label and
+ * document path, keyed by the node RECORD (the graph walk and the document walk
+ * hand out the same objects). Built once per flow by {@link lintFlowPatterns}.
+ */
+interface FlowNodeSites {
+  flowLabel: string;
+  nodes: WeakMap<object, { label: string; path: string }>;
+}
 
 /** Extract the raw predicate source from a `condition` (string or Expression envelope). */
 function conditionSource(raw: unknown): string {
@@ -342,6 +377,21 @@ export const FLOW_LOOP_BODY_UNCONTAINED = 'flow-loop-body-uncontained';
  * See {@link scanTryCatchWithoutCatch}.
  */
 export const FLOW_TRY_CATCH_WITHOUT_CATCH = 'flow-try-catch-without-catch';
+/**
+ * An `approval` node whose out-edges do not claim both decisions. `error`: the
+ * engine routes the decision by out-edge `label`, matched exactly, and a
+ * decision no edge claims falls back to EVERY out-edge. See
+ * {@link scanApprovalDecisionEdges}.
+ */
+export const FLOW_APPROVAL_DECISION_UNROUTED = 'flow-approval-decision-unrouted';
+/**
+ * An `http` node with no timer: no positive `config.timeoutMs` and no positive
+ * node-level `timeoutMs`. `warning`: the run is held, not lost. See
+ * {@link scanHttpTimeouts}.
+ */
+export const FLOW_HTTP_TIMEOUT_MISSING = 'flow-http-timeout-missing';
+/** #35143 — an after-create and an after-update flow on one object running the same steps (advisory). */
+export const FLOW_CREATE_UPDATE_PAIR = 'flow-create-update-pair';
 
 /**
  * Node types that ship in the box. `config.condition` is only ever READ on the
@@ -1219,6 +1269,7 @@ function scanBranchRouting(
   nodes: AnyRec[],
   edges: AnyRec[],
   findings: FlowLintFinding[],
+  sites?: FlowNodeSites,
 ): void {
   const outEdgesBySource = new Map<string, AnyRec[]>();
   for (const e of edges) {
@@ -1310,6 +1361,27 @@ function scanBranchRouting(
     if (!nid) continue;
     const outs = outEdgesBySource.get(nid) ?? [];
     if (outs.length === 0) continue;
+    // The user sentence's names and the node's path (#34818): the builder
+    // reads the decision and its successors by their labels.
+    const site = sites?.nodes.get(node);
+    const labelOfId = (id: unknown): string => {
+      const target = nodes.find((n) => n.id === id);
+      return target ? (sites?.nodes.get(target)?.label ?? flowNodeLabel(target, 0)) : String(id);
+    };
+    const userSite = (shape: 'none' | 'mixed', targets: readonly AnyRec[]) => ({
+      ...(site ? { path: site.path } : {}),
+      ...(sites
+        ? {
+            userTextParams: {
+              flow: sites.flowLabel,
+              node: site?.label ?? nid,
+              shape,
+              // One label per line: each locale's sentence quotes and joins them.
+              targets: targets.map((e) => labelOfId(e.target)).join('\n'),
+            },
+          }
+        : {}),
+    });
 
     const cfg = (node.config ?? {}) as AnyRec;
     const declaredLabels = new Set(
@@ -1424,6 +1496,7 @@ function scanBranchRouting(
             `Gate the branches: a \`condition\` per out-edge plus \`isDefault: true\` on the fallback, or a ` +
             `\`config.conditions[]\` whose \`label\` matches an out-edge's.`,
           rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+          ...userSite('none', outs),
         });
       }
       // Either way no out-edge is gated, so the mixed-branch check below — an
@@ -1447,6 +1520,7 @@ function scanBranchRouting(
           `Mark the fallback \`isDefault: true\` so it is taken only when no sibling condition matched ` +
           `(BPMN default flow), or give it its own \`condition\`.`,
         rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+        ...userSite('mixed', ungated),
       });
     }
   }
@@ -1759,6 +1833,88 @@ function scanBulkUpdatesMovingStoredInputs(
       // Warning, not `error`: a patch whose computed value is the same on every
       // matched row is stored, so the shape is not provably refused.
       rule: FLOW_MULTI_UPDATE_MOVES_STORED_INPUT,
+    });
+  }
+}
+
+/**
+ * An approval decision continues ONLY down an out-edge whose `label` is exactly
+ * `approve` or `reject` (`APPROVAL_BRANCH_LABELS`, `@objectstack/spec/automation`):
+ * the engine narrows the out-edges to that label (`traverseNext`), and a label no
+ * edge carries falls back to every out-edge. So an approval whose edges are
+ * labelled `Approved` / `通过`, or that claims one decision and not the other,
+ * publishes clean and then runs the approving AND the rejecting branch on the
+ * same decision. An approval with no out-edge at all ends the flow on either
+ * decision and is not reported; a `fault` edge routes failures, not decisions,
+ * and is not counted.
+ */
+function scanApprovalDecisionEdges(
+  at: string,
+  nodes: AnyRec[],
+  edges: AnyRec[],
+  findings: FlowLintFinding[],
+  sites?: FlowNodeSites,
+): void {
+  for (const node of nodes) {
+    if (node.type !== APPROVAL_NODE_TYPE || typeof node.id !== 'string') continue;
+    const outs = edges.filter((e) => e.source === node.id && e.type !== 'fault');
+    if (outs.length === 0) continue;
+    const labels = new Set(outs.map((e) => (typeof e.label === 'string' ? e.label : '')));
+    const missing = (['approve', 'reject'] as const).filter((d) => !labels.has(d));
+    if (missing.length === 0) continue;
+    const written = [...labels].map((l) => (l ? `'${l}'` : '(none)')).join(', ');
+    findings.push({
+      severity: 'error',
+      where: `${at} · approval '${node.id}'`,
+      ...(sites?.nodes.get(node) ? { path: sites.nodes.get(node)!.path } : {}),
+      message:
+        `approval '${node.id}' has no out-edge labelled ${missing.map((d) => `'${d}'`).join(' or ')} ` +
+        `(its out-edge labels: ${written}). The decision is routed by an exact edge label, and a decision no ` +
+        'edge claims runs EVERY out-edge — approving and rejecting branches alike.',
+      hint:
+        "Label the out-edge the approved request takes `label: 'approve'` and the rejected one " +
+        "`label: 'reject'`, exactly as written.",
+      rule: FLOW_APPROVAL_DECISION_UNROUTED,
+    });
+  }
+}
+
+/**
+ * An `http` node with no timer at all: the executor arms one only when
+ * `config.timeoutMs` is a positive number (`timeoutMs ? setTimeout : undefined`
+ * in `service-automation` `builtin/http-nodes.ts`, so `0` arms none), and the
+ * engine races a node against its node-level `timeoutMs` only when that is
+ * positive (`dag-traversal.ts`). With neither, an endpoint that never answers
+ * holds the run — and a record-triggered run holds the save that started it —
+ * for as long as the transport waits. A warning, not an error: the run is
+ * held, not lost.
+ *
+ * A `durable: true` node is not reported: it enqueues onto the HTTP outbox and
+ * returns, and on the save path its no-outbox fallback is sent in the
+ * background, so the run does not wait on the endpoint. Its one waiting arm —
+ * no outbox wired, off the save path — is a deployment fact this lint cannot
+ * see.
+ */
+function scanHttpTimeouts(at: string, nodes: AnyRec[], findings: FlowLintFinding[], sites?: FlowNodeSites): void {
+  const armed = (v: unknown) => typeof v === 'number' && v > 0;
+  for (const node of nodes) {
+    if (node.type !== 'http') continue;
+    const cfg = (node.config ?? {}) as AnyRec;
+    if (armed(cfg.timeoutMs) || armed(node.timeoutMs) || cfg.durable === true) continue;
+    const nodeId = typeof node.id === 'string' ? node.id : 'http';
+    // A number here is not positive (`armed` said so): it arms no timer.
+    const what = typeof cfg.timeoutMs === 'number'
+      ? `sets \`config.timeoutMs: ${cfg.timeoutMs}\`, which arms no timer`
+      : 'sets no `config.timeoutMs`';
+    findings.push({
+      severity: 'warning',
+      where: `${at} · node '${nodeId}' (http)`,
+      ...(sites?.nodes.get(node) ? { path: `${sites.nodes.get(node)!.path}.config` } : {}),
+      message:
+        `http node '${nodeId}' ${what} and no node-level \`timeoutMs\`, so the call has no timeout: an endpoint ` +
+        'that never answers holds the run, and a record-triggered run holds the save that started it.',
+      hint: 'Set `config.timeoutMs` to a positive number of milliseconds, e.g. `timeoutMs: 10000`.',
+      rule: FLOW_HTTP_TIMEOUT_MISSING,
     });
   }
 }
@@ -2281,8 +2437,19 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
   // Built once per stack, read by (f') below for every `multi` update.
   const storedInputs = storedInputsByObject(stack);
+  const flowList: readonly unknown[] = Array.isArray(stack.flows) ? stack.flows : [];
   for (const flow of recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
+    // [#34818] Labels and document paths for the findings that carry a user
+    // sentence. A flow that is not an array member (a keyed map) has no
+    // `flows[N]` path, so its findings keep `where` as their path.
+    const flowIndex = flowList.indexOf(flow);
+    const sites: FlowNodeSites = { flowLabel: flowDisplayLabel(flow, Math.max(flowIndex, 0)), nodes: new WeakMap() };
+    if (flowIndex >= 0) {
+      walkFlowNodes(flow, `flows[${flowIndex}]`).forEach(({ node, path }, i) => {
+        sites.nodes.set(node, { label: flowNodeLabel(node, i), path });
+      });
+    }
     // `Array.isArray` proves the LIST, never its MEMBERS. A YAML `nodes:` item
     // left empty deserialises to `null`, and `nodes.find(n => n.type === …)`
     // four lines down dereferenced it (#16751). Read through `recordsOf` — the
@@ -2562,6 +2729,12 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       // (c) ADR-0044 — approval send-back-for-revision loop footguns.
       scanApprovalReviseLoops(at, graphNodes, graphEdges, findings);
 
+      // (c') An approval whose out-edges do not claim both decisions runs every
+      //      branch on either decision; an http node without a timeout can hold
+      //      its run indefinitely.
+      scanApprovalDecisionEdges(at, graphNodes, graphEdges, findings, sites);
+      scanHttpTimeouts(at, graphNodes, findings, sites);
+
       // (d) #3863 — an edge labelled like an error path but typed 'default' is an
       //     unconditional out-edge: the handler runs on every SUCCESS, in parallel
       //     with the real path, and never on a failure.
@@ -2570,7 +2743,7 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       // (e) #4414 — a decision that declares a branch it cannot route: an
       //     unclaimable branch label, an unconditional sibling that runs anyway,
       //     or a self-contradictory / duplicated `isDefault` marker.
-      scanBranchRouting(at, graphNodes, graphEdges, findings);
+      scanBranchRouting(at, graphNodes, graphEdges, findings, sites);
 
       // (f) #5482 — a `multi: true` write with nothing bounding it: the declared
       //     whole-object delete/update. Scanned per graph like the rest, which is
@@ -2600,5 +2773,83 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       scanTryCatchWithoutCatch(at, graphNodes, findings);
     }
   }
+  scanCreateUpdatePairs(recordsOf(stack.flows), findings);
   return findings;
+}
+
+/**
+ * JSON with object keys sorted at every depth, so two configs that differ only
+ * in key order fingerprint alike.
+ */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const r = v as AnyRec;
+    return `{${Object.keys(r)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableJson(r[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/** Node keys that name or place a node and change nothing it does. */
+const COSMETIC_NODE_KEYS: ReadonlySet<string> = new Set(['id', 'label', 'description', 'position']);
+
+/**
+ * What a flow DOES: each non-start, non-end node whole (its `config`, and
+ * every other key a node carries its work in, such as `connectorConfig`),
+ * order insensitive, with the keys that only name or place it left out.
+ * `undefined` for a flow with no such node.
+ */
+function flowActionSignature(nodes: AnyRec[]): string | undefined {
+  const actions = nodes.filter((n) => n.type !== 'start' && n.type !== 'end');
+  if (actions.length === 0) return undefined;
+  return actions
+    .map((n) => stableJson(Object.fromEntries(Object.entries(n).filter(([k]) => !COSMETIC_NODE_KEYS.has(k)))))
+    .sort()
+    .join('|');
+}
+
+/**
+ * #35143 — two record-change flows on one object, one started after create
+ * and one after update, that run the same steps. That is one rule written
+ * twice: `record-after-write` binds both events in one flow, and two copies
+ * drift the first time one is edited and the other is not. Advisory: both
+ * copies run as written. The runtime publish gate judges one flow per write,
+ * so this speaks on the CLI, where the stack holds both.
+ */
+function scanCreateUpdatePairs(flows: AnyRec[], findings: FlowLintFinding[]): void {
+  const legOf = (t: unknown): 'create' | 'update' | undefined =>
+    t === 'record-after-create' || t === 'record-after-insert' ? 'create'
+    : t === 'record-after-update' ? 'update'
+    : undefined;
+  const pairs = new Map<string, { object: string; create?: string; update?: string }>();
+  for (const flow of flows) {
+    if (typeof flow.name !== 'string' || !flow.name) continue;
+    const nodes = recordsOf(flow.nodes);
+    const cfg = (nodes.find((n) => n.type === 'start')?.config ?? {}) as AnyRec;
+    const leg = legOf(cfg.triggerType);
+    const object = typeof cfg.objectName === 'string' && cfg.objectName ? cfg.objectName : undefined;
+    const signature = flowActionSignature(nodes);
+    if (!leg || !object || !signature) continue;
+    const key = `${object}\u0000${signature}`;
+    const entry = pairs.get(key) ?? { object };
+    entry[leg] ??= flow.name;
+    pairs.set(key, entry);
+  }
+  for (const { object, create, update } of pairs.values()) {
+    if (!create || !update) continue;
+    findings.push({
+      severity: 'warning',
+      where: `flow '${create}' · flow '${update}'`,
+      message:
+        `flows '${create}' (after create) and '${update}' (after update) both watch '${object}' and run the ` +
+        `same steps: one rule written twice, and the copies drift the first time only one of them is edited.`,
+      hint:
+        `Merge them into one flow with config.triggerType 'record-after-write' and delete the other; on the ` +
+        `create run \`previous\` is null, so write the condition to allow it.`,
+      rule: FLOW_CREATE_UPDATE_PAIR,
+    });
+  }
 }

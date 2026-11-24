@@ -31,7 +31,7 @@ import * as React from 'react';
 import { render, cleanup, waitFor } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
 import { en, ru, zh } from '@object-ui/i18n/locales';
-import { GridField } from './GridField';
+import { GridFieldWidget as GridField } from './grid-field/GridFieldWidget';
 
 afterEach(() => cleanup());
 

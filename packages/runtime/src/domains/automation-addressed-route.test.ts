@@ -719,3 +719,103 @@ describe('[#33905] a flow whose only holder\'s package is disabled: the bare doo
         }
     });
 });
+
+/**
+ * [ADR-0126 §7.2, ADR-0150 D4] The toggle door's `200` answers the switched
+ * flow's own state, on a name two packages hold too. The door reaches such a
+ * name through `flowSlotView` (an address, or the bare name with one served
+ * holder left), whose `toggleFlow` switches one slot, while the engine reads
+ * one row per slot under the bare name, in registration order. A row picked by
+ * name there is the FIRST holder's, so each case switches the holder
+ * registered SECOND, with the first one's row reading the opposite state.
+ *
+ * Driven through the real dispatcher over a real `SchemaRegistry`, and an
+ * engine double that keeps each slot's state, switches it in `toggleFlowSlot`
+ * and reads it back the engine's way (`getFlowRuntimeStates`: one row per
+ * slot, under the bare name).
+ */
+describe('[ADR-0126 §7.2] the toggle door answers the switched slot, on a name two packages hold', () => {
+    const NAME = 'convert';
+
+    function registryOf(order: readonly string[], disabled: readonly string[] = []) {
+        const registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        for (const [id, namespace] of [[CRM, 'crm'], [HR, 'hr']]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace } as never, 'code');
+        }
+        for (const holder of order) registry.registerItem('flow', { name: NAME, _packageId: holder }, 'name' as never, holder);
+        for (const id of disabled) registry.disablePackage(id);
+        return registry;
+    }
+
+    /** `slots`: each holder's slot of `NAME` and its state, in registration order. */
+    function dispatcherOver(registry: SchemaRegistry, slots: Array<[string, boolean]>) {
+        const state = new Map(slots);
+        const keyed = (pkg: string | null) => (pkg !== null && state.has(pkg) ? (state.size > 1 ? `${pkg}/${NAME}` : NAME) : undefined);
+        const shared = () => Object.assign(new Error(`Flow '${NAME}' is held by several packages`), { code: 'RESOURCE_CONFLICT', status: 409 });
+        const automation = {
+            handlerReady: true,
+            getFlow: vi.fn(async (name: string) => { if (name === NAME) throw shared(); return null; }),
+            toggleFlow: vi.fn(async (name: string) => { if (name === NAME) throw shared(); }),
+            getFlowRuntimeStates: vi.fn(() => [...state].map(([, enabled]) => ({ name: NAME, enabled, bound: enabled }))),
+            flowSlotKey: vi.fn((pkg: string | null, name: string) => (name === NAME ? keyed(pkg) : undefined)),
+            getFlowSlot: vi.fn((pkg: string | null, name: string) => (name === NAME && keyed(pkg) ? { name, label: `${pkg} flow` } : null)),
+            executeSlot: vi.fn(async () => ({ success: true, output: {} })),
+            toggleFlowSlot: vi.fn(async (pkg: string, _name: string, enabled: boolean) => { state.set(pkg, enabled); }),
+        };
+        const services: Record<string, unknown> = { automation, objectql: { registry } };
+        const resolve = (name: string) => services[name];
+        const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
+        const dispatcher = new HttpDispatcher(kernel);
+        const toggle = async (path: string, enabled: boolean) => {
+            const answered = await dispatcher.handleAutomation(path, 'POST', { enabled }, { request: {}, executionContext: ADMIN } as any, {});
+            return { status: answered.response?.status ?? 200, body: answered.response?.body as any };
+        };
+        return { toggle, automation, stateOf: (pkg: string) => state.get(pkg) };
+    }
+
+    it('switched ON at the second holder\'s address, the first holder off: 200 { enabled: true }, that slot\'s state (FROM: the first holder\'s false)', async () => {
+        const { toggle, automation, stateOf } = dispatcherOver(registryOf([CRM, HR]), [[CRM, false], [HR, false]]);
+        const on = await toggle(`/hr/${NAME}/toggle`, true);
+        expect(automation.toggleFlowSlot.mock.calls.map((c) => [c[0], c[2]])).toEqual([[HR, true]]);
+        expect([on.status, on.body?.data], JSON.stringify(on.body)).toEqual([200, { name: NAME, enabled: true }]);
+        expect(on.body?.data?.enabled).toBe(stateOf(HR));
+        expect(stateOf(CRM)).toBe(false);
+    });
+
+    it('switched OFF at the second holder\'s address, the first holder on: 200 { enabled: false } (FROM: the first holder\'s true)', async () => {
+        const { toggle, stateOf } = dispatcherOver(registryOf([CRM, HR]), [[CRM, true], [HR, true]]);
+        const off = await toggle(`/hr/${NAME}/toggle`, false);
+        expect([off.status, off.body?.data], JSON.stringify(off.body)).toEqual([200, { name: NAME, enabled: false }]);
+        expect(off.body?.data?.enabled).toBe(stateOf(HR));
+        expect(stateOf(CRM)).toBe(true);
+    });
+
+    it('the bare name whose one served holder is the second registered (the first disabled, its slot off): 200 { enabled: true } (FROM: the disabled holder\'s false)', async () => {
+        const { toggle, automation, stateOf } = dispatcherOver(registryOf([CRM, HR], [CRM]), [[CRM, false], [HR, false]]);
+        const on = await toggle(`/${NAME}/toggle`, true);
+        expect(automation.toggleFlowSlot.mock.calls.map((c) => [c[0], c[2]])).toEqual([[HR, true]]);
+        expect([on.status, on.body?.data], JSON.stringify(on.body)).toEqual([200, { name: NAME, enabled: true }]);
+        expect(on.body?.data?.enabled).toBe(stateOf(HR));
+        expect(automation.toggleFlow).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — the first holder\'s address, the second holder reading the opposite: the answer is the first holder\'s own state', async () => {
+        const { toggle, automation, stateOf } = dispatcherOver(registryOf([CRM, HR]), [[CRM, false], [HR, true]]);
+        const on = await toggle(`/crm/${NAME}/toggle`, true);
+        expect(automation.toggleFlowSlot.mock.calls.map((c) => [c[0], c[2]])).toEqual([[CRM, true]]);
+        expect([on.status, on.body?.data], JSON.stringify(on.body)).toEqual([200, { name: NAME, enabled: true }]);
+        expect(on.body?.data?.enabled).toBe(stateOf(CRM));
+    });
+
+    it('CONTROL — a name one package holds still answers its one row read back, not the request', async () => {
+        const { toggle, automation } = dispatcherOver(registryOf([HR]), [[HR, false]]);
+        // The row reads off whatever was asked: the door answers the row.
+        automation.toggleFlowSlot.mockImplementation(async () => {});
+        automation.toggleFlow.mockImplementation(async () => {});
+        automation.getFlow.mockImplementation(async (name: string) => (name === NAME ? { name } : null) as never);
+        const on = await toggle(`/${NAME}/toggle`, true);
+        expect([on.status, on.body?.data], JSON.stringify(on.body)).toEqual([200, { name: NAME, enabled: false }]);
+        expect(automation.getFlowRuntimeStates).toHaveBeenCalled();
+    });
+});

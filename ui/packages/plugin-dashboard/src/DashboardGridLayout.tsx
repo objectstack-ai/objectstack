@@ -42,12 +42,19 @@ function DndEditModeBridge({ editMode }: { editMode: boolean }) {
   return null;
 }
 
+// Ten distinct theme `--chart-N` tokens (ADR-0065 §3); kept in step with
+// `THEME_CHART_PALETTE` in plugin-charts' AdvancedChartImpl.
 const CHART_COLORS = [
   'hsl(var(--chart-1))',
   'hsl(var(--chart-2))',
   'hsl(var(--chart-3))',
   'hsl(var(--chart-4))',
   'hsl(var(--chart-5))',
+  'hsl(var(--chart-6))',
+  'hsl(var(--chart-7))',
+  'hsl(var(--chart-8))',
+  'hsl(var(--chart-9))',
+  'hsl(var(--chart-10))',
 ];
 
 export interface DashboardGridLayoutProps {

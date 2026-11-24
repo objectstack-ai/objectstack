@@ -1,0 +1,136 @@
+/**
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * objectstack#36235 — a related list's count is drawn once it is known, never
+ * as the 0 its empty first read holds. On a slow network the header used to
+ * read 「Contacts 0」 until the rows landed, a false "no related records".
+ *
+ * Pinned here: while the first read is in flight and no count answers for it,
+ * the list's header (and a compact card's header) draws no count; once the
+ * read lands it draws the real one, and a list that really holds no rows
+ * still draws its 0.
+ */
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import React from 'react';
+import { RelatedList } from '../RelatedList';
+import { RelatedCardCountContext, RelatedListCompactContext } from '../relatedListCompact';
+
+beforeAll(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+const ROWS = [
+  { id: 'c1', name: 'Ada' },
+  { id: 'c2', name: 'Grace' },
+];
+
+/** A `find` that answers only when `answer()` is called. */
+function deferredFind() {
+  let answer: (rows: unknown[]) => void = () => {};
+  const find = vi.fn(
+    () => new Promise((resolve) => {
+      answer = (rows) => resolve({ data: rows, total: rows.length });
+    }),
+  );
+  return { find, answer: (rows: unknown[]) => act(async () => { answer(rows); }) };
+}
+
+async function flush() {
+  await act(async () => {
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+  });
+}
+
+/** The list header's count badge (the only `N records` label in the head). */
+const headBadge = () =>
+  document.querySelector('[data-related-list-head] [aria-label$=" records"]')?.textContent ?? null;
+const cardCount = () => document.querySelector('[data-related-card-count]')?.textContent ?? null;
+
+function renderList(find: ReturnType<typeof vi.fn>) {
+  render(
+    <RelatedList
+      title="Contacts"
+      type="table"
+      api="contact"
+      objectName="contact"
+      referenceField="account"
+      parentId="ACC-1"
+      columns={[{ accessorKey: 'name', header: 'Name' }]}
+      dataSource={{ find } as any}
+    />,
+  );
+}
+
+class InView {
+  constructor(private readonly cb: (entries: Array<{ isIntersecting: boolean }>) => void) {}
+  observe() {
+    this.cb([{ isIntersecting: true }]);
+  }
+  unobserve() {}
+  disconnect() {}
+}
+
+function renderCard(find: ReturnType<typeof vi.fn>) {
+  render(
+    <RelatedListCompactContext.Provider value>
+      <RelatedCardCountContext.Provider value={null}>
+        <RelatedList
+          title="Contacts"
+          type="table"
+          api="contact"
+          objectName="contact"
+          referenceField="account"
+          parentId="ACC-1"
+          columns={[{ accessorKey: 'name', header: 'Name' }]}
+          dataSource={{ find } as any}
+        />
+      </RelatedCardCountContext.Provider>
+    </RelatedListCompactContext.Provider>,
+  );
+}
+
+describe('a related list\'s count before it is known (objectstack#36235)', () => {
+  it('the list header draws no count while the first read is in flight, then the real one', async () => {
+    const read = deferredFind();
+    renderList(read.find);
+    await waitFor(() => expect(read.find).toHaveBeenCalled());
+    await flush();
+    expect(document.querySelector('[data-related-list-head]')).not.toBeNull();
+    expect(headBadge()).toBeNull();
+    await read.answer(ROWS);
+    await waitFor(() => expect(headBadge()).toBe('2'));
+  });
+
+  it('CONTROL — a list whose read lands with no rows still draws its 0', async () => {
+    const read = deferredFind();
+    renderList(read.find);
+    await waitFor(() => expect(read.find).toHaveBeenCalled());
+    await read.answer([]);
+    await waitFor(() => expect(headBadge()).toBe('0'));
+  });
+
+  it('a compact card no count answers for draws no count while its rows are read', async () => {
+    vi.stubGlobal('IntersectionObserver', InView);
+    const read = deferredFind();
+    renderCard(read.find);
+    await waitFor(() => expect(read.find).toHaveBeenCalled());
+    await flush();
+    expect(document.querySelector('[data-related-card]')).not.toBeNull();
+    expect(cardCount()).toBeNull();
+    await read.answer(ROWS);
+    await waitFor(() => expect(cardCount()).toBe('2'));
+  });
+});

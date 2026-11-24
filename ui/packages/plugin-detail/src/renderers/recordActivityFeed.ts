@@ -41,7 +41,7 @@ import { FeedFilterMode as FeedFilterModeEnum, FeedItemType as FeedItemTypeEnum 
 import { RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES } from '@objectstack/spec/api';
 import { classifyLoadError } from '@object-ui/react';
 import { recordDisplayValueAt, resolveNameField } from '@object-ui/core';
-import type { FeedItem, FeedItemType } from '@object-ui/types';
+import type { FeedItem, FeedItemType, FieldChangeEntry } from '@object-ui/types';
 import type { FeedFilterMode } from '../RecordActivityTimeline';
 
 const FILTER_MODE_VALUES: readonly string[] = FeedFilterModeEnum.options;
@@ -447,6 +447,94 @@ function activityChangedFields(row: SysActivityRow): string[] | undefined {
   const raw = row?.changed_fields;
   if (!Array.isArray(raw)) return undefined;
   return raw.filter((f): f is string => typeof f === 'string' && f.length > 0);
+}
+
+/**
+ * One changed field of an activity row (objectstack#36290): a
+ * {@link FieldChangeEntry} as the served change code gives it, plus the option
+ * each side matched. The timeline words each side from these facts in the
+ * reader's language: the option by the field's option label, a yes/no
+ * (`oldValue` / `newValue` a boolean, no display text) by the pack's word, and
+ * an empty side (`null`, no display text) by the pack's word for empty.
+ * Package-local hand-off: written by {@link activityFieldChangesOf}, read by
+ * `RecordActivityTimeline`, never authored.
+ */
+export interface ActivityFieldChange extends FieldChangeEntry {
+  oldOption?: string;
+  newOption?: string;
+}
+
+/**
+ * How plugin-audit writes an empty side of a change into the change code: the
+ * writer's `summaryValueOf` renders a null, undefined or `''` value as this
+ * text (`packages/plugins/plugin-audit/src/audit-writers.ts`), and the code
+ * carries no other mark for it.
+ */
+const WRITER_EMPTY_VALUE_TEXT = '∅';
+
+/** One side of a served change: `{ text, option?, boolean? }`, or `null` when it is not that shape. */
+function servedChangeSide(value: unknown): { value: unknown; display?: string; option?: string } | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const { text, option, boolean } = value as { text?: unknown; option?: unknown; boolean?: unknown };
+  if (typeof text !== 'string') return null;
+  if (option !== undefined && typeof option !== 'string') return null;
+  if (boolean !== undefined && typeof boolean !== 'boolean') return null;
+  if (typeof option === 'string') return { value: option, display: text, option };
+  if (typeof boolean === 'boolean') return { value: boolean };
+  if (text === '' || text === WRITER_EMPTY_VALUE_TEXT) return { value: null };
+  return { value: text, display: text };
+}
+
+/**
+ * The changed fields of a `sys_activity` row, one entry per field, from the
+ * field-change code plugin-audit serves in `metadata.summary_message`
+ * (`{ key: 'fieldChanges', object, changes: [{ field, from, to }] }`), or
+ * `undefined` when the row carries none.
+ *
+ * The server narrows that code to the reader before it is served
+ * (objectstack#36290, plugin-audit `activity-field-redaction.ts`): a change of
+ * a field the reader may not read is dropped, and a reference field's change
+ * is kept only for a reader served the referenced record's title. So this
+ * reads the changes it is handed and adds none; the record page draws one line
+ * for each of them. A reference side's text is the record's title the writer
+ * read, and an option side names the option it matched.
+ *
+ * Read from the `metadata` JSON string only, as {@link activityKindOf} reads
+ * the kind. A code this version cannot read whole (any change not of the
+ * shape above) gives `undefined`, and the row draws its summary as before.
+ */
+export function activityFieldChangesOf(row: SysActivityRow): ActivityFieldChange[] | undefined {
+  const raw = row?.metadata;
+  if (typeof raw !== 'string') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  const code = (parsed as { summary_message?: unknown }).summary_message;
+  if (typeof code !== 'object' || code === null || Array.isArray(code)) return undefined;
+  const { key, changes } = code as { key?: unknown; changes?: unknown };
+  if (key !== 'fieldChanges' || !Array.isArray(changes) || changes.length === 0) return undefined;
+  const out: ActivityFieldChange[] = [];
+  for (const change of changes) {
+    if (typeof change !== 'object' || change === null) return undefined;
+    const { field, from, to } = change as { field?: unknown; from?: unknown; to?: unknown };
+    const before = servedChangeSide(from);
+    const after = servedChangeSide(to);
+    if (typeof field !== 'string' || !field || !before || !after) return undefined;
+    out.push({
+      field,
+      oldValue: before.value,
+      newValue: after.value,
+      ...(before.display !== undefined ? { oldDisplayValue: before.display } : {}),
+      ...(after.display !== undefined ? { newDisplayValue: after.display } : {}),
+      ...(before.option !== undefined ? { oldOption: before.option } : {}),
+      ...(after.option !== undefined ? { newOption: after.option } : {}),
+    });
+  }
+  return out;
 }
 
 /** A row as `sys_activity` returns it. Loose on purpose: the block reads a
@@ -1102,6 +1190,7 @@ export function activityRowToFeedItem(
     ? MILESTONE_ACTIVITY_FEED_TYPE
     : mapped;
   const changedFields = activityChangedFields(row);
+  const fieldChanges = activityFieldChangesOf(row);
   const recordFacts = activityRecordFacts(row);
   const item: FeedItem & ActivityRecordFacts = {
     id: row.id as string | number,
@@ -1125,6 +1214,9 @@ export function activityRowToFeedItem(
     ...(activityKind ? { activityKind } : {}),
     actorId: activityActorId(row),
     ...(changedFields ? { changedFields } : {}),
+    // Each changed field with its before and after values, as served to this
+    // reader (objectstack#36290). See `activityFieldChangesOf`.
+    ...(fieldChanges ? { fieldChanges } : {}),
     // Which record the summary names, and by what name, as stored
     // (objectstack#29962). See `withReaderRecordName`.
     ...recordFacts,

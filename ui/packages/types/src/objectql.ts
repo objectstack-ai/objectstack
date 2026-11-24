@@ -158,6 +158,8 @@ import type {
   // `ObjectTreeSchema.tree` below takes the protocol's own type. Aliased for
   // the reason `SpecGanttConfig` above is.
   TreeConfig as SpecTreeConfig,
+  // objectstack#34382 — the `object-timesheet` node's `timesheet` block.
+  TimesheetConfig as SpecTimesheetConfig,
   // objectui#9239 — `ComponentPropsMap['object-calendar']`'s author state, so
   // `ObjectCalendarSchema.data` below DERIVES the protocol's `data` row rather
   // than re-spelling it. Aliased because the bare name is the protocol's, and a
@@ -746,9 +748,12 @@ export interface BulkActionDef {
    *   injects `params._selectedIds: string[]` (every selected record id) and
    *   publishes the full records as `context.selectedRecords`, so the server
    *   can produce a single aggregate artifact (zip of QR codes, merged PDF,
-   *   batch print job…). Result semantics are all-or-nothing: the one call
-   *   covers the whole selection, so per-row retry is unavailable — a total
-   *   failure keeps the selection for a whole-run re-run.
+   *   batch print job…). A rejection is one outcome for the whole
+   *   selection; a run that moved some rows and refused others resolves
+   *   with a `BulkActionResult` (`{ succeeded, failed }`,
+   *   `@objectstack/spec/ui`), a non-empty `failed` being a legal success
+   *   answer. Per-row retry is unavailable — a total failure keeps the
+   *   selection for a whole-run re-run.
    *
    * Ignored for `operation: 'update' | 'delete'` (their bulk fast-path already
    * aggregates per batch) and for a `custom` def without `actionDef` (nothing
@@ -1321,16 +1326,23 @@ export interface ObjectGridSchema extends BaseSchema {
   editable?: boolean;
 
   /**
-   * Enable single-click editing mode
-   * When true with editable, clicking a cell enters edit mode (instead of double-click)
+   * RETIRED (objectstack#36270, ADR-0049) — the switch between opening a cell
+   * editor on a single click and on a double click. A grid that renders
+   * editable (`editable` set and the viewer allowed to edit) now selects a cell
+   * first: a click selects it, and double-click, Enter, F2 or typing opens its
+   * editor, each committed cell saved on its own. That model has no
+   * single-click entry, so `ObjectGrid` no longer reads the key, and
+   * `@objectstack/spec` refuses it by name on `object-grid`.
    *
-   * `ObjectGrid` reads it as `schema.singleClickEdit ?? true`, so an absent key
-   * means single-click editing, as the spec's `object-grid` row says ("default true
-   * when editable"). This comment read `@default false` until objectui#6152 round 6,
-   * which mirrored the key and measured the default through the real registry.
-   * @default true
+   * `?: never`, not a deletion — this package's tombstone convention (see
+   * `resizableColumns` above). Lockstep with the Zod twin
+   * (`zod/objectql.zod.ts`, `retirementTombstone()`). `DataTableSchema`'s own
+   * `singleClickEdit`, a flag a host sets in code, is unchanged.
+   *
+   * @deprecated RETIRED (objectstack#36270) — delete the key; `editable` decides
+   * whether the grid edits.
    */
-  singleClickEdit?: boolean;
+  singleClickEdit?: never;
   
   /**
    * Grouping Configuration (Airtable-style)
@@ -1372,9 +1384,12 @@ export interface ObjectGridSchema extends BaseSchema {
    *
    * `ObjectGrid` reads it as `schema.keyboardNavigation ?? inlineEditable`, where
    * `inlineEditable` is the authored `editable` AND the viewer's write verdict on
-   * the object — the one value the grid's inline editing itself obeys. So a grid
-   * that renders editable has it on, a grid that renders read-only keeps its Tab
-   * behaviour unless this is `true`, and `false` turns it off on an editable grid.
+   * the object — the one value the grid's inline editing itself obeys. A grid
+   * that renders read-only keeps its Tab behaviour unless this is `true`. A grid
+   * that renders editable is select-first by default (objectstack#36270), and
+   * the select-first model always keeps navigation on, so `false` has no effect
+   * there. Only a host that keeps the staged model (`cellSelection={false}` on
+   * `ObjectGrid`) lets `false` turn it off on an editable grid.
    * @default true when the grid renders editable
    */
   keyboardNavigation?: boolean;
@@ -3293,6 +3308,9 @@ export interface NamedListView {
    */
   tree?: ListViewSchema['tree'];
 
+  /** Timesheet configuration. Consumed by `ObjectTimesheet` (`@object-ui/plugin-timesheet`, objectstack#34382). */
+  timesheet?: ListViewSchema['timesheet'];
+
   /**
    * The audience gate — `@objectstack/spec` 18's one list-view capability key
    * (objectstack#22611, ruling A): a list of capabilities, ALL required, with
@@ -3819,6 +3837,23 @@ export interface ObjectTreeSchema extends BaseSchema {
    * @deprecated Not a channel `object-tree` reads — nothing renders it.
    */
   children?: never;
+}
+
+/**
+ * Object Timesheet Component Schema (objectstack#34382)
+ *
+ * The editable row × weekday grid `ListView` composes for a `type: 'timesheet'`
+ * view: one record per filled cell, keyed by `timesheet.rowFields`, placed by
+ * `timesheet.dateField` and valued by `timesheet.valueField`.
+ */
+export interface ObjectTimesheetSchema extends BaseSchema {
+  type: 'object-timesheet';
+  /** The object whose records the grid pivots. */
+  objectName: string;
+  /** The binding — the spec's `TimesheetConfig`, by reference. */
+  timesheet?: SpecTimesheetConfig;
+  /** Base query filter, joined with the displayed week on `dateField`. */
+  filter?: QueryParams['$filter'];
 }
 
 /**
@@ -6182,6 +6217,7 @@ export type ObjectQLComponentSchema =
   | ObjectViewSchema
   | ObjectMapSchema
   | ObjectTreeSchema
+  | ObjectTimesheetSchema
   | ObjectGanttSchema
   | ObjectCalendarSchema
   | ObjectKanbanSchema

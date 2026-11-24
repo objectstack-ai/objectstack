@@ -117,6 +117,7 @@
  * read gate and the redaction.
  */
 
+import { operationUserMessage, type UserMessageCaller } from '@objectstack/core';
 import { sideCopyColumnsOf } from './side-copy-columns.js';
 import { FieldReferenceSchema } from '@objectstack/spec/data';
 import { ACTIVITY_STAMPED_COLUMNS } from './activity-changed-fields.js';
@@ -374,6 +375,7 @@ export type ParentFieldQueryRefusal = Error & {
   object: string;
   fields: string[];
   details: { object: string; fields: string[]; reason: string };
+  userMessage?: string;
 };
 
 /**
@@ -386,6 +388,7 @@ export function parentFieldQueryRefusal(
   guard: ParentFieldQueryGuard,
   operation: string,
   named: NamedValueBearingColumns,
+  caller?: UserMessageCaller | null,
 ): ParentFieldQueryRefusal {
   const aggregateRole = operation === 'aggregate' && named.aggregate.length > 0;
   const fields = aggregateRole ? named.aggregate : [...new Set([...named.predicate, ...named.aggregate])];
@@ -402,6 +405,8 @@ export function parentFieldQueryRefusal(
   err.object = guard.object;
   err.fields = [...fields];
   err.details = { object: guard.object, fields: [...fields], reason: 'field_predicate_denied' };
+  // [#34699] The user's half of the predicate refusal, naming no field.
+  if (!aggregateRole) err.userMessage = operationUserMessage('query_field_not_readable', caller);
   return err;
 }
 
@@ -440,7 +445,7 @@ function installParentFieldQueryGuard(
         );
         refuse = true;
       }
-      if (refuse) throw parentFieldQueryRefusal(guard, ctx.operation, named);
+      if (refuse) throw parentFieldQueryRefusal(guard, ctx.operation, named, ctx.context);
       return next();
     },
     { object: guard.object },

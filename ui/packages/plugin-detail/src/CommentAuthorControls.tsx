@@ -10,6 +10,7 @@ import * as React from 'react';
 import { Button, Textarea } from '@object-ui/components';
 import { Pencil, Trash2 } from 'lucide-react';
 import type { FeedItem } from '@object-ui/types';
+import { useDiscussionContext } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
 
 /**
@@ -39,6 +40,8 @@ export interface CommentBodyProps {
   onDeleteComment?: (itemId: string | number) => void | Promise<void>;
   /** The body paragraph's classes: the timeline row and a reply each keep their own. */
   bodyClassName: string;
+  /** The Edit and Delete row's classes; a row under the body by default. */
+  controlsClassName?: string;
 }
 
 /**
@@ -61,11 +64,16 @@ export const CommentBody: React.FC<CommentBodyProps> = ({
   onEditComment,
   onDeleteComment,
   bodyClassName,
+  controlsClassName = 'mt-1 flex items-center gap-0.5',
 }) => {
   const { t } = useDetailTranslation();
   const own = offersAuthorControls(item);
   const edit = own ? onEditComment : undefined;
-  const remove = own ? onDeleteComment : undefined;
+  // Where the host's Delete is the own-comment delete door
+  // (`ownCommentDeletesOnly`, objectstack#36191), a comment that has replies
+  // is kept by the door, so it offers no Delete.
+  const keptForReplies = useDiscussionContext()?.ownCommentDeletesOnly === true && (item.replyCount ?? 0) > 0;
+  const remove = own && !keptForReplies ? onDeleteComment : undefined;
   // `null` while the text is shown; the draft while the editor is open.
   const [draft, setDraft] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
@@ -137,7 +145,7 @@ export const CommentBody: React.FC<CommentBodyProps> = ({
     <>
       {item.body && <p className={bodyClassName}>{item.body}</p>}
       {(edit || remove) && (
-        <div className="mt-1 flex items-center gap-0.5">
+        <div className={controlsClassName}>
           {edit && (
             <Button
               variant="ghost"

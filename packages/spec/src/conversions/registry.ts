@@ -71,6 +71,7 @@ import { objectExternalSharingModelRemoved } from './entries/18/object-external-
 import { objectGridDefaultFiltersRemoved } from './entries/18/object-grid-default-filters-removed.js';
 import { objectGridDefaultSortRemoved } from './entries/18/object-grid-default-sort-removed.js';
 import { objectGridResizableColumnsRemoved } from './entries/18/object-grid-resizable-columns-removed.js';
+import { objectGridSingleClickEditRemoved } from './entries/18/object-grid-single-click-edit-removed.js';
 import { objectKanbanQuickAddRemoved } from './entries/18/object-kanban-quick-add-removed.js';
 import { pageHeaderBreadcrumbRemoved } from './entries/18/page-header-breadcrumb-removed.js';
 import { pageHeaderShowStarRemoved } from './entries/18/page-header-show-star-removed.js';
@@ -120,6 +121,7 @@ import { actionAriaRemoved } from './entries/18/action-aria-removed.js';
 import { dashboardWidgetChartConfigStructureRemoved } from './entries/18/dashboard-widget-chart-config-structure-removed.js';
 import { objectMasterDetailFormDetailSortFieldRemoved } from './entries/18/object-master-detail-form-detail-sort-field-removed.js';
 import { objectTenancyOrganizationFieldRemoved } from './entries/18/object-tenancy-organization-field-removed.js';
+import { viewColumnStateRemoved } from './entries/18/view-column-state-removed.js';
 import { viewItemOwnerHiddenRemoved } from './entries/18/view-item-owner-hidden-removed.js';
 import { viewOverlayOwnerHiddenRemoved } from './entries/18/view-overlay-owner-hidden-removed.js';
 import { viewListFilterableFieldsRemoved } from './entries/18/view-list-filterable-fields-removed.js';
@@ -252,6 +254,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: objectGridDefaultFiltersRemoved, order: 35.5 },
   { conversion: objectGridDefaultSortRemoved, order: 14 },
   { conversion: objectGridResizableColumnsRemoved, order: 57 },
+  { conversion: objectGridSingleClickEditRemoved, order: 83 },
   { conversion: objectKanbanQuickAddRemoved, order: 15 },
   { conversion: objectMasterDetailFormDetailSortFieldRemoved, order: 60 },
   { conversion: objectTenancyOrganizationFieldRemoved, order: 35 },
@@ -288,6 +291,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: translationWidgetSubCaptionRemoved, order: 55 },
   { conversion: tursoConfigEncryptionKeyRemoved, order: 74 },
   { conversion: tursoConfigTimeoutToTimeoutMs, order: 28 },
+  { conversion: viewColumnStateRemoved, order: 83 },
   { conversion: viewItemOwnerHiddenRemoved, order: 37 },
   { conversion: viewListFilterableFieldsRemoved, order: 71 },
   { conversion: viewListTabsRemoved, order: 46 },

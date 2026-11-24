@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 40 — spawns `os serve` (src, via runServe) once per single-cause fixture: five boots, three refused and two that reach the ready banner; budget to be re-measured
+// test-budget: 40 — spawns the real producer once per single-cause fixture: five boots, three refused and two that reach the ready banner; budget to be re-measured
 
 /**
  * `os serve` refuses to boot when a `plugins` entry fails to load and it cannot

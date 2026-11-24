@@ -39,6 +39,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { t } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 const en = (key: string) => t(key, 'en-US');
 
@@ -51,6 +52,8 @@ function makeServer(objects: Record<string, Body>) {
     list: async () => Object.entries(objects).map(([name, body]) => ({ name, label: body.label ?? name })),
     listDrafts: async () => [],
     layered: async (_type: string, name: string) => ({ effective: objects[name] ?? {}, code: null }),
+    publish: async () => ({}),
+    reset: async () => ({}),
     getDraft: async () => null,
     save: async (_type: string, name: string, body: Body, opts?: Body) => {
       saved.push({ name, body, opts });
@@ -72,7 +75,7 @@ const DIALS = ['owd-internal-p_int', 'owd-internal-p_ext'] as const;
 async function renderPanel(objects: Record<string, Body> = OBJECTS(), readOnly?: boolean) {
   const server = makeServer(objects);
   const utils = render(
-    <PackageOwdOverviewPanel client={server.client} packageId="pkg.a" locale="en-US" readOnly={readOnly} />,
+    <StudioSaveHarness><PackageOwdOverviewPanel client={server.client} packageId="pkg.a" locale="en-US" readOnly={readOnly} /></StudioSaveHarness>,
   );
   await screen.findByTestId('owd-row-p_int');
   return { ...utils, saved: server.saved };
@@ -92,7 +95,8 @@ async function pick(testId: string, label: string): Promise<void> {
   fireEvent.click(option);
 }
 
-const saveButton = () => screen.getByTestId('owd-save') as HTMLButtonElement;
+/** The top bar's Save (objectstack#36511), drawn only while a dial holds an unsaved edit. */
+const saveButton = () => screen.queryByTestId('studio-save') as HTMLButtonElement | null;
 
 beforeEach(() => {
   // jsdom has no layout — stub the scroll used by the deep-link highlight.
@@ -158,12 +162,12 @@ describe('every option saves what the native dial saved', () => {
       const { saved } = await renderPanel();
       await pick(testId, label);
       if (json === null) {
-        expect(saveButton()).toBeDisabled();
+        expect(saveButton()).toBeNull();
         expect(saved).toEqual([]);
         return;
       }
       expect(saveButton()).toBeEnabled();
-      fireEvent.click(saveButton());
+      fireEvent.click(saveButton()!);
       await waitFor(() => expect(saved).toHaveLength(1));
       expect(JSON.stringify(saved)).toBe(json);
     },
@@ -196,7 +200,7 @@ describe('a stored value no option carries is what the trigger shows', () => {
     expect(listed[0]).toBe('full');
     expect(listed.slice(1)).toEqual(WRITES.filter(([d]) => d === 'owd-internal-p_int').map(([, label]) => label));
     fireEvent.click(screen.getAllByRole('option')[0]);
-    expect(saveButton()).toBeDisabled();
+    expect(saveButton()).toBeNull();
     expect(saved).toEqual([]);
   });
 });
@@ -210,7 +214,7 @@ describe('the keyboard alone picks', () => {
       within(listbox).getByRole('option', { name: en('engine.studio.settings.sharingPrivate') }),
       { key: 'Enter' },
     );
-    fireEvent.click(saveButton());
+    fireEvent.click(saveButton()!);
     await waitFor(() => expect(saved).toHaveLength(1));
     expect(JSON.stringify(saved)).toBe(SAVED('p_int', { name: 'p_int', label: 'Int', sharingModel: 'private' }));
   });

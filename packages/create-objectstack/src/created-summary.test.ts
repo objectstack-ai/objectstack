@@ -48,13 +48,14 @@ import {
 let root: string;
 
 /**
- * The published catalog — one entry per `skills/*\/SKILL.md` on this tree; the
- * real run reports the same count as `Found N skills`. Ten since the published
- * PM Dispatch skill was deleted (2026-09-10); it was eleven before.
+ * The published catalog — one entry per `skills/objectstack-*\/SKILL.md` on this
+ * tree. Eleven: ten since the published PM Dispatch skill was deleted
+ * (2026-09-10), then `objectstack-ask` joined.
  */
 const SKILLS = [
   'objectstack-ai',
   'objectstack-api',
+  'objectstack-ask',
   'objectstack-automation',
   'objectstack-data',
   'objectstack-formula',
@@ -195,7 +196,7 @@ describe('created-summary — reachability', () => {
 describe('created-summary — readability', () => {
   it('collapses big trees instead of enumerating them', () => {
     const entries = summarizeTree(root);
-    // 10 skills x 2 files plus a 2050-entry node_modules: an
+    // 11 skills x 2 files plus a 2050-entry node_modules: an
     // enumeration would be thousands of lines. The bar is reachability AND a
     // summary a human reads, so bulk arrives as directory lines.
     expect(entries.length).toBeLessThan(60);
@@ -220,21 +221,21 @@ describe('created-summary — readability', () => {
     // package in node_modules and `.claude/skills/*` into `.agents/skills/`
     // (measured, skills-install.ts). That shape is built here in a tree of its
     // own. Following the links would double-count the catalog and report a
-    // size the disk does not hold. A ten-skill catalog puts each farm exactly
-    // AT COLLAPSE_AT, so it is ENUMERATED (a directory collapses only above the
-    // threshold) and the property is read off the symlink lines themselves:
-    // each is one entry whose size is the link's own bytes — the target path
-    // string, as `lstat` reports it — never the tree it points at. Should the
-    // catalog grow past COLLAPSE_AT again, the farms collapse to one line each
-    // and this test moves to asserting on those lines' `entries` and `bytes`.
+    // size the disk does not hold. An eleven-skill catalog puts each farm
+    // ABOVE COLLAPSE_AT, so it collapses to one line, and the property is read
+    // off that line's `entries` and `bytes`: one entry per link, sized as the
+    // links' own bytes — the target path strings, as `lstat` reports them —
+    // never the trees they point at. Should the catalog shrink to COLLAPSE_AT
+    // or under, the farms are enumerated and this test moves to asserting on
+    // the symlink lines themselves.
     expect(
       SKILLS.length,
-      'the farm must sit at or under COLLAPSE_AT for the enumerate-path reading below',
-    ).toBeLessThanOrEqual(COLLAPSE_AT);
+      'the farm must sit above COLLAPSE_AT for the collapse-path reading below',
+    ).toBeGreaterThan(COLLAPSE_AT);
     const linked = fs.mkdtempSync(path.join(os.tmpdir(), 'summary-linked-'));
     try {
       const pkgSkills = path.join('node_modules', '@objectstack', 'skills', 'dist', 'skills');
-      const targets = new Map<string, string>();
+      const farmBytes = new Map<string, number>();
       for (const skill of SKILLS) {
         for (const f of ['SKILL.md', 'references/guide.md']) {
           const abs = path.join(linked, pkgSkills, skill, f);
@@ -247,22 +248,22 @@ describe('created-summary — readability', () => {
         ] as const) {
           fs.mkdirSync(path.join(linked, farm), { recursive: true });
           fs.symlinkSync(target, path.join(linked, farm, skill));
-          targets.set(`${farm}/${skill}`, target);
+          farmBytes.set(farm, (farmBytes.get(farm) ?? 0) + Buffer.byteLength(target));
         }
       }
       const entries = summarizeTree(linked);
       expect(unreachablePaths(entries, walkWritten(linked))).toEqual([]);
       const real = entries.find((e) => e.path === `${pkgSkills.split(path.sep).join('/')}/`);
       expect(real, 'the real catalog tree must still collapse — two files per skill').toBeTruthy();
-      const links = entries.filter((e) => targets.has(e.path));
-      expect(links.map((e) => e.path).sort()).toEqual([...targets.keys()].sort());
-      for (const link of links) {
-        expect(link.kind).toBe('file');
-        expect(link.entries).toBe(1);
-        expect(link.bytes, `${link.path} must be sized as the link, not as its target`).toBe(
-          Buffer.byteLength(targets.get(link.path)!),
-        );
-        expect(link.bytes).toBeLessThan(real!.bytes / SKILLS.length);
+      expect(farmBytes.size).toBe(2);
+      for (const [farm, bytes] of farmBytes) {
+        const line = entries.find((e) => e.path === `${farm}/`);
+        expect(line, `${farm}/ must collapse to one line`).toBeTruthy();
+        expect(line!.kind).toBe('dir');
+        expect(line!.truncated).toBe(false);
+        expect(line!.entries, `${farm}/ must count each link once, not the tree behind it`).toBe(SKILLS.length);
+        expect(line!.bytes, `${farm}/ must be sized as its links, not as their targets`).toBe(bytes);
+        expect(line!.bytes).toBeLessThan(real!.bytes);
       }
     } finally {
       fs.rmSync(linked, { recursive: true, force: true });

@@ -20,11 +20,16 @@
  *  - CONTROL: a package not installed here does not read the list at all;
  *  - a list refused `403` (a caller without `manage_metadata`) renders no
  *    panel and no error.
+ *
+ * objectstack#34094 — the prompt and the Grant / Dismiss / Revoke toasts
+ * name the set by the label the package's own sets carry (read through the
+ * metadata client, stubbed here), the machine name only when the set has no
+ * label (CONTROL).
  */
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const PKG = 'app.example.crm';
 
@@ -41,6 +46,9 @@ const api = vi.hoisted(() => ({
   reopen: vi.fn(),
 }));
 
+// The package's permission sets as the metadata client lists them.
+const meta = vi.hoisted(() => ({ list: vi.fn() }));
+
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
   useParams: () => ({ packageId: 'pkg_1' }),
@@ -52,13 +60,19 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useAuth: () => ({ activeOrganization: { id: 'org_1' } }),
 }));
 
-// `t` echoes the KEY, as the sibling suites do.
+// `t` echoes the KEY, as the sibling suites do, and the interpolation values
+// after it, so a pin reads which set a string names.
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
-    t: (key: string) => `«${key}»`,
+    t: (key: string, values?: Record<string, unknown>) => `«${key}»${values ? ` ${JSON.stringify(values)}` : ''}`,
     language: 'en',
   }),
+}));
+
+vi.mock('../../../views/metadata-admin/useMetadata', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useMetadataClient: () => meta,
 }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() } }));
@@ -147,6 +161,7 @@ beforeEach(() => {
   state.cloudInstall = null;
   state.localInstalls = [];
   state.installLocal = false;
+  meta.list.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -216,6 +231,97 @@ describe('objectstack#33158 — an installed package page draws its suggested bi
     await new Promise((r) => setTimeout(r, 0));
     expect(screen.queryByTestId('suggested-bindings-panel')).toBeNull();
     expect(screen.queryByText(/manage_metadata/)).toBeNull();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('objectstack#34094 — the prompt and the toasts name the set by its label', () => {
+  const SETS = [
+    { name: 'crm_user', label: 'CRM user' },
+    { name: 'crm_admin', label: 'CRM admin' },
+  ];
+  const ACCEPTED = { ...PENDING, status: 'confirmed' as const, deployment_decision: true };
+  const DISMISSED = { ...PENDING, status: 'dismissed' as const, deployment_decision: true };
+
+  const installed = () => {
+    state.cloudInstall = { installationId: 'inst_1', version: '6.1.2', withSampleData: false };
+  };
+  const successTexts = () => (toast.success as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+
+  it('the prompt names the label, read from the package\'s own sets', async () => {
+    installed();
+    meta.list.mockResolvedValue(SETS);
+    api.list.mockResolvedValue([PENDING]);
+    await boot();
+    render(<MarketplacePackagePage />);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() => expect(row).toHaveTextContent('"set":"CRM user"'));
+    expect(row).toHaveTextContent('«marketplace.suggestedBindings.promptEveryone»');
+    expect(row).not.toHaveTextContent('"set":"crm_user"');
+    expect(meta.list).toHaveBeenCalledWith('permission', { packageId: PKG });
+  });
+
+  it('Grant, then Revoke: both toasts and the accepted line name the label', async () => {
+    installed();
+    meta.list.mockResolvedValue(SETS);
+    api.list.mockResolvedValue([PENDING]);
+    api.confirm.mockResolvedValue({ suggestion: ACCEPTED, bindingCreated: true });
+    api.dismiss.mockResolvedValue(DISMISSED);
+    await boot();
+    render(<MarketplacePackagePage />);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() => expect(row).toHaveTextContent('"set":"CRM user"'));
+
+    fireEvent.click(within(row).getByTestId('suggested-binding-confirm-crm_user'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect(successTexts()[0]).toBe('«marketplace.suggestedBindings.confirmedToast» {"set":"CRM user","anchor":"everyone"}');
+    expect(row).toHaveTextContent('«marketplace.suggestedBindings.acceptedState» {"set":"CRM user"}');
+
+    fireEvent.click(within(row).getByTestId('suggested-binding-revoke-crm_user'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+    expect(successTexts()[1]).toBe('«marketplace.suggestedBindings.revokedToast» {"set":"CRM user"}');
+  });
+
+  it('Dismiss: the toast names the label', async () => {
+    installed();
+    meta.list.mockResolvedValue(SETS);
+    api.list.mockResolvedValue([PENDING]);
+    api.dismiss.mockResolvedValue(DISMISSED);
+    await boot();
+    render(<MarketplacePackagePage />);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() => expect(row).toHaveTextContent('"set":"CRM user"'));
+    fireEvent.click(within(row).getByTestId('suggested-binding-dismiss-crm_user'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect(successTexts()[0]).toBe('«marketplace.suggestedBindings.dismissedToast» {"set":"CRM user"}');
+  });
+
+  it('CONTROL: a set with no label is named by its machine name', async () => {
+    installed();
+    meta.list.mockResolvedValue([{ name: 'crm_user', label: '' }, { name: 'crm_admin', label: 'CRM admin' }]);
+    api.list.mockResolvedValue([PENDING]);
+    api.dismiss.mockResolvedValue(DISMISSED);
+    await boot();
+    render(<MarketplacePackagePage />);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() => expect(meta.list).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(row).toHaveTextContent('«marketplace.suggestedBindings.promptEveryone» {"set":"crm_user"}');
+    fireEvent.click(within(row).getByTestId('suggested-binding-dismiss-crm_user'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+    expect(successTexts()[0]).toBe('«marketplace.suggestedBindings.dismissedToast» {"set":"crm_user"}');
+  });
+
+  it('CONTROL: a refused read of the sets names the set by its machine name, with no error', async () => {
+    installed();
+    meta.list.mockRejectedValue(refused(403, 'PERMISSION_DENIED', 'denied'));
+    api.list.mockResolvedValue([PENDING]);
+    await boot();
+    render(<MarketplacePackagePage />);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() => expect(meta.list).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(row).toHaveTextContent('«marketplace.suggestedBindings.promptEveryone» {"set":"crm_user"}');
     expect(toast.error).not.toHaveBeenCalled();
   });
 });

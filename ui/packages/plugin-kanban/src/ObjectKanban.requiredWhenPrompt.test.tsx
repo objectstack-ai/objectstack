@@ -195,6 +195,12 @@ describe('ObjectKanban — a drop that makes fields required collects them (#425
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText('Complete required fields')).toBeInTheDocument();
     expect(within(dialog).getByText('Win Reason')).toBeInTheDocument();
+    // objectstack#35956 — the shared dialog names the record and the move,
+    // read-only, above the field.
+    expect(within(dialog).getByText(DEAL)).toBeInTheDocument();
+    const moveRow = dialog.querySelector('[data-required-fields-change-row="stage"]');
+    expect(moveRow).toHaveTextContent('Stage:');
+    expect(moveRow).toHaveTextContent('Closed Won');
     // Only the field the move made required — `name` is empty of a predicate,
     // `stage` is the thing being set.
     expect(within(dialog).queryByText('Name')).not.toBeInTheDocument();

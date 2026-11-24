@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page, type Response } from '@playwright/test';
-import { selectOption, fillLookup } from './helpers';
+import { selectOption, fillLookup, addLineItem } from './helpers';
 
 /**
  * Live e2e for the master-detail entry form (showcase "New Project + Tasks").
@@ -144,4 +144,91 @@ test('Create with a task line stores the child referencing the parent', async ({
   const child = await readBack(request, 'showcase_task', childId);
   expect(child?.title).toBe('E2E Task A');
   expect(child?.project).toBe(parentId);
+});
+
+/**
+ * objectstack#36102 — the line-item grid's body left the console's eager chunk:
+ * `@object-ui/fields` exports a lazy face whose body loads through one
+ * `import()`, which the record forms start when they mount and wait for with
+ * the child schema they derive the columns from. On a form's FIRST open the
+ * grid must therefore mount on its body, never on its loading placeholder
+ * (`grid-field-loading`), and a cell the user is typing in must keep focus.
+ *
+ * The observer is installed before the document's first byte, so it sees every
+ * attach of the placeholder, however brief. Its control is the grid itself: the
+ * same observer must have seen `line-items` attach, or a zero count would only
+ * say the observer saw nothing.
+ */
+test.describe('the line-item grid on a form\'s first open (objectstack#36102)', () => {
+  const INVOICES = '/apps/showcase_app/showcase_invoice';
+
+  /** Count every attach of the placeholder and of the grid, from document start. */
+  async function watchGridMounts(page: Page) {
+    await page.addInitScript(() => {
+      const seen = { placeholder: 0, grid: 0 };
+      (window as unknown as { __gridMounts: typeof seen }).__gridMounts = seen;
+      const count = (node: Node) => {
+        if (!(node instanceof Element)) return;
+        seen.placeholder += node.matches('[data-testid="grid-field-loading"]') ? 1 : 0;
+        seen.placeholder += node.querySelectorAll('[data-testid="grid-field-loading"]').length;
+        seen.grid += node.matches('[data-testid="line-items"]') ? 1 : 0;
+        seen.grid += node.querySelectorAll('[data-testid="line-items"]').length;
+      };
+      new MutationObserver((records) => {
+        for (const record of records) record.addedNodes.forEach(count);
+      }).observe(document, { childList: true, subtree: true });
+    });
+  }
+
+  const gridMounts = (page: Page) =>
+    page.evaluate(() => (window as unknown as { __gridMounts: { placeholder: number; grid: number } }).__gridMounts);
+
+  /** Type into the first Description cell and check the cell kept focus and the text. */
+  async function typeKeepsFocus(page: Page, scope: ReturnType<Page['getByTestId']>) {
+    const cell = scope.locator('input[aria-label="Description"]').first();
+    await cell.click();
+    // A stored line already has text: type at its end, not where the click landed.
+    await cell.press('End');
+    await cell.pressSequentially('first-open');
+    // A beat for any late remount to land before it is checked.
+    await page.waitForTimeout(300);
+    await expect(cell).toBeFocused();
+    await expect(cell).toHaveValue(/first-open$/);
+  }
+
+  test('the New Invoice form draws its line grid on its body, and a typed cell keeps focus', async ({ page }) => {
+    await watchGridMounts(page);
+    await page.goto(INVOICES);
+    await page.getByTestId('object-view-new-button').first().click();
+    const dialog = page.getByRole('dialog');
+    const grid = dialog.getByTestId('line-items');
+    await expect(grid).toBeVisible();
+
+    await addLineItem(page);
+    await typeKeepsFocus(page, grid);
+
+    const mounts = await gridMounts(page);
+    expect(mounts.grid, 'the observer saw the grid attach (its control)').toBeGreaterThan(0);
+    expect(mounts.placeholder, 'the grid never mounted on its loading placeholder').toBe(0);
+  });
+
+  test('an invoice edit form draws its stored lines on the body, and a typed cell keeps focus', async ({ page, request }) => {
+    const res = await request.get(`${API}/api/v1/data/showcase_invoice?$top=50`);
+    expect(res.ok(), `GET showcase_invoice answered ${res.status()}`).toBe(true);
+    const body = await res.json();
+    const invoice = (body?.records ?? body?.data ?? []).find((r: { name?: string }) => r.name === 'INV-1002');
+    expect(invoice, 'the seeded draft invoice INV-1002 exists').toBeTruthy();
+
+    await watchGridMounts(page);
+    await page.goto(`${INVOICES}/record/${encodeURIComponent(invoice.id ?? invoice._id)}/edit`);
+    const grid = page.getByTestId('line-items');
+    await expect(grid).toBeVisible();
+    await expect(grid.locator('input[aria-label="Description"]').first()).not.toHaveValue('');
+
+    await typeKeepsFocus(page, grid);
+
+    const mounts = await gridMounts(page);
+    expect(mounts.grid, 'the observer saw the grid attach (its control)').toBeGreaterThan(0);
+    expect(mounts.placeholder, 'the grid never mounted on its loading placeholder').toBe(0);
+  });
 });

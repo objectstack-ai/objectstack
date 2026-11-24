@@ -1,5 +1,126 @@
 # @objectstack/driver-memory
 
+## 18.6.0
+
+### Patch Changes
+
+- 6091b64: feat(objectql): a nested-relation condition, and an analytics dimension through a lookup, are refused up front with a stable 400 on a driver that compiles no semi-join (MongoDB, OData), decided by the new `DriverCapabilities.readableIdsLeaf` bit
+  
+  Clause-②: yes (narrowing) — narrowed: on a driver that does not declare `DriverCapabilities.readableIdsLeaf` (MongoDB, OData, a third-party driver), a nested-relation condition beneath a single-valued relation on `find`, `findOne`, `count` or `aggregate` is refused `INVALID_FILTER` / 400 before anything is read, where it read the related ids first and answered up to 1,000 related matches (past 1,000 it was already refused `INVALID_FILTER` / 400, never truncated); an analytics dimension through a lookup on such a driver is refused `INVALID_QUERY` / 400 before anything is read, where it was served by reading the related records for the grouped ids. Widened: a driver that declares the bit is served by the planned semi-join whatever its name.
+  Metadata-protocol: added
+  Skills-docs: follow-up #33875 — skills/objectstack-query/SKILL.md (its nested-relation row still promises the capped id read on every driver; MongoDB and OData now refuse it)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata key, accepted value or metadata type is removed, renamed or re-shaped: the one protocol change is the new optional `DriverCapabilities.readableIdsLeaf`, which a driver declares. What moves is a runtime answer on drivers that do not declare it, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment whose data lives on MongoDB, OData or a third-party driver that does not declare `readableIdsLeaf`. The fix:
+  
+  - FROM `find('opportunity', { where: { account: { region: 'NA' } } })` TO two reads: `find('account', { where: { region: 'NA' }, fields: ['id'] })`, then `find('opportunity', { where: { account: { $in: ids } } })`. The same for `findOne`, `count` and `aggregate`.
+  - FROM an analytics dimension `opportunity.stage` on a line cube TO a dimension on the lookup field itself (`opportunity`), then a read of `opportunity` for `stage` by those ids.
+  - FROM an analytics `where` naming a field through a lookup (`opportunity.stage`), or a dataset whose own `filter` does, TO a filter on the lookup field itself (`opportunity` `$in` the ids read from `opportunity` with that condition): the analytics service hands such a leaf to the engine as the same nested-relation condition, so on these drivers it is refused `INVALID_FILTER` / 400 the same way.
+  - FROM a row-level read scope that holds such a condition (a field through a single-valued relation) TO one on the relation field itself (`account` `$in` the ids it may read): on these drivers an analytics query under the former is refused before anything is read with the withheld `READ_SCOPE_COMPILE_FAILED` / 500, the answer a read scope the engine cannot run already gets.
+  - A third-party driver whose filter compiler composes the leaf declares `supports.readableIdsLeaf: true` and keeps serving both.
+  
+  **`DriverCapabilities.readableIdsLeaf`** (`@objectstack/spec`) is a new optional capability bit: the driver's filter compiler compiles (or, in process, evaluates) a composed `ReadableIds` semi-join leaf. `driver-sql` declares it on every dialect (`SqliteWasmDriver` and `TursoDriver` inherit it), and so does `driver-memory`. MongoDB and OData do not. Absence means `false`.
+  
+  **Where the engine reads it.** A nested-relation condition beneath a single-valued relation on a read verb (`{ account: { region: 'NA' } }` on `find`, `findOne`, `count` or `aggregate`) is planned as one in-database subquery on a driver that declares the bit, as before. On a driver that does not, the engine now refuses the condition before it plans or reads anything: `INVALID_FILTER` / 400, naming the driver and the two-step route (read the related object with that condition, then match the relation field against its ids with `$in`). Until now such a read fell back to reading the related ids first: up to 1,000 related matches were served, and past 1,000 the filter was refused `INVALID_FILTER` / 400. A multi-valued relation and the `where` of `update` / `delete` keep that capped id read on every driver. The engine's filter judge (`IObjectQLEngine.judgeFilter`) answers the same refusal from the driver's declared capabilities, without calling it, so a caller that asks the judge first (the analytics read-scope merge does) gets execution's verdict; an engine that routes the object to no driver does not judge it.
+  
+  **The analytics dimension through a lookup** (`opportunity.stage` on a line cube, `@objectstack/service-analytics` on the ObjectQL face) is decided by the same bit. On a driver without it the query is refused before anything is read: `INVALID_QUERY` / 400, naming the driver and the route (group by the lookup field itself, then read the related object for its attribute by those ids). Until now it was served by reading the related ids. On a driver that declares the bit, the SQL drivers keep the one joined statement and `driver-memory` and Turso keep the id-expand, unchanged.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

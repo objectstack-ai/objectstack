@@ -19,7 +19,7 @@ import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/react';
 import { en, zh } from '@object-ui/i18n/locales';
-import { BulkActionBar } from '../components/BulkActionBar';
+import { BulkActionBar } from '../components/SelectionBar';
 
 afterEach(cleanup);
 

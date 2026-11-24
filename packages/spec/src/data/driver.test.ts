@@ -8,6 +8,7 @@ import {
   type DriverOptions,
   driverSupportsTransactions,
 } from './driver.zod';
+import { FIXED_READ_LEAF_NAMES } from './fixed-read-leaf';
 
 /**
  * The 31 capability bits retired in 17.0.0 (#4634, ADR-0049 enforce-or-remove).
@@ -72,6 +73,11 @@ const RETIRED_BITS = [
  * says whether a driver's filter compiler understands a composed `ReadableIds`
  * leaf (every driver has `find()`), and the engine's nested-relation lowering
  * reads it to plan the semi-join or refuse the condition up front.
+ *
+ * [ADR-0155 D4] `fixedReadLeaves` is the ninth, and a list rather than a bit:
+ * the names of the fixed-read leaves the filter compiler evaluates. No method
+ * says that either, and the engine's executor seam reads it to hand such a
+ * leaf to the driver or refuse the operation before calling it.
  */
 const LIVE_BITS = [
   'queryDateGranularity',
@@ -82,6 +88,7 @@ const LIVE_BITS = [
   'lockRows',
   'zonedDateBucketing',
   'readableIdsLeaf',
+  'fixedReadLeaves',
 ] as const;
 
 describe('DriverCapabilitiesSchema', () => {
@@ -95,6 +102,7 @@ describe('DriverCapabilitiesSchema', () => {
       lockRows: true,
       zonedDateBucketing: true,
       readableIdsLeaf: true,
+      fixedReadLeaves: ['SharedRecordIds'],
     };
 
     expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
@@ -119,6 +127,9 @@ describe('DriverCapabilitiesSchema', () => {
     // [#33876] Absent = no semi-join leaf: the engine refuses a nested-relation
     // condition on a read verb up front.
     expect(parsed).not.toHaveProperty('readableIdsLeaf');
+    // [ADR-0155 D4] Absent = no fixed-read leaf: the engine's seam refuses an
+    // operation carrying one before calling the driver.
+    expect(parsed).not.toHaveProperty('fixedReadLeaves');
   });
 
   it('refuses a non-boolean aggregationFilter', () => {
@@ -137,7 +148,21 @@ describe('DriverCapabilitiesSchema', () => {
     expect(DriverCapabilitiesSchema.safeParse({ readableIdsLeaf: 'yes' }).success).toBe(false);
   });
 
-  it('declares exactly the audited shape: 8 live bits + 31 tombstones', () => {
+  it('accepts every fixed-read leaf name and an empty list, and keeps the names it was given', () => {
+    expect(DriverCapabilitiesSchema.parse({ fixedReadLeaves: [...FIXED_READ_LEAF_NAMES] }).fixedReadLeaves)
+      .toEqual([...FIXED_READ_LEAF_NAMES]);
+    expect(DriverCapabilitiesSchema.parse({ fixedReadLeaves: [] }).fixedReadLeaves).toEqual([]);
+  });
+
+  it('refuses a fixedReadLeaves that is not a list of fixed-read leaf names', () => {
+    // A bit is not the declaration: the key names the leaves it covers.
+    expect(DriverCapabilitiesSchema.safeParse({ fixedReadLeaves: true }).success).toBe(false);
+    // `ReadableIds` is not a fixed-read leaf, and a brand's symbol key is not its name.
+    expect(DriverCapabilitiesSchema.safeParse({ fixedReadLeaves: ['ReadableIds'] }).success).toBe(false);
+    expect(DriverCapabilitiesSchema.safeParse({ fixedReadLeaves: ['objectstack.filter.sharedRecordIds'] }).success).toBe(false);
+  });
+
+  it('declares exactly the audited shape: 9 live bits + 31 tombstones', () => {
     const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
     const keys = Object.keys(shape).sort();
     expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
@@ -238,7 +263,7 @@ describe('tsc channel: the retired bits are unwritable in DriverCapabilities', (
     const props = new Map(capsType.getProperties().map((p) => [p.getName(), p]));
 
     // Anti-vacuity: the walked shape is the audited key set — 31 tombstones
-    // plus the live bits (8 since `readableIdsLeaf`).
+    // plus the live bits (9 since `fixedReadLeaves`).
     expect([...props.keys()].sort()).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
 
     const decl = capsAlias!.declarations?.[0];

@@ -13,7 +13,9 @@
  * The derive functions turned such a child field into a select column whose
  * options were `{ label: 'Yes', value: 'true' }` and `{ label: 'No', value:
  * 'false' }`, English on every locale: the editable cell's picker and the
- * list-mode cell showed it. The labels now come from `useBooleanValueLabel`
+ * list-mode cell showed it. Since objectstack#36043 the column is a check
+ * column (`type: 'boolean'`): the editable cell is a checkbox, and the two
+ * options are the words its read-only and list-mode cells read as. The labels now come from `useBooleanValueLabel`
  * (`@object-ui/fields`), the one rule that names a boolean value as a word
  * (`common.yes` / `common.no`, objectui#11689). The derive module is pure, so
  * its two producers hold the hook and hand it in, and every derive function
@@ -24,11 +26,12 @@
  *   - the derive functions draw the labels with the function they are handed,
  *     and keep the stored values;
  *   - `record:line_items` (`LineItemsPanel`) hydrates an untyped column over a
- *     boolean child field into a picker that reads the zh words, draws the
- *     same words in its read-only table, and re-labels the picker when the
+ *     boolean child field into a check cell over the stored value, draws the
+ *     zh words in its read-only table, and re-labels that table when the
  *     language is switched while it is on screen;
- *   - `MasterDetailForm` derives a boolean column that reads the zh words, in
- *     its editable grid and in its list-mode (per-row form) cells.
+ *   - `MasterDetailForm` derives a boolean column that is a check cell in its
+ *     editable grid and reads the zh words in its list-mode (per-row form)
+ *     cells.
  *
  * Every oracle is read from the zh pack.
  */
@@ -73,13 +76,13 @@ describe('the derive functions draw a boolean column\'s labels with the `boolean
     const byName = Object.fromEntries(
       deriveColumns(CHILD, { relationshipField: 'invoice', booleanLabel: marked }).map((c) => [c.name, c]),
     );
-    expect(byName.billable).toMatchObject({ type: 'select', options: MARKED_OPTIONS });
-    expect(byName.rush).toMatchObject({ type: 'select', options: MARKED_OPTIONS });
+    expect(byName.billable).toMatchObject({ type: 'boolean', options: MARKED_OPTIONS });
+    expect(byName.rush).toMatchObject({ type: 'boolean', options: MARKED_OPTIONS });
   });
 
   it('hydrateColumns: an untyped column over a boolean field gets the same two options', () => {
     const [col] = hydrateColumns([{ name: 'billable' }], CHILD, { booleanLabel: marked });
-    expect(col).toMatchObject({ type: 'select', label: 'Billable', options: MARKED_OPTIONS });
+    expect(col).toMatchObject({ type: 'boolean', label: 'Billable', options: MARKED_OPTIONS });
   });
 
   it('deriveDetail: both of its column paths hand the function on', () => {
@@ -119,11 +122,12 @@ function dataSource() {
 const inZh = (node: React.ReactNode) =>
   render(<I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>{node}</I18nProvider>);
 
-/** The two lines' `Billable` pickers, in row order. */
-const billablePickers = () => screen.getAllByRole('combobox', { name: 'Billable' }).slice(0, 2);
+/** The two lines' `Billable` check cells' states, in row order. */
+const billableChecks = () =>
+  screen.getAllByRole('checkbox', { name: 'Billable' }).slice(0, 2).map((el) => el.getAttribute('aria-checked'));
 
 describe('the line-items carriers read a boolean column in the session language (objectui#12924)', () => {
-  it('record:line_items: an untyped column over a boolean field is a picker reading the zh words', async () => {
+  it('record:line_items: an untyped column over a boolean field is a check cell over the stored value (objectstack#36043)', async () => {
     inZh(
       <SchemaRendererProvider dataSource={dataSource() as never}>
         <LineItemsPanel
@@ -137,9 +141,8 @@ describe('the line-items carriers read a boolean column in the session language 
         />
       </SchemaRendererProvider>,
     );
-    // `waitFor`: the zh catalogue loads after the first render, and the grid
-    // is re-hydrated when the words change.
-    await waitFor(() => expect(billablePickers().map((el) => el.textContent)).toEqual([YES, NO]));
+    await waitFor(() => expect(billableChecks()).toEqual(['true', 'false']));
+    expect(screen.queryByRole('combobox', { name: 'Billable' })).toBeNull();
     expect(screen.queryByText('Yes')).toBeNull();
     expect(screen.queryByText('No')).toBeNull();
   });
@@ -165,9 +168,9 @@ describe('the line-items carriers read a boolean column in the session language 
     );
   };
 
-  it('MasterDetailForm, editable grid: the derived picker reads the zh words', async () => {
+  it('MasterDetailForm, editable grid: the derived column is a check cell (objectstack#36043)', async () => {
     await masterDetail('grid');
-    await waitFor(() => expect(billablePickers().map((el) => el.textContent)).toEqual([YES, NO]));
+    await waitFor(() => expect(billableChecks()).toEqual(['true', 'false']));
     expect(screen.queryByText('Yes')).toBeNull();
   });
 
@@ -198,7 +201,7 @@ describe('the line-items carriers read a boolean column in the session language 
     expect(container.textContent).not.toMatch(/\b(Yes|No|true|false)\b/);
   });
 
-  it('record:line_items: a language switched while the grid is on screen re-labels the picker', async () => {
+  it('record:line_items: a language switched while the read-only table is on screen re-labels its cells', async () => {
     // The grid memo is keyed on the two WORDS, so a switch re-hydrates the
     // columns; the function itself is a new one every render and cannot key it.
     function SwitchTo({ language }: { language: string }) {
@@ -209,7 +212,7 @@ describe('the line-items carriers read a boolean column in the session language 
         </button>
       );
     }
-    render(
+    const { container } = render(
       <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
         <SwitchTo language="zh" />
         <SchemaRendererProvider dataSource={dataSource() as never}>
@@ -219,15 +222,18 @@ describe('the line-items carriers read a boolean column in the session language 
               relationshipField: 'invoice',
               parentObject: 'inv',
               parentId: 'inv1',
+              readonly: true,
               columns: [{ name: 'description' }, { name: 'billable' }],
             } as never}
           />
         </SchemaRendererProvider>
       </I18nProvider>,
     );
-    await waitFor(() => expect(billablePickers().map((el) => el.textContent)).toEqual(['Yes', 'No']));
+    const billableCells = () =>
+      Array.from(container.querySelectorAll('tbody tr')).map((tr) => tr.querySelectorAll('td')[2]?.textContent);
+    await waitFor(() => expect(billableCells()).toEqual(['Yes', 'No']));
     fireEvent.click(screen.getByRole('button', { name: 'switch' }));
-    await waitFor(() => expect(billablePickers().map((el) => el.textContent)).toEqual([YES, NO]));
+    await waitFor(() => expect(billableCells()).toEqual([YES, NO]));
   });
 
   it('MasterDetailForm, list mode: each line\'s cell reads the zh words', async () => {

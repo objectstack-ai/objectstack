@@ -4,17 +4,20 @@
  * objectui#12456 — the Access pillar's open permission set (epic
  * objectui#12446, decision C):
  *
- *   • the item header carries the set: its label, its api name, the Package
- *     chip and "N objects granted · M field overrides"; the PageShell
- *     breadcrumb and badge row it replaces are gone,
+ *   • the item header carries the set: its label (its api name the title's
+ *     tooltip since objectstack#34795), the Package label and "N objects
+ *     granted · M field overrides"; the PageShell breadcrumb and badge row it
+ *     replaces are gone,
  *   • five tabs, Objects the landing; each other tab shows its section,
- *   • the object matrix's bulk strip (R · CRUD · All · None) draws only on the
- *     row under the pointer or the row holding keyboard focus,
+ *   • the object matrix's bulk strip draws on every row (objectstack#34795;
+ *     it drew only on the row under the pointer or with keyboard focus),
  *   • the tab bodies stay mounted, so a closed facet tab still reports to the
  *     Save gate.
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -117,8 +120,11 @@ describe('Access pillar — the open set is a header and five tabs (objectui#124
   it('the header reads the label, the api name, Package and the grant counts', async () => {
     await renderGuestPortal();
     expect(header().getByRole('heading', { level: 1 })).toHaveTextContent('Guest (Public Forms)');
-    expect(header().getByText('guest_portal').tagName).toBe('CODE');
-    expect(header().getByTestId('perm-provenance-badge')).toHaveTextContent(en('perm.badge.package'));
+    // objectstack#34795 — the api name is the title's tooltip, not a chip.
+    expect(header().getByRole('heading', { level: 1 })).toHaveAttribute('title', 'guest_portal');
+    expect(header().queryByText('guest_portal')).toBeNull();
+    // objectstack#35018 — the Studio note reads the builder's words, not the package term.
+    expect(header().getByTestId('perm-provenance-badge')).toHaveTextContent(en('engine.studio.access.origin.app'));
     expect(header().getByText('1 object granted · 0 field overrides')).toBeInTheDocument();
     expect(header().getByRole('button', { name: en('engine.studio.access.explain.open') })).toBeInTheDocument();
     expect(header().getByRole('button', { name: en('engine.edit.history') })).toBeInTheDocument();
@@ -182,43 +188,32 @@ describe('Access pillar — the open set is a header and five tabs (objectui#124
   });
 });
 
-describe('Objects tab — the bulk strip is per hovered or focused row (objectui#12456)', () => {
-  it('draws on no row at rest, on the row under the pointer, and leaves with it', async () => {
+describe('Objects tab — the bulk strip is on every row (objectui#12456, objectstack#34795)', () => {
+  it('draws on every row at rest, All · Read only · None, then the CRUD arm', async () => {
     await renderGuestPortal();
-    expect(screen.queryByTestId('perm-bulk-crm_lead')).toBeNull();
-    expect(screen.queryByTestId('perm-bulk-crm_account')).toBeNull();
-
-    fireEvent.mouseEnter(screen.getByTestId('perm-row-crm_lead'));
-    const strip = screen.getByTestId('perm-bulk-crm_lead');
-    expect(within(strip).getAllByRole('button').map((b) => b.textContent)).toEqual([
-      en('perm.bulk.read'),
-      en('perm.bulk.crud'),
-      en('perm.bulk.all'),
-      en('perm.bulk.none'),
-    ]);
-    expect(screen.queryByTestId('perm-bulk-crm_account')).toBeNull();
-
-    fireEvent.mouseLeave(screen.getByTestId('perm-row-crm_lead'));
-    expect(screen.queryByTestId('perm-bulk-crm_lead')).toBeNull();
+    for (const obj of ['crm_lead', 'crm_account']) {
+      const strip = screen.getByTestId(`perm-bulk-${obj}`);
+      expect(within(strip).getAllByRole('button').map((b) => b.textContent)).toEqual([
+        en('perm.bulk.all'),
+        en('perm.bulk.read'),
+        en('perm.bulk.none'),
+        en('perm.bulk.crud'),
+      ]);
+    }
   });
 
-  it("keyboard focus on a row's first checkbox draws it; focus leaving the row clears it", async () => {
+  it("keyboard focus on a row's first checkbox still marks the row; focus leaving the row clears it", async () => {
     await renderGuestPortal();
     const row = screen.getByTestId('perm-row-crm_account');
     const first = within(row).getAllByRole('checkbox')[0];
-    // A real focus move (focusin / focusout), not a class read; `act` flushes
-    // the row's re-render as RTL's fireEvent does for pointer events.
     act(() => first.focus());
     expect(first).toHaveFocus();
-    expect(screen.getByTestId('perm-bulk-crm_account')).toBeInTheDocument();
-
-    // Focus moving within the row keeps it: the strip is reachable by Tab.
+    expect(row).toHaveAttribute('data-active', 'true');
+    // The strip's buttons are in the row's tab order.
     act(() => within(screen.getByTestId('perm-bulk-crm_account')).getAllByRole('button')[0].focus());
-    expect(screen.getByTestId('perm-bulk-crm_account')).toBeInTheDocument();
-
+    expect(row).toHaveAttribute('data-active', 'true');
     act(() => within(screen.getByTestId('perm-row-crm_lead')).getAllByRole('checkbox')[0].focus());
-    expect(screen.getByTestId('perm-bulk-crm_lead')).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByTestId('perm-bulk-crm_account')).toBeNull());
+    await waitFor(() => expect(row).not.toHaveAttribute('data-active'));
   });
 
   it('a bulk action writes what it wrote before: CRUD grants the four CRUD cells', async () => {

@@ -239,11 +239,27 @@ export function refuseReadableIdsOnce(
   unsupportedReason?: string,
 ): ReadableIdsDriverRefusalError {
   const err = readableIdsDriverRefusal(driver, site, unsupportedReason);
-  if (!state.logged) {
-    state.logged = true;
-    const line = `${err.message} Logged once for this driver; later refusals answer the caller the same way.`;
-    if (typeof log?.error === 'function') log.error(line);
-    else log?.warn(line);
-  }
+  logRefusalOnce(err, log, state);
   return err;
+}
+
+/**
+ * The once-per-instance log every composition-fault refusal shares: `err`'s
+ * message at `error` (at `warn` on a sink without `error`), the first time
+ * `state` is asked, and never again for that instance. `who` names the
+ * instance the flag belongs to in the line. [ADR-0155 D4] The fixed-read
+ * leaves' refusal (`fixed-read-leaf-refusal.ts`) logs through it too, so one
+ * device logs both leaves' refusals.
+ */
+export function logRefusalOnce(
+  err: Error,
+  log: ReadableIdsRefusalLog | undefined,
+  state: { logged: boolean },
+  who = 'driver',
+): void {
+  if (state.logged) return;
+  state.logged = true;
+  const line = `${err.message} Logged once for this ${who}; later refusals answer the caller the same way.`;
+  if (typeof log?.error === 'function') log.error(line);
+  else log?.warn(line);
 }

@@ -172,7 +172,7 @@ describe('an empty tree list view draws the view empty state (objectstack#28966)
       { compactToolbar: false, emptyState: { title: 'No business units yet' } } as Partial<ListViewSchema>,
       'none',
     );
-    expect(screen.getByTestId('toolbar-filter-trigger')).toBeTruthy();
+    expect(screen.getByTestId('condition-add-filter')).toBeTruthy();
     expect(screen.getByTestId('refresh-button')).toBeTruthy();
     expect(headingOf(state)).toBe('No business units yet');
   });
