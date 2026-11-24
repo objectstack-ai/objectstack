@@ -2051,13 +2051,15 @@ function assertProjectionHasNoDottedPaths(
  * one the caller may not query, so the narrowing in `expandSearchOnAst` left
  * nothing. Same code and status — the search cannot be honoured for this
  * caller either way — with a message that names the cause, not a declaration
- * fault the object does not have.
+ * fault the object does not have. [#34700] A field a registered search-field
+ * withholder names counts as one the caller may not query.
  */
 function emptySearchSetError(object: string, schema: any, internalExcluded: boolean, withheld = false): Error {
   const declared: unknown[] = Array.isArray(schema?.searchableFields) ? schema.searchableFields : [];
   const err: any = withheld ? new Error(
     `Object '${object}' has no field this caller may search, so 'search' cannot be honoured on it: `
-    + `every field it searches is one field-level security does not let this caller query. `
+    + `every field it searches is one field-level security, or a query guard of the object's own, `
+    + `does not let this caller query. `
     + 'Answering every row instead would read as "everything matched". Grant read access to one of '
     + `its searchable fields, or filter on a field this caller can read.`,
   ) : new Error(
@@ -4351,6 +4353,54 @@ export type EngineMiddleware = (
   ctx: OperationContext,
   next: () => Promise<void>
 ) => Promise<void>;
+
+/**
+ * [#34700] What a search-field withholder is asked, once per read that carries
+ * a non-blank `search` on its object: the caller's `where` as written (before
+ * the search is ANDed in and before any middleware adds its own predicate),
+ * the context the middlewares will see, and the fields the server resolved
+ * the search over before any withholding.
+ */
+export interface SearchFieldWithholdingRequest {
+  readonly object: string;
+  readonly where: unknown;
+  readonly context: ExecutionContext;
+  readonly searchFields: readonly string[];
+}
+
+/**
+ * [#34700] A guard of an object's own — a middleware that refuses a query
+ * naming some of its columns for some callers — tells the search expansion
+ * which of `searchFields` this caller may not query, so a server-chosen search
+ * set never names them (`EngineMiddlewareOptions.withholdSearchFields`).
+ * `undefined` or `[]` withholds nothing. A throw propagates, as from the
+ * security service's `getQueryableFields`.
+ */
+export type SearchFieldWithholder = (
+  request: SearchFieldWithholdingRequest,
+) => Promise<readonly string[] | undefined> | readonly string[] | undefined;
+
+/** The options of `ObjectQL#registerMiddleware`. */
+export interface EngineMiddlewareOptions {
+  /** The object the middleware runs for; absent or `'*'` = every object. */
+  object?: string;
+  /**
+   * [#34700] The middleware is a guard of the object's own (plugin-audit's
+   * parent-field query guard, #21154) and this names the fields a non-blank
+   * `search` must not scan for the caller, asked for the reads the middleware
+   * runs on. They leave the server-resolved search set before the expansion,
+   * beside what the security service's `getQueryableFields` withholds
+   * (#25672). A field the caller names in `searchFields` is never withheld, so
+   * the middleware still refuses it; a context-less read is not asked. The
+   * middleware stays the enforcement.
+   */
+  withholdSearchFields?: SearchFieldWithholder;
+}
+
+/** One registered middleware, as `ObjectQL#registerMiddleware` stores it. */
+export interface EngineMiddlewareEntry extends EngineMiddlewareOptions {
+  fn: EngineMiddleware;
+}
 
 /**
  * "Which of these tombstoned `sys_file` rows is something still holding?"
