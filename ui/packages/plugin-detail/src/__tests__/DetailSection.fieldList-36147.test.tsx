@@ -21,12 +21,14 @@
  */
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { RecordContextProvider } from '@object-ui/react';
 import type { DetailViewSection } from '@object-ui/types';
 import { DetailSection } from '../DetailSection';
 import { DefaultRecordPageContext, DetailsColumnCapContext } from '../defaultRecordPage';
 import { createEmptyFieldTally, RecordFieldListContext, type RecordFieldList } from '../recordFieldList';
 import { EmptyFieldsRow } from '../EmptySectionsFold';
+import { RecordPageColumns, buildDefaultPageSchema } from '../index';
 import { I18nProvider } from '@object-ui/i18n';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
@@ -261,16 +263,30 @@ describe('empty fields fold into the list’s one last row (objectstack#36147 it
     expect(screen.getByText('Address')).toBeTruthy();
   });
 
-  it('an authored all-empty hide is not the reader’s to undo, and is not counted', () => {
-    const list = makeList(true);
+  // Flipped by objectstack#36593 (seat route: `hideEmpty` hides an all-empty
+  // group only while the reader hides empty fields). It read "an authored
+  // all-empty hide is not the reader’s to undo, and is not counted".
+  it('an all-empty `hideEmpty: true` group is counted, and drawn once the reader shows empty fields', () => {
     const hidden = { title: 'Hidden', hideEmpty: true, fields: [{ name: 'note', label: 'Note' }] } as unknown as DetailViewSection;
-    render(
-      <Page list={list}>
+    const folded = makeList(false);
+    const first = render(
+      <Page list={folded}>
         <DetailSection section={hidden} data={data} objectSchema={objectSchema} />
       </Page>,
     );
     expect(screen.queryByText('Hidden')).toBeNull();
-    expect(list.emptyFields.getTotal()).toBe(0);
+    expect(folded.emptyFields.getTotal()).toBe(1);
+    first.unmount();
+
+    const shown = makeList(true);
+    render(
+      <Page list={shown}>
+        <DetailSection section={hidden} data={data} objectSchema={objectSchema} />
+      </Page>,
+    );
+    expect(screen.getByText('Hidden')).toBeTruthy();
+    expect(screen.getByText('Note', { exact: true })).toBeTruthy();
+    expect(shown.emptyFields.getTotal()).toBe(1);
   });
 
   it('a group leaving the list withdraws its count', () => {
@@ -443,5 +459,131 @@ describe('an editable value offers the hover / focus copy button too (objectstac
     const nameRow = screen.getByText('Atlas deal').closest('.group') as HTMLElement;
     expect(nameRow.querySelector('[data-detail-copy]')).toBeNull();
     expect(container.querySelector('button[aria-label="Double-click to edit"]')).not.toBeNull();
+  });
+});
+
+/**
+ * objectstack#36593 — on the record page's field list, a group whose fields
+ * are ALL empty and that `hideEmpty` hides (authored `true`, or the
+ * `record:details` renderer default the default page's declared groups carry)
+ * is hidden only while the reader hides empty fields. Its fields are counted
+ * by the list's one 「显示 N 个空字段」 row, and pressing the row draws the
+ * group in its place with its heading. Before the press nothing of it draws,
+ * as before; a group with a value draws exactly as before.
+ *
+ * Drawn the way the running default page draws it: `buildDefaultPageSchema`'s
+ * `record:details` node (the declared groups as `{ group }` references, no
+ * `hideEmpty` written), the real renderer, and `RecordPageColumns`, which
+ * mounts the field list and draws its last row.
+ */
+const leadDef = {
+  name: 'os_36593_lead',
+  label: 'Lead',
+  fieldGroups: [
+    { key: 'info', label: 'Lead Information' },
+    { key: 'addr', label: 'Address' },
+  ],
+  fields: {
+    name: { label: 'Name', type: 'text' },
+    company: { label: 'Company', type: 'text', group: 'info' },
+    phone: { label: 'Phone', type: 'text', group: 'info' },
+    street: { label: 'Street', type: 'text', group: 'addr' },
+    city: { label: 'City', type: 'text', group: 'addr' },
+  },
+};
+
+/** The details column of the default page; `sections` as an author writes them, else the declared groups. */
+function columnsFor(sections?: unknown[]) {
+  const page = buildDefaultPageSchema(leadDef as any, { ...(sections ? { sections: sections as any } : {}), hideDiscussion: true });
+  const details: any[] = [];
+  const walk = (n: unknown) => {
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (!n || typeof n !== 'object') return;
+    const rec = n as Record<string, any>;
+    if (rec.type === 'record:details') { details.push(rec); return; }
+    Object.values(rec).forEach(walk);
+  };
+  walk(page);
+  expect(details, 'the page carries exactly one record:details node').toHaveLength(1);
+  return { details: details[0], columns: { header: [], strip: [], details, timeline: [], related: [] } };
+}
+
+function drawPage(data: Record<string, unknown>, sections?: unknown[]) {
+  const { details, columns } = columnsFor(sections);
+  const view = render(
+    <RecordContextProvider
+      objectName={leadDef.name}
+      recordId="L1"
+      data={data}
+      objectSchema={leadDef}
+      dataSource={{ find: vi.fn(async () => ({ data: [], total: 0 })), getObjectSchema: vi.fn(async () => leadDef) } as any}
+    >
+      <RecordPageColumns tier="stack" columns={columns} />
+    </RecordContextProvider>,
+  );
+  return { ...view, details };
+}
+
+const emptyRow = (container: HTMLElement) => container.querySelector('[data-empty-fields-row]') as HTMLElement | null;
+const press = (row: HTMLElement) => act(() => { fireEvent.click(within(row).getByRole('button')); });
+const shows = (text: string) => screen.queryByText(text, { exact: true }) !== null;
+
+const ALL_EMPTY_ADDRESS = { id: 'L1', name: 'Ada', company: 'Acme', phone: null, street: null, city: '' };
+
+describe('objectstack#36593 — an all-empty hidden group on the field list', () => {
+  it('the default page’s declared group (renderer default) is counted, and the row draws it with its heading', () => {
+    const { container, details } = drawPage(ALL_EMPTY_ADDRESS);
+    // Firing control: the declared group is the spec's reference form, no `hideEmpty` written.
+    const refs = (details.properties?.sections ?? details.sections) as Array<Record<string, unknown>>;
+    const addr = refs.find((s) => s.group === 'addr');
+    expect(addr).toBeDefined();
+    expect('hideEmpty' in addr!).toBe(false);
+
+    expect(shows('Acme')).toBe(true);
+    const row = emptyRow(container)!;
+    // phone (Lead Information) + street + city (Address).
+    expect(row.getAttribute('data-empty-fields-count')).toBe('3');
+    // Toggle off: nothing of the group draws, heading included.
+    expect(shows('Address')).toBe(false);
+    expect(shows('Street')).toBe(false);
+
+    press(row);
+    const heading = screen.getByText('Address');
+    const group = heading.closest('[data-detail-section-list]') as HTMLElement;
+    expect(group).not.toBeNull();
+    expect(within(group).getByText('Street', { exact: true })).toBeTruthy();
+    expect(within(group).getByText('City', { exact: true })).toBeTruthy();
+    expect(shows('Phone')).toBe(true);
+
+    // Hidden again with the row: the group leaves again.
+    press(emptyRow(container)!);
+    expect(shows('Address')).toBe(false);
+    expect(shows('Street')).toBe(false);
+  });
+
+  it('an authored `hideEmpty: true` group is counted and drawn by the row the same way', () => {
+    const { container } = drawPage(ALL_EMPTY_ADDRESS, [
+      { name: 'info', label: 'Lead Information', fields: ['company', 'phone'] },
+      { name: 'shipping', label: 'Shipping', hideEmpty: true, fields: ['street', 'city'] },
+    ]);
+    const row = emptyRow(container)!;
+    expect(row.getAttribute('data-empty-fields-count')).toBe('3');
+    expect(shows('Shipping')).toBe(false);
+    expect(shows('Street')).toBe(false);
+
+    press(row);
+    const group = screen.getByText('Shipping').closest('[data-detail-section-list]') as HTMLElement;
+    expect(group).not.toBeNull();
+    expect(within(group).getByText('Street', { exact: true })).toBeTruthy();
+    expect(within(group).getByText('City', { exact: true })).toBeTruthy();
+  });
+
+  it('CONTROL — a group with a value draws before any press, and only its empty field is counted', () => {
+    const { container } = drawPage({ ...ALL_EMPTY_ADDRESS, street: 'Main St 1' });
+    expect(shows('Address')).toBe(true);
+    expect(shows('Main St 1')).toBe(true);
+    expect(shows('City')).toBe(false);
+    // phone + city.
+    expect(emptyRow(container)!.getAttribute('data-empty-fields-count')).toBe('2');
   });
 });
