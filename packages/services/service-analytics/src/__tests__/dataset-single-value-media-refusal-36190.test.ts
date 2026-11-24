@@ -101,6 +101,52 @@ const REFUSED: Array<[string, (f: string) => Record<string, unknown>]> = [
   ['$ne', (f) => ({ [f]: { $ne: 'file_1' } })],
 ];
 
+/**
+ * The production composition, once per suite: a real engine over a real
+ * `SqlDriver` (SQLite, `driverConfig` added to its config), the fixture rows,
+ * and an `AnalyticsServicePlugin` per strategy face. The draft preview rides
+ * the ObjectQL face's service with `previewDrafts`.
+ */
+async function composeFaces(driverConfig: Record<string, unknown> = {}): Promise<{
+  engine: ObjectQL;
+  services: Record<'native' | 'objectql', AnalyticsService>;
+}> {
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true, ...driverConfig } as never);
+  const engine = new ObjectQL({ logger: quiet } as never);
+  engine.registerDriver(driver as never, true);
+  await engine.init();
+  engine.registry.registerObject({
+    name: OBJECT,
+    label: 'Item',
+    fields: {
+      label: { name: 'label', type: 'text' },
+      pic: { name: 'pic', type: 'image' },
+      doc: { name: 'doc', type: 'file' },
+    },
+  } as never);
+  await engine.syncSchemas();
+  await installDefaultOrganization(engine as never);
+  for (const row of ROWS) await engine.insert(OBJECT, { ...row } as never);
+
+  const services = {} as Record<'native' | 'objectql', AnalyticsService>;
+  for (const [face, caps] of [
+    ['native', undefined],
+    ['objectql', () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false })],
+  ] as const) {
+    const registered: Record<string, unknown> = {};
+    const provided: Record<string, unknown> = { data: engine, protocol: pendingSeedProtocol };
+    await new AnalyticsServicePlugin({ ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
+      getService: (name: string) => provided[name] ?? registered[name],
+      registerService: (name: string, svc: unknown) => { registered[name] = svc; },
+      replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
+      hook: () => {},
+      logger: quiet,
+    } as never);
+    services[face] = registered.analytics as AnalyticsService;
+  }
+  return { engine, services };
+}
+
 describe('[#36190] the dataset door refuses a scalar comparison on a single-value media column', () => {
   let engine: ObjectQL;
   const services: Partial<Record<'native' | 'objectql', AnalyticsService>> = {};
@@ -129,38 +175,9 @@ describe('[#36190] the dataset door refuses a scalar comparison on a single-valu
   };
 
   beforeAll(async () => {
-    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
-    engine = new ObjectQL({ logger: quiet } as never);
-    engine.registerDriver(driver as never, true);
-    await engine.init();
-    engine.registry.registerObject({
-      name: OBJECT,
-      label: 'Item',
-      fields: {
-        label: { name: 'label', type: 'text' },
-        pic: { name: 'pic', type: 'image' },
-        doc: { name: 'doc', type: 'file' },
-      },
-    } as never);
-    await engine.syncSchemas();
-    await installDefaultOrganization(engine as never);
-    for (const row of ROWS) await engine.insert(OBJECT, { ...row } as never);
-
-    for (const [face, caps] of [
-      ['native', undefined],
-      ['objectql', () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false })],
-    ] as const) {
-      const registered: Record<string, unknown> = {};
-      const provided: Record<string, unknown> = { data: engine, protocol: pendingSeedProtocol };
-      await new AnalyticsServicePlugin({ ...(caps ? { queryCapabilities: caps } : {}) } as never).init({
-        getService: (name: string) => provided[name] ?? registered[name],
-        registerService: (name: string, svc: unknown) => { registered[name] = svc; },
-        replaceService: (name: string, svc: unknown) => { registered[name] = svc; },
-        hook: () => {},
-        logger: quiet,
-      } as never);
-      services[face] = registered.analytics as AnalyticsService;
-    }
+    const composed = await composeFaces();
+    engine = composed.engine;
+    Object.assign(services, composed.services);
   });
 
   afterAll(async () => {
@@ -229,4 +246,48 @@ describe('[#36190] the dataset door refuses a scalar comparison on a single-valu
       expect(await countOf(face, { pic: { $null: true } }), face).toBe(2);
     }
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('[#36190] CONTROL: a deployment whose media columns have moved is not refused, and answers', () => {
+  // The refusal reads the storing driver's class, never the declared type: once
+  // the media columns hold the bare id (`fileColumnsMoved: true`), the column
+  // is comparable and every face answers it. Reading `image` / `file` instead
+  // would refuse here and take a working capability away.
+  let engine: ObjectQL;
+  let services: Record<'native' | 'objectql', AnalyticsService>;
+
+  const countOf = async (face: Face, runtimeFilter: Record<string, unknown>): Promise<number> => {
+    const result = (await services[face === 'preview' ? 'objectql' : face].queryDataset(
+      DATASET,
+      { measures: ['cnt'], runtimeFilter } as never,
+      undefined,
+      face === 'preview' ? { previewDrafts: true } : undefined,
+    )) as { rows: Array<Record<string, unknown>> };
+    return Number(result.rows[0]?.cnt ?? 0);
+  };
+
+  beforeAll(async () => {
+    ({ engine, services } = await composeFaces({ fileColumnsMoved: true }));
+  });
+
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  it('the storing driver reads neither media column as JSON', () => {
+    const driver = engine.getDriverForObject(OBJECT) as unknown as { jsonColumnFieldClass(t: string, f: string): unknown };
+    expect(MEDIA_FIELDS.map((f) => driver.jsonColumnFieldClass(OBJECT, f))).toEqual([undefined, undefined]);
+  });
+
+  for (const field of MEDIA_FIELDS) {
+    it(`${field}: equality and $in answer the one matching row on every face`, async () => {
+      for (const face of FACES) {
+        for (const filter of [{ [field]: 'file_1' }, { [field]: { $eq: 'file_1' } }, { [field]: { $in: ['file_1'] } }]) {
+          expect(await countOf(face, filter), `${face} ${JSON.stringify(filter)}`).toBe(1);
+        }
+      }
+    });
+  }
 });
