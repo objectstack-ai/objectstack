@@ -5,7 +5,7 @@
 
 feat(app-shell): every metadata type's list is drawn by ObjectGrid, and its New on a read-only base creates in the base's paired `.custom` package
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 - `@object-ui/plugin-grid`: `ObjectGrid` takes two generic host props for its table view — `hostCells` (a host draws a column's cells) and `rowTint` (a palette name per row, over `rowColor`).
