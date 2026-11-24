@@ -571,26 +571,9 @@ export function registerBuiltinAnchors(): void {
     // seed it as an empty record so the saved body validates.
     createDefaults: { fields: {} },
     searchableFields: ['name', 'label', 'pluralLabel', 'description'],
-    listColumns: [
-      { key: 'name', label: 'Name', width: '24%' },
-      { key: 'label', label: 'Label', width: '22%' },
-      { key: 'pluralLabel', label: 'Plural', width: '22%' },
-      {
-        key: 'fields',
-        label: 'Fields',
-        width: '90px',
-        render: (value) => {
-          if (value == null) return '—';
-          const count = Array.isArray(value)
-            ? value.length
-            : typeof value === 'object'
-              ? Object.keys(value as Record<string, unknown>).length
-              : 0;
-          return count;
-        },
-      },
-      { key: 'description', label: 'Description' },
-    ],
+    // objectstack#36860 — the list columns are the spec's
+    // (`METADATA_LIST_REGISTRY`): name, label, plural label, field count,
+    // description.
   });
 
   // objectui#12982 — the declared sharing rules Setup lists read-only
@@ -600,19 +583,17 @@ export function registerBuiltinAnchors(): void {
     type: 'sharing_rule',
     iconName: 'share-2',
     searchableFields: ['name', 'label', 'description', 'object'],
-    listColumns: [
-      { key: 'name', label: 'Name' },
-      { key: 'label', label: 'Label' },
-      { key: 'object', label: 'Object' },
-      {
-        key: 'sharedWith',
-        label: 'Shared with',
+    // objectstack#36860 — name / label / object / shared with / access level
+    // are the spec's columns; the declaring package is served beside each row.
+    listCells: {
+      sharedWith: {
         render: (value) => {
           const v = value as { type?: unknown; value?: unknown } | null | undefined;
           return v && typeof v === 'object' ? `${String(v.type ?? '')}: ${String(v.value ?? '')}` : '—';
         },
       },
-      { key: 'accessLevel', label: 'Access' },
+    },
+    listExtraColumns: [
       {
         key: '_packageId',
         label: 'Package',

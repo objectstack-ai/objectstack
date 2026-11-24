@@ -125,8 +125,13 @@ function formFieldLabels(type: string): Map<string, string> {
 const TYPES = Object.keys(METADATA_LIST_REGISTRY);
 
 describe('METADATA_LIST_REGISTRY ↔ the type schemas', () => {
-  it('declares the list of each type it covers, hook first', () => {
-    expect(TYPES.sort()).toEqual(['hook']);
+  it('declares a list for the first-batch types and the nine types the console used to declare', () => {
+    expect(TYPES.sort()).toEqual([
+      'action', 'agent', 'api', 'assignment_rule', 'book', 'dashboard', 'dataset', 'doc',
+      'email_template', 'field', 'flow', 'hook', 'job', 'mapping', 'object', 'page',
+      'permission', 'picklist', 'position', 'queue', 'report', 'seed', 'sharing_rule',
+      'skill', 'tool', 'translation', 'view',
+    ]);
   });
 
   it.each(TYPES)('%s: binds to its own type, which has a schema', (type) => {

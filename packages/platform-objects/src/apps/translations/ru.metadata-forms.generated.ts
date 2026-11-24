@@ -1088,15 +1088,54 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Начальные данные",
-    description: "Тестовые / инициализирующие данные, применяемые при публикации"
+    description: "Тестовые / инициализирующие данные, применяемые при публикации",
+    fields: {
+      object: {
+        label: "Объект"
+      },
+      mode: {
+        label: "Режим"
+      }
+    }
   },
   picklist: {
     label: "Список вариантов",
-    description: "Общий список вариантов, на который поля выбора ссылаются по имени"
+    description: "Общий список вариантов, на который поля выбора ссылаются по имени",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      options: {
+        label: "Варианты"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   mapping: {
     label: "Сопоставление импорта",
-    description: "Повторно используемое сопоставление полей для импорта/экспорта (переименование + преобразования), на которое ссылаются по имени при импорте"
+    description: "Повторно используемое сопоставление полей для импорта/экспорта (переименование + преобразования), на которое ссылаются по имени при импорте",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      targetObject: {
+        label: "Целевой объект"
+      },
+      mode: {
+        label: "Режим"
+      },
+      sourceFormat: {
+        label: "Формат источника"
+      }
+    }
   },
   view: {
     label: "Представление",
@@ -1420,6 +1459,9 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Кем заблокировано",
         helpText: "Пользователь, заблокировавший настройку представления"
+      },
+      object: {
+        label: "Объект"
       }
     }
   },
@@ -2576,7 +2618,24 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Фоновое задание"
+    label: "Фоновое задание",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      schedule: {
+        label: "Расписание"
+      },
+      enabled: {
+        label: "Включено"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   datasource: {
     label: "Источник данных"
@@ -2586,10 +2645,41 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "Конечная точка API",
-    description: "Постоянный HTTP-URL, который вызывают другие системы, чтобы запустить поток или работать с записями в приложении"
+    description: "Постоянный HTTP-URL, который вызывают другие системы, чтобы запустить поток или работать с записями в приложении",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      method: {
+        label: "Метод"
+      },
+      path: {
+        label: "Путь"
+      },
+      type: {
+        label: "Тип"
+      },
+      "objectParams.object": {
+        label: "Объект"
+      },
+      "objectParams.operation": {
+        label: "Операция"
+      }
+    }
   },
   translation: {
-    label: "Перевод"
+    label: "Перевод",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      locale: {
+        label: "Язык"
+      }
+    }
   },
   email_template: {
     label: "Шаблон письма",
@@ -2666,11 +2756,45 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Документация",
-    description: "Страница справки в Markdown, которую поставляет пакет или пишете вы сами"
+    description: "Страница справки в Markdown, которую поставляет пакет или пишете вы сами",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      group: {
+        label: "Группа"
+      },
+      tags: {
+        label: "Теги"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   book: {
     label: "Книга документации",
-    description: "Оглавление, группирующее страницы справки в упорядоченные разделы"
+    description: "Оглавление, группирующее страницы справки в упорядоченные разделы",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      audience: {
+        label: "Аудитория"
+      },
+      groups: {
+        label: "Группы"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   permission: {
     label: "Набор разрешений",
@@ -2774,15 +2898,66 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Правило общего доступа",
-    description: "Правило, которое пакет объявляет для открытия доступа к записям; организации создают собственные в Настройке"
+    description: "Правило, которое пакет объявляет для открытия доступа к записям; организации создают собственные в Настройке",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      object: {
+        label: "Объект"
+      },
+      sharedWith: {
+        label: "Доступ для"
+      },
+      accessLevel: {
+        label: "Уровень доступа"
+      }
+    }
   },
   queue: {
     label: "Очередь",
-    description: "Именованная группа людей, в которой записи могут находиться, пока кто-то из них не возьмёт запись; организации формируют собственные в Настройке"
+    description: "Именованная группа людей, в которой записи могут находиться, пока кто-то из них не возьмёт запись; организации формируют собственные в Настройке",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      members: {
+        label: "Участники"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   assignment_rule: {
     label: "Правило назначения",
-    description: "Правило, которое пакет объявляет для направления новых записей в очередь или человеку"
+    description: "Правило, которое пакет объявляет для направления новых записей в очередь или человеку",
+    fields: {
+      name: {
+        label: "Имя"
+      },
+      label: {
+        label: "Метка"
+      },
+      object: {
+        label: "Объект"
+      },
+      entries: {
+        label: "Записи"
+      },
+      active: {
+        label: "Активен"
+      },
+      description: {
+        label: "Описание"
+      }
+    }
   },
   agent: {
     label: "ИИ-агент",
@@ -2864,6 +3039,9 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Меры защиты",
         helpText: "Правила безопасности и политики содержимого"
+      },
+      "model.model": {
+        label: "Модель"
       }
     }
   },

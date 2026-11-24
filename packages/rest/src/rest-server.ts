@@ -4777,38 +4777,16 @@ export class RestServer {
      * so this is safe to call unconditionally from the `/meta` handler.
      */
     private async translateMetaTypesResponse(req: any, environmentId: string | undefined, payload: any): Promise<any> {
-        if (!payload || typeof payload !== 'object' || !Array.isArray(payload.entries)) return payload;
-        const i18n = await this.resolveI18nService(environmentId, req);
-        const bundle = this.buildTranslationBundle(i18n);
-        if (!bundle) return payload;
-        const locale = this.extractLocale(req, i18n);
-        if (!locale) return payload;
-        const {
-            resolveMetadataTypeLabel,
-            resolveMetadataTypeDescription,
-            resolveMetadataFormLabels,
-            resolveMetadataFormSchemaTitles,
-            resolveMetadataListLabels,
-        } = await import('@objectstack/spec/system');
-        const opts = RestServer.translateOptionsFor(i18n, locale);
-        const entries = payload.entries.map((entry: any) => {
-            if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') return entry;
-            const next: any = { ...entry };
-            next.label = resolveMetadataTypeLabel(bundle, entry.type, entry.label ?? entry.type, opts);
-            const desc = resolveMetadataTypeDescription(bundle, entry.type, entry.description, opts);
-            if (desc !== undefined) next.description = desc;
-            if (entry.form) {
-                next.form = resolveMetadataFormLabels(entry.form, entry.type, bundle, opts);
-            }
-            if (entry.list) {
-                next.list = resolveMetadataListLabels(entry.list, entry.type, bundle, opts);
-            }
-            if (entry.schema && typeof entry.schema === 'object') {
-                next.schema = resolveMetadataFormSchemaTitles(entry.schema, entry.type, bundle, opts);
-            }
-            return next;
-        });
-        return { ...payload, entries };
+        // [#36886] The one translation the runtime dispatcher's
+        // `/metadata/types` runs too: `translateMetaTypesListing` in
+        // `./meta-item-read-gate.ts`.
+        return metaReadGate.translateMetaTypesListing(
+            {
+                resolveI18nService: () => this.resolveI18nService(environmentId, req),
+                requestLocale: (i18n) => this.extractLocale(req, i18n),
+            },
+            payload,
+        );
     }
 
     /**
