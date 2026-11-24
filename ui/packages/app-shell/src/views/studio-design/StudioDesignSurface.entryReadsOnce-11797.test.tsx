@@ -91,7 +91,7 @@ interface Held {
 let held: Held[] = [];
 let requested: string[] = [];
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 beforeEach(() => {
   held = [];

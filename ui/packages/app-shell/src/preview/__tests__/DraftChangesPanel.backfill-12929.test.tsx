@@ -64,7 +64,7 @@ const DRAFT_TICKET = {
 const DRAFT_QUEUE = { name: 'st_queue', fields: { open: { type: 'boolean', defaultValue: true } } };
 
 function ok(body: unknown) {
-  return { ok: true, status: 200, json: async () => body };
+  return { headers: new Headers(), ok: true, status: 200, json: async () => body };
 }
 
 const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -74,7 +74,7 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
   const isDraft = url.includes('state=draft');
   if (url.includes('/meta/object/st_ticket')) return ok(isDraft ? DRAFT_TICKET : PUBLISHED_TICKET);
   if (url.includes('/meta/object/st_queue') && isDraft) return ok(DRAFT_QUEUE);
-  return { ok: false, status: 404, json: async () => ({}) };
+  return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
 });
 
 let find: ReturnType<typeof vi.fn>;

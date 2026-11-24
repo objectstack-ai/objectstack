@@ -73,7 +73,7 @@ const RECORDS: Record<string, unknown[]> = {
   ],
 };
 
-const answer = (body: unknown) => ({ json: async () => body }) as unknown as Response;
+const answer = (body: unknown) => ({ headers: new Headers(), json: async () => body }) as unknown as Response;
 
 function stubFetch(): void {
   vi.stubGlobal(

@@ -172,13 +172,13 @@ beforeEach(() => {
     vi.fn(async (input: unknown) => {
       const url = String(input);
       fetchCalls.push(url);
-      if (routeOf(url) === DRAFTS_ROUTE) return { ok: true, status: 200, json: async () => ({ drafts }) };
+      if (routeOf(url) === DRAFTS_ROUTE) return { headers: new Headers(), ok: true, status: 200, json: async () => ({ drafts }) };
       if (routeOf(url) === PACKAGES_ROUTE) {
         if (packagesGate) await packagesGate;
         const { ok, status, body } = packagesAnswer;
-        return { ok, status, json: async () => body };
+        return { headers: new Headers(), ok, status, json: async () => body };
       }
-      return { ok: false, status: 404, json: async () => ({}) };
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }),
   );
 });

@@ -60,7 +60,7 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 const PILLARS = ['data', 'automations', 'interfaces', 'access'] as const;
 const READ_ONLY = t('engine.studio.pkg.readonly', 'en');
 
