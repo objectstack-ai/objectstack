@@ -29,6 +29,8 @@
    > - Focus is per conversation, one record in phase 1, client-reported and advisory: never an access decision.
    > - Field egress is not a dependency of this epic.
 
+   Ruling 2's sentence on a hidden field meets ADR-0106 D1, which removes such a field from an ordinary caller's schema. How this record holds both is point 10 of [Points that go past the card's words](#points-that-go-past-the-cards-words).
+
 2. **The card.** The ten items of objectstack#36997. The decision sections carry them.
 3. **Fixed by a sibling card.** The `focus` contract of [objectstack#36999](https://github.com/objectstack-ai/objectstack/issues/36999), already in development. [D6](#d6) writes it exactly as that card states it.
 4. **This record's own settlement.** Where a section had to choose past the words of 1–3, the choice is listed in [Points that go past the card's words](#points-that-go-past-the-cards-words), for the approver to accept with the record or strike.
@@ -37,12 +39,12 @@
 
 1. **`ai_context` is admitted as a metadata kind** ([D1](#d1)). A context pack names a root object and says which fields, related lists and body text of one record are handed to a model. v1 has six keys — `name`, `label`, `object`, `fields`, `related`, `body` — and each is read by the render service in the PR that adds the type.
 2. **The recipe is not on the object** ([D2](#d2)). The object-level AI keys stay as they are ruled. A pack grants nothing and locks nothing.
-3. **The render contract** ([D3](#d3)): every read is the caller's read. Fields carry labels and option labels. A field hidden by field-level rules is named and reads "not visible to you". A related row the caller cannot read is absent. A long body becomes an outline. Record text reaches the model inside one data envelope written by one shared wrapper.
-4. **`get_record_context` is one definition, one executor, every transport** ([D4](#d4)): a read-family tool under `data:read`, subject to the record tools' system-object and API-exposure refusals. Its read set is a function of its arguments and published metadata, so anything installed on the ordinary tool seams can judge the call.
+3. **The render contract** ([D3](#d3)): every read is the caller's read. Fields carry labels and option labels. A field hidden by field-level rules never shows its value. Where the caller's own schema shows the field, it is named and reads "not visible to you". Where the caller's schema hides the field — the default for an ordinary caller under ADR-0106 — the pack names nothing and states that some of its material is not visible to the caller. A related row the caller cannot read is absent. A long body becomes an outline. Record material reaches the model inside one envelope written by one shared wrapper, apart from the executor's own notes.
+4. **`get_record_context` is one definition, one executor, every transport** ([D4](#d4)): a read-family tool under `data:read`, subject to the record tools' system-object and API-exposure refusals. The root object is judged before any pack is looked up, and no answer names what the caller's schema hides. Its read set is a function of its arguments and published metadata, so anything installed on the ordinary tool seams can judge the call.
 5. **The render service lives in a new service package** ([D5](#d5)), by the precedent of the dataset and knowledge tools. The name is a proposal.
 6. **`ToolExecutionContext.focus`** ([D6](#d6)) is written as objectstack#36999 fixes it.
 7. **`ask_ai` is an action type** ([D7](#d7)) that focuses the assistant on the record. It has no server dispatch, is never an AI tool, and is absent where there is no in-app assistant.
-8. **The skill key `context`** ([D8](#d8)) names a pack. Its reader in this repository is the MCP skill prompt, which gains a record argument.
+8. **The skill key `context`** ([D8](#d8)) names a pack, and a skill that declares it binds `get_record_context`. Its reader in this repository is the MCP skill prompt, which gains a record argument.
 9. **A citation** ([D9](#d9)) is `{ object, id, anchor?, quote }`. Shape only; no schema lands before its reader.
 10. **Not decided**: field egress, and the rest of [Not decided here](#not-decided-here).
 
@@ -52,8 +54,11 @@
 
 - **The record tools.** `packages/mcp/src/mcp-http-tools.ts#registerObjectTools` registers the record tools on the MCP door; `#wireBridgeTools` gates each family on its OAuth scope, the read family on `data:read` (`packages/spec/src/ai/mcp.zod.ts#MCP_OAUTH_SCOPE_DATA_READ`). The names the door may register are the closed set `packages/spec/src/system/constants/platform-tool-names.ts#MCP_DOOR_TOOL_NAMES`.
 - **Their two refusals.** A system object is refused unless it declares itself AI-readable: the guard inside `packages/mcp/src/mcp-http-tools.ts#registerObjectTools` reads `#isSystemObject` and the bridge's `aiReadExposed` member (`#McpDataBridge`). API exposure (`apiEnabled`, `apiMethods`) is asked before every data call: `packages/runtime/src/action-execution.ts#callData` asks `packages/runtime/src/api-exposure.ts#checkApiExposure` for the HTTP bridge (`packages/runtime/src/domains/mcp.ts#buildMcpBridge`), and `packages/mcp/src/stdio-data-bridge.ts#enforceApiExposure` does for stdio.
-- **A read that reaches a second object.** The header of `packages/mcp/src/mcp-relation-reads.ts` states the rule (#35145): every object a read shape reaches is judged by the read guard exactly as the object the call names, and a refused target refuses the whole call before any record is read — "never a silently smaller answer". `packages/mcp/src/mcp-relation-reads.ts#judgeRelatedLists` applies it to `get_record`'s `related`, `#judgeQueryExpand` to `query_records`' `expand`.
+- **A read that reaches a second object.** The header of `packages/mcp/src/mcp-relation-reads.ts` states the rule (#35145): every object a read shape reaches is judged by the read guard exactly as the object the call names, and a refused target refuses the whole call before any record is read — "never a silently smaller answer". `packages/mcp/src/mcp-relation-reads.ts#judgeRelatedLists` applies it to `get_record`'s `related`, `#judgeQueryExpand` to `query_records`' `expand`. Both judge the names the caller typed against the object as the caller is served it, and refuse the whole call with `INVALID_FIELD` for a lookup or a link field that definition does not show. One call is capped at 3 expanded lookups, 3 related lists and 20 rows a list (`#QUERY_EXPAND_MAX_FIELDS`, `#GET_RECORD_MAX_RELATED_LISTS`, `#RELATED_LIST_MAX_ROWS`), and a related-list read expands nothing.
+- **What a refusal names.** The record tools name only what the caller typed. The docblock of `packages/mcp/src/mcp-http-tools.ts#notRecordedMembersOf` reads "Decided from two things only: the names the caller sent, and the object as the caller's own schema shows it", so "an object or a field the caller's schema does not show is answered exactly as one that does not exist". ADR-0106's amendment of 2026-11-11 says the same of an object the caller may not read.
 - **A field the caller cannot read.** `packages/mcp/src/mcp-http-tools.ts#withheldFieldNames` (#35137) names a field as withheld only when the caller's served schema shows it and `getReadableFields` (`packages/spec/src/contracts/security-service.ts#ISecurityService`) leaves it out; a field the served schema does not show is never named. `packages/mcp/src/mcp-http-tools.ts#WITHHELD_FIELDS_NOTE` is the sentence: "Say they are not visible to you; never say they are empty or blank."
+- **Which callers that rule reaches.** Under ADR-0106 D1 a field the caller may not read is removed whole from that caller's served schema; D8 makes this the default, and D4 exempts only system and platform-admin callers. So #35137 names a field only for an exempt caller, or with schema masking switched off. `packages/runtime/src/domains/mcp-object-schema-mask.test.ts` pins both sides: an ordinary member whose schema hides the field "is never answered it", and an exempt author whose schema shows it has it withheld.
+- **A narrowing that names nothing.** `packages/spec/src/ai/dataset-tools.zod.ts#DatasetToolCatalogEntrySchema` carries `membersWithheld: true` when a member was left out because this caller cannot read a field it reads, "so an answer can say a measure exists that this caller may not see". ADR-0149 D2 rests it on ADR-0090 D10: a narrowed read arrives with the narrowing stated. The record tools carry the same kind of statement beside a narrowed list through the bridge's `diagnoseDelegation` member (`packages/mcp/src/mcp-http-tools.ts#McpDataBridge`).
 - **Masking.** `maskingRule` is "single channel — API, UI, export and AI context all see the same masked value" (`packages/spec/src/data/field.zod.ts`), enforced by `packages/plugins/plugin-security/src/field-masker.ts#FieldMasker`.
 - **A reference to a row the caller cannot read.** The engine's expansion leaves the bare id; where the field declares `referenceNameVisible` it serves `{ id, name, readRefused: true }` (`packages/objectql/src/engine-reference-name-visible.ts#serveReferenceNames`).
 - **Object-level AI keys.** `packages/spec/src/data/ai-read-exposure.ts#aiReadExposureRefusal` accepts `enable.aiReadable` only on a system object outside the stored-metadata family and refuses it on a business object; the write-arm spellings (`ai`, `aiExposed`, `aiWritable`, `aiWrite`, `aiEditable`) are refused with guidance in `packages/spec/src/data/object.zod.ts#CAPABILITIES_AI_WRITE_ARM_GUIDANCE`.
@@ -81,7 +86,7 @@ ADR-0088's three clauses:
 2. **Declarative governability.** It ships from a package as a standalone file and is authored at runtime through the metadata API and Studio (row 7).
 3. **A real consumer.** The render service behind `get_record_context` reads it and lands in the same PR as the type (row 5). Row 8 and row 9 add readers.
 
-**v1 keys.** The schema is strict: an unknown key is refused at parse. Every key is read by the render service in row 5 (ADR-0049).
+**v1 keys.** The schema is strict: an unknown key is refused at parse. Every key is read by the render service in row 5 (ADR-0049). The schema also bounds a pack's size — how many lookups its `fields` lists and how many `related` entries it holds — so a pack over a bound is refused at parse and nothing is cut silently at call time. Row 5 fixes the numbers and says how they stand against the record tools' per-call caps.
 
 | Key | Meaning | Reader (row 5) |
 |:--|:--|:--|
@@ -89,7 +94,7 @@ ADR-0088's three clauses:
 | `label` | Human name. | The pack's header in the tool answer, and the refusal that names candidate packs. |
 | `object` | The root object. Required. | Pack selection; the root read. |
 | `fields` | Ordered field names on the root object. | The field section of the pack. |
-| `related` | Child lists: `{ object, field?, fields? }[]`. `object` is a child object with a reference field that points at the root; `field` names that field and is required when several do; `fields` are the columns of each row. One level, child lists only — the shape of `get_record`'s `related`. | The related section. |
+| `related` | Child lists: `{ object, field?, fields? }[]`. `object` is a child object with a reference field that points at the root; `field` names that field and is required when several do; `fields` are the columns of each row. One level, child lists only — the shape of `get_record`'s `related`. The link is resolved once, on the published definition, so no caller's pack follows a different link than the author declared. | The related section. |
 | `body` | `{ field }`: the one long-text field rendered as the record's body. | The body section and its outline ([D3](#d3)). |
 
 ```yaml
@@ -128,32 +133,47 @@ An object therefore gains no key from this record.
 
 The render service takes a pack, a record id and the caller, and returns the pack's material for that record. v1 has one caller, the `get_record_context` executor.
 
-**Read as the caller.** Every read goes through the data engine with the caller's execution context — no system context, no direct driver read. The reads are the ones the record tools make: the root as `get_record` reads it, a lookup in `fields` as `query_records`' `expand` reads it, a `related` entry as `get_record`'s `related` reads it. Each answers as that read answers.
+**Read as the caller.** Every read goes through the data engine with the caller's execution context — no system context, no direct driver read. The reads are of four kinds, each one a read the record tools already make:
 
-**Object level: one refusal is the whole call's.** Each read meets the gates the record tools put before the same read — the system-object refusal, API exposure, the caller's object permission. This record adds none and skips none. If a gate refuses any object of the read set ([D4](#d4)), the call is refused in the record tools' envelope and with their code, and no partial pack is returned. This is the #35145 rule (`packages/mcp/src/mcp-relation-reads.ts`) applied to a pack. Where the record tools do not refuse, the pack does not either: a lookup whose target the caller may not read is left unexpanded by the engine, and the row-level rule below renders it.
+- the root record, as `get_record` reads it;
+- a lookup listed in `fields`, as `query_records`' `expand` reads it on the root;
+- a `related` entry, as `get_record`'s `related` reads a list: one capped query on the child, filtered by the link field;
+- a lookup listed in a `related` entry's `fields`, as `query_records`' `expand` reads it on the child.
+
+**The pack is projected before its reads are planned.** In the record tools the caller types the names, and a name the caller's schema does not show is answered `INVALID_FIELD`: the refusal names it and tells the caller to fix the request. In a pack the author typed the names and the caller sent none. The same answer would name a field the caller's schema hides, and would tell a model its request was malformed when it sent no field. So a pack may answer differently from a caller-typed read, and the order is fixed:
+
+1. The executor projects the pack onto the object definitions as the caller is served them (ADR-0106): the root's for `fields` and `body`, each child's for a `related` entry's link field and its `fields`.
+2. An entry the caller's served schema does not show is taken out of the plan and never read. The field-level rule below says what the answer carries in its place.
+3. The reads are planned from what remains. Every planned read is then one the record tools would accept from this caller, and it answers as that read answers.
+
+**Object level: one refusal is the whole call's.** Each planned read meets the gates the record tools put before the same read — the system-object refusal, API exposure, the caller's object permission. This record adds none and skips none. If a gate refuses an object the pack declares — a `related` child, or a lookup's target — the call is refused in the record tools' envelope and no partial pack is returned. This is the #35145 rule (`packages/mcp/src/mcp-relation-reads.ts`) applied to a pack. The refusal names the refused object only when the caller's served schema shows it, and every such refusal carries one code ([D4](#d4), "The naming bound"). Where the record tools do not refuse, the pack does not either: a lookup whose target the caller may not read is left unexpanded by the engine, and the row-level rule below renders it.
 
 **Row level.**
 
 - The root record the caller cannot read, or that does not exist, answers as `get_record` answers for it.
-- A related row the caller cannot read is absent. The list is read as the caller, so the row never arrives; the pack carries no id, count or marker for it.
-- A lookup whose target row the caller cannot read shows what the engine serves that caller: the name where the field declares `referenceNameVisible`, otherwise "not visible to you" and no bare id.
+- A related row the caller cannot read is absent. The list is read as the caller, so the row never arrives; the pack carries no id, count or marker for it. The one statement kept is the narrowing statement the record tools already carry beside a narrowed list (`diagnoseDelegation`), where the bridge establishes one.
+- A lookup the caller's expansion left unexpanded reads "not visible to you" and carries no id. The engine leaves a dangling id unexpanded too, and telling the two apart takes a read the caller cannot make, so both render alike. Where the field declares `referenceNameVisible`, the pack carries the name the engine serves, marked as not readable, and still no id: an id the caller cannot open is dangling.
 
-**Field level.**
+**Field level.** No hidden value is ever carried. What the answer says depends on what the caller's own schema shows. The rules hold for a root field and for a column of a related list alike.
 
-- A field the caller's served schema shows and `getReadableFields` leaves out keeps its `name` and `label`, carries no value and is marked withheld. The pack carries one sentence, written by the executor, that says such fields are not visible to the caller and are not empty — the #35137 rule.
-- A field the caller's served schema does not show is omitted and nothing is said about it — that rule's bound, and ADR-0106's.
+- **The caller's served schema shows the field and `getReadableFields` leaves it out** — an exempt caller, or schema masking switched off. The entry keeps its `name` and `label`, carries no value and is marked withheld. The notes name it, with the executor's sentence that such fields are not visible to the caller and are not empty. This is the #35137 rule, unchanged.
+- **The caller's served schema does not show the field** — the default for an ordinary caller. The pack names nothing: no entry, no name, no count. The notes carry one statement, the same whatever was removed: some of the material this pack covers is not visible to the caller, and the answer must not treat it as empty or absent. This is the `membersWithheld` precedent of ADR-0149 D2. The statement fires only for an entry the published definition has and the caller's served schema hides. A name the published definition lacks is an author defect ([D1](#d1)) and fires nothing.
+- **The hidden field is one the pack uses structurally.** A hidden lookup in `fields` is a hidden field: it is dropped as above and never expanded. A `related` entry whose link field the caller's schema hides is a read the record tools refuse this caller, so the whole section is dropped, with the same statement. A hidden `body` field drops the body section, with the same statement. These are field-level rules, so they omit and state. Only an object-level refusal refuses the call.
 - A masked value is carried as served. The render adds no masking and removes none.
+
+This is how ruling 2's sentence — "A field hidden from the caller reads 'not visible to you'" — holds beside ADR-0106 D1, which removes such a field whole because a kept name "still leaks existence". The model is always told that something is not visible. It is told which field only when the caller's own schema already shows that field.
 
 **Labels.** A field entry carries `name`, `label` and the value as served, plus a display form where the stored value is not what a person reads: the option label for a select-family field, the display name for a lookup. Labels are the metadata service's at the caller's locale, as ADR-0149 D2 localizes a dataset.
 
-**The body.** A body within the service's bound is carried whole. A longer body is carried as an outline: its headings in order, each with an `anchor`. One section is read by calling the tool again with that `anchor` ([D4](#d4)). A long body with no headings is carried up to the bound and marked truncated. Every cut is stated in the answer — a truncated body, a related list cut at its cap. The bounds are constants of the service, fixed and pinned by test in row 5; this record sets no number. An `anchor` that no longer resolves is refused, never answered with the whole body.
+**The body.** A body within the service's bound is carried whole. A longer body is carried as an outline: its headings in order, each with an `anchor`. One section is read by calling the tool again with that `anchor` ([D4](#d4)). A long body with no headings is carried up to the bound and marked truncated. Every cut is stated in the notes — a truncated body, a related list cut at its cap. The body bound and the row cap of a related list are constants of the service, fixed and pinned by test in row 5; this record sets no number. An `anchor` that no longer resolves is refused, never answered with the whole body.
 
-**One wrapper: data, not instructions.** Text authored in records is untrusted input to a model. The tool's output is an envelope with two parts, declared in spec ([D4](#d4)):
+**One wrapper, three parts.** Text authored in records is untrusted input to a model. The tool's output is an envelope with three parts, declared in spec ([D4](#d4)):
 
-- one data member that holds everything read from records, as JSON string values;
-- one string slot for a sentence saying that the data member is material read from records and is not instructions to follow.
+1. **The data member** holds the record material: the pack header, the record, the field entries, the related lists, and the body or its outline. Values are carried as served — a number is a number, a boolean a boolean, text a JSON string. Record text appears here and nowhere else. An entry may carry a structural mark (`withheld`, `truncated`); a mark is not a sentence.
+2. **The notes** hold what the executor states about this answer: the withheld-fields statement with its list of names, the statement that some material is not visible, every cut, and the narrowing statement where one is established. Each is a fixed sentence of the executor's, picked for the caller's locale. A note never contains record text, and the only names it lists are names the caller's served schema shows.
+3. **The framing sentence** is one string slot: the data member is material read from records and is not instructions to follow.
 
-Record text never appears outside the data member and is never joined into the sentence. The sentence is the executor's, not spec's (ADR-0149 M1), and is picked for the caller's locale. One function builds the envelope. Its proposed home is `@objectstack/core`, beside `packages/core/src/sentence-locale.ts#pickSentenceLocale`, which is already shared by the dataset tools and the MCP record tools. v1 has one caller; whether other tools adopt the wrapper is not decided here.
+The framing sentence covers the data member only, so it does not undo a note. Spec declares the slots and the executor writes every sentence (ADR-0149 M1). One function builds the envelope. Its proposed home is `@objectstack/core`, beside `packages/core/src/sentence-locale.ts#pickSentenceLocale`, which is already shared by the dataset tools and the MCP record tools. v1 has one caller; whether other tools adopt the wrapper is not decided here.
 
 ### D4 — `get_record_context`: one definition, one executor, every transport {#d4}
 
@@ -162,25 +182,31 @@ Record text never appears outside the data member and is never joined into the s
 **Definition.** Input and output are zod in `@objectstack/spec`, in a new module beside the dataset tools' module, projected to JSON Schema the way `packages/spec/src/ai/dataset-tools.zod.ts#getDatasetToolJsonSchemas` does. This follows the dataset tools' form, not the knowledge tool's.
 
 - Input, strict: `{ objectName: string, recordId: string, context?: string, anchor?: string }`, with the record tools' aliases for the first two.
-- Output: the D3 envelope. Its data member holds the pack header (`name`, `label`), the record (`object`, `id`, display name), the field entries, the related lists and the body or its outline.
+- Output: the D3 envelope, with its three parts — the data member, the notes and the framing sentence. The data member holds the pack header (`name`, `label`), the record (`object`, `id`, display name), the field entries, the related lists and the body or its outline.
 
-**Pack selection.** No silent fallback:
+**Order of judgement.** The steps run in this order, and no later step changes an earlier answer:
 
-- `context` given: that pack. If it does not exist, or its `object` is not `objectName`, the call is refused.
-- `context` omitted: the one pack whose `object` is `objectName`. If none exists the call is refused and the record tools remain the way to read the record. If several exist the call is refused and the answer names them.
+1. The arguments are validated.
+2. **The root object's gates.** The system-object refusal, API exposure and the caller's object-level visibility of `objectName` are judged before any pack is looked up. A caller they refuse gets `get_record`'s answer for that object and record. The answer is the same whether or not a pack exists, so the tool never shows that an object the caller is not served has packs.
+3. **Pack selection.** No silent fallback:
+   - `context` given: that pack, if it exists and its `object` is `objectName`. Otherwise the call is refused with one answer, the same for a name no pack has and for a pack rooted on another object.
+   - `context` omitted: the one pack whose `object` is `objectName`. If none exists the call is refused and the record tools remain the way to read the record. If several exist the call is refused and the answer names them. They are packs rooted on an object the caller has just been shown to be served.
+4. **Projection, planning and the reads**, in the order [D3](#d3) fixes.
+
+**The naming bound.** No refusal and no answer of this tool names an object, a field or a pack beyond the names the caller sent and what the caller is served: an object or a field the caller's served schema shows, or a pack rooted on such an object. It is the record tools' bound (`notRecordedMembersOf`), applied to names the author typed. So an object-level refusal of a pack-declared object names the pack and the root. It names the refused object only when the caller's served schema shows that object; otherwise it says the pack covers an object the caller cannot read, and no more. Every such refusal carries one code — `PERMISSION_DENIED`, the code #35145 uses — so the code does not tell a hidden object from a refused one.
 
 **Executor and transports.** One executor, in the package of [D5](#d5), in the `createDatasetTools` form (definitions plus `execute`).
 
 - MCP: `packages/mcp/src/mcp-http-tools.ts#McpDataBridge` gains optional members for it, under the same graceful-degradation contract as the dataset members; `#wireBridgeTools` gains a step gated on `data:read` and on their presence; both bridges implement them by calling the executor with the principal they already bind. `packages/spec/src/system/constants/platform-tool-names.ts#MCP_DOOR_TOOL_NAMES` gains the name in row 5.
 - Product AI: cloud's tool registry registers the same definition and delegates to the same executor (row 9); `packages/spec/src/system/constants/platform-tool-names.ts#PLATFORM_TOOLS_BY_PACKAGE` gains the name with that registration.
 
-**Refusals.** The system-object refusal and the API-exposure refusal of the record tools apply: each read of the pack meets them as the record tool making the same read does (D3). Refusals answer in the ADR-0112 envelope with codes the catalogue already holds; the tool coins no code. Every transport gives the same caller the same answer, and row 5 pins that with a parity test, as ADR-0149 D7 asks of the dataset tools.
+**Refusals.** The system-object refusal and the API-exposure refusal of the record tools apply: the root meets them first, and each planned read meets them as the record tool making the same read does (D3). Refusals answer in the ADR-0112 envelope with codes the catalogue already holds, under the naming bound; the tool coins no code. Every transport gives the same caller the same answer, and row 5 pins that with a parity test, as ADR-0149 D7 asks of the dataset tools.
 
 **The seams.** cloud ADR-0119 D3 says its interceptors are to apply to this tool. The open contract that makes this possible without new seam code:
 
 1. **It is an ordinary tool call.** On MCP it passes through `packages/mcp/src/tool-call-interceptor.ts#routeToolCallsThrough` like every tool; in the product it is a registry tool call. Anything that reads a pack for a model does it as this tool call — the first-turn pre-read of row 9 included — and never by calling the render service directly.
 2. **It is a read.** The executor writes nothing.
-3. **Its read set is knowable from the call.** The read set is the root object, each `related[].object`, and the target object of each lookup the pack lists, in `fields` or in a `related` entry's `fields`. It is a function of the validated arguments and published metadata only, never of the caller or of record data. The D5 package exports the one function that returns it for a call's arguments, and the executor plans its reads from that same function. Row 5 pins by test that the executor reads no object outside the set.
+3. **Its read set is knowable from the call.** The read set is the root object, each `related[].object`, and the target object of each lookup the pack lists, in `fields` or in a `related` entry's `fields`. It is a function of the validated arguments and published metadata only, never of the caller or of record data. The D5 package exports the one function that returns it for a call's arguments, and the executor plans its reads from that same function. A caller's projected plan ([D3](#d3)) reads a subset of the set, never more; row 5 pins by test that the executor reads no object outside it. The set is the call's plan when it is computed, not a guarantee across a publish: a pack published between an interceptor's judgement and the executor's reads changes it. The data door still decides every read.
 
 ### D5 — The render service lives in a new service package {#d5}
 
@@ -201,6 +227,7 @@ The contract is fixed by objectstack#36999 and is restated, not changed:
 
 - `ToolExecutionContext.focus?: { object: string; id: string }[]`, beside `surfaceContext` in `packages/spec/src/contracts/ai-service.ts`.
 - Docblock: client-reported and advisory, never an access decision; the server re-reads the record as the caller; at most one entry in phase 1.
+- Console: every turn's request carries `context.focus` while a focus is pinned. The request body is the authority; anything stored on the conversation only restores the chip.
 - The name is `focus`: `scope` already means the conversation cache key in `ui/packages/app-shell/src/hooks/useChatConversation.ts`.
 - Capability gate: the pin UI is drawn and `focus` is sent only when the AI service advertises that it honours focus — one flag on the discovery the console already reads, named in that card's PR and mirrored by the cloud child. Without the flag nothing changes.
 - Entry point: a pin control on the page chip. The drawer entry (objectstack#36998) and the `ask_ai` action ([D7](#d7)) call the same setter when they land.
@@ -222,9 +249,13 @@ What this record adds is only how `focus` meets the rest:
 
 ### D8 — The skill key `context` {#d8}
 
-`SkillSchema` gains `context?: string`, the name of an `ai_context` item: the pack this skill works from. Two readers:
+`SkillSchema` gains `context?: string`, the name of an `ai_context` item: the pack this skill works from.
 
-- **MCP skill prompts, in this repository (row 8, same PR as the key).** A skill with `context` lists one optional prompt argument, the record id; the object is the pack's root. When the argument is given, the prompt's message carries the skill's instructions and one platform-written line telling the client's model to call `get_record_context` for that record and pack. The pack itself is not placed in the prompt: it reaches the model as the tool's result, through the seam of D4. Without the argument the prompt is what it is today. The argument is listed only on a connection that serves `get_record_context`; `packages/mcp/src/skill-prompts.ts#skillBindingServed` still decides, from `tools`, whether the skill is offered at all.
+A skill that declares `context` binds `get_record_context` in `tools`, by name or by a wildcard that matches it; one that does not is refused at parse. A runtime that filters tools per skill needs the binding for the first read and for an `anchor` re-read. It also lets `packages/mcp/src/skill-prompts.ts#skillBindingServed` withhold the skill on a connection that does not serve the tool.
+
+Two readers:
+
+- **MCP skill prompts, in this repository (row 8, same PR as the key).** A skill with `context` lists one optional prompt argument, the record id; the object is the pack's root. When the argument is given, the prompt's message carries three things: the skill's instructions; one fixed platform-written line telling the client's model to call `get_record_context` with the arguments that follow; and those arguments as one JSON object — `objectName`, `recordId`, `context`. The record id the client sent appears only there, as a JSON string value, which is to say as a tool argument. It is never joined into the line. The pack itself is not placed in the prompt: it reaches the model as the tool's result, through the seam of D4. Without the argument the prompt is what it is today.
 - **The in-app runtime, in cloud (row 9).** When a skill with `context` is active and the conversation's focus is a record of the pack's root object, the runtime reads that pack. Closed code; named here, not described.
 
 A `context` that names no pack is an authoring error, reported where skills are validated. At run time the tool call it leads to is refused; no other pack is substituted. `packages/spec/liveness/skill.json` gains the key's row with its reader in row 8.
@@ -256,14 +287,17 @@ Shape only. No schema lands with this record or with row 5: the shape enters spe
 Each is this record's settlement, taken from the tree's precedent. The approver accepts it with the record or strikes it.
 
 1. **Pack selection** (D4): with `context` omitted, exactly one pack on the object is used; none or several is a refusal. There is no default pack and no synthesized one.
-2. **Object-level refusal is the whole call's** (D3), not a trimmed pack. It follows #35145. The consequence: a user who can read the root but not one related object named by the pack is refused the pack, and the author's remedy is a pack that names only what its audience can read. The alternative is a related section that states it is not visible to the caller.
-3. **A lookup to an unreadable row shows no bare id** (D3), extending the ruling's "no dangling id" from related rows to references.
+2. **Object-level refusal is the whole call's** (D3), not a trimmed pack. It follows #35145. The consequence: a user who can read the root but not one related object named by the pack is refused the pack, and the author's remedy is a pack that names only what its audience can read. The alternative is the mechanism of point 10: leave the section out and carry the statement that some material is not visible.
+3. **A lookup the caller cannot open carries no id** (D3) — neither the bare id nor the id the engine serves beside a `referenceNameVisible` name. This extends the ruling's "no dangling id" from related rows to references. A dangling id renders the same way.
 4. **A section is read with `anchor` on the same tool** (D3, D4), not by a second tool.
-5. **`related` is child lists, one level; `body` is an object with one key** (D1), so a later key can join each without a reshaping.
+5. **`related` is child lists, one level; `body` is an object with one key** (D1), so a later key can join each without a reshaping. The schema also bounds a pack's entry counts, so an oversized pack is refused at parse.
 6. **`ask_ai` takes no `target` and refuses `ai.exposed: true` at parse** (D7).
-7. **The MCP prompt's record argument is optional, and the prompt names the tool call instead of carrying the pack** (D8).
-8. **The read-set function is exported** from the D5 package, and the pre-read is a tool call (D4).
+7. **The MCP prompt's record argument is optional, and the prompt names the tool call instead of carrying the pack** (D8). The call's arguments ride as a JSON object, and a skill with `context` must bind `get_record_context` in `tools`.
+8. **The read-set function is exported** from the D5 package, and the pre-read is a tool call (D4). The set is the call's plan, not a guarantee across a publish.
 9. **Registry flags, file suffix and collection key** follow the `skill` row (D1).
+10. **A field the caller's schema hides is stated, not named** (D3). Ruling 2 says a hidden field reads "not visible to you". ADR-0106 D1 removes such a field whole from an ordinary caller's schema, so the #35137 naming reaches only exempt callers and deployments with masking off. The pack therefore names nothing for an ordinary caller and carries one statement that some of its material is not visible, on the `membersWithheld` precedent. Two alternatives are not taken: naming the field for every caller, which goes against ADR-0106 D1; and saying nothing, which falls short of ruling 2.
+11. **A hidden field the pack uses structurally drops its part and does not refuse the pack** (D3). A hidden lookup is not expanded, and a `related` entry whose link field is hidden is left out, each with the statement of point 10. The alternative not taken is the record tools' answer to a caller-typed name, a whole-call `INVALID_FIELD`, which would name the field and blame a request that sent none.
+12. **Order and naming** (D4). The root object's gates are judged before pack selection. A `context` that names no pack and one rooted on another object get one answer. An object-level refusal names the refused object only when the caller's served schema shows it, and every such refusal carries one code.
 
 ## Implementation split (after acceptance)
 
@@ -278,11 +312,18 @@ Rows 5–10 of the epic's table, with the epic's numbers. Listed, not filed: the
 | 9 | cloud: the in-app chat persists the focus and pre-reads the pack as a tool call on the first turn | objectstack-ai/cloud | — | objectstack#36999, 5, 8 | D4 (registry registration), D6 and D8 (cloud readers) |
 | 10 | Answer citations that open the record at the cited place (split after this record merges) | — | `added` when the shape enters spec | this record | D9 |
 
+The lanes are the epic's, and three of them understate the work. This record adds no row; the seat decides how the cards carry it.
+
+- Row 7's form is a spec file, by the precedent of `packages/spec/src/ai/skill.form.ts`.
+- Row 8's key is a spec key, with its liveness row.
+- Row 9 has a half in this repository. The maintenance contract in `packages/spec/src/system/constants/platform-tool-names.ts` asks for the tool's name in `#PLATFORM_TOOLS_BY_PACKAGE` and for a `chatbot.tool.get_record_context` label in every pack under `ui/packages/i18n/src/locales/`.
+
 ## Consequences
 
 - **One mechanism, two doors.** The in-app assistant and an external agent over MCP receive the same pack from the same executor, under the same caller's rules. The open edition gets the type, the tool and the skill prompt argument; it gets no AI button.
 - **Nothing existing changes behaviour.** `get_record`, `query_records` and the dataset and knowledge tools are untouched. No object schema gains a key.
-- **A pack is authored for an audience.** Because an object-level refusal refuses the pack (point 2), an author who serves roles with different object access writes packs to match, or the narrower role is refused.
+- **A pack is authored for an audience.** Because an object-level refusal refuses the pack (point 2), an author who serves roles with different object access writes packs to match, or the narrower role is refused. A field-level rule never refuses a pack: it shortens the pack and says so.
+- **An ordinary caller is told that something is hidden, never what.** The per-field "not visible to you" is seen only by a caller whose own schema shows the field (point 10).
 - **The seams need no new code for this tool.** `get_record_context` is a read whose objects are known from its arguments; cloud#4969 and cloud#4970 can cite D4.
 - **Three protocol additions follow** — a kind, an `ActionType` member, a skill key — each in the PR that brings its reader.
 - **A new package** joins `packages/services/`, if D5's proposal stands.
