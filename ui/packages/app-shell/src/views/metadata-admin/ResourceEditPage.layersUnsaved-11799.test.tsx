@@ -24,13 +24,15 @@
  * keeps that 404 for every caller by design (objectstack-ai/objectstack#22397,
  * answer (a)), so the page reads it as "never published": `MetadataClient.layered()`
  * resolves the 404 as an envelope with every layer null, and the lock banner,
- * the Layers sheet and the reset verdict show their no-published-version form,
+ * the layered comparison and the reset verdict show their no-published-version form,
  * with no error. Pinned in the second describe below, with two controls: a
  * published item still gets its layers, and a failed `/layers` read (a 5xx)
  * still shows the load error.
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic import of this module: its first load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -298,9 +300,14 @@ describe('MetadataResourceEditPage — no /layers re-read for an item known to h
 const layersStatuses = (name: string) =>
   server.requests.filter((r) => r.method === 'GET' && r.path === `/api/v1/meta/doc/${name}/layers`).map((r) => r.status);
 
-/** Opens the Layers sheet and returns the Overlay tab, whose badge names the overlay layer. */
+/**
+ * Opens the layered comparison — the Source tab's Layers view since the item
+ * tools became tabs (objectstack#36901) — and returns its Overlay tab, whose
+ * badge names the overlay layer.
+ */
 async function overlayTab() {
-  fireEvent.click(screen.getByTitle('Layers'));
+  fireEvent.click(screen.getByTestId('item-tab-source'));
+  fireEvent.click(await screen.findByTestId('item-tab-view-layers'));
   return screen.findByRole('tab', { name: /Overlay/ });
 }
 
@@ -317,7 +324,7 @@ describe('MetadataResourceEditPage — the LOAD reads a /layers 404 as "never pu
     expect(screen.getByText(/Pending changes/)).toBeInTheDocument();
     expect(screen.queryByTestId('lock-banner-title')).toBeNull();
     expect(screen.queryByTestId('reset-or-delete-button')).toBeNull();
-    // The Layers sheet: no overlay layer, and no code layer to diff against.
+    // The layered comparison: no overlay layer, and no code layer to diff against.
     expect(await overlayTab()).toHaveTextContent('none');
     expect(screen.getByText(/No code-level artifact to compare against/)).toBeInTheDocument();
   });

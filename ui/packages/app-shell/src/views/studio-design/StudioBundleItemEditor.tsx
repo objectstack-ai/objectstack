@@ -56,15 +56,9 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  cn,
-} from '@object-ui/components';
+import { cn } from '@object-ui/components';
 import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
-import { History, Link2, Lock, MoreHorizontal } from 'lucide-react';
+import { Link2, Lock } from 'lucide-react';
 import { SchemaForm } from '../metadata-admin/SchemaForm.js';
 import { resolveResourceConfig } from '../metadata-admin/registry.js';
 import { useRegisteredMetadataPreview } from '../metadata-admin/preview-registry.js';
@@ -88,6 +82,9 @@ import {
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import { StudioTranslationTable } from './StudioTranslationTable.js';
 import { readAuthoredDraft } from './authoredDraft.js';
+import { ResourceDetailHeader } from '../metadata-admin/ResourceDetailHeader.js';
+import { ItemToolTabPanel, ItemToolTabStrip, offeredItemToolTabs, useItemToolTab } from '../item-tools/ItemToolTabs.js';
+import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 
 /**
  * objectstack#30285 — what the form still offers for a translation item: its
@@ -241,7 +238,7 @@ export interface StudioBundleItemEditorProps {
   publishNonce?: number;
   /** Told when a draft save lands, so the header's pending count follows it. */
   onDraftSaved?: (saved?: { type: string; name: string }) => void;
-  /** The area's root (`MetadataAreaHost.basePath`), for the item's history link. */
+  /** The area's root (`MetadataAreaHost.basePath`), for the links to what uses the item. */
   basePath: string;
   /** objectstack#30064 — what the header's last Publish refused for this item, kept until it is resolved. */
   publishRefusal?: StudioRefusal | null;
@@ -260,10 +257,18 @@ export function StudioBundleItemEditor({
   publishRefusal = null,
 }: StudioBundleItemEditorProps): React.ReactElement {
   const locale = useMetadataLocale();
-  const navigate = useNavigate();
   const client = useMetadataClient();
   const { entries } = useMetadataTypes(client);
   const entry = entries.find((e) => e.type === type);
+  // objectstack#36901 (decision 8) — the item page's tabs, the generic page's
+  // shared strip: the form beside its preview is Details (the preview here is
+  // the form's live rendering, not an editing canvas, so it is no tab of its
+  // own); References, History (with the audit log) and Source (with the
+  // layered comparison) are the tools.
+  const canReadTrail = useCanReadAuthoringTrail();
+  const canAuthor = useCanAuthorMetadata();
+  const offeredTabs = React.useMemo(() => offeredItemToolTabs({ trail: canReadTrail }), [canReadTrail]);
+  const itemTab = useItemToolTab(offeredTabs);
   const config = resolveResourceConfig(type, entry);
   // The generic page's resolution: the served schema first, the fallback second.
   const schema =
@@ -540,75 +545,66 @@ export function StudioBundleItemEditor({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="studio-bundle-editor" data-type={type}>
-      <div className="flex min-h-12 flex-wrap items-center gap-2 border-b px-4 py-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{translateMetadataType(type, locale)}</p>
-          <h2 className="truncate text-sm font-semibold" title={name}>
-            {label}
-          </h2>
-        </div>
-        {type === 'email_template' && shownLocale && (
-          <span
-            data-testid="studio-bundle-editor-locale"
-            className="inline-flex h-[22px] shrink-0 items-center rounded-[5px] bg-muted px-2 font-mono text-[11px] text-muted-foreground"
-          >
-            {tFormat('engine.studio.area.formEditor.locale', locale, { locale: shownLocale })}
-          </span>
-        )}
-        {customizing && served.declaration && (
-          <StudioOverrideChip
-            baseLabel={baseLabel}
-            basedOn={served.declaration.basedOn}
+      <ResourceDetailHeader
+        testId="studio-bundle-editor-header"
+        type={type}
+        name={name}
+        tabAddress={itemTab.address}
+        locale={locale}
+        label={label}
+        apiName={name}
+        typeLabel={translateMetadataType(type, locale, entry?.label ?? type)}
+        packageLabel={baseLabel}
+        meta={
+          type === 'email_template' && shownLocale ? (
+            <span
+              data-testid="studio-bundle-editor-locale"
+              className="inline-flex h-[22px] shrink-0 items-center rounded-[5px] bg-muted px-2 font-mono text-[11px] text-muted-foreground"
+            >
+              {tFormat('engine.studio.area.formEditor.locale', locale, { locale: shownLocale })}
+            </span>
+          ) : undefined
+        }
+        primaryAction={
+          <div className="flex shrink-0 items-center gap-2">
+            {customizing && served.declaration && (
+              <StudioOverrideChip
+                baseLabel={baseLabel}
+                basedOn={served.declaration.basedOn}
+                locale={locale}
+                // objectstack#29692 — Restore lives on the mark that names the customization.
+                onRestore={inPair ? () => setRestoreOpen(true) : undefined}
+                restoreDisabled={restoring || saving || (customization?.pairId == null && pairRef.current === null)}
+              />
+            )}
+            {status && (
+              <span data-testid="studio-bundle-editor-status" className="shrink-0 text-xs text-muted-foreground">
+                {status}
+              </span>
+            )}
+            {customizing && !unlocked && (
+              <StudioCustomizeButton block={block} baseLabel={baseLabel} locale={locale} onCustomize={() => setAsked(true)} />
+            )}
+            {readOnly && !customizing && (
+              <span
+                data-testid="studio-bundle-editor-readonly"
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-amber-400/15 px-2.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+              >
+                <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                {t('engine.studio.pkg.readonly', locale)}
+              </span>
+            )}
+          </div>
+        }
+        tabs={
+          <ItemToolTabStrip
+            tabs={offeredTabs}
+            active={itemTab.location.tab}
+            onSelect={(tab) => itemTab.select(tab)}
             locale={locale}
-            // objectstack#29692 — Restore lives on the mark that names the customization.
-            onRestore={inPair ? () => setRestoreOpen(true) : undefined}
-            restoreDisabled={restoring || saving || (customization?.pairId == null && pairRef.current === null)}
           />
-        )}
-        {status && (
-          <span data-testid="studio-bundle-editor-status" className="shrink-0 text-xs text-muted-foreground">
-            {status}
-          </span>
-        )}
-        {customizing && !unlocked && (
-          <StudioCustomizeButton block={block} baseLabel={baseLabel} locale={locale} onCustomize={() => setAsked(true)} />
-        )}
-        {readOnly && !customizing && (
-          <span
-            data-testid="studio-bundle-editor-readonly"
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-amber-400/15 px-2.5 text-xs font-medium text-amber-700 dark:text-amber-300"
-          >
-            <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-            {t('engine.studio.pkg.readonly', locale)}
-          </span>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              data-testid="studio-bundle-editor-more"
-              aria-label={t('engine.studio.if.more', locale)}
-              title={t('engine.studio.if.more', locale)}
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuItem
-              data-testid="studio-bundle-editor-history"
-              onSelect={() => {
-                const qs = new URLSearchParams({ package: packageId });
-                if (member) qs.set('member', member);
-                navigate(`${basePath}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history?${qs}`);
-              }}
-            >
-              <History className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-              {t('engine.edit.history', locale)}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+        }
+      />
 
       {customizing && !inPair && type === 'translation' && (
         <p role="note" data-testid="studio-bundle-editor-whole-bundle" className="border-b bg-sky-500/5 px-4 py-2 text-xs text-foreground">
@@ -656,7 +652,25 @@ export function StudioBundleItemEditor({
         </div>
       )}
 
-      {draftRefused ? null : loadedFor !== target && !loadError ? (
+      {itemTab.location.tab !== 'details' ? (
+        !draftRefused && (
+          <div className="min-h-0 flex-1 overflow-auto">
+            <ItemToolTabPanel
+              tab={itemTab.location.tab === 'history' ? 'history' : itemTab.location.tab === 'source' ? 'source' : 'references'}
+              view={itemTab.location.view}
+              onViewChange={(view) => itemTab.select(itemTab.location.tab, view)}
+              type={type}
+              name={name}
+              packageId={packageId}
+              // Source is this editor's buffer, saved by its autosave like a form edit.
+              source={loadedFor === target ? { value: draft, onChange: editable ? onChange : undefined } : undefined}
+              // A rollback writes the package's own row: not on a read-only base.
+              onRolledBack={!readOnly && canAuthor ? reload : undefined}
+              locale={locale}
+            />
+          </div>
+        )
+      ) : draftRefused ? null : loadedFor !== target && !loadError ? (
         <div role="status" className="p-6 text-sm text-muted-foreground">
           {t('engine.studio.loading', locale)}
         </div>

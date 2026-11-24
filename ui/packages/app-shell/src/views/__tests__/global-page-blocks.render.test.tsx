@@ -217,7 +217,7 @@ describe('objectui#6757 — spec `PageComponentType` members that had no rendere
 
       // 1. Real content: the search control itself, with its accessible name.
       const box = screen.getByRole('searchbox', {
-        name: 'Search objects, dashboards, pages, reports',
+        name: 'Search objects, dashboards, pages, reports, components, docs',
       });
       expect(box).toBeInTheDocument();
 
