@@ -20,7 +20,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
 import { FieldList, fieldTypeIcon, moveFieldInOrder, orderFieldList } from '../FieldList';
 import { FilterValuePanel, quickDateWindowValue } from '../FilterValuePanel';
-import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue, sortDirectionLabel } from '../ListConditionControls';
+import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue } from '../ListConditionControls';
 import {
   addSortLevel,
   chipsAreIndependent,
@@ -35,7 +35,7 @@ import type { FilterBuilderRow } from '@object-ui/components';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { operatorsForField } from '@object-ui/components';
+import { operatorsForField, sortDirectionLabel } from '@object-ui/components';
 import { builtInLocales, en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
 import { I18nProvider } from '@object-ui/i18n';
 import { parseFilterAST } from '@objectstack/spec/data';

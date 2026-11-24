@@ -163,15 +163,6 @@ export function addSortLevel(items: readonly SortItem[], field: string, order: '
   return [...items, { id, field, order }];
 }
 
-/** The direction words a sort chip uses, by field type: time, size or the alphabet. */
-export type SortWording = 'time' | 'size' | 'alphabet';
-
-export function sortWording(type: string | undefined): SortWording {
-  if (type && DATE_TYPES.has(type)) return 'time';
-  if (type && (NUMBER_TYPES.has(type) || type === 'boolean')) return 'size';
-  return 'alphabet';
-}
-
 /** One condition of the view's own filter, read for a locked chip. */
 export interface ViewConditionChip {
   key: string;

@@ -139,3 +139,27 @@ describe('SortBuilder keeps one row per field (objectstack#27520 row 7)', () => 
     expect(screen.getByRole('button', { name: /add sort/i })).toBeEnabled();
   });
 });
+
+describe('SortBuilder names a numeric sort as size, from the chip\'s own table', () => {
+  const NUMERIC: Fields = [
+    { value: 'title', label: 'Title', type: 'text' },
+    { value: 'due_date', label: 'Due Date', type: 'date' },
+    { value: 'estimate_hours', label: 'Estimate', type: 'number' },
+    { value: 'progress', label: 'Progress', type: 'progress' },
+    { value: 'completion', label: 'Completion', type: 'percent' },
+    { value: 'budget', label: 'Budget', type: 'currency' },
+  ];
+  const optionLabels = (i: number) => optionsOf(directionTriggers()[i]).map((o) => o.label);
+
+  it('number, progress, percent and currency rows read "Low → High" / "High → Low"', () => {
+    mount([asc('estimate_hours'), asc('progress'), asc('completion'), { field: 'budget', order: 'desc' }], NUMERIC);
+    for (const i of [0, 1, 2, 3]) expect(optionLabels(i)).toEqual(['Low → High', 'High → Low']);
+    expect(directionTriggers()[3]).toHaveTextContent('High → Low');
+  });
+
+  it('CONTROL: beside them a date keeps time and text keeps the alphabet', () => {
+    mount([asc('due_date'), asc('title'), asc('estimate_hours')], NUMERIC);
+    expect(optionLabels(0)).toEqual(['Oldest → Newest', 'Newest → Oldest']);
+    expect(optionLabels(1)).toEqual(['A → Z', 'Z → A']);
+  });
+});
