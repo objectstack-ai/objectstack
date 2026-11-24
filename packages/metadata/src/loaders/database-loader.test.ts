@@ -4206,7 +4206,7 @@ describe('[#37013] a platform-registered skill and a package\'s same-named skill
     }
     return manager;
   }
-  const rows = async () => ((await driver.find('sys_metadata', { where: { type: 'skill', name: NAME } } as any)) as Array<Record<string, unknown>>)
+  const rows = async () => ((await driver.find('sys_metadata', { where: { type: 'skill', name: NAME } })) as Array<Record<string, unknown>>)
     .map((row) => ({ package_id: row.package_id ?? null, body: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata }));
   const rowOf = async (packageId: string | null) => (await rows()).find((row) => row.package_id === packageId)?.body;
 
