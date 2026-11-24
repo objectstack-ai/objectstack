@@ -252,7 +252,9 @@ describe('cookie-only same-server fetch ratchet (app-shell + console)', () => {
       ["await fetch('/api/v1/x');", 0],
     ];
     for (const [code, expected] of cases) {
-      expect({ code, found: bareCookieOnlyCalls('case.ts', code).length }).toEqual({ code, found: expected });
+      // Inside an async function: at a script's top level `await (x)(…)` parses as a call of `await`.
+      const found = bareCookieOnlyCalls('case.ts', `async function run() { ${code} }`).length;
+      expect({ code, found }).toEqual({ code, found: expected });
     }
   });
 
