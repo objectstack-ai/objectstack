@@ -98,6 +98,11 @@ export class KnowledgeService implements IKnowledgeService {
    * lives only while a sync for it is pending.
    */
   private readonly recordSyncTails = new Map<string, Promise<void>>();
+  /**
+   * The tail of each source's reindex chain, keyed by source id — see
+   * {@link reindexSource}. A key lives only while a walk of it is pending.
+   */
+  private readonly reindexTails = new Map<string, Promise<void>>();
   /** Sources whose `where` the no-engine sync path has already reported it cannot enforce. */
   private readonly whereUnenforceableReported = new Set<string>();
 
@@ -166,6 +171,40 @@ export class KnowledgeService implements IKnowledgeService {
 
   // ── Reindex ───────────────────────────────────────────────────────
 
+  /**
+   * Walk an `object` source and push its documents to the adapter.
+   *
+   * ## Paging
+   *
+   * The walk reads at most {@link REINDEX_PAGE_SIZE} rows per `find`, in
+   * `id` order, each page continuing after the last id of the one before
+   * (`where AND id > cursor` — a keyset walk, so a page never re-reads or skips
+   * a row the way an offset does when rows land meanwhile), and upserts each
+   * page in its own adapter call before reading the next. Every `find` carries
+   * a `limit`, and no `upsert` holds more than one page. Each row goes through
+   * the same {@link recordToDocument} gate as the event sync.
+   *
+   * `opts.limit` caps the TOTAL number of rows the walk reads (the last page is
+   * shortened to it); `opts.dryRun` asks `count` under the source's `where`
+   * instead of reading rows, and reports that count (capped by `limit`).
+   *
+   * ## Failure
+   *
+   * A page whose read or upsert fails ends the walk: the result is
+   * `ok: false`, its `message` names the page (1-based) and the id it
+   * continued after, and `discovered` / `indexed` count the pages done before
+   * it. Pages already upserted stay in the index; nothing is rolled back.
+   *
+   * ## One walk per source at a time
+   *
+   * Walks of one source run one after another in this process: a second
+   * `reindexSource` of a source waits until the first has finished, so their
+   * pages never interleave (the same promise chain as the record sync,
+   * {@link chainAfter}). Walks of different sources run concurrently.
+   *
+   * Documents of rows that no longer exist or no longer match are NOT removed
+   * by a reindex.
+   */
   async reindexSource(
     sourceId: string,
     opts: KnowledgeReindexOptions = {},
@@ -185,7 +224,8 @@ export class KnowledgeService implements IKnowledgeService {
       };
     }
 
-    if (!this.options.dataEngine) {
+    const engine = this.options.dataEngine;
+    if (!engine) {
       return {
         ok: false,
         discovered: 0,
@@ -194,35 +234,95 @@ export class KnowledgeService implements IKnowledgeService {
       };
     }
 
-    const objSource = source.source as ObjectKnowledgeSource;
+    return chainAfter(this.reindexTails, source.id, () =>
+      this.walkObjectSource(source, source.source as ObjectKnowledgeSource, adapter, engine, opts),
+    );
+  }
+
+  /** The paged walk of {@link reindexSource}; runs inside that source's chain. */
+  private async walkObjectSource(
+    source: KnowledgeSource,
+    objSource: ObjectKnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    engine: IDataEngine,
+    opts: KnowledgeReindexOptions,
+  ): Promise<KnowledgeReindexResult> {
+    const object = objSource.object;
+    // `limit` keeps its meaning: a cap on the TOTAL rows the walk takes.
+    const cap = opts.limit;
     // RLS-bypassing system context — this is a server-side admin op.
-    const records = (await this.options.dataEngine.find(objSource.object, {
-      where: objSource.where,
-      limit: opts.limit,
-      context: systemContext(),
-    } as never)) as Array<Record<string, unknown>>;
+    const context = systemContext();
 
     if (opts.dryRun) {
+      const total = await engine.count(object, { where: objSource.where }, { context });
       return {
         ok: true,
-        object: objSource.object,
-        discovered: records.length,
+        object,
+        discovered: cap === undefined ? total : Math.min(total, cap),
         indexed: 0,
         message: 'dryRun=true; no documents pushed.',
       };
     }
 
-    const schema = this.schemaFor(objSource.object);
-    const docs = records.map((rec) => recordToDocument(source, objSource, rec, schema));
-    if (docs.length > 0) {
-      await adapter.upsert(docs, { source, reason: 'reindex' });
+    const schema = this.schemaFor(object);
+    let discovered = 0;
+    let indexed = 0;
+    let cursor: string | number | undefined;
+    for (let page = 1; ; page++) {
+      const want = cap === undefined ? REINDEX_PAGE_SIZE : Math.min(REINDEX_PAGE_SIZE, cap - discovered);
+      if (!(want > 0)) break;
+      const after = cursor === undefined ? '' : ` (after id '${cursor}')`;
+      const stopped = (what: string): KnowledgeReindexResult => ({
+        ok: false,
+        object,
+        discovered,
+        indexed,
+        message: `reindex of source '${source.id}' stopped at page ${page}${after}: ${what}`,
+      });
+
+      const byCursor = cursor === undefined ? undefined : { id: { $gt: cursor } };
+      let rows: Array<Record<string, unknown>>;
+      try {
+        rows = await engine.find(
+          object,
+          {
+            where:
+              byCursor === undefined
+                ? objSource.where
+                : objSource.where === undefined ? byCursor : { $and: [objSource.where, byCursor] },
+            orderBy: [{ field: 'id', order: 'asc' }],
+            limit: want,
+          },
+          { context },
+        );
+      } catch (err) {
+        return stopped(`the read failed: ${(err as Error).message}`);
+      }
+      if (!Array.isArray(rows) || rows.length === 0) break;
+
+      const docs = rows.map((row) => recordToDocument(source, objSource, row, schema));
+      try {
+        await adapter.upsert(docs, { source, reason: 'reindex' });
+      } catch (err) {
+        return stopped(`the adapter upsert failed: ${(err as Error).message}`);
+      }
+      discovered += rows.length;
+      indexed += docs.length;
+      if (rows.length < want) break;
+
+      // The next page continues after this page's last id. A last row with no
+      // id, or one that did not move past the cursor (an engine that ignored
+      // the `id > cursor` condition), ends the walk rather than looping on it.
+      const lastId = rows[rows.length - 1].id;
+      if (!isRecordId(lastId)) {
+        return stopped('the page was indexed, but its last row carries no id, so the walk cannot continue after it.');
+      }
+      if (lastId === cursor) {
+        return stopped(`the page was indexed, but its last row's id did not move past the cursor, so the walk cannot continue.`);
+      }
+      cursor = lastId;
     }
-    return {
-      ok: true,
-      object: objSource.object,
-      discovered: records.length,
-      indexed: docs.length,
-    };
+    return { ok: true, object, discovered, indexed };
   }
 
   // ── The `search_knowledge` AI tool (ADR-0149 D2) ──────────────────
@@ -420,12 +520,7 @@ export class KnowledgeService implements IKnowledgeService {
    * does not break the chain (the sync paths never throw; this is a backstop).
    */
   private serializeRecordSync(key: string, task: () => Promise<void>): Promise<void> {
-    const previous = this.recordSyncTails.get(key) ?? Promise.resolve();
-    const tail: Promise<void> = previous.then(task).catch(() => undefined).finally(() => {
-      if (this.recordSyncTails.get(key) === tail) this.recordSyncTails.delete(key);
-    });
-    this.recordSyncTails.set(key, tail);
-    return tail;
+    return chainAfter(this.recordSyncTails, key, task).catch(() => undefined);
   }
 
   /**
@@ -662,6 +757,34 @@ export class KnowledgeService implements IKnowledgeService {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Rows one reindex page reads, and so the most documents one reindex `upsert`
+ * carries. A memory and request-size bound for the walk, not an embedder
+ * limit: an embedder that caps inputs per request splits a larger upsert into
+ * several requests itself (`OpenAIEmbedder` does).
+ */
+export const REINDEX_PAGE_SIZE = 100;
+
+/**
+ * Run `task` after every earlier task chained on the same `key` has settled —
+ * an in-process promise chain per key, dropped from `tails` once idle.
+ * Answers `task`'s own outcome (rejection included); the chain itself never
+ * rejects, so a failed task does not break the tasks queued behind it.
+ */
+function chainAfter<T>(
+  tails: Map<string, Promise<void>>,
+  key: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const previous = tails.get(key) ?? Promise.resolve();
+  const outcome = previous.then(task);
+  const tail: Promise<void> = outcome.then(() => undefined, () => undefined).finally(() => {
+    if (tails.get(key) === tail) tails.delete(key);
+  });
+  tails.set(key, tail);
+  return outcome;
+}
 
 /**
  * The `object` sources whose per-record projection of `object` is kept in step

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { KnowledgeService, documentIdFor, recordToDocument } from '../knowledge-service.js';
+import { KnowledgeService, REINDEX_PAGE_SIZE, documentIdFor, recordToDocument } from '../knowledge-service.js';
 import type {
   IDataEngine,
   IKnowledgeAdapter,
@@ -268,7 +268,8 @@ describe('KnowledgeService — reindex', () => {
   it('object source: walks IDataEngine with isSystem context and pushes docs', async () => {
     const find = vi.fn(async (
       _obj: string,
-      _opts: { where?: unknown; limit?: number; context: { isSystem?: boolean } },
+      _query: { where?: unknown; limit?: number },
+      _options: { context: { isSystem?: boolean } },
     ) => [
       { id: 'r1', title: 'T1', notes: 'N1', status: 'open' },
       { id: 'r2', title: 'T2', notes: 'N2', status: 'done' },
@@ -281,19 +282,21 @@ describe('KnowledgeService — reindex', () => {
     expect(res.ok).toBe(true);
     expect(res.indexed).toBe(2);
     expect(res.discovered).toBe(2);
-    expect(find.mock.calls[0][1].context.isSystem).toBe(true);
+    expect(find.mock.calls[0][2].context.isSystem).toBe(true);
     expect(adapter.upsertSpy).toHaveBeenCalledOnce();
   });
 
-  it('dryRun reports counts without calling adapter', async () => {
+  it('dryRun asks count, reads no rows and does not call the adapter', async () => {
     const find = vi.fn(async () => [{ id: 'r1', title: 'T1', notes: 'N1' }]);
+    const count = vi.fn(async () => 1);
     const adapter = makeAdapter('memory');
-    const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine });
+    const svc = new KnowledgeService({ dataEngine: { find, count } as unknown as IDataEngine });
     svc.registerAdapter('memory', adapter);
     svc.registerSource(objectSource('s1', 'task'));
     const res = await svc.reindexSource('s1', { dryRun: true });
     expect(res.indexed).toBe(0);
     expect(res.discovered).toBe(1);
+    expect(find).not.toHaveBeenCalled();
     expect(adapter.upsertSpy).not.toHaveBeenCalled();
   });
 
@@ -435,5 +438,273 @@ describe('recordToDocument withholds credential-class and internal fields', () =
     const src = source(['title', 'notes']);
     const doc = recordToDocument(src, src.source as ObjectKnowledgeSource, { id: 'r1', title: 'A', notes: 'B' });
     expect(doc.content).toBe('A\n\nB');
+  });
+});
+
+// ── The reindex walk pages by id ────────────────────────────────────
+//
+// The walk reads at most one page per `find` (ordered by `id`, continuing
+// after the previous page's last id) and upserts each page in its own call.
+// The engine double below REFUSES, by a throw, any `find` without a positive
+// `limit` or without the `id` ascending order, and any operator it does not
+// implement — so an unbounded read turns the suite red rather than being
+// answered. Ids are zero-padded and inserted shuffled: the order the walk
+// sees is the engine's, never insertion order.
+
+type PagedRow = Record<string, unknown>;
+
+function pagedEngine(rowsIn: PagedRow[]) {
+  const rows = [...rowsIn];
+  let hold: Promise<void> | undefined;
+  const matches = (row: PagedRow, where: Record<string, unknown> | undefined): boolean => {
+    if (!where) return true;
+    for (const [key, value] of Object.entries(where)) {
+      if (key === '$and') {
+        if (!Array.isArray(value)) throw new Error('engine double: $and takes an array');
+        if (!value.every((c) => matches(row, c as Record<string, unknown>))) return false;
+        continue;
+      }
+      if (key.startsWith('$')) throw new Error(`engine double: operator ${key} is not implemented`);
+      if (value !== null && typeof value === 'object') {
+        const ops = Object.keys(value);
+        if (key !== 'id' || ops.length !== 1 || ops[0] !== '$gt') {
+          throw new Error(`engine double: condition ${JSON.stringify(value)} on '${key}' is not implemented`);
+        }
+        if (!(String(row.id) > String((value as { $gt: unknown }).$gt))) return false;
+        continue;
+      }
+      if (row[key] !== value) return false;
+    }
+    return true;
+  };
+  const find = vi.fn(async (
+    _object: string,
+    query: { where?: Record<string, unknown>; orderBy?: unknown; limit?: number },
+    options: { context?: { isSystem?: boolean } },
+  ): Promise<PagedRow[]> => {
+    if (typeof query?.limit !== 'number' || !(query.limit > 0)) {
+      throw new Error('engine double: an unbounded find (no positive limit)');
+    }
+    if (JSON.stringify(query.orderBy) !== JSON.stringify([{ field: 'id', order: 'asc' }])) {
+      throw new Error(`engine double: expected orderBy id asc, got ${JSON.stringify(query.orderBy)}`);
+    }
+    if (options?.context?.isSystem !== true) throw new Error('engine double: expected the system context');
+    const page = rows
+      .filter((r) => matches(r, query.where))
+      .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0))
+      .slice(0, query.limit)
+      .map((r) => ({ ...r }));
+    const gate = hold;
+    hold = undefined;
+    if (gate) await gate;
+    return page;
+  });
+  const count = vi.fn(async (_object: string, query: { where?: Record<string, unknown> }) =>
+    rows.filter((r) => matches(r, query?.where)).length);
+  return {
+    engine: { find, count } as unknown as IDataEngine,
+    find,
+    count,
+    /** The next `find` reads at call time but resolves only once the returned function is called. */
+    holdNextFind(): () => void {
+      let release!: () => void;
+      hold = new Promise<void>((resolve) => { release = resolve; });
+      return release;
+    },
+  };
+}
+
+/** `n` task rows `r000…`, inserted in a shuffled (but deterministic) order. */
+function taskRows(n: number, extra: (i: number) => PagedRow = () => ({})): PagedRow[] {
+  const out: PagedRow[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push({ id: `r${String(i).padStart(3, '0')}`, title: `T${i}`, notes: `N${i}`, status: 'open', ...extra(i) });
+  }
+  return out.sort((a, b) => ((Number(String(a.id).slice(1)) * 7919) % 1009) - ((Number(String(b.id).slice(1)) * 7919) % 1009));
+}
+
+function upsertedIds(adapter: ReturnType<typeof makeAdapter>): string[][] {
+  return (adapter.upsertSpy.mock.calls as unknown as Array<[KnowledgeDocument[]]>).map(([docs]) => docs.map((d) => d.id));
+}
+
+function reindexHarness(rows: PagedRow[], src: KnowledgeSource = objectSource('s1', 'task')) {
+  const db = pagedEngine(rows);
+  const adapter = makeAdapter('memory');
+  const svc = new KnowledgeService({ dataEngine: db.engine });
+  svc.registerAdapter('memory', adapter);
+  svc.registerSource(src);
+  return { ...db, adapter, svc };
+}
+
+const ids = (from: number, to: number): string[] =>
+  Array.from({ length: to - from }, (_, k) => `s1:r${String(from + k).padStart(3, '0')}`);
+
+describe('KnowledgeService — the reindex walk pages by id', () => {
+  it('the page size is 100', () => {
+    expect(REINDEX_PAGE_SIZE).toBe(100);
+  });
+
+  it('0 rows: one bounded read, no upsert', async () => {
+    const h = reindexHarness([]);
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 0, indexed: 0 });
+    expect(h.find).toHaveBeenCalledTimes(1);
+    expect(h.adapter.upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it('exactly one page: one upsert of the page, then a read that comes back empty', async () => {
+    const h = reindexHarness(taskRows(100));
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 100, indexed: 100 });
+    expect(upsertedIds(h.adapter)).toEqual([ids(0, 100)]);
+    expect(h.find).toHaveBeenCalledTimes(2);
+    expect(h.find.mock.calls[1][1].where).toEqual({ id: { $gt: 'r099' } });
+  });
+
+  it('one page + 1: two upserts (100, then 1), each row once, in id order', async () => {
+    const h = reindexHarness(taskRows(101));
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 101, indexed: 101 });
+    expect(upsertedIds(h.adapter)).toEqual([ids(0, 100), ids(100, 101)]);
+    // The second page came back short, so no third read.
+    expect(h.find).toHaveBeenCalledTimes(2);
+    for (const call of h.find.mock.calls) expect(call[1].limit).toBe(REINDEX_PAGE_SIZE);
+    for (const call of h.adapter.upsertSpy.mock.calls as unknown as Array<[KnowledgeDocument[], { reason: string }]>) {
+      expect(call[0].length).toBeLessThanOrEqual(REINDEX_PAGE_SIZE);
+      expect(call[1].reason).toBe('reindex');
+    }
+  });
+
+  it("the source's where is ANDed with the cursor on every page", async () => {
+    const src = objectSource('s1', 'task');
+    (src.source as ObjectKnowledgeSource).where = { status: 'open' };
+    const h = reindexHarness(taskRows(250, (i) => ({ status: i % 5 === 0 ? 'done' : 'open' })), src);
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 200, indexed: 200 });
+    const all = upsertedIds(h.adapter).flat();
+    expect(all).toHaveLength(200);
+    expect(new Set(all).size).toBe(200);
+    expect(all.every((id) => Number(id.slice(4)) % 5 !== 0)).toBe(true);
+    expect(h.find.mock.calls[0][1].where).toEqual({ status: 'open' });
+    expect(h.find.mock.calls[1][1].where).toEqual({ $and: [{ status: 'open' }, { id: { $gt: all[99].slice(3) } }] });
+  });
+
+  it.each([
+    [150, [100, 50], 150],
+    [100, [100], 100],
+    [30, [30], 30],
+    [0, [], 0],
+  ])('limit %i caps the total: reads %j', async (limit, reads, total) => {
+    const h = reindexHarness(taskRows(250));
+    const res = await h.svc.reindexSource('s1', { limit });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: total, indexed: total });
+    expect(h.find.mock.calls.map((c) => c[1].limit)).toEqual(reads);
+    expect(upsertedIds(h.adapter).flat()).toEqual(ids(0, total));
+  });
+
+  it('a limit above the row count reads to the end', async () => {
+    const h = reindexHarness(taskRows(120));
+    const res = await h.svc.reindexSource('s1', { limit: 500 });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 120, indexed: 120 });
+  });
+
+  it('dryRun counts under the where, capped by limit, and reads no rows', async () => {
+    const src = objectSource('s1', 'task');
+    (src.source as ObjectKnowledgeSource).where = { status: 'open' };
+    const h = reindexHarness(taskRows(250, (i) => ({ status: i % 5 === 0 ? 'done' : 'open' })), src);
+    expect(await h.svc.reindexSource('s1', { dryRun: true })).toMatchObject({ ok: true, discovered: 200, indexed: 0 });
+    expect(await h.svc.reindexSource('s1', { dryRun: true, limit: 150 })).toMatchObject({ ok: true, discovered: 150, indexed: 0 });
+    expect(h.count.mock.calls[0][1]).toEqual({ where: { status: 'open' } });
+    expect(h.find).not.toHaveBeenCalled();
+    expect(h.adapter.upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it('a failed page read ends the walk with ok:false naming the page; earlier pages stay counted', async () => {
+    const h = reindexHarness(taskRows(250));
+    const real = h.find.getMockImplementation()!;
+    h.find.mockImplementation(async (o, q, opt) => {
+      if (h.find.mock.calls.length === 2) throw new Error('connection reset');
+      return real(o, q, opt);
+    });
+    const res = await h.svc.reindexSource('s1');
+    expect(res.ok).toBe(false);
+    expect(res).toMatchObject({ object: 'task', discovered: 100, indexed: 100 });
+    expect(res.message).toContain('page 2');
+    expect(res.message).toContain("after id 'r099'");
+    expect(res.message).toContain('connection reset');
+    expect(upsertedIds(h.adapter)).toEqual([ids(0, 100)]);
+  });
+
+  it('a failed page upsert ends the walk with ok:false naming the page; the next walk runs', async () => {
+    const h = reindexHarness(taskRows(250));
+    h.adapter.upsertSpy.mockImplementationOnce(async () => undefined);
+    h.adapter.upsertSpy.mockImplementationOnce(async () => { throw new Error('embedder 429'); });
+    const res = await h.svc.reindexSource('s1');
+    expect(res.ok).toBe(false);
+    expect(res).toMatchObject({ discovered: 100, indexed: 100 });
+    expect(res.message).toContain('page 2');
+    expect(res.message).toContain('embedder 429');
+    expect(h.find).toHaveBeenCalledTimes(2);
+    // The failed walk released the source's lock.
+    const again = await h.svc.reindexSource('s1');
+    expect(again).toEqual({ ok: true, object: 'task', discovered: 250, indexed: 250 });
+  });
+
+  it('an engine that ignores the cursor ends the walk instead of looping', async () => {
+    const page = taskRows(100);
+    const find = vi.fn(async () => page.map((r) => ({ ...r })).sort((a, b) => String(a.id).localeCompare(String(b.id))));
+    const adapter = makeAdapter('memory');
+    const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    const res = await svc.reindexSource('s1');
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('page 2');
+    expect(res.message).toMatch(/did not move past the cursor/);
+    expect(find).toHaveBeenCalledTimes(2);
+  });
+
+  it('a page whose last row has no id ends the walk after indexing it', async () => {
+    const rows = taskRows(100).map((r) => ({ ...r }));
+    const find = vi.fn(async () => rows.map((r, i) => (i === rows.length - 1 ? { title: 'no id' } : r)));
+    const adapter = makeAdapter('memory');
+    const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('s1', 'task'));
+    const res = await svc.reindexSource('s1');
+    expect(res).toMatchObject({ ok: false, discovered: 100, indexed: 100 });
+    expect(res.message).toMatch(/page 1: .*carries no id/);
+    expect(find).toHaveBeenCalledTimes(1);
+  });
+
+  it('a second reindex of the same source waits: the two walks never interleave', async () => {
+    const h = reindexHarness(taskRows(150));
+    const order: string[] = [];
+    h.adapter.upsertSpy.mockImplementation(async (...args: unknown[]) => {
+      const docs = args[0] as KnowledgeDocument[];
+      order.push(`${docs[0].id}+${docs.length}`);
+    });
+    const release = h.holdNextFind();
+    const first = h.svc.reindexSource('s1');
+    const second = h.svc.reindexSource('s1');
+    await new Promise((r) => setTimeout(r, 5));
+    // The first walk's first read is held; the second walk has not read at all.
+    expect(h.find).toHaveBeenCalledTimes(1);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150 });
+    expect(b).toEqual(a);
+    expect(order).toEqual(['s1:r000+100', 's1:r100+50', 's1:r000+100', 's1:r100+50']);
+  });
+
+  it('walks of different sources do not wait for each other', async () => {
+    const h = reindexHarness(taskRows(10));
+    h.svc.registerSource(objectSource('s2', 'task'));
+    const release = h.holdNextFind();
+    const first = h.svc.reindexSource('s1');
+    const other = await h.svc.reindexSource('s2');
+    expect(other).toEqual({ ok: true, object: 'task', discovered: 10, indexed: 10 });
+    release();
+    expect(await first).toEqual({ ok: true, object: 'task', discovered: 10, indexed: 10 });
   });
 });
