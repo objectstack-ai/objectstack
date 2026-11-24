@@ -10,7 +10,7 @@
  * |-----------------------------------------|---------------------------------|
  * | security-owd-unset            (error)   | objectui#2348 leave_request 事故 |
  * | security-owd-alias            (error)   | ADR-0090 D4 canonical enum — UNPARSED intakes only, see § Intake |
- * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
+ * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard; since the field-axis split (ruling 6912661484) also `viewAllFields`, the field half of it |
  * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; no door binds a set to `guest` until ADR-0138 D3 item 5's bind door is built (#16110) |
  * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310; CLI + runtime publish gate since commit a227afa41 |
  * | security-book-audience-unknown-set(warn)| ADR-0046 §6.7 { permissionSet } |
@@ -24,6 +24,7 @@
  * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): a caller-keyed update policy on a detail admits nobody the master gate refuses — unless it keys `owner_id` and the detail opted in (#26591: the opt-in is prescribed only there) |
  * | security-superuser-field-mask-inert (warning) | ADR-0066 D2 ⑧ as amended (ruling 6573563853, letter A; note of 2026-11-15): a set's Modify All on an object votes on every field of it, so its own `readable: false` or edit lock on that object binds none of its holders. Beside View All alone the set's own `readable: false` binds, and is not reported |
  * | security-controlled-by-parent-master-reference-hidden (warning) | ADR-0055 §3: a write of a detail needs edit access to the master its stored reference names, so a set's `readable: false` on that reference hides a field that still decides its holders' writes, and a holder refused there gets a refusal that names no master |
+ * | security-cross-set-field-reopen (warning) | ADR-0066 D2 ⑧; the field-axis split, ruling 6912661484, step 2: one set's `readable: false` or edit lock on a field binds no holder of a second set whose View All, Modify All or `viewAllFields` on the object votes that field open; the same-set case is `security-superuser-field-mask-inert`'s |
  * | security-update-policy-no-check (info) | ADR-0058 D4 write-check composition: a USING-only `update` / `all` policy keyed on a caller column other than `created_by` lets the ownership floor admit a row's new image too; info tier, so neither `os lint --strict` nor `os validate --strict` fails on it |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
@@ -182,6 +183,7 @@ export const SECURITY_CBP_AMBIGUOUS_RELATION = 'security-controlled-by-parent-am
 export const SECURITY_MODIFY_ALL_DELETE_WITHHELD = 'security-modify-all-delete-withheld';
 export const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN = 'security-controlled-by-parent-owner-policy-without-opt-in';
 export const SECURITY_SUPERUSER_FIELD_MASK_INERT = 'security-superuser-field-mask-inert';
+export const SECURITY_CROSS_SET_FIELD_REOPEN = 'security-cross-set-field-reopen';
 export const SECURITY_CBP_MASTER_REFERENCE_HIDDEN = 'security-controlled-by-parent-master-reference-hidden';
 export const SECURITY_UPDATE_POLICY_NO_CHECK = 'security-update-policy-no-check';
 
@@ -333,6 +335,23 @@ export function holdsSuperuserBypass(
     | undefined;
   if (!op || typeof op !== 'object') return false;
   return bit === 'modify' ? Boolean(op.modifyAllRecords) : Boolean(op.viewAllRecords || op.modifyAllRecords);
+}
+
+/**
+ * [ADR-0066 D2 ⑧; the field-axis split, ruling of record 6912661484, letter
+ * A] Does `set` carry `viewAllFields` on `objectName`? A copy of the private
+ * `holdsViewAllFields` in `@objectstack/core`
+ * (`security/effective-object-permissions.ts`), the reading
+ * `superuserFieldVote` asks: the set's own entry for the object when it has
+ * one, otherwise its `'*'` wildcard (a lookup, never a merge), and the bit
+ * read as `=== true`. A field-axis question only, so it is deliberately not a
+ * disjunct of {@link holdsSuperuserBypass}: the bit widens no record.
+ */
+function holdsViewAllFields(set: { objects?: Record<string, unknown> | null } | null | undefined, objectName: string): boolean {
+  const objects = set?.objects;
+  if (!objects || typeof objects !== 'object') return false;
+  const op = (objects[objectName] || objects['*']) as { viewAllFields?: unknown } | null | undefined;
+  return !!op && typeof op === 'object' && op.viewAllFields === true;
 }
 
 /** snake_case identifier contains the reserved token `role`/`roles`. */
@@ -893,6 +912,178 @@ function pushExtensionMergedCbpFindings(findings: SecurityFinding[], stack: AnyR
       if (!blamed.has(visible)) continue;
       if (candidates.length === 0) pushCbpNoRelation(findings, target, `${visible.path}.fields`);
       else pushCbpAmbiguousRelation(findings, target, `${visible.path}.fields`, candidates);
+    }
+  }
+}
+
+/**
+ * The bit through which one set votes a field of `objectName` open, named the
+ * way `security-cross-set-field-reopen`'s user sentence selects its label.
+ */
+type FieldReopenBit = 'view-all' | 'modify-all' | 'view-all-fields';
+
+const FIELD_REOPEN_BIT_KEY: Readonly<Record<FieldReopenBit, string>> = {
+  'view-all': 'viewAllRecords',
+  'modify-all': 'modifyAllRecords',
+  'view-all-fields': 'viewAllFields',
+};
+
+/**
+ * [ADR-0066 D2 ⑧ as amended; the field-axis split, ruling of record
+ * 6912661484] The vote ONE set casts on `<objectName>.<fieldName>` through
+ * its object-wide bits, read as `superuserFieldVote` (`@objectstack/core`)
+ * reads it for that set: Modify All votes `readable` and `editable` on every
+ * field, its own rows included; View All and `viewAllFields` vote `readable`
+ * only, and cast no vote on a field the set's own row declares
+ * `readable: false` (inside one set, specific beats general). `undefined`
+ * when the set casts no such vote. `via` names the entry the lookup answered
+ * from: the set's own entry for the object when it has one, otherwise `'*'`.
+ */
+function objectWideFieldVote(
+  set: AnyRec,
+  objectName: string,
+  fieldName: string,
+): { bit: FieldReopenBit; via: string; editable: boolean } | undefined {
+  const objects = set.objects && typeof set.objects === 'object' ? (set.objects as AnyRec) : undefined;
+  const via = objects?.[objectName] ? `objects.${objectName}` : `objects['*']`;
+  if (holdsSuperuserBypass(set, objectName, 'modify')) return { bit: 'modify-all', via, editable: true };
+  const viewAll = holdsSuperuserBypass(set, objectName, 'view');
+  if (!viewAll && !holdsViewAllFields(set, objectName)) return undefined;
+  const fields = set.fields && typeof set.fields === 'object' ? (set.fields as AnyRec) : undefined;
+  const own = fields?.[`${objectName}.${fieldName}`];
+  if (own && typeof own === 'object' && (own as AnyRec).readable === false) return undefined;
+  return { bit: viewAll ? 'view-all' : 'view-all-fields', via, editable: false };
+}
+
+/**
+ * [ADR-0066 D2 ⑧ as amended; the field-axis split, ruling of record
+ * 6912661484, step 2] `security-cross-set-field-reopen`: one set hides a
+ * field (`readable: false`) or locks it (`editable` not `true`), and ANOTHER
+ * set's View All, Modify All or `viewAllFields` on the object votes that field
+ * open. Field grants union without deny, so a caller holding both sets reads
+ * the field (and, under Modify All, edits it), while the first set reads as
+ * protecting it. The case behind it: a field hidden from one role by a
+ * `readable: false` row, read anyway by a holder who also has View All on the
+ * object through another set.
+ *
+ * What it reads, and why each skip:
+ *
+ * - Only the declared two-set shape. No field-name heuristic: a field is
+ *   judged by its rows and its object's bits, never by what it is called.
+ * - The hiding set's own Modify All on the object makes its own row inert:
+ *   that is the same-set case `security-superuser-field-mask-inert` reports,
+ *   so the row is skipped here and no row earns two findings for one cause.
+ *   Beside its own View All alone the row binds that set's holders (the note
+ *   of 2026-11-15), so it is judged here.
+ * - The second set casts the vote `superuserFieldVote` casts for it
+ *   ({@link objectWideFieldVote}): its own `readable: false` row beside View
+ *   All or `viewAllFields` keeps the field closed for it, so it re-opens
+ *   nothing. View All and `viewAllFields` vote read only, so an edit lock
+ *   beside them binds and is not reported.
+ * - A field gated on the field itself by `requiredPermissions` (ADR-0066 D3)
+ *   is not reported: that AND-gate is folded in after the merge, so no set's
+ *   bit opens it to a caller without the capabilities. It is the ruled place
+ *   for a field that must stay hidden from everyone without a capability.
+ * - Only a field this stack declares, extends or has injected is judged: the
+ *   `requiredPermissions` skip needs the field's declaration, an object this
+ *   stack does not define may be another package's, and a key naming no field
+ *   is `security-fls-unknown-field`'s.
+ *
+ * `warning`, never `error`: the pair is legal and no door refuses it (ruling
+ * 6912661484, step 2: no app that builds today stops building). One finding
+ * per hiding row and re-opening set, on the hiding row's path.
+ */
+function pushCrossSetFieldReopen(
+  findings: SecurityFinding[],
+  stack: AnyRec,
+  permissionSets: AnyRec[],
+  flsGraph: ObjectGraph,
+): void {
+  if (permissionSets.length < 2) return;
+  // The fields gated by `requiredPermissions`, on the objects as the registry
+  // serves them (an extension's field included), as the FieldMasker reads them.
+  const capabilityGated = new Map<string, Set<string>>();
+  for (const obj of objectsAsServed(stack).objects) {
+    if (typeof obj.name !== 'string') continue;
+    for (const f of recordsOf(obj.fields)) {
+      const required = f.requiredPermissions;
+      if (typeof f.name !== 'string' || !Array.isArray(required) || required.length === 0) continue;
+      const gated = capabilityGated.get(obj.name) ?? new Set<string>();
+      gated.add(f.name);
+      capabilityGated.set(obj.name, gated);
+    }
+  }
+
+  for (let i = 0; i < permissionSets.length; i++) {
+    const ps = permissionSets[i];
+    if (!ps || typeof ps !== 'object') continue;
+    const hidingName = typeof ps.name === 'string' ? ps.name : `(permission set ${i})`;
+    const flsMap = ps.fields && typeof ps.fields === 'object' ? (ps.fields as AnyRec) : {};
+    for (const [flsKey, flsEntry] of Object.entries(flsMap)) {
+      if (!flsEntry || typeof flsEntry !== 'object') continue;
+      const dot = flsKey.indexOf('.');
+      if (dot <= 0) continue; // unqualified: `security-fls-unqualified-key`
+      const objectName = flsKey.slice(0, dot);
+      const fieldName = flsKey.slice(dot + 1);
+      const surface = flsGraph.get(objectName);
+      if (!surface) continue; // not this stack's object, or no readable field map
+      if (!surface.names.has(fieldName) && !surface.injected.has(fieldName)) continue; // `security-fls-unknown-field`
+      if (capabilityGated.get(objectName)?.has(fieldName)) continue; // ADR-0066 D3 gates it after the merge
+      if (holdsSuperuserBypass(ps, objectName, 'modify')) continue; // same-set: `security-superuser-field-mask-inert`
+      const mask = flsEntry as AnyRec;
+      const readMasked = mask.readable === false;
+      const editLocked = mask.editable !== true;
+      if (!readMasked && !editLocked) continue;
+
+      for (let j = 0; j < permissionSets.length; j++) {
+        if (j === i) continue;
+        const set = permissionSets[j];
+        if (!set || typeof set !== 'object') continue;
+        const vote = objectWideFieldVote(set, objectName, fieldName);
+        if (!vote) continue;
+        const reopensRead = readMasked;
+        const reopensEdit = editLocked && vote.editable;
+        if (!reopensRead && !reopensEdit) continue;
+        const otherName = typeof set.name === 'string' ? set.name : `(permission set ${j})`;
+        const bitKey = FIELD_REOPEN_BIT_KEY[vote.bit];
+        const reopened = reopensRead && reopensEdit ? 'both' : reopensRead ? 'read' : 'edit';
+        const votes = { both: 'readable and editable', read: 'readable', edit: 'editable' }[reopened];
+        const restriction = { both: 'readable: false and the edit lock', read: 'readable: false', edit: 'the edit lock' }[
+          reopened
+        ];
+        const binds = reopened === 'both' ? 'bind' : 'binds';
+        const drop =
+          vote.bit === 'view-all-fields'
+            ? `Drop viewAllFields from "${otherName}"'s ${vote.via} entry`
+            : `Drop ${bitKey} from "${otherName}"'s ${vote.via} entry and reach the rows with readScope/writeScope or a row-level policy`;
+        const ownRow = vote.editable ? '' : `, or give "${otherName}" its own '${flsKey}': { readable: false } row`;
+        const allFields =
+          reopensRead && vote.bit !== 'view-all-fields'
+            ? `; if "${otherName}" really should read every field, say so with viewAllFields: true on that entry`
+            : '';
+        const capability = reopensRead
+          ? `; a field that must stay hidden from everyone without a capability (salary, an ID number) declares ` +
+            `requiredPermissions on the field (ADR-0066 D3), plus a maskingRule where a partial value is needed`
+          : `; a field no one may edit without a capability declares requiredPermissions on the field (ADR-0066 D3)`;
+        findings.push({
+          severity: 'warning',
+          rule: SECURITY_CROSS_SET_FIELD_REOPEN,
+          where: `permission set "${hidingName}"`,
+          path: `permissions[${i}].fields["${flsKey}"]`,
+          message:
+            `permission set "${otherName}" holds ${bitKey} on ${vote.via}, which votes ${votes} on every field of ` +
+            `"${objectName}", so ${restriction} on '${flsKey}' ${binds} no holder of both sets`,
+          hint: `${drop}${ownRow}${allFields}${capability}`,
+          userTextParams: {
+            permissionSet: hidingName,
+            otherSet: otherName,
+            field: flsKey,
+            object: objectName,
+            bit: vote.bit,
+            reopened,
+          },
+        });
+      }
     }
   }
 }
@@ -1482,19 +1673,33 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       });
     }
 
+    // [Field-axis split, ruling of record 6912661484, letter A; L2 record
+    // 7063858938] `viewAllFields` on the wildcard is the field half of the
+    // same superuser: a read vote on every field of every object, other
+    // packages' objects included, so another package's `readable: false`
+    // binds no holder of this set. Read like the two record bits, at the same
+    // tier. `error`, as for them: the organization boundary refuses to
+    // distribute such a set (`delegated-admin-gate.ts`, condition (a), reads
+    // the three bits alike), and the key is in no release yet, so no stack a
+    // released version accepted stops building.
     const wildcard = objectsMap['*'] as AnyRec | undefined;
-    if (wildcard && (wildcard.viewAllRecords === true || wildcard.modifyAllRecords === true)) {
+    const recordBypass = !!wildcard && (wildcard.viewAllRecords === true || wildcard.modifyAllRecords === true);
+    const fieldBypass = !!wildcard && wildcard.viewAllFields === true;
+    if (recordBypass || fieldBypass) {
+      const bits = [...(recordBypass ? ['viewAllRecords', 'modifyAllRecords'] : []), ...(fieldBypass ? ['viewAllFields'] : [])];
       findings.push({
         severity: 'error',
         rule: SECURITY_WILDCARD_VAMA,
         where: `permission set "${psName}"`,
         path: `${psPath}.objects.*`,
-        message:
-          `'*' wildcard carrying View All / Modify All Data — a package-authored superuser. ` +
-          `Only the platform's own admin set may combine the wildcard with VAMA (ADR-0066).`,
+        message: recordBypass
+          ? `'*' wildcard carrying View All / Modify All Data — a package-authored superuser. ` +
+            `Only the platform's own admin set may combine the wildcard with VAMA (ADR-0066).`
+          : `'*' wildcard carrying viewAllFields — a package-authored read of every field of every object, ` +
+            `other packages' objects included. Only the platform's own admin set may carry it on the wildcard (ADR-0066).`,
         // [#22161] One remedy line; where an app-level admin set belongs
         // (ADR-0090 D9) is this id's `os explain` entry.
-        hint: `Enumerate the objects this set really needs, or drop viewAllRecords/modifyAllRecords from the '*' entry`,
+        hint: `Enumerate the objects this set really needs, or drop ${bits.join('/')} from the '*' entry`,
       });
     }
 
@@ -1523,6 +1728,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       }
     }
   }
+
+  pushCrossSetFieldReopen(findings, stack, permissionSets, flsGraph);
 
   // ── D3 (`security-role-word`) lives in `validateSecurityRoleWord` below ──
   // [#8310] Extracted into its own registry entry when the rest of this block
