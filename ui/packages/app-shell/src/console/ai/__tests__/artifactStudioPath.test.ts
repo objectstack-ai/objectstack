@@ -22,24 +22,23 @@ describe('artifactStudioPath', () => {
     );
   });
 
-  it('dashboard / page → Interfaces pillar with their own surface', () => {
+  // objectstack#36502 — the Interfaces pillar is retired: these open their All-metadata item page.
+  it('dashboard / page → their All-metadata item page', () => {
     expect(artifactStudioPath(pkg, { type: 'dashboard', name: 'home_dashboard' })).toBe(
-      '/studio/app.rmpe/interfaces?surface=dashboard%3Ahome_dashboard',
+      '/studio/app.rmpe/metadata/dashboard/home_dashboard',
     );
-    expect(artifactStudioPath(pkg, { type: 'page', name: 'welcome' })).toBe(
-      '/studio/app.rmpe/interfaces?surface=page%3Awelcome',
-    );
+    expect(artifactStudioPath(pkg, { type: 'page', name: 'welcome' })).toBe('/studio/app.rmpe/metadata/page/welcome');
   });
 
-  it('view → the OWNING OBJECT leaf on Interfaces (views are not nav leaves)', () => {
+  it('view → its own All-metadata item page, by its qualified name', () => {
     expect(artifactStudioPath(pkg, { type: 'view', name: 'rmpe_customer.customer_list' })).toBe(
-      '/studio/app.rmpe/interfaces?surface=object%3Armpe_customer',
+      '/studio/app.rmpe/metadata/view/rmpe_customer.customer_list',
     );
   });
 
-  it('app → Interfaces pillar home (no surface)', () => {
+  it('app → its All-metadata item page', () => {
     expect(artifactStudioPath(pkg, { type: 'app', name: 'customer_management' })).toBe(
-      '/studio/app.rmpe/interfaces',
+      '/studio/app.rmpe/metadata/app/customer_management',
     );
   });
 

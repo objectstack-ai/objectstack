@@ -54,7 +54,7 @@ vi.mock('@object-ui/fields', async (importOriginal) => {
   };
 });
 
-import { AdapterCtx, SchemaRendererContext } from '@object-ui/react';
+import { AdapterCtx, MetadataCtx, SchemaRendererContext } from '@object-ui/react';
 import { seedRecordVerdict } from '@object-ui/plugin-detail';
 import { FormOwnerLine } from '@object-ui/plugin-form';
 import { FormOwnerChangeAction } from './FormOwnerChangeAction';
@@ -683,5 +683,173 @@ describe('the Change Owner dialog offers the declared cascades as ticks (objects
     fireEvent.click(screen.getByTestId('change-owner-kind-queue'));
     await act(async () => {});
     expect(screen.queryByTestId('change-owner-cascades')).toBeNull();
+  });
+});
+
+describe('the queue target offers the queues an app declares beside sys_queue (objectstack#36807)', () => {
+  /** The organization's `sys_queue` rows; `support_desk` shares a declared queue's name. */
+  const ROWS = [
+    { id: 'q_1', name: 'billing_desk', label: 'Billing Desk' },
+    { id: 'q_2', name: 'support_desk', label: 'Support Desk (row)' },
+  ];
+  /** The `queue` items a package declares, as `GET /api/v1/meta/queue` lists them. */
+  const DECLARED = [
+    { name: 'support_desk', label: 'Support Desk' },
+    { name: 'escalations', label: 'Escalations' },
+  ];
+
+  /**
+   * One `$filter` node over a row: the object form (`$and`, and a `name` that
+   * is a value, `$in` or `$nin`) and the array form `mergeFilterNodes` writes
+   * for the recents rail (`['and', …]`, `['name', 'in' | 'nin' | '=', v]`).
+   */
+  function matches(row: { name: string }, filter: any): boolean {
+    if (!filter) return true;
+    if (Array.isArray(filter)) {
+      const [head, op, value] = filter;
+      if (head === 'and') return filter.slice(1).every((f: unknown) => matches(row, f));
+      if (head !== 'name') return true;
+      if (op === 'in') return value.includes(row.name);
+      if (op === 'nin') return !value.includes(row.name);
+      return op === '=' ? row.name === value : true;
+    }
+    if (Array.isArray(filter.$and) && !filter.$and.every((f: Record<string, any>) => matches(row, f))) return false;
+    const byName = filter.name;
+    if (typeof byName === 'string' && row.name !== byName) return false;
+    if (Array.isArray(byName?.$in) && !byName.$in.includes(row.name)) return false;
+    if (Array.isArray(byName?.$nin) && byName.$nin.includes(row.name)) return false;
+    return true;
+  }
+
+  /** `sys_queue` as the data API serves it, honouring `$search` and `$filter`. */
+  function queueBackend() {
+    return vi.fn(async (objectName: string, params: Record<string, any> = {}) => {
+      if (objectName !== 'sys_queue') return { data: [], total: 0 };
+      let rows = ROWS;
+      const term = typeof params.$search === 'string' ? params.$search.toLowerCase() : '';
+      if (term) rows = rows.filter((q) => q.label.toLowerCase().includes(term) || q.name.includes(term));
+      rows = rows.filter((q) => matches(q, params.$filter));
+      return { data: rows.map((q) => ({ ...q })), total: rows.length };
+    });
+  }
+
+  async function settle(ms = 0) {
+    for (let i = 0; i < 6; i++) {
+      await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+    }
+  }
+
+  afterEach(() => cleanup());
+
+  function mountQueueDialog(records: Array<Record<string, unknown>>, ensureType: (type: string) => Promise<any[]>) {
+    const find = queueBackend();
+    const changeOwner = vi.fn(async () => ({ object: 'crm_case', id: 'c1', queue: 'x' }));
+    const changeOwnerMany = vi.fn(async () => ({
+      object: 'crm_case', field: 'owner_id', queue: 'x', updated: records.length, failed: 0, failures: [], notified: 0,
+    }));
+    const adapter = { getClient: () => ({ data: { changeOwner, changeOwnerMany } }), find } as any;
+    const store = { ensureType: vi.fn(ensureType) };
+    render(
+      <AdapterCtx.Provider value={adapter}>
+        <MetadataCtx.Provider value={store as any}>
+          <SchemaRendererContext.Provider value={{ dataSource: adapter } as any}>
+            <ChangeOwnerDialog
+              open
+              onOpenChange={vi.fn()}
+              objectDef={{ name: 'crm_case', fields: { owner_id: {}, queue: { type: 'text' } } } as any}
+              records={records}
+            />
+          </SchemaRendererContext.Provider>
+        </MetadataCtx.Provider>
+      </AdapterCtx.Provider>,
+    );
+    return { find, changeOwner, changeOwnerMany, store };
+  }
+
+  const declaredRead = async () => DECLARED.map((q) => ({ ...q }));
+  const queueReads = (find: ReturnType<typeof vi.fn>) => find.mock.calls.filter((c) => c[0] === 'sys_queue').map((c) => c[1] ?? {});
+
+  async function showQueueTarget() {
+    fireEvent.click(screen.getByTestId('change-owner-kind-queue'));
+    await screen.findByTestId('lookup-trigger-change_owner_queue');
+    await settle();
+  }
+
+  async function openLookup() {
+    await act(async () => { fireEvent.click(screen.getByTestId('lookup-trigger-change_owner_queue')); });
+    await waitFor(() => expect(screen.getAllByRole('option').length).toBeGreaterThan(0));
+    await settle();
+  }
+
+  it('one record: a declared queue is offered, picked, and the owner write names it', async () => {
+    const { changeOwner, store } = mountQueueDialog([{ id: 'c1', owner_id: 'u_amy' }], declaredRead);
+    await showQueueTarget();
+    expect(store.ensureType).toHaveBeenCalledWith('queue');
+    const group = await screen.findByTestId('change-owner-declared-queues');
+    expect(within(group).getByText('Escalations (escalations)')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('change-owner-declared-queue-escalations'));
+    await settle();
+    fireEvent.click(screen.getByTestId('change-owner-submit'));
+    await waitFor(() => expect(changeOwner).toHaveBeenCalledWith('crm_case', 'c1', { queue: 'escalations' }));
+  });
+
+  it('a list: a declared queue picked moves every record to it by name', async () => {
+    const { changeOwnerMany } = mountQueueDialog([{ id: 'c1' }, { id: 'c2' }], declaredRead);
+    await showQueueTarget();
+    fireEvent.click(await screen.findByTestId('change-owner-declared-queue-support_desk'));
+    await settle();
+    fireEvent.click(screen.getByTestId('change-owner-submit'));
+    await screen.findByTestId('change-owner-report');
+    expect(changeOwnerMany).toHaveBeenCalledWith('crm_case', ['c1', 'c2'], { queue: 'support_desk' });
+  });
+
+  it('a plain sys_queue row is still offered by the lookup, picked, and sent by its name', async () => {
+    const { changeOwner } = mountQueueDialog([{ id: 'c1', owner_id: 'u_amy' }], declaredRead);
+    await showQueueTarget();
+    await screen.findByTestId('change-owner-declared-queues');
+    await openLookup();
+    fireEvent.click(await screen.findByRole('option', { name: /Billing Desk/ }));
+    await settle();
+    // The lookup's pick is the target; no declared choice stays ticked beside it.
+    expect(screen.getByTestId('change-owner-declared-queue-support_desk').getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(screen.getByTestId('change-owner-submit'));
+    await waitFor(() => expect(changeOwner).toHaveBeenCalledWith('crm_case', 'c1', { queue: 'billing_desk' }));
+  });
+
+  it('a declared queue and a sys_queue row of the same name are offered once: the declared one wins', async () => {
+    const { find } = mountQueueDialog([{ id: 'c1', owner_id: 'u_amy' }], declaredRead);
+    await showQueueTarget();
+    await screen.findByTestId('change-owner-declared-queues');
+    await openLookup();
+    // Every read the lookup sends (its list, and the recents rail when it has
+    // any) asks the server to leave the declared names out, so the row is not drawn …
+    const reads = queueReads(find);
+    expect(reads.length).toBeGreaterThan(0);
+    const leftOut = /\{"name":\{"\$nin":\["escalations","support_desk"\]\}\}|\["name","nin",\["escalations","support_desk"\]\]/;
+    for (const p of reads) expect(JSON.stringify(p.$filter)).toMatch(leftOut);
+    expect(screen.queryByRole('option', { name: /Support Desk \(row\)/ })).toBeNull();
+    expect(screen.getByRole('option', { name: /Billing Desk/ })).toBeTruthy();
+    // … and the declared queue is drawn exactly once.
+    expect(screen.getAllByText('Support Desk (support_desk)')).toHaveLength(1);
+  });
+
+  it('a failed declared read offers no declared queue, and the sys_queue lookup works unfiltered', async () => {
+    const { find, changeOwner } = mountQueueDialog([{ id: 'c1', owner_id: 'u_amy' }], async () => { throw new Error('meta read refused'); });
+    await showQueueTarget();
+    expect(screen.queryByTestId('change-owner-declared-queues')).toBeNull();
+    await openLookup();
+    const reads = queueReads(find);
+    expect(reads.length).toBeGreaterThan(0);
+    for (const p of reads) expect(JSON.stringify(p.$filter ?? {})).not.toContain('$nin');
+    fireEvent.click(await screen.findByRole('option', { name: /Support Desk \(row\)/ }));
+    await settle();
+    fireEvent.click(screen.getByTestId('change-owner-submit'));
+    await waitFor(() => expect(changeOwner).toHaveBeenCalledWith('crm_case', 'c1', { queue: 'support_desk' }));
+  });
+
+  it('reads no declared queue until the queue target is shown', async () => {
+    const { store } = mountQueueDialog([{ id: 'c1', owner_id: 'u_amy' }], declaredRead);
+    await settle();
+    expect(store.ensureType).not.toHaveBeenCalled();
   });
 });

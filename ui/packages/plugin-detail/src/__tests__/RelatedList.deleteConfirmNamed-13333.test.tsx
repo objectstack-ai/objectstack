@@ -25,7 +25,12 @@ beforeAll(() => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
 });
 
-const h = vi.hoisted(() => ({ schema: null as any }));
+const h = vi.hoisted(() => ({ schema: null as any, toastError: null as any }));
+vi.mock('@object-ui/components', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, any>>();
+  h.toastError = vi.fn();
+  return { ...actual, toast: Object.assign((...a: unknown[]) => actual.toast(...a), actual.toast, { error: h.toastError }) };
+});
 vi.mock('@object-ui/react', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
@@ -40,6 +45,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 const nativeConfirm = vi.fn(() => true);
 beforeEach(() => {
   h.schema = null;
+  h.toastError?.mockClear();
   nativeConfirm.mockClear();
   vi.stubGlobal('confirm', nativeConfirm);
 });
@@ -223,5 +229,70 @@ describe('RelatedList — the row delete confirm names a fetched row by its decl
     }
     expect(drawn).toEqual(['full_name', 'email']);
     expect(dialog.textContent).toContain('Are you sure you want to delete "Ada Lovelace"?');
+  });
+});
+
+/**
+ * objectstack#36851 — a delete the server REFUSES says so. The row delete the
+ * host hands the list rejects (a `409 RECORD_LOCKED` from a hook or a record
+ * lock, carrying the producer-marked `userMessage`); the list used to log it
+ * to the console and close the dialog with nothing on screen. It now toasts
+ * the refusal the way the object's list page does: "Failed to delete LABEL",
+ * with the marked `userMessage` as the description. The row stays in the list.
+ */
+describe('RelatedList — a refused row delete says it was refused (objectstack#36851)', () => {
+  const LINE_SCHEMA = {
+    name: 'crm_sales_order_line',
+    label: 'Order Line',
+    fields: { product: { name: 'product', type: 'text', label: 'Product' } },
+  };
+  const ROW = { id: 'l1', name: 'Widget x2', product: 'Widget' };
+  const lineDataSource = () =>
+    ({
+      getObjectSchema: vi.fn(async () => LINE_SCHEMA),
+      find: vi.fn(async () => ({ data: [ROW] })),
+    }) as any;
+  const refusal = (fields: Record<string, unknown>) =>
+    Object.assign(new Error('Order SO-1 is confirmed, so its lines can no longer be changed.'), { httpStatus: 409, code: 'RECORD_LOCKED', ...fields });
+
+  async function confirmDelete(onRowDelete: (row: any) => unknown) {
+    const dialog = await openDelete(
+      { api: LINE_SCHEMA.name, objectName: LINE_SCHEMA.name, dataSource: lineDataSource(), data: [ROW], onRowDelete } as any,
+      ROW,
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(onRowDelete).toHaveBeenCalledWith(ROW));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+  }
+
+  it('a refusal carrying a userMessage toasts that message under "Failed to delete LABEL"', async () => {
+    const userMessage = 'Order SO-1 is confirmed. Return it to draft before changing its lines.';
+    await confirmDelete(vi.fn(async () => { throw refusal({ userMessage }); }));
+    await waitFor(() => expect(h.toastError).toHaveBeenCalledTimes(1));
+    const [title, opts] = h.toastError.mock.calls[0];
+    expect(title).toBe('Failed to delete Order Line');
+    expect(opts).toEqual({ description: userMessage });
+  });
+
+  it('a refusal with no userMessage still toasts the refusal, with the server sentence cleaned', async () => {
+    await confirmDelete(vi.fn(async () => { throw refusal({}); }));
+    await waitFor(() => expect(h.toastError).toHaveBeenCalledTimes(1));
+    const [title, opts] = h.toastError.mock.calls[0];
+    expect(title).toBe('Failed to delete Order Line');
+    expect(opts).toEqual({ description: 'Order SO-1 is confirmed, so its lines can no longer be changed.' });
+  });
+
+  it('a refusal with no sentence at all toasts the generic refusal title alone', async () => {
+    await confirmDelete(vi.fn(async () => { throw Object.assign(new Error(''), { httpStatus: 409 }); }));
+    await waitFor(() => expect(h.toastError).toHaveBeenCalledTimes(1));
+    expect(h.toastError.mock.calls[0]).toEqual(['Failed to delete Order Line', undefined]);
+  });
+
+  it('CONTROL: a delete that succeeds toasts no error', async () => {
+    const onRowDelete = vi.fn(async () => undefined);
+    await confirmDelete(onRowDelete);
+    // Let the post-delete refresh settle before asserting silence.
+    await act(async () => { await Promise.resolve(); });
+    expect(h.toastError).not.toHaveBeenCalled();
   });
 });

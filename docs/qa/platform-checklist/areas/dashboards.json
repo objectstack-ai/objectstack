@@ -700,7 +700,7 @@
       "title": "Dashboard-level dateRange + global filters re-scope every bound widget through its OWN field mapping; opted-out widgets stay fixed; and the Studio widget inspector AUTHORS those filterBindings",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -711,7 +711,7 @@
         "requires": [
           "the Revenue Pulse dashboard (showcase_revenue_pulse) — the framework#2501 acceptance fixture: one dateRange (default field issued_on) + one region filter (default field region) driving invoice AND account widgets, account widgets re-mapping via filterBindings (dateRange→signed_on, region→sales_region), one KPI opted out of both (filterBindings false) as the all-time reference",
           "seeded accounts spread across sales_region amer/emea/apac with signed_on dates (src/data/seed/index.ts)",
-          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages with the body {id, name, version: '0.1.0', type: 'app'}: the manifest is strict, so a `label` key is refused as unrecognized, and `type` is required) and author the dashboard there, since the showcase package is read-only in Studio — AND author an app in that package whose navigation carries the dashboard (PUT /api/v1/meta/app/NAME?package=PKG): the Studio Interfaces pillar IS the app navigation tree (objectui app-shell StudioDesignSurface.tsx: \"Interfaces: the real App navigation tree\"), so a package with no app shows no dashboard to select (QA run #24573); D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. A scratch dashboard that carries Revenue Pulse's global filters gives each account-bound widget a filterBindings for them (e.g. dateRange→signed_on, region: false) before its first save: a widget the issued_on / region defaults cannot reach is refused 422 dashboard-filter-field-unknown. Delete the scratch package at teardown"
+          "for D2 and D3 a SCRATCH dashboard, because no stock dashboard serves either leg (QA run #23163 scored both on runtime scratch dashboards): D2's Studio authoring round-trip needs a dashboard in a WRITABLE package to publish into — create a scratch package (POST /api/v1/packages with the body {id, name, version: '0.1.0', type: 'app'}: the manifest is strict, so a `label` key is refused as unrecognized, and `type` is required) and author the dashboard there, since the showcase package is read-only in Studio — AND author an app in that package whose navigation carries the dashboard (PUT /api/v1/meta/app/NAME?package=PKG), so the dashboard opens in the running app, where its design mode is the authoring door since Studio's Interfaces pillar (which reached a dashboard only through an app's navigation, QA run #24573) retired with #36502; D3's dataset-sourced option half needs a globalFilter whose options come from `optionsFrom` ({object, valueField, labelField} — GlobalFilterOptionsFromSchema in packages/spec/src/ui/dashboard.zod.ts), which NO stock dashboard declares (Revenue Pulse's region filter lists static options). D3's {value,label} render half still reads on Revenue Pulse. A scratch dashboard that carries Revenue Pulse's global filters gives each account-bound widget a filterBindings for them (e.g. dateRange→signed_on, region: false) before its first save: a widget the issued_on / region defaults cannot reach is refused 422 dashboard-filter-field-unknown. Delete the scratch package at teardown"
         ]
       },
       "steps": [
@@ -840,7 +840,8 @@
           "date": "2026-11-15",
           "change": "fixtures.requires[2] names the scratch package body POST /api/v1/packages takes ({id, name, version, type}; 'label' is refused) and the filterBindings a scratch dashboard needs before its first save (else 422 dashboard-filter-field-unknown) (QA run #33853, comment 6894307378; ledger 6896511848 of #33761 row 71). No clause changed. Read at base bc6b7ffd",
           "ref": "#34016"
-        }
+        },
+        { "revision":  7, "date":  "2026-11-24", "change":  "fixtures.requires[2]: D2's authoring door is the running app's design mode, since Studio's Interfaces pillar retired with #36502; the app that carries the dashboard stays, now to open it in the app. No clause changed", "ref":  "#36502" }
       ]
     },
     {

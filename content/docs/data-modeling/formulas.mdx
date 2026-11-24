@@ -200,6 +200,9 @@ All functions are pure given a pinned `now`, which is what makes
 | `date(s)` / `datetime(s)` | timestamp | Parse an ISO date / date-time string (aliases) |
 | `isoDate(t)` / `isoDatetime(t)` | string | A timestamp as ISO text on the UTC calendar: `YYYY-MM-DD` / `YYYY-MM-DDTHH:mm:ss.sssZ`, the bytes a flow template's `{TODAY()}` / `{NOW()}` wrote. Refuses text, numbers and `null`: write `isoDate(date(s))` for ISO text |
 | `daysBetween(a, b)` | int | Whole days from `a` to `b` (negative when `b` is earlier) |
+| `addWorkingDays(d, n[, code])` | timestamp | The calendar day `n` working days after `d` on the organization's working calendar (before it, for a negative `n`) — see [Working days](#working-days) |
+| `workingDaysBetween(a, b[, code])` | int | Working days after `a` up to and including `b` (negative when `b` is earlier); the inverse of `addWorkingDays` |
+| `addWorkingHours(t, h[, code])` | timestamp | The instant `h` working hours after `t`, counted as elapsed time in the calendar's time zone |
 | `isBlank(v)` | bool | True for `null`, `undefined`, `''`, `[]` |
 | `isEmpty(v)` | bool | True for `null` or zero-length string/list/map |
 | `coalesce(v, fallback)` | dyn | `v` when non-null, else `fallback` |
@@ -572,6 +575,64 @@ answers `false` instead of being coerced into a match. This is the read-side
 counterpart to the date-arithmetic build error above — equality is rewritten and
 works; `+`/`-` arithmetic is rejected.
 </Callout>
+
+### Working days
+
+`addWorkingDays`, `workingDaysBetween` and `addWorkingHours` count with the
+organization's **working calendar** (ADR-0157): its weekly working hours, its
+holidays, and its make-up working days, such as a Saturday worked in exchange for
+a holiday week. A due date "three working days later" steps over a weekend, a
+National Day week, and onto a make-up Saturday.
+
+```typescript
+// Response due three working days after the case opened (a calendar day)
+Field.formula({
+  label: 'Respond By',
+  returnType: 'date',
+  expression: 'addWorkingDays(record.opened_on, 3)',
+})
+
+// Working days left until the deadline, on a named calendar
+Field.formula({
+  label: 'Working Days Left',
+  returnType: 'number',
+  expression: "workingDaysBetween(today(), record.deadline, 'cn_mainland')",
+})
+
+// SLA due time, STORED: computed on each write, so a list view, a report
+// or a flow can filter on it
+Field.datetime({
+  label: 'SLA Due',
+  expression: 'addWorkingHours(record.opened_at, 8)',
+})
+```
+
+- **Which calendar.** With two arguments, the organization's default calendar;
+  the third names a calendar by its code, and it must be a quoted literal: the
+  engine loads the calendars an expression names before it evaluates it. To pick
+  a calendar per record, branch between literal calls:
+  `record.region == 'us' ? addWorkingDays(record.start, 3, 'us') : addWorkingDays(record.start, 3, 'cn_mainland')`.
+- **Days and instants.** `addWorkingDays` and `workingDaysBetween` take calendar
+  days (a `date` field, `today()`, or `YYYY-MM-DD` text) and the start day itself
+  never counts, so `0` answers the start. `addWorkingHours` takes an instant; a
+  start outside working time begins at the next working period.
+- **Where they run.** Only in a `formula` field and in a stored field's
+  `expression`, evaluated on the server. No calendar arithmetic runs in SQL, so a
+  filter cannot call them; neither can a validation rule, a visibility rule, a
+  flow condition, a sharing rule, a field's expression `defaultValue` or a seed
+  value. `os build` refuses them there and points at the stored due-time field
+  above, which a filter compares with `{now}` and a CEL condition with `now()`.
+- **When the calendar cannot answer.** With no default calendar in the
+  organization, or a count that reaches past the span the calendar is maintained
+  for, the formula reads `null` (a stored field stores blank and the write goes
+  through), and the server logs one line naming the object, the field and the
+  reason. It never falls back to counting the weekly pattern or the wall clock.
+- **After a calendar edit.** A formula field counts again on its next read; a
+  stored due time keeps the value computed on its last write. So a stored due
+  time left blank by a refusal stays blank until that record is written again,
+  and a write made while the calendar refuses blanks a value that was valid
+  before. A filter such as "due before now" never matches a blank, so keep the
+  calendar's maintained span ahead of the records it counts for.
 
 ### Financial Calculations
 

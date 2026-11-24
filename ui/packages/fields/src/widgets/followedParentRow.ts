@@ -25,6 +25,18 @@ interface ParentSource {
 const isRow = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
+ * Where the read of a followed parent stands:
+ * - `none`: the field follows no parent, or the record names none by id (no
+ *   parent, or one already expanded on the record);
+ * - `pending`: the read for the parent the record names has not answered;
+ * - `read`: the parent row is laid on the record;
+ * - `unread`: the record names a parent whose code cannot be read here — the
+ *   read failed or answered no row, the source cannot read (`findOne`), or the
+ *   form stamped no parent object to read it from.
+ */
+export type FollowedParentState = 'none' | 'pending' | 'read' | 'unread';
+
+/**
  * `record` as the resolver should read it for `field`: unchanged unless the
  * field follows a parent the record names by a bare id, in which case the
  * parent row read for that id is laid under the `master_detail` once it lands.
@@ -36,6 +48,19 @@ export function useFollowedParentRecord(
   record: Readonly<Record<string, unknown>> | null | undefined,
   dataSource: unknown,
 ): Readonly<Record<string, unknown>> | null | undefined {
+  return useFollowedParentRead(field, record, dataSource).record;
+}
+
+/**
+ * {@link useFollowedParentRecord}, with where the read stands
+ * ({@link FollowedParentState}): a caller that waits for the parent's code
+ * waits only while the read is `pending`, never on a read that will not come.
+ */
+export function useFollowedParentRead(
+  field: { currencyConfig?: FieldCurrencyConfig } | null | undefined,
+  record: Readonly<Record<string, unknown>> | null | undefined,
+  dataSource: unknown,
+): { record: Readonly<Record<string, unknown>> | null | undefined; state: FollowedParentState } {
   const ctx = useContext(SchemaRendererContext);
   const source = (dataSource ?? ctx?.dataSource) as ParentSource | null | undefined;
   const path = recordCurrencyPath(field);
@@ -45,17 +70,20 @@ export function useFollowedParentRecord(
   const canRead = !!path && !!parentObject && id !== undefined && typeof source?.findOne === 'function';
   const key = canRead ? `${parentObject}\u0000${id}` : '';
 
-  const [answer, setAnswer] = useState<{ key: string; row: Record<string, unknown> } | undefined>(undefined);
+  const [answer, setAnswer] = useState<{ key: string; row?: Record<string, unknown> } | undefined>(undefined);
   useEffect(() => {
     if (!canRead || !source?.findOne) return;
     let current = true;
     source.findOne(parentObject!, id!, { $select: ['id', path!.codeField] }).then(
-      (row) => { if (current && isRow(row)) setAnswer({ key, row }); },
-      () => { if (current) setAnswer(undefined); },
+      (row) => { if (current) setAnswer(isRow(row) ? { key, row } : { key }); },
+      () => { if (current) setAnswer({ key }); },
     );
     return () => { current = false; };
   }, [canRead, source, parentObject, id, key, path?.codeField]);
 
-  if (!canRead || answer?.key !== key) return record;
-  return withFollowedParent(record ?? {}, field, answer.row) as Readonly<Record<string, unknown>>;
+  if (!path || id === undefined) return { record, state: 'none' };
+  if (!canRead) return { record, state: 'unread' };
+  if (answer?.key !== key) return { record, state: 'pending' };
+  if (!answer.row) return { record, state: 'unread' };
+  return { record: withFollowedParent(record ?? {}, field, answer.row) as Readonly<Record<string, unknown>>, state: 'read' };
 }

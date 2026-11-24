@@ -153,7 +153,7 @@ export function unresolvedFieldOf(param: BulkActionParam): string | undefined {
  * promoted param always delivered them (the hand-mapper spread the raw param).
  *
  * The picker settings a reference-bearing field declares — `lookupFilters`,
- * `lookupColumns`, `lookupPageSize` and `descriptionField` — are carried under
+ * `lookupColumns`, `lookupPageSize`, `descriptionField` and `allowCreate` — are carried under
  * their own names, the spellings `LookupField` reads and the ones app-shell's
  * `paramToField` hands the single-record dialog's picker
  * (objectstack-ai/objectstack#26951). No rename is needed: `BulkActionParam`'s
@@ -188,6 +188,7 @@ function toBulkParam(resolved: ActionParamDef): BulkActionParam | null {
     ...(resolved.lookupColumns !== undefined && { lookupColumns: resolved.lookupColumns }),
     ...(resolved.lookupFilters !== undefined && { lookupFilters: resolved.lookupFilters }),
     ...(resolved.lookupPageSize !== undefined && { lookupPageSize: resolved.lookupPageSize }),
+    ...(resolved.allowCreate !== undefined && { allowCreate: resolved.allowCreate }),
     ...(resolved.accept !== undefined && { accept: resolved.accept }),
     ...(resolved.maxSize !== undefined && { maxSize: resolved.maxSize }),
     ...(resolved.unresolvedField !== undefined && { [UNRESOLVED_FIELD_KEY]: resolved.unresolvedField }),

@@ -603,8 +603,12 @@ export function PeoplePicker({
         )}
       </div>
 
-      {/* Candidate area */}
-      <ScrollArea className="min-h-0 flex-1" data-testid="people-picker-list">
+      {/* Candidate area. `flex flex-col` makes the viewport a flex item that
+          shrinks to the room this area is given: a container capped only by
+          `max-h-*` (the inline popover, the desktop dialog) has no definite
+          height, so the viewport's own `h-full` falls back to its content
+          height and the list is clipped instead of scrolling. */}
+      <ScrollArea className="flex min-h-0 flex-1 flex-col" data-testid="people-picker-list">
         <div
           id="people-picker-list"
           role="listbox"
@@ -722,8 +726,13 @@ export function PeoplePicker({
         </Sheet>
       );
     }
+    // `modal`: the popover is its own scroll-lock layer. It is portalled out of
+    // a modal form's DOM, so a non-modal popover's list sits outside that
+    // dialog's scroll lock, which cancels every wheel and touch move on it; as
+    // the topmost lock its list scrolls. The same treatment as the lookup
+    // popover (objectstack#36825, #36852).
     return (
-      <Popover open={open} onOpenChange={onOpenChange}>
+      <Popover modal open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>{trigger}</PopoverTrigger>
         <PopoverContent
           align="start"

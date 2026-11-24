@@ -123,6 +123,8 @@ const WALK_PUSHES: Record<string, string> = {
   hookRefusalTemplateIssues: "a hook refusal's template sentences over its declared params: no rule or field expression",
   // [#34273] The same judge over an action's refusal catalogue.
   actionRefusalTemplateIssues: "an action refusal's template sentences over its declared params: no rule or field expression",
+  // [#35356] ADR-0157 D4/D6: working-day calls at value sites the engine loads no calendar for.
+  workingDayValueSiteIssues: "a field's expression `defaultValue` and a seed record's expression values: no rule or formula `expression`",
 };
 
 /** The passes the walk pushes whole from INSIDE a site's regions: classified with that site's calls, in `SITE_CALLS`. */
@@ -193,6 +195,9 @@ const EXT = {
 
 const VALIDATOR = { kind: 'validator', why: 'the shared validator: the tool runs `validateExpression` itself' } as const;
 const HOP_FIELD: Fixture = { objects: [REQ, BAL], expression: 'record.balance.nope > 1', severity: 'error', names: 'nope' };
+// [#36237] A list-valued field on the hop target, compared with a scalar.
+const BAL_TAGS = { name: 'bal', fields: { ...BAL.fields, tags: { type: 'tags', label: 'Tags' } } };
+const HOP_LIST: Fixture = { objects: [REQ, BAL_TAGS], expression: "record.balance.tags == 'x'", severity: 'error', names: 'record.balance.tags' };
 const BODY_HOP: Fixture = { objects: [REQ, BAL], expression: "record.meta.name == 'x'", severity: 'error', names: 'sys_metadata' };
 const ANCHOR: Fixture = { objects: [EXT], expression: "record.owner_id == 'u1'", severity: 'warning', names: 'owner_id' };
 const asValue = (f: Fixture): Fixture => ({ ...f, expression: `${f.expression} ? 1 : 0` });
@@ -204,12 +209,18 @@ const SITE_CALLS: Record<ObjectSite, Record<string, Classified>> = {
     isBareReferenceToAny: { kind: 'plumbing', why: "filters the shared validator's findings on a field-rule slot" },
     refuseStoredMetadataBodyHop: { kind: 'pass', fixture: BODY_HOP },
     refuseUndeclaredHopField: { kind: 'pass', fixture: HOP_FIELD },
+    refuseHopListEquality: { kind: 'pass', fixture: HOP_LIST },
     warnUnprovisionedAnchors: { kind: 'pass', fixture: ANCHOR },
     atSlot: { kind: 'plumbing', why: "sets the judged slot's key path on the findings" },
     celSourceOf: { kind: 'plumbing', why: 'reads the CEL source off the slot' },
     rulePredicates: { kind: 'plumbing', why: "lists the rule's predicates" },
     faultOutcomeOf: { kind: 'plumbing', why: "the rule's fault outcome, from its severity" },
     check: { kind: 'plumbing', why: 'the helper whose calls are the first region of this site' },
+    // [#35356] ADR-0157 D4: a working-day call where no calendar is loaded.
+    refuseWorkingDayElsewhere: {
+      kind: 'pass',
+      fixture: { objects: [REQ, BAL], expression: 'addWorkingDays(today(), 3) < now()', severity: 'error', names: 'addWorkingDays()' },
+    },
     validationRuleParentIssue: {
       kind: 'pass',
       fixture: { objects: [REQ, BAL], expression: 'parent.remaining > 1', severity: 'error', names: 'parent' },
@@ -224,6 +235,12 @@ const SITE_CALLS: Record<ObjectSite, Record<string, Classified>> = {
     celSourceOf: { kind: 'plumbing', why: 'reads the CEL source off the field' },
     refuseStoredMetadataBodyHop: { kind: 'pass', fixture: asValue(BODY_HOP) },
     refuseUndeclaredHopField: { kind: 'pass', fixture: asValue(HOP_FIELD) },
+    refuseHopListEquality: { kind: 'pass', fixture: asValue(HOP_LIST) },
+    // [#35356] ADR-0157 D4: a working-day call whose calendar code is not a quoted literal.
+    computedCalendarCodeMessage: {
+      kind: 'pass',
+      fixture: { objects: [REQ, BAL], expression: 'addWorkingDays(today(), 3, record.title)', severity: 'error', names: 'addWorkingDays()' },
+    },
     warnUnprovisionedAnchors: { kind: 'pass', fixture: asValue(ANCHOR) },
     // [#33100] The formula-cycle pass, after the fields loop. It locates each
     // finding on a cycle member's own `expression`; the probe is named
@@ -494,6 +511,11 @@ const FLOW_CALLS: Record<string, FlowClassified> = {
   checkDeclaredPredicate: { kind: 'plumbing', why: "a `decision` branch's helper, the second region" },
   withAttachedBlocks: { kind: 'plumbing', why: 'the field list handed to the shared validator' },
   isBareReferenceToAny: { kind: 'plumbing', why: "filters the shared validator's findings on a field-rule slot" },
+  // [#35356] ADR-0157 D4: a working-day call where no calendar is loaded.
+  refuseWorkingDayElsewhere: {
+    kind: 'pass',
+    fixture: { objects: [FLOW_OBJ], expression: 'addWorkingDays(today(), 3) < now()', severity: 'error', names: 'addWorkingDays()' },
+  },
   checkFlowNullGuards: {
     kind: 'pass',
     fixture: { objects: [FLOW_OBJ], expression: 'record.days > 3', severity: 'error', names: 'record.days' },
@@ -529,6 +551,11 @@ const FLOW_CALLS: Record<string, FlowClassified> = {
     kind: 'pass-silent-here',
     why: 'runs only where a relationship hop is hydrated (a rule condition, a formula); nothing hydrates one at a flow condition',
     fixture: { objects: [FLOW_OBJ, BAL], expression: 'record.balance.nope > 1' },
+  },
+  refuseHopListEquality: {
+    kind: 'pass-silent-here',
+    why: 'runs only where a relationship hop is hydrated (a rule condition, a formula); nothing hydrates one at a flow condition',
+    fixture: { objects: [FLOW_OBJ, BAL_TAGS], expression: "record.balance.tags == 'x'" },
   },
 };
 

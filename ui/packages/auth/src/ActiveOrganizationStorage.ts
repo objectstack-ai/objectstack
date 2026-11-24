@@ -139,6 +139,120 @@ const SIGNED_OUT_KEPT_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The list LAYOUT this browser keeps for its reader — column widths, row
+ * height, tab order — survives a SIGN-OUT, and only a sign-out
+ * (objectstack#36110, by the maintainer's ruling on objectstack#35955: "Signing
+ * out or a session ending keeps them for the same person; a different person
+ * signing in on that browser still clears everything, as today").
+ *
+ * It is kept by key PREFIX — the first prefix exception to this allowlist —
+ * because the families are open: one entry per object, and for the grid per
+ * view. Two families, both `localStorage`:
+ *
+ *  - `list-layout:USER:OBJECT` — `@object-ui/app-shell`'s list layout store
+ *    (`views/listLayoutStore.ts`, `LIST_LAYOUT_STORAGE_PREFIX`): the tab order
+ *    and, per view, the column widths and row height. Written only for a
+ *    signed-in reader; there is no spelling for nobody.
+ *  - `grid-columns-OBJECT[-VIEW]` — `@object-ui/plugin-grid`'s own browser
+ *    copy (`objectGridColumnState.ts`): column widths and column order, the
+ *    copy a record page's related tab reads (browser-only by the ruling on
+ *    objectstack#35892).
+ *
+ * After objectstack#35955 there is no server copy of any of this, so sweeping
+ * it reset every list at every sign-out. What it holds is object names, field
+ * names, view ids, widths and a row height: nothing of a record.
+ *
+ * A key is kept only while its VALUE is that and nothing more
+ * ({@link holdsOnlyListLayout}, {@link holdsOnlyGridColumns}). A family's
+ * writer that starts storing anything else — a filter, a search term, a
+ * record — loses the exception for that entry, and the sweep removes it like
+ * any other key; the behaviour pins in `@object-ui/app-shell`
+ * (`context/__tests__/signOutPurge.test.tsx`) fill both families through their
+ * real writers and fail the moment a writer's output stops passing. Both
+ * prefixes are spelled out for the dependency reason above: `@object-ui/auth`
+ * depends on neither package.
+ *
+ * {@link purgePreviousUserClientState} keeps none of it: a different person
+ * signing in on this browser starts at every view's defaults.
+ */
+const SIGNED_OUT_KEPT_LAYOUT_FAMILIES: readonly {
+  prefix: string;
+  holdsOnly(value: unknown): boolean;
+}[] = [
+  { prefix: 'list-layout:', holdsOnly: holdsOnlyListLayout },
+  { prefix: 'grid-columns-', holdsOnly: holdsOnlyGridColumns },
+];
+
+/**
+ * The row heights a list offers (`RowHeight` in `@objectstack/spec/ui`, the
+ * keys of `@object-ui/core`'s `ROW_HEIGHT_TO_DENSITY_MODE`). Spelled out:
+ * `@object-ui/auth` depends on neither; the app-shell pin writes every one of
+ * them through the real writer and signs out.
+ */
+const LAYOUT_ROW_HEIGHTS: ReadonlySet<string> = new Set(['compact', 'short', 'medium', 'tall', 'extra_tall']);
+
+const isLayoutObject = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** Whether `v` has no keys but `allowed`. */
+function hasOnlyKeys(v: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(v).every((key) => allowed.includes(key));
+}
+
+function isNameList(v: unknown): boolean {
+  return Array.isArray(v) && v.every((name) => typeof name === 'string');
+}
+
+function isWidthMap(v: unknown): boolean {
+  return isLayoutObject(v) && Object.values(v).every((w) => typeof w === 'number' && Number.isFinite(w));
+}
+
+/**
+ * `{ viewOrder?: VIEW_ID[], perView?: { VIEW_ID: { widths?: { FIELD: px }, rowHeight? } } }`
+ * and nothing else.
+ */
+function holdsOnlyListLayout(value: unknown): boolean {
+  if (!isLayoutObject(value) || !hasOnlyKeys(value, ['viewOrder', 'perView'])) return false;
+  if (value.viewOrder !== undefined && !isNameList(value.viewOrder)) return false;
+  if (value.perView === undefined) return true;
+  if (!isLayoutObject(value.perView)) return false;
+  return Object.values(value.perView).every(
+    (view) =>
+      isLayoutObject(view) &&
+      hasOnlyKeys(view, ['widths', 'rowHeight']) &&
+      (view.widths === undefined || isWidthMap(view.widths)) &&
+      (view.rowHeight === undefined || (typeof view.rowHeight === 'string' && LAYOUT_ROW_HEIGHTS.has(view.rowHeight))),
+  );
+}
+
+/** `{ order?: FIELD[], widths?: { FIELD: px } }` and nothing else. */
+function holdsOnlyGridColumns(value: unknown): boolean {
+  return (
+    isLayoutObject(value) &&
+    hasOnlyKeys(value, ['order', 'widths']) &&
+    (value.order === undefined || isNameList(value.order)) &&
+    (value.widths === undefined || isWidthMap(value.widths))
+  );
+}
+
+/**
+ * Whether the `localStorage` entry `key` is list layout a sign-out keeps
+ * ({@link SIGNED_OUT_KEPT_LAYOUT_FAMILIES}): its family's prefix, and a value
+ * that holds that family's layout and nothing more. Unreadable or unparsable
+ * is not kept.
+ */
+function isKeptListLayoutEntry(store: Storage, key: string): boolean {
+  const family = SIGNED_OUT_KEPT_LAYOUT_FAMILIES.find(({ prefix }) => key.startsWith(prefix));
+  if (!family) return false;
+  try {
+    const raw = store.getItem(key);
+    return raw !== null && family.holdsOnly(JSON.parse(raw));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * `localStorage` / `sessionStorage`, or `undefined` where they are absent or
  * blocked. Accessing the global itself can throw (partitioned iframes, some
  * privacy modes), so the guard has to be a try/catch and not a `typeof` test
@@ -238,9 +352,16 @@ function removePersisted(key: string): boolean {
  * instead of silent — the callers (`SessionUserScope.adopt` on the sign-in
  * path, {@link purgeSignedOutUserClientState} on the sign-out path) still
  * cannot act on it and must not throw either. `kept` is the allowlist of keys
- * that survive; `caller` names the purge in the report.
+ * that survive; `caller` names the purge in the report; `keepEntry`, when
+ * given, keeps a further entry it answers `true` for (the sign-out tier's
+ * list layout, {@link isKeptListLayoutEntry}).
  */
-function sweepStore(store: Storage | undefined, kept: ReadonlySet<string>, caller: string): void {
+function sweepStore(
+  store: Storage | undefined,
+  kept: ReadonlySet<string>,
+  caller: string,
+  keepEntry?: (store: Storage, key: string) => boolean,
+): void {
   if (!store) return;
   let keys: string[];
   try {
@@ -250,7 +371,7 @@ function sweepStore(store: Storage | undefined, kept: ReadonlySet<string>, calle
   }
   const unswept: string[] = [];
   for (const key of keys) {
-    if (kept.has(key)) continue;
+    if (kept.has(key) || keepEntry?.(store, key)) continue;
     try {
       store.removeItem(key);
     } catch {
@@ -293,11 +414,13 @@ export function purgePreviousUserClientState(): void {
  * answers "no session" on a browser that has held one (an expired, revoked or
  * elsewhere-ended session, at boot or in place).
  *
- * Every key in both stores goes except {@link SIGNED_OUT_KEPT_KEYS}: what a
- * list, a draft, a recents cache or any later feature wrote for the signed-out
+ * Every key in both stores goes except {@link SIGNED_OUT_KEPT_KEYS} and, in
+ * `localStorage`, the list layout ({@link SIGNED_OUT_KEPT_LAYOUT_FAMILIES}):
+ * what a draft, a recents cache or any later feature wrote for the signed-out
  * user is gone before the sign-in page is shown, without anyone naming it
  * here. The session-user pointer is kept, so a DIFFERENT user's sign-in still
- * sees a previous owner and runs its own purge.
+ * sees a previous owner and runs its own purge — which takes the kept layout
+ * with everything else.
  *
  * The sweep runs BEFORE {@link ActiveOrganizationStorage.clear}: the sweep
  * needs no org scope, and `clear()` then nulls the in-memory copy and
@@ -305,7 +428,7 @@ export function purgePreviousUserClientState(): void {
  * already ended, and nothing on that path can refuse it.
  */
 export function purgeSignedOutUserClientState(): void {
-  sweepStore(safeStore('local'), SIGNED_OUT_KEPT_KEYS, 'purgeSignedOutUserClientState');
+  sweepStore(safeStore('local'), SIGNED_OUT_KEPT_KEYS, 'purgeSignedOutUserClientState', isKeptListLayoutEntry);
   sweepStore(safeStore('session'), SIGNED_OUT_KEPT_KEYS, 'purgeSignedOutUserClientState');
   ActiveOrganizationStorage.clear();
 }

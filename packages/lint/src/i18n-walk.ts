@@ -161,9 +161,10 @@
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
  *
  * The `metadataForms.*` surface is registry-driven (sourced from
- * `METADATA_FORM_REGISTRY` + `DEFAULT_METADATA_TYPE_REGISTRY` in
- * `@objectstack/spec`) — it is included unconditionally, independent of
- * the supplied stack config.
+ * `METADATA_FORM_REGISTRY`, `METADATA_LIST_REGISTRY` and
+ * `DEFAULT_METADATA_TYPE_REGISTRY` in `@objectstack/spec`; a list column's
+ * header is the `fields.<path>.label` slot of its path) — it is included
+ * unconditionally, independent of the supplied stack config.
  *
  * Pure given its inputs: no network, and the only filesystem read is the
  * shipped liveness ledger behind {@link authorWarnedTranslationGroups} —
@@ -175,6 +176,7 @@
 
 import {
   METADATA_FORM_REGISTRY,
+  METADATA_LIST_REGISTRY,
   PAGE_COMPONENT_COPY_KEYS,
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
@@ -2755,6 +2757,22 @@ function walkMetadataForms(out: ExpectedEntry[]): void {
       if (Array.isArray(section.fields)) {
         for (const child of section.fields) walkFormField(child, type, '', out);
       }
+    }
+  }
+
+  // 3) List column headers (`METADATA_LIST_REGISTRY`). A column is translated
+  //    through the form field slot of the same path, so only a path the
+  //    type's form does not already declare needs its own entry.
+  const formFieldSlots = new Set(
+    out
+      .filter((e) => e.source === 'metadataFormField' && e.path[0] === 'metadataForms' && e.path[2] === 'fields' && e.path[4] === 'label')
+      .map((e) => `${e.path[1]}\u0000${e.path[3]}`),
+  );
+  for (const [type, list] of Object.entries(METADATA_LIST_REGISTRY)) {
+    for (const column of list.columns) {
+      if (formFieldSlots.has(`${type}\u0000${column.field}`)) continue;
+      formFieldSlots.add(`${type}\u0000${column.field}`);
+      pushEntry(out, ['metadataForms', type, 'fields', column.field, 'label'], inlineText(column.label) ?? humanizeFieldPath(column.field), 'metadataFormField', { metadataType: type });
     }
   }
 }

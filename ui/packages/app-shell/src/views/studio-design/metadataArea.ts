@@ -7,7 +7,7 @@
  *
  * ## Two legs
  *
- *  - Per package: `/studio/<package>/metadata/...`, beside the four pillars of
+ *  - Per package: `/studio/<package>/metadata/...`, beside the pillars of
  *    that package. The metadata-admin pages, mounted unchanged, scoped to it.
  *  - Across packages: `/studio/~all/metadata/...`. The environment catalog
  *    (positions, capabilities, permission sets, sharing rules), whose items
@@ -54,28 +54,28 @@ export function studioMetadataAreaPath(segment: string): string {
 }
 
 /** The pillar keys a pillar type opens in (`StudioDesignSurface`'s `PILLARS`). */
-export type StudioPillarKey = 'data' | 'automations' | 'interfaces' | 'access';
+export type StudioPillarKey = 'data' | 'automations' | 'access';
 
 /**
  * ADR-0146 D1 — "A pillar type opened from the directory opens its pillar".
  * The types each pillar designs; every other type opens the area's generic
  * item page.
  *
- * Its own table, not `StudioDesignSurface`'s `PILLAR_FOR_SURFACE_TYPE`: that
- * one routes the live in-surface request channel, which the Interfaces pillar
- * answers through its nav tree alone, so it names no Interfaces type. Here the
- * four Interfaces types open the pillar by URL, where the pillar resolves an
- * item no nav entry opens through its off-nav lists.
+ * objectstack#36502 — pages, dashboards, reports and views have no pillar
+ * since the Interfaces pillar retired: they are designed in the running app,
+ * and this area's generic item page is where they are read and, as a
+ * fallback, edited as metadata.
  */
 export const AREA_PILLAR_FOR_TYPE: Readonly<Record<string, StudioPillarKey>> = {
   object: 'data',
   flow: 'automations',
-  page: 'interfaces',
-  dashboard: 'interfaces',
-  report: 'interfaces',
-  view: 'interfaces',
   permission: 'access',
 };
+
+/** The area's generic item page of one item of a package. */
+export function studioMetadataItemPath(packageId: string, item: { type: string; name: string }): string {
+  return `${studioMetadataAreaPath(packageId)}/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`;
+}
 
 /** A pillar of a package, opened on one item through its `?surface=` deep link. */
 export function studioPillarItemPath(
@@ -123,8 +123,14 @@ export const AREA_FORM_EDITOR_TYPES: readonly string[] = ['email_template', 'tra
  * registered designer (`DatasetDefaultInspector`) and preview. On a writable
  * package the generic item page stays the dataset's editor, as on Setup's.
  * `overridable` in the spec's classification.
+ *
+ * objectstack#36502 — a view, a dashboard, a report and a page too. Their
+ * Customize door was the Interfaces pillar's; with that pillar retired, a
+ * read-only base's item of these types is customized here, in its registered
+ * designer (`ViewDefaultInspector`, `DashboardDefaultInspector`,
+ * `ReportDefaultInspector`, `PageDefaultInspector`), into the base's pair.
  */
-export const AREA_CUSTOMIZE_EDITOR_TYPES: readonly string[] = ['dataset'];
+export const AREA_CUSTOMIZE_EDITOR_TYPES: readonly string[] = ['dataset', 'view', 'dashboard', 'report', 'page'];
 
 /**
  * Whether an item of the area opens the form editor rather than the generic

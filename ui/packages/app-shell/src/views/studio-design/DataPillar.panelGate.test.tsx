@@ -190,7 +190,7 @@ describe('DataPillar — Save is gated on the validations panel’s CEL verdict 
     await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
     await pressStudioSave();
     expect(mockClient.save).not.toHaveBeenCalled();
     expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Rule A');

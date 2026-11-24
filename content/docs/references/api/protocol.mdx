@@ -1378,6 +1378,8 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **locales** | `{ code: string; label: string; isDefault?: boolean }[]` | ✅ | Available locales |
+| **sourceLocale** | `string` | optional | The language the app's own text (a plain-string `label`) is written in: the declared `i18n.sourceLocale`, else the default locale. Absent when the server knows neither. Text typed in any other locale is a translation |
+| **fallbackChain** | `string[]` | optional | The locales the server consults, in order, after the requested one and before the authored text: the deployment's declared fallback (`i18n.fallbackLocale`, else `defaultLocale`). Absent when the i18n service reports none; the requested locale alone is then consulted. A request tag is negotiated against `locales[].code` first, and the chain is not walked for a request that negotiates to `sourceLocale` |
 
 ### Nested Shape: `GetLocalesResponse.locales[number]`
 
@@ -1714,6 +1716,7 @@ One changed key path of the pending draft, and the last write that changed it.
 | **domain** | `Enum<'data' \| 'ui' \| 'automation' \| 'system' \| 'security' \| 'ai'>` | ✅ | Protocol domain |
 | **overrideSource** | `Enum<'registry' \| 'env'>` | ✅ | Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable |
 | **createSeed** | `any` | optional | Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively. |
+| **list** | `{ data?: object \| object \| object; columns: object[] }` | optional | Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description. |
 
 
 ---
@@ -1994,11 +1997,11 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2074,11 +2077,11 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |

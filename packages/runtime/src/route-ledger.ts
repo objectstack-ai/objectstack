@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 156 rows.
+ * CENSUS (generated): this list holds 157 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -743,6 +743,10 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'the uploader\'s removal door: a member removes an attachment they uploaded, and only theirs, with no object delete grant. Forwarded with its body UNREAD to the REQUEST kernel\'s file-attachments service (IAttachmentDoorsService.handleAttachmentDoor; service-storage builds it in init), read per request and never from the host kernel\'s scoped fallback, and the member\'s Response returned as it is: the member runs the very mount the self-hosted kernel runs, so the caller, every refusal and every answer are the mount\'s. Same credential, preamble-gate, absence and body notes as the personal-view row. This is the door for a kernel with no http.server; a self-hosted kernel serves the same path from service-storage\'s own mount on its http.server, and a hosted host\'s storage bridge covers /api/v1/storage only. NOT JS-SDK surface here: the mount\'s own ledger rows (service-storage attachment-removal-route-ledger.ts) carry the disposition. Pinned in `domains/own-door-bridge.test.ts`' },
   { route: 'PATCH /attachments/:id', domain: '/attachments', disposition: 'server-only',
     note: 'the rename door: rename an attachment from the Attachments panel, body exactly { file_name }. Same forwarding, credential, absence and door notes as the removal row' },
+
+  // ── print door (the hosted door) ──────────────────────────────────────────
+  { route: 'POST /print/records', domain: '/print', disposition: 'server-only',
+    note: 'the print door: print a record\'s print page to a PDF as the caller and archive it on the record; a console type:\'api\' action targets it, and the /actions door forwards that action in-process to this path. Forwarded with its body UNREAD to the REQUEST kernel\'s print service (IPrintDoorService.handlePrintDoor; service-print builds it in init), read per request and never from the host kernel\'s scoped fallback, and the member\'s Response returned as it is: the member runs the very registration the self-hosted mount runs, so the caller, every refusal (an unconfigured print engine is the door\'s own 503 SERVICE_UNAVAILABLE) and every answer are the mount\'s. Same credential, preamble-gate, absence and body notes as the personal-view row: a kernel that composes no print service answers 501 NOT_IMPLEMENTED, never the dispatcher\'s 404 ROUTE_NOT_FOUND. This is the door for a kernel with no http.server; a self-hosted kernel serves the same path from service-print\'s own mount on its http.server. NOT JS-SDK surface here: the mount\'s own ledger row (service-print print-route-ledger.ts) carries the disposition. Pinned in `domains/own-door-bridge.test.ts`' },
 
   // ── ai (dynamic route table, owned by another repo) ───────────────────────
   { route: '* /ai/**', domain: '/ai', disposition: 'dynamic',

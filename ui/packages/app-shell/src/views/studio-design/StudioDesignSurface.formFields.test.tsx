@@ -140,6 +140,8 @@ vi.mock('@object-ui/plugin-form', async (importOriginal) => {
   };
 });
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 
@@ -185,7 +187,7 @@ function Harness(): React.ReactElement {
 async function mountSettledFormPreview(): Promise<void> {
   render(<Harness />);
   await waitFor(() => expect(dataSource.find).toHaveBeenCalled(), { timeout: 4000 });
-  fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
   fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled(), { timeout: 4000 });
   await settle();
