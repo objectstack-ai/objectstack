@@ -387,10 +387,10 @@ function applyCollectionItemOwnerStampGate(
  * that no body declares is registered under `manifest.id` and its stamp is
  * judged at both doors, like every other residual item.
  * A package BODY's items of these collections are still judged, at both doors.
- * This is the owner-stamp mirror only: the composition's duplicate-entry door
- * still judges two top-level `jobs` no body declares as one package's
- * ({@link residualEntryPredicate}), since the boot's job binder schedules
- * neither of two enabled jobs of one name.
+ * This is the owner-stamp mirror only: the composition still judges the
+ * residual's `jobs` — two of one name as one package's pair, and one sharing
+ * an enabled name with a body's job — ({@link composedJobDeclarations}), since
+ * the boot's job binder schedules neither of two enabled jobs of one name.
  *
  * Mirrored, because `@objectstack/spec` cannot import the rule it mirrors; a
  * `@objectstack/metadata` test holds the two equal, collection by collection.
@@ -3331,7 +3331,10 @@ function collectDuplicateFunctionNameErrors(config: ObjectStackDefinition): stri
  * collide here too. Cross-package reuse of a name is untouched (ADR-0048 §3.4):
  * a multi-package project (`composeStacks(…, { manifest: 'preserve' })`)
  * carries each package's collections in its own `packages[i]` body, and each
- * body is judged on its own, never against another. The same-package case is
+ * body is judged on its own, never against another (an enabled job name is the
+ * one exception, judged across a composition's packages by
+ * {@link collectComposedJobNameErrors}: the boot schedules a job by its bare
+ * name, whichever package declares it). The same-package case is
  * the one §3.4 leaves to authoring-time hygiene (`os lint`'s duplicate-name
  * advisory); it is refused here at the contract, as the action-key check
  * already does for actions.
@@ -3496,7 +3499,8 @@ interface PackageCollectionEntry {
  * ONE package: `entriesOf(key)` lists that package's entries of `key`, each
  * labelled with where it sits, or `undefined` when the package carries none.
  * Every door below hands it one package and nothing else, so cross-package
- * reuse of a name is never read here (ADR-0048 §3.4). The finding's wording is
+ * reuse of a name is never read here (ADR-0048 §3.4); a job name enabled in two
+ * packages of a composition is {@link collectComposedJobNameErrors}'s. The finding's wording is
  * the same at every door; only the origins differ.
  */
 function duplicateEntryFindings(
@@ -3555,7 +3559,8 @@ function collectDuplicateEntryErrors(config: ObjectStackDefinition): string[] {
  * `registerApp` exactly as a single-package stack's top level is, so two
  * entries under one identity in one body lose one entry at the boot just the
  * same. Each body is judged alone: two bodies reusing a name is the
- * cross-package reuse ADR-0048 §3.4 allows, and two bodies under ONE package id
+ * cross-package reuse ADR-0048 §3.4 allows (except an enabled job name, which
+ * the boot schedules by its bare name: {@link collectComposedJobNameErrors}), and two bodies under ONE package id
  * are the boot's own `DUPLICATE_ARTIFACT_PACKAGE` refusal, not this one.
  * `label(i)` spells where body `i` sits for the finding's origins.
  */
@@ -3595,7 +3600,10 @@ function collectPackageBodyDuplicateEntryErrors(
  *   own collections of an input that carries `packages[]` — is one package,
  *   and two of its entries under one identity are refused with the one-stack
  *   wording. That includes two of its `jobs` of one name: the boot reads jobs
- *   off the stack whole and its binder schedules neither.
+ *   off the stack whole and its binder schedules neither. The residual's jobs
+ *   are read by count beyond the bodies' copies
+ *   ({@link composedJobDeclarations}); one sharing an enabled name with a
+ *   body's job is {@link collectComposedJobNameErrors}'s.
  *
  * The residual registers under `manifest.id`, and under `'preserve'` that id
  * is also a body's: the last input with a manifest. The registry keeps one
@@ -3631,6 +3639,12 @@ function collectComposedResidualDuplicateEntryErrors(
   const isResidual = residualEntryPredicate(composedPackages);
   return duplicateEntryFindings(
     (key) => {
+      // The residual's jobs are read where every holder's jobs are read, by
+      // count beyond the bodies' copies ({@link composedJobDeclarations}).
+      if (key === 'jobs') {
+        const residual = composedJobDeclarations(stacks, preserve).filter((d) => d.holder === RESIDUAL_JOB_HOLDER);
+        return residual.length > 0 ? residual : undefined;
+      }
       const entries: PackageCollectionEntry[] = [];
       const seen = new Set<unknown>();
       let declared = false;
@@ -3718,24 +3732,16 @@ function composedPackageBodies(composedPackages: unknown): Record<string, unknow
  * body carries an entry EQUAL to it ({@link deepEqualAuthored}) — the copy a
  * body's flattened top level repeats — so an entry extending a target some body
  * also extends, with other fields, is the residual's own and registers under
- * `manifest.id`. The two table collections judged here that the rule does not
- * walk by a slot — `datasources`, and `jobs`, which it never files as residual
- * ({@link TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL}) because the boot reads them off
- * the stack whole — count an entry as claimed when a body carries one under the
- * same identity ({@link SAME_STACK_ENTRY_IDENTITY}), so a body's flattened copy
- * is never read as a second entry of the residual, while two entries that no
- * body declares are judged as one package's: the boot's job binder schedules
- * neither of two enabled jobs of one name.
+ * `manifest.id`. `datasources`, the table collection judged here that the rule
+ * does not walk by a slot, counts an entry as claimed when a body carries one
+ * under the same identity ({@link SAME_STACK_ENTRY_IDENTITY}), so a body's
+ * flattened copy is never read as a second entry of the residual.
  *
- * ⚠ Known gap, left to the binder and NOT judged here: the claim is by NAME, so
- * a residual job whose name a package body's job also carries is read as that
- * body's copy even when the two differ, and composes. The boot reads jobs off
- * the stack whole, so it holds two enabled jobs of that name and its binder
- * (`jobNameCollisions`, `@objectstack/runtime`) schedules neither — read from
- * code, not driven. Two package bodies each declaring the name meet the same
- * binder outcome and compose too (cross-package reuse, ADR-0048 §3.4). Whether
- * composition should refuse a job name shared across packages is #36431's
- * question, not this door's.
+ * `jobs` is not read here: the rule never files a job as residual
+ * ({@link TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL}) because the boot reads jobs off
+ * the stack whole, and a claim by name read a residual job sharing a body job's
+ * name as that body's copy. The residual's jobs are read input by input, by
+ * count beyond the bodies' copies ({@link composedJobDeclarations}).
  */
 function residualEntryPredicate(composedPackages: unknown): (key: string, entry: unknown) => boolean {
   const bodies = composedPackageBodies(composedPackages);
@@ -3769,6 +3775,140 @@ function residualEntryPredicate(composedPackages: unknown): (key: string, entry:
     const identity = SAME_STACK_ENTRY_IDENTITY[typed].identity(entry);
     return identity === undefined || !claimed(typed).has(identity);
   };
+}
+
+/** The holder {@link composedJobDeclarations} files a residual job under. */
+const RESIDUAL_JOB_HOLDER = 'residual';
+
+/** One job a composed artifact declares, where it sits, and which holder declares it. */
+interface ComposedJobDeclaration extends PackageCollectionEntry {
+  /** A package body (`body:INPUT` or `body:INPUT:INDEX`) or {@link RESIDUAL_JOB_HOLDER}. */
+  readonly holder: string;
+}
+
+/**
+ * Every job a composed artifact declares, each once, with its holder: the
+ * reading the boot's job binder makes of the artifact (`jobNameCollisions`,
+ * `@objectstack/runtime`), taken input by input.
+ *
+ * - An input that carries `packages[]` (a nested artifact): each carried body's
+ *   jobs are that body's (`INPUT packages[P].manifest.jobs[J]`). Its own
+ *   top-level jobs are the flattened copies of those bodies' jobs plus its own
+ *   residual: a top-level job beyond the copies is the residual's. By COUNT,
+ *   as the binder counts (the artifact holds more jobs of the name than its
+ *   bodies declare), never by content, since a conversion replays a body under
+ *   its own version window and a genuine copy need not stay equal to it. A
+ *   top-level job that IS a body's job object is matched to it first, so the
+ *   residual's own job is the one named, whatever the order.
+ * - Under `manifest: 'preserve'`, an input with a manifest is assembled into a
+ *   body, so its jobs are that body's (`INPUT jobs[J]`).
+ * - Any other input's jobs reach the artifact's top level and no body: the
+ *   residual's. With no body anywhere (a flat composition) that is every job.
+ *
+ * One entry OBJECT reached through two inputs is one declaration, counted once,
+ * as at {@link collectComposedResidualDuplicateEntryErrors}.
+ */
+function composedJobDeclarations(
+  stacks: readonly ObjectStackDefinition[],
+  preserve: boolean,
+): ComposedJobDeclaration[] {
+  const declarations: ComposedJobDeclaration[] = [];
+  const seen = new Set<unknown>();
+  const declare = (entry: unknown, origin: string, holder: string): void => {
+    if (entry !== null && typeof entry === 'object') {
+      if (seen.has(entry)) return;
+      seen.add(entry);
+    }
+    declarations.push({ entry, origin, holder });
+  };
+  for (const [i, stack] of stacks.entries()) {
+    const label = stackLabel(stack, i);
+    const own: unknown = (stack as Record<string, unknown>).jobs;
+    const carried: unknown = (stack as Record<string, unknown>).packages;
+    if (Array.isArray(carried)) {
+      const copies = new Map<string, number>();
+      const bodyJobs = new Set<unknown>();
+      for (const [p, entry] of carried.entries()) {
+        const body: unknown = isRecord(entry) ? entry.manifest : undefined;
+        if (!isRecord(body) || !Array.isArray(body.jobs)) continue;
+        for (const [j, job] of body.jobs.entries()) {
+          declare(job, `${label} packages[${p}].manifest.jobs[${j}]`, `body:${i}:${p}`);
+          bodyJobs.add(job);
+          const name = readEntryName(job);
+          if (name !== undefined) copies.set(name, (copies.get(name) ?? 0) + 1);
+        }
+      }
+      if (!Array.isArray(own)) continue;
+      const consume = (name: string | undefined): boolean => {
+        const left = name === undefined ? 0 : copies.get(name) ?? 0;
+        if (left === 0) return false;
+        copies.set(name as string, left - 1);
+        return true;
+      };
+      const unmatched = own.flatMap((job, j) => (bodyJobs.has(job) && consume(readEntryName(job)) ? [] : [j]));
+      for (const j of unmatched) {
+        if (!consume(readEntryName(own[j]))) declare(own[j], `${label} jobs[${j}]`, RESIDUAL_JOB_HOLDER);
+      }
+      continue;
+    }
+    if (!Array.isArray(own)) continue;
+    const holder = preserve && stack.manifest ? `body:${i}` : RESIDUAL_JOB_HOLDER;
+    own.forEach((job, j) => declare(job, `${label} jobs[${j}]`, holder));
+  }
+  return declarations;
+}
+
+/**
+ * [#36431] One job name ENABLED in more than one holder of a composed
+ * artifact — two package bodies, or a body and the residual — one refusal line
+ * per name, naming every enabled job of it.
+ *
+ * The boot's job binder schedules every job of an artifact under the
+ * artifact's id, keyed by its bare name whichever package declares it, and
+ * refuses a name two enabled jobs share: neither is scheduled
+ * (`jobNameCollisions`, `@objectstack/runtime`, ADR-0150 D3). The install-local
+ * door refuses such a package by the same judge (`collectJobNameCollisions`),
+ * so the door and the binder cannot disagree about a shared name; this is that
+ * judge at composition, over {@link composedJobDeclarations}, so a composition
+ * never builds an artifact whose boot silently schedules none of the name.
+ * Its reading is the binder's: enabled jobs only (a disabled job is scheduled
+ * by nothing, so a disabled twin composes), counted by name, the residual by
+ * count beyond the bodies' copies. Cross-package reuse of a name (ADR-0048
+ * §3.4) does not reach jobs: nothing resolves a bare job name to a package.
+ *
+ * Only names that span two holders: two jobs of one name in one holder are
+ * that package's pair, refused by its own door
+ * ({@link collectComposedPackageBodyDuplicateEntryErrors},
+ * {@link collectComposedResidualDuplicateEntryErrors}). An artifact no
+ * composition built (hand-written, or built before this) still meets the
+ * binder's refusal at boot.
+ */
+function collectComposedJobNameErrors(
+  stacks: readonly ObjectStackDefinition[],
+  preserve: boolean,
+): string[] {
+  const enabledByName = new Map<string, ComposedJobDeclaration[]>();
+  for (const declaration of composedJobDeclarations(stacks, preserve)) {
+    const name = readEntryName(declaration.entry);
+    if (name === undefined || (declaration.entry as { enabled?: unknown }).enabled === false) continue;
+    enabledByName.set(name, [...(enabledByName.get(name) ?? []), declaration]);
+  }
+  const errors: string[] = [];
+  for (const [name, declared] of enabledByName) {
+    if (new Set(declared.map((d) => d.holder)).size < 2) continue;
+    const origins = declared.map((d) =>
+      d.holder === RESIDUAL_JOB_HOLDER ? `${d.origin} (the top level, outside every package body)` : d.origin,
+    );
+    const many = declared.length > 2;
+    errors.push(
+      `Job '${name}' is declared enabled ${many ? `${declared.length} times` : 'twice'} across the packages of one composed artifact: ` +
+        `${joinDeclarationOrigins(origins)}. The runtime schedules an artifact's jobs by their bare name, ` +
+        'whichever package declares them, and the job scheduler refuses a name two enabled jobs share, so none ' +
+        `of them runs. Rename ${many ? 'all but one' : 'one'} of them, or disable ${many ? 'all but one' : 'one'} ` +
+        '(`enabled: false`).',
+    );
+  }
+  return errors;
 }
 
 /**
@@ -9841,6 +9981,9 @@ function composeBuiltStacks(
   //     manifest strategy, and every package body the artifact carries, each on
   //     its own — see {@link collectComposedResidualDuplicateEntryErrors} and
   //     {@link collectComposedPackageBodyDuplicateEntryErrors}.
+  //     [#36431] …and one job name enabled in two holders of the result (two
+  //     package bodies, or a body and the residual): the boot's job binder
+  //     schedules none of the name — see {@link collectComposedJobNameErrors}.
   const artifactCrossRefErrors = [
     ...collectArtifactCrossReferenceErrors(
       stacks,
@@ -9853,6 +9996,7 @@ function composeBuiltStacks(
     ...collectArtifactFlowClaimErrors(stacks),
     ...collectComposedResidualDuplicateEntryErrors(stacks, composed.packages, (composed.manifest as { id?: unknown } | undefined)?.id, opts.manifest === 'preserve'),
     ...collectComposedPackageBodyDuplicateEntryErrors(stacks, opts.manifest === 'preserve'),
+    ...collectComposedJobNameErrors(stacks, opts.manifest === 'preserve'),
   ];
   if (artifactCrossRefErrors.length > 0) {
     const count = artifactCrossRefErrors.length;
