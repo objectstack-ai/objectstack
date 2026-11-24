@@ -59,8 +59,8 @@ nothing. The one item-name grammar itself lives in
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, KanbanLaneSummarySchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TimesheetConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, KanbanLaneSummary, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TimesheetConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, KanbanLaneSummarySchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, MetadataListCellTypeSchema, MetadataListColumnSchema, MetadataListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TimesheetConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, KanbanLaneSummary, ListChartConfig, ListColumn, ListMapConfig, ListView, MetadataListCellType, MetadataListColumn, MetadataListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TimesheetConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -1258,6 +1258,83 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **ariaLabel** | `string \| Record<string, string>` | optional | Accessible label for screen readers (WAI-ARIA aria-label). Plain string, or an inline locale map — no translation-bundle slot addresses this key, so a plain string is announced in the source language. |
 | **ariaDescribedBy** | `string` | optional | ID of element providing additional description (WAI-ARIA aria-describedby) |
 | **role** | `string` | optional | WAI-ARIA role attribute (e.g., "dialog", "navigation", "alert") |
+
+
+---
+
+## MetadataListCellType
+
+How a metadata list cell draws its value
+
+### Allowed Values
+
+* `text`
+* `badge`
+* `boolean`
+* `count`
+* `list`
+* `summary`
+
+
+---
+
+## MetadataListColumn
+
+One column of a metadata type list
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Key of the metadata type's schema: a top-level key, or a dotted path into it |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **type** | `Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'>` | optional | Cell renderer; `text` when absent |
+
+
+---
+
+## MetadataListView
+
+List layout of a metadata type: its schema binding and its columns
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'> }[]` | ✅ | Columns of the list, in display order |
+
+### Nested Shape: `MetadataListView.data[provider='object']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'object'` | ✅ |  |
+| **object** | `string` | ✅ | Target object name |
+
+### Nested Shape: `MetadataListView.data[provider='value']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'value'` | ✅ |  |
+| **items** | `any[]` | ✅ | Static data array |
+
+### Nested Shape: `MetadataListView.data[provider='schema']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'schema'` | ✅ |  |
+| **schemaId** | `string` | ✅ | Schema identifier — typically the metadata type name |
+| **schema** | `Record<string, any>` | optional | Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable. |
+
+### Nested Shape: `MetadataListView.columns[number]`
+
+One column of a metadata type list
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Key of the metadata type's schema: a top-level key, or a dotted path into it |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **type** | `Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'>` | optional | Cell renderer; `text` when absent |
 
 
 ---
