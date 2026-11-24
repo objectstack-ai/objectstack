@@ -100,7 +100,7 @@ describe('ObjectDefaultInspector — name editability', () => {
         readOnly={false}
       />,
     );
-    expect(labelledInput('Name')).toBeDisabled();
+    expect(labelledInput('Internal name')).toBeDisabled();
   });
 
   it('allows editing the name in create mode (empty host name)', () => {
@@ -114,7 +114,7 @@ describe('ObjectDefaultInspector — name editability', () => {
         readOnly={false}
       />,
     );
-    const nameInput = labelledInput('Name');
+    const nameInput = labelledInput('Internal name');
     expect(nameInput).not.toBeDisabled();
     fireEvent.change(nameInput, { target: { value: 'My Thing' } });
     expect(onPatch).toHaveBeenCalledWith({ name: 'my_thing' });
@@ -148,7 +148,7 @@ describe('ObjectDefaultInspector — create-mode name derivation', () => {
 
     onPatch.mockClear();
     // Once the user edits name, label changes no longer overwrite it.
-    fireEvent.change(labelledInput('Name'), { target: { value: 'so' } });
+    fireEvent.change(labelledInput('Internal name'), { target: { value: 'so' } });
     expect(onPatch).toHaveBeenCalledWith({ name: 'so' });
     onPatch.mockClear();
     fireEvent.change(labelledInput('Label'), { target: { value: 'Sales Orders' } });
@@ -203,7 +203,7 @@ describe('ObjectDefaultInspector — access section (ADR-0066 D2/D3/④/⑤)', (
       />,
     );
     expect(screen.getByText('Access')).toBeInTheDocument();
-    expect(screen.getByTestId('object-access-posture').textContent).toBe('Public — covered by wildcard grants (default)');
+    expect(screen.getByTestId('object-access-posture').textContent).toBe('Standard — anyone with access to all objects (default)');
   });
 
   it('patches access.default=private and clears it back to the spec default', () => {
@@ -217,7 +217,7 @@ describe('ObjectDefaultInspector — access section (ADR-0066 D2/D3/④/⑤)', (
         readOnly={false}
       />,
     );
-    pickPosture('Private');
+    pickPosture('Restricted');
     expect(onPatch).toHaveBeenCalledWith({ access: { default: 'private' } });
 
     rerender(
@@ -229,10 +229,10 @@ describe('ObjectDefaultInspector — access section (ADR-0066 D2/D3/④/⑤)', (
         readOnly={false}
       />,
     );
-    expect(screen.getByTestId('object-access-posture').textContent).toBe('Private — needs an explicit grant');
+    expect(screen.getByTestId('object-access-posture').textContent).toBe('Restricted — only people granted this object by name');
     // The private hint warns that a grant must exist before publishing.
     expect(screen.getByText(/Make sure some permission set grants/i)).toBeInTheDocument();
-    pickPosture('Public');
+    pickPosture('Standard');
     // public = spec default → the key is cleared, not written out.
     expect(onPatch).toHaveBeenCalledWith({ access: undefined });
   });
@@ -313,9 +313,9 @@ describe('ObjectDefaultInspector — a Chinese label derives the name by pinyin 
     }
     render(<Host />);
     fireEvent.change(labelledInput('Label'), { target: { value: '维修中心' } });
-    expect(labelledInput('Name').value).toBe('weixiu_zhongxin');
-    fireEvent.change(labelledInput('Name'), { target: { value: 'repair_center' } });
+    expect(labelledInput('Internal name').value).toBe('weixiu_zhongxin');
+    fireEvent.change(labelledInput('Internal name'), { target: { value: 'repair_center' } });
     fireEvent.change(labelledInput('Label'), { target: { value: '维修中心二' } });
-    expect(labelledInput('Name').value).toBe('repair_center');
+    expect(labelledInput('Internal name').value).toBe('repair_center');
   });
 });

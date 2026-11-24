@@ -92,6 +92,7 @@ enable: {
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | `trackHistory` | `false` | Field history tracking for audit compliance |
+| `fieldHistory` | — (on) | Field-change values (`old → new`) on the activity stream; `false` turns them off for the object |
 | `searchable` | `true` | Index records for global search |
 | `apiEnabled` | `true` | Expose object via automatic APIs |
 | `apiMethods` | all | Whitelist over the six primitives (`get/list/create/update/delete/bulk`); derived verbs (search/export/upsert/…) follow automatically. `undefined` = all, `[]` = none |

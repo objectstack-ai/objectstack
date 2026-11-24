@@ -276,9 +276,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "言語",
         helpText: "エディター言語（例: sql, javascript）"
       },
+      "fields.fieldHistory": {
+        label: "フィールド変更値",
+        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はプラットフォームに従い、ほとんどの型ではオン、メディア・JSON・資格情報のフィールドではオフです。オフでは変更は項目名だけで示され、オンではメディアや JSON の項目も値を表示します。資格情報のフィールドは常に値を表示せず、オブジェクト自体のフィールド変更値がオフなら、そちらが優先されます。"
+      },
       "fields.trackHistory": {
         label: "履歴追跡",
-        helpText: "レコードのアクティビティタイムラインでこのフィールドを要約する"
+        helpText: "メディアや JSON の項目（画像、ファイル、json など）で、アクティビティタイムラインに旧値 → 新値を表示します。他の項目はもともと表示され、オフにしても値は隠れません。隠すには「フィールド変更値」を使います。"
       },
       "fields.visibleWhen": {
         label: "表示条件",
@@ -298,6 +302,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "履歴追跡"
+      },
+      "enable.fieldHistory": {
+        label: "フィールド変更値",
+        helpText: "変更されたフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はオンです。オフにすると、フィールドの設定にかかわらずオブジェクト全体で値が表示されなくなります。"
       },
       "enable.searchable": {
         label: "検索可能"
@@ -460,6 +468,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.transfer": {
         label: "所有者の変更",
         helpText: "所有者の変更アクション（単一および一括）。オンで提供、オフで非表示。未設定の場合はオンですが、controlled_by_parent の詳細オブジェクトではオフです。レコードに再割り当て可能な所有者があるオブジェクト（ownership が user または未設定、managedBy なし、sys_ オブジェクトでない、owner_id が読み取り専用でなく、外部オブジェクトでは宣言またはマッピングされている）でのみ提供されます。それ以外のオブジェクトでオンにすると拒否されます。制御するのはアクションのみで、owner_id の通常の編集は対象外です。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各レコードでアクションを制御するにはソースに記述してください。"
+      },
+      actionLayout: {
+        label: "アクションの配置",
+        helpText: "このオブジェクトのアクションの順序と、どれをボタンにするかをスコープごとに指定します：pinned（ボタン最大 3 個、表示順）と more（「その他」メニューの順序。どちらにも書かれていないアクションは既定の順序で後ろに続きます）。未設定の場合、各画面は従来どおりアクションの order でボタンを選びます。"
+      },
+      "actionLayout.list": {
+        label: "リスト",
+        helpText: "リストページのツールバー。{\"pinned\": [...], \"more\": [...]} の形で書きます：リストのツールバーに配置されたアクション名。$import / $export は pinned にのみ書けます。固定は最大 3 個。固定しない場合も、ページは独自のインポート / エクスポートメニューを表示します。os validate は、このオブジェクトのアクションでない名前やリストのツールバーに配置されていない名前を拒否します。そのような名前は何も表示しません。"
+      },
+      "actionLayout.record": {
+        label: "レコード",
+        helpText: "レコードヘッダー（レコードページ、サイドプレビュー、スマートフォンの下部バー）。{\"pinned\": [...], \"more\": [...]} の形で書きます：レコードヘッダーまたはその「その他」メニューに配置されたアクション名。固定は最大 3 個。os validate は、このオブジェクトのアクションでない名前やレコードページに配置されていない名前を拒否します。そのような名前は何も表示しません。"
       },
       editMode: {
         label: "編集の開き方",
@@ -865,6 +885,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "非表示",
         helpText: "既定 UI ビューからフィールドを非表示"
       },
+      showOnCreate: {
+        label: "作成時に表示",
+        helpText: "レコード作成時にこのフィールドを入力させます。オフにすると、作成ダイアログ、全画面の作成、アクションから開く作成には表示されません。編集、レコードページ、リストには引き続き表示されます。必須フィールドは作成時に必ず入力するため、オフにできません。"
+      },
       searchable: {
         label: "検索可能",
         helpText: "グローバル検索結果に含める"
@@ -897,9 +921,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "外部に返さない",
         helpText: "この項目の値を汎用データ経路では返しません。エンジンは find／findOne の結果と、作成・更新のレスポンスボディからこのキーを削除します。既定の射影でも、クライアントが ?select= で名指ししたときも同様です。保存・絞り込み・インデックスには影響しません。"
       },
+      fieldHistory: {
+        label: "フィールド変更値",
+        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はプラットフォームに従い、ほとんどの型ではオン、メディア・JSON・資格情報のフィールドではオフです。オフでは変更は項目名だけで示され、オンではメディアや JSON の項目も値を表示します。資格情報のフィールドは常に値を表示せず、オブジェクト自体のフィールド変更値がオフなら、そちらが優先されます。"
+      },
       trackHistory: {
         label: "変更履歴を記録",
-        helpText: "この項目の値の変更を、レコードのアクティビティタイムラインの項目として表示します（ADR-0052 §5b）。項目ごとのオプトインです。"
+        helpText: "メディアや JSON の項目（画像、ファイル、json など）で、アクティビティタイムラインに旧値 → 新値を表示します。他の項目はもともと表示され、オフにしても値は隠れません。隠すには「フィールド変更値」を使います。"
       },
       widget: {
         label: "ウィジェット指定",

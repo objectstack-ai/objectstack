@@ -119,6 +119,8 @@ export interface FieldMetadataPayload {
   options?: Array<{ label: string; value: string; color?: string }>;
   externalId?: boolean;
   trackHistory?: boolean;
+  /** objectstack#36290 — the field's own old → new values switch; absent follows the platform. */
+  fieldHistory?: boolean;
   // No `indexed` (objectui#4644): the spec has no field-level index flag —
   // `FieldSchema.safeParse` rejects the key by name, so writing it made
   // `PUT /api/v1/meta/object/:name` fail with 422 `INVALID_METADATA`.
@@ -628,6 +630,7 @@ function toFieldPayload(
     options: field.options,
     externalId: field.externalId,
     trackHistory: field.trackHistory,
+    fieldHistory: field.fieldHistory,
     reference: field.referenceTo,
   };
 }

@@ -7,14 +7,17 @@
  * that side of the threshold, else expanded on a wide window and collapsed on
  * a narrow one (ruling 7069868269 on objectstack#36112). Collapsed, the
  * console's sidebar is hidden, and its full menu floats over the content from
- * the window's left edge or ⌘B (ruling 6973617688 on objectstack#35062;
- * `consoleSidebarRail.ts`). Must be called inside a SidebarProvider context.
+ * the window's left edge (ruling 6973617688 on objectstack#35062;
+ * `consoleSidebarRail.ts`); ⌘B / Ctrl+B is a press on the expand / collapse
+ * button (ruling 7074574380 on objectstack#36112), so it collapses and docks
+ * the sidebar as the reader's choice. Must be called inside a SidebarProvider
+ * context.
  *
  * It also keeps the reader's choices, each on its own side of the threshold:
  * an open or close on a wide window is the wide-window choice
  * (objectstack#28079), a close of the docked sidebar on a narrow window the
- * narrow-window choice (the page header's expand button keeps the other
- * half, `useConsoleSidebarRailPanel`). The float writes neither, and a state
+ * narrow-window choice (the page header's expand button and ⌘B keep the
+ * other half, `useConsoleSidebarRailPanel`). The float writes neither, and a state
  * this hook gives a window is not a choice.
  * @module
  */

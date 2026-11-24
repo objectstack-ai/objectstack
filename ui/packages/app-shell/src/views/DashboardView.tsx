@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, type ComponentProps } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { DashboardRenderer } from '@object-ui/plugin-dashboard';
 import { DrillNavigationProvider, notifyDataChanged } from '@object-ui/react';
 import { useRecordListDrillNavigation } from './useOpenRecordList.js';
@@ -51,6 +51,7 @@ import {
 } from './DashboardInPageEditor.js';
 import { useInSetupApp } from '../console/setupApp.js';
 import { useCustomizeDoorWalled } from './studio-design/StudioCustomizeControls.js';
+import { readDashboardEditArrival, withoutDashboardEditArrival } from '../layout/designModeArrival.js';
 
 /**
  * One refresh of this dashboard's data: the `onRefresh` handed to
@@ -110,8 +111,6 @@ type DashboardRefreshState = Parameters<
 // ---------------------------------------------------------------------------
 
 export function DashboardView({ dataSource }: { dataSource?: any }) {
-  // Drill "escape hatch": lets the drill drawers open an object's full list page.
-  const drillNavigation = useRecordListDrillNavigation();
   const { dashboardName } = useParams<{ dashboardName: string }>();
   // Setup's own System Overview (`platform-objects`' `system_overview`).
   const isSystemOverview = useInSetupApp() && dashboardName === 'system_overview';
@@ -235,6 +234,12 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
   const missedName = !dashboard && dashboardsSettled && !previewDrafts && dashboardName ? dashboardName : null;
   const access = useMetaItemRefusal('dashboard', missedName);
 
+  // Drill navigation: the drill list's 「Open in list」 and its record pages,
+  // which name this dashboard as their way back (objectstack-ai/objectstack#36256).
+  const drillNavigation = useRecordListDrillNavigation(
+    dashboard ? resolveKeyedI18nLabel(dashboard.label, t) || dashboard.name : undefined,
+  );
+
   // ---- Runtime capability gate --------------------------------------------
   // Hide widgets whose `requiresObject` is not registered (mirrors
   // NavigationItem.requiresObject for nav entries). Defaults to widget.object
@@ -295,6 +300,25 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
       toast.error(tt('dashboard.inPageEdit.saveFailed', 'The dashboard could not be saved'), { description: err?.message || String(err) });
     }
   };
+
+  // objectstack#36364 — a dashboard the design mode just created arrives with
+  // its page asked to open the edit state, once the Edit button is offered;
+  // the landing is cleared as it is read, so Back or a reload opens nothing.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const arrivedToEdit = readDashboardEditArrival(location.state, dashboardName);
+  const landedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!arrivedToEdit || !dashboard || !editOffered || editing) return;
+    if (landedRef.current === location.key) return;
+    landedRef.current = location.key;
+    navigate(`${location.pathname}${location.search}${location.hash}`, {
+      replace: true,
+      state: withoutDashboardEditArrival(location.state),
+    });
+    void startEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per landing; `startEdit` is a fresh closure each render
+  }, [arrivedToEdit, dashboard, editOffered, editing, location.key]);
 
   const previewSchema = useMemo(() => {
     if (!dashboard || !unregistered) return dashboard;
@@ -499,6 +523,18 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
                     }
                   : {})}
               />
+              {/* objectstack#36364 — a dashboard with no cards yet (one just
+                  created in the design mode, say) says so, rather than
+                  drawing a blank page. */}
+              {!editing && Array.isArray((dashboard as { widgets?: unknown }).widgets) && (dashboard as { widgets: unknown[] }).widgets.length === 0 && (
+                <Empty data-testid="dashboard-no-cards">
+                  <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                    <LayoutDashboard className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+                  </div>
+                  <EmptyTitle>{tt('dashboard.noCards.title', 'No cards yet')}</EmptyTitle>
+                  <EmptyDescription>{tt('dashboard.noCards.message', 'This dashboard has no cards yet.')}</EmptyDescription>
+                </Empty>
+              )}
             </DrillNavigationProvider>
          </div>
 
@@ -511,6 +547,8 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
               onSelectionChange={edit.select}
               revealFilters={edit.revealFilters}
               onFiltersRevealed={edit.filtersRevealed}
+              served={dashboard as Record<string, unknown> | undefined}
+              published={edit.published}
             />
          )}
 

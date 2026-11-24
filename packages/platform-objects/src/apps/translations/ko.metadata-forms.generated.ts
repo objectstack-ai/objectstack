@@ -276,9 +276,13 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "언어",
         helpText: "편집기 언어(예: sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 기본값은 플랫폼을 따르며, 대부분의 유형은 켜짐, 미디어·JSON·자격 증명 필드는 꺼짐입니다. 끄면 변경이 필드 이름으로만 표시되고, 켜면 미디어나 JSON 필드도 값을 표시합니다. 자격 증명 필드는 항상 값을 표시하지 않으며, 객체 자체의 필드 변경 값이 꺼져 있으면 그것이 우선합니다."
+      },
       "fields.trackHistory": {
         label: "기록 추적",
-        helpText: "레코드 활동 타임라인에 이 필드를 요약합니다"
+        helpText: "미디어나 JSON 필드(이미지, 파일, json 등)가 활동 타임라인에 이전 값 → 새 값을 표시하게 합니다. 다른 필드는 이미 표시하며, 꺼도 값이 숨겨지지 않습니다. 숨기려면 필드 변경 값을 사용하세요."
       },
       "fields.visibleWhen": {
         label: "표시 조건",
@@ -298,6 +302,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "기록 추적"
+      },
+      "enable.fieldHistory": {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 변경된 필드의 이전 값 → 새 값을 표시합니다. 기본값은 켜짐입니다. 끄면 필드 설정과 관계없이 객체 전체에서 값이 표시되지 않습니다."
       },
       "enable.searchable": {
         label: "검색 가능"
@@ -460,6 +468,18 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "소유자 변경",
         helpText: "소유자 변경 작업(단건 및 일괄): 켜면 제공하고 끄면 숨깁니다. 설정하지 않으면 켜짐이며, controlled_by_parent 상세 개체에서는 꺼짐입니다. 레코드에 재할당 가능한 소유자가 있는 개체(ownership이 user이거나 미설정, managedBy 없음, sys_ 개체 아님, owner_id가 읽기 전용 아님, 외부 개체에서는 owner_id가 선언되거나 매핑됨)에서만 제공됩니다. 다른 개체에서 켜면 거부됩니다. 작업만 제어하며 owner_id의 일반 편집에는 영향을 주지 않습니다. 저장된 {enabled, visibleWhen, disabledWhen} 개체는 키별로 편집됩니다. 레코드마다 작업을 제어하려면 소스에 작성하세요."
+      },
+      actionLayout: {
+        label: "작업 배치",
+        helpText: "이 객체 작업의 순서와 버튼으로 표시할 작업을 범위별로 지정합니다: pinned(버튼 최대 3개, 순서대로)와 more(「더 보기」 메뉴의 순서. 둘 다에 없는 작업은 기본 순서로 뒤에 이어집니다). 설정하지 않으면 각 화면이 이전처럼 작업의 order로 버튼을 고릅니다."
+      },
+      "actionLayout.list": {
+        label: "목록",
+        helpText: "목록 페이지 도구 모음, {\"pinned\": [...], \"more\": [...]} 형식: 목록 도구 모음에 배치된 작업 이름; $import / $export는 pinned에만 씁니다. 고정은 최대 3개. 고정하지 않아도 페이지는 자체 가져오기 / 내보내기 메뉴를 표시합니다. os validate는 이 객체의 작업이 아니거나 목록 도구 모음에 배치되지 않은 이름을 거부하며, 그런 이름은 아무것도 표시하지 않습니다."
+      },
+      "actionLayout.record": {
+        label: "레코드",
+        helpText: "레코드 헤더(레코드 페이지, 측면 미리보기, 휴대폰 하단 바), {\"pinned\": [...], \"more\": [...]} 형식: 레코드 헤더나 그 「더 보기」 메뉴에 배치된 작업 이름. 고정은 최대 3개. os validate는 이 객체의 작업이 아니거나 레코드 페이지에 배치되지 않은 이름을 거부하며, 그런 이름은 아무것도 표시하지 않습니다."
       },
       editMode: {
         label: "편집 모드",
@@ -865,6 +885,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "숨김",
         helpText: "기본 UI 뷰에서 필드 숨김"
       },
+      showOnCreate: {
+        label: "생성 시 표시",
+        helpText: "레코드를 생성할 때 이 필드를 입력받습니다. 끄면 생성 대화상자, 전체 페이지 생성, 액션으로 여는 생성에서 표시되지 않으며, 편집·레코드 페이지·목록에는 계속 표시됩니다. 필수 필드는 생성 시 항상 입력받으므로 끌 수 없습니다."
+      },
       searchable: {
         label: "검색 가능",
         helpText: "전역 검색 결과에 포함"
@@ -897,9 +921,13 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "내부",
         helpText: "일반 데이터 경로에서 이 필드의 값을 절대 반환하지 않습니다. 엔진은 기본 투영과 클라이언트가 ?select=에서 필드를 지정한 경우 모두, find/findOne 결과와 create, update 응답 본문에서 키를 생략합니다. 저장, 필터링, 색인에는 영향이 없습니다."
       },
+      fieldHistory: {
+        label: "필드 변경 값",
+        helpText: "레코드 활동 타임라인에 이 필드의 이전 값 → 새 값을 표시합니다. 기본값은 플랫폼을 따르며, 대부분의 유형은 켜짐, 미디어·JSON·자격 증명 필드는 꺼짐입니다. 끄면 변경이 필드 이름으로만 표시되고, 켜면 미디어나 JSON 필드도 값을 표시합니다. 자격 증명 필드는 항상 값을 표시하지 않으며, 객체 자체의 필드 변경 값이 꺼져 있으면 그것이 우선합니다."
+      },
       trackHistory: {
         label: "기록 추적",
-        helpText: "이 필드의 값 변경을 레코드 활동 타임라인의 항목으로 렌더링합니다(ADR-0052 §5b). 필드별로 선택합니다."
+        helpText: "미디어나 JSON 필드(이미지, 파일, json 등)가 활동 타임라인에 이전 값 → 새 값을 표시하게 합니다. 다른 필드는 이미 표시하며, 꺼도 값이 숨겨지지 않습니다. 숨기려면 필드 변경 값을 사용하세요."
       },
       widget: {
         label: "위젯",

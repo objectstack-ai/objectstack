@@ -35,7 +35,8 @@ import type { SysActivityBuiltinType } from '../data/feed.zod';
  * `GET /data/sys_comment` for the record's thread plus
  * `GET /data/sys_comment_reaction` for those comments, `activity` is
  * `GET /data/sys_activity` for the record with its actor expanded, and
- * `attachments` is `GET /data/sys_attachment` for the record with `$count`.
+ * `attachments` is `GET /data/sys_attachment` for the record with `$count`
+ * and its uploader expanded.
  * The three stream parts are each that read exactly as the table on
  * `RecordPageActivityRequestSchema` spells it: the route composes the record's
  * scope and the order, and the request names only whether a stream is wanted
@@ -167,7 +168,7 @@ export type RecordPageRelatedRequestParsed = z.infer<typeof RecordPageRelatedReq
  * | `activity`    | `sys_activity` where `object_name` = `{object}` and `record_id` = `{id}`, by `timestamp` desc, |
  * |               | `top` rows with `$count`, `actor_id` expanded                                                  |
  * | `attachments` | `sys_attachment` where `parent_object` = `{object}` and `parent_id` = `{id}`, by `created_at`  |
- * |               | desc, `top` rows with `$count`                                                                 |
+ * |               | desc, `top` rows with `$count`, `uploaded_by` expanded                                         |
  *
  * Each is asked of the data door as the caller, behind that object's own API
  * exposure gate, so a stream the caller may not read is that read's refusal.

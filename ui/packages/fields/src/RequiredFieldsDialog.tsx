@@ -129,6 +129,12 @@ export interface RequiredFieldsDialogProps {
   labelOf?: (name: string) => string | undefined;
   title?: string;
   description?: string;
+  /**
+   * What the host adds about the change under the change block, read-only —
+   * the record header's stage menu names the flows the move would start there
+   * (objectstack#35928). Nothing is drawn for none.
+   */
+  notice?: React.ReactNode;
   submitLabel?: string;
 }
 
@@ -153,6 +159,7 @@ export function RequiredFieldsDialog({
   labelOf,
   title,
   description,
+  notice,
   submitLabel,
 }: RequiredFieldsDialogProps): React.ReactElement {
   const tt = useSafeTranslate();
@@ -273,6 +280,8 @@ export function RequiredFieldsDialog({
             )}
           </div>
         )}
+
+        {notice}
 
         <div className="flex flex-col gap-4 py-2">
           {shown.map((f) => {

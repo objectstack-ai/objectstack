@@ -18,9 +18,11 @@
  * SCOPE & SHAPE. Rows carry full wire paths at the DEFAULT unscoped base
  * (`/api/v1`), exactly as `RestServer.getRoutes()` reports them — unlike the
  * dispatcher ledger, which uses dispatcher-internal cleanPath patterns. When
- * project scoping is on, every row is additionally mirrored under
+ * project scoping is on, every row but one is additionally mirrored under
  * `/api/v1/environments/:environmentId` (rest-server.ts registerRoutes); the
- * mirror is a mechanical duplication and is deliberately not re-ledgered.
+ * mirror is a mechanical duplication and is deliberately not re-ledgered. The
+ * one row with no mirror is the restriction profile, which is mounted on the
+ * unscoped base only (#36198; its row says so).
  *
  * SOURCES. Both are enumerable through `RestServer.getRoutes()`, and since
  * #5822 that is the ONLY enumeration the conformance test runs. `route-manager`
@@ -184,7 +186,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: 'duplicate mount with the dispatcher /discovery branch — REST registers first and wins. Answers BARE (res.json(discovery), no envelope), so `DiscoverySchema` names the whole body here while the dispatcher row names its envelope `data`; discovery-schema-conformance.test.ts drives THIS handler through the double assertion: the live body parses against `DiscoverySchema`, and it carries no key the protocol does not declare' },
   // [#34774] Read by the CLI (`os validate --target <url>`, `RESTRICTION_PROFILE_ROUTE`), not by `@objectstack/client`.
   { route: 'GET /api/v1/discovery/restriction-profile', family: 'discovery', source: 'route-manager', disposition: 'server-only',
-    note: 'the restriction profile `os validate --target <url>` reads: `{ success, data }`, `data` a `RestrictionProfileSchema` value; the open runtime restricts nothing and states the spec/skills versions it runs' },
+    note: 'the restriction profile `os validate --target <url>` reads: `{ success, data }`, `data` a `RestrictionProfileSchema` value; the open runtime restricts nothing and states the spec/skills versions it runs. Mounted on the unscoped base ONLY: project scoping does not mirror it under `/api/v1/environments/:environmentId`, where the same constant would answer for any environment id' },
 
   // ── openapi ───────────────────────────────────────────────────────────────
   // [#25104] The document's HTML viewer page (`GET /api/v1/docs`) is retired

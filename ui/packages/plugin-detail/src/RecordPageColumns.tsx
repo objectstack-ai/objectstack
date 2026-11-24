@@ -12,6 +12,7 @@ import type { FieldContainerLike } from '@object-ui/core';
 import { SchemaRenderer, toRenderableSchema, useRecordContext, useRecordPagePreferences } from '@object-ui/react';
 import {
   RECORD_PAGE_DETAILS_MIN_WIDTH,
+  RECORD_PAGE_DETAILS_WIDTH,
   RECORD_PAGE_PINNED_GAP,
   RECORD_PAGE_TABS_MIN_WIDTH,
   RECORD_PAGE_TIMELINE_PANEL,
@@ -118,6 +119,12 @@ export interface RecordPageColumnsProps {
    * counts read each child's definition first.
    */
   relatedFieldsOf?: (objectName: string) => FieldContainerLike;
+  /**
+   * The tab row's edit state (objectstack#36499): an administrator's tab
+   * editor, drawn in the tab row's place, with no reader's arrangement hint
+   * beside it. Absent: the tab row.
+   */
+  tabRowEditor?: React.ReactNode;
   className?: string;
 }
 
@@ -363,7 +370,9 @@ const DETAILS_WIDTH_KEY_STEP = 16;
  * 拖宽，拖过的宽度按人记住」), sitting in the gap between the columns: a
  * vertical separator, dragged with the pointer or moved with ← → (Home / End
  * to either end). `onPreview` follows the drag; `onCommit` keeps the width
- * once the drag ends.
+ * once the drag ends. A double-click keeps {@link RECORD_PAGE_DETAILS_WIDTH},
+ * the width the page has when nothing is kept (objectstack#36226), and ends
+ * any drag it interrupts.
  */
 const DetailsWidthHandle: React.FC<{
   width: number;
@@ -407,6 +416,11 @@ const DetailsWidthHandle: React.FC<{
       onPointerCancel={() => {
         drag.current = null;
         onPreview(null);
+      }}
+      onDoubleClick={() => {
+        drag.current = null;
+        onPreview(null);
+        onCommit(RECORD_PAGE_DETAILS_WIDTH);
       }}
       onKeyDown={(event) => {
         const next =
@@ -474,6 +488,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   enlargedRelated,
   onCloseEnlargedRelated,
   relatedFieldsOf,
+  tabRowEditor,
   className,
 }) => {
   const { t } = useDetailTranslation();
@@ -672,8 +687,9 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       editArrangement({ kind: edit === 'move-before' ? 'move-up' : 'move-down', id });
     }
   };
-  const tabRow =
-    onEnlargeRelated && (pinned ? tabs.length + hiddenTabs.length > 0 : tabs.length + hiddenTabs.length > 1) ? (
+  const tabRow = tabRowEditor ? (
+    tabRowEditor
+  ) : onEnlargeRelated && (pinned ? tabs.length + hiddenTabs.length > 0 : tabs.length + hiddenTabs.length > 1) ? (
       <RecordTabRow
         tabs={tabs}
         hiddenTabs={hiddenTabs}
@@ -685,7 +701,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
         }
       />
     ) : null;
-  const defaultChangedHint = tabRow && resolved.defaultChanged ? (
+  const defaultChangedHint = tabRow && !tabRowEditor && resolved.defaultChanged ? (
     <RelatedDefaultChangedHint onRestore={() => editArrangement({ kind: 'restore-default-order' })} />
   ) : null;
   // A face without the 动态 tab open still names the stream's count on its

@@ -556,6 +556,14 @@ export type SaveAndPublishOutcome = 'published' | 'pending-draft';
  * A publish the server refuses leaves no draft of this call behind: the draft
  * it wrote is discarded (it was the only one, by the pin) and the refusal is
  * rethrown. Any other refusal is rethrown as it came.
+ *
+ * objectstack#36409 — a NEW view shared at once (the view dropdown's create)
+ * passes the app it was made in
+ * ({@link RuntimePersistCtx.app}): its first write is saved into the app's
+ * package as {@link createRuntimeMetadata} saves it. The publish names no
+ * package (ADR-0146 D8 addresses the name's one holder). When no package can be
+ * had it is saved naming none and nothing is said: it is published, so no
+ * draft bar has to count it.
  */
 export async function saveAndPublishRuntimeMetadata(
   type: RuntimeArtifactType,
@@ -563,8 +571,15 @@ export async function saveAndPublishRuntimeMetadata(
   body: any,
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
+  const app = type === 'view' ? ctx.app : null;
+  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId) : null;
   try {
-    await ctx.metadataClient.save(type, name, body, { mode: 'draft', ifNoneMatch: '*' });
+    await ctx.metadataClient.save(
+      type,
+      name,
+      body,
+      packageId ? { mode: 'draft', ifNoneMatch: '*', packageId } : { mode: 'draft', ifNoneMatch: '*' },
+    );
   } catch (err) {
     if (isDraftVersionConflict(err)) {
       return 'pending-draft';
@@ -706,9 +721,26 @@ export async function saveDashboardInPlace(
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
   if (target.kind === 'unbound') return saveAndPublishRuntimeMetadata('dashboard', name, body, ctx);
-  return saveAndPublishRuntimeMetadata('dashboard', name, body, {
+  return saveAndPublishInPackage('dashboard', name, body, target.packageId, ctx);
+}
+
+/**
+ * {@link saveAndPublishRuntimeMetadata} into the package `packageId`: the
+ * draft, its publish and the discard of a refused publish all name it. Used
+ * where an item is created in a known package, such as a dashboard or report
+ * made from the design mode's 「Add menu item」 (objectstack#36364), which is
+ * saved where the menu is.
+ */
+export function saveAndPublishInPackage(
+  type: RuntimeArtifactType,
+  name: string,
+  body: Record<string, unknown>,
+  packageId: string,
+  ctx: RuntimePersistCtx,
+): Promise<SaveAndPublishOutcome> {
+  return saveAndPublishRuntimeMetadata(type, name, body, {
     ...ctx,
-    metadataClient: boundToPackage(ctx.metadataClient, target.packageId),
+    metadataClient: boundToPackage(ctx.metadataClient, packageId),
   });
 }
 

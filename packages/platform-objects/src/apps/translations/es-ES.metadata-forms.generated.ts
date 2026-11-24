@@ -276,9 +276,13 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Idioma",
         helpText: "Lenguaje del editor (p. ej. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Un campo de credenciales nunca muestra valores, y si el propio objeto lo desactiva, manda el objeto."
+      },
       "fields.trackHistory": {
         label: "Seguimiento de historial",
-        helpText: "Resume este campo en la cronología de actividad del registro"
+        helpText: "Hace que un campo multimedia o JSON (imagen, archivo, json, …) muestre valores anterior → nuevo en la cronología de actividad. Los demás campos ya los muestran, y apagarlo no los oculta: use Valores de cambios de campo."
       },
       "fields.visibleWhen": {
         label: "Condición de visibilidad",
@@ -298,6 +302,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "Seguimiento de historial"
+      },
+      "enable.fieldHistory": {
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de los campos modificados en la cronología de actividad del registro. Predeterminado es activado. Desactivado deja de mostrar valores en todo el objeto, diga lo que diga un campo."
       },
       "enable.searchable": {
         label: "Buscable"
@@ -460,6 +468,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.transfer": {
         label: "Cambiar propietario",
         helpText: "La acción Cambiar propietario, individual y masiva: activada la ofrece, desactivada la oculta. Sin definir: activada, salvo desactivada en un objeto de detalle controlled_by_parent. Solo se ofrece en un objeto cuyos registros tienen un propietario reasignable (ownership user o sin definir, sin managedBy, no es un objeto sys_, owner_id no es de solo lectura y, en un objeto externo, está declarado o mapeado); activarla en cualquier otro objeto se rechaza. Solo controla la acción, no una edición directa de owner_id. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escriba uno en el código fuente para condicionar la acción a cada registro."
+      },
+      actionLayout: {
+        label: "Disposición de acciones",
+        helpText: "El orden de las acciones de este objeto y cuáles son botones, por ámbito: pinned (como máximo 3 botones, en orden) y more (el orden del menú Más; una acción que no aparece en ninguno sigue en su orden predeterminado). Sin definir: cada superficie elige sus botones por el orden de las acciones, como antes."
+      },
+      "actionLayout.list": {
+        label: "Lista",
+        helpText: "La barra de herramientas de la página de lista, como {\"pinned\": [...], \"more\": [...]}: nombres de acciones colocadas en la barra de la lista; $import / $export solo en pinned. Como máximo 3 fijadas. Sin fijar, la página sigue mostrando su propio menú Importar / Exportar. os validate rechaza un nombre que no es una acción de este objeto o que no está en la barra de la lista; ese nombre no dibuja nada."
+      },
+      "actionLayout.record": {
+        label: "Registro",
+        helpText: "El encabezado del registro (página del registro, vista previa lateral, barra inferior del teléfono), como {\"pinned\": [...], \"more\": [...]}: nombres de acciones colocadas en el encabezado del registro o en su menú Más. Como máximo 3 fijadas. os validate rechaza un nombre que no es una acción de este objeto o que no está en la página del registro; ese nombre no dibuja nada."
       },
       editMode: {
         label: "Modo de edición",
@@ -865,6 +885,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Oculto",
         helpText: "Oculta el campo en las vistas UI predeterminadas"
       },
+      showOnCreate: {
+        label: "Mostrar al crear",
+        helpText: "Pedir este campo al crear un registro. Desactivado: el diálogo de creación, la creación a página completa y una creación abierta por una acción lo omiten; la edición, la página del registro y las listas lo siguen mostrando. Un campo obligatorio siempre se pide, así que no se puede desactivar."
+      },
       searchable: {
         label: "Buscable",
         helpText: "Incluye en los resultados de búsqueda global"
@@ -897,9 +921,13 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Interno",
         helpText: "Nunca devuelve el valor de este campo por la ruta de datos genérica: el motor omite la clave en los resultados de find/findOne y en los cuerpos de respuesta de creación y actualización, tanto en la proyección predeterminada como cuando un cliente la nombra en ?select=. El almacenamiento, el filtrado y los índices no se ven afectados."
       },
+      fieldHistory: {
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Un campo de credenciales nunca muestra valores, y si el propio objeto lo desactiva, manda el objeto."
+      },
       trackHistory: {
         label: "Registrar historial",
-        helpText: "Muestra los cambios de valor de este campo como entradas en la línea de actividad del registro (ADR-0052 §5b). Se activa campo a campo."
+        helpText: "Hace que un campo multimedia o JSON (imagen, archivo, json, …) muestre valores anterior → nuevo en la cronología de actividad. Los demás campos ya los muestran, y apagarlo no los oculta: use Valores de cambios de campo."
       },
       widget: {
         label: "Control del campo",

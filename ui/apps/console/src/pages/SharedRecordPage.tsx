@@ -342,7 +342,12 @@ export default function SharedRecordPage() {
     <div className="mx-auto flex h-svh max-w-3xl flex-col bg-background">
       <header className="border-b px-4 py-3">
         <h1 className="text-sm font-medium">
-          {t('sharedRecord.sharedObject', { defaultValue: 'Shared {{object}}', object: data.link.object_name })}
+          {t('sharedRecord.sharedObject', {
+            defaultValue: 'Shared {{object}}',
+            // The object's label in the request's locale (objectstack#33552);
+            // an older server, or an object with no label, names it by its name.
+            object: data.link.object_label || data.link.object_name,
+          })}
         </h1>
       </header>
       <main className="flex-1 overflow-y-auto p-4">

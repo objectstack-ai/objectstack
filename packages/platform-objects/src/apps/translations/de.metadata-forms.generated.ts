@@ -276,9 +276,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Sprache",
         helpText: "Sprache des Editors (z. B. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
+      },
       "fields.trackHistory": {
         label: "Verlauf verfolgen",
-        helpText: "Dieses Feld in der Aktivitätszeitleiste des Datensatzes zusammenfassen"
+        helpText: "Lässt ein Medien- oder JSON-Feld (Bild, Datei, json, …) alte → neue Werte in der Aktivitätszeitleiste zeigen. Alle anderen Felder zeigen sie ohnehin, und Ausschalten verbirgt sie nicht: dafür gibt es Feldänderungswerte."
       },
       "fields.visibleWhen": {
         label: "Sichtbar wenn",
@@ -298,6 +302,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Verlauf verfolgen"
+      },
+      "enable.fieldHistory": {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte geänderter Felder in der Aktivitätszeitleiste des Datensatzes. Standard ist an. Aus schaltet die Werte für das ganze Objekt ab, gleich was ein Feld sagt."
       },
       "enable.searchable": {
         label: "Durchsuchbar"
@@ -460,6 +468,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "Inhaber ändern",
         helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt und auf einem externen Objekt deklariert oder zugeordnet); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
+      },
+      actionLayout: {
+        label: "Aktionsanordnung",
+        helpText: "Die Reihenfolge der Aktionen dieses Objekts und welche davon Schaltflächen sind, je Bereich: pinned (höchstens 3 Schaltflächen, in Reihenfolge) und more (die Reihenfolge des Menüs „Mehr“; eine in keinem von beiden genannte Aktion folgt in ihrer Standardreihenfolge). Nicht gesetzt: Jede Oberfläche wählt ihre Schaltflächen wie bisher nach der Reihenfolge der Aktionen."
+      },
+      "actionLayout.list": {
+        label: "Liste",
+        helpText: "Die Symbolleiste der Listenseite, als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Listen-Symbolleiste; $import / $export nur in pinned. Höchstens 3 angeheftet. Nicht angeheftet zeigt die Seite weiterhin ihr eigenes Import-/Export-Menü. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht in der Listen-Symbolleiste platziert ist; ein solcher Name zeichnet nichts."
+      },
+      "actionLayout.record": {
+        label: "Datensatz",
+        helpText: "Die Datensatzkopfzeile (Datensatzseite, Seitenvorschau, Leiste unten auf dem Telefon), als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Datensatzkopfzeile oder ihrem Menü „Mehr“. Höchstens 3 angeheftet. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht auf der Datensatzseite platziert ist; ein solcher Name zeichnet nichts."
       },
       editMode: {
         label: "Bearbeitungsmodus",
@@ -865,6 +885,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Ausgeblendet",
         helpText: "Feld in den Standardansichten der Oberfläche ausblenden"
       },
+      showOnCreate: {
+        label: "Beim Anlegen anzeigen",
+        helpText: "Dieses Feld beim Anlegen eines Datensatzes abfragen. Aus: Der Anlegen-Dialog, das Anlegen auf ganzer Seite und ein von einer Aktion geöffnetes Anlegen lassen es weg; Bearbeiten, die Datensatzseite und Listen zeigen es weiterhin. Ein Pflichtfeld wird immer abgefragt und kann daher nicht ausgeschaltet werden."
+      },
       searchable: {
         label: "Durchsuchbar",
         helpText: "In die Ergebnisse der globalen Suche einbeziehen"
@@ -897,9 +921,13 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Intern",
         helpText: "Den Wert dieses Felds nie über den allgemeinen Datenpfad zurückgeben: Die Engine lässt den Schlüssel in Ergebnissen von find/findOne und in den Antworttexten von create und update weg, bei der Standardprojektion und wenn ein Client das Feld in ?select= nennt. Speicherung, Filterung und Indizierung bleiben unberührt."
       },
+      fieldHistory: {
+        label: "Feldänderungswerte",
+        helpText: "Alte → neue Werte dieses Felds in der Aktivitätszeitleiste des Datensatzes. Standard folgt der Plattform: an für die meisten Typen, aus für ein Medien-, JSON- oder Zugangsdaten-Feld. Aus nennt die Änderung nur mit dem Feldnamen; An zeigt auch die Werte eines Medien- oder JSON-Felds. Ein Zugangsdaten-Feld zeigt nie Werte, und ist die Einstellung des Objekts selbst aus, gilt diese."
+      },
       trackHistory: {
         label: "Verlauf verfolgen",
-        helpText: "Wertänderungen dieses Felds als Einträge in der Aktivitätszeitleiste des Datensatzes darstellen (ADR-0052 §5b). Pro Feld einzeln zu aktivieren."
+        helpText: "Lässt ein Medien- oder JSON-Feld (Bild, Datei, json, …) alte → neue Werte in der Aktivitätszeitleiste zeigen. Alle anderen Felder zeigen sie ohnehin, und Ausschalten verbirgt sie nicht: dafür gibt es Feldänderungswerte."
       },
       widget: {
         label: "Widget",

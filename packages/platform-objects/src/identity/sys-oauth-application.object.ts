@@ -23,6 +23,7 @@ export const SysOauthApplication = ObjectSchema.create({
   label: 'OAuth Application',
   pluralLabel: 'OAuth Applications',
   icon: 'key-round',
+  color: 'purple',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,

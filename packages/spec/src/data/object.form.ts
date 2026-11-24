@@ -438,7 +438,9 @@ export const objectForm = defineForm({
             // named the `auditTrail` / `dataQuality` / `encryptionConfig` family
             // pruned in 2026-06 as dead in both layers (see the FieldSchema
             // tombstone); at-rest protection is `type: 'secret'`, not a flag.
-            { field: 'trackHistory', type: 'boolean', helpText: 'Summarize this field on the record activity timeline' },
+            // [#36482] Three-way, as on the field form: Default removes the key.
+            { field: 'fieldHistory', widget: 'field-history', helpText: "Old → new values for this field on the record activity timeline. Default follows the platform: on for most types, off for a media, JSON or credential field. Off names the change by label only; On also shows a media or JSON field's values. A credential field never shows values, and the object's own Field History off wins." },
+            { field: 'trackHistory', type: 'boolean', helpText: "Opt a media or JSON field (image, file, json, …) into old → new values on the activity timeline. Every other field shows them already, and off does not hide them: use Field History." },
             { field: 'visibleWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is shown only when TRUE' },
             { field: 'readonlyWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is read-only when TRUE (enforced server-side)' },
             { field: 'requiredWhen', type: 'code', language: 'expression', helpText: 'CEL predicate — field is required when TRUE (enforced server-side)' },
@@ -462,6 +464,7 @@ export const objectForm = defineForm({
           helpText: 'Enable/disable system features',
           fields: [
             { field: 'trackHistory', type: 'boolean' },
+            { field: 'fieldHistory', widget: 'field-history', helpText: "Old → new values of changed fields on the record activity timeline. Default is on. Off turns values off for the whole object, whatever a field says." },
             { field: 'searchable', type: 'boolean' },
             { field: 'apiEnabled', type: 'boolean' },
             { field: 'files', type: 'boolean' },
@@ -751,6 +754,18 @@ export const objectForm = defineForm({
             { field: 'delete', label: 'Delete', widget: 'json', helpText: 'Row and bulk delete: on offers it, off hides it. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate each row on its own record.' },
             { field: 'exportCsv', label: 'Export CSV', type: 'boolean', helpText: 'The Export entry that downloads this object\'s data (CSV, XLSX or JSON) on its grids, list views and dataset reports: on shows it, off hides it. A Gantt chart\'s PNG / PDF export is not covered. Unset: shown, since every managedBy bucket offers export. It is not a permission: who may export is the permission set\'s allowExport.' },
             { field: 'transfer', label: 'Change Owner', widget: 'json', helpText: 'The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record.' },
+          ],
+        },
+        // [#36366] The action layout per scope. Each arm is an object of two
+        // name lists (`pinned`, `more`), edited as JSON; the design mode edits
+        // it on the page.
+        {
+          field: 'actionLayout',
+          type: 'composite',
+          helpText: 'The order of this object\'s actions and which are buttons, per scope: pinned (at most 3 buttons, in order) and more (the More menu\'s order; an action named in neither follows in its default order). Unset: each surface picks its buttons by the actions\' order, as before.',
+          fields: [
+            { field: 'list', label: 'List', widget: 'json', helpText: 'The list page toolbar, as {"pinned": [...], "more": [...]}: action names placed on the list toolbar; $import / $export only in pinned. At most 3 pinned. Not pinned, the page still draws its own Import / Export menu. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing.' },
+            { field: 'record', label: 'Record', widget: 'json', helpText: 'The record header (record page, side preview, phone bar), as {"pinned": [...], "more": [...]}: action names placed in the record header or its More menu. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws nothing.' },
           ],
         },
         { field: 'editMode', type: 'select', helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling.", options: [

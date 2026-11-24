@@ -25,6 +25,7 @@ export const ExternalCustomer = ObjectSchema.create({
   label: 'External Customer',
   pluralLabel: 'External Customers',
   icon: 'database',
+  color: 'teal',
   description: 'A customer federated from the external analytics DB (ADR-0015). Bound to remote table `customers` via external.remoteName.',
   datasource: 'showcase_external',
   external: { remoteName: 'customers' },

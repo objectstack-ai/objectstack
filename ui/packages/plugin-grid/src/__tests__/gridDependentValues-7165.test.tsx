@@ -154,7 +154,6 @@ function renderGrid(ds: any, rows: any[]) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     data: rows,
     pagination: { pageSize: 50 },
     columns: COLUMNS,
@@ -162,7 +161,7 @@ function renderGrid(ds: any, rows: any[]) {
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={ds}>
-        <ObjectGrid schema={schema} dataSource={ds} />
+        <ObjectGrid cellSelection={false} schema={schema} dataSource={ds} />
       </SchemaRendererProvider>
     </ActionProvider>,
   );

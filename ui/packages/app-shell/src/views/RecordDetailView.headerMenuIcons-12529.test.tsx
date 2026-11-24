@@ -7,8 +7,9 @@
  */
 
 /**
- * objectui#12529: the record header's system entries (Edit, favorites, Share,
- * Delete) declare icons through the same `icon` key the app's actions use, so
+ * objectui#12529: the record header's system entries (Edit, Share, Delete;
+ * favorites is the star beside the name since objectstack#36246) declare
+ * icons through the same `icon` key the app's actions use, so
  * the `⋯` menu draws one kind of row; Delete is last, behind a separator.
  *
  * objectui#12617 replaced this file's third rule: Edit no longer folds into
@@ -183,13 +184,14 @@ afterEach(() => {
 });
 
 describe('record header: iconed system entries, Delete set apart in the ⋯, Edit a labelled button in the row (objectui#12529, objectui#12617)', () => {
-  it('each system entry carries its icon: Edit in the row, the other three in the ⋯', async () => {
+  it('each system entry carries its icon: Edit in the row, Share and Delete in the ⋯', async () => {
     await mountRecordPage(FULL_ROW);
     const edit = screen.getByRole('button', { name: 'Edit' });
     await waitFor(() => expect(edit.querySelector('svg.lucide-pencil')).not.toBeNull());
     const menu = await openOverflow();
+    // The favorites control is the star beside the record's name
+    // (objectstack#36246), not a ⋯ entry.
     const expected: Record<string, string> = {
-      'Add to favorites': 'lucide-star',
       Share: 'lucide-share',
       Delete: 'lucide-trash',
     };
@@ -206,7 +208,7 @@ describe('record header: iconed system entries, Delete set apart in the ⋯, Edi
     // The host's Refresh leads the ⋯, set apart (objectstack#27055); the three
     // app actions fit the bar's three inline slots (objectstack#35853), so the
     // system group follows.
-    expect(menuRows(menu)).toEqual(['Refresh', '---', 'Add to favorites', 'Share', '---', 'Delete']);
+    expect(menuRows(menu)).toEqual(['Refresh', '---', 'Share', '---', 'Delete']);
   });
 
   it('with three app actions in the header, the first leads, Edit stays a labelled button after it, opens the edit session, and nothing is icon-only', async () => {
@@ -238,6 +240,6 @@ describe('record header: iconed system entries, Delete set apart in the ⋯, Edi
     // The ⋯ then holds only the menu-pinned system entries.
     const menu = await openOverflow();
     // The host's Refresh leads the ⋯, set apart (objectstack#27055).
-    expect(menuRows(menu)).toEqual(['Refresh', '---', 'Add to favorites', 'Share', '---', 'Delete']);
+    expect(menuRows(menu)).toEqual(['Refresh', '---', 'Share', '---', 'Delete']);
   });
 });

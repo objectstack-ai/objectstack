@@ -433,7 +433,9 @@ dataset card's verified build is a fixture here, `builds/<id>.json`, byte for by
 `builds/<id>.provenance.json` records the sha256, the card's sha256, the runner sha, the packages and
 the authoring model and effort. A round installs it with `--modes ask --template
 docs/qa/scenarios/builds/<id>.json` and builds nothing; its record names the file's sha256. A round never
-writes it: it changes only by a PR, when the card or the runner changes. Records, recordings and logs stay
+writes it: it changes only by a PR, when the card or the runner changes, or when the platform starts refusing
+it at install. A hand edit of that last kind changes only what the refusal names, and the provenance's `amended`
+entry records it with the sha256 it replaced. Records, recordings and logs stay
 out of the tree. The loader and the packed library read this directory one level deep, so `builds/` is
 neither a card nor shipped.
 
@@ -452,7 +454,9 @@ for not guessing a name.
   it answers, the kind of each write it applies or confirms, and a refusal of each write the card
   refuses it with `PERMISSION_DENIED` (no grant, or a field it may not edit). A write the card
   has wait on confirmation may instead go through the card's confirm-gated agent action: when
-  the set withholds the verb and the build declares that action, the check is not measured. The prompt names
+  the set withholds the verb and the build declares that action, the check is not measured. A delete
+  is also read against the platform's owner-only delete floor: a granted delete of a seed row the
+  persona does not own needs Modify All (or a write depth of `org`) on it as well. The prompt names
   the set and the persona's role; the questions and operations stay out of it, so the role the
   card's prose gives a persona must already imply its reads and writes. A grant it does not imply
   is a card fix, never a sentence added to the prompt.

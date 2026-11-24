@@ -276,9 +276,13 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "語言",
         helpText: "編輯器語言（如 sql、javascript）"
       },
+      "fields.fieldHistory": {
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。憑證欄位始終不顯示值；物件本身的欄位修改值設為關時，以物件為準。"
+      },
       "fields.trackHistory": {
         label: "歷史追蹤",
-        helpText: "在記錄的活動時間軸上概述該欄位的變更"
+        helpText: "讓媒體或 JSON 欄位（圖片、檔案、json 等）在活動時間軸上顯示舊值 → 新值。其他欄位本來就會顯示，關掉它也不會隱藏值：請用「欄位修改值」。"
       },
       "fields.visibleWhen": {
         label: "可見條件",
@@ -298,6 +302,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "enable.trackHistory": {
         label: "歷史追蹤"
+      },
+      "enable.fieldHistory": {
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示被修改欄位的舊值 → 新值。預設為開。關：整個物件都不顯示值，無論欄位如何設定。"
       },
       "enable.searchable": {
         label: "可搜尋"
@@ -460,6 +468,18 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "userActions.transfer": {
         label: "變更負責人",
         helpText: "變更負責人操作（單筆與批次）：開啟即提供，關閉即隱藏。未設定時開啟，但 controlled_by_parent 明細物件預設關閉。僅在記錄有可重新指派負責人的物件上提供（ownership 為 user 或未設定、無 managedBy、不是 sys_ 物件、owner_id 未設為唯讀，外部物件上 owner_id 已宣告或已對應）；在其他物件上開啟會被拒絕。它只控制該操作，不影響直接編輯 owner_id。已儲存的 {enabled, visibleWhen, disabledWhen} 物件逐鍵編輯；在原始碼中寫一個即可按每筆記錄控制該操作。"
+      },
+      actionLayout: {
+        label: "動作佈局",
+        helpText: "本物件動作的順序及哪些顯示為按鈕，按作用域分：pinned（最多 3 個按鈕，按順序）和 more（「更多」選單的順序；兩者都沒寫的動作按預設順序排在後面）。未設定時，各處仍按動作的排序選按鈕。"
+      },
+      "actionLayout.list": {
+        label: "列表",
+        helpText: "列表頁工具列，寫作 {\"pinned\": [...], \"more\": [...]}：放在列表工具列上的動作名稱；$import / $export 只能放在 pinned。最多固定 3 個。未固定時，頁面仍顯示自己的匯入 / 匯出選單。os validate 會拒絕不是本物件動作、或未放在列表工具列上的名稱；這樣的名稱什麼也不顯示。"
+      },
+      "actionLayout.record": {
+        label: "記錄",
+        helpText: "記錄頁頭（記錄頁、側邊預覽、手機底欄），寫作 {\"pinned\": [...], \"more\": [...]}：放在記錄頁頭或其「更多」選單中的動作名稱。最多固定 3 個。os validate 會拒絕不是本物件動作、或未放在記錄頁上的名稱；這樣的名稱什麼也不顯示。"
       },
       editMode: {
         label: "編輯方式",
@@ -865,6 +885,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "隱藏",
         helpText: "在預設介面檢視中隱藏"
       },
+      showOnCreate: {
+        label: "新建時顯示",
+        helpText: "新建記錄時是否填寫此欄位。關閉後，新建彈窗、整頁新建和動作開啟的新建都不顯示它；編輯、記錄頁和清單仍然顯示。必填欄位新建時總要填寫，不能關閉。"
+      },
       searchable: {
         label: "可搜尋",
         helpText: "納入全域搜尋結果"
@@ -897,9 +921,13 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "不對外傳回",
         helpText: "該欄位的值永遠不經通用資料通道傳回：引擎會從 find/findOne 結果以及建立和更新的回應體中刪除這個鍵——預設投影如此，用戶端在 ?select= 中點名它時同樣如此。儲存、過濾和索引都不受影響。"
       },
+      fieldHistory: {
+        label: "欄位修改值",
+        helpText: "在記錄的活動時間軸上顯示該欄位的舊值 → 新值。預設跟隨平台：大多數類型為開，媒體、JSON 或憑證欄位為關。關：只寫出欄位名；開：媒體或 JSON 欄位也顯示值。憑證欄位始終不顯示值；物件本身的欄位修改值設為關時，以物件為準。"
+      },
       trackHistory: {
         label: "記錄變更歷史",
-        helpText: "把該欄位的值變更呈現為記錄活動時間軸上的條目（ADR-0052 §5b）。依欄位逐個開啟。"
+        helpText: "讓媒體或 JSON 欄位（圖片、檔案、json 等）在活動時間軸上顯示舊值 → 新值。其他欄位本來就會顯示，關掉它也不會隱藏值：請用「欄位修改值」。"
       },
       widget: {
         label: "控制項覆寫",

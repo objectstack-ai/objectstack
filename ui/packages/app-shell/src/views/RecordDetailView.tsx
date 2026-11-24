@@ -31,6 +31,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { authoredBodyTableIds, deriveRelatedLists } from '../utils/deriveRelatedLists.js';
+import { RECORD_TABS_CONFIG_ACTION, useRecordTabsConfig } from './RecordTabsConfig.js';
 import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
@@ -42,6 +43,7 @@ import { useRecordChangeOwnerOffer } from './changeOwner.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { PublishRecordEditCommand, type RecordHeaderEditEntry } from './recordPaletteEdit.js';
 import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
@@ -73,6 +75,9 @@ import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../layout/shellPageActionsSlot.js';
+import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
+import { headerReadsPins } from '../layout/designModeHeaderPinsModel.js';
+import { useDesignModeActive } from '../layout/designMode.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -85,7 +90,7 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 // Both sets are derived, not restated — see record-detail-system-fields.ts.
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
-import { placedHeaderActions } from '@object-ui/types';
+import { arrangedHeaderActions, placedHeaderActions } from '@object-ui/types';
 import type { ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
@@ -110,6 +115,7 @@ import './record-approvals-renderer.js';
 import { getRecordDisplayName } from '../utils/index.js';
 import { parseAuditValue, collectAuditChanges, collectLookupIds, formatAuditValue, auditImpersonatorId } from '../utils/auditHistoryDisplay.js';
 import { useFavorites } from '../hooks/useFavorites.js';
+import { recordFavoriteItem } from '../context/FavoritesProvider.js';
 import {
   RECORD_DETAILS_WIDTH_PREFERENCE,
   RECORD_RELATED_ARRANGEMENT_PREFERENCE,
@@ -275,6 +281,15 @@ function recordPagePlacesNoComponent(page: Parameters<typeof checkPageRecordPlac
   let refused = false;
   checkPageRecordPlacesComponent(page, { value: page, issues: [], addIssue: () => { refused = true; } });
   return refused;
+}
+
+/**
+ * Whether a record page is a print page (objectui#11958): it declares `print`
+ * as an object. Only an assigned page can; the default page never does.
+ */
+function pageDeclaresPrintOf(page: unknown): boolean {
+  const print = (page as { print?: unknown } | null | undefined)?.print;
+  return typeof print === 'object' && print !== null && !Array.isArray(print);
 }
 
 /**
@@ -894,6 +909,9 @@ function ApprovalGroupBeacon({ onHosted }: { onHosted: (update: (n: number) => n
   return null;
 }
 
+/** The reader's arrangement is not written while the tab configuration previews the default (objectstack#36499). */
+const ignoreArrangementChange = (): void => {};
+
 export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverride, recordIdOverride, embedded }: RecordDetailViewProps) {
 
   const params = useParams<{
@@ -1056,6 +1074,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [heldRecordTitle, setHeldRecordTitle] = useState<{ record: string; title: string } | undefined>();
   const recordTitle = heldRecordTitle?.record === routeRecordKey ? heldRecordTitle.title : undefined;
   const objectDef = objects.find((o: any) => o.name === objectName);
+  // objectstack#36366 — the object's action arrangement as the header draws
+  // it: staged under the design mode, else as served. Keyed on content for the
+  // synthesized page's memo below.
+  const objectPins = useObjectPins(objectDef as any);
+  const recordPinsKey = JSON.stringify(objectPins.record ?? null);
+  const designModeOn = useDesignModeActive();
   // objectui#13385 (maintainer ruling, option B) — a record page inside the
   // Setup app draws no floating `ManagedByBadge`; the header's object-label
   // chip carries the badge's note instead. Read off the route's `:appName`, so
@@ -1189,12 +1213,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   const favoriteRecord = useMemo(() => {
     if (!objectName || !pureRecordId) return null;
-    return {
-      id: `record:${objectName}:${pureRecordId}`,
-      label: recordTitle || pureRecordId || '',
-      href: `/apps/${appName}/${objectName}/record/${pureRecordId}`,
-      type: 'record' as const,
-    };
+    return recordFavoriteItem(appName, objectName, pureRecordId, recordTitle);
   }, [appName, objectName, pureRecordId, recordTitle]);
   const isRecordFavorite = favoriteRecord ? isFavorite(favoriteRecord.id) : false;
   const handleToggleRecordFavorite = useCallback(() => {
@@ -2580,15 +2599,35 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `resolveRecordHeaderActionGates(objectDef, perms)`: the affordance-to-grant
   // map asks both itself (objectui#12082), so this view no longer threads
   // either one by hand.
+  // objectstack#36499 — 「Configure tabs」: an administrator arranges this
+  // object's record-page tabs in place. While its edit state is on, the page
+  // is drawn from the object with the draft's `relatedLists`
+  // (`tabsConfig.previewObject`), the preview of what Save writes.
+  const canReadChild = useMemo(
+    () => (permissionsLoaded ? (name: string) => canOnObject(name, 'read') : undefined),
+    [permissionsLoaded, canOnObject],
+  );
+  const tabsConfig = useRecordTabsConfig({
+    objectDef,
+    objects,
+    enabled: !embedded && !phone && pageColumnsEligible,
+    canRead: canReadChild,
+    titleOf: (list) => {
+      if (list.title) return list.title;
+      const childDef = objects.find((o: any) => o.name === list.childObject);
+      return childDef ? servedObjectPluralLabel(childDef, language, objectPluralLabel, list.childLabel) : list.childLabel;
+    },
+  });
+  const tabsObjectDef = tabsConfig.previewObject ?? objectDef;
   const childRelations = useMemo(
-    () => deriveRelatedLists(objectDef, objects, {
+    () => deriveRelatedLists(tabsObjectDef, objects, {
       canRead: permissionsLoaded ? (name) => canOnObject(name, 'read') : undefined,
       // A related list is a list of the child's records, so the multi-FK
       // title it composes names it with the plural, as the single-FK title
       // below does (objectui#11733).
       listLabel: (child) => servedObjectPluralLabel(child, language, objectPluralLabel, child.name),
     }),
-    [objectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel, language],
+    [tabsObjectDef, objects, canOnObject, permissionsLoaded, objectPluralLabel, language],
   );
 
   // [objectui#12244] A write to a CHILD re-reads this record, in place.
@@ -4646,8 +4685,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // (objectstack#29951), so the synthesized header and such a page draw the
     // same actions, an action another package places on the object included.
     const recordHeaderActions = (() => {
-      const base = placedHeaderActions<any>(objectDef.actions as any[] | undefined)
-        .map((a: any) => localizeActionTexts(objectDef.name, a));
+      // objectstack#36366 — the object's record scope arrangement
+      // (`actionLayout.record`): `pinned` chooses which of them are buttons, in
+      // order, and `more` orders the rest in ⋯. The same list feeds the side
+      // preview (an embedded mount) and the phone's bottom bar (the header's
+      // `bar` face). No arm: the header's own choice, as before.
+      const base = arrangedHeaderActions<any>(
+        placedHeaderActions<any>(objectDef.actions as any[] | undefined),
+        objectPins.record,
+        'record',
+      ).map((a: any) => localizeActionTexts(objectDef.name, a));
 
       // ⛔ No approval actions are injected here any more (objectui#3055).
       // They used to be two hand-written buttons (approve/reject only, no
@@ -4793,7 +4840,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  // `recordPinsKey`: the record scope arrangement (objectstack#36366), staged under
+  // the design mode without `objects` changing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `objectPins` is keyed on content by `recordPinsKey`
+  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id, recordPinsKey]);
   // objectstack#30344 — whether this record page shows the record's field
   // history: the history gate, AND this reader's audit read answered. A read
   // the server refuses (or that fails) answers nothing, so the stream offers
@@ -4822,6 +4872,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // read where the page is assigned, above.)
   const phonePage = phone && !embedded;
   const [phoneActionBarEl, setPhoneActionBarEl] = useState<HTMLDivElement | null>(null);
+  // objectstack#36151 — the top bar's right end, where the record's `⋯` is
+  // drawn on a phone (Edit among its entries).
+  const [phoneMoreEl, setPhoneMoreEl] = useState<HTMLSpanElement | null>(null);
   const [pageScrollerEl, setPageScrollerEl] = useState<HTMLDivElement | null>(null);
   useRecordPageScrollMemory(phonePage ? pageScrollerEl : null, pageRecordStatus === 'loaded');
 
@@ -5243,7 +5296,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // in the header row whether or not the record has app actions
         // (objectstack#36049; before, it drew filled when it had none);
         // `page:header` decides that — no `variant` is declared here for it
-        // to read. The phone's bottom bar still draws it filled.
+        // to read.
         icon: 'pencil',
         type: 'script',
         locations: ['record_header'],
@@ -5285,15 +5338,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // button's tooltip and accessible description, and as the second
         // line of its `⋯` entry (the phone bar's, where an off Edit goes).
         ...(editReason ? { disabledReason: editReason } : null),
-        // objectstack#35016, objectstack#35099 — on a phone the bottom bar's
-        // first slot is its primary place, and an action that cannot be
-        // pressed never holds it: whichever of the three reasons above turns
-        // this Edit off, it moves into the bar's `⋯` (still drawn, still
-        // off), and the first usable action takes the slot. The approval band
-        // states the lock, and the `editLockedByState` badge the state lock.
-        // The desktop row keeps it greyed in place for every reason, and an
-        // Edit that is on is untouched.
-        ...(phonePage && editOff ? { component: 'action:menu' } : {}),
+        // objectstack#36151 — on a phone Edit is an entry of the `⋯` at the
+        // top bar's right end, on or off: a field's value is edited by a tap
+        // on it, and the bottom bar holds the object's own actions, or is not
+        // drawn when it has none. An Edit that is off is still drawn there,
+        // off, with its reason (objectstack#35099, objectstack#35135). The
+        // desktop row keeps it a button, greyed in place when it is off.
+        ...(phonePage ? { component: 'action:menu' } : {}),
         // objectstack#35599 — a page drawing body tables enters its edit state;
         // every other page opens the record form, as before.
         onClick: () => (recordEditEligible
@@ -5301,11 +5352,32 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
-    // The record's favorites entry (objectui#12427), in the `⋯` overflow ahead
-    // of Share. A record is never a navigation entry, so this toggles the
-    // `record:` favorite, which the sidebar draws in its Favorites section at
-    // the top.
-    if (favoriteRecord) {
+    // objectstack#36499 — 「Configure tabs」, the first item of the `⋯`
+    // (`leadsMenu`, ahead of Refresh), for an administrator who may arrange
+    // this object's tabs (`useRecordTabsConfig`'s gate: never on a phone, a
+    // drawer or a pane).
+    if (tabsConfig.offered && !tabsConfig.active && !recordEditState) {
+      items.push({
+        name: RECORD_TABS_CONFIG_ACTION,
+        leadsMenu: true,
+        label: t('designMode.recordTabs.entry', { defaultValue: 'Configure tabs' }),
+        icon: 'panels-top-left',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 101,
+        component: 'action:menu',
+        onClick: () => tabsConfig.enter(),
+      } as any);
+    }
+    // The record's favorites control is the star beside the record's name
+    // (objectstack#36246), drawn by `page:header` from the record context
+    // below, so the `⋯` holds no second entry. A print page draws no
+    // `page:header`, so no name and no star: there the favorites entry stays
+    // in the `⋯` of its chrome row, ahead of Share. A record is never a
+    // navigation entry, so both toggle the `record:` favorite, which the
+    // sidebar draws in its Favorites section at the top.
+    if (favoriteRecord && pageDeclaresPrintOf(assignedPage)) {
       items.push({
         name: 'sys_favorite',
         label: isRecordFavorite
@@ -5399,6 +5471,30 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         order: 115,
         component: 'action:menu',
         onClick: () => recordPane.openAsPage(),
+      } as any);
+    }
+    // objectstack#36149 — a side preview's header draws no copy-id icon after
+    // the name; the copy is this `⋯` entry instead.
+    if (embedded && paneHeaderBar?.preview && pureRecordId) {
+      items.push({
+        name: 'sys_copy_record_id',
+        label: t('detail.copyRecordId', { defaultValue: 'Copy record ID' }),
+        icon: 'copy',
+        type: 'script',
+        locations: ['record_header'],
+        variant: 'outline',
+        order: 113,
+        component: 'action:menu',
+        onClick: async () => {
+          const label = t('detail.copyRecordId', { defaultValue: 'Copy record ID' });
+          try {
+            await navigator.clipboard.writeText(String(pureRecordId));
+            toast.success(t('detail.copied', { defaultValue: 'Copied!' }));
+          } catch (err: any) {
+            // A clipboard the page may not write (not focused, not https) says so.
+            toast.error(err?.message ? `${label}: ${err.message}` : label);
+          }
+        },
       } as any);
     }
     if (affordances.delete) {
@@ -5500,6 +5596,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     return items;
   })();
+  // objectstack#36286 — the header's Edit, offered by the ⌘K palette on the
+  // record's own page (not a drawer or a pane over a list).
+  const paletteEdit = embedded
+    ? undefined
+    : (synthSystemActions.find((action) => action.name === 'sys_edit') as RecordHeaderEditEntry | undefined);
 
   // The synth path hands ONLY business actions (authored on objectDef and
   // routed to the record_header location, e.g. Lead.convert) to the page
@@ -5517,7 +5618,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     : null;
   const composedPage = assignedPage
     ? effectivePage
-    : buildDefaultPageSchema(objectDef as any, {
+    : buildDefaultPageSchema(tabsObjectDef as any, {
         sections: synthParts.sections,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
@@ -5737,21 +5838,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       <span className="flex shrink-0 items-center gap-2 empty:hidden" data-record-page-badges="">{recordBadges}</span>
     </>
   );
-  // objectstack#35853 — ✕ at the far right of the navigation row, on every
-  // desktop face: back to the list the page came from as it was left
+  // objectstack#36557 — ✕ is the first control of the navigation row, on
+  // every desktop face: back to the list the page came from as it was left
   // (objectstack#35854), else the object's default list.
   const closePage = pageReturn.toList ?? (objectListPath ? () => navigate(objectListPath) : undefined);
-  const pageFrame = closePage || shellActions ? (
-    <>
-      {/* objectstack#36112 — the comments icon is the group's first button. */}
-      {shellActions && renderShellGroup?.({ comments: commentsButton })}
-      {closePage && (
-        <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
-          <X className="h-3.5 w-3.5" />
-        </RecordTopBarButton>
-      )}
-    </>
+  const pageClose = closePage ? (
+    <RecordTopBarButton label={t('common.close', { defaultValue: 'Close' })} onClick={closePage} data-testid="record-page-close">
+      <X className="h-3.5 w-3.5" />
+    </RecordTopBarButton>
   ) : undefined;
+  // objectstack#36112 — the comments icon is the group's first button.
+  const pageFrame = shellActions ? renderShellGroup?.({ comments: commentsButton }) : undefined;
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
   // parent going back in the history when the page was pushed from it.
@@ -5794,6 +5891,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         stepper={pageStepper}
         toggles={approvalQueueSwitch ?? undefined}
         comments={phoneCommentsButton}
+        // objectstack#36151 — the record's `⋯`, at the bar's right end.
+        frame={<span ref={setPhoneMoreEl} className="flex items-center empty:hidden" data-record-phone-more="" />}
       />
       {phonePathRow}
     </>
@@ -5806,6 +5905,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       toggles={approvalQueueSwitch || panelToggles ? <>{approvalQueueSwitch}{panelToggles}</> : undefined}
       comments={shellActions ? undefined : commentsButton}
       frame={pageFrame}
+      close={pageClose}
       record={pageRecordRow}
     />
   );
@@ -5818,8 +5918,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // what it hides). The action is the browser's print preview of it, and it is
   // offered only where the page declares `print`, so every other record page
   // is unchanged.
-  const pagePrint = (renderedPage as { print?: unknown } | null | undefined)?.print;
-  const pageDeclaresPrint = typeof pagePrint === 'object' && pagePrint !== null && !Array.isArray(pagePrint);
+  const pageDeclaresPrint = pageDeclaresPrintOf(renderedPage);
   const printHint = t('common.printDialogHint');
 
   // Shared cross-cutting chrome: lifecycle badge + presence avatars —
@@ -5915,14 +6014,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // any (`DeclaredActionsBar`'s header face says which) and the record's own
   // row otherwise. Remind is the submitter's 「催办」 here, so it is not
   // excluded as it was from the band (the approvals panel keeps its own).
-  const recordHeaderState: RecordHeaderState = {
-    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
-      <>
-        {approvalTag}
-        {headerBarForRecord ? stateLockChip : null}
-      </>
-    ) : undefined,
-    group: approvalBarMounted
+  // The pending request's levers, when the viewer has any.
+  const approvalGroup = approvalBarMounted
       ? (parts: RecordHeaderGroupParts) => (
         <>
         <ApprovalGroupBeacon onHosted={setApprovalGroupHosts} />
@@ -5938,7 +6031,36 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         />
         </>
       )
-      : undefined,
+      : undefined;
+  // objectstack#36366 — under the design mode the group ends with
+  // 「Header buttons」 (the record row, or the approval's levers, unchanged),
+  // on a header that reads the pins: not on one authored with its own
+  // `actions` list, nor on one that draws none of the object's actions.
+  const headerTakesPins = headerReadsPins(assignedPage ?? assignedSlots);
+  const recordHeaderState: RecordHeaderState = {
+    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
+      <>
+        {approvalTag}
+        {headerBarForRecord ? stateLockChip : null}
+      </>
+    ) : undefined,
+    group: designModeOn && objectDef
+      ? (parts: RecordHeaderGroupParts) => (
+        <>
+        {approvalGroup ? approvalGroup(parts) : parts.recordRow}
+        {parts.face === 'row' && headerTakesPins && (
+          <DesignModeHeaderPins
+            objectDef={objectDef as any}
+            page="record"
+            actions={placedHeaderActions<any>((objectDef as any).actions).map((a: any) => localizeActionTexts(objectDef.name, a))}
+          />
+        )}
+        </>
+      )
+      : approvalGroup,
+    // objectstack#36366 — the record scope arrangement the header draws, a staged one
+    // included, for a page that places the object's actions itself.
+    actionLayout: objectPins.record,
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,
@@ -5970,6 +6092,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
     <RecordReadReportContext.Provider value={objectName === SYS_APPROVAL_REQUEST_OBJECT ? reportRecordRead : null}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
+      {tabsConfig.bar}
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
       {embedded && paneBar && <RecordPaneBarToggles>{panelToggles}</RecordPaneBarToggles>}
@@ -5982,7 +6105,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             'absolute right-2 sm:right-4 z-50 flex items-center gap-2',
             // Under a phone's one 44 px bar row; in a pane, over the page's
             // top-right corner, level with its first row (objectstack#35745).
-            pageBar ? 'top-12' : headerBarForRecord ? 'top-3' : 'top-2 sm:top-4',
+            // While the tab configuration's bar is drawn: its 48 px (3rem)
+            // plus the page's own top-2 / sm:top-4 gap under it.
+            pageBar
+              ? 'top-12'
+              : tabsConfig.bar
+                ? 'top-[calc(3rem+0.5rem)] sm:top-[calc(3rem+1rem)]'
+                : headerBarForRecord
+                  ? 'top-3'
+                  : 'top-2 sm:top-4',
           )}
         >
           {sharedChrome}
@@ -6000,11 +6131,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         reread={headerReread}
         headerSystemActions={synthSystemActions}
         objectLabelNote={inSetupApp ? managedByNote ?? undefined : undefined}
+        // objectstack#36246 — the record's favorite star beside its name, in
+        // every face `page:header` draws (the page's bar, a drawer or pane,
+        // a phone's header): hollow until the record is a favorite, filled
+        // once it is, one press to toggle.
+        isFavorite={isRecordFavorite}
+        onToggleFavorite={favoriteRecord ? handleToggleRecordFavorite : undefined}
       >
-        {/* No `isFavorite` / `onToggleFavorite` here (objectui#12427): the
-            record's favorites entry is the `sys_favorite` item in the header's
-            `⋯` overflow, and the `page:header` chrome draws its star only for
-            a host that wires `onToggleFavorite`, so this page draws none. */}
         {/* objectui#2407 P2 — ONE record-level inline-edit session spanning
             the highlights strip AND the details body (both descend from this
             provider), committed together by the single <InlineEditSaveBar>
@@ -6055,6 +6188,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
         >
+        <PublishRecordEditCommand edit={paletteEdit} />
         <RecordEditStateController
           active={recordEditState}
           onExit={exitRecordEditState}
@@ -6245,7 +6379,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   into the bottom bar below, and the default page's header
                   takes its subtitle from the declared text highlights. */}
               <PageHeaderPhoneContext.Provider
-                value={phonePage ? { actionBar: phoneActionBarEl, subtitle: phoneHeader?.subtitle || undefined } : null}
+                value={phonePage ? { actionBar: phoneActionBarEl, more: phoneMoreEl, subtitle: phoneHeader?.subtitle || undefined } : null}
               >
               <RelatedRecordActionsBridge
                 appName={appName}
@@ -6291,8 +6425,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     detailsWidth={detailsWidth}
                     onDetailsWidthChange={setDetailsWidth}
                     onShownTabChange={setShownRecordTab}
-                    relatedArrangement={relatedArrangement}
-                    onRelatedArrangementChange={setRelatedArrangement}
+                    // objectstack#36499 — the edit state previews the
+                    // default order, the reader's own arrangement set aside.
+                    relatedArrangement={tabsConfig.active ? EMPTY_RELATED_ARRANGEMENT : relatedArrangement}
+                    onRelatedArrangementChange={tabsConfig.active ? ignoreArrangementChange : setRelatedArrangement}
+                    tabRowEditor={tabsConfig.editor ?? undefined}
                     enlargedRelated={enlargedRelatedParam}
                     onEnlargeRelated={openEnlargedRelated}
                     onCloseEnlargedRelated={closeEnlargedRelated}
@@ -6434,13 +6571,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             />
           </div>
           {/* objectstack#27058, Target 7 — the phone's bottom action bar: the
-              header's action row in its bar face (the primary action, one more
-              and the `⋯`), at the foot of the page above the safe area, so
-              the body ends where the bar starts. Empty, it is not drawn. */}
+              header's action row in its bar face (the primary action and one
+              more; the `⋯` is in the top bar, objectstack#36151), at the foot
+              of the page above the safe area, so the body ends where the bar
+              starts. Empty, it is not drawn, and the body runs to the foot. */}
           {phonePage && (
             <div
               ref={setPhoneActionBarEl}
-              className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] empty:hidden"
+              className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] empty:hidden [&:has(>[role=toolbar]:empty)]:hidden"
               data-record-action-bar=""
             />
           )}

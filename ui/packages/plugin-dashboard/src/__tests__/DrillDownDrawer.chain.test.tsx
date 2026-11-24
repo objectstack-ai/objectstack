@@ -2,15 +2,19 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * Verifies the drill chain completes through DrillDownDrawer: the filtered
- * record list it renders (for pivot / dataset / chart drill-through) is itself
- * drill-to-record, so clicking a row opens that record.
+ * The drill list stacks no record panel over the drill
+ * (objectstack-ai/objectstack#36256 item 6): a record opens as its page from
+ * the standard list's record name. Without the standard list registered, the
+ * data-table fallback lists the records and, when the host offers a record
+ * page, its rows open nothing. A host with no record page (a page block)
+ * keeps the rows drill-to-record, as before.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
+import { DrillNavigationProvider } from '@object-ui/react';
 import { DrillDownDrawer } from '../DrillDownDrawer';
 // Registers the renderers at module scope, NOT inside a `beforeAll` — there the
 // cold transform is billed to `hookTimeout`, which is why this carried a raised
@@ -31,27 +35,31 @@ function makeDataSource() {
   };
 }
 
-describe('DrillDownDrawer — completes the drill chain to a record', () => {
-  it('wires record drill on the filtered drill list (chain completion)', async () => {
-    render(
-      <DrillDownDrawer
-        open
-        onClose={vi.fn()}
-        title="Won × Web"
-        objectName="opportunity"
-        filter={{ stage: 'won' }}
-        dataSource={makeDataSource()}
-      />,
-    );
+const drill = () => (
+  <DrillDownDrawer
+    open
+    onClose={vi.fn()}
+    title="Won × Web"
+    objectName="opportunity"
+    filter={{ stage: 'won' }}
+    dataSource={makeDataSource()}
+  />
+);
 
-    // The drill-through list renders the underlying records.
-    await waitFor(() => expect(screen.getByText('Acme Renewal')).toBeInTheDocument());
+/** The data-table marks a row `cursor-pointer` only when an onRowClick is wired. */
+const rowOf = async (name: string) => {
+  await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument());
+  return screen.getByText(name).closest('tr') as HTMLElement;
+};
 
-    // Its rows are drill-to-record: the data-table marks clickable rows with
-    // `cursor-pointer` only when an onRowClick is wired, which ObjectDataTable
-    // does only when record drill is enabled. (The record drawer opening on
-    // click is covered by ObjectDataTable.drill.test.)
-    const row = screen.getByText('Acme Renewal').closest('tr') as HTMLElement;
-    expect(row.className).toContain('cursor-pointer');
+describe('DrillDownDrawer — no record panel stacked over the drill', () => {
+  it('the data-table fallback rows open no record drawer when the host offers a record page', async () => {
+    render(<DrillNavigationProvider value={{ openRecord: vi.fn() }}>{drill()}</DrillNavigationProvider>);
+    expect((await rowOf('Acme Renewal')).className).not.toContain('cursor-pointer');
+  });
+
+  it('a host with no record page keeps the rows drill-to-record', async () => {
+    render(drill());
+    expect((await rowOf('Acme Renewal')).className).toContain('cursor-pointer');
   });
 });

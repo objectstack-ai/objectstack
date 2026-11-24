@@ -27,12 +27,14 @@ import { suggestRename } from '../shared/rename-guess';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
-import { RECORD_PAGE_BUILTIN_TABS } from './related-list-entry';
+import { RECORD_PAGE_BUILTIN_TABS, relatedListEntryHidden, relatedListEntryName, relatedListNameCovers } from './related-list-entry';
 // [#23809] The stage-field option-kind rule, in its own module so the AI
 // blueprint object (`ai/solution-blueprint.zod.ts`) runs this same refinement.
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
 // [#32763] The `icon` leaf, shared with the AI blueprint object.
 import { OBJECT_COLOR_SCHEMA, OBJECT_ICON_SCHEMA } from './object-icon';
+// [#36366] The action arrangement per scope (pinned, more), shared with the object extension.
+import { OBJECT_ACTION_LAYOUT_SCHEMA } from './object-action-layout';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
@@ -42,7 +44,11 @@ import { isMaskedOnReadFieldType } from './masked-field-types';
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
 // field predicate `isControlledByParentMasterField` it counts and the
 // resolver `controlledByParentMasterOf` it judges the one master with.
-import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
+import {
+  CONTROLLED_BY_PARENT_MASTER_INVALID,
+  controlledByParentMasterRefusal,
+  type ControlledByParentMasterIssueParams,
+} from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
 import { externalBindingDatasourceRefusal } from './external-binding-datasource';
@@ -332,13 +338,32 @@ export const ObjectCapabilities = strictObject({
    * Changes filter; that page has no separate History tab. A page an author
    * assigns is drawn as authored: a `record:history` or `record:activity`
    * block placed there shows the record's field changes from its own activity
-   * (`sys_activity`), and neither reads this flag. Pair with per-field
-   * `trackHistory: true` to select which field diffs render as human-readable
-   * timeline summaries (ADR-0052 §5b). Audit *capture* into `sys_audit_log` is
+   * (`sys_activity`), and neither reads this flag. Whether the activity
+   * stream shows a changed field's old → new values is not this flag's
+   * question: it is {@link fieldHistory}'s, and the field's own
+   * `trackHistory` (ADR-0052 §5b, #36290). Audit *capture* into `sys_audit_log` is
    * a compliance ledger and stays on regardless of this flag; retention is
    * governed by data lifecycle (ADR-0057), not by hiding the UI.
    */
-  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
+  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Whether the activity stream shows a changed field\'s old → new values is enable.fieldHistory\'s question, not this flag\'s; audit capture itself is always on for compliance'),
+
+  /**
+   * Field-change values on the record's activity stream — on unless turned off
+   * (#36290, ruling 7076513167, reversing ADR-0052 §5b.1's opt-in default).
+   *
+   * Absent: every changed field's old → new values show on the record's
+   * activity stream (`sys_activity`); a field turns its own off with its
+   * own `fieldHistory: false`. `false`: off for the object — a change names
+   * its fields, never their values, whatever a field says. Deliberately no `.default()`: a parsed body
+   * that materialized a default would persist it into every built artifact
+   * and stored definition, where it could not be told from an authored value.
+   *
+   * Independent of {@link trackHistory}, which keeps its meaning (the ledger
+   * view on the record page and the derived `history` API verb): an object
+   * writing `trackHistory: false` alone shows values. Who reads a value is the
+   * field's read rule, per reader; a credential field never shows one.
+   */
+  fieldHistory: z.boolean().optional().describe('Field-change values on the record activity stream. Absent: each changed field\'s old → new values show (a field opts out with its own fieldHistory: false). false: off for this object, a change names its fields only, whatever a field says. Independent of trackHistory, which does not turn values off. Who reads a value is the field\'s read rule; a credential field never shows one'),
 
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),
@@ -1323,6 +1348,12 @@ export const RelatedListEntryObjectSchema = lazySchema(() => strictObject({
       '`filter` is not a relatedLists entry key: a related list\'s scope is the child FK\'s `relatedListFilter`.',
     sort:
       '`sort` is not a relatedLists entry key: a related list orders its rows the way the child object\'s default list view sorts.',
+    // [ADR-0146 D10] Hiding by name is the environment's word, written in the
+    // paired `.custom` package's arrangement; an object hides by leaving out.
+    hidden:
+      '`hidden` is not a relatedLists entry key on an object: an object hides a tab by leaving its list out of ' +
+      '`relatedLists`. Only the object extension of a base\'s paired `.custom` package writes ' +
+      '`{ list, hidden: true }`, in its own `relatedLists` (ADR-0146 D10).',
   },
 }, {
   list: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE })
@@ -3687,6 +3718,11 @@ function refuseFieldGroupMembershipConflicts(fieldGroups: unknown, fields: unkno
  * ({@link controlledByParentMasterRefusal}), which the v18 upgrade's stored-row
  * listing reads too: `os migrate meta --stored` lists each stored object this
  * refinement refuses, by object, with the fate of its shape (#23270).
+ *
+ * The issue carries `params: { code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape }`
+ * ({@link CONTROLLED_BY_PARENT_MASTER_INVALID}), so a surface that shows the
+ * refusal in the author's language selects its wording by the shape instead of
+ * reading the English `message`.
  */
 function refuseControlledByParentWithoutOneMaster(
   objectName: unknown,
@@ -3696,7 +3732,11 @@ function refuseControlledByParentWithoutOneMaster(
 ): void {
   const refusal = controlledByParentMasterRefusal(objectName, sharingModel, fields);
   if (refusal === undefined) return;
-  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
+  const params: ControlledByParentMasterIssueParams = {
+    code: CONTROLLED_BY_PARENT_MASTER_INVALID,
+    shape: refusal.shape,
+  };
+  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message, params });
 }
 
 /**
@@ -4025,6 +4065,8 @@ const ObjectSchemaBase = strictObject(
   icon: OBJECT_ICON_SCHEMA,
   // [#35985] The colour of the square the icon is drawn on, from a closed palette.
   color: OBJECT_COLOR_SCHEMA,
+  // [#36366] The order of the object's actions and which are buttons, per scope (list, record).
+  actionLayout: OBJECT_ACTION_LAYOUT_SCHEMA,
 
   /**
    * Taxonomy & Organization
@@ -6641,6 +6683,242 @@ function refuseForeignPlacements(fields: unknown, place: unknown, ctx: z.Refinem
   });
 }
 
+// =================================================================
+// The paired `.custom` package's arrangement (ADR-0146 D10)
+// =================================================================
+
+/**
+ * [ADR-0146 D10] The OBJECT form of one entry of the paired `.custom`
+ * package's `ObjectExtensionSchema.relatedLists`: an object's own entry
+ * ({@link RelatedListEntryObjectSchema}: `list`, `label`, `columns`) plus
+ * `hidden`. The environment's tab list shows a tab it does not name (after
+ * the listed ones), so hiding one is written: `{ list: 'task', hidden: true }`.
+ * `hidden` is accepted here and nowhere else: an object's own `relatedLists`
+ * refuses it by name.
+ */
+export const ObjectExtensionRelatedListEntryObjectSchema = lazySchema(() => strictObject({
+  surface: 'this relatedLists entry of an object extension',
+  history:
+    'An unknown key here would be dropped silently: the tab would still draw, as the arrangement before this ' +
+    'one had it, so the author would believe the setting they wrote had been applied.',
+  aliases: {
+    name: 'list',
+    object: 'list',
+    objectName: 'list',
+    relationship: 'list',
+    title: 'label',
+    fields: 'columns',
+    hide: 'hidden',
+  },
+  guidance: {
+    filter:
+      '`filter` is not a relatedLists entry key: a related list\'s scope is the child FK\'s `relatedListFilter`.',
+    sort:
+      '`sort` is not a relatedLists entry key: a related list orders its rows the way the child object\'s default list view sorts.',
+    visible:
+      '`visible` is not a relatedLists entry key: a listed tab is shown. Write `hidden: true` to hide it.',
+  },
+}, {
+  ...RelatedListEntryObjectSchema.shape,
+  hidden: z.boolean().optional()
+    .describe("true = this list's tab is not shown on the record page (and a reader's own arrangement cannot bring it back); absent or false = shown at this entry's position. The one way the paired `.custom` arrangement hides a tab: a tab it does not name still shows, after the listed ones. A built-in tab is written only as its bare name and is not hidden here."),
+}));
+
+/**
+ * [ADR-0146 D10] One entry of the paired `.custom` package's
+ * `ObjectExtensionSchema.relatedLists`: the bare name (a child object,
+ * `object.field`, or a built-in tab), or
+ * {@link ObjectExtensionRelatedListEntryObjectSchema}'s object form.
+ */
+export const ObjectExtensionRelatedListEntrySchema = lazySchema(() => z.union([
+  z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }),
+  ObjectExtensionRelatedListEntryObjectSchema,
+]));
+/** One entry of the paired `.custom` package's `relatedLists`, as an author writes it. */
+export type ObjectExtensionRelatedListEntry = z.input<typeof ObjectExtensionRelatedListEntrySchema>;
+/** One entry of the paired `.custom` package's `relatedLists`, after parse. */
+export type ObjectExtensionRelatedListEntryParsed = z.infer<typeof ObjectExtensionRelatedListEntrySchema>;
+
+/**
+ * [ADR-0146 D10] A `.custom` arrangement's group keys are unique, as an
+ * object's are. Judged here, in the extension's own refinement, and not as a
+ * `.refine()` on the `fieldGroups` array: that would be a new position at
+ * which a rule reaches the runtime and not the published JSON Schema
+ * (`dropped-refinements.baseline.json`), where this refinement is already
+ * one recorded position for the whole extension.
+ */
+function refuseDuplicateExtensionFieldGroupKeys(fieldGroups: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(fieldGroups)) return;
+  const keys = fieldGroups.map((group) => (group as { key?: unknown } | null | undefined)?.key);
+  if (new Set(keys).size === keys.length) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['fieldGroups'],
+    message: 'fieldGroups[].key must be unique within an object extension',
+  });
+}
+
+/**
+ * [ADR-0146 D10] Refuse a `.custom` tab list that says two things about one
+ * list: an entry that shows a list another entry hides. The hiding entry
+ * hides every list it names (a bare child name, all of that child's lists),
+ * so a shown entry naming the same list, or one relationship of a child the
+ * list hides whole, would draw nothing. Located at the later of the two.
+ * `'task'` shown beside `{ list: 'task.account', hidden: true }` is not a
+ * contradiction: every list of the child shows but the one hidden.
+ *
+ * Judged on the extension's root refinement, where `ObjectExtensionSchema`
+ * already carries one, so the published JSON Schema gains no
+ * dropped-refinement site.
+ */
+function refuseContradictoryRelatedListEntries(relatedLists: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(relatedLists)) return;
+  const entries = relatedLists.map((entry: unknown, index: number) => ({
+    index,
+    name: relatedListEntryName(entry),
+    hidden: relatedListEntryHidden(entry),
+  })).filter((entry): entry is { index: number; name: string; hidden: boolean } => entry.name !== undefined);
+  for (const shown of entries) {
+    if (shown.hidden) continue;
+    const hiding = entries.find((entry) => entry.hidden && relatedListNameCovers(entry.name, shown.name));
+    if (hiding === undefined) continue;
+    const at = Math.max(shown.index, hiding.index);
+    ctx.addIssue({
+      code: 'custom',
+      path: at === shown.index ? ['relatedLists', at] : ['relatedLists', at, 'hidden'],
+      message:
+        `List '${shown.name}' is listed (relatedLists[${shown.index}]) and hidden ` +
+        `(relatedLists[${hiding.index}]${hiding.name === shown.name ? '' : `, which hides every list of '${hiding.name}'`}): ` +
+        'a hidden list is not shown wherever it is listed. Keep one of the two entries.',
+    });
+  }
+}
+
+/**
+ * [ADR-0146 D10] Refuse a `place` entry beside the arrangement key that
+ * replaces it, in one extension: `fieldGroups` is the whole field
+ * arrangement, so a `{ field }` or `{ group }` placement written beside it
+ * would be applied and then replaced; `relatedLists` is the whole tab list,
+ * so a `{ list }` placement beside it would be. Located at the entry, naming
+ * where the item is written instead. An extension that writes only one of
+ * the two keys keeps the placements of the other kind.
+ */
+function refusePlacementsTheArrangementReplaces(
+  extension: { place?: unknown; fieldGroups?: unknown; relatedLists?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (!Array.isArray(extension.place)) return;
+  const groupsWritten = Array.isArray(extension.fieldGroups);
+  const tabsWritten = Array.isArray(extension.relatedLists);
+  if (!groupsWritten && !tabsWritten) return;
+  extension.place.forEach((entry: unknown, index: number) => {
+    if (entry === null || typeof entry !== 'object') return;
+    const { field, group, list } = entry as { field?: unknown; group?: unknown; list?: unknown };
+    if (groupsWritten && typeof field === 'string') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['place', index],
+        message:
+          `This extension writes \`fieldGroups\`, the whole field arrangement, so the placement of the field ` +
+          `'${field}' would be replaced by it. List '${field}' in a group's \`fields\` there and remove this entry.`,
+      });
+    } else if (groupsWritten && group !== null && typeof group === 'object') {
+      const key = (group as { key?: unknown }).key;
+      ctx.addIssue({
+        code: 'custom',
+        path: ['place', index],
+        message:
+          `This extension writes \`fieldGroups\`, the whole field arrangement, so the placement of the group ` +
+          `${typeof key === 'string' ? `'${key}' ` : ''}would be replaced by it. Declare the group in \`fieldGroups\`, ` +
+          'at its position, and remove this entry.',
+      });
+    } else if (tabsWritten && typeof list === 'string') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['place', index],
+        message:
+          `This extension writes \`relatedLists\`, the whole tab list, so the placement of the list '${list}' ` +
+          `would be replaced by it. Name '${list}' in \`relatedLists\`, at its position, and remove this entry.`,
+      });
+    }
+  });
+}
+
+/** [ADR-0146 D10] The words every key of the paired `.custom` arrangement shares: who may write it, and what refuses anyone else. */
+const CUSTOM_ARRANGEMENT_WRITER =
+  'Written only by the object extension of the paired `.custom` package of the App the object belongs to ' +
+  '(ADR-0146 D10). An extension in a package that is not a `.custom` package is refused at publish, by ' +
+  '`os validate` / `os build` and at install, with the prescription to place what it brings with `place`, and ' +
+  'the registry merge skips it with a warning. A `.custom` package that is not this object\'s pair is not ' +
+  'refused at those doors: the registry merge does not apply what it writes here, alone or beside the pair, ' +
+  'and the boot log names it.';
+
+/** [#36366, ADR-0146 D10] The extension's `actionLayout` description. */
+function objectExtensionActionLayoutDescription(): string {
+  return (
+    'The arrangement of the extended object\'s actions, per scope (`list`, `record`), in the object\'s own shape. ' +
+    'Written only by the object extension of the paired `.custom` package of the App the object belongs to ' +
+    '(ADR-0146 D10). An extension in a package that is not a `.custom` package is refused at publish, by ' +
+    '`os validate` / `os build` and at install, and the registry merge skips it with a warning; an action that ' +
+    'package brings is placed by its own `locations` and `order`. A `.custom` package that is not this object\'s ' +
+    'pair is not applied. Each arm written replaces the arm the object serves for that scope, whole, after ' +
+    'every other layer; an arm not written stays as the object gives it, and removing the key, or uninstalling ' +
+    'or disabling the package, restores it.'
+  );
+}
+
+/** [ADR-0146 D10] The extension's `fieldGroups` description. */
+function objectExtensionFieldGroupsDescription(): string {
+  return (
+    'The whole field arrangement of the extended object on the record page, the forms and the preview: an ' +
+    'object\'s `fieldGroups`, in the same shape. ' + CUSTOM_ARRANGEMENT_WRITER + ' A group may list any field the ' +
+    'object has, whoever declares it (its owner, another package\'s extension, or this extension\'s own `__c` ' +
+    'fields), and a group\'s `relatedList` may place any body table. Written, it replaces the groups the owner ' +
+    'declares and the other extensions\' `place` entries add, whole: no group, member or order of that ' +
+    'arrangement is kept unless written here, and nothing is merged entry by entry. A group that lists `fields` ' +
+    'shows exactly its list. A field no group here lists is never dropped: it shows after the last group, ' +
+    'whatever group its owner or another extension had put it in. That covers a field a later version of the ' +
+    'base adds and a field another package\'s extension brings. A group that lists no `fields` keeps the ' +
+    'object\'s older rule (the fields whose `group` names it), and a field this extension adds keeps the ' +
+    '`group` it declares. Not written, the arrangement stays as ' +
+    'the owner and the `place` entries give it, and removing this key, or uninstalling or disabling the package, ' +
+    'restores that. To keep a field off the record page and the forms, list it in a group whose `visibleWhen` ' +
+    'is false: `hidden` is not a display property a `fieldPatches` entry may set, because it also changes what ' +
+    'search indexes and what a form requires. Such a group is presentation only, not access control: the field ' +
+    'stays readable and writable through the API. Do not use it for a `required` field that has no default: ' +
+    'the create form no longer shows the field while the save still requires it, so the form cannot be ' +
+    'submitted. Example: `fieldGroups: [{ key: \'contact\', label: \'Contact\', ' +
+    'fields: [\'email\', \'phone\', \'region__c\'] }, { key: \'basic\', label: \'Basics\', fields: [\'name\', ' +
+    '\'company\'] }]`.'
+  );
+}
+
+/** [ADR-0146 D10] The extension's `relatedLists` description. */
+function objectExtensionRelatedListsDescription(): string {
+  return (
+    'The whole tab list of the extended object\'s record page, in order: an object\'s `relatedLists`, in the same ' +
+    'shape, whose object form also takes `hidden`. ' + CUSTOM_ARRANGEMENT_WRITER + ' An entry may name any list ' +
+    'the object has, whoever brings it (a child object, object.field, or a built-in tab; `{ list, label?, ' +
+    'columns?, hidden? }` gives the list its own title and columns, or hides it). Written, it replaces the tab ' +
+    'list the owner declares and the other extensions\' `place` entries add to, whole, and nothing is merged ' +
+    'entry by entry. A tab this list does not name is not hidden, the reverse of an object\'s own `relatedLists`: ' +
+    'where the object had a declared tab list, each of its tabs not named here follows the listed ones (before ' +
+    'a trailing approvals / activity-stream run), with the title and columns it had; where the object declared ' +
+    'none (every list shows), every list not named here follows the listed ones, and so does the attachments ' +
+    'tab. That covers a tab a later version of the base adds and a child list a package installed later brings. ' +
+    'Hiding is written: `{ list: \'task\', hidden: true }` hides that list\'s tab, whoever brings the list, and ' +
+    'a bare child name hides every list of that child. A list the object\'s own `relatedLists` hides by leaving ' +
+    'it out stays hidden until this list names it. A built-in tab is written only as its bare name, keeps its ' +
+    'own rule (approvals and the activity stream follow the listed tabs when unlisted) and cannot be hidden ' +
+    'here. `relatedList: false` on the child\'s field still hides a list whatever this says, and body tables a ' +
+    'field group places are the groups\' to place. A reader\'s own tab order and hidden tabs (kept per user) ' +
+    'are laid over this list, as over an object\'s. Not written, the tabs stay as the owner and the `place` ' +
+    'entries give them, and removing this key, or uninstalling or disabling the package, restores that. ' +
+    'Example: `relatedLists: [\'opportunity\', { list: \'contact\', label: \'People\' }, { list: \'task\', ' +
+    'hidden: true }]`.'
+  );
+}
+
 /**
  * Object Extension Entry — used in `objectExtensions` array.
  * Declares fields/config to merge into an existing object owned by another package.
@@ -6676,12 +6954,16 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   guidance: {
     // The merge in `objectql/src/engine.ts` copies EXACTLY the declared keys
     // (extend / fields / fieldPatches / label / pluralLabel / description /
-    // validations / indexes / priority) onto the extension def. Anything else
-    // is not "unsupported yet" — there is no slot for it to arrive through.
+    // validations / indexes / priority, and the paired `.custom` package's
+    // fieldGroups / relatedLists / actionLayout) onto the extension def.
+    // Anything else is not "unsupported yet" — there is no slot for it to
+    // arrive through.
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
       '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes`, and ' +
-      'applies `fieldPatches`, and nothing else. ' +
+      'applies `fieldPatches`; only the base\'s paired `.custom` package also writes ' +
+      '`fieldGroups`, `relatedLists` and `actionLayout` (the order of the object\'s actions, ' +
+      'never a new one); nothing else. ' +
       "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
       '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
       'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
@@ -6703,17 +6985,11 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
       'carry them. Declare the views as a top-level `view` in the stack that defines the ' +
       'target object. `defineStack()` refuses a top-level `view` whose `list` or `form` data ' +
       'source is an object the stack does not define, an extended one included.',
-    // [#35901] An extension's groups, and where its fields and child lists go,
-    // are its `place` entries; the owner's own arrangement is the owner's.
-    fieldGroups:
-      '`fieldGroups` is not an object extension key: an extension adds a group of its own with a ' +
-      '`place` entry — `place: [{ group: { key: \'tax\', label: \'Tax\' }, after: \'basic\' }]` — and puts a field ' +
-      'it adds into a group with `{ field: \'tax_id\', group: \'basic\', after: \'industry\' }`. The extended ' +
-      'object\'s own groups stay its owner\'s.',
-    relatedLists:
-      '`relatedLists` is not an object extension key: an extension places a child list its package brings ' +
-      'with a `place` entry — `place: [{ list: \'contract\', after: \'opportunity\' }]`. The extended object\'s ' +
-      'own tab list stays its owner\'s.',
+    // [#35901, #36366, ADR-0146 D10] `fieldGroups`, `relatedLists` and
+    // `actionLayout` are KEYS of this schema, not guidance: the paired
+    // `.custom` package's extension writes them, and which package an extension belongs to is not in its body, so
+    // the refusal of any other writer is the server's (`CUSTOM_ARRANGEMENT_KEYS`
+    // and its judge, at publish, `os validate` / `os build` and install).
     // A membership key belongs to the package that owns the roster object, so a
     // key cannot reach into another package's object (the ruled refusal 10).
     membershipKeys:
@@ -6796,6 +7072,17 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   
   /** Override description */
   description: z.string().optional().describe('Override description for the extended object'),
+
+  /**
+   * [#36366, ADR-0146 D10] The arrangement of the extended object's actions,
+   * as on the object itself (`ObjectSchema.actionLayout`), written by the
+   * object extension of the base's paired `.custom` package and by no other
+   * (`CUSTOM_ARRANGEMENT_KEYS`). Applied by role, last, arm by arm: each arm
+   * it writes replaces the arm the object serves for that scope, whole; an
+   * arm it leaves out stays. Refused for any other writer where `fieldGroups`
+   * is. See {@link objectExtensionActionLayoutDescription}.
+   */
+  actionLayout: OBJECT_ACTION_LAYOUT_SCHEMA.describe(objectExtensionActionLayoutDescription()),
   
   /** Additional validation rules to add */
   validations: z.array(ValidationRuleSchema).optional().describe('Additional validation rules to merge into the target object'),
@@ -6817,6 +7104,32 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
    */
   place: z.array(ObjectExtensionPlacementSchema).optional().describe(objectExtensionPlaceDescription()),
 
+  /**
+   * [ADR-0146 D10] The whole field arrangement of the extended object, written
+   * by the object extension of the base's paired `.custom` package and by no
+   * other: an object's `fieldGroups` ({@link ObjectFieldGroupSchema}), in the
+   * same shape. Written, it replaces the arrangement the owner declares and
+   * the other extensions' `place` entries add to, whole; the registry fold
+   * applies it last (`applyCustomArrangement` in `@objectstack/objectql`).
+   * Pure shape: which package the extension belongs to is not in its body, so
+   * any other writer is refused by the server (`judgeExtensionArrangement` in
+   * `@objectstack/metadata-protocol`, at publish, `os validate` / `os build`
+   * and install). See {@link objectExtensionFieldGroupsDescription}.
+   */
+  fieldGroups: z.array(ObjectFieldGroupSchema).optional().describe(objectExtensionFieldGroupsDescription()),
+
+  /**
+   * [ADR-0146 D10] The whole tab list of the extended object's record page,
+   * written by the object extension of the base's paired `.custom` package
+   * and by no other: an object's `relatedLists`, whose object form also takes
+   * `hidden` ({@link ObjectExtensionRelatedListEntrySchema}). Written, it
+   * replaces the tab list the owner declares and the other extensions'
+   * `place` entries add to, whole; a tab it does not name still shows, after
+   * the listed ones. Applied and refused where `fieldGroups` is. See
+   * {@link objectExtensionRelatedListsDescription}.
+   */
+  relatedLists: z.array(ObjectExtensionRelatedListEntrySchema).optional().describe(objectExtensionRelatedListsDescription()),
+
   /** Merge priority. Higher number applied later (wins on conflict). Default: 200 */
   priority: z.number().int().min(0).max(999).default(200).describe('Merge priority (higher = applied later)'),
 }).superRefine((extension, ctx) => {
@@ -6829,6 +7142,16 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   refuseFieldPatchOfReplacedField(extension.fields, extension.fieldPatches, ctx);
   // [#35901] An extension places only what it brings, each item once, with one anchor.
   refuseForeignPlacements(extension.fields, extension.place, ctx);
+  // [ADR-0146 D10] The `.custom` arrangement: the object's own two membership
+  // rules, over the fields this extension adds (a base field's `group` is
+  // not in this body; the registry fold lets the list win over it)…
+  refuseDuplicateExtensionFieldGroupKeys(extension.fieldGroups, ctx);
+  refuseFieldsInRelatedListGroups(extension.fieldGroups, extension.fields, ctx);
+  refuseFieldGroupMembershipConflicts(extension.fieldGroups, extension.fields, ctx);
+  // …one statement per list…
+  refuseContradictoryRelatedListEntries(extension.relatedLists, ctx);
+  // …and no `place` entry the extension's own arrangement replaces.
+  refusePlacementsTheArrangementReplaces(extension, ctx);
 }).overwrite((extension) => {
   // [#23065] …and the object a referenceless `tree` field references. See
   // {@link materializeTreeSelfReferences}.

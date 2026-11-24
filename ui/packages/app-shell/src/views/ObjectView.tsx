@@ -100,7 +100,9 @@ import { useObjectViewListRenderer } from './objectViewListRenderer.js';
 import { ListDraftActions } from './ListDraftActions.js';
 import { viewSaveRefusalText } from './viewSaveRefusal.js';
 import { listDraftPreference, listDraftScope, useListDraft } from './listDraftStore.js';
-import { useObjectViewViewCrud } from './objectViewViewCrud.js';
+import { useObjectViewViewCrud, useRuntimeCreateApp } from './objectViewViewCrud.js';
+import { mayManageViews, useViewSharing } from './objectViewViewSharing.js';
+import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import {
     PERSONAL_VIEW_OBJECT,
     buildInPlaceViewConfig,
@@ -115,6 +117,7 @@ import { ChangeOwnerDialog } from './ChangeOwnerDialog.js';
 import { changeOwnerEligibleRows, changeOwnerObjectOffer, useListChangeOwnerOffered } from './changeOwner.js';
 import { parseListStateParams } from './userFilterUrlState.js';
 import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
+import { kanbanDraftToSave } from './objectViewOptions.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -281,6 +284,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const { user, activeOrganization } = useAuth();
     const { isAdmin } = useWorkspaceAdminStatus();
     const perms = usePermissions();
+    // objectstack#36448 — who is offered the object's views to change: an
+    // administrator holding `manage_metadata`, the capability every `view`
+    // metadata write asks (`./objectViewViewSharing.ts`). Manage views, the
+    // view settings panel, Create View, a Shared new view, and a saved view's
+    // rename and save in place all read this one answer, so an organization
+    // administrator without it is offered none of the writes the server
+    // refuses with 403. `isAdmin` alone still gates what only reads.
+    const canAuthorMetadata = useCanAuthorMetadata();
+    const canManageViews = mayManageViews(isAdmin, canAuthorMetadata);
     
     // Get Object Definition. The outer ObjectView wrapper already guards the
     // missing-object case, so this always resolves while this component is
@@ -717,6 +729,17 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? (requestedViewId.includes('.') ? requestedViewId : `${objectDef.name}.${requestedViewId}`)
         : null;
     const viewAccess = useMetaItemRefusal('view', missedViewName);
+    // objectstack#36409 — a view the address names that the server says is
+    // gone (deleted, or never there): the list opens its default view, and
+    // says why once per name.
+    const goneViewNoticed = useRef<string | null>(null);
+    useEffect(() => {
+        if (!viewAccess.absent || !missedViewName || goneViewNoticed.current === missedViewName) return;
+        goneViewNoticed.current = missedViewName;
+        toast.info(t('view.switcher.viewGone', {
+            defaultValue: 'The view you opened is no longer available, so the list shows its default view.',
+        }));
+    }, [viewAccess.absent, missedViewName, t]);
     const activeViewId = resolvedViewId || pinnedViewId || defaultViewId || views[0]?.id;
     const baseView = views.find((v: any) => v.id === activeViewId) || views[0];
     const activeView = viewDraft && viewDraft.id === baseView?.id
@@ -757,6 +780,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     const draftDisplay = {
         ...(listDraft.draft.viewType ? { viewType: listDraft.draft.viewType } : {}),
         ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
+        // objectstack#36370 — and a board's changed settings, with the lane
+        // field the board draws when the view declares none (`kanbanDraftToSave`).
+        ...(listDraft.draft.kanban ? { kanban: kanbanDraftToSave(activeView, objectDef, listDraft.draft.kanban) } : {}),
     };
     // objectstack#25992 slice 8: the list's toolbar state in the URL (seed, write-back,
     // "Reset view") moved to `./objectViewListUrlState.ts`.
@@ -894,7 +920,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         ? savedViews.find((sv: any) => viewRowId(sv) === activeView.id)
         : undefined;
     const activeViewPackageSaveRead = usePackageSaveRead(studioPackageId(activeSavedViewRow));
-    const canSaveToSharedView = !isEnvironmentList && !activeIsPersonal && !!activeView && isAdmin
+    const canSaveToSharedView = !isEnvironmentList && !activeIsPersonal && !!activeView && canManageViews
         && activeViewPackageSaveRead === 'takes' && isSavedViewId(savedViews, String(activeView.id));
     const handleSaveToSharedView = async () => {
         if (!activeView || !canSaveToSharedView) return;
@@ -1016,7 +1042,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         if (!activeView) return false;
         // objectstack#35955 — the draft's layout is the new view's type (so
         // the type's own field list is filled as the create card fills it),
-        // and its row colour is laid over the body.
+        // and its row colour is laid over the body; objectstack#36370 — so are
+        // a board's changed settings.
+        const saveAsDisplay = {
+            ...(listDraft.draft.rowColor !== undefined ? { rowColor: listDraft.draft.rowColor } : {}),
+            ...(listDraft.draft.kanban ? { kanban: kanbanDraftToSave(activeView, objectDef, listDraft.draft.kanban) } : {}),
+        };
         const built = buildInPlaceViewConfig(
             objectDef.name,
             activeView,
@@ -1026,7 +1057,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 preference: draftPreferenceOf(activeView.id),
                 panelFilters: viewPanelFilters,
                 summaries: listDraft.draft.summaries,
-                ...(listDraft.draft.rowColor !== undefined ? { display: { rowColor: listDraft.draft.rowColor } } : {}),
+                ...(Object.keys(saveAsDisplay).length > 0 ? { display: saveAsDisplay } : {}),
             },
         );
         if (!built.ok) {
@@ -1103,7 +1134,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#27058 — on a phone the record is always a page: a row tap
     // navigates to it, and no pane is mounted beside or over the list.
     const phone = usePhoneViewport();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
+    const { listRecordActions, navOverlay, drawerWidthKey, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -1143,6 +1174,22 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listSeedRef,
     });
 
+    // objectstack#36409 — only an administrator holding the shared view's write
+    // capability (`canManageViews`, above) creates a shared view, and it is
+    // published at once (`./objectViewViewSharing.ts`).
+    const sharingApp = useRuntimeCreateApp(t);
+    const viewSharing = useViewSharing({
+        objectName: objectDef.name,
+        objectDef,
+        metadataClient,
+        dataSource,
+        app: sharingApp,
+        routeViewId: viewId,
+        navigate,
+        refresh: () => setRefreshKey((k) => k + 1),
+        t,
+    });
+
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
     const { viewTabItems, titleSwitcher, refusingPackages } = useObjectViewTitleSwitcher({
@@ -1157,7 +1204,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         viewAccess,
         activeViewId,
         handleViewChange,
-        isAdmin,
+        canManageViews,
         handleAddView,
         setManageViewsOpen,
         pinnedViewId,
@@ -1175,10 +1222,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             }),
             savePersonal: personalViews.save,
             openPersonal: openPersonalView,
-            createShared: handleViewCreate,
+            createShared: viewSharing.createShared,
             clearSourceListState,
             canCreatePersonal: canCreatePersonalView,
-            canCreateShared: isAdmin,
+            canCreateShared: canManageViews,
             hasUnsavedConditions: listDraftParts.some((part) => part === 'filters' || part === 'sort'),
         },
         onRenamePersonalView: personalViewsReady && personalGrant('update')
@@ -1285,7 +1332,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 ? (label: string) => handleRenamePersonalView(String(activeView.id), label)
                 // A read-only package's view is renamed too (objectstack#35974):
                 // `updateView` writes the label into its customization pair.
-                : activeView && isAdmin && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
+                : activeView && canManageViews && savedViews.some((sv: any) => viewRowId(sv) === activeView.id)
                     ? async (label: string) => { await handleRenameView(String(activeView.id), label); return true; }
                     : undefined,
             save: !isEnvironmentList && listDraftParts.length > 0 ? saveToThisView : undefined,
@@ -1310,7 +1357,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         activeView,
         objectDef,
         onEdit,
-        isAdmin,
+        canManageViews,
         location,
         navigate,
         viewId,
@@ -1560,7 +1607,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  the server refused alike. Its Manage views opens the dialog
                  below. On a phone the same switcher leads the list's toolbar
                  row (objectstack#27058). */}
-             {isAdmin && views.length >= 1 && (
+             {canManageViews && views.length >= 1 && (
                <ManageViewsDialog
                  open={manageViewsOpen}
                  onOpenChange={setManageViewsOpen}
@@ -1604,12 +1651,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 <div
                     data-testid="view-config-panel-wrapper"
                     className={`transition-[max-width,opacity] duration-300 ease-in-out overflow-hidden ${
-                        showViewConfigPanel && isAdmin ? 'max-w-[280px] opacity-100' : 'max-w-0 opacity-0'
+                        showViewConfigPanel && canManageViews ? 'max-w-[280px] opacity-100' : 'max-w-0 opacity-0'
                     }`}
                 >
                     <Suspense fallback={null}>
                         <ViewConfigPanel
-                            open={showViewConfigPanel && isAdmin}
+                            open={showViewConfigPanel && canManageViews}
                             onClose={() => { setShowViewConfigPanel(false); setViewConfigPanelMode('edit'); }}
                             mode={viewConfigPanelMode}
                             activeView={activeView}
@@ -1626,7 +1673,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                 </div>
                 <Suspense fallback={null}>
                     <CreateViewDialog
-                        open={showCreateViewDialog && isAdmin}
+                        open={showCreateViewDialog && canManageViews}
                         onOpenChange={setShowCreateViewDialog}
                         existingLabels={views.map((v: any) => v.label).filter(Boolean)}
                         objectDef={objectDef}
@@ -1673,6 +1720,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         <ObjectViewRecordOverlay
             navOverlay={navOverlay}
             mode={navOverlay.mode}
+            widthKey={drawerWidthKey}
             list={pageColumn}
             handleDrawerClose={handleDrawerClose}
             objectDef={objectDef}

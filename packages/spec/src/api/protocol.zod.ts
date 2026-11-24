@@ -961,6 +961,19 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
     'LAYER 2 — the stored customization row ALONE, not merged with `code`. '
     + '`null` when the environment has not customized the item.',
   ),
+  overlayVersion: z.string().nullable().optional().describe(
+    'ADR-0008 version token of the stored ACTIVE row at this read\'s address '
+    + '(`?package=`, and the bundle member): the published layer a publish of '
+    + 'this item replaces. The same keyed token the plain uncached read serves '
+    + 'as `version` and a publish receipt serves as `version`. Send it back as '
+    + '`If-Match` on `POST /meta/:type/:name/publish` and a publish over a row '
+    + 'that moved since this read is refused 409 `METADATA_CONFLICT` instead of '
+    + 'replacing it. `null` when no active row is stored at that address — an '
+    + 'item served from code or a package artifact alone — so the next publish '
+    + 'creates one: pin it with `If-None-Match: *`. ABSENT from a server that '
+    + 'does not serve it: absence means "not served", never "no row". Opaque — '
+    + 'echo it verbatim, never parse it.',
+  ),
   overlayScope: z.enum(['env']).nullable().describe(
     'Which scope the `overlay` row was read from: `env`, the environment layer — '
     + 'the only layer a read serves (ADR-0131 D6). `null` exactly when `overlay` is null.',
@@ -1579,6 +1592,21 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + '`no_draft`.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  parentVersion: z.string().nullable().optional().describe(
+    'ADR-0008 optimistic-concurrency pin on the PUBLISHED layer: the version '
+    + 'token of the active row the caller loaded and means to replace (on the '
+    + 'REST door, the `If-Match` request header; the `/layers` read\'s '
+    + '`overlayVersion`, the plain read\'s `version` and a publish receipt\'s '
+    + '`version` serve it). A token that is not the current active row\'s at the '
+    + 'address the promotion writes is refused 409 `METADATA_CONFLICT`, whose '
+    + '`currentVersion` names the active row\'s current token, and nothing is '
+    + 'promoted: the draft stays pending. ⚠️ `null` is NOT the same as absent: a '
+    + 'present `null` asserts "no active row here" (on the REST door, '
+    + '`If-None-Match: *`, which takes `*` alone and never beside `If-Match`), '
+    + 'refused 409 when one exists; an ABSENT key is unpinned and promotes over '
+    + 'whatever is live, as before. It pins the active row only — which draft is '
+    + 'promoted is the address\'s, as without it.',
+  ),
   userTextLocales: userTextLocalesMember(),
 }));
 

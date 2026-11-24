@@ -41,7 +41,9 @@ import { ChevronDown, CopyPlus, RotateCcw, Save } from 'lucide-react';
  */
 export type ListPersonalizationPart =
   | Parameters<NonNullable<ListViewProps['onPersonalizationChange']>>[0][number]
-  | 'summaries';
+  | 'summaries'
+  // objectstack#36370 — a board's settings (its lanes, card fields, …).
+  | 'kanban';
 
 /** The order the menu names the unsaved parts in: the toolbar's, then the Display panel's. */
 const LIST_DRAFT_PART_ORDER: readonly ListPersonalizationPart[] = [
@@ -51,6 +53,7 @@ const LIST_DRAFT_PART_ORDER: readonly ListPersonalizationPart[] = [
   'columns',
   'hiddenFields',
   'summaries',
+  'kanban',
   'layout',
   'rowColor',
   'inlineEdit',
@@ -84,6 +87,7 @@ export function ListDraftActions({
     columns: t('console.objectView.personalizedParts.columns'),
     hiddenFields: t('console.objectView.personalizedParts.hiddenFields'),
     summaries: t('console.objectView.personalizedParts.summaries'),
+    kanban: t('console.objectView.personalizedParts.kanban'),
     density: t('console.objectView.personalizedParts.density'),
     layout: t('console.objectView.personalizedParts.layout'),
     rowColor: t('console.objectView.personalizedParts.rowColor'),

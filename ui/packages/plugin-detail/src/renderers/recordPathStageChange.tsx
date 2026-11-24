@@ -65,6 +65,13 @@
  * the meantime leaves the dialog, the move no longer sends it, and a value the
  * reader typed for it stops counting toward the fields it would chain in. When
  * nothing is left, the dialog is the move's confirmation again.
+ *
+ * ## The flows a move starts (objectstack#35928)
+ *
+ * Both confirmations name the flows the move would start, under their
+ * sentence, through `../stageChangeStarts` — the reader the list cell's
+ * confirm shares, so the two surfaces cannot disagree. The server judges which
+ * flows start; a read that fails or answers none leaves the sentence alone.
  */
 
 import React from 'react';
@@ -108,6 +115,7 @@ import { NON_EDITABLE_SYSTEM_FIELDS } from '../systemFields';
 import { updateVia } from '../InlineEditSaveBar';
 import { isConcurrentUpdateError } from '../ConcurrentUpdateDialog';
 import { useDetailTranslation } from '../useDetailTranslation';
+import { StageChangeStarts, useRecordUpdateStarts } from '../stageChangeStarts';
 
 /** The field a server refusal names when its rule declares no field. */
 const RECORD_LEVEL_FIELD = '_record';
@@ -273,6 +281,14 @@ export function useStageChange(
     setTarget({ value: stage.value, label: stage.label, fields: fieldsNeededAt(stage.value) });
   };
 
+  // objectstack#35928 — the flows the pending move would start, named under
+  // the confirm's sentence by the shared reader the list cell's confirm uses.
+  const starts = useRecordUpdateStarts(
+    target && pressable && statusField && objectName
+      ? { object: objectName, recordId: String(recordId), changes: { [statusField]: target.value } }
+      : null,
+  );
+
   const labelOf = (field: string): string => {
     const declared = fieldDefOf(objectSchema, field)?.label;
     const fallback = declared == null ? field : String(pickLocalized(declared as Parameters<typeof pickLocalized>[0], language) ?? field);
@@ -341,6 +357,7 @@ export function useStageChange(
               {t('detail.pathStageChangeDescription', { stage: target?.label ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <StageChangeStarts flows={starts} />
           <AlertDialogFooter>
             <AlertDialogCancel>{t('detail.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={() => { void confirm(); }}>
@@ -409,6 +426,7 @@ export function useStageChange(
         description={asked.length > 0
           ? t('detail.stageMenuFieldsDescription', { stage: stage.label })
           : t('detail.pathStageChangeDescription', { stage: stage.label })}
+        notice={<StageChangeStarts flows={starts} />}
         submitLabel={t('detail.pathStageChangeConfirm')}
         onCancel={() => setTarget(null)}
         onSubmit={(values) => submitWithFields(stage, values)}

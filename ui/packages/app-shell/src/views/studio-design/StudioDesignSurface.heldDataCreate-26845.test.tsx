@@ -198,7 +198,7 @@ describe('a held Data field guards create and Pending changes (objectstack#26845
     fireEvent.change(within(dialog).getByLabelText(t('engine.studio.data.nameLabel', 'en')), {
       target: { value: 'Ticket' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en') }));
+    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createLive', 'en') }));
     await openObjectIs('acme_ticket');
     expect(confirmSpy).toHaveBeenCalledTimes(2);
   });

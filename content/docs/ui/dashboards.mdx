@@ -743,9 +743,11 @@ or re-target. `os validate` and the publish door refuse such a key with
   absent). A dashboard embedded in a page that declares its own `variables` merges the two
   scopes: a filter shadows only an outer variable of the same name, and a write goes to the
   scope that defines the variable.
-- **Bindings in Studio.** The dashboard widget inspector has a **Dashboard filter bindings**
-  section, one row per declared filter, with an apply toggle (the `false` opt-out) and a
-  field picker for the override.
+- **Bindings in Studio.** The dashboard widget inspector has a **Follows the filters at the
+  top of the page** section, one row per declared filter, named by the filter's label (the
+  date range reads **Date**; a filter with no label reads its dimension's label), with an
+  apply toggle (the `false` opt-out) and a field picker for the override. The panel names
+  fields, metrics and data sources by their labels; a machine name shows on hover only.
 - **Refresh.** The page header has a **Refresh All** button, and `refreshIntervalSeconds`
   re-reads the widgets every that many seconds (`0` or unset: no automatic refresh). Widgets
   re-read in place rather than remounting, single-value tiles included.

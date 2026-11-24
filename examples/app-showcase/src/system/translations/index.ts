@@ -231,7 +231,7 @@ export const ShowcaseTranslationBundle = {
           issued_on: { label: 'Issued On' },
           tax_rate: { label: 'Tax Rate (%)' },
           paid_on: { label: 'Paid On' },
-          total: { label: 'Total' },
+          total: { label: 'Subtotal' },
           // Translated at birth (the multi-currency fields, ADR-0144):
           // check-i18n-coverage ratchets this example at its untranslated count.
           currency_code: { label: 'Currency' },
@@ -760,7 +760,7 @@ export const ShowcaseTranslationBundle = {
           issued_on: { label: '开具日期' },
           tax_rate: { label: '税率 (%)' },
           paid_on: { label: '付款日期' },
-          total: { label: '合计' },
+          total: { label: '小计' },
           currency_code: { label: '币种' },
           invoice_date: { label: '发票日期' },
           amount: { label: '含税总额' },
@@ -791,7 +791,8 @@ export const ShowcaseTranslationBundle = {
       // 报销单), so its object label, description, every column and every
       // status option are translated here — the sidebar's word and the list's
       // header now agree. 草稿 / 已提交 / 已批准 follow the 已… shape this
-      // bundle uses for a reached state; 合计 is showcase_invoice's `total`.
+      // bundle uses for a reached state. 合计 is this report's own total; the
+      // invoice's pre-tax `total` reads 小计 (Subtotal) beside its 含税总额.
       showcase_expense_report: {
         label: '报销单',
         pluralLabel: '报销单',

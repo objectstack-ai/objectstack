@@ -26,7 +26,9 @@ import { test, expect, type Page } from '@playwright/test';
 const APP = 'com.example.showcase';
 const LIST = `/apps/${APP}/showcase_task`;
 const DRAWER = '[data-sidebar="sidebar"][data-mobile="true"]';
-const TRIGGER = 'button[data-sidebar="trigger"]';
+/** The desktop sidebar's collapse button, and the page header's expand button (objectstack#36112). */
+const COLLAPSE = '[data-testid="sidebar-collapse"]';
+const EXPAND = '[data-testid="shell-sidebar-expand"]';
 /** On a phone list the app bar's 「‹」, there once the page is drawn. */
 const PHONE_BACK = '[data-testid="app-bar-phone-home"]';
 const FLAG = '__navDrawerOpen';
@@ -142,13 +144,20 @@ for (const width of [375, 390]) {
 test.describe('desktop sidebar', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
+  // From 1280 px the sidebar starts expanded, and its collapse button and the
+  // page header's expand button are each drawn only while they act
+  // (objectstack#36112); the collapsed sidebar's own button stays in the DOM,
+  // off the screen. So the two presses are the visible control each time, by
+  // its test id, never the first trigger in the DOM (objectstack#36321).
   test('CONTROL — opening and closing the sidebar writes no history entry', async ({ page }) => {
-    await openList(page, TRIGGER);
+    await openList(page, COLLAPSE);
     const url = page.url();
     const length = await historyLength(page);
 
-    await page.locator(TRIGGER).first().click();
-    await page.locator(TRIGGER).first().click();
+    await page.locator(COLLAPSE).click();
+    await expect(page.locator(EXPAND)).toBeVisible();
+    await page.locator(EXPAND).click();
+    await expect(page.locator(COLLAPSE)).toBeInViewport();
 
     expect(await historyLength(page)).toBe(length);
     expect(page.url()).toBe(url);

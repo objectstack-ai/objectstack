@@ -98,6 +98,7 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
 ### Nested Shape: `ObjectTranslationData.fields[string]`
@@ -155,6 +156,12 @@ Translation data for a single field
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated tab label |
+
+### Nested Shape: `ObjectTranslationData._relatedLists[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated related list title (overlays the relatedLists entry's own `label`) |
 
 ### Nested Shape: `ObjectTranslationData._validations[string]`
 
@@ -215,6 +222,7 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
 ### Nested Shape: `PlatformTranslationData.picklists[string]`
@@ -297,6 +305,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -404,6 +413,7 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
 ### Nested Shape: `ServedTranslationData.picklists[string]`
@@ -486,6 +496,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -656,6 +667,7 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
 ### Nested Shape: `TranslationData.picklists[string]`
@@ -738,6 +750,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 
@@ -877,6 +890,7 @@ Translation data for a single object
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string; fields?: Record<string, object> }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_relatedLists** | `Record<string, { label?: string }>` | optional | Record-page related list titles keyed by the relatedLists entry list name |
 | **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
 ### Nested Shape: `TranslationItem.picklists[string]`
@@ -959,6 +973,7 @@ Translation data for a single object
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **nodes** | `Record<string, { label?: string }>` | optional | Node-label translations keyed by node id (`FlowNode.id`) — every node other than an untitled `screen` or an `approval` |
 | **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 | **records** | `Record<string, { fields?: Record<string, string> }>` | optional | Record-write text translations keyed by the node id (`FlowNode.id`) of a `create_record` / `update_record` node |
 

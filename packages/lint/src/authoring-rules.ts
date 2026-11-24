@@ -123,6 +123,7 @@ import { validatePageSourceStyling } from './validate-page-source-styling.js';
 import { validateCapabilityReferences } from './validate-capability-references.js';
 import {
   validateFlowApiTriggerSecret,
+  validateFlowSubflowTargets,
   validateFlowTriggerReadiness,
 } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
@@ -131,6 +132,7 @@ import { validateRecordPageHeader } from './validate-record-page-header.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
+import { validateInternalFormViews } from './validate-internal-form-views.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
@@ -153,6 +155,7 @@ import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
 import { validateHookAndJobBodyCompiles } from './validate-hook-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
+import { validateObjectActionLayout } from './validate-object-action-layout.js';
 import { validateActionObjectBinding } from './validate-action-object-binding.js';
 import { validateFlowNodeExecutors } from './validate-flow-node-executors.js';
 import { validateInertObjectDeclarations } from './validate-inert-object-declarations.js';
@@ -1657,6 +1660,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // GET → edit → PUT passes, and a secretless `api` flow is refused at `/meta`
   // with this id instead of being stored for the engine to refuse at
   // registration.
+  // #35143 — a `subflow` / `map` node calling a flow this stack does not
+  // define. CLI only: the runtime gate's flow snapshot holds just the written
+  // flow, so every call to another stored flow would read as unknown there.
+  // Advisory, with the sibling unknown-object hedge: another installed package
+  // may ship the called flow.
+  {
+    name: 'validateFlowSubflowTargets',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateFlowSubflowTargets(stack),
+  },
   {
     name: 'validateFlowApiTriggerSecret',
     tier: 'gating',
@@ -1823,6 +1841,24 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['view'],
     run: (stack) => validateFormLayout(stack),
   },
+  // #36425 — an internal create / edit form view the app still declares: the
+  // Console's create and edit surfaces no longer load one (they lay out by the
+  // object's field groups), so it installs, runs and steers nothing. Advisory,
+  // once per form. `normalized`: it reads only the authored `views[]` shapes,
+  // so `os lint`, which never parses, runs it too.
+  {
+    name: 'validateInternalFormViews',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-internal-form-views.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Advisory-tier retirement notice for the app author at the check tools (`os lint`, `os validate`, ' +
+      '`os build`): an internal form view still installs and runs, inert, so the runtime door has nothing ' +
+      'to refuse, and the Studio no longer offers internal form views to save.',
+    run: (stack) => validateInternalFormViews(stack),
+  },
   // Ruling C on #25572 (#25650) — a form open to anonymous intake that
   // declares a file field (a `FILE_REFERENCE_TYPES` type on the bound object)
   // is refused: no visitor can upload a file, so the field can never be
@@ -1877,6 +1913,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
+  },
+  // [#36366] An object's action layout (`actionLayout`, and an object
+  // extension's) naming no action of the object, or one not placed in the
+  // scope its arm arranges: the name draws nothing. Gating, because the
+  // author's arrangement is lost without a word otherwise. CLI only: the runtime
+  // snapshot carries no stack `actions`, so an action bound by `objectName`
+  // would read as unknown there; the design mode's Save checks the names
+  // against the served object before it writes.
+  {
+    name: 'validateObjectActionLayout',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-object-action-layout.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateObjectActionLayout(stack),
   },
   // A standalone action that declares a location but no `objectName` binds to
   // no object, so the button it declares never renders (every location is an

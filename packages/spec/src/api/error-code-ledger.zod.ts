@@ -1595,6 +1595,12 @@ export const ERROR_CODE_LEDGER = {
     // through rest. `@objectstack/rest` keeps its own rows for the data door.
     'OBJECT_API_DISABLED',
     'OBJECT_API_METHOD_NOT_ALLOWED',
+    // [#35525] …and the data door's disabled-package refusal, stamped by the
+    // same gate (`api-exposure-door.ts`) for an object of a disabled package
+    // in a query's read set: 404, the data route's own sentence. Same wire
+    // paths as the two above. Provenance, not identity:
+    // `@objectstack/metadata-protocol` keeps its row for the data door.
+    'OBJECT_PACKAGE_DISABLED',
     'RAW_SQL_UNSUPPORTED',
     'READ_SCOPE_COMPILE_FAILED',   // [#5367] RLS read-scope lowering failed fail-closed — a SERVER fault (500), never the caller's
   ],
@@ -1901,6 +1907,17 @@ export const ERROR_CODE_LEDGER = {
     // tree answers with it, the thrown value is the boundary.
     'CONNECTOR_UPSTREAM_CHANGED',
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
+    // `door: 'none'` on the `PLUGIN_UI_REQUIRED_KEY_MISSING` reading below: the
+    // `controlled_by_parent` master refusal's code (`data/controlled-by-parent-master.ts`),
+    // stamped on the zod ISSUE as `params.code` beside `params.shape` by
+    // `ObjectSchema`'s refinement and `defineStack`'s extension-merge gate, never
+    // on a thrown error, and not in the `message`; no `status` of its own.
+    // Visible on the zod issue itself (any `safeParse`, the Studio settings
+    // tab's path, which keys its localized wording on it) and on `defineStack`'s
+    // `STACK_SCHEMA_INVALID` refusal, whose `issues` are the raw zod issues. NOT
+    // on the metadata save door's `422 INVALID_METADATA`: `zodIssuesToMetadataIssues`
+    // keeps `path`, `message` and zod's `code` ('custom'), never `params`.
+    'CONTROLLED_BY_PARENT_MASTER_INVALID',
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
     'EXTERNAL_WRITE_FORBIDDEN',

@@ -19,9 +19,10 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, fireEvent, waitFor, cleanup, screen, act } from '@testing-library/react';
+import { render, fireEvent, waitFor, cleanup, screen, act, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { MetadataCtx } from '@object-ui/react';
+import { InlineEditProvider, MetadataCtx, useInlineEdit } from '@object-ui/react';
+import { MetadataClient } from '@object-ui/data-objectstack';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -50,6 +51,21 @@ vi.mock('@object-ui/permissions', async (importOriginal) => ({
   usePermissions: () => PERMS,
 }));
 
+// The switcher's create card reads the dataset catalog (a chart view's
+// source): answered empty here, with no network.
+let metadataClient: MetadataClient | undefined;
+vi.mock('../views/metadata-admin/useMetadata', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useMetadataClient: () =>
+    (metadataClient ??= new MetadataClient({
+      baseUrl: 'http://localhost',
+      fetch: (async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch,
+    })),
+}));
+
+// The view switcher's module reaches the draft-publish lint, which the source
+// loads lazily: pay that load at import, not inside a test's window.
+import '@objectstack/lint';
 // The preview's key fields draw through `lazy()`: load the detail entry at
 // module scope, so its cost is paid at import (ui/AGENTS.md, lazy boundaries).
 import '@object-ui/plugin-detail';
@@ -58,6 +74,14 @@ import { CommandPalette } from './CommandPalette';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider';
 import { paletteEnterAction } from './PaletteEnterHint';
 import { paletteCreateTargets, palettePrefillField, routeObjectName } from './paletteCreate';
+import { paletteCurrentPage } from './PaletteCurrentPage';
+import { FavoritesProvider, recordFavoriteItem, type FavoriteItem } from '../context/FavoritesProvider';
+import { RecentItemsProvider, useRecentItems } from '../context/RecentItemsProvider';
+import { useFavorites } from '../hooks/useFavorites';
+import { scopedKey } from '../context/UserStateAdapters';
+import { useObjectListFavorite } from '../layout/SidebarItemMenu';
+import { ObjectViewTitleSwitcher } from '../views/objectViewTitleSwitcher';
+import { PublishRecordEditCommand } from '../views/recordPaletteEdit';
 
 const CUSTOMER = 'customer_36286';
 const CONTACT = 'contact_36286';
@@ -329,5 +353,335 @@ describe('objectstack#36286 — which objects a create row offers', () => {
     expect(routeObjectName(`/apps/crm/${CUSTOMER}/record/C1`, names)).toBe(CUSTOMER);
     expect(routeObjectName('/apps/crm/dashboard/sales', names)).toBeUndefined();
     expect(routeObjectName('/apps/crm', names)).toBeUndefined();
+  });
+});
+
+describe('objectstack#36286 — the empty palette leads with the current page\'s entries', () => {
+  /** The list's own favorites entry, as `ObjectView`'s ⋮ More reads it. */
+  let listFavorite: { isFavorite: boolean } | null = null;
+  let favorites: FavoriteItem[] = [];
+  function PageProbe({ objectName }: { objectName?: string }) {
+    const list = useObjectListFavorite({ appSegment: 'crm', objectName, label: 'Customers' });
+    const stored = useFavorites().favorites;
+    React.useEffect(() => {
+      listFavorite = list;
+      favorites = stored;
+    });
+    return null;
+  }
+  /** The visit the record page records once its title is known. */
+  function SeedVisit({ recordId, title }: { recordId: string; title: string }) {
+    const { addRecentItem } = useRecentItems();
+    React.useEffect(() => {
+      addRecentItem({ id: `record:${CUSTOMER}:${recordId}`, label: title, href: `/apps/crm/${CUSTOMER}/record/${recordId}`, type: 'record' });
+    }, [addRecentItem, recordId, title]);
+    return null;
+  }
+
+  function mountPage(path: string, { visit, listObject }: { visit?: { recordId: string; title: string }; listObject?: string } = {}) {
+    const metadata = { ...metadataValue(), apps: [CRM] };
+    const ds = { find: vi.fn(async () => ({ data: [] })), findOne: vi.fn(async () => null) };
+    const view = render(
+      <MetadataCtx.Provider value={metadata as never}>
+        <FavoritesProvider>
+          <RecentItemsProvider>
+            <MemoryRouter initialEntries={[`${path}?palette=1`]}>
+              <CommandPaletteProvider>
+                <Probe />
+                <PageProbe objectName={listObject} />
+                {visit && <SeedVisit {...visit} />}
+                <CommandPalette apps={[CRM, SALES]} activeApp={CRM} objects={OBJECTS} onAppChange={() => {}} dataSource={ds} />
+              </CommandPaletteProvider>
+            </MemoryRouter>
+          </RecentItemsProvider>
+        </FavoritesProvider>
+      </MetadataCtx.Provider>,
+    );
+    return view;
+  }
+  const input = () => document.querySelector('[cmdk-input]') as HTMLInputElement | null;
+  const heading = () => document.querySelector('[cmdk-group-heading]')?.textContent;
+  const row = () => screen.queryByTestId('palette-current-page-favorite');
+
+  afterEach(() => {
+    localStorage.clear();
+    listFavorite = null;
+    favorites = [];
+  });
+
+  it('on an object\'s list: first, selected, and Enter runs the list\'s own favorites entry', async () => {
+    mountPage(`/apps/crm/${CUSTOMER}`, { listObject: CUSTOMER });
+    await waitFor(() => expect(row()).not.toBeNull());
+    expect(heading()).toBe('Current page');
+    expect(row()).toHaveTextContent('Add to favorites');
+    await waitFor(() => expect(selected()).toBe(`favorite-add current page list ${CUSTOMER}`));
+    expect(hint()).toBe('addFavorite');
+    expect(screen.getByTestId('palette-enter-hint')).toHaveTextContent('Add to favorites');
+    expect(listFavorite?.isFavorite).toBe(false);
+
+    press(input()!, 'Enter');
+    // The page's own entry turned on: the app lists the object, so its navigation entry is pinned.
+    await waitFor(() => expect(listFavorite?.isFavorite).toBe(true));
+    expect(favorites.map((f) => f.id)).toEqual(['nav:n_customer']);
+    expect(location()).toBe(`/apps/crm/${CUSTOMER}`);
+    expect(input()).toBeNull();
+  });
+
+  it('a named view of the list is the list too', async () => {
+    mountPage(`/apps/crm/${CUSTOMER}/view/all`);
+    await waitFor(() => expect(row()).not.toBeNull());
+    expect(row()?.getAttribute('data-value')).toBe(`favorite-add current page list ${CUSTOMER}`);
+  });
+
+  it('on a record page: Enter stars the record, named by the title it was visited under', async () => {
+    mountPage(`/apps/crm/${CUSTOMER}/record/C1`, { visit: { recordId: 'C1', title: 'Qingdao Haichen Foods' } });
+    await waitFor(() => expect(row()).not.toBeNull());
+    expect(heading()).toBe('Current page');
+    await waitFor(() => expect(selected()).toBe(`favorite-add current page record ${CUSTOMER}`));
+
+    press(input()!, 'Enter');
+    await waitFor(() => expect(favorites).toHaveLength(1));
+    // The very entry the record page's star toggles.
+    expect(favorites[0]).toMatchObject(recordFavoriteItem('crm', CUSTOMER, 'C1', 'Qingdao Haichen Foods'));
+  });
+
+  it('a record already starred offers to take the star off', async () => {
+    const starred = { ...recordFavoriteItem('crm', CUSTOMER, 'C1', 'Qingdao Haichen Foods'), favoritedAt: '2026-11-22T00:00:00.000Z' };
+    localStorage.setItem(scopedKey('objectui-favorites', 'u1'), JSON.stringify([starred]));
+    mountPage(`/apps/crm/${CUSTOMER}/record/C1`);
+    await waitFor(() => expect(row()).toHaveTextContent('Remove from favorites'));
+    await waitFor(() => expect(hint()).toBe('removeFavorite'));
+    press(input()!, 'Enter');
+    await waitFor(() => expect(favorites).toEqual([]));
+  });
+
+  it('typing takes the group away; clearing brings it back', async () => {
+    mountPage(`/apps/crm/${CUSTOMER}`);
+    await waitFor(() => expect(row()).not.toBeNull());
+    type(input()!, 'zhang');
+    await waitFor(() => expect(row()).toBeNull());
+    type(input()!, '');
+    await waitFor(() => expect(row()).not.toBeNull());
+  });
+
+  it.each([
+    ['the app\'s landing', '/apps/crm'],
+    ['a dashboard', '/apps/crm/dashboard/sales'],
+    ['the full search page', '/apps/crm/search'],
+    ['a create form', `/apps/crm/${CUSTOMER}/new`],
+    ['an object the console does not serve', '/apps/crm/no_such_object'],
+  ])('CONTROL: no group on %s', async (_name, path) => {
+    mountPage(path);
+    await waitFor(() => expect(input()).not.toBeNull());
+    await act(async () => {});
+    expect(row()).toBeNull();
+    expect(screen.queryByText('Current page')).toBeNull();
+  });
+
+  it('reads the page off the address, by the console\'s own route table', () => {
+    const served = (name: string) => name === CUSTOMER;
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}`, served)).toEqual({ kind: 'list', appSegment: 'crm', objectName: CUSTOMER });
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}/view/all`, served)?.kind).toBe('list');
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}/record/C1/page/print`, served)).toEqual({
+      kind: 'record',
+      appSegment: 'crm',
+      objectName: CUSTOMER,
+      recordId: 'C1',
+    });
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}/record/C1/edit`, served)).toBeNull();
+    expect(paletteCurrentPage(`/apps/crm/${CUSTOMER}/data`, served)).toBeNull();
+    expect(paletteCurrentPage('/apps/crm/reports', served)).toBeNull();
+    expect(paletteCurrentPage('/home', served)).toBeNull();
+  });
+
+  it('the footer reads the favorites rows\' kind', () => {
+    expect(paletteEnterAction(`favorite-add current page list ${CUSTOMER}`)).toBe('addFavorite');
+    expect(paletteEnterAction(`favorite-remove current page record ${CUSTOMER}`)).toBe('removeFavorite');
+  });
+});
+
+describe('objectstack#36286 — the current page\'s Add view and Edit, run by the page\'s own control', () => {
+  const t = ((key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key) as never;
+  const SWITCHER_VIEWS = [{ id: 'all', label: 'All Customers', type: 'grid', authored: true }];
+
+  /** The list's own view switcher, as `ObjectView` mounts it. */
+  function ListSwitcher(props: { create?: boolean; onAddView?: () => void }) {
+    return (
+      <ObjectViewTitleSwitcher
+        views={SWITCHER_VIEWS}
+        activeViewId="all"
+        activeLabel="All Customers"
+        favorites={null}
+        onViewChange={() => {}}
+        onAddView={props.onAddView}
+        create={props.create
+          ? { objectDef: OBJECTS[0] as never, canCreatePersonal: true, canCreateShared: false, hasUnsavedConditions: false, onCreate: vi.fn().mockResolvedValue(true) }
+          : undefined}
+        t={t}
+      />
+    );
+  }
+
+  /** Starts an inline draft, as a field's double-click does on the record page. */
+  function StartInlineDraft() {
+    const session = useInlineEdit();
+    React.useEffect(() => {
+      session?.enter();
+    }, [session]);
+    return null;
+  }
+
+  function tree(path: string, page: React.ReactNode) {
+    const metadata = { ...metadataValue(), apps: [CRM] };
+    const ds = { find: vi.fn(async () => ({ data: [] })), findOne: vi.fn(async () => null) };
+    return (
+      <MetadataCtx.Provider value={metadata as never}>
+        <FavoritesProvider>
+          <RecentItemsProvider>
+            <MemoryRouter initialEntries={[`${path}?palette=1`]}>
+              <CommandPaletteProvider>
+                <Probe />
+                {page}
+                <CommandPalette apps={[CRM, SALES]} activeApp={CRM} objects={OBJECTS} onAppChange={() => {}} dataSource={ds} />
+              </CommandPaletteProvider>
+            </MemoryRouter>
+          </RecentItemsProvider>
+        </FavoritesProvider>
+      </MetadataCtx.Provider>
+    );
+  }
+  const LIST = `/apps/crm/${CUSTOMER}`;
+  const RECORD = `/apps/crm/${CUSTOMER}/record/C1`;
+  const input = () => document.querySelector('[cmdk-input]') as HTMLInputElement | null;
+  const addView = () => screen.queryByTestId('palette-current-page-add-view');
+  const edit = () => screen.queryByTestId('palette-current-page-edit');
+  const groupRows = () =>
+    Array.from(document.querySelectorAll('[cmdk-item][data-value*=" current page "]')).map((el) => el.getAttribute('data-value'));
+
+  afterEach(() => localStorage.clear());
+
+  it('on a list whose switcher offers the create card: listed after the favorites row; Enter opens the switcher on that card', async () => {
+    render(tree(LIST, <ListSwitcher create />));
+    await waitFor(() => expect(addView()).not.toBeNull());
+    expect(addView()).toHaveTextContent('Add view');
+    expect(groupRows()).toEqual([`favorite-add current page list ${CUSTOMER}`, `view-add current page ${CUSTOMER}`]);
+
+    press(input()!, 'ArrowDown');
+    await waitFor(() => expect(selected()).toBe(`view-add current page ${CUSTOMER}`));
+    expect(hint()).toBe('addView');
+    expect(screen.getByTestId('palette-enter-hint')).toHaveTextContent('Add view');
+
+    press(input()!, 'Enter');
+    await waitFor(() => expect(input()).toBeNull());
+    const menu = await screen.findByTestId('list-view-switcher-menu');
+    expect(await within(menu).findByTestId('create-view-card')).toBeInTheDocument();
+    expect(location()).toBe(LIST);
+  });
+
+  it('opened the switcher\'s own way afterwards, it shows the views again', async () => {
+    render(tree(LIST, <ListSwitcher create />));
+    await waitFor(() => expect(addView()).not.toBeNull());
+    fireEvent.click(addView()!);
+    const menu = await screen.findByTestId('list-view-switcher-menu');
+    fireEvent.click(await within(menu).findByTestId('create-view-card-back'));
+    expect(screen.getByTestId('list-view-switcher-body')).toBeInTheDocument();
+  });
+
+  it('a switcher that offers only the Create View dialog: Enter runs that dialog\'s door', async () => {
+    const onAddView = vi.fn();
+    render(tree(LIST, <ListSwitcher onAddView={onAddView} />));
+    await waitFor(() => expect(addView()).not.toBeNull());
+    fireEvent.click(addView()!);
+    expect(onAddView).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('list-view-switcher-menu')).toBeNull();
+  });
+
+  it('CONTROL: a switcher that offers no 「Add view」 (a reader who may create no view) lists none; the favorites row stays', async () => {
+    render(tree(LIST, <ListSwitcher />));
+    await waitFor(() => expect(screen.queryByTestId('palette-current-page-favorite')).not.toBeNull());
+    await act(async () => {});
+    expect(addView()).toBeNull();
+  });
+
+  it('on a record page: Edit runs the header entry\'s own handler', async () => {
+    const onClick = vi.fn();
+    render(tree(RECORD, (
+      <InlineEditProvider>
+        <PublishRecordEditCommand edit={{ onClick }} />
+      </InlineEditProvider>
+    )));
+    await waitFor(() => expect(edit()).not.toBeNull());
+    expect(edit()).toHaveTextContent('Edit');
+    expect(groupRows()).toEqual([`favorite-add current page record ${CUSTOMER}`, `record-edit current page ${CUSTOMER}`]);
+    press(input()!, 'ArrowDown');
+    await waitFor(() => expect(hint()).toBe('editRecord'));
+    press(input()!, 'Enter');
+    expect(onClick).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(input()).toBeNull());
+  });
+
+  it('an Edit the header draws off is listed off, with the header\'s reason, and does nothing', async () => {
+    const onClick = vi.fn();
+    render(tree(RECORD, (
+      <InlineEditProvider>
+        <PublishRecordEditCommand edit={{ onClick, disabled: true, disabledReason: 'Closed deals cannot be edited' }} />
+      </InlineEditProvider>
+    )));
+    await waitFor(() => expect(edit()).not.toBeNull());
+    expect(edit()?.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByTestId('palette-current-page-edit-reason')).toHaveTextContent('Closed deals cannot be edited');
+    fireEvent.click(edit()!);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(input()).not.toBeNull();
+  });
+
+  it('off while an inline draft is live, as the header greys its Edit (disableDuringInlineEdit)', async () => {
+    const onClick = vi.fn();
+    render(tree(RECORD, (
+      <InlineEditProvider>
+        <StartInlineDraft />
+        <PublishRecordEditCommand edit={{ onClick, disableDuringInlineEdit: true }} />
+      </InlineEditProvider>
+    )));
+    await waitFor(() => expect(edit()?.getAttribute('aria-disabled')).toBe('true'));
+  });
+
+  it('CONTROL: a live draft leaves Edit pressable where the header keeps it pressable (the edit state\'s page)', async () => {
+    render(tree(RECORD, (
+      <InlineEditProvider>
+        <StartInlineDraft />
+        <PublishRecordEditCommand edit={{ onClick: () => {}, disableDuringInlineEdit: false }} />
+      </InlineEditProvider>
+    )));
+    await waitFor(() => expect(edit()).not.toBeNull());
+    await act(async () => {});
+    expect(edit()?.getAttribute('aria-disabled')).not.toBe('true');
+  });
+
+  it('withdrawn when the page stops drawing it, and listed only on its own kind of page', async () => {
+    const view = render(tree(RECORD, (
+      <InlineEditProvider>
+        <PublishRecordEditCommand edit={{ onClick: () => {} }} />
+      </InlineEditProvider>
+    )));
+    await waitFor(() => expect(edit()).not.toBeNull());
+    view.rerender(tree(RECORD, <InlineEditProvider><PublishRecordEditCommand edit={undefined} /></InlineEditProvider>));
+    await waitFor(() => expect(edit()).toBeNull());
+    cleanup();
+
+    // A record drawer's Edit (were one published) is no row on the list behind it.
+    render(tree(LIST, (
+      <InlineEditProvider>
+        <PublishRecordEditCommand edit={{ onClick: () => {} }} />
+      </InlineEditProvider>
+    )));
+    await waitFor(() => expect(screen.queryByTestId('palette-current-page-favorite')).not.toBeNull());
+    await act(async () => {});
+    expect(edit()).toBeNull();
+  });
+
+  it('the footer reads the two rows\' kind', () => {
+    expect(paletteEnterAction(`view-add current page ${CUSTOMER}`)).toBe('addView');
+    expect(paletteEnterAction(`record-edit current page ${CUSTOMER}`)).toBe('editRecord');
   });
 });

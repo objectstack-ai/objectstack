@@ -31,7 +31,17 @@ import { buildExpandFields, declaredNameField, getRecordDisplayName, mergeFilter
 import { getRecentLookupIds, pushRecentLookupId } from './recentLookups.js';
 import { getPersonInitials } from './personDisplay.js';
 import { rememberPickedRecords } from './referenceRecordCache.js';
-import { declaredLookupAutofillPatch, type LookupAutofillPair } from './lookupAutofill.js';
+import {
+  amountCurrencyOf,
+  pickedAmountCurrencyOf,
+  planDeclaredLookupAutofill,
+  readLookupAutofillTargets,
+  withheldAutofillMessage,
+  type AutofillCurrencyContext,
+  type LookupAutofillPair,
+  type WithheldAutofill,
+} from './lookupAutofill.js';
+import { useFollowedParentRecord } from './followedParentRow.js';
 import { getCellRendererResolver } from './_cell-renderer-bridge.js';
 // The one place a lookup column's display value is decided — shared with the
 // "browse all records" picker (RecordPickerDialog) so a single `lookupColumns`
@@ -42,7 +52,7 @@ import {
   buildLookupColumnDescriptors,
   renderLookupColumnValue,
 } from './lookupColumnDisplay.js';
-import { useSafeFieldLabel, useDisplayLocale } from '@object-ui/i18n';
+import { useSafeFieldLabel, useDisplayLocale, useLocalization, recordCurrencyPath } from '@object-ui/i18n';
 import { SchemaRendererContext as ImportedSchemaRendererContext, useAction, useHasActionProvider } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useFieldTranslation } from './useFieldTranslation.js';
@@ -638,6 +648,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // `recordToOption`, ADR-0079). Without this the label fell back to a
   // non-existent `name` field and ultimately to the raw record id.
   const [refObjectSchema, setRefObjectSchema] = useState<any>(null);
+  // Whether that read has answered (or failed): the opening fill waits for it
+  // when it would copy an amount, since the amount's currency is its field's
+  // on the referenced object (objectstack#36249). A host that cannot read the
+  // schema has nothing to wait for.
+  const refSchemaReadable = !!dataSource && !!referenceTo && typeof (dataSource as any).getObjectSchema === 'function';
+  const [refSchemaAnswered, setRefSchemaAnswered] = useState(false);
   useEffect(() => {
     if (!dataSource || !referenceTo) return;
     const getSchema = (dataSource as any).getObjectSchema;
@@ -645,9 +661,11 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     let alive = true;
     Promise.resolve(getSchema.call(dataSource, referenceTo))
       .then((s: any) => { if (alive) setRefObjectSchema(s); })
-      .catch(() => { /* fall back to displayField chain */ });
+      .catch(() => { /* fall back to displayField chain */ })
+      .finally(() => { if (alive) setRefSchemaAnswered(true); });
     return () => { alive = false; };
   }, [dataSource, referenceTo]);
+  const refSchemaSettled = !refSchemaReadable || refSchemaAnswered;
 
   /**
    * Picker columns. Honour explicit `lookupColumns` when authored; otherwise
@@ -1187,6 +1205,52 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const onAutofill = props.onAutofill;
 
   /**
+   * The cross-currency rule of a pick in a record form (objectstack#36249):
+   * an amount is copied only into a target in the same currency
+   * (`crossCurrencyRefusal`). The picked amount's currency is its field's on
+   * the referenced object (`refObjectSchema`), read on the picked row; the
+   * target's is its definition's, which the record form stamps on this field
+   * (`withLookupAutofillTargets`), read on the record being edited. A target
+   * that follows its parent's currency reads the parent's code, read once
+   * for the parent the record holds, as the amount box itself does.
+   */
+  const { currency: homeCurrency } = useLocalization();
+  const autofillTargets = autofillPairs?.length ? readLookupAutofillTargets(fieldMeta) : undefined;
+  const followingTarget = useMemo(
+    () => (autofillTargets ? Object.values(autofillTargets).find((d) => recordCurrencyPath(d as never)) : undefined),
+    [autofillTargets],
+  );
+  const editedRecordForCurrency = useFollowedParentRecord(followingTarget as never, resolvedDependentValues, dataSource);
+  const followingPath = followingTarget ? recordCurrencyPath(followingTarget as never) : undefined;
+  const followedParentHeld = followingPath ? resolvedDependentValues?.[followingPath.via] : undefined;
+  // The parent read has not landed yet: the record names a parent by its id,
+  // and its code is not on the record the resolver reads.
+  const followedParentPending =
+    !!followingPath &&
+    (typeof followedParentHeld === 'string' || typeof followedParentHeld === 'number') &&
+    followedParentHeld !== '' &&
+    !(editedRecordForCurrency?.[followingPath.via] && typeof editedRecordForCurrency[followingPath.via] === 'object');
+  const autofillCurrency = !!autofillTargets;
+  /** The currency context of a pick of `row` (`crossCurrencyRefusal`), or none without stamped targets. */
+  const currencyFor = useCallback(
+    (row: Record<string, unknown>): AutofillCurrencyContext | undefined => {
+      if (!autofillTargets) return undefined;
+      const sourceFields = (refObjectSchema as { fields?: Record<string, unknown> } | null)?.fields;
+      return {
+        home: homeCurrency,
+        sourceCurrency: (source, v) => pickedAmountCurrencyOf(sourceFields?.[source] as never, v, row),
+        targetCurrency: (target) => amountCurrencyOf(autofillTargets[target] as never, editedRecordForCurrency),
+      };
+    },
+    [autofillTargets, refObjectSchema, homeCurrency, editedRecordForCurrency],
+  );
+  /** What the last fill left empty, for the record it picked; said under the field. */
+  const [withheldFill, setWithheldFill] = useState<{ picked: string; items: readonly WithheldAutofill[] } | null>(null);
+  const noteWithheld = useCallback((picked: unknown, items: readonly WithheldAutofill[]) => {
+    setWithheldFill(items.length > 0 && picked != null ? { picked: String(picked), items } : null);
+  }, []);
+
+  /**
    * Fill the declared targets from the picked `row`. The current values are
    * the host's live record (`dependentValues`). "An earlier pick filled it" is
    * read from `pickedRecords`, the rows this widget's own picks committed: the
@@ -1202,10 +1266,11 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         heldId == null || heldId === ''
           ? null
           : pickedRecords.find((r) => String(recordValue(r, idField)) === String(heldId)) ?? null;
-      const patch = declaredLookupAutofillPatch(autofillPairs, row, resolvedDependentValues, previous);
+      const { patch, withheld } = planDeclaredLookupAutofill(autofillPairs, row, resolvedDependentValues, previous, currencyFor(row));
+      noteWithheld(recordValue(row, idField), withheld);
       if (Object.keys(patch).length > 0) onAutofill(patch);
     },
-    [autofillPairs, onAutofill, normalizeId, value, pickedRecords, idField, resolvedDependentValues],
+    [autofillPairs, onAutofill, normalizeId, value, pickedRecords, idField, resolvedDependentValues, currencyFor, noteWithheld],
   );
 
   /**
@@ -1241,16 +1306,22 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     const row: Record<string, unknown> | undefined =
       expanded ?? hydratedRecords.find((r) => String(recordValue(r, idField)) === key);
     if (!row) return;
+    // objectstack#36249 — an amount's currency is read off the referenced
+    // object's schema and the parent the record follows: the opening fill
+    // waits for both reads, so it judges the copy once, on the answer.
+    if (autofillCurrency && (!refSchemaSettled || followedParentPending)) return;
     openingFilledRef.current = key;
     setPickedRecords((prev) => mergeRowsByValue(prev, [row], idField));
-    const patch = declaredLookupAutofillPatch(
+    const { patch, withheld } = planDeclaredLookupAutofill(
       autofillPairs.map(({ target, source }) => ({ target, source })),
       row,
       resolvedDependentValues,
       null,
+      currencyFor(row),
     );
+    noteWithheld(key, withheld);
     if (Object.keys(patch).length > 0) onAutofill(patch, { opening: true });
-  }, [autofillPairs, onAutofill, openingValue, value, normalizeId, hydratedRecords, idField, resolvedDependentValues]);
+  }, [autofillPairs, onAutofill, openingValue, value, normalizeId, hydratedRecords, idField, resolvedDependentValues, autofillCurrency, refSchemaSettled, followedParentPending, currencyFor, noteWithheld]);
 
   /**
    * Commit a pick. `row` is the record `option` was built from.
@@ -1289,7 +1360,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         }
       } else {
         if (referenceTo) pushRecentLookupId(referenceTo, option.value, perms.userId);
-        if (onSelectRecord) onSelectRecord(option);
+        if (onSelectRecord) onSelectRecord(option, { sourceFields: refObjectSchema?.fields ?? null });
         else {
           onChange(option.value);
           fillDeclaredTargets(row);
@@ -1363,7 +1434,10 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       if (referenceTo) pushRecentLookupId(referenceTo, recordValue(row, idField) as string | number | undefined, perms.userId);
       setPickedRecords(records);
       rememberPickedRecords(referenceTo, records, idField, refObjectSchema ?? undefined);
-      onSelectRecord(recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo));
+      onSelectRecord(
+        recordToOption(row, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo),
+        { sourceFields: refObjectSchema?.fields ?? null },
+      );
       if (commitsCell) onCommit?.();
     },
     [multiple, onSelectRecord, handlePickerSelectRecords, referenceTo, idField, declaredDisplayField, effectiveDescriptionField, refObjectSchema, perms, inCell, onCommit],
@@ -2230,6 +2304,22 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     );
   }
 
+  // objectstack#36249 — what the last fill left empty because the picked
+  // amount is in another currency, while the field still holds that pick and
+  // the target is still empty.
+  const heldNow = normalizeId(value);
+  const withheldShown =
+    withheldFill && heldNow != null && String(heldNow) === withheldFill.picked
+      ? withheldFill.items.filter((w) => {
+          const held = resolvedDependentValues?.[w.target];
+          return held === undefined || held === null || held === '';
+        })
+      : [];
+  const withheldLabel = (target: string): string => {
+    const label = (autofillTargets?.[target] as { label?: unknown } | undefined)?.label;
+    return typeof label === 'string' && label !== '' ? label : target;
+  };
+
   return (
     <div className={compact ? '' : 'space-y-2'}>
       {/* Selected values display — a multi-select field's chips (full mode
@@ -2378,6 +2468,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         </Button>
       )}
       </div>
+      )}
+
+      {withheldShown.length > 0 && (
+        <div className="text-xs text-muted-foreground" role="status" data-testid="lookup-autofill-withheld">
+          {withheldShown.map((w) => (
+            <p key={w.target} data-withheld-target={w.target}>
+              {withheldAutofillMessage(w, withheldLabel(w.target), t, displayLocale)}
+            </p>
+          ))}
+        </div>
       )}
 
       {recordPickerDialog}

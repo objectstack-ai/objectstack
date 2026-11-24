@@ -510,19 +510,10 @@ describe('the Data rail lists the pair’s objects with the base’s (objectstac
   });
 });
 
-describe('the package switcher and the pair’s URLs (objectstack#28572)', () => {
-  it('the switcher gives the pair no row, and names it under its base', async () => {
-    renderAt(`/studio/${BASE}/interfaces`);
-    await waitFor(() => expect(document.querySelector('[data-slot="pkg-name"]')).toHaveTextContent('HotCRM'), { timeout: 8000 });
-    fireEvent.click(document.querySelector('[data-slot="pkg-name"]')!.closest('button')!);
-    await waitFor(() => expect(screen.getAllByTestId('studio-switcher-row').length).toBeGreaterThan(0), { timeout: 8000 });
-    const rows = screen.getAllByTestId('studio-switcher-row');
-    expect(rows.map((r) => r.getAttribute('data-package'))).toEqual([BASE, ADDON]);
-    expect(within(rows[0]!).getByTestId('studio-switcher-pair')).toHaveTextContent(
-      tFormat('engine.studio.pkg.withPair', 'en', { pair: PAIR }),
-    );
-  });
-
+describe('the pair’s URLs (objectstack#28572)', () => {
+  // The package switcher's case (the pair has no row, named under its base)
+  // left with the switcher, objectstack#36501; the Studio landing's cards
+  // fold the pair the same way (`foldCustomizationPairs`).
   it('a pillar URL of the pair lands on the base’s surface, its query kept', async () => {
     renderAt(`/studio/${encodeURIComponent(PAIR)}/interfaces?surface=dashboard:wins`);
     await waitFor(() => expect(screen.getByTestId('location').textContent).toMatch(new RegExp(`^/studio/${BASE}/interfaces\\?`)));

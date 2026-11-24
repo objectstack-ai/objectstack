@@ -296,6 +296,13 @@ product's `list_price`.
 - **Overwrite rule.** By default a pick never replaces a value somebody wrote: the
   target is filled only while it is empty or still holds the value an earlier pick
   filled in. A pair with `overwrite: true` replaces the target on every pick.
+- **Currency rule.** An amount of money (a `currency` field, or a `formula` returning
+  `currency`) is copied only into a target in the same currency: both in the home
+  currency, or both naming the same code (a `fixed` code, or the code the record or
+  its `master_detail` parent holds). Otherwise the target is left as it is and the
+  form says why, naming both currencies and the picked amount so the price can be
+  entered by hand. Nothing is converted. A `number` carries no currency and copies
+  as before. The grid's same-named copy follows the same rule.
 - **Client-side only.** The fill edits the form, and the filled value is saved as an
   ordinary write. Nothing on the write path reads the key: an import or an API
   write that sets the lookup fills nothing.
@@ -618,7 +625,8 @@ Database indexes are declared at the object level in the object's `indexes[]` ar
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `requiredPermissions` | `string[]` | — | Capabilities required to read/edit this field — masked on read, denied on write unless the caller holds all of them (ADR-0066 D3) |
-| `trackHistory` | `boolean` | — | Render this field's value changes as entries on the record activity timeline |
+| `trackHistory` | `boolean` | — | Opt a media or JSON field into old → new values on the record activity timeline; other fields show them already, and `false` does not hide them |
+| `fieldHistory` | `boolean` | — | This field's old → new values on the record activity timeline: absent shows them, `false` turns them off |
 
 For values that must be encrypted at rest (API keys, tokens, DB passwords), use the
 `secret` field type — see the [Field Type Gallery](/docs/data-modeling/field-types#secret).

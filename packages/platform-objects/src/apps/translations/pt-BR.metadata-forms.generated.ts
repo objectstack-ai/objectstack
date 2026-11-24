@@ -276,9 +276,13 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Linguagem",
         helpText: "Linguagem do editor (por exemplo sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Um campo de credencial nunca mostra valores, e se o próprio objeto desligar, vale o objeto."
+      },
       "fields.trackHistory": {
         label: "Acompanhar histórico",
-        helpText: "Resumir este campo na linha do tempo de atividades do registro"
+        helpText: "Faz um campo de mídia ou JSON (imagem, arquivo, json, …) mostrar valores antigo → novo na linha do tempo de atividades. Os outros campos já os mostram, e desligar não os oculta: use Valores de alterações de campo."
       },
       "fields.visibleWhen": {
         label: "Visível quando",
@@ -298,6 +302,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "Acompanhar histórico"
+      },
+      "enable.fieldHistory": {
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo dos campos alterados na linha do tempo de atividades do registro. Padrão é ligado. Desligado deixa de mostrar valores em todo o objeto, seja o que for que um campo diga."
       },
       "enable.searchable": {
         label: "Pesquisável"
@@ -460,6 +468,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.transfer": {
         label: "Alterar proprietário",
         helpText: "A ação Alterar proprietário, individual e em massa: ativada, é oferecida; desativada, fica oculta. Não definida: ativada, exceto desativada em um objeto de detalhe controlled_by_parent. Oferecida apenas em um objeto cujos registros têm um proprietário reatribuível (ownership user ou não definido, sem managedBy, não é um objeto sys_, owner_id não é somente leitura e, em um objeto externo, está declarado ou mapeado); ativá-la em qualquer outro objeto é recusado. Controla apenas a ação, não uma edição simples de owner_id. Um objeto {enabled, visibleWhen, disabledWhen} armazenado é editado chave por chave; escreva um no código-fonte para condicionar a ação a cada registro."
+      },
+      actionLayout: {
+        label: "Disposição das ações",
+        helpText: "A ordem das ações deste objeto e quais são botões, por escopo: pinned (no máximo 3 botões, em ordem) e more (a ordem do menu Mais; uma ação não nomeada em nenhum dos dois segue na sua ordem padrão). Sem definir: cada superfície escolhe seus botões pela ordem das ações, como antes."
+      },
+      "actionLayout.list": {
+        label: "Lista",
+        helpText: "A barra de ferramentas da página de lista, como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas na barra da lista; $import / $export apenas em pinned. No máximo 3 fixadas. Sem fixar, a página ainda mostra seu próprio menu Importar / Exportar. O os validate recusa um nome que não é uma ação deste objeto ou que não está na barra da lista; esse nome não desenha nada."
+      },
+      "actionLayout.record": {
+        label: "Registro",
+        helpText: "O cabeçalho do registro (página do registro, pré-visualização lateral, barra inferior do celular), como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas no cabeçalho do registro ou no seu menu Mais. No máximo 3 fixadas. O os validate recusa um nome que não é uma ação deste objeto ou que não está na página do registro; esse nome não desenha nada."
       },
       editMode: {
         label: "Modo de edição",
@@ -865,6 +885,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Oculto",
         helpText: "Ocultar o campo nas visualizações padrão da interface"
       },
+      showOnCreate: {
+        label: "Mostrar ao criar",
+        helpText: "Pedir este campo ao criar um registro. Desligado: a caixa de criação, a criação em página inteira e uma criação aberta por uma ação o omitem; a edição, a página do registro e as listas continuam a mostrá-lo. Um campo obrigatório é sempre pedido, por isso não pode ser desligado."
+      },
       searchable: {
         label: "Pesquisável",
         helpText: "Incluir nos resultados da busca global"
@@ -897,9 +921,13 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Interno",
         helpText: "Nunca retornar o valor deste campo pelo caminho de dados genérico: o mecanismo omite a chave dos resultados de find/findOne e dos corpos de resposta de criação e atualização, na projeção padrão e quando um cliente nomeia o campo em ?select=. O armazenamento, a filtragem e a indexação não são afetados."
       },
+      fieldHistory: {
+        label: "Valores de alterações de campo",
+        helpText: "Valores antigo → novo deste campo na linha do tempo de atividades do registro. Padrão segue a plataforma: ligado para a maioria dos tipos, desligado para um campo de mídia, JSON ou credencial. Desligado nomeia a alteração só pelo rótulo; Ligado também mostra os valores de um campo de mídia ou JSON. Um campo de credencial nunca mostra valores, e se o próprio objeto desligar, vale o objeto."
+      },
       trackHistory: {
         label: "Acompanhar histórico",
-        helpText: "Exibir as alterações de valor deste campo como entradas na linha do tempo de atividades do registro (ADR-0052 §5b). Ativação opcional por campo."
+        helpText: "Faz um campo de mídia ou JSON (imagem, arquivo, json, …) mostrar valores antigo → novo na linha do tempo de atividades. Os outros campos já os mostram, e desligar não os oculta: use Valores de alterações de campo."
       },
       widget: {
         label: "Widget",

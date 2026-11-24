@@ -25,7 +25,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate, type InitialEntry } from 'react-router-dom';
 
 const { approvalsApiStub, ROW, AUTH } = vi.hoisted(() => {
   const ROW = {
@@ -82,7 +82,7 @@ vi.mock('../../services/approvalsApi', async (importOriginal) => ({
 
 import { AdapterCtx, MetadataCtx, SchemaRendererProvider, useAdapter } from '@object-ui/react';
 import { I18nProvider, type I18nConfig } from '@object-ui/i18n';
-import { RecordDetailView } from '@object-ui/app-shell';
+import { RecordDetailView, approvalQueueState } from '@object-ui/app-shell';
 import { APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 import { APPROVAL_ACTION_OBJECT, APPROVAL_REQUEST_OBJECT } from '../../services/approvalRequestsDataSource';
 import { ApprovalRecordReads } from '../../AppContent';
@@ -254,7 +254,7 @@ function RouterProbe() {
   );
 }
 
-function renderAt(entries: string[]) {
+function renderAt(entries: InitialEntry[]) {
   return render(
     <I18nProvider config={EN} persistLanguage={false}>
       <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
@@ -416,9 +416,21 @@ describe('a request opened from no app (the deep link) opens in the app that own
     expect(where()).toBe(REQUEST_PAGE);
   });
 
-  it('no app lists the object: the request opens under Setup, never under the unrelated app', async () => {
+  // objectstack#35505 (ruling option A, item 4) — flipped: this pinned "the
+  // request opens under Setup". With no app listing the record's object, the
+  // request now stays in the app the deep link was asked from (the current,
+  // last used or first app), and Setup is no default.
+  it('no app lists the object: the request stays in the app it was opened from, not Setup', async () => {
     setApps([CALLER, SETUP]);
     renderAt([`/apps/${APP}/home`, `${INBOX}?request=${REQ}`]);
+
+    await servedPage();
+    expect(where()).toBe(REQUEST_PAGE);
+  });
+
+  it('CONTROL: opened from Setup (its current or last used app), the request may stay there', async () => {
+    setApps([CALLER, SETUP]);
+    renderAt([`/apps/com.objectstack.setup/home`, `/apps/com.objectstack.setup/system/approvals?request=${REQ}`]);
 
     await servedPage();
     expect(where()).toBe(pageUnder('com.objectstack.setup'));
@@ -431,5 +443,56 @@ describe('a request opened from no app (the deep link) opens in the app that own
 
     await servedPage();
     expect(where()).toBe(REQUEST_PAGE);
+  });
+});
+
+describe('a deep-linked request returns to the approvals inbox, and carries the queue it was opened with (objectstack#35505)', () => {
+  /** The ✕ at the end of the request page's top bar. */
+  const closeButton = () => screen.findByTestId('record-page-close', undefined, { timeout: 8000 });
+  const OTHER = 'req_other';
+
+  it('the e-mail link (no state): ✕ goes back to the approvals inbox, not the raw request list', async () => {
+    renderAt([`${INBOX}?request=${REQ}`]);
+    await servedPage();
+    expect(where()).toBe(REQUEST_PAGE);
+    // The link carries the way back alone: no queue, so no 「处理后打开下一条」.
+    expect(screen.queryByTestId('approval-queue-open-next')).toBeNull();
+
+    fireEvent.click(await closeButton());
+    expect(where()).toBe(INBOX);
+    expect(where()).not.toBe(`/apps/${APP}/${APPROVAL_REQUEST_OBJECT}`);
+  });
+
+  it("Home's and the bell's open hands the pending queue on: the switch shows, and ✕ still goes to the inbox", async () => {
+    renderAt([
+      {
+        pathname: INBOX,
+        search: `?request=${REQ}`,
+        state: approvalQueueState({ pathname: INBOX, label: 'Approvals Inbox' }, [REQ, OTHER]),
+      },
+    ]);
+    await servedPage();
+    expect(where()).toBe(REQUEST_PAGE);
+    expect(await screen.findByTestId('approval-queue-open-next')).toBeInTheDocument();
+
+    fireEvent.click(await closeButton());
+    expect(where()).toBe(INBOX);
+  });
+
+  it('the way back names the inbox of the app the request opens in, when the owner app is another', async () => {
+    (metadata as { apps: unknown[] }).apps = [
+      { name: APP, navigation: [{ type: 'object', objectName: 'leave_request' }] },
+      { name: 'finance', _packageId: 'com.example.finance', navigation: [{ type: 'object', objectName: ROW.object_name }] },
+    ];
+    try {
+      renderAt([`${INBOX}?request=${REQ}`]);
+      await servedPage();
+      expect(where()).toBe(`/apps/com.example.finance/${APPROVAL_REQUEST_OBJECT}/record/${REQ}`);
+
+      fireEvent.click(await closeButton());
+      expect(where()).toBe('/apps/com.example.finance/system/approvals');
+    } finally {
+      (metadata as { apps: unknown[] }).apps = [];
+    }
   });
 });

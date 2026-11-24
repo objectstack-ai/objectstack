@@ -47,7 +47,9 @@ import { useObjectTranslation, useDisplayLocale } from '@object-ui/i18n';
 import type { ActivityFeedReading, PendingApprovalRequest } from '../hooks/sharedUserFeeds.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
-import { resolveHostAppSegment } from '../utils/appRoute.js';
+import { isApprovalsInboxLink, resolveApprovalsHostSegment, resolveHostAppSegment } from '../utils/appRoute.js';
+import { useLastApp } from '../context/LastAppProvider.js';
+import { approvalQueueState } from '../views/approval-decision/approvalQueueAdvance.js';
 import { timeAgo } from '../utils/relativeTime.js';
 import { groupNotifications } from './inboxGrouping.js';
 import type { InboxNotification, NotificationGroup } from './inboxGrouping.js';
@@ -56,6 +58,7 @@ import { ActivityObjectLabel } from './ActivityObjectLabel.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 import { RECORD_DRAWER_PARAM } from '../urlParams.js';
 import { InboxApprovalItem } from './InboxApprovalItem.js';
+import { inboxPagePath, isDesktopViewport, isInboxPagePath } from '../views/inbox/inboxPageModel.js';
 
 // Re-exported so importers of the notification/group shapes keep resolving
 // through this module (the pure logic itself lives in inboxGrouping.ts).
@@ -188,6 +191,13 @@ export interface InboxPopoverProps {
   pendingApprovals?: PendingApprovalRequest[];
   /** A declared decision on one of them succeeded: re-read the approvals. */
   onApprovalDecided?: () => void;
+  /**
+   * From 768 px up, the bell opens the full-page inbox instead of the panel
+   * (objectstack#36741): the sidebar's bell sets it. A phone keeps the panel,
+   * and a host that leaves it unset (the `global:notifications` page block)
+   * keeps the panel at every width.
+   */
+  opensPageOnDesktop?: boolean;
 }
 
 export function InboxPopover({
@@ -200,6 +210,7 @@ export function InboxPopover({
   onMarkManyRead,
   pendingApprovals,
   onApprovalDecided,
+  opensPageOnDesktop = false,
 }: InboxPopoverProps) {
   const { t } = useObjectTranslation();
   // Every relative time below reads the DISPLAY locale, never the UI language
@@ -341,21 +352,43 @@ export function InboxPopover({
    */
   const hostAppSegment = resolveHostAppSegment(apps, currentAppName ?? params.appName);
 
+  /**
+   * The app the approvals drills and an approval notice open in
+   * (objectstack#35505): the current app, then the last used one
+   * (`LastAppProvider`), then the first — the same answer Home gives. Inside an
+   * app it is that app; the request page still prefers the app that lists the
+   * request's record.
+   */
+  const { lastApp } = useLastApp();
+  const approvalsHostSegment = resolveApprovalsHostSegment(apps, currentAppName ?? params.appName, lastApp);
+  const approvalsInboxPath = `/apps/${approvalsHostSegment}/system/approvals`;
+
   // Every drill below leaves the page from a popover button, which no page's
   // link guard sees, so it asks first while the page holds unsaved edits
   // (objectui#13253). The popover closes either way; Cancel keeps the page.
-  const leaveTo = (to: string) => confirmUnsavedLeave(() => navigate(to));
+  const leaveTo = (to: string, options?: { state?: unknown }) =>
+    confirmUnsavedLeave(() => (options ? navigate(to, options) : navigate(to)));
 
   const goToApprovals = () => {
     setOpen(false);
-    leaveTo(`/apps/${hostAppSegment}/system/approvals`);
+    leaveTo(approvalsInboxPath);
   };
 
   // One request in the Approvals inbox — the target Home's "My work" approvals
   // row opens. The panel stays open beside the page, as for a notification.
+  // It hands the page the pending queue the panel lists (objectstack#35505),
+  // so 「处理后打开下一条」 moves on through it.
   const openApproval = (r: PendingApprovalRequest) => {
     if (isMobile) setOpen(false);
-    leaveTo(`/apps/${hostAppSegment}/system/approvals?request=${encodeURIComponent(r.id)}`);
+    leaveTo(`${approvalsInboxPath}?request=${encodeURIComponent(r.id)}`, {
+      state: approvalQueueState(
+        {
+          pathname: approvalsInboxPath,
+          label: t('approvalsInbox.title', { defaultValue: 'Approvals Inbox' }),
+        },
+        shownApprovals.map((row) => row.id),
+      ),
+    });
   };
 
   const handleApprovalDecided = (r: PendingApprovalRequest) => {
@@ -413,14 +446,18 @@ export function InboxPopover({
   // lands in the page beside it and the next notification is one click away.
   // On a phone the panel covers the page, so it closes there.
   const handleNotificationClick = (n: InboxNotification) =>
-    openInboxNotification({ id: n.id, actionUrl: n.action_url }, hostAppSegment, {
-      markRead: onMarkRead,
-      goTo: leaveTo,
-      openInbox: goToAllNotifications,
-      beforeFollow: () => {
-        if (isMobile) setOpen(false);
+    openInboxNotification(
+      { id: n.id, actionUrl: n.action_url },
+      isApprovalsInboxLink(n.action_url) ? approvalsHostSegment : hostAppSegment,
+      {
+        markRead: onMarkRead,
+        goTo: leaveTo,
+        openInbox: goToAllNotifications,
+        beforeFollow: () => {
+          if (isMobile) setOpen(false);
+        },
       },
-    });
+    );
 
   const toggleGroup = (key: string) => {
     setExpandedGroups((prev) => {
@@ -492,18 +529,11 @@ export function InboxPopover({
     </ul>
   );
 
-  return (
-    <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
-      <SheetTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className={`h-8 w-8 max-md:size-11 relative shrink-0 ${pulse ? 'motion-safe:animate-bounce' : ''}`}
-          aria-label={ariaLabel}
-          title={t('sidebar.inbox', { defaultValue: 'Inbox' }) as string}
-        >
-          <Bell className="h-4 w-4" />
-          {totalBadge > 0 && (
+  // The bell's face: the glyph and the badge, the same in either mode.
+  const bellFace = (
+    <>
+      <Bell className="h-4 w-4" />
+      {totalBadge > 0 && (
             <span
               key={totalBadge}
               data-testid="inbox-bell-badge"
@@ -515,6 +545,44 @@ export function InboxPopover({
               {totalBadge > 9 ? '9+' : totalBadge}
             </span>
           )}
+    </>
+  );
+  const bellClass = `h-8 w-8 max-md:size-11 relative shrink-0 ${pulse ? 'motion-safe:animate-bounce' : ''}`;
+
+  // objectstack#36741 — from 768 px up the bell is the way into the full-page
+  // inbox, in the current app's shell; the panel below is the phone's. On the
+  // page already, the bell is marked as the current page and stays put.
+  if (opensPageOnDesktop && !isMobile && isDesktopViewport()) {
+    const onInboxPage = isInboxPagePath(location.pathname);
+    return (
+      <Button
+        variant="ghost"
+        size="icon"
+        className={`${bellClass} ${onInboxPage ? 'bg-accent text-accent-foreground' : ''}`}
+        aria-label={ariaLabel}
+        aria-current={onInboxPage ? 'page' : undefined}
+        title={t('sidebar.inbox', { defaultValue: 'Inbox' }) as string}
+        data-testid="inbox-bell-page-link"
+        onClick={() => {
+          if (!onInboxPage) leaveTo(inboxPagePath(hostAppSegment));
+        }}
+      >
+        {bellFace}
+      </Button>
+    );
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
+      <SheetTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={bellClass}
+          aria-label={ariaLabel}
+          title={t('sidebar.inbox', { defaultValue: 'Inbox' }) as string}
+        >
+          {bellFace}
         </Button>
       </SheetTrigger>
       {/* Non-modal, no overlay, and a click in the page does not close it: the

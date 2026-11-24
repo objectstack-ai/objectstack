@@ -25,6 +25,7 @@ import { ObjectForm } from './ObjectForm';
 import { ModalForm } from './ModalForm';
 import { registerAllFields } from '@object-ui/fields';
 import { SchemaRendererContext } from '@object-ui/react';
+import { createI18n, I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 
 registerAllFields();
 
@@ -314,5 +315,125 @@ describe('ObjectForm — a create form opened with a lookup value fills its decl
     await waitFor(() => expect(valueOf(container, 'unit_price')).toBe('100'));
     await waitFor(() => expect(ds.findOne).toHaveBeenCalledWith('account', 'a1'));
     expect(valueOf(container, 'note')).toBe('');
+  });
+});
+
+describe('ObjectForm — a pick does not copy an amount into a field in another currency (objectstack#36249)', () => {
+  // A quote whose price follows its own currency code (ADR-0144 D2), and a
+  // catalog whose price is in the home currency (USD here).
+  const CURRENCY_SCHEMAS: Record<string, unknown> = {
+    fx_quote: {
+      name: 'fx_quote',
+      fields: {
+        currency_code: { type: 'text', label: 'Currency' },
+        product: {
+          type: 'lookup',
+          label: 'Product',
+          reference: 'fx_product',
+          lookupAutofill: [
+            { target: 'unit_price', source: 'list_price' },
+            { target: 'description', source: 'summary' },
+          ],
+        },
+        unit_price: {
+          type: 'currency',
+          label: 'Unit Price',
+          currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+        },
+        description: { type: 'text', label: 'Description' },
+      },
+    },
+    fx_product: {
+      name: 'fx_product',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        list_price: { type: 'currency', label: 'List Price' },
+        summary: { type: 'text', label: 'Summary' },
+      },
+    },
+  };
+  const CURRENCY_ROWS: Record<string, Record<string, unknown>[]> = {
+    fx_product: [{ id: 'p1', name: 'Widget', list_price: 100, summary: 'A widget' }],
+  };
+  const makeCurrencyDS = () => ({
+    getObjectSchema: vi.fn(async (name: string) => CURRENCY_SCHEMAS[name]),
+    find: vi.fn(async (name: string, params?: { $filter?: { id?: { $in?: unknown[] } } }) => {
+      const wanted = params?.$filter?.id?.$in;
+      const rows = (CURRENCY_ROWS[name] ?? []).filter((r) => !wanted || wanted.includes(r.id));
+      return { data: rows.map((r) => ({ ...r })), total: rows.length };
+    }),
+    findOne: vi.fn(async (name: string, id: string) => {
+      const row = (CURRENCY_ROWS[name] ?? []).find((r) => r.id === id);
+      return row ? { ...row } : null;
+    }),
+    create: vi.fn(async (_o: string, d: Record<string, unknown>) => ({ id: 'q1', ...d })),
+    update: vi.fn(),
+  });
+
+  function renderQuote(initialValues: Record<string, unknown>, i18n?: ReturnType<typeof createI18n>) {
+    const ds = makeCurrencyDS();
+    const form = (
+      <LocalizationProvider value={{ currency: 'USD' }}>
+        <SchemaRendererContext.Provider value={{ dataSource: ds } as never}>
+          <ObjectForm
+            schema={{ type: 'object-form', objectName: 'fx_quote', mode: 'create', initialValues } as any}
+            dataSource={ds as any}
+          />
+        </SchemaRendererContext.Provider>
+      </LocalizationProvider>
+    );
+    const view = render(i18n ? <I18nProvider instance={i18n}>{form}</I18nProvider> : form);
+    return { ds, container: view.container };
+  }
+
+  it('a EUR quote: the price stays empty and the form says why; the description still fills', async () => {
+    const { container } = renderQuote({ currency_code: 'EUR' });
+    await input(container, 'description');
+    await pick('product', 'Widget');
+
+    await waitFor(() => expect((container.querySelector('input[name="description"]') as HTMLInputElement).value).toBe('A widget'));
+    const note = await screen.findByTestId('lookup-autofill-withheld');
+    expect(note.querySelector('[data-withheld-target="unit_price"]')).not.toBeNull();
+    expect(note.textContent).toContain('$100.00');
+    expect(note.textContent).toContain('USD');
+    expect(note.textContent).toContain('EUR');
+    const price = container.querySelector('input[name="unit_price"]') as HTMLInputElement | null;
+    expect(price?.value ?? '').toBe('');
+  });
+
+  it('the note names the field as the form shows it: the translated label, not the authored one', async () => {
+    const i18n = createI18n({
+      defaultLanguage: 'zh',
+      detectBrowserLanguage: false,
+      resources: { zh: { app: { fields: { fx_quote: { unit_price: '单价' } } } } },
+    });
+    const { container } = renderQuote({ currency_code: 'EUR' }, i18n);
+    await input(container, 'description');
+    await screen.findByText('单价');
+    await pick('product', 'Widget');
+
+    const note = await screen.findByTestId('lookup-autofill-withheld');
+    const line = note.querySelector('[data-withheld-target="unit_price"]');
+    expect(line?.textContent).toContain('单价');
+    expect(line?.textContent).not.toContain('Unit Price');
+    expect(line?.textContent).not.toContain('unit_price');
+  });
+
+  it('a USD quote: the price fills as before, with no note', async () => {
+    const { container } = renderQuote({ currency_code: 'USD' });
+    await input(container, 'description');
+    await pick('product', 'Widget');
+
+    await waitFor(() => expect((container.querySelector('input[name="description"]') as HTMLInputElement).value).toBe('A widget'));
+    await waitFor(() => expect((container.querySelector('input[name="unit_price"]') as HTMLInputElement).value).toBe('100'));
+    expect(screen.queryByTestId('lookup-autofill-withheld')).toBeNull();
+  });
+
+  it('the opening fill follows the same rule: a EUR quote opened with a product fills no price', async () => {
+    const { container } = renderQuote({ currency_code: 'EUR', product: 'p1' });
+    await waitFor(() => expect((container.querySelector('input[name="description"]') as HTMLInputElement).value).toBe('A widget'));
+    await screen.findByTestId('lookup-autofill-withheld');
+    const price = container.querySelector('input[name="unit_price"]') as HTMLInputElement | null;
+    expect(price?.value ?? '').toBe('');
   });
 });

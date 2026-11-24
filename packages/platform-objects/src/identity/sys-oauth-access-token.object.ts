@@ -171,6 +171,7 @@ export const SysOauthAccessToken = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     apiEnabled: false,
     apiMethods: [],

@@ -15,20 +15,23 @@
  * and one edit), `DraftChangesPanel` and the session.
  *
  * Pinned:
- *  - the chip names the package and says it is read-only; the menu still
- *    does not offer it;
+ *  - the item header says it is read-only (the top bar's chip that also said
+ *    so left with the package switcher, objectstack#36501);
  *  - Customize is offered on its dashboard, and the first edit asks the door
  *    and writes the pair's draft declaring the override at the listed version;
  *  - a system package the door refuses (its manifest states no version, so the
  *    pair's dependency range cannot be declared): Customize disabled, saying
  *    so, and the door is never asked;
- *  - CONTROL: an ordinary writable package opens with no chip and no Customize.
+ *  - CONTROL: an ordinary writable package opens with no mark and no Customize.
  */
 
 import '@testing-library/jest-dom/vitest';
+// The surface's reach loads `@objectstack/lint` lazily; pay that load during
+// collection, not inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 /** A system-scope package, as the platform ships its own (manifest scope `system`). */
@@ -202,7 +205,6 @@ function renderAt(packageId: string) {
   );
 }
 
-const chip = () => within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip');
 const header = () => screen.getByTestId('if-item-header');
 
 async function openOverview(): Promise<void> {
@@ -210,15 +212,9 @@ async function openOverview(): Promise<void> {
 }
 
 describe('a system-scope package opens read-only, as the server judges it (objectstack#29567)', () => {
-  it('the chip names the package and says it is read-only; the menu still does not offer it', async () => {
+  it('the item header says it is read-only', async () => {
     renderAt(BASE);
-    await waitFor(() => expect(within(chip()).getByTestId('studio-pkg-readonly')).toBeInTheDocument(), { timeout: 8000 });
-    expect(within(chip()).getByText('Authentication')).toBeInTheDocument();
-
-    fireEvent.click(chip());
-    const menu = await screen.findByRole('dialog');
-    expect(within(menu).getByText('Field Ops')).toBeInTheDocument();
-    expect(within(menu).queryByText('Authentication')).toBeNull();
+    await waitFor(() => expect(screen.getAllByTestId('studio-readonly-link').length).toBeGreaterThan(0), { timeout: 8000 });
   });
 
   it('offers Customize on its dashboard, and the first edit asks the door and writes the pair', async () => {
@@ -246,15 +242,17 @@ describe('a system-scope package opens read-only, as the server judges it (objec
     expect(blocked).toHaveAttribute('data-block', 'noVersion');
     expect(blocked).toHaveAttribute('title', tFormat('engine.studio.customize.noVersion', 'en', { package: 'Authentication' }));
     expect(within(blocked).getByTestId('studio-customize')).toBeDisabled();
-    expect(within(chip()).getByTestId('studio-pkg-readonly')).toBeInTheDocument();
     expect(srv.ensure).toEqual([]);
   });
 
-  it('CONTROL: an ordinary writable package opens with no read-only chip and no Customize', async () => {
+  it('CONTROL: an ordinary writable package opens with no read-only mark and no Customize', async () => {
     renderAt(OWN);
-    await waitFor(() => expect(chip()).toHaveAttribute('data-pkg-list-state', 'loaded'), { timeout: 8000 });
-    await waitFor(() => expect(within(chip()).getByText('Field Ops')).toBeInTheDocument());
-    expect(within(chip()).queryByTestId('studio-pkg-readonly')).toBeNull();
+    // Settled: the package list has answered, and the surface has read it.
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/api/v1/packages', expect.anything()), { timeout: 8000 });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(screen.queryByTestId('studio-readonly-link')).toBeNull();
     expect(screen.queryByTestId('studio-customize')).toBeNull();
     expect(screen.queryByTestId('studio-customize-blocked')).toBeNull();
   });

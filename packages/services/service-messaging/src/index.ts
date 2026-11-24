@@ -114,6 +114,7 @@ export {
 export type {
     NotificationTextKeys,
     NotificationTextParam,
+    NotificationObjectLabelParam,
     NotificationTextI18n,
     NotificationTextItem,
     NotificationTextRendererOptions,

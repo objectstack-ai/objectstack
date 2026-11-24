@@ -24,6 +24,10 @@
  * bulk arms, in `PermissionMatrixEditor.bulkMergeKeys.test.tsx`.
  */
 
+// Warmed at module top so the first load of the console's lazily loaded
+// authoring code is paid during collection, not inside a test's clock.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
@@ -53,6 +57,9 @@ function makeClient(server: FakeServer) {
       server.set = payload; // the reopen reads what was saved
       return payload;
     },
+    // objectstack#36511 — the Studio's Save publishes the set it wrote.
+    publish: async () => ({ success: true }),
+    reset: async () => ({ success: true }),
   } as any;
 }
 
@@ -74,6 +81,7 @@ vi.mock('@object-ui/fields', async (importOriginal) => ({
 }));
 
 import { PermissionMatrixEditPage } from './PermissionMatrixEditor';
+import { StudioSaveHarness, pressStudioSave } from '../studio-design/__tests__/studioSaveHarness';
 
 afterEach(cleanup);
 
@@ -93,13 +101,15 @@ async function mount(server: FakeServer, site: Site, packageId?: string) {
   const utils = render(
     <MemoryRouter>
       {site === 'studio' ? (
-        <PermissionMatrixEditPage
-          type="permission"
-          name="sales_perms"
-          packageId={packageId}
-          embedded
-          studio={{ tab: 'objects', onTabChange: () => {} }}
-        />
+        <StudioSaveHarness>
+          <PermissionMatrixEditPage
+            type="permission"
+            name="sales_perms"
+            packageId={packageId}
+            embedded
+            studio={{ tab: 'objects', onTabChange: () => {} }}
+          />
+        </StudioSaveHarness>
       ) : (
         <PermissionMatrixEditPage type="permission" name="sales_perms" packageId={packageId} />
       )}
@@ -220,6 +230,8 @@ describe.each<Site>(['page', 'studio'])('record scope pickers (%s renderer)', (s
     await mount(server, site, 'app.a');
 
     await pick(readPicker('a_account'), 'Own and reports');
+    // objectstack#36511 — in the Studio the top bar's Save sends it; the page autosaves.
+    if (site === 'studio') await pressStudioSave();
     const payload = await autosaved(server);
     expect(payload.objects.a_account).toEqual({ allowRead: true, readScope: 'own_and_reports' });
     expect(payload.objects.b_order).toEqual({ allowRead: true, readScope: 'unit' });

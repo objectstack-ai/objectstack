@@ -243,7 +243,7 @@ import { isEmptyForRequired, recordAdvisoryHit } from '@objectstack/core';
 // reports it unconditionally, even under `systemFields: false`), and the
 // engine's whole by-id addressing reads that key (`idAddressesThisRow`,
 // `addressKey: 'id'`).
-import { SystemFieldName, objectValidationMessageKey, scalarOverridesPackagedBase } from '@objectstack/spec/system';
+import { SystemFieldName, scalarOverridesPackagedBase } from '@objectstack/spec/system';
 import Ajv, { type ValidateFunction } from 'ajv';
 // #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
 // See the `const ajv` note below for why the runtime registers it.
@@ -4066,11 +4066,17 @@ export function emitValidationAdvisories(
  *
  * ## What this is NOT
  *
- * It is not a second i18n path into objectql. The lookup runs on the SAME
- * `ValidationMessageContext.translate` hook — the engine's `i18nService`,
- * bridged by `ObjectQLPlugin` — that `renderValidationMessage` already uses
- * (a metadata LABEL reads `labelTranslation` instead, #34030). What was missing was a key shape for
- * an author-written rule, not a channel to resolve one.
+ * It is not a second i18n path into objectql. [#35384] The message is
+ * METADATA (`objects.<o>._validations.<rule>.message`, the key `/meta`'s
+ * `translateObjectValidations` reads), so it resolves as `/meta` serves it:
+ * `translateObject` (`@objectstack/spec/system`) over
+ * `ValidationMessageContext.labelTranslation` — the bundle and the
+ * `ResolveOptions` the field, option and object labels of the same refusal
+ * read (#34030), ⛔ never a second copy of those options. So a request in the
+ * deployment's declared `sourceLocale` reads the sentence as authored, never
+ * the `defaultLocale` row `t()` falls back to; `translate` (`t()`) carries the
+ * built-in MESSAGES only. What #14253 added was a key shape for an
+ * author-written rule, not a channel to resolve one.
  *
  * The authored message is handed over verbatim on a miss and the translation is
  * handed over verbatim on a hit: no `{{…}}` interpolation, because an authored
@@ -4090,26 +4096,27 @@ export function emitValidationAdvisories(
  * one here), so the served rule and the refusal of the same write keep
  * showing one sentence. A rule the packaged declaration does not carry, or no
  * lookup at all, has nothing to diverge from: the catalog applies.
+ *
+ * Nothing is translated — the authored sentence stands — without an object
+ * name or a locale, with a service that cannot hand its translations over
+ * (`labelTranslation` answers `undefined`), and when the translator throws
+ * ({@link translatedLabels}: a misbehaving i18n service must not turn a 400
+ * into a 500).
  */
 function authoredRuleMessage(
   rule: Pick<BaseRule, 'name' | 'message'>,
   messages: ValidationMessageContext | undefined,
 ): string {
-  if (messages?.translate && messages.objectName && messages.locale
-      && typeof rule.name === 'string' && rule.name.length > 0) {
+  if (messages?.objectName && messages.locale && typeof rule.name === 'string' && rule.name.length > 0) {
     if (scalarOverridesPackagedBase(messages.packagedRule?.(rule.name), 'message', rule.message)) {
       return rule.message;
     }
-    const key = objectValidationMessageKey(messages.objectName, rule.name);
-    try {
-      const translated = messages.translate(key, messages.locale);
-      // II18nService echoes the key back on a miss.
-      if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
-        return translated;
-      }
-    } catch {
-      // A misbehaving i18n service must not turn a 400 into a 500.
-    }
+    const doc = translatedLabels(
+      { name: messages.objectName, validations: [{ name: rule.name, message: rule.message }] },
+      messages,
+    );
+    const translated: unknown = doc.validations[0]?.message;
+    if (typeof translated === 'string' && translated.length > 0) return translated;
   }
   return rule.message;
 }

@@ -24,7 +24,8 @@
  *  - Narrower (the split pane at 720, a phone at 390): ONE column, the
  *    details as the first tab, 「详情」, of the record's tab row (Target 8).
  *    On a phone (objectstack#27058: a 390 px window, not only a 390 px root)
- *    the header's actions sit in the bottom bar after it.
+ *    the header's actions sit in the bottom bar after it, and its `⋯` at the
+ *    top bar's right end (objectstack#36151).
  *  - The embedded record (drawer / split pane) never pins.
  *  - History is read at open in every tier. `?tab=` addresses no strip;
  *    `?related=timeline` is the 动态 tab, the full stream.
@@ -350,14 +351,17 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
     // objectstack#27058 — on a phone the stack ends where the bottom action
     // bar starts: the header's actions are drawn there, after the body, and
-    // the header draws no action row. The split pane keeps the header's
+    // the header draws no action row. This object declares no action, so the
+    // bar is left empty (not drawn) and the header's `⋯` is at the top bar's
+    // right end (objectstack#36151). The split pane keeps the header's
     // group, in the page's one top row (objectstack#35593).
     const bar = container.querySelector('[data-record-action-bar]');
     const header = container.querySelector('[data-record-page-root] header') as HTMLElement;
     if (name === 'a phone') {
-      await waitFor(() => expect(bar?.querySelector('[role="toolbar"]')).toBeTruthy());
+      await waitFor(() => expect(container.querySelector('[data-record-phone-more] button[aria-label="More actions"]')).toBeTruthy());
       const details = column(container, 'details')!;
       expect(details.compareDocumentPosition(bar!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(bar!.childElementCount).toBe(0);
       expect(header.querySelector('[role="toolbar"]')).toBeNull();
     } else {
       expect(bar).toBeNull();

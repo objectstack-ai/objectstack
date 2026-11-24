@@ -127,6 +127,8 @@
     "data/ObjectExtensionGroupPlacement",
     "data/ObjectExtensionListPlacement",
     "data/ObjectExtensionPlacement",
+    "data/ObjectExtensionRelatedListEntry",
+    "data/ObjectExtensionRelatedListEntryObject",
     "data/ObjectExternalBinding",
     "data/ObjectFieldGroup",
     "data/ObjectOwnershipEnum",

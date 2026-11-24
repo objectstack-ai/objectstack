@@ -276,9 +276,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "语言",
         helpText: "编辑器语言（如 sql、javascript）"
       },
+      "fields.fieldHistory": {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
+      },
       "fields.trackHistory": {
         label: "历史跟踪",
-        helpText: "在记录的活动时间线上概述该字段的变更"
+        helpText: "让媒体或 JSON 字段（图片、文件、json 等）在活动时间线上显示旧值 → 新值。其他字段本来就会显示，关掉它也不会隐藏值：请用「字段修改值」。"
       },
       "fields.visibleWhen": {
         label: "可见条件",
@@ -298,6 +302,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "历史跟踪"
+      },
+      "enable.fieldHistory": {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示被修改字段的旧值 → 新值。默认为开。关：整个对象都不显示值，无论字段如何设置。"
       },
       "enable.searchable": {
         label: "可搜索"
@@ -460,6 +468,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.transfer": {
         label: "更改负责人",
         helpText: "更改负责人操作（单条与批量）：开启即提供，关闭即隐藏。未设置时开启，但 controlled_by_parent 明细对象默认关闭。仅在记录有可重新分配负责人的对象上提供（ownership 为 user 或未设置、无 managedBy、不是 sys_ 对象、owner_id 未设为只读，外部对象上 owner_id 已声明或已映射）；在其他对象上开启会被拒绝。它只控制该操作，不影响直接编辑 owner_id。已存储的 {enabled, visibleWhen, disabledWhen} 对象逐键编辑；在源码中写一个即可按每条记录控制该操作。"
+      },
+      actionLayout: {
+        label: "动作布局",
+        helpText: "本对象动作的顺序及哪些显示为按钮，按作用域分：pinned（最多 3 个按钮，按顺序）和 more（「更多」菜单的顺序；两者都没写的动作按默认顺序排在后面）。未设置时，各处仍按动作的排序选按钮。"
+      },
+      "actionLayout.list": {
+        label: "列表",
+        helpText: "列表页工具栏，写作 {\"pinned\": [...], \"more\": [...]}：放在列表工具栏上的动作名称；$import / $export 只能放在 pinned。最多固定 3 个。未固定时，页面仍显示自己的导入 / 导出菜单。os validate 会拒绝不是本对象动作、或未放在列表工具栏上的名称；这样的名称什么也不显示。"
+      },
+      "actionLayout.record": {
+        label: "记录",
+        helpText: "记录页头（记录页、侧边预览、手机底栏），写作 {\"pinned\": [...], \"more\": [...]}：放在记录页头或其「更多」菜单中的动作名称。最多固定 3 个。os validate 会拒绝不是本对象动作、或未放在记录页上的名称；这样的名称什么也不显示。"
       },
       editMode: {
         label: "编辑方式",
@@ -865,6 +885,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "隐藏",
         helpText: "在默认界面视图中隐藏"
       },
+      showOnCreate: {
+        label: "新建时显示",
+        helpText: "新建记录时是否填写此字段。关闭后，新建弹窗、整页新建和动作打开的新建都不显示它；编辑、记录页和列表仍然显示。必填字段新建时总要填写，不能关闭。"
+      },
       searchable: {
         label: "可搜索",
         helpText: "纳入全局搜索结果"
@@ -897,9 +921,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "不对外返回",
         helpText: "该字段的值永远不经通用数据通道返回：引擎会从 find/findOne 结果以及创建和更新的响应体中删除这个键——默认投影如此，客户端在 ?select= 中点名它时同样如此。存储、过滤和索引都不受影响。"
       },
+      fieldHistory: {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
+      },
       trackHistory: {
         label: "记录变更历史",
-        helpText: "把该字段的值变更渲染为记录活动时间线上的条目（ADR-0052 §5b）。按字段逐个开启。"
+        helpText: "让媒体或 JSON 字段（图片、文件、json 等）在活动时间线上显示旧值 → 新值。其他字段本来就会显示，关掉它也不会隐藏值：请用「字段修改值」。"
       },
       widget: {
         label: "控件覆盖",
@@ -1371,7 +1399,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "尺寸",
-        helpText: "抽屉详情的浮层尺寸档位：'auto'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。"
+        helpText: "记录抽屉的宽度档位：'auto'（默认）沿用宿主固定的默认宽度，每个对象都一样，与字段数无关（控制台的记录侧边面板以 460px 打开）；或粗粒度覆盖 sm/md/lg/xl/full（上限分别为 480/720/960/1200/1600px，始终受视口限制）。读者拖动出的宽度优先于两者。优先使用它而非像素 `width`；记录以整页打开时它不起作用（控制台在手机上一律以整页打开记录），在手机宽度的屏幕上也不起作用，那里抽屉占满屏幕。"
       },
       "navigation.width": {
         label: "宽度",

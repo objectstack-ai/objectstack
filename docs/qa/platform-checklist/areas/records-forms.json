@@ -1728,7 +1728,7 @@
         ]
       },
       "steps": [
-        "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~720 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the full page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
+        "open the Northwind account's full record page: from /_console/apps/com.example.showcase/showcase_account, clicking Northwind opens a ~460 px record DRAWER (the console's default record-open mode, ui/packages/app-shell/src/views/ObjectView.tsx), not the full page steps[1] reads — open it full page with the drawer's 'Open as full page' (↗), or load /_console/apps/com.example.showcase/showcase_account/record/ID directly",
         "screenshot at 1440×900; enumerate the related lists. The page draws the record's tab row — Details (详情), one tab per related list in its order (an empty one muted, with no number), Attachments, Approvals (while a request exists), then Activity (动态) last with its count, the tabs that do not fit folded into its 'More N' (更多 N) dropdown (ui/packages/plugin-detail/src/RecordPageColumns.tsx, the tab row; ui/packages/plugin-detail/src/RecordTabRow.tsx; #35595), so a role=tab strip is expected: enumerate the lists from it (QA run #33861 read the earlier records-first row). The primary lists (relatedList: 'primary' — Invoices on showcase_invoice.account, Projects on showcase_project.account) are body tables among the 详情 tab's details and take no tab, and every non-primary child — Contacts among them — is a tab of its own whose face is the whole list with its pager (packages/spec/src/data/field.zod.ts relatedList: 'true = an auxiliary panel on the record page; absent = an auxiliary panel, except that a master_detail field becomes a body table when a field group of the parent names it (fieldGroups[].relatedList)', and for 'primary': 'a body table: part of the record's main content'). With those tables among its details the account's full page never pins the details in a left column (ui/packages/plugin-detail/src/synth/recordPageColumns.ts#recordPagePinsDetails, #35890): the same tab row at every width, and no right rail (retired, #35890)",
         "open Contacts' whole list: its tab opens it in place (?related=showcase_contact.account); capture the page-1 data request. An enlarged list whose block names no limit pages 25 rows (ui/packages/plugin-detail/src/RecordPageColumns.tsx, ENLARGED_PAGE_SIZE), so the pager reads 'Page 1 of 2' for Northwind's 26 contacts (QA run #27438)",
         "click next-page; capture the page-2 request; note the pager text ('Page 2 of 2', one row)",
@@ -5799,10 +5799,10 @@
     },
     {
       "id": "records-forms.field-history-tracking",
-      "title": "Per-field trackHistory: a tracked edit lands the ADR-0052 §5b old→new timeline summary with display values, an untracked edit does not, and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
+      "title": "Field-change values: an edit lands the ADR-0052 §5b old→new timeline summary with display values unless the object or field turns them off (#36290), and object-level enable.trackHistory gates the record page's sys_audit_log field-change read and derived history op both ways",
       "since": "v15",
       "status": "active",
-      "revision": 15,
+      "revision": 16,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -5834,9 +5834,9 @@
           "evidence": "the sys_activity row + a timeline screenshot"
         },
         {
-          "clause": "an UNtracked-field edit lands NO tracked-change summary — the activity (if any) falls back to the generic 'Updated <object>' with no per-field old→new for the untracked key (renderTrackedChangeSummary returns null when no tracked field changed)",
+          "clause": "an edit of a field that declares no trackHistory ALSO lands its old→new values: since #36290 they show for every changed field unless the object writes enable.fieldHistory: false or the field writes fieldHistory: false (a field's trackHistory: false reads like absent) (changeValuesShownFor, packages/plugins/plugin-audit/src/audit-writers.ts). The label-only frame of a turned-off field is the unit pins' (audit-writers.test.ts '[#36290]'), since no showcase object turns values off",
           "oracle": "api",
-          "verify": "post-edit sys_activity for the website-only edit carries no field-diff summary naming website",
+          "verify": "post-edit sys_activity for the website-only edit carries 'Website: <old url> → <new url>', message key fieldChanges",
           "evidence": "the sys_activity read"
         },
         {
@@ -5859,7 +5859,7 @@
         }
       ],
       "negative": [
-        "an untracked edit producing an old→new diff in the sys_activity summary is a FAIL — trackHistory is opt-in per field (spec default false, object.zod.ts family note), and the per-field opt-in governs exactly that surface. ⛔ Not the timeline stream's audit-log lines (on a trackHistory object they fill the Changes chip, and the stream's sys_activity `updated` rows step aside for them: ui/packages/plugin-detail/src/recordTimelineStream.ts#mergeTimelineStream): they come from sys_audit_log (the compliance audit, ui/packages/app-shell/src/views/RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA runs #24616, #27438)",
+        "an edit of a field that declares no trackHistory landing WITHOUT its old→new values in the sys_activity summary is a FAIL (#36290: on unless the object writes enable.fieldHistory: false or the field writes fieldHistory: false), and so is a value from a field with fieldHistory: false. ⛔ Not the timeline stream's audit-log lines (on a trackHistory object they fill the Changes chip, and the stream's sys_activity `updated` rows step aside for them: ui/packages/plugin-detail/src/recordTimelineStream.ts#mergeTimelineStream): they come from sys_audit_log (the compliance audit, ui/packages/app-shell/src/views/RecordDetailView.tsx), which records every field and is not per-field-gated, so 'Website old → new' there for the untracked field is correct; sys_activity.metadata also carries raw old/new for untracked fields by design — only the rendered summary is gated (QA runs #24616, #27438)",
         "a sys_audit_log read on the task detail is a FAIL — per-field flags without the object-level opt-in must not summon the field-change history; judged on the network log, never on an empty Changes chip or a missing tab (acceptance[2].verify says why)",
         "a tracked select rendering raw option VALUES ('in_progress') instead of labels is a FAIL (#7289 closed exactly that). To stage it on showcase_task's status, walk its state machine: a direct backlog → in_progress PATCH answers 400 invalid_transition, so PATCH backlog → todo → in_progress (examples/app-showcase/src/data/objects/task.object.ts, transitions)"
       ],
@@ -5869,11 +5869,11 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); ui/e2e/live/record-history-display.spec.ts (the record history's display contract, which the cross-ref in source[4] assigns to records-forms.crud-roundtrip. It runs only against the vite console dev server, LIVE_APP_URL, default http://localhost:5180 (ui/playwright.live.config.ts), never a built /_console boot: its page.goto paths are root-relative (/apps/…). At 1440×900, a column tier whatever the sidebar does, it opens the timeline stream's Changes chip on showcase_account in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true DOM half; it reads no network log and never opens the task detail, so the read gate both ways is driven by hand). packages/qa/dogfood/test/field-history-tracking-activity.dogfood.test.ts, at the REST doors of the showcase with AuditPlugin added as objectstack serve composes it: acceptance[0] and negative[2] (PATCH industry retail → finance lands a sys_activity row whose summary is exactly 'Industry: Retail → Finance', message key fieldChanges), acceptance[1] and negative[0] (a website-only PATCH lands the generic frame naming the Website label with no arrow and neither URL, message key activityUpdatedFields) and acceptance[3] (GET /api/v1/auth/me/permissions: showcase_account's apiOperations carry history, showcase_task's carry get and not history). acceptance[4] stays the unit pin's. acceptance[2]'s absence half and negative[1] (no sys_audit_log read from the task detail) stay live browser legs: they are judged on the network log of the rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
+        "ref": "packages/plugins/plugin-audit/src/audit-lookup-summary.test.ts (reference titles + read plan); audit-option-label-summary.test.ts (option labels); ui/e2e/live/record-history-display.spec.ts (the record history's display contract, which the cross-ref in source[4] assigns to records-forms.crud-roundtrip. It runs only against the vite console dev server, LIVE_APP_URL, default http://localhost:5180 (ui/playwright.live.config.ts), never a built /_console boot: its page.goto paths are root-relative (/apps/…). At 1440×900, a column tier whatever the sidebar does, it opens the timeline stream's Changes chip on showcase_account in a browser, the enable.trackHistory object, so it holds acceptance[2]'s flag-true DOM half; it reads no network log and never opens the task detail, so the read gate both ways is driven by hand). packages/qa/dogfood/test/field-history-tracking-activity.dogfood.test.ts, at the REST doors of the showcase with AuditPlugin added as objectstack serve composes it: acceptance[0] and negative[2] (PATCH industry retail → finance lands a sys_activity row whose summary is exactly 'Industry: Retail → Finance', message key fieldChanges), acceptance[1] and negative[0] (a website-only PATCH lands 'Website: https://before.example → https://after.example', message key fieldChanges, #36290) and acceptance[3] (GET /api/v1/auth/me/permissions: showcase_account's apiOperations carry history, showcase_task's carry get and not history). acceptance[4] stays the unit pin's. acceptance[2]'s absence half and negative[1] (no sys_audit_log read from the task detail) stay live browser legs: they are judged on the network log of the rendered detail page, which no HTTP pin reaches, and the card's ruling adds no Playwright lane (#26573)"
       },
       "source": [
         "packages/plugins/plugin-audit/src/audit-writers.ts#planTrackedLookupReads (planTrackedLookupReads), (renderTrackedChangeSummary — ADR-0052 §5b, #7230/#7289 localization), (zero-reads-by-default plan)",
-        "packages/spec/src/data/object.zod.ts#trackHistory (history derives from get ∧ trackHistory), (opt-in default false); packages/spec/src/data/api-derivation.ts",
+        "packages/spec/src/data/object.zod.ts#trackHistory (history derives from get ∧ trackHistory), (values on unless enable.fieldHistory: false, #36290); packages/spec/src/data/api-derivation.ts",
         "ui/packages/app-shell/src/views/RecordDetailView.tsx (historyEnabled, the three-precondition gate on the sys_audit_log read; record page v3 hands its rows to the timeline stream, #27055)",
         "examples/app-showcase/src/data/objects/account.object.ts (the deliberate both-halves fixture), examples/app-showcase/src/data/objects/task.object.ts#Task (its status and priority fields declare trackHistory)",
         "cross-ref records-forms.crud-roundtrip clause 5 (acceptance[4]) — it owns the record history's display contract on the create/update pair (option labels, localized dates, real actor); this item owns the tracked/untracked boundary and the two gating directions, so do not re-score that contract here"
@@ -5968,6 +5968,12 @@
           "date": "2026-11-22",
           "change": "steps[3] and acceptance[2].verify re-pointed after #35890 retired the right rail: the stream opens from the Activity tab or ?related=timeline, the first tab reads 详情 (Details), and the account's body tables keep its page from pinning (recordPagePinsDetails). The audit read at page load now rests on RecordDetailView's historyConsumerOnScreen (a laid-out synthesized page reads it at open) instead of the retired 最近动态 card; the drawer half, which named the rail, is dropped. No clause changed. Read from source at base 28ba01fe",
           "ref": "#36188"
+        },
+        {
+          "revision": 16,
+          "date": "2026-11-22",
+          "change": "title, acceptance[1], negative[0], automated.ref and source[1] re-pointed: field-change values now show by default (ruling 7076513167). A field with no trackHistory lands old → new; enable.fieldHistory: false (object) or fieldHistory: false (field) turns them off, and a field's trackHistory: false reads like absent; enable.trackHistory keeps the ledger read and the history op. The dogfood pin's website leg reads the values. Read at base SHA c448c615",
+          "ref": "#36290"
         }
       ]
     },

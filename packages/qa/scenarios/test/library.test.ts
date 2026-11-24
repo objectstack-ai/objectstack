@@ -226,8 +226,21 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
         if (JSON.stringify([wide.truths[id], wide.personaTruths[id]]) !== JSON.stringify([loaded.truths[id], loaded.personaTruths[id]])) ambiguous.push(`${loaded.card.id}/${id}`);
       }
     }
-    // order_to_cash's PAY-0044 (2026-10-01) is the one left: the same defect, outside this change's cards.
-    expect(ambiguous).toEqual(['order_to_cash/collected_by_team_last_30_days']);
+    expect(ambiguous).toEqual([]);
+  });
+
+  it('names its decide action as the route (`via`) of each manager approval the card decides through it, and only those', () => {
+    // The Build grant check leaves these writes to the run when the set withholds the verb and the build
+    // declares the action. asset_lifecycle manager_approves_scrap and order_to_cash approve_discount have
+    // the same shape but no measured run behind them, so they stay measured until one exists.
+    const routed = result.cards.flatMap(({ card }) =>
+      card.run.operations.filter((o) => o.via !== undefined).map((o) => `${card.id}/${o.id} via ${o.via}`),
+    );
+    expect(routed.sort()).toEqual([
+      'leave_balances/manager_approves_step_one via decide_approval_step',
+      'requisition_to_receipt/manager_approves_level_one via decide_approval_step',
+      'travel_expense/manager_approves_step_one via decide_approval_step',
+    ]);
   });
 
   it('every card tagged for a report asks for one in its detailed prompt, in both languages', () => {

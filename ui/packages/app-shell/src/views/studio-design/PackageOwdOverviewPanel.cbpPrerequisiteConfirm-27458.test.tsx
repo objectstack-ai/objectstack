@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { t } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 const CBP_LABEL = t('engine.studio.settings.sharingControlledByParent', 'en-US');
 const GUARD_MESSAGE = "Field 'project' is now required but has no default value";
@@ -38,6 +39,8 @@ function renderPanel(refuse: () => Error) {
     list: async () => [{ name: 'qnine_step', label: 'QN Step' }],
     listDrafts: async () => [],
     layered: async () => ({ effective: body, code: null }),
+    publish: async () => ({}),
+    reset: async () => ({}),
     getDraft: async () => null,
     save: async (_type: string, name: string, saved: Body, opts: { force?: boolean }) => {
       calls.push({ name, body: saved, force: opts?.force === true });
@@ -45,7 +48,7 @@ function renderPanel(refuse: () => Error) {
       return saved;
     },
   } as unknown as React.ComponentProps<typeof PackageOwdOverviewPanel>['client'];
-  render(<PackageOwdOverviewPanel client={client} packageId="com.qa.rnine" locale="en-US" />);
+  render(<StudioSaveHarness><PackageOwdOverviewPanel client={client} packageId="com.qa.rnine" locale="en-US" /></StudioSaveHarness>);
   return { calls };
 }
 
@@ -53,7 +56,7 @@ async function pickCbpAndSave() {
   await screen.findByTestId('owd-row-qnine_step');
   fireEvent.keyDown(screen.getByTestId('owd-internal-qnine_step'), { key: 'ArrowDown' });
   fireEvent.click(within(await screen.findByRole('listbox')).getByRole('option', { name: CBP_LABEL }));
-  fireEvent.click(screen.getByTestId('owd-save'));
+  fireEvent.click(await screen.findByTestId('studio-save'));
 }
 
 beforeEach(() => {

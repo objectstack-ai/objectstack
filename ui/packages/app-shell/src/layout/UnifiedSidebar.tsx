@@ -85,7 +85,16 @@ import { InboxBell } from './InboxBell.js';
 import { AccountMenu } from './AccountMenu.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
 import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
-import { SIDEBAR_EDGE_ZONE, useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSidebarRail.js';
+import {
+  CONSOLE_EXPANDED_SIDEBAR_WIDTH,
+  CONSOLE_SIDEBAR_WIDTH_PREFERENCE,
+  SIDEBAR_EDGE_ZONE,
+  SIDEBAR_RESIZING_FRAME,
+  useConsoleSidebarRail,
+  useConsoleSidebarRailPanel,
+} from './consoleSidebarRail.js';
+import { SidebarWidthHandle } from './SidebarWidthHandle.js';
+import { useWorkspacePreference } from '../utils/workspacePreference.js';
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
@@ -93,6 +102,13 @@ import { useDesignModeActive } from './designMode.js';
 import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
 import { usePhoneAppHomeSlot } from './PhoneAppHome.js';
+
+/**
+ * The app's menu as the design mode edits it (objectstack#36363). Loaded on
+ * the mode's first use: it brings the metadata client and the package doors
+ * the menu's write needs, which no other sidebar row reads.
+ */
+const DesignModeMenu = React.lazy(() => import('./DesignModeMenu.js'));
 
 /**
  * The class the Recent group's label carries so that, once the sidebar
@@ -207,6 +223,16 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
   const sidebarRef = React.useRef<HTMLDivElement | null>(null);
   const railPanel = useConsoleSidebarRailPanel(rail, sidebarRef);
+  // objectstack#36227 — from 768 px up the reader drags the docked sidebar's
+  // right edge to resize it; this browser keeps the width, and the menu
+  // floating over a collapsed sidebar takes it too.
+  const [keptWidth, setKeptWidth] = useWorkspacePreference(
+    CONSOLE_SIDEBAR_WIDTH_PREFERENCE,
+    'user',
+    CONSOLE_EXPANDED_SIDEBAR_WIDTH,
+  );
+  const [dragWidth, setDragWidth] = React.useState<number | null>(null);
+  const sidebarWidth = dragWidth ?? keptWidth;
   // objectstack#36112 — from 768 px up the console draws no top bar: the
   // sidebar starts at the top of the window and carries the app menu, the
   // search and the bell in its head, and the account at its foot.
@@ -692,7 +718,20 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
 
            {/* App Navigation tree. `locale` is the same `language` the area
                labels above resolve in, so an entry label written as an inline
-               locale map reads the viewer's entry too (objectui#11299). */}
+               locale map reads the viewer's entry too (objectui#11299).
+               objectstack#36363 — while the design mode is on, the app's
+               menu is drawn by its editor instead (an app whose menu is split
+               in areas keeps its menu: the card edits `navigation`). */}
+           {designMode && where === 'sidebar' && context === 'app' && activeApp && areas.length === 0 ? (
+             <React.Suspense fallback={null}>
+               <DesignModeMenu
+                 app={activeApp}
+                 basePath={basePath}
+                 resolveTargetLabel={resolveNavTargetLabel}
+                 resolveTargetIcon={resolveNavTargetIcon}
+               />
+             </React.Suspense>
+           ) : (
            <NavigationRenderer
              items={processedNavigation}
              basePath={basePath}
@@ -718,11 +757,16 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
              t={t}
              templateContext={navTemplateContext}
            />
+           )}
     </>
   );
 
   return (
-    <div data-testid="console-sidebar-frame" className={railPanel.frameClassName}>
+    <div
+      data-testid="console-sidebar-frame"
+      className={cn(railPanel.frameClassName, dragWidth !== null && SIDEBAR_RESIZING_FRAME)}
+      style={rail.desktop ? ({ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties) : undefined}
+    >
     <Sidebar
       ref={sidebarRef}
       collapsible={railPanel.collapsible}
@@ -931,10 +975,14 @@ export function UnifiedSidebar({ activeAppName, onAppChange, railOverlay = false
       {/* No footer trigger: from 768 px up the trigger is the head's collapse
           button and, while collapsed, the page header's expand button; on a
           phone the app bar's left slot holds it. */}
+      {railPanel.docked && (
+        <SidebarWidthHandle width={sidebarWidth} onPreview={setDragWidth} onCommit={setKeptWidth} />
+      )}
     </Sidebar>
     {/* objectstack#35062 — the window's left edge while the sidebar is
         hidden: resting the pointer on it, or a press, floats the menu. For
-        the pointer only; the keyboard has the app bar's trigger and ⌘B. */}
+        the pointer only; the keyboard has the page header's expand button
+        and ⌘B, which dock the sidebar. */}
     {railPanel.edgeZoneProps && (
       <div
         data-testid="console-sidebar-edge"

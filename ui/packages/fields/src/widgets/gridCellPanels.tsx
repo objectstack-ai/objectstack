@@ -10,7 +10,9 @@
  * The line-item grid's cell faces that open a panel under the cell
  * (objectstack#36023): a select cell's searchable option list, a date or
  * date-time cell's calendar, and a text cell that floats right over its
- * neighbours while its text is longer than the column.
+ * neighbours while its text is longer than the column. objectstack#36043 adds
+ * the panel shell that hosts a widget's own in-cell face (multi-select, tags,
+ * people) under the cell.
  *
  * The grid stays a typing-first grid: a text, number or date cell is a live
  * input the user types into on arrival, and a panel never takes that away.
@@ -191,6 +193,157 @@ export function GridSelectCell({
       </PopoverContent>
     </Popover>
   );
+}
+
+/** What a {@link GridPanelCell}'s face is handed: the value it edits, and the two ways it ends. */
+export interface GridPanelFace<V> {
+  /** The value being edited: the cell's value until the face changes it. */
+  draft: V;
+  /** Change the value being edited; nothing is written yet. */
+  setDraft: (next: V) => void;
+  /** Write the value being edited and close the panel (a single pick ends the edit). */
+  commit: () => void;
+}
+
+export interface GridPanelCellProps<V> {
+  /** The cell's written value. */
+  value: V;
+  /** Write a value the panel ended with. Called only when it differs from `value`. */
+  onWrite: (next: V) => void;
+  /** What the cell shows, open or closed. */
+  display: React.ReactNode;
+  disabled?: boolean;
+  invalid?: boolean;
+  label: string;
+  /** The grid's own key handler: the arrows move between lines. */
+  onNavKeyDown: (e: React.KeyboardEvent) => void;
+  'data-cell': string;
+  /** The panel's test id. */
+  panelTestId: string;
+  /** The face drawn in the panel: a widget's own `inCell` face. */
+  children: (face: GridPanelFace<V>) => React.ReactNode;
+}
+
+/**
+ * A cell whose editor is a widget's own in-cell face (objectstack#36043), the
+ * face the main list's cell editor draws: a click, Enter, Space, F2 or
+ * Alt+ArrowDown opens it in a panel under the cell, which keeps drawing its
+ * value. The face edits a draft. A click outside the panel or Tab writes it
+ * and closes; Esc closes and writes nothing; a face that ends on one pick
+ * (a single person) calls `commit`.
+ */
+export function GridPanelCell<V>({
+  value,
+  onWrite,
+  display,
+  disabled,
+  invalid,
+  label,
+  onNavKeyDown,
+  'data-cell': dataCell,
+  panelTestId,
+  children,
+}: GridPanelCellProps<V>) {
+  const [open, setOpen] = React.useState(false);
+  const [draft, setDraftState] = React.useState<V>(value);
+  // Read by `commit`, which a face may call in the same handler that set the draft.
+  const draftRef = React.useRef<V>(value);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+
+  const setDraft = (next: V) => {
+    draftRef.current = next;
+    setDraftState(next);
+  };
+  const openPanel = () => {
+    setDraft(value);
+    setOpen(true);
+  };
+  const close = (write: boolean) => {
+    if (write && !sameValue(draftRef.current, value)) onWrite(draftRef.current);
+    setOpen(false);
+  };
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        // Opening goes through `openPanel`; any other close writes, as a click outside does.
+        if (!next) close(true);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          aria-label={label}
+          aria-invalid={invalid || undefined}
+          data-cell={dataCell}
+          disabled={disabled}
+          onKeyDown={(e) => {
+            if (open) return;
+            if (e.key === 'Enter' || e.key === ' ' || e.key === 'F2' || (e.altKey && e.key === 'ArrowDown')) {
+              e.preventDefault();
+              openPanel();
+            } else {
+              onNavKeyDown(e);
+            }
+          }}
+          onClick={(e) => {
+            // The trigger's own toggle is replaced: a click always opens.
+            e.preventDefault();
+            if (!open) openPanel();
+          }}
+          className={cn(
+            GRID_CELL_CONTROL_CLASS,
+            PHONE_TOUCH_HEIGHT,
+            'focus:ring-1 focus:ring-ring/60',
+            'flex w-full items-center overflow-hidden text-left text-sm outline-none disabled:cursor-not-allowed disabled:opacity-50',
+          )}
+        >
+          {display}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side="bottom"
+        sideOffset={2}
+        className={cn(PANEL_CLASS, 'max-w-[min(24rem,calc(100vw-2rem))]')}
+        data-testid={panelTestId}
+        onEscapeKeyDown={(e) => {
+          // Esc takes back what the panel changed.
+          e.preventDefault();
+          close(false);
+          triggerRef.current?.focus();
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Tab') return;
+          // The panel lives outside the table, so Tab is moved on by hand.
+          e.preventDefault();
+          close(true);
+          const trigger = triggerRef.current;
+          if (!trigger) return;
+          (neighbourTabbable(trigger, e.shiftKey) ?? trigger).focus();
+        }}
+      >
+        {children({
+          draft,
+          setDraft,
+          commit: () => {
+            close(true);
+            triggerRef.current?.focus();
+          },
+        })}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Two cell values are the same write: equal scalars, or arrays of equal members in order. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+  return Object.is(a, b) || ((a == null || a === '') && (b == null || b === ''));
 }
 
 export interface GridDateCellProps extends Omit<React.ComponentProps<typeof Input>, 'value' | 'onChange'> {

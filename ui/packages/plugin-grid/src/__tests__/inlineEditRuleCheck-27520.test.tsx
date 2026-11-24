@@ -88,7 +88,6 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'title', label: 'Title', editable: false },
       { field: 'estimate_hours', label: 'Estimate (h)', type: 'number' },
@@ -98,6 +97,7 @@ async function loaded(dataSource: ReturnType<typeof makeDataSource>) {
   render(
     <ActionProvider>
       <ObjectGrid
+        cellSelection={false}
         schema={schema}
         dataSource={dataSource as unknown as GridProps['dataSource']}
         onEdit={() => {}}

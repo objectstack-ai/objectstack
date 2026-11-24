@@ -19,6 +19,8 @@
  * headers on `context.request` the way the dispatcher plugin hands them over.
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -201,7 +203,7 @@ describe('[#22049] dispatcher: a declared encoding that does not hold is refused
     expect(answer.body?.error?.message).toContain('X-Share-Password');
     expect(JSON.stringify(answer.body)).not.toContain(headers['x-share-password']);
     expect(answer.headers?.['Cache-Control']).toBe('no-store');
-    expect(answer.headers?.Vary).toBe('X-Share-Password, X-Share-Password-Encoding');
+    expect(answer.headers?.Vary).toBe('X-Share-Password, X-Share-Password-Encoding, Accept-Language');
     expect(resolveToken).not.toHaveBeenCalled();
   });
 

@@ -721,7 +721,7 @@ describe('validateFlowTriggerReadiness', () => {
         const withSchedule = scalarOnlyStack('daily');
         (
           (withSchedule.flows[0] as Record<string, unknown>).nodes as Array<Record<string, unknown>>
-        )[0].config = { timeRelative: 'daily', schedule: { type: 'cron', expression: '0 8 * * *' } };
+        )[0].config = { timeRelative: 'daily', schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' } };
         const [f] = validateFlowTriggerReadiness(withSchedule);
         expect(f.rule).toBe(FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE);
         expect(f.message).toContain('config.schedule');
@@ -1853,7 +1853,7 @@ describe('validateFlowTriggerReadiness', () => {
 
     it('reports NOTHING for a `schedule` flow that declares no organization', () => {
       expect(
-        validateFlowTriggerReadiness(timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *' } })),
+        validateFlowTriggerReadiness(timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' } })),
         'the deleted rule fired here; under the single posture with the switch on this flow is correct',
       ).toEqual([]);
     });
@@ -1873,7 +1873,7 @@ describe('validateFlowTriggerReadiness', () => {
       // layer that knows neither.
       expect(
         validateFlowTriggerReadiness(
-          timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *' }, organizationId: 'org_x' }),
+          timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' }, organizationId: 'org_x' }),
         ),
       ).toEqual([]);
     });
@@ -1881,7 +1881,7 @@ describe('validateFlowTriggerReadiness', () => {
     it('reports NOTHING for a present-but-unusable organization value', () => {
       for (const bad of ['', 123, { id: 'org_x' }, null]) {
         expect(
-          validateFlowTriggerReadiness(timeTriggered({ schedule: '0 1 * * *', organization: bad })),
+          validateFlowTriggerReadiness(timeTriggered({ schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' }, organization: bad })),
           `organization: ${JSON.stringify(bad)} is the trigger's judgement to make, not lint's`,
         ).toEqual([]);
       }

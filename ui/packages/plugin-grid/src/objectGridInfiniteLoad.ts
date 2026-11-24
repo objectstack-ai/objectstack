@@ -12,9 +12,12 @@
  *
  * The host owns the rows and the fetch (`ListView` on the list page): it hands
  * the grid `onLoadMore` and `hasMoreRows`, and this hook calls `onLoadMore`
- * when the table's own scroll box (`data-table-scroll-box`) comes within
- * {@link LOAD_MORE_THRESHOLD_PX} of its end — or when the loaded rows do not
- * fill the box at all, so a short first window never strands the rest.
+ * when the list's scroll box comes within {@link LOAD_MORE_THRESHOLD_PX} of
+ * its end — or when the loaded rows do not fill the box at all, so a short
+ * first window never strands the rest. The scroll box is the table's own
+ * (`data-table-scroll-box`) on a desktop, and on a phone the record cards'
+ * scroller, which is the grid's root there (objectstack#36407): a phone list
+ * loads as it scrolls exactly as the table does.
  *
  * The scroll position is kept in session storage under the host's
  * `scrollRestoreKey`, with the number of rows loaded when it was taken. The
@@ -61,8 +64,13 @@ function writeListScrollState(key: string, state: ListScrollState): void {
   }
 }
 
+/** The phone's record-card scroller, the grid's root on the card face. */
+const CARD_SCROLLER = '[data-testid="object-grid-card-scroller"]';
+
 function scrollBoxOf(root: HTMLElement | null): HTMLElement | null {
-  return root?.querySelector<HTMLElement>('[data-table-scroll-box]') ?? null;
+  if (!root) return null;
+  if (root.matches(CARD_SCROLLER)) return root;
+  return root.querySelector<HTMLElement>('[data-table-scroll-box]');
 }
 
 export function useInfiniteRowLoad({

@@ -60,6 +60,7 @@ export const CascadingSelect = ObjectSchema.create({
   label: 'Cascading Select',
   pluralLabel: 'Cascading Selects',
   icon: 'git-fork',
+  color: 'amber',
   description:
     'B3 dynamic-options fixture: a country → province cascade (per-option visibleWhen + dependsOn) plus a role-gated tier, enforced client-side (offered set) AND server-side (objectql rejects an out-of-set submit).',
 

@@ -29,6 +29,7 @@ export const SemanticZoo = ObjectSchema.create({
   label: 'Semantic Zoo',
   pluralLabel: 'Semantic Zoos',
   icon: 'flask-conical',
+  color: 'amber',
   description: 'ADR-0085 semantic-role runtime fixture (canonical spellings)',
 
   fields: {
@@ -91,6 +92,7 @@ export const SemanticZooLegacy = ObjectSchema.create({
   label: 'Semantic Zoo (Legacy)',
   pluralLabel: 'Semantic Zoo Legacies',
   icon: 'flask-round',
+  color: 'amber',
   description: 'ADR-0085 semantic-role runtime fixture (stageField:false suppression)',
 
   fields: {

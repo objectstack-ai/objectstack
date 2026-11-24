@@ -951,7 +951,7 @@ type MetaLayeredProtocol = MetaDomainProtocol & Required<Pick<MetaDomainProtocol
  */
 type LayeredReadWithDraft = (
     request: Parameters<MetaLayeredProtocol['getMetaItemLayered']>[0],
-    opts: { withDraft?: boolean },
+    opts: { withDraft?: boolean; withVersion?: boolean },
 ) => ReturnType<MetaLayeredProtocol['getMetaItemLayered']>;
 
 /**
@@ -1030,7 +1030,8 @@ async function answerMetaLayered(
     // declaration as every draft switch in this domain is). A caller it does
     // not admit is answered the layers without a `draft` key, byte-identical to
     // a read that never asked, as `RestServer`'s layered read answers.
-    const layeredOptions = { withDraft: mayReadPendingDrafts(context.executionContext) };
+    // [#36601] …and `overlayVersion`, the published layer's version, as `RestServer`'s layered read serves it.
+    const layeredOptions = { withDraft: mayReadPendingDrafts(context.executionContext), withVersion: true };
     let answer: MetaLayeredAnswer;
     try {
         const layered = await (protocol as { getMetaItemLayered: LayeredReadWithDraft }).getMetaItemLayered({

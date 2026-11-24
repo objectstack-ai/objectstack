@@ -57,6 +57,9 @@ import { createAutomationDomain, handleAutomationRequest } from './domains/autom
 import { createAuthDomain, handleAuthRequest } from './domains/auth.js';
 import { createApprovalsActDomain, APPROVALS_ACT_ROUTE } from './domains/approvals.js';
 import { createWebhooksRedeliverDomain } from './domains/webhooks.js';
+import { createCommentsDomain } from './domains/comments.js';
+import { createPersonalViewsDomain } from './domains/personal-views.js';
+import { createAttachmentsDomain } from './domains/attachments.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
 import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest, type ActionResumeRequest } from './action-dispatch.js';
@@ -1013,6 +1016,18 @@ export class HttpDispatcher {
         // `POST /webhooks/redeliver`, forwarded to the `webhooks` slot's
         // `handleRedeliver`, resolved per request. See `./domains/webhooks.ts`.
         this.domainRegistry.register(createWebhooksRedeliverDomain(this.domainDeps));
+        // The three comment doors for a kernel with no `http.server` (#36469;
+        // ruling A on #22438): exactly their three method and path shapes,
+        // forwarded to the `comments` slot's `handleCommentDoor`, resolved per
+        // request. See `./domains/comments.ts`.
+        this.domainRegistry.register(createCommentsDomain(this.domainDeps));
+        // The personal-view delete door and the attachment removal and rename
+        // doors for a kernel with no `http.server` (#36506; ruling A on
+        // #22438): exactly their method and path shapes, forwarded to the
+        // REQUEST kernel's `personal-views` / `file-attachments` member, read
+        // per request. See `./domains/own-door-bridge.ts`.
+        this.domainRegistry.register(createPersonalViewsDomain(this.domainDeps));
+        this.domainRegistry.register(createAttachmentsDomain(this.domainDeps));
         this.domainRegistry.register(createAiDomain(this.domainDeps));
         this.domainRegistry.register(createActionsDomain(this.domainDeps));
         for (const route of createMcpDomains(this.domainDeps)) this.domainRegistry.register(route);

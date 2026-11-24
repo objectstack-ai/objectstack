@@ -36,7 +36,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { operatorsForField } from '@object-ui/components';
-import { en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
+import { builtInLocales, en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
+import { I18nProvider } from '@object-ui/i18n';
 import { parseFilterAST } from '@objectstack/spec/data';
 import { convertFilterGroupToAST } from '../../ListView';
 
@@ -871,5 +872,242 @@ describe('ConditionChipRow — the resident row of the two-row toolbar (objectst
     render(<TwoRow filters={stageFilter} />);
     const row = screen.getByTestId('condition-chips');
     expect(row.className.split(/\s+/)).toEqual(expect.arrayContaining(['flex-nowrap', 'overflow-x-auto']));
+  });
+});
+
+describe('ConditionChipRow — a view condition on a related record\'s field (objectstack#36507)', () => {
+  // The HotCRM industry-donut drill: the drilled list is a child of
+  // `crm_account`, its slice is a condition on the account's industry. The
+  // base object's lookup is labelled by the host (as the list translates its
+  // own fields); the related field and its options live on `crm_account`.
+  const LOOKUP_EN: ConditionField = { value: 'crm_account', label: 'Account', type: 'lookup', referenceTo: 'crm_account' };
+  const LOOKUP_ZH: ConditionField = { ...LOOKUP_EN, label: '所属客户' };
+  const AMOUNT: ConditionField = { value: 'amount', label: 'Amount', type: 'currency' };
+  const ACCOUNT_DEF = {
+    name: 'crm_account',
+    fields: {
+      name: { type: 'text', label: 'Account Name' },
+      industry: {
+        type: 'select',
+        label: 'Industry',
+        options: [
+          { value: 'technology', label: 'Technology' },
+          { value: 'finance', label: 'Finance' },
+        ],
+      },
+    },
+  };
+  const ZH_BUNDLE = {
+    'zh-CN': {
+      crm: {
+        fields: { crm_account: { industry: '行业' } },
+        fieldOptions: { crm_account: { industry: { technology: '科技' } } },
+      },
+    },
+  };
+  // The drill's base filter as the list receives it: the nested form
+  // `{ crm_account: { industry: 'technology' } }`, lowered by `toFilterNode`.
+  const DRILLED = ['crm_account', '=', { industry: 'technology' }];
+
+  function source(def: () => Promise<unknown>) {
+    return { find: vi.fn(async () => ({ data: [] })), getObjectSchema: vi.fn(def) };
+  }
+
+  function Row(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={[LOOKUP_EN, AMOUNT]}
+        filters={EMPTY}
+        filterFields={[LOOKUP_EN, AMOUNT]}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div />}
+        renderSortLevels={() => <div />}
+        {...props}
+      />
+    );
+  }
+
+  it('reads the nested-relation form, as written and as lowered, into one chip on the path', () => {
+    const chip = { key: 'view-0', field: 'crm_account.industry', operator: 'equals', value: 'technology' };
+    expect(readViewConditions(DRILLED)).toEqual([chip]);
+    expect(readViewConditions({ crm_account: { industry: 'technology' } })).toEqual([chip]);
+    expect(readViewConditions([{ crm_account: { industry: 'technology' } }, ['amount', '>=', 10]])).toEqual([
+      chip,
+      { key: 'view-1', field: 'amount', operator: '>=', value: 10 },
+    ]);
+    // A nested condition it cannot say as one equality is the view's
+    // condition, never a value printed as `[object Object]`.
+    expect(readViewConditions(['crm_account', '=', { industry: { $in: ['technology'] } }])).toEqual([{ key: 'view-0' }]);
+    expect(readViewConditions(['crm_account', '=', { industry: 'technology', name: 'Acme' }])).toEqual([{ key: 'view-0' }]);
+    // CONTROL: a condition on the list's own field reads as before.
+    expect(readViewConditions(['amount', '>=', 10])).toEqual([{ key: 'view-0', field: 'amount', operator: '>=', value: 10 }]);
+  });
+
+  it('en: labels the chip from the lookup, the related field and its option', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(<Row viewFilter={DRILLED} dataSource={ds as never} />);
+    const chip = screen.getByTestId('view-condition-chip');
+    expect(chip.getAttribute('data-field')).toBe('crm_account.industry');
+    expect(chip.getAttribute('data-locked')).toBe('true');
+    await vi.waitFor(() => expect(chip.textContent).toBe('Account › Industry: Technology'));
+    expect(ds.getObjectSchema).toHaveBeenCalledTimes(1);
+    expect(ds.getObjectSchema).toHaveBeenCalledWith('crm_account');
+    // No record-name read for it: the value is an option, not a record id.
+    expect(ds.find).not.toHaveBeenCalled();
+  });
+
+  it('zh-CN: the related field and option labels come from the locale bundle', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false, resources: ZH_BUNDLE }} persistLanguage={false}>
+        <Row viewFilter={DRILLED} filterFields={[LOOKUP_ZH, AMOUNT]} dataSource={ds as never} />
+      </I18nProvider>,
+    );
+    const chip = await screen.findByTestId('view-condition-chip');
+    await vi.waitFor(() => expect(chip.textContent).toBe('所属客户的行业：科技'));
+    expect(chip.getAttribute('aria-label')).toContain('所属客户的行业：科技');
+  });
+
+  it('falls back to the raw names when the lookup is not among the list\'s fields', async () => {
+    const ds = source(async () => {
+      throw new Error('offline');
+    });
+    render(<Row viewFilter={DRILLED} filterFields={[AMOUNT]} dataSource={ds as never} />);
+    await act(async () => {});
+    // No lookup in the field list (one the reader may not read) ⇒ no target
+    // to read, and every name raw.
+    expect(ds.getObjectSchema).not.toHaveBeenCalled();
+    expect(screen.getByTestId('view-condition-chip').textContent).toBe('crm_account › industry: equals technology');
+  });
+
+  it('falls back to the raw related names when the definition read fails', async () => {
+    const ds = source(async () => {
+      throw new Error('offline');
+    });
+    render(<Row viewFilter={DRILLED} dataSource={ds as never} />);
+    await vi.waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('crm_account'));
+    await act(async () => {});
+    expect(screen.getByTestId('view-condition-chip').textContent).toBe('Account › industry: equals technology');
+  });
+
+  it('CONTROL: a condition on the list\'s own field beside it is unchanged, and reads no definition', async () => {
+    const ds = source(async () => ACCOUNT_DEF);
+    render(<Row viewFilter={[['amount', '>=', 10]]} dataSource={ds as never} />);
+    const chip = screen.getByTestId('view-condition-chip');
+    expect(chip.getAttribute('data-field')).toBe('amount');
+    expect(chip.textContent).toBe('Amount: >= 10');
+    await act(async () => {});
+    expect(ds.getObjectSchema).not.toHaveBeenCalled();
+  });
+});
+
+describe('ConditionChipRow — an operator only the advanced panel writes (objectstack#36462)', () => {
+  // A drill dialog's base filter carries the panel's own operators as view
+  // triples (`['amount', 'is_not_null', true]`); a reader's filter can carry
+  // them too, written by the advanced panel. Each chip names the operator in
+  // the panel's own words, never by its id.
+  const PANEL_ONLY = ['not_equals', 'greater_than', 'less_than', 'is_null', 'is_not_null', 'icontains', 'ends_with'] as const;
+  const fieldsIn = (amount: string, stage: string, name: string, lost: string): ConditionField[] => [
+    { value: 'amount', label: amount, type: 'currency' },
+    { value: 'stage', label: stage, type: 'select', options: [{ value: 'lost', label: lost }] },
+    { value: 'name', label: name, type: 'text' },
+  ];
+  const EN_FIELDS = fieldsIn('Deal Value', 'Stage', 'Name', 'Lost');
+  const ZH_FIELDS = fieldsIn('金额', '阶段', '名称', '输单');
+  const VIEW_FILTER = [
+    ['stage', 'not_equals', 'lost'],
+    ['amount', 'greater_than', 100],
+    ['amount', 'less_than', 500],
+    ['amount', 'is_null', true],
+    ['amount', 'is_not_null', true],
+    ['name', 'icontains', 'acme'],
+    ['name', 'ends_with', 'inc'],
+  ];
+
+  function Row(props: Partial<React.ComponentProps<typeof ConditionChipRow>>) {
+    return (
+      <ConditionChipRow
+        sort={[]}
+        sortFields={EN_FIELDS}
+        filters={EMPTY}
+        filterFields={EN_FIELDS}
+        onFiltersChange={() => {}}
+        renderAdvanced={() => <div />}
+        renderSortLevels={() => <div />}
+        {...props}
+      />
+    );
+  }
+  const chipTexts = () => screen.getAllByTestId('view-condition-chip').map((chip) => chip.textContent);
+
+  it('en: each chip reads the panel\'s word for its operator', () => {
+    render(<Row viewFilter={VIEW_FILTER} />);
+    expect(chipTexts()).toEqual([
+      'Stage: Does not equal Lost',
+      'Deal Value: Greater than 100',
+      'Deal Value: Less than 500',
+      'Deal Value: Is null',
+      'Deal Value: Is not null',
+      'Name: Contains (ignore case) acme',
+      'Name: Ends with inc',
+    ]);
+  });
+
+  it('zh-CN: each chip reads the panel\'s word for its operator', async () => {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>
+        <Row viewFilter={VIEW_FILTER} filterFields={ZH_FIELDS} />
+      </I18nProvider>,
+    );
+    await screen.findAllByTestId('view-condition-chip');
+    expect(chipTexts()).toEqual([
+      '阶段：不等于 输单',
+      '金额：大于 100',
+      '金额：小于 500',
+      '金额：为 null',
+      '金额：不为 null',
+      '名称：包含（忽略大小写） acme',
+      '名称：以…结尾 inc',
+    ]);
+  });
+
+  it('the reader\'s own filter chip and its operator choice read the same words', () => {
+    const filters: FilterBuilderRowGroup = {
+      id: 'root',
+      logic: 'and',
+      conditions: [{ id: 'c1', field: 'amount', operator: 'is_not_null', value: undefined }],
+    };
+    render(<Row filters={filters} />);
+    expect(screen.getByTestId('filter-chip-open-amount').textContent).toBe('Deal Value: Is not null');
+  });
+
+  it('every pack words each of them, as the panel does, and never as the id', () => {
+    for (const [tag, pack] of Object.entries(builtInLocales)) {
+      const words = pack.filterBuilder.operators as Record<string, string>;
+      for (const op of PANEL_ONLY) {
+        expect(words[op], `${tag} ${op}`).toBeTruthy();
+        expect(words[op], `${tag} ${op}`).not.toBe(op);
+      }
+    }
+  });
+
+  it('an operator nothing words is named as a condition, never by its id, in en and zh-CN', async () => {
+    const unknown = [['amount', 'nin', [1, 2]], { field: 'amount', operator: 'exists' }];
+    const { unmount } = render(<Row viewFilter={unknown} />);
+    expect(chipTexts()).toEqual(['Deal Value: Condition 1, 2', 'Deal Value: Condition']);
+    unmount();
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>
+        <Row viewFilter={unknown} filterFields={ZH_FIELDS} />
+      </I18nProvider>,
+    );
+    await screen.findAllByTestId('view-condition-chip');
+    expect(chipTexts()).toEqual(['金额：条件 1、2', '金额：条件']);
+  });
+
+  it('CONTROL: a view triple\'s comparison symbol still reads as written', () => {
+    render(<Row viewFilter={[['amount', '>=', 10], ['amount', '!=', 0]]} />);
+    expect(chipTexts()).toEqual(['Deal Value: >= 10', 'Deal Value: != 0']);
   });
 });

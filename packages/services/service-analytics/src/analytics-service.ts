@@ -75,8 +75,10 @@ import {
   assertDefinitionExposed,
   assertNoInternalFieldNamed,
   assertObjectsExposed,
+  assertObjectsOfServedPackages,
   servesLabelTarget,
   type ObjectDeclarationProvider,
+  type ObjectPackageDisabledProbe,
   type RegisteredDefinitionKind,
 } from './api-exposure-door.js';
 // [#15768] The measure result-type rule — which aggregates return a value of
@@ -1189,6 +1191,23 @@ export interface AnalyticsServiceConfig {
    */
   getObjectDeclaration?: ObjectDeclarationProvider;
   /**
+   * [#35525] Whether `objectName` belongs to a DISABLED package — the
+   * registry's `isObjectPackageDisabled`, the predicate the data route asks
+   * before it answers `404 OBJECT_PACKAGE_DISABLED` (`api-exposure-door.ts`,
+   * {@link ObjectPackageDisabledProbe}).
+   *
+   * Asked of every object a query reads (base object, declared joins,
+   * relationship hops) on every door, for every caller: such an object is
+   * refused with the data route's own `404 OBJECT_PACKAGE_DISABLED`. A lookup
+   * dimension's label read of it is withheld (the stored id renders, as the
+   * data route's `$expand` withholds it), and `getMeta` leaves out a cube
+   * whose base object or declared join it is, as the metadata listing leaves
+   * the object out. Absent, or answering `false`, hides nothing — a registry
+   * that cannot answer hides nothing on the data route either. The production
+   * bridge in `plugin.ts` wires it from the data engine's registry.
+   */
+  isObjectPackageDisabled?: ObjectPackageDisabledProbe;
+  /**
    * ADR-0021 — optional object-graph resolver used when compiling datasets:
    * `(baseObject, relationshipName) => relatedObjectName | undefined`. When
    * provided, `queryDataset` validates that every declared `include` exists.
@@ -1627,6 +1646,8 @@ export class AnalyticsService implements IAnalyticsService {
   private readonly isExternalObject?: AnalyticsServiceConfig['isExternalObject'];
   /** The generic-exit declaration probe (`api-exposure-door.ts`). */
   private readonly objectDeclarationProvider?: ObjectDeclarationProvider;
+  /** [#35525] The registry's disabled-package predicate (`api-exposure-door.ts`). */
+  private readonly isObjectPackageDisabled?: ObjectPackageDisabledProbe;
   /** One-shot flag for the no-declaration-probe stand-down warning. */
   private warnedNoObjectDeclaration = false;
   /** Names {@link reportDatasetCatalogDefect} already reported (once each). */
@@ -1695,9 +1716,18 @@ export class AnalyticsService implements IAnalyticsService {
     // not serve is never read, and the stored id renders. Wrapped once, here,
     // so every pass that reads labels inherits it. No declaration probe wired:
     // no gate, as on the query face (which reports that once).
+    //
+    // [#35525] …and a target of a disabled package is withheld the same way
+    // (the stored id renders), as the data route's `$expand` withholds it.
     const declarations = this.objectDeclarationProvider;
-    this.labelResolver = config.labelResolver && declarations
-      ? withServedLabelTargets(config.labelResolver, (target) => servesLabelTarget(target, declarations, this.logger))
+    const packageDisabled = config.isObjectPackageDisabled;
+    this.isObjectPackageDisabled = packageDisabled;
+    this.labelResolver = config.labelResolver && (declarations || packageDisabled)
+      ? withServedLabelTargets(
+        config.labelResolver,
+        (target) => packageDisabled?.(target) !== true
+          && (!declarations || servesLabelTarget(target, declarations, this.logger)),
+      )
       : config.labelResolver;
     this.getObjectDatasource = config.getObjectDatasource;
     this.isExternalObject = config.isExternalObject;
@@ -2261,6 +2291,15 @@ export class AnalyticsService implements IAnalyticsService {
    * exposure declaration before the permission check, and so does this one.
    */
   private assertQueryObjectsExposed(objects: Iterable<string>): void {
+    // [#35525] Ahead of the exposure decision, in the data route's order
+    // (`assertObjectRegistered` refuses a disabled package's object before any
+    // exposure is judged), and whether or not a declaration probe is wired:
+    // every door and both asks above run through here, so an object of a
+    // disabled package — the base object, a declared join, a hop — answers the
+    // data route's `404 OBJECT_PACKAGE_DISABLED` on all of them.
+    const set = [...objects];
+    if (this.isObjectPackageDisabled) assertObjectsOfServedPackages(set, this.isObjectPackageDisabled);
+    objects = set;
     const provider = this.objectDeclarationProvider;
     if (!provider) {
       if (!this.warnedNoObjectDeclaration) {
@@ -3961,11 +4000,25 @@ export class AnalyticsService implements IAnalyticsService {
    * from each dataset measure, and no `description`, because the compiler
    * writes none.
    */
+  /** [#35525] Whether `cube`'s own read set ({@link cubeObjects}) holds an object of a disabled package. */
+  private readsObjectOfDisabledPackage(cube: Cube): boolean {
+    const disabled = this.isObjectPackageDisabled;
+    if (!disabled) return false;
+    for (const object of this.cubeObjects(cube)) if (disabled(object) === true) return true;
+    return false;
+  }
+
   async getMeta(cubeName?: string): Promise<CubeMeta[]> {
     const cubes = (cubeName
       ? [this.cubeRegistry.get(cubeName)].filter(Boolean) as Cube[]
       : this.cubeRegistry.getAll()
-    ).filter(isCubePublic);
+    ).filter(isCubePublic)
+      // [#35525] A cube whose base object or declared join belongs to a
+      // disabled package is left out, as the metadata listing leaves the
+      // object out: every query of it answers `404 OBJECT_PACKAGE_DISABLED`
+      // until the package is re-enabled, and it is listed again then (nothing
+      // is cached). By name it answers as a hidden cube does: nothing.
+      .filter((cube) => !this.readsObjectOfDisabledPackage(cube));
 
     return cubes.map(cube => ({
       name: cube.name,

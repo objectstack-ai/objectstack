@@ -218,6 +218,17 @@ export function deriveRecordDetailSections(
     // untitled so DetailSection still flattens its chrome when alone.
     // Shared by the pure-fallback path and the ungrouped remainder of
     // the fieldGroups path below.
+    //
+    // objectstack#36404 — every section the split writes says
+    // `hideEmpty: false`. `record:details` resolves an omitted `hideEmpty`
+    // to `true` on the sections it is handed, and an all-empty section with
+    // `true` renders nothing and is left out of the record page's one
+    // 「Show N empty fields」 row (objectstack#36147). Nobody authored these
+    // sections, so nobody can write `false` on them: an empty "More details"
+    // section (an empty long-text field alone) vanished from read mode, its
+    // field uncounted and unrevealable. Written here, at the producer, they
+    // fold their empty rows like every other group: counted by that row,
+    // drawn in place when the reader shows them.
     const splitPrimarySecondary = (keys: string[]) => {
       const primaryKeys = keys.filter((k) => !isSecondaryField(k, fields[k]));
       const secondaryKeys = keys.filter((k) => isSecondaryField(k, fields[k]));
@@ -228,6 +239,7 @@ export function deriveRecordDetailSections(
         return [
           {
             showBorder: false as const,
+            hideEmpty: false as const,
             fields: keys.map(toField),
           },
         ];
@@ -236,6 +248,7 @@ export function deriveRecordDetailSections(
       return [
         {
           showBorder: false as const,
+          hideEmpty: false as const,
           fields: primaryKeys.map(toField),
         },
         {
@@ -248,6 +261,7 @@ export function deriveRecordDetailSections(
           collapsible: true,
           defaultCollapsed: false,
           showBorder: true as const,
+          hideEmpty: false as const,
           fields: secondaryKeys.map(toField),
         },
       ];

@@ -27,6 +27,7 @@ import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
 import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
 import { PhonePageBarProvider } from './PhonePageBar.js';
 import { useLastApp } from '../context/LastAppProvider.js';
+import { rememberAppReturnPage } from '../utils/appReturnPage.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { appAddressSegment } from '../utils/appRoute.js';
 import { ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
@@ -41,7 +42,7 @@ import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
-import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
+import { SIDEBAR_TOGGLE_CHORD, primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -82,16 +83,18 @@ interface ConsoleLayoutProps {
 }
 
 /**
- * `⌘B` / `Ctrl+B` toggles the sidebar. The listener is `SidebarProvider`'s own
- * (`@object-ui/components`' synced Shadcn primitive, mounted by `AppShell`):
- * it matches `b` with ⌘ or Ctrl, and a bare `B` does nothing. That code is not
- * ours to edit, so the shortcut is advertised from inside the provider it
- * belongs to, by {@link ConsoleLayoutInner} (objectui#11674).
+ * `⌘B` / `Ctrl+B` toggles the sidebar: it matches `b` with ⌘ or Ctrl, and a
+ * bare `B` does nothing. From 768 px up the console sidebar answers it as a
+ * press on its expand / collapse button (`useConsoleSidebarRailPanel`, ruling
+ * 7074574380 on objectstack#36112); on a phone the listener is
+ * `SidebarProvider`'s own (`@object-ui/components`' synced Shadcn primitive,
+ * mounted by `AppShell`). The shortcut is advertised from inside that
+ * provider, by {@link ConsoleLayoutInner} (objectui#11674).
  */
 const TOGGLE_SIDEBAR_SHORTCUT: AdvertisedShortcut = {
   id: 'toggle-sidebar',
   group: 'navigation',
-  chord: { key: 'b', mod: true },
+  chord: SIDEBAR_TOGGLE_CHORD,
   label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleSidebar'),
 };
 
@@ -200,10 +203,20 @@ export function ConsoleLayout({
   useEffect(() => {
     if (activeAppName) rememberApp(activeAppName);
   }, [activeAppName, rememberApp]);
+  // objectstack#36501 — and the app page in view, where Studio's 「‹ Back to
+  // app」 returns: an app → Studio entry leaves from the page recorded last.
+  useEffect(() => {
+    if (!activeAppName) return;
+    rememberAppReturnPage({
+      path: `${location.pathname}${location.search}${location.hash}`,
+      app: activeAppName,
+      label: appLabel,
+    });
+  }, [activeAppName, appLabel, location.pathname, location.search, location.hash]);
   const { apps: metadataApps } = useMetadata();
   const appBasePath = `/apps/${appAddressSegment(metadataApps, activeApp) ?? activeAppName}`;
   // objectstack#36362 — the app's design mode, held here so it stays on from
-  // page to page of the app; never on a phone, which has no 「Edit app」.
+  // page to page of the app; never on a phone, which has no 「Design layout」.
   const designMode = useDesignModeController({ appName: activeAppName, appBasePath, enabled: !phone });
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object

@@ -178,10 +178,16 @@ const NO_OVERRIDE: ServedOverride = { declaration: null, state: null, shipped: n
  * A failed read is no declaration, as an absent one: no fact, no badge.
  * The same layered read says whether the base ships the item
  * ({@link ServedOverride.shipped}).
+ *
+ * objectstack#36750 — `item.unpublished`: the caller knows nothing is
+ * published under the item's name (a list view's fallback default id, which
+ * no view is held under). The layered read is not asked, and the answer is
+ * the one its 404 gave: no override, `shipped: 'none'`. The pair's draft is
+ * still read first: the item's first save into the pair creates it there.
  */
 export function useServedOverride(
   client: Pick<MetadataClient, 'getDraft' | 'layered'>,
-  item: { type: string; name: string; member?: string } | null,
+  item: { type: string; name: string; member?: string; unpublished?: boolean } | null,
   base: string | null,
   pair: string | null,
   nonce: string | number,
@@ -189,7 +195,8 @@ export function useServedOverride(
   const itemType = item?.type ?? '';
   const itemName = item?.name ?? '';
   const itemMember = item?.member ?? '';
-  const key = itemType && itemName && base ? JSON.stringify([itemType, itemName, itemMember, base]) : '';
+  const itemUnpublished = item?.unpublished === true;
+  const key = itemType && itemName && base ? JSON.stringify([itemType, itemName, itemMember, base, itemUnpublished]) : '';
   const [answer, setAnswer] = React.useState<{ key: string; served: ServedOverride }>({ key: '', served: NO_OVERRIDE });
   React.useEffect(() => {
     if (!key || !base) return;
@@ -204,6 +211,7 @@ export function useServedOverride(
         const declared = declaredOverrideOf(extractDraftBody(draft), base);
         if (declared) return { declaration: declared, state: 'draft', shipped: null };
       }
+      if (itemUnpublished) return { declaration: null, state: null, shipped: 'none' };
       const layered = await client
         .layered(itemType, itemName, { packageId: base, ...memberScope })
         .catch(() => null);
@@ -217,7 +225,7 @@ export function useServedOverride(
     return () => {
       cancelled = true;
     };
-  }, [client, key, itemType, itemName, itemMember, base, pair, nonce]);
+  }, [client, key, itemType, itemName, itemMember, itemUnpublished, base, pair, nonce]);
   // A re-read of the same item keeps the last answer until it lands, so the
   // badge does not blink off and on after a save.
   return key && answer.key === key ? answer.served : NO_OVERRIDE;

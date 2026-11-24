@@ -44,7 +44,7 @@ import { checkApiExposure, type ApiExposureDecision, type ObjectApiDef } from '.
 // takes to find its nested-relation conditions and each one's target — the data
 // door's and the MCP stdio bridge's, imported rather than re-walked so this door
 // cannot disagree with them about which conditions a filter holds.
-import { relationConditionSites } from '@objectstack/core';
+import { registryObjectPackageDisabled, relationConditionSites } from '@objectstack/core';
 // [ADR-0090 D10 rule 5] The agent forward credential: minted here, redeemed by
 // the doors that serve forward targets (the dispatcher, the REST face, the
 // identity mount). One module in `@objectstack/rest`, which all three reach.
@@ -92,7 +92,7 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 // A pure factory — no service resolution — so importing it costs the fallback
 // nothing on an assembly where the protocol plugin is absent, which is exactly
 // when the fallback runs.
-import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
+import { objectPackageDisabledError, recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
 // [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
 import { isTenantAuthored, readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { PLATFORM_SYSTEM_API, deriveThroughSeam, serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
@@ -343,10 +343,40 @@ const RELATION_CONDITION_TARGET_OPERATION = DATA_ACTION_TO_API_OPERATION[RELATIO
  * `callData` must not give two answers depending on whether the deployment
  * registered the protocol slot (the #5138 rule this file already keeps).
  *
- * `callData` skips it for a system context on the one decision that skips the
- * addressed gate: these flags govern API exposure, not the engine's own reads. A schema
- * that cannot be resolved finds no condition (the filtered object) or serves
- * (a target), the gate's own fail-open.
+ * [#35526] A target whose owning package is DISABLED is refused first, with
+ * the data plane's own `404 OBJECT_PACKAGE_DISABLED` (the target as `object`,
+ * the condition's position as `param`), whatever it declares: the protocol's
+ * relation-condition check refuses the same condition so (#35427), and the
+ * engine would otherwise read the disabled object to lower it, answering a
+ * count of 1 for a stored value and 0 for any other. The question is the
+ * engine registry's `isObjectPackageDisabled`, the one the data plane asks,
+ * read through {@link registryObjectPackageDisabled}; the refusal is the
+ * protocol's one constructor, `objectPackageDisabledError`. ⛔ Never a second
+ * copy of either. A registry that cannot answer disables nothing, as on the
+ * data route.
+ *
+ * [#36393] EVERY HOP the engine serves, not the first one only. The engine
+ * lowers a condition beneath a condition (`{ c_ref: { b_ref: { … } } }`) up
+ * to `RELATION_CONDITION_MAX_HOPS` relationships (`@objectstack/objectql`),
+ * reading each related object in turn, so each site's own condition is
+ * walked against its target's field map and every target on the way is asked
+ * both questions, disabled package first, at its full position
+ * (`where.c_ref.b_ref`). The protocol's twin walk for an engine without an
+ * evaluate gate (`refuseUnservedRelationTargetsIn`) descends the same way, in
+ * the same order. A site the engine would refuse for depth is still asked:
+ * a refusal for a hop it would not serve costs nothing it served.
+ *
+ * WHO is asked what: the disabled-package question is asked for EVERY caller,
+ * a system context included (#35526 ruling, 「系统身份也一律拒绝」: the protocol's
+ * data plane refuses every caller, and `ctx.api` never passes `callData`).
+ * The exposure question is skipped for a system context (`exposureGated`
+ * false), on the one decision that skips the addressed gate: these flags
+ * govern API exposure, not the engine's own reads. The package predicate is
+ * the one {@link callData} read from the engine for the addressed object
+ * ({@link packageDisabledPredicate}), so the arm's own engine (a raw driver
+ * on the MCP multi-env query fallback, which carries no registry) never
+ * decides it. A schema that cannot be resolved finds no condition (the
+ * filtered object) or serves (a target), the gate's own fail-open.
  */
 async function refuseUnservedRelationTargets(
     deps: ActionExecutionDeps,
@@ -354,16 +384,60 @@ async function refuseUnservedRelationTargets(
     engine: unknown,
     object: string,
     where: unknown,
-    scopeId?: string,
+    scopeId: string | undefined,
+    asked: { isObjectPackageDisabled: (objectName: string) => boolean; exposureGated: boolean },
 ): Promise<void> {
+    const walk = async (schema: unknown, condition: unknown, prefix: string, depth: number): Promise<void> => {
+        if (condition == null || typeof condition !== 'object' || depth > RELATION_CONDITION_WALK_DEPTH) return;
+        const fields = (schema as { fields?: Record<string, any> } | undefined)?.fields;
+        for (const site of relationConditionSites(fields, condition)) {
+            const param = `${prefix}.${site.field}`;
+            if (asked.isObjectPackageDisabled(site.target)) {
+                throw Object.assign(objectPackageDisabledError(site.target), { param });
+            }
+            const target = await resolveWriteResponseSchema(deps, requestContext, engine, site.target, scopeId);
+            if (asked.exposureGated) {
+                const gate = checkApiExposure(target as ObjectApiDef | undefined, RELATION_CONDITION_TARGET_ACTION);
+                if (!gate.allowed) throw unservedRelationTargetError(site.target, param, gate);
+            }
+            await walk(target, site.condition, param, depth + 1);
+        }
+    };
     if (where == null || typeof where !== 'object') return;
-    const schema = await resolveWriteResponseSchema(deps, requestContext, engine, object, scopeId);
-    const fields = (schema as { fields?: Record<string, any> } | undefined)?.fields;
-    for (const site of relationConditionSites(fields, where)) {
-        const target = await resolveWriteResponseSchema(deps, requestContext, engine, site.target, scopeId);
-        const gate = checkApiExposure(target as ObjectApiDef | undefined, RELATION_CONDITION_TARGET_ACTION);
-        if (!gate.allowed) throw unservedRelationTargetError(site.target, `where.${site.field}`, gate);
+    await walk(await resolveWriteResponseSchema(deps, requestContext, engine, object, scopeId), where, 'where', 0);
+}
+
+/**
+ * [#36393] A backstop against a self-referential in-process `where`, never the
+ * hop limit: the engine's own `RELATION_CONDITION_MAX_HOPS` decides what it
+ * lowers, and this walk asks at least every hop it serves. The protocol's twin
+ * walk and the engine's evaluate gate stop at the same depth.
+ */
+const RELATION_CONDITION_WALK_DEPTH = 8;
+
+/**
+ * [#36393] The engine registry's `isObjectPackageDisabled`, read once per
+ * {@link callData} call through {@link registryObjectPackageDisabled}, the one
+ * reading the data plane asks before it refuses an object `404
+ * OBJECT_PACKAGE_DISABLED`. The engine is the one this door aggregates on
+ * (`getObjectQL`, then the `objectql` slot), never the raw driver an MCP
+ * multi-env caller threads through. An engine that cannot be resolved, or a
+ * registry without the member, disables nothing, as on the data route.
+ */
+async function packageDisabledPredicate(
+    deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    scopeId?: string,
+): Promise<(objectName: string) => boolean> {
+    let engine = await resolveEngineQuietly(deps, requestContext, scopeId);
+    if (engine == null) {
+        try {
+            engine = (await deps.resolveService(requestContext, 'objectql', scopeId)) ?? undefined;
+        } catch {
+            engine = undefined;
+        }
     }
+    return registryObjectPackageDisabled((engine as { registry?: unknown } | null | undefined)?.registry);
 }
 
 /**
@@ -642,9 +716,19 @@ export async function callData(deps: ActionExecutionDeps,
 ): Promise<any> {
     // The object-level API exposure gate ({@link refuseUnexposedDataAction}).
     // [#22823] Decided ONCE, here: the same bypass covers each nested-relation
-    // condition's target, asked below on the two arms that hand the engine a
-    // caller's `where` ({@link refuseUnservedRelationTargets}).
+    // condition's target's EXPOSURE question, asked below on the two arms that
+    // hand the engine a caller's `where` ({@link refuseUnservedRelationTargets});
+    // [#36393] its disabled-package question is asked of every caller.
     const exposureGated = !executionContext?.isSystem;
+    // [#36393] The disabled-package question, asked of EVERY caller (a system
+    // context included, the #35526 ruling) before any exposure verdict: of the
+    // addressed object here, and of every nested-relation condition's target
+    // below. Read from the engine's registry, so a host with no protocol
+    // service, whose by-name read below cannot refuse, refuses too.
+    const isObjectPackageDisabled = await packageDisabledPredicate(deps, requestContext, scopeId);
+    if (typeof params?.object === 'string' && isObjectPackageDisabled(params.object)) {
+        throw objectPackageDisabledError(params.object);
+    }
     // [#25120] `'refuse'`: a disabled package's object is refused here, on
     // every arm, the `aggregate` arm that never reaches the protocol included.
     await refuseUnexposedDataAction(deps, requestContext, action, params?.object, scopeId, executionContext, 'refuse');
@@ -944,9 +1028,7 @@ export async function callData(deps: ActionExecutionDeps,
             // [#22823] …and each nested-relation condition's TARGET, before the
             // engine reads it — the protocol path asks the same of the same
             // sites (`refuseUnservedRelationTarget`).
-            if (exposureGated) {
-                await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId);
-            }
+            await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId, { isObjectPackageDisabled, exposureGated });
             // …and the `internal: true` evaluate refusal for every caller, as
             // the protocol path asks it inside `findData` — the engine's one
             // definition (see the `aggregate` arm). A raw driver on the MCP
@@ -983,9 +1065,7 @@ export async function callData(deps: ActionExecutionDeps,
             // is asked before the engine aggregates, as the query fallback asks
             // it (the engine lowers relation conditions in `where` only, never
             // in an aggregation's own `filter`).
-            if (exposureGated) {
-                await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
-            }
+            await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId, { isObjectPackageDisabled, exposureGated });
             // The `internal: true` evaluate refusal — a filter (`where`, an
             // aggregation's own `filter`), a group key or an aggregation operand
             // on such a field — asked of the ENGINE's one definition

@@ -445,7 +445,7 @@ describe('acceptance 1 — clicking the announcement opens the message and marks
     act(() => { presentNotificationToast.mock.calls[0][0].actions[0].onClick(); });
 
     expect(markRead).toHaveBeenCalledWith('m1');
-    expect(navigate).toHaveBeenCalledWith('/apps/setup/sys_inbox_message?view=mine');
+    expect(navigate).toHaveBeenCalledWith('/apps/setup/inbox');
   });
 
   it('clicking the system notification focuses the window, then opens the message', async () => {

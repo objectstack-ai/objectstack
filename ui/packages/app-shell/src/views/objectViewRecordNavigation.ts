@@ -46,7 +46,7 @@
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
-import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view/core';
+import { deriveRecordSurface } from '@object-ui/plugin-view/core';
 import { useNavigationOverlay } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import type { ViewNavigationConfig } from '@object-ui/types';
@@ -55,6 +55,7 @@ import { RECORD_FORM_CREATE_VALUES_STATE } from '../utils/recordFormNavigation.j
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
 import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
+import { recordPaneWidth, recordPreviewWidthKey } from './recordDrawerContext.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
 import {
     expandedRecordPath,
@@ -185,17 +186,6 @@ function splitRecordFormSearch(search: string): { form: string; origin: URLSearc
     return { form: form.toString(), origin };
 }
 
-type OverlaySizeBucket = 'sm' | 'md' | 'lg' | 'xl' | 'full';
-
-/**
- * The record pane's size bucket (objectstack#27545): `auto` — or no size —
- * is `md` (720 px) whatever the object's field count; an authored bucket
- * stands as authored.
- */
-function recordPaneSize(size: 'auto' | OverlaySizeBucket | undefined): OverlaySizeBucket {
-    return !size || size === 'auto' ? 'md' : size;
-}
-
 export function useObjectViewRecordNavigation({
     activeView,
     objectDef,
@@ -261,19 +251,20 @@ export function useObjectViewRecordNavigation({
             // view that declares one behaves as one that declares nothing.
             // The drawer's width still reads the authored `size` bucket (or the
             // deprecated pixel `width`, objectstack-ai/objectstack#2578): `auto`
-            // is the pane's 720 (objectstack#27545), clamped to the viewport.
+            // is the side preview's 460 (objectstack#36149), clamped to the viewport.
             // `openNewTab: true` stays live: the name opens the page in a new tab.
             return {
                 mode: 'drawer',
                 openNewTab: authored?.openNewTab,
-                width: authored?.width ?? overlayWidthFor(
-                    recordPaneSize((authored as { size?: 'auto' | OverlaySizeBucket } | undefined)?.size),
-                    objectDef,
-                ),
+                width: recordPaneWidth(authored, objectDef),
             };
         },
         [activeView?.navigation, objectDef, phone, recordServed]
     );
+    // objectstack#36149 — where the drawer remembers a dragged width: the
+    // shared preview key, or this object's own key when the view or the
+    // object authors the drawer's width (`recordPreviewWidthKey`).
+    const drawerWidthKey = recordPreviewWidthKey(objectDef.name, phone ? undefined : activeView?.navigation ?? objectDef.navigation);
     const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
     // objectstack#36015 — the root's object when a lookup chip opened a record
     // of another object; `null` for the listed object's own rows.
@@ -582,5 +573,5 @@ export function useObjectViewRecordNavigation({
             navOverlay.close();
         }
     }, [drawerRecordId, drawerForeignObject, phone, drawerRootServed]);
-    return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel };
+    return { listRecordActions, navOverlay, drawerWidthKey, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowInPanel, handleOpenReferencedRecord, drawerRoot, drawerRestore, handleListRowsChange, handleListTotalChange, handleRootStep, listLabel };
 }

@@ -81,6 +81,7 @@ export const SysAuditLog = ObjectSchema.create({
   label: 'Audit Log',
   pluralLabel: 'Audit Logs',
   icon: 'scroll-text',
+  color: 'amber',
   isSystem: true,
   managedBy: 'append-only',
   // [ADR-0131 D7] Deployment-level ledger: NO injected organization column.
@@ -689,6 +690,7 @@ export const SysAuditLog = ObjectSchema.create({
 
   enable: {
     trackHistory: false, // Audit logs are themselves the audit trail
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: true,
     apiEnabled: true,
     apiMethods: ['get', 'list'], // Read-only — creation happens via internal system hooks only

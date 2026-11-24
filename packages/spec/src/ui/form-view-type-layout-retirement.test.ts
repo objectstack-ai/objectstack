@@ -73,7 +73,7 @@ const TYPE_FIRST_SENTENCE = {
   modal:
     "'modal' was removed from the form view `type` enum in @objectstack/spec 18.3.0 (ADR-0050) — `type` is the "
     + "form's layout, and where a form opens is decided by whoever opens it: the console's New and Edit dialogs "
-    + "open the record form themselves (sized by the form's `modalSize`), and an action `type: 'modal'` opens "
+    + "open the record form themselves (laid out by the object's `fieldGroups`), and an action `type: 'modal'` opens "
     + 'the page it targets.',
 } as const;
 /** Each tombstoned key → the first sentence of its prescription. */
@@ -229,7 +229,7 @@ describe('the split-only keys — `pane`, `splitSize`, `splitResizable`, `splitD
   });
 
   it('STATED BOUNDARY: `modalSize` stays declared', () => {
-    // `modalSize` is read by the console's record dialog on every layout.
+    // `modalSize` stays declared; since #36425 the console's record dialog reads no form view (its verdict: #36544).
     // [#29012] `drawerSide` / `drawerWidth` left this boundary: they are
     // tombstones now (`form-view-drawer-keys-retirement.test.ts`).
     const r = FormViewSchema.safeParse({

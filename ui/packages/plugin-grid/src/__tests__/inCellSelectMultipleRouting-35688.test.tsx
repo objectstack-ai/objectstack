@@ -113,7 +113,6 @@ function renderGrid(cellSelection = false) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [
       { field: 'title', label: 'Title', type: 'text' },
       { field: 'priority', label: 'Priority', type: 'select' },
@@ -128,7 +127,7 @@ function renderGrid(cellSelection = false) {
       <SchemaRendererProvider dataSource={ds}>
         <div>
           <button data-testid="outside">outside</button>
-          <ObjectGrid schema={schema} dataSource={ds} cellSelection={cellSelection || undefined} />
+          <ObjectGrid schema={schema} dataSource={ds} cellSelection={cellSelection} />
         </div>
       </SchemaRendererProvider>
     </ActionProvider>,

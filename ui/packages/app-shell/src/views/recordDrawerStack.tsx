@@ -63,7 +63,6 @@ import {
   type RecordHeaderBar,
   ObjectIconTile,
 } from '@object-ui/components';
-import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
@@ -86,6 +85,8 @@ import {
   type RecordDrawerApi,
   type RecordPaneApi,
   type RecordPaneBarApi,
+  recordPaneWidth,
+  recordPreviewWidthKey,
 } from './recordDrawerContext.js';
 
 export {
@@ -526,8 +527,10 @@ export function RecordStackDrawer({
   const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLElement | null>(null);
   const [headerActionSlot, setHeaderActionSlot] = useState<HTMLElement | null>(null);
   const [headerClaimed, setHeaderClaimed] = useState(false);
+  // objectstack#36149 / objectstack#36201 — the pane is the side preview: the
+  // record's name first, one labelled action, Edit and the id's copy in `⋯`.
   const headerBar = useMemo<RecordHeaderBar>(
-    () => ({ titleSlot: headerTitleSlot, actionSlot: headerActionSlot, claim: setHeaderClaimed }),
+    () => ({ titleSlot: headerTitleSlot, actionSlot: headerActionSlot, claim: setHeaderClaimed, preview: true }),
     [headerTitleSlot, headerActionSlot],
   );
   const currentObject = current?.objectName;
@@ -945,9 +948,10 @@ export function RecordPageDrawerHost({
   );
 
   const rootDef = root ? objects.find((o) => (o as { name?: unknown } | null)?.name === root.objectName) : undefined;
-  // The pane's own width (objectstack#27545): an authored one, else `md`.
-  const rootWidth = (rootDef as { navigation?: { width?: string | number } } | undefined)?.navigation?.width
-    ?? overlayWidthFor('md', rootDef);
+  // The pane's own width (objectstack#27545): an authored width or size
+  // bucket, else the side preview's 460 (`recordPaneWidth`, objectstack#36149).
+  const rootNavigation = (rootDef as { navigation?: unknown } | undefined)?.navigation;
+  const rootWidth = recordPaneWidth(rootNavigation, rootDef);
 
   return (
     <RecordDrawerContext.Provider value={api}>
@@ -956,7 +960,7 @@ export function RecordPageDrawerHost({
         stack={stack}
         open={!!root}
         width={rootWidth}
-        storageKey={root ? `drawer-width:${root.objectName}` : undefined}
+        storageKey={root ? recordPreviewWidthKey(root.objectName, rootNavigation) : undefined}
         objects={objects}
         onClose={close}
         onOpenAsPage={openAsPage}

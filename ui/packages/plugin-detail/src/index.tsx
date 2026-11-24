@@ -142,6 +142,10 @@ export type { RecordOperation } from './useRecordEditable';
 // claim is `{ owner_id: <self> }` through the normal update.
 export { recordSitsInQueue, useQueueClaimOffered, claimQueuedRecord, seedQueueClaimDecision } from './queueClaim';
 export type { QueueClaimOutcome, ClaimWriter } from './queueClaim';
+// objectstack#35928 — the flows a stage change would start, named in both
+// stage confirms: the record page's and the list cell's (`@object-ui/plugin-grid`).
+export { useRecordUpdateStarts, StageChangeStarts, RECORD_UPDATE_STARTS_PATH } from './stageChangeStarts';
+export type { RecordUpdateStartsAsk } from './stageChangeStarts';
 export { SectionGroup } from './SectionGroup';
 export { HeaderHighlight } from './HeaderHighlight';
 export { InlineFieldInput } from './InlineFieldInput';
@@ -158,6 +162,19 @@ export { CommentAttachment } from './CommentAttachment';
 export { RecordActivityTimeline } from './RecordActivityTimeline';
 export { RecordChatterPanel } from './RecordChatterPanel';
 export { FieldChangeItem } from './FieldChangeItem';
+// objectstack#36290 — one field's change history, opened in place: the record
+// page's field button, and the card a list cell's context menu opens.
+export {
+  FieldHistoryButton,
+  FieldHistoryCard,
+  FieldHistoryPopover,
+  fieldHistoryOffered,
+  useFieldHistory,
+  useFieldHistoryOffered,
+  FIELD_HISTORY_PAGE_SIZE,
+  FIELD_HISTORY_SCAN_BATCH,
+  FIELD_HISTORY_SCAN_BATCHES_PER_LOAD,
+} from './FieldHistory';
 export { SubscriptionToggle } from './SubscriptionToggle';
 export { ReactionPicker } from './ReactionPicker';
 export { ThreadedReplies } from './ThreadedReplies';
@@ -183,6 +200,15 @@ export type { CommentAttachmentProps, Attachment } from './CommentAttachment';
 export type { RecordActivityTimelineProps, FeedFilterMode } from './RecordActivityTimeline';
 export type { RecordChatterPanelProps } from './RecordChatterPanel';
 export type { FieldChangeItemProps } from './FieldChangeItem';
+export type {
+  FieldHistoryButtonProps,
+  FieldHistoryCardProps,
+  FieldHistoryCreation,
+  FieldHistoryEntry,
+  FieldHistoryPopoverProps,
+  FieldHistoryState,
+  UseFieldHistoryOptions,
+} from './FieldHistory';
 export type { SubscriptionToggleProps } from './SubscriptionToggle';
 export type { ReactionPickerProps } from './ReactionPicker';
 export type { ThreadedRepliesProps } from './ThreadedReplies';
@@ -718,7 +744,7 @@ ComponentRegistry.register('details', RecordDetailsRenderer, {
     // open editing the platform refuses; only `false` is unconditional. Saying
     // "enables inline editing" would advertise an authority this key does not
     // have.
-    { name: 'inlineEdit', type: 'boolean', description: 'Offer the per-field double-click / pencil inline-edit affordances in the detail body. On by default, and an OPT-OUT only: the value is combined with the object\'s own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server\'s effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The edit session and the atomic Save bar are hosted by the page, so one draft spans the highlights strip and this body.' },
+    { name: 'inlineEdit', type: 'boolean', description: 'Offer the per-field edit affordances in the detail body. On the default record page a click on a value (or its pencil) edits that field alone in place and saves it on Enter or a click elsewhere; on a page an author laid out a double-click (or the pencil) enters the page\'s whole-record edit session, saved together by its Save bar. On by default, and an OPT-OUT only: the value is combined with the object\'s own editability (system, engine-owned, append-only and better-auth objects are not user-editable unless they opened userActions.edit) and with the server\'s effective API operation set for the object, so `false` always wins while `true` cannot open editing the platform refuses. The whole-record session and its atomic Save bar are hosted by the page, so that one draft spans the highlights strip and this body.' },
     { name: 'showHeader', type: 'boolean', description: 'Render the detail body\'s own title / follow-star / copy-id chip above the fields. Off by default because this block is normally composed under a `page:header` that already draws that chrome, and turning it on there shows the record title twice. Set it true only when this block is the whole page.' },
     // The field-security triple — `enforceFieldSecurity`, `redactFields`,
     // `requiredPermissions` — is DECLARED here by objectui#8649, the reverse

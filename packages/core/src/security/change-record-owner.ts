@@ -86,6 +86,58 @@ export const CHANGE_OWNER_DISABLED = 'CHANGE_OWNER_DISABLED';
 /** [ADR-0142 D3] The ownership-queue column a queue target is written to. */
 const QUEUE_FIELD = 'queue';
 
+/**
+ * The write options every owner change passes besides its address and context.
+ *
+ * The answer is what was saved, not what was asked. A `readonlyWhen` lock on
+ * `owner_id` or `queue` that holds for the row makes the engine strip that
+ * key; without `strictReadonlyWrites` the write would commit without it and
+ * this module would still answer "moved", and tell the new owner, for a record
+ * that never moved. Under the flag the strip is refused before anything is
+ * written, and {@link writeOwner} answers that refusal as the row's own: `403
+ * FIELD_NOT_ACCESSIBLE`, naming the locked column. The single form throws it,
+ * the bulk form lists the row under `failures` with that code, and no
+ * notification names it. A queue target writes both keys, so a lock on either
+ * refuses the whole row rather than half-moving it.
+ */
+const OWNER_WRITE_OPTIONS = { strictReadonlyWrites: true } as const;
+
+/**
+ * The row's refusal for an owner write the engine refused under
+ * `strictReadonlyWrites`, or `undefined` for any other throw. The engine's own
+ * sentence speaks to a developer about write options; the person changing the
+ * owner reads which column is locked and that nothing changed. `403
+ * FIELD_NOT_ACCESSIBLE`, as the record-file door answers the same refusal.
+ */
+function lockedOwnerRefusal(err: unknown, object: string, id: string): Error | undefined {
+  const e = err as { code?: unknown; fields?: unknown } | null;
+  // The engine's code for a write `strictReadonlyWrites` refused (`@objectstack/objectql`'s, read here, never stamped).
+  if (!e || e.code !== 'ERR_READONLY_FIELD_REJECTED') return undefined;
+  const fields = Array.isArray(e.fields) && e.fields.length > 0 ? e.fields.map(String) : [SystemFieldName.OWNER_ID];
+  const named = fields.map((f) => `${object}.${f}`).join(', ');
+  const refusal = new Error(
+    `The owner of ${object} record ${id} was not changed: ${named} ${fields.length === 1 ? 'is' : 'are'} read-only ` +
+    'on this record in its current state, so nothing was written',
+  ) as Error & { code?: string; status?: number; fields?: string[] };
+  refusal.code = 'FIELD_NOT_ACCESSIBLE';
+  refusal.status = 403;
+  refusal.fields = fields;
+  return refusal;
+}
+
+/**
+ * One record's owner write: a by-id update under the caller's context with
+ * {@link OWNER_WRITE_OPTIONS}, a locked owner or queue answered as
+ * {@link lockedOwnerRefusal}. Answers what the engine answers.
+ */
+async function writeOwner(engine: ChangeOwnerEngine, object: string, id: string, changeSet: AnyRec, context: unknown): Promise<unknown> {
+  try {
+    return await engine.update(object, changeSet, { where: { id }, context, ...OWNER_WRITE_OPTIONS });
+  } catch (err) {
+    throw lockedOwnerRefusal(err, object, id) ?? err;
+  }
+}
+
 /** The notification topic a notified new owner receives. */
 export const CHANGE_OWNER_NOTIFICATION_TOPIC = 'record.owner_changed';
 
@@ -141,7 +193,23 @@ export interface ChangeOwnerMessaging {
       titleKey: string;
       params: Record<string, string | { key: string; fallback: string }>;
     };
-  }): Promise<unknown>;
+  }): Promise<ChangeOwnerEmitResult>;
+}
+
+/**
+ * The part of the messaging service's `EmitResult` this module reads: how many
+ * deliveries a channel accepted inline, and how many rows the outbox took.
+ */
+export interface ChangeOwnerEmitResult {
+  readonly delivered: number;
+  readonly enqueued: number;
+}
+
+/** Whether an emit's answer reports a delivered or an enqueued row. */
+function emitReachedSomeone(result: ChangeOwnerEmitResult | null | undefined): boolean {
+  const delivered = result?.delivered;
+  const enqueued = result?.enqueued;
+  return (typeof delivered === 'number' && delivered > 0) || (typeof enqueued === 'number' && enqueued > 0);
 }
 
 /** What one record's Change Owner answers. */
@@ -239,8 +307,10 @@ function objectLabel(object: string, def: AnyRec): string {
 /**
  * Tell the new owner, when asked to. Never fails the call: the records have
  * moved, and a notification the deployment cannot send (no `messaging`
- * service, a fault in it) is answered as `notified: false`. A queue target, or
- * a caller who took the records themselves, has nobody to tell.
+ * service, a fault in it) is answered as `notified: false`, as is one the
+ * service took but sent nowhere (a muted topic, an unavailable channel: zero
+ * delivered and zero enqueued). A queue target, or a caller who took the
+ * records themselves, has nobody to tell.
  */
 async function notifyNewOwner(
   messaging: ChangeOwnerMessaging | undefined,
@@ -256,7 +326,7 @@ async function notifyNewOwner(
   const messageId: keyof typeof CHANGE_OWNER_NOTIFICATION_TEXT = single ? 'recordOwnerChangedTitle' : 'recordsOwnerChangedTitle';
   const count = String(ids.length);
   try {
-    await messaging.emit({
+    const result = await messaging.emit({
       topic: CHANGE_OWNER_NOTIFICATION_TOPIC,
       audience: [ownerId],
       severity: 'info',
@@ -276,7 +346,7 @@ async function notifyNewOwner(
         },
       },
     });
-    return true;
+    return emitReachedSomeone(result);
   } catch {
     return false;
   }
@@ -285,9 +355,10 @@ async function notifyNewOwner(
 /**
  * Change the owner of one record, as the caller. Throws the write path's own
  * refusal for a row the caller may not move (the route answers it as the
- * `/data` door answers the same throw), `404 RECORD_NOT_FOUND` for a row the
- * caller cannot reach, and the whole-call refusals of
- * {@link changeRecordsOwner}.
+ * `/data` door answers the same throw), `403 FIELD_NOT_ACCESSIBLE` when a
+ * `readonlyWhen` lock holds `owner_id` or `queue` on the row, `404
+ * RECORD_NOT_FOUND` for a row the caller cannot reach, and the whole-call
+ * refusals of {@link changeRecordsOwner}.
  */
 export async function changeRecordOwner(
   engine: ChangeOwnerEngine,
@@ -299,7 +370,7 @@ export async function changeRecordOwner(
 ): Promise<ChangeOwnerResult> {
   const def = offeredDefinition(engine, object, target);
   await assertTarget(engine, target, context);
-  const written = await engine.update(object, ownerChangeSet(target), { where: { id }, context });
+  const written = await writeOwner(engine, object, id, ownerChangeSet(target), context);
   if (written === null || written === undefined || written === 0) {
     throw recordNotFoundError(object, id, context as Parameters<typeof recordNotFoundError>[2]);
   }
@@ -359,7 +430,7 @@ export async function changeRecordsOwner(
   const moved: string[] = [];
   for (const id of ids) {
     try {
-      const written = await engine.update(object, { ...changeSet }, { where: { id }, context });
+      const written = await writeOwner(engine, object, id, { ...changeSet }, context);
       if (written === null || written === undefined || written === 0) {
         throw recordNotFoundError(object, id, context as Parameters<typeof recordNotFoundError>[2]);
       }

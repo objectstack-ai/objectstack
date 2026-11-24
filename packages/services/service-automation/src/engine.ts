@@ -10,9 +10,9 @@ import type {
     FlowFunctionEffect,
     FlowRunSummary,
 } from '@objectstack/spec/automation';
-import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest, FlowDryRunOptions, FlowDryRunResult } from '@objectstack/spec/contracts';
+import type { AutomationContext, AutomationResult, ResumeSignal, IAutomationService, RunListResult, ScreenSpec, ScreenFieldSpec, ConnectorSourcePullRequest, ConnectorSourcePullResult, ConnectorCredentialRef, ConnectorCredentialSetRequest, ConnectorCredentialClearRequest, ConnectorConnectionState, ConnectorConnectionRequest, ConnectorConnectionBegin, ConnectorConnectionCallbackRequest, FlowDryRunOptions, FlowDryRunResult, RecordUpdateStartsInput } from '@objectstack/spec/contracts';
 import type { MetadataActivationWriteOptions } from '@objectstack/core';
-import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal } from '@objectstack/spec/api';
+import type { FlowRegistration, FlowRegistrationRefusal, FlowInnerRefusal, RecordUpdateStart } from '@objectstack/spec/api';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
 import {
     validateScreenInputs,
@@ -132,6 +132,8 @@ import {
     type ValueEnvelopeRefusal,
 } from './dag-traversal.js';
 import { activeDryRunExecuteNode, dryRun as dryRunBody, type DryRunHost } from './dry-run.js';
+// [#35928] The record-update preview's body.
+import { listRecordUpdateStarts, type RecordUpdateStartsHost } from './record-update-starts.js';
 // [#25222] The run history's bodies: recording a run's log entry, finishing a
 // refused run, and reading runs and suspended runs back. Each
 // `AutomationEngine` method of the same name calls its body.
@@ -5970,6 +5972,27 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#35928] Which flows a proposed update of one record would start — the
+     * preview the stage-change confirms show. The contract is
+     * `IAutomationService.listRecordUpdateStarts`; the body lives in
+     * ./record-update-starts.ts, over this engine's own arming state and its
+     * one start-condition gate.
+     */
+    listRecordUpdateStarts(input: RecordUpdateStartsInput): RecordUpdateStart[] {
+        const host: RecordUpdateStartsHost = {
+            flows: this.flows,
+            boundFlowTriggers: this.boundFlowTriggers,
+            isFlowEnabled: (...a) => this.isFlowEnabled(...a),
+            resolveTriggerBinding: (...a) => this.resolveTriggerBinding(...a),
+            seedRunVariables: (...a) => this.seedRunVariables(...a),
+            evaluateCondition: (...a) => this.evaluateCondition(...a),
+            flowSlotName: (...a) => this.flowSlotName(...a),
+            subflowTargets: (...a) => this.subflowTargets(...a),
+        };
+        return listRecordUpdateStarts.call(host, input);
+    }
+
+    /**
      * [#17396 ruled item 6, #18235] The ONE place that decides why a registered
      * flow is not armed — both the status door ({@link getFlowRuntimeStates})
      * and the boot-time audit ({@link getTriggerBindingAudit}) read it, so the
@@ -11564,6 +11587,16 @@ export class AutomationEngine implements IAutomationService {
      *
      * Shared deliberately: a predicate and a value expression that disagreed
      * about what `rows` means would be two dialects wearing one name.
+     *
+     * ## No variable key reaches a prototype
+     *
+     * Every container the builder creates has no prototype, and a key with a
+     * `__proto__` segment binds nothing here — skipped, not refused (a dotted
+     * tail whose head names a value the run holds is still written into that
+     * value);
+     * `./scope-key-segments.ts` states the rule and why `constructor` and
+     * `prototype` stay ordinary keys. The text-hole scope
+     * (`textTemplateScope`) follows the same rule.
      *
      * ## `current_user` — the run's user, or `null` (#19939)
      *

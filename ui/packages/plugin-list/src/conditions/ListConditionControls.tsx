@@ -23,10 +23,12 @@
  *
  * All three are controlled: they read the host's filter group and sort array
  * and hand back the next one. Nothing here stores anything or changes what a
- * filter row or a sort entry looks like. The one read the row makes is the
- * names of the records a lookup condition points at, through the host's data
- * source (`useLookupValueNames`), so a chip says 「Account: Globex」, not the
- * record's id.
+ * filter row or a sort entry looks like. The row makes two reads, both
+ * through the host's data source: the names of the records a lookup condition
+ * points at (`useLookupValueNames`), so a chip says 「Account: Globex」, not
+ * the record's id; and the definition of the object a view condition on a
+ * related record's field reaches (`useRelatedConditionFields`), so that chip
+ * says 「Account › Industry: Technology」.
  */
 
 import * as React from 'react';
@@ -42,6 +44,7 @@ import {
 } from '@object-ui/components';
 import { referencedRecordTitle } from '@object-ui/core';
 import type { DataSource } from '@object-ui/types';
+import { useSafeFieldLabel } from '@object-ui/i18n';
 import { ArrowDown, ArrowUp, ArrowUpDown, ListFilter, Lock, Plus, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
 import { FieldList, type FieldListItem } from './FieldList';
 import { FilterValuePanel, isQuickRowApplied, quickDateWindowOf } from './FilterValuePanel';
@@ -53,6 +56,7 @@ import {
   newConditionId,
   quickFilterFamily,
   readViewConditions,
+  relationPathOf,
   removeCondition,
   seedValueFor,
   sortWording,
@@ -110,10 +114,10 @@ export function describeConditionValue(
   } else {
     text = list.map(String).join(joiner);
   }
-  // 「is any of」 is what a value list means on its own; every other operator is named.
-  return operator === 'in' || (operator === 'equals' && (family === 'option' || family === 'boolean'))
-    ? text
-    : `${opLabel} ${text}`;
+  // 「is any of」 is what a value list means on its own; every other operator is
+  // named, and with no value it is the operator alone, never one with a trailing space.
+  if (operator === 'in' || (operator === 'equals' && (family === 'option' || family === 'boolean'))) return text;
+  return text ? `${opLabel} ${text}` : opLabel;
 }
 
 function chipText(
@@ -135,11 +139,125 @@ function viewChipText(
   fields: ReadonlyArray<ConditionField>,
   t: Translate,
   nameOf?: LookupValueName,
+  relatedFieldOf?: RelatedFieldOf,
 ): string {
-  if (chip.anyOf) return chip.anyOf.map((member) => viewChipText(member, fields, t, nameOf)).join(t('listConditions.chips.or'));
+  if (chip.anyOf) {
+    return chip.anyOf.map((member) => viewChipText(member, fields, t, nameOf, relatedFieldOf)).join(t('listConditions.chips.or'));
+  }
   if (!chip.field || !chip.operator) return t('listConditions.chips.viewFilter');
+  const path = relationPathOf(chip.field);
+  if (path) {
+    // A related record's field: 「Account › Industry: Technology」, each name
+    // its label where one is known and its raw name where none is. No record
+    // name is read for it (`nameOf` names the list's own lookups only).
+    const related = relatedFieldOf?.(chip.field);
+    const label = t('listConditions.chips.relationPath', {
+      lookup: fields.find((f) => f.value === path.lookup)?.label ?? path.lookup,
+      field: related?.label ?? path.field,
+    });
+    return t('listConditions.chips.pattern', {
+      field: label,
+      value: describeConditionValue(related, chip.operator, chip.value, t),
+    });
+  }
   const field = fields.find((f) => f.value === chip.field);
   return chipText(field, chip.field, chip.operator, chip.value, t, nameOf);
+}
+
+// ---------------------------------------------------------------------------
+// Related fields
+// ---------------------------------------------------------------------------
+
+/** A related record's field, by its chip path `<lookup>.<field>`, or `undefined` while it is not read. */
+export type RelatedFieldOf = (path: string) => ConditionField | undefined;
+
+/** The value of a declared option (an array of `{ value, label }` or a keyed object) and its declared label. */
+function declaredOptions(raw: unknown): Array<{ value: string; label: string }> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (Array.isArray(raw)) {
+    return raw.map((o) => {
+      const value = o && typeof o === 'object' ? (o as { value?: unknown }).value : o;
+      const label = o && typeof o === 'object' ? (o as { label?: unknown }).label : undefined;
+      return { value: String(value), label: typeof label === 'string' && label ? label : String(value) };
+    });
+  }
+  return Object.entries(raw as Record<string, unknown>).map(([value, meta]) => {
+    const label = meta && typeof meta === 'object' ? (meta as { label?: unknown }).label : undefined;
+    return { value, label: typeof label === 'string' && label ? label : value };
+  });
+}
+
+/**
+ * The related fields the view's relation-path chips name (`<lookup>.<field>`),
+ * read from the definition of the object each lookup points at
+ * (`referenceTo`) through the host's data source: one definition read per
+ * target, again only when the targets change. The field's label and its
+ * options' labels are translated as the list translates its own fields
+ * (`fields.<object>.<field>`, `fieldOptions.<object>.<field>.<value>`), with
+ * the declared label, then the raw name, as the fallback.
+ *
+ * Keyed on the targets it reads, never on the identity of the arrays the host
+ * rebuilds every render (`ui/AGENTS.md` #10). A read that fails answers
+ * `undefined`: the chip keeps the raw names.
+ */
+export function useRelatedConditionFields(
+  dataSource: Pick<DataSource, 'getObjectSchema'> | null | undefined,
+  fields: ReadonlyArray<ConditionField>,
+  conditions: ReadonlyArray<NamedCondition>,
+): RelatedFieldOf {
+  const { fieldLabel, translateOptions } = useSafeFieldLabel();
+  const wanted = new Set<string>();
+  for (const condition of conditions) {
+    const path = relationPathOf(condition.field);
+    const target = path ? fields.find((f) => f.value === path.lookup)?.referenceTo : undefined;
+    if (target) wanted.add(target);
+  }
+  const readKey = JSON.stringify([...wanted].sort());
+
+  const [read, setRead] = React.useState<{ key: string; defs: ReadonlyMap<string, unknown> } | null>(null);
+
+  React.useEffect(() => {
+    const targets = JSON.parse(readKey) as string[];
+    if (targets.length === 0 || !dataSource || typeof dataSource.getObjectSchema !== 'function') return;
+    let cancelled = false;
+    void Promise.all(
+      targets.map(async (target) => {
+        try {
+          return [target, await dataSource.getObjectSchema(target)] as const;
+        } catch {
+          // The chip keeps the raw names: the labels are a courtesy, the condition still filters.
+          return [target, undefined] as const;
+        }
+      }),
+    ).then((answers) => {
+      if (!cancelled) setRead({ key: readKey, defs: new Map(answers) });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [dataSource, readKey]);
+
+  const defs = read?.key === readKey ? read.defs : undefined;
+  return React.useCallback<RelatedFieldOf>(
+    (chipField) => {
+      const path = relationPathOf(chipField);
+      const target = path ? fields.find((f) => f.value === path.lookup)?.referenceTo : undefined;
+      if (!path || !target) return undefined;
+      const def = defs?.get(target) as { fields?: Record<string, { label?: unknown; type?: unknown; multiple?: unknown; options?: unknown }> } | undefined;
+      const declared = def?.fields?.[path.field];
+      if (!declared) return undefined;
+      const label = typeof declared.label === 'string' && declared.label ? declared.label : path.field;
+      const options = declaredOptions(declared.options);
+      return {
+        value: path.field,
+        label: fieldLabel(target, path.field, label),
+        type: typeof declared.type === 'string' ? declared.type : 'text',
+        multiple: declared.multiple === true,
+        ...(options ? { options: translateOptions(target, path.field, options) } : {}),
+      };
+    },
+    [defs, fields, fieldLabel, translateOptions],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +686,7 @@ export function ConditionChipRow({
     ...appliedRows,
   ];
   const nameOf = useLookupValueNames(dataSource, filterFields, namedConditions);
+  const relatedFieldOf = useRelatedConditionFields(dataSource, filterFields, namedConditions);
   const independent = chipsAreIndependent(filters);
   // Nothing to show and nothing to offer: the row the host reserves stays empty.
   if (!renderSortPanel && !filterOffered && !end && !trailing && sort.length === 0 && viewChips.length === 0 && appliedRows.length === 0) {
@@ -667,7 +786,7 @@ export function ConditionChipRow({
       )}
 
       {viewChips.map((chip) => {
-        const text = viewChipText(chip, filterFields, t, nameOf);
+        const text = viewChipText(chip, filterFields, t, nameOf, relatedFieldOf);
         return (
           <span
             key={chip.key}

@@ -2,18 +2,19 @@
 
 /**
  * UnifiedSidebar — on a narrow window (below 1280 px, objectstack#36112) the
- * console sidebar starts collapsed, and ⌘B floats its menu OVER the content
- * (objectstack#27593). Collapsed, the sidebar is hidden, with no icon column
+ * console sidebar starts collapsed, and the window's left edge floats its menu
+ * OVER the content (objectstack#27593; ⌘B docks it instead, ruling 7074574380
+ * on objectstack#36112). Collapsed, the sidebar is hidden, with no icon column
  * (ruling 6973617688 on objectstack#35062, which replaced the icon rail; the
  * edge, the reader's own collapse and focus are pinned in
  * `UnifiedSidebar.hiddenCollapse-35062.test.tsx`).
  *
  * - At 1024 px the sidebar mounts collapsed and hidden; at 1440 px nothing
  *   changes; at 700 px the phone drawer still mounts.
- * - ⌘B floats the menu: the panel takes the expanded width above the page
- *   while the in-flow gap keeps no width, so the content beside it does not
- *   move. Resting the pointer on the window's left edge floats it too (the
- *   ruling's change to "hover alone does not expand").
+ * - A press on the window's left edge floats the menu: the panel takes the
+ *   expanded width above the page while the in-flow gap keeps no width, so
+ *   the content beside it does not move. Resting the pointer on the edge
+ *   floats it too (the ruling's change to "hover alone does not expand").
  * - A navigation choice, a press outside it or Esc folds it again; a press in
  *   an entry's own menu (a portal) does not, and a sidebar trigger toggles it
  *   once.
@@ -26,8 +27,8 @@
  *   a resize and a reload (objectstack#28079).
  * - A group declared `expanded: false` stays collapsed, with its count, in the
  *   floated menu as in the expanded sidebar, and its disclosure opens it to
- *   the pointer and the keyboard (objectstack#32156 listed its entries in the
- *   icon rail, which is gone).
+ *   the pointer, and to the keyboard in the sidebar ⌘B docks
+ *   (objectstack#32156 listed its entries in the icon rail, which is gone).
  *
  * The test DOM computes no Tailwind and no layout, so widths are read as the
  * class that sets them; the rendered widths are measured in a browser on the
@@ -223,9 +224,9 @@ const appBarTrigger = () => within(screen.getByTestId('app-bar')).getByRole('but
 const hiddenTooltip = () =>
   Array.from(document.querySelectorAll('[role="tooltip"]')).find((el) => el.closest('[hidden]'));
 
-/** The collapsed sidebar's menu, floated over the content by ⌘B. */
-function expandRail() {
-  fireEvent.keyDown(window, { key: 'b', metaKey: true });
+/** The collapsed sidebar's menu, floated over the content by a press on the window's left edge. */
+function floatRail() {
+  fireEvent.click(screen.getByTestId('console-sidebar-edge'));
   expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
   expect(panel()).toHaveAttribute('data-console-rail', 'overlay');
 }
@@ -267,9 +268,9 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
     expect(keepOpen()).toBeNull();
   });
 
-  it('⌘B floats the menu over the content; the gap keeps no width', () => {
+  it('a press on the window’s left edge floats the menu over the content; the gap keeps no width', () => {
     renderShell(1024);
-    expandRail();
+    floatRail();
 
     // The panel takes the expanded width above the page…
     for (const token of RAIL_OVERLAY_PANEL.split(' ')) expect(tokens(panel())).toContain(token);
@@ -297,7 +298,7 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
 
       // Ruling 6973617688 on objectstack#35062 changes this pin's "hover alone
       // does not expand": with the icon rail gone, the left edge floats the menu
-      // on hover, as ⌘B does.
+      // on hover, as a press on it does.
       fireEvent.pointerEnter(screen.getByTestId('console-sidebar-edge'), { pointerType: 'mouse' });
       act(() => {
         vi.advanceTimersByTime(SIDEBAR_FLOAT_OPEN_DELAY_MS);
@@ -311,7 +312,7 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
 
   it('choosing a navigation item folds it', () => {
     renderShell(1024);
-    expandRail();
+    floatRail();
     fireEvent.click(within(panel()).getByRole('link', { name: 'Contacts' }));
     expectRail();
     expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/contact');
@@ -319,18 +320,18 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
 
   it('a navigation from anywhere else folds it', () => {
     renderShell(1024);
-    expandRail();
+    floatRail();
     act(() => navigateTo('/apps/crm/account'));
     expectRail();
   });
 
   it('a press outside folds it; a sidebar trigger toggles it exactly once, and pressed again docks it', () => {
     renderShell(1024);
-    expandRail();
+    floatRail();
     fireEvent.pointerDown(screen.getByText('The page'));
     expectRail();
 
-    expandRail();
+    floatRail();
     const trigger = within(screen.getByTestId('app-bar')).getByRole('button', { name: 'Toggle sidebar' });
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
@@ -344,7 +345,7 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
 
   it('a press in an entry’s own menu, drawn in a portal, does not fold it', () => {
     renderShell(1024);
-    expandRail();
+    floatRail();
     fireEvent.keyDown(within(panel()).getByRole('button', { name: 'More actions for Accounts' }), { key: 'Enter' });
     const item = screen.getAllByRole('menuitem')[0];
     expect(panel()).not.toContainElement(item);
@@ -354,11 +355,9 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
 
   it('Esc folds it; an Esc another layer already handled does not', () => {
     renderShell(1024);
-    // Floated by a press on the edge, which moves no focus: ⌘B's float
-    // focuses an entry, whose hidden tooltip would take the Esc
-    // (objectstack#28078, below).
-    fireEvent.click(screen.getByTestId('console-sidebar-edge'));
-    expect(panel()).toHaveAttribute('data-console-rail', 'overlay');
+    // Floated by a press on the edge, which moves no focus (focus on an
+    // entry opens its hidden tooltip, objectstack#28078, below).
+    floatRail();
     const handled = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     handled.preventDefault();
     act(() => {
@@ -373,7 +372,7 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
   describe('one Esc folds it wherever the pointer or focus is inside it (objectstack#28078)', () => {
     it('with focus on an entry, whose hidden tooltip is open', () => {
       renderShell(1024);
-      expandRail();
+      floatRail();
       const entry = within(panel()).getByRole('link', { name: 'Contacts' });
       act(() => entry.focus());
       expect(hiddenTooltip(), 'the entry opened its hidden tooltip').toBeDefined();
@@ -383,7 +382,7 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
 
     it('with the pointer on an entry', async () => {
       renderShell(1024);
-      expandRail();
+      floatRail();
       fireEvent.pointerMove(within(panel()).getByRole('link', { name: 'Accounts' }), { pointerType: 'mouse' });
       await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
       expect(hiddenTooltip(), 'the entry opened its hidden tooltip').toBeDefined();
@@ -393,7 +392,7 @@ describe('the narrow window’s collapsed sidebar (objectstack#27593, objectstac
 
     it('an entry’s open menu still takes the Esc first', () => {
       renderShell(1024);
-      expandRail();
+      floatRail();
       const entry = within(panel()).getByRole('link', { name: 'Accounts' });
       act(() => entry.focus());
       fireEvent.keyDown(within(panel()).getByRole('button', { name: 'More actions for Accounts' }), { key: 'Enter' });
@@ -510,7 +509,7 @@ describe('a collapsed group in the folded sidebar (objectstack#32156)', () => {
     // objectstack#32156 listed the group's entries in the icon rail. With no
     // rail (ruling 6973617688 on objectstack#35062) the hidden panel is inert,
     // and the entries are reached through the floated menu.
-    expandRail();
+    floatRail();
     expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
     expect(groupEntry('OAuth Applications')).toBeNull();
     fireEvent.click(disclosure());
@@ -519,16 +518,14 @@ describe('a collapsed group in the folded sidebar (objectstack#32156)', () => {
     expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/oauth_app');
   });
 
-  it('at 1024 px the keyboard floats the menu with ⌘B, opens the group and Enter opens an entry', async () => {
+  it('at 1024 px the keyboard docks the sidebar with ⌘B, opens the group and Enter opens an entry; the sidebar stays docked', async () => {
     const user = userEvent.setup();
     renderShell(1024, COLLAPSED_GROUP_NAVIGATION);
     act(() => appBarTrigger().focus());
-    fireEvent.keyDown(window, { key: 'b', metaKey: true });
-    expect(panel()).toHaveAttribute('data-console-rail', 'overlay');
-    expect(panel(), '⌘B moves focus into the floated menu').toContainElement(
-      document.activeElement as HTMLElement,
-    );
-    for (let press = 0; press < 8 && document.activeElement !== disclosure(); press++) {
+    fireEvent.keyDown(appBarTrigger(), { key: 'b', metaKey: true });
+    expectDocked();
+    expect(document.activeElement, '⌘B moves no focus, as a press on the button').toBe(appBarTrigger());
+    for (let press = 0; press < 12 && document.activeElement !== disclosure(); press++) {
       await user.tab();
     }
     expect(document.activeElement, 'Tab reaches the group’s disclosure').toBe(disclosure());
@@ -540,7 +537,7 @@ describe('a collapsed group in the folded sidebar (objectstack#32156)', () => {
     expect(document.activeElement, 'Tab reaches the entry').toBe(groupEntry('API Keys'));
     await user.keyboard('{Enter}');
     expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/api_key');
-    expectRail();
+    expectDocked();
   });
 
   it('a wide window collapsed by hand is hidden too: no entry of the group is reachable', () => {
@@ -554,14 +551,14 @@ describe('a collapsed group in the folded sidebar (objectstack#32156)', () => {
 
   it('the floated menu keeps the group collapsed, with its count, every time it floats', () => {
     renderShell(1024, COLLAPSED_GROUP_NAVIGATION);
-    expandRail();
+    floatRail();
     expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
     expect(disclosure()).toHaveTextContent('2');
     expect(groupEntry('API Keys')).toBeNull();
 
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expectRail();
-    expandRail();
+    floatRail();
     expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
     expect(groupEntry('API Keys')).toBeNull();
   });

@@ -816,16 +816,29 @@ function predicateSource(v: unknown): string | null {
   return null;
 }
 
+/** One field definition {@link multiValueFieldsOf} reads: its name, `type` and `multiple`. */
+export interface CelFieldDef {
+  name: string;
+  type?: unknown;
+  multiple?: unknown;
+}
+
 /**
- * [#36167] The draft's fields whose stored value is a list, read through
+ * [#36167] The fields whose stored value is a list, read through
  * `isMultiValueField` (`@objectstack/spec/data`) — the `multiValueFields` the
  * CEL lint hands the engine, so `record.<field> == 'a'` on a multi-value
- * field is refused here as the publish lint refuses it.
+ * field is refused here as the publish lint refuses it. The ONE derivation:
+ * the draft check below and `CelPredicateField`'s as-you-type lint both call
+ * it, so the editor and the save judge the same fields as lists.
  */
-function multiValueFieldsOf(view: FieldsView): string[] {
-  return view.entries
-    .filter((e) => typeof e.def.type === 'string' && isMultiValueField({ type: e.def.type, multiple: e.def.multiple === true }))
-    .map((e) => e.name);
+export function multiValueFieldsOf(defs: ReadonlyArray<CelFieldDef>): string[] {
+  return defs
+    .filter((d) => typeof d.type === 'string' && isMultiValueField({ type: d.type, multiple: d.multiple === true }))
+    .map((d) => d.name);
+}
+
+function multiValueFieldsOfView(view: FieldsView): string[] {
+  return multiValueFieldsOf(view.entries.map((e) => ({ name: e.name, type: e.def.type, multiple: e.def.multiple })));
 }
 
 /**
@@ -841,7 +854,7 @@ async function validateObjectFieldRules(draft: unknown): Promise<SchemaFormIssue
   if (view.entries.length === 0) return [];
   const objectName = typeof d?.name === 'string' ? d.name : undefined;
   const fieldNames = view.entries.map((e) => e.name);
-  const multiValueFields = multiValueFieldsOf(view);
+  const multiValueFields = multiValueFieldsOfView(view);
   const issues: SchemaFormIssue[] = [];
   for (let i = 0; i < view.entries.length; i++) {
     const entry = view.entries[i];
@@ -963,7 +976,7 @@ async function validateObjectValidationRules(draft: unknown): Promise<SchemaForm
   const objectName = typeof d?.name === 'string' ? d.name : undefined;
   const view = readFields(d?.fields);
   const fieldNames = view.entries.map((e) => e.name);
-  const multiValueFields = multiValueFieldsOf(view);
+  const multiValueFields = multiValueFieldsOfView(view);
   const issues: SchemaFormIssue[] = [];
 
   const visit = async (rule: unknown, path: string, depth: number): Promise<void> => {

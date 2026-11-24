@@ -128,8 +128,15 @@ async function settle() {
 }
 
 const contextMenu = () => screen.queryByTestId('row-context-menu');
+/**
+ * The row's items of a menu: a menu opened on a data cell lists that cell's
+ * own items first (objectstack#36289, pinned in `cellContextMenu-36289`),
+ * which these pins leave out.
+ */
 const itemIds = (menu: HTMLElement) =>
-  within(menu).queryAllByRole('menuitem').map((el) => el.getAttribute('data-testid'));
+  within(menu).queryAllByRole('menuitem')
+    .map((el) => el.getAttribute('data-testid'))
+    .filter((id) => !id?.startsWith('row-context-cell-') && id !== 'row-context-field-history');
 
 /** The "⋮" items of a row, read off its real menu, which is closed again. */
 async function kebabItemIds(name: string): Promise<(string | null)[]> {
@@ -322,10 +329,13 @@ describe('objectstack#28434 · the browser keeps its own menu where it is the us
     renderGrid({ schema: { editable: true } });
     await settle();
     const cell = plainCellOf('Acme');
+    // objectstack#36270 — an editable grid selects a cell first: a click
+    // selects it, and a double-click opens its editor.
     await userEvent.dblClick(cell);
-    await userEvent.click(cell);
     const input = await waitFor(() => {
-      const el = cell.querySelector('input, textarea');
+      const el = cell.hasAttribute('data-editing-cell')
+        ? cell.querySelector('input:not([data-slot="cell-type-catcher"]), textarea')
+        : null;
       expect(el).not.toBeNull();
       return el as HTMLElement;
     });

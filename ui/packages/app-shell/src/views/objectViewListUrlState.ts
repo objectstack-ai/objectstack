@@ -381,6 +381,10 @@ export function useObjectViewListUrlState({
     if (listDraft.summaries && Object.keys(listDraft.summaries).length > 0) {
         listDraftParts.push('summaries');
     }
+    // objectstack#36370 — and a board's settings: one part, however many keys.
+    if (listDraft.kanban && Object.keys(listDraft.kanban).length > 0) {
+        listDraftParts.push('kanban');
+    }
 
     /**
      * objectstack#35955 — Discard (objectstack#28950's "Reset to view" before

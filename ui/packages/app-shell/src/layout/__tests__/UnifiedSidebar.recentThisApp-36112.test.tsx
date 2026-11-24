@@ -186,8 +186,9 @@ describe('the sidebar’s Recent lists this app’s items (objectstack#36112)', 
   it('the phone drawer is unchanged: it lists every app’s entries', () => {
     recent.items = [HR_RECORD, CRM_RECORD];
     renderSidebar(700);
-    // The drawer is drawn on demand: open it as the phone's trigger does (the provider's toggle, ⌘B).
-    fireEvent.keyDown(window, { key: 'b', metaKey: true });
+    // The drawer is drawn on demand: open it as the phone's trigger does (the
+    // provider's toggle, which answers ⌘B on a phone).
+    fireEvent.keyDown(document.body, { key: 'b', metaKey: true });
     expect(document.querySelector('[data-mobile="true"][data-sidebar="sidebar"]')).not.toBeNull();
     expect(recentEntries()).toEqual(['Jane Doe', 'Acme Corporation']);
   });

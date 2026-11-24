@@ -276,9 +276,13 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Langue",
         helpText: "Langage de l’éditeur (par ex. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Un champ d’identifiants n’affiche jamais de valeurs, et si l’objet lui-même le désactive, l’objet l’emporte."
+      },
       "fields.trackHistory": {
         label: "Suivre l’historique",
-        helpText: "Résumer ce champ dans la chronologie d’activité de l’enregistrement"
+        helpText: "Fait afficher à un champ média ou JSON (image, fichier, json, …) ses valeurs ancienne → nouvelle dans la chronologie d’activité. Les autres champs les affichent déjà, et l’éteindre ne les masque pas : utilisez Valeurs des modifications de champ."
       },
       "fields.visibleWhen": {
         label: "Visible si",
@@ -298,6 +302,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "enable.trackHistory": {
         label: "Suivre l’historique"
+      },
+      "enable.fieldHistory": {
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle des champs modifiés dans la chronologie d’activité de l’enregistrement. Par défaut, activé. Désactivé n’affiche plus de valeurs pour tout l’objet, quoi que dise un champ."
       },
       "enable.searchable": {
         label: "Recherchable"
@@ -460,6 +468,18 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "Changer de propriétaire",
         helpText: "L’action Changer de propriétaire, unitaire et en masse : activée, elle est proposée ; désactivée, elle est masquée. Non défini : activée, sauf désactivée sur un objet de détail controlled_by_parent. Proposée uniquement sur un objet dont les enregistrements ont un propriétaire réattribuable (ownership user ou non défini, sans managedBy, pas un objet sys_, owner_id non en lecture seule et, sur un objet externe, déclaré ou mappé) ; l’activer sur tout autre objet est refusé. Elle ne contrôle que l’action, pas une simple modification de owner_id. Un objet {enabled, visibleWhen, disabledWhen} enregistré se modifie clé par clé ; écrivez-en un dans le source pour conditionner l’action à chaque enregistrement."
+      },
+      actionLayout: {
+        label: "Disposition des actions",
+        helpText: "L’ordre des actions de cet objet et celles qui sont des boutons, par portée : pinned (au plus 3 boutons, dans l’ordre) et more (l’ordre du menu Plus ; une action nommée dans aucun des deux suit dans son ordre par défaut). Non défini : chaque surface choisit ses boutons selon l’ordre des actions, comme avant."
+      },
+      "actionLayout.list": {
+        label: "Liste",
+        helpText: "La barre d’outils de la page de liste, sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans la barre de la liste ; $import / $export seulement dans pinned. Au plus 3 épinglées. Non épinglés, la page affiche toujours son propre menu Importer / Exporter. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé dans la barre de la liste ; un tel nom n’affiche rien."
+      },
+      "actionLayout.record": {
+        label: "Enregistrement",
+        helpText: "L’en-tête de l’enregistrement (page de l’enregistrement, aperçu latéral, barre du bas sur téléphone), sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans l’en-tête de l’enregistrement ou son menu Plus. Au plus 3 épinglées. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé sur la page de l’enregistrement ; un tel nom n’affiche rien."
       },
       editMode: {
         label: "Mode de modification",
@@ -865,6 +885,10 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Masqué",
         helpText: "Masquer le champ dans les vues d’interface par défaut"
       },
+      showOnCreate: {
+        label: "Afficher à la création",
+        helpText: "Demander ce champ à la création d’un enregistrement. Désactivé : la boîte de création, la création en pleine page et une création ouverte par une action l’omettent ; la modification, la page de l’enregistrement et les listes l’affichent toujours. Un champ obligatoire est toujours demandé et ne peut donc pas être désactivé."
+      },
       searchable: {
         label: "Recherchable",
         helpText: "Inclure dans les résultats de la recherche globale"
@@ -897,9 +921,13 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Interne",
         helpText: "Ne jamais renvoyer la valeur de ce champ par le chemin de données générique : le moteur omet la clé des résultats find/findOne et des corps de réponse de création et de mise à jour, avec la projection par défaut comme lorsqu’un client nomme le champ dans ?select=. Le stockage, le filtrage et l’indexation ne sont pas affectés."
       },
+      fieldHistory: {
+        label: "Valeurs des modifications de champ",
+        helpText: "Valeurs ancienne → nouvelle de ce champ dans la chronologie d’activité de l’enregistrement. Par défaut suit la plateforme : activé pour la plupart des types, désactivé pour un champ média, JSON ou d’identifiants. Désactivé ne nomme la modification que par son libellé ; Activé affiche aussi les valeurs d’un champ média ou JSON. Un champ d’identifiants n’affiche jamais de valeurs, et si l’objet lui-même le désactive, l’objet l’emporte."
+      },
       trackHistory: {
         label: "Suivre l’historique",
-        helpText: "Afficher les modifications de valeur de ce champ sous forme d’entrées dans la chronologie d’activité de l’enregistrement (ADR-0052 §5b). Activation par champ."
+        helpText: "Fait afficher à un champ média ou JSON (image, fichier, json, …) ses valeurs ancienne → nouvelle dans la chronologie d’activité. Les autres champs les affichent déjà, et l’éteindre ne les masque pas : utilisez Valeurs des modifications de champ."
       },
       widget: {
         label: "Widget",

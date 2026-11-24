@@ -32,6 +32,7 @@ import {
   useInlineEdit,
   usePrintPage,
   usePredicateScope,
+  useRecordContext,
   useRecordPagePreferences,
 } from '@object-ui/react';
 import { resolveFieldAffordance, isDeadlineSettled } from '@object-ui/core';
@@ -59,6 +60,8 @@ import { useDetailTranslation } from './useDetailTranslation';
 import { useSafeFieldLabel } from '@object-ui/react';
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { InlineFieldInput } from './InlineFieldInput';
+import { FieldInPlaceEditor, isToggleFieldType, type FieldInPlaceWriter } from './FieldInPlaceEditor';
+import { FieldHistoryButton, fieldHistoryOffered } from './FieldHistory';
 import { headerColorClass } from './headerColor';
 import { DetailsColumnCapContext, framelessSectionColumns, useDefaultRecordPage } from './defaultRecordPage';
 import { hasCellValue } from './emptiness';
@@ -319,6 +322,41 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
    * beside this record (objectui#11815) — the scope the grid reads too.
    */
   const predicateScope = usePredicateScope();
+  /**
+   * The fields of this section being edited in place (objectstack#36475): on
+   * the record page's field face a click on an editable value edits that
+   * value alone and saves it on its own (`FieldInPlaceEditor`), where the
+   * record the page shows can be written. The whole-record session (the
+   * header's Edit) draws every field as an input and closes these.
+   */
+  const [fieldsInPlace, setFieldsInPlace] = React.useState<string[]>([]);
+  const recordCtx = useRecordContext();
+  const inPlaceWriter = React.useMemo<FieldInPlaceWriter | null>(() => {
+    if (!recordCtx?.dataSource || recordCtx.recordId == null) return null;
+    if (objectName && recordCtx.objectName !== objectName) return null;
+    return {
+      dataSource: recordCtx.dataSource,
+      objectName: recordCtx.objectName,
+      recordId: recordCtx.recordId,
+      refresh: recordCtx.reread ?? recordCtx.refresh,
+    };
+  }, [recordCtx?.dataSource, recordCtx?.recordId, recordCtx?.objectName, recordCtx?.reread, recordCtx?.refresh, objectName]);
+  React.useEffect(() => {
+    if (isEditing) setFieldsInPlace([]);
+  }, [isEditing]);
+  /**
+   * objectstack#36290 — the record a field's change history is read for: the
+   * page's own record, as `inPlaceWriter` reads it, so a section drawing
+   * another record (or none) offers no history button.
+   */
+  const historyRecord =
+    recordCtx?.dataSource && recordCtx.recordId != null && recordCtx.recordId !== ''
+      && objectName && recordCtx.objectName === objectName
+      ? { dataSource: recordCtx.dataSource, objectName, recordId: recordCtx.recordId }
+      : null;
+  const closeInPlace = React.useCallback((name: string) => {
+    setFieldsInPlace((open) => open.filter((n) => n !== name));
+  }, []);
 
   /**
    * What the copy affordance WRITES (objectui#8395).
@@ -628,6 +666,18 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     const fieldEditable =
       !isReadonly && !isComputedField && !isSystemField && !isInlineExcluded && isWriteGranted;
     const canInlineEditField = fieldEditable && !!onEnterInlineEdit;
+    // On the field face a value is edited alone and saved on its own
+    // (objectstack#36475); elsewhere, and where the page's record cannot be
+    // written from here, the gesture enters the whole-record session.
+    const editsInPlace = frameless && canInlineEditField && !!inPlaceWriter;
+    const inPlace = editsInPlace && !isEditing && fieldsInPlace.includes(field.name);
+    const enterEdit = () => {
+      if (!editsInPlace) {
+        onEnterInlineEdit?.(field.name);
+        return;
+      }
+      setFieldsInPlace((open) => (open.includes(field.name) ? open : [...open, field.name]));
+    };
     const fieldLabelText = fieldLabel(objectName || '', field.name, field.label || field.name);
 
     const displayValue = (() => {
@@ -984,8 +1034,8 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
               ? () => handleCopyField(field.name, value)
               : frameless && canInlineEditField
                 ? (e: React.MouseEvent<HTMLElement>) => {
-                    if (clickBelongsElsewhere(e)) return;
-                    onEnterInlineEdit?.(field.name);
+                    if (inPlace || clickBelongsElsewhere(e)) return;
+                    enterEdit();
                   }
                 : undefined
           }
@@ -1003,10 +1053,20 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
           <div
             className={cn(
               'flex-1 min-w-0 break-words',
-              frameless ? 'py-1 text-sm leading-6' : 'text-sm py-1',
+              frameless ? 'relative py-1 text-sm leading-6' : 'text-sm py-1',
             )}
           >
             {displayValue}
+            {inPlace && inPlaceWriter && (
+              <FieldInPlaceEditor
+                name={field.name}
+                field={enrichedField}
+                record={data}
+                writer={inPlaceWriter}
+                toggle={isToggleFieldType(enrichedField.type)}
+                onClose={() => closeInPlace(field.name)}
+              />
+            )}
           </div>
           {canInlineEditField && (
             <TooltipProvider>
@@ -1020,7 +1080,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                     aria-label={editHintLabel}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onEnterInlineEdit?.(field.name);
+                      enterEdit();
                     }}
                   >
                     <Pencil className="h-3 w-3" />
@@ -1031,6 +1091,19 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+          )}
+          {/* objectstack#36290 — the field's change history, opened in place,
+              for a field of the object whose changes are recorded with their
+              values and that the reader may read. */}
+          {historyRecord && objectDefField && fieldHistoryOffered(perms, objectName, field.name, objectSchema) && (
+            <FieldHistoryButton
+              dataSource={historyRecord.dataSource}
+              objectName={historyRecord.objectName}
+              recordId={historyRecord.recordId}
+              field={field.name}
+              objectSchema={objectSchema}
+              className={frameless ? 'pointer-coarse:hidden' : undefined}
+            />
           )}
           {/* On the field face an editable value is copied from the same
               hover / focus button a read-only one is: its click is the
