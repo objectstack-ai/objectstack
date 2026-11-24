@@ -158,11 +158,15 @@ import {
   type ReportTableSnapshot,
 } from './ReportExport';
 import {
+  ReportCompareToggle,
   ReportDateRangeControl,
   initialReportPeriod,
   readDateRangeDeclaration,
+  reportChartComparable,
+  reportCompareTo,
   reportTimeWindow,
   useReportDateDimension,
+  type ReportCompareTo,
   type ReportPeriod,
   type ReportTimeWindow,
 } from './ReportDateRange';
@@ -706,6 +710,7 @@ function useDatasetRows(
   totalsGroupings?: string[][],
   order?: SelectionOrder,
   timeWindow?: ReportTimeWindow,
+  compareTo?: ReportCompareTo,
 ) {
   const [state, setState] = React.useState<{
     status: 'idle' | 'loading' | 'ok' | 'error';
@@ -737,8 +742,10 @@ function useDatasetRows(
   // The report's period (`dateRange`) is part of the signature too: picking
   // another window on the chip is another selection, so it re-queries.
   const windowKey = JSON.stringify(timeWindow ?? null);
+  // Turning the comparison on or off is another selection too.
+  const compareKey = JSON.stringify(compareTo ?? null);
   const packageId = React.useContext(ReportPackageContext);
-  const signature = `${packageId ?? ''}|${dataset}|${dimensions.join(',')}|${measures.join(',')}|${rfKey}|${totalsKey}|${orderKey}|${windowKey}`;
+  const signature = `${packageId ?? ''}|${dataset}|${dimensions.join(',')}|${measures.join(',')}|${rfKey}|${totalsKey}|${orderKey}|${windowKey}|${compareKey}`;
 
   // objectui#10814 — the data-invalidation bus (`notifyDataChanged` from
   // `@object-ui/react`), read the objectui#10623 way: the nonce moves when a
@@ -803,6 +810,11 @@ function useDatasetRows(
         // `runtimeFilter`, never a bucket. Absent, the selection is exactly
         // what a report without a period has always posted.
         ...(timeWindow ? { timeDimensions: [timeWindow] } : {}),
+        // "Compare with previous period" (objectstack#36645): the executor
+        // runs the same selection over the window just before this one and
+        // answers each measure's earlier value as `<measure>__compare`. Only
+        // ever sent beside the window it shifts.
+        ...(timeWindow && compareTo ? { compareTo } : {}),
       }, ...(packageId ? [{ callerPackage: packageId }] : []))
       .then((res) => {
         if (!cancelled) {
@@ -1545,6 +1557,22 @@ function useRegistryComponent(
  * names the measure but carries no usable `label` returns `undefined` and falls
  * through to the dataset's own measure label, exactly as an absent entry does.
  */
+/** The column the dataset executor answers a measure's earlier window under (`compareTo`). */
+const COMPARE_SUFFIX = '__compare';
+
+/**
+ * The signed change from the previous period to the current one, as a percent
+ * of the previous value (`+25%`, `−10%`). `undefined` when either side is not
+ * a number or the previous value is 0, where a percent says nothing.
+ */
+export function formatPeriodChange(current: unknown, previous: unknown, locale?: string): string | undefined {
+  const cur = typeof current === 'number' ? current : typeof current === 'string' && current.trim() !== '' ? Number(current) : NaN;
+  const prev = typeof previous === 'number' ? previous : typeof previous === 'string' && previous.trim() !== '' ? Number(previous) : NaN;
+  if (!Number.isFinite(cur) || !Number.isFinite(prev) || prev === 0) return undefined;
+  const ratio = (cur - prev) / Math.abs(prev);
+  return new Intl.NumberFormat(locale, { style: 'percent', maximumFractionDigits: 1, signDisplay: 'exceptZero' }).format(ratio);
+}
+
 function authoredSeriesLabel(series: unknown, measure: string, language: string | undefined): string | undefined {
   if (!Array.isArray(series) || !measure) return undefined;
   for (const entry of series as unknown[]) {
@@ -1617,6 +1645,7 @@ function DatasetReportChart({
   dataSource,
   order,
   timeWindow,
+  compareTo,
   onDrill,
 }: {
   dataset: string;
@@ -1625,6 +1654,12 @@ function DatasetReportChart({
   dataSource?: unknown;
   order?: SelectionOrder;
   timeWindow?: ReportTimeWindow;
+  /**
+   * The viewer's 「Compare with previous period」 (objectstack#36645). Set only
+   * for a chart {@link reportChartComparable} accepts; the chart then draws the
+   * earlier window beside the current one.
+   */
+  compareTo?: ReportCompareTo;
   /** The report's drill sink: a clicked mark drills like its table line (objectstack-ai/objectstack#36256). */
   onDrill?: (args: DatasetDrillArgs) => void;
 }) {
@@ -1661,6 +1696,7 @@ function DatasetReportChart({
     undefined,
     order,
     timeWindow,
+    compareTo,
   );
   const ChartComponent = useRegistryComponent('chart');
   const { fieldLabel, fieldOptionLabel } = useSafeFieldLabel();
@@ -1786,6 +1822,13 @@ function DatasetReportChart({
   // refusal is an error here too: the table beside this slot reads the same
   // dataset and draws the one no-access state, so the chart draws no second
   // one (objectui#12330).
+  //
+  // Except a refused COMPARISON (objectstack#36645): the table beside the
+  // chart never asks for one, so a silent fallback would leave the viewer's
+  // switch on over a chart that vanished with no reason given.
+  if (state.status === 'error' && compareTo && !state.forbidden) {
+    return <FetchStates status="error" error={state.error} />;
+  }
   if (state.status === 'error' || state.rows.length === 0) return null;
 
   // objectui#7534 — resolve a BUILT-IN default measure's caption through the
@@ -1815,16 +1858,33 @@ function DatasetReportChart({
   // raw `name` to a fully-translated console.
   const measureLabel = authoredSeriesLabel(chart.series, yAxis, language) ?? headerLabel(yAxis);
 
+  // The earlier window's caption: the dashboard's own words for the same
+  // `previousPeriod` comparison, so a report and a dashboard tile read alike.
+  const compareLabel = tt('dashboard.trend.vsPreviousPeriod', 'vs previous period');
+  const compareKey = `${yAxis}${COMPARE_SUFFIX}`;
+
   if (plan.kind === 'single_value') {
     const mf = measureField(yAxis);
+    const current = state.rows[0]?.[yAxis];
+    const previous = compareTo ? state.rows[0]?.[compareKey] : undefined;
+    const change = compareTo ? formatPeriodChange(current, previous, displayLocale) : undefined;
     return (
       <div className="rounded-md border bg-card p-3" data-testid="dataset-report-metric">
         {title ? <h3 className="mb-2 text-sm font-semibold">{title}</h3> : null}
         <div className="flex flex-col gap-0.5 py-2">
           <span className="text-2xl font-semibold tabular-nums">
-            {formatMeasure(state.rows[0]?.[yAxis], mf?.format, mf?.currency, mf?.percentScale, displayLocale)}
+            {formatMeasure(current, mf?.format, mf?.currency, mf?.percentScale, displayLocale)}
           </span>
           <span className="text-xs text-muted-foreground">{measureLabel}</span>
+          {compareTo ? (
+            <span className="pt-1 text-xs text-muted-foreground tabular-nums" data-testid="dataset-report-metric-previous">
+              {compareLabel}{' '}
+              <span className="font-medium text-foreground">
+                {formatMeasure(previous, mf?.format, mf?.currency, mf?.percentScale, displayLocale)}
+              </span>
+              {change ? <span data-testid="dataset-report-metric-change">{` (${change})`}</span> : null}
+            </span>
+          ) : null}
         </div>
       </div>
     );
@@ -1930,6 +1990,10 @@ function DatasetReportChart({
   const markScope: MeasureDrillScope | undefined = state.object ? measureDrillScope(state.drillScopes, yAxis) : {};
   const handleMarkClick = onDrill && markScope !== undefined
     ? (ev: ChartSegmentClickEvent) => {
+      // A mark of the earlier window stands for records the current query did
+      // not count, so it opens no list (the dashboard's rule for the same
+      // `<measure>__compare` series).
+      if (ev?.series === compareKey) return;
       const at = findChartSeriesRow(plotRows, queryDimensions, [yAxis], ev?.category, ev?.series, {
         nullCategoryLabel,
         bucketId: ev?.categoryId,
@@ -1973,6 +2037,23 @@ function DatasetReportChart({
       ? { ...s, label: authoredSeriesLabel(chart.series, s.dataKey, language) ?? derivedSeries[i].label }
       : s.dataKey === yAxis ? { ...s, label: measureLabel } : s,
   );
+  // 「Compare with previous period」 (objectstack#36645): the measure's
+  // earlier window as one more series, drawn muted / dashed by the chart's
+  // `variant: 'comparison'` styling. The rows already carry it: the executor
+  // restates the earlier window's buckets in the current window's keys, so a
+  // month axis pairs each month with the month one period before it.
+  const comparisonAggregate = measureField(yAxis)?.aggregate;
+  const drawnSeries = compareTo && !seriesBy
+    ? [
+      ...chartSeries,
+      {
+        dataKey: compareKey,
+        label: `${measureLabel} · ${compareLabel}`,
+        variant: 'comparison' as const,
+        ...(typeof comparisonAggregate === 'string' ? { aggregate: comparisonAggregate } : {}),
+      },
+    ]
+    : chartSeries;
 
   // The authored CHROME — `showLegend`, `showDataLabels`, `colors`, `subtitle`,
   // `description`, `annotations`, `interaction`, `height` — lowered by the same
@@ -2008,7 +2089,7 @@ function DatasetReportChart({
           // input the legend, the mark's tooltip name and the single-value
           // caption all read — so legend and tooltip follow this by
           // construction rather than by a second resolution.
-          series: chartSeries,
+          series: drawnSeries,
           // The default plot height, kept beneath the spread so an authored
           // `height` wins. A non-positive one never reaches here (the whitelist
           // drops it), which leaves this default rather than an invisible plot.
@@ -2562,6 +2643,10 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
   const dateDimension = useReportDateDimension(String(report.dataset ?? ''), dateRangeDecl, reportPackageId);
   const timeWindow =
     period && dateDimension.status === 'ready' ? reportTimeWindow(dateDimension.dimension, period) : undefined;
+  // 「Compare with previous period」 (objectstack#36645) — the viewer's, like
+  // the period itself, and keyed on the same declaration.
+  const [comparePicked, setComparePicked] = React.useState<{ key: string; on: boolean } | null>(null);
+  const compareOn = !!comparePicked && comparePicked.key === dateRangeKey && comparePicked.on;
 
   // Joined → a vertical stack of dataset-bound blocks.
   if (presentation === 'joined' && Array.isArray(report.blocks)) {
@@ -2653,6 +2738,13 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
     report.chart && typeof report.chart === 'object' && (report.chart as { type?: unknown }).type
       ? (report.chart as Record<string, unknown>)
       : null;
+  // Offered beside the period chip only when the chart can draw it over the
+  // window's dimension; sent only while the period names a window to step
+  // back from.
+  const compareOffered =
+    !!dateRangeDecl &&
+    reportChartComparable(chartCfg, dateDimension.status === 'ready' ? dateDimension.dimension : undefined);
+  const compareTo = compareOffered ? reportCompareTo(compareOn, timeWindow) : undefined;
   const chart = chartCfg ? (
     <DatasetReportChart
       dataset={String(report.dataset ?? '')}
@@ -2661,6 +2753,7 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
       dataSource={dataSource}
       order={reportOrder}
       timeWindow={timeWindow}
+      compareTo={compareTo}
       onDrill={drillSink}
     />
   ) : null;
@@ -2723,15 +2816,25 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
       data-report-name={report.name}
       data-report-presentation={presentation}
     >
-      {/* One header row: the period chip on the left, Export on the right;
-          hidden when neither draws. */}
+      {/* One header row: the period chip (and 「Compare with previous
+          period」 beside it) on the left, Export on the right; hidden when
+          neither draws. */}
       <div className="flex flex-wrap items-center justify-between gap-2 empty:hidden" data-testid="dataset-report-header">
         {dateRangeDecl && period ? (
-          <ReportDateRangeControl
-            decl={dateRangeDecl}
-            value={period}
-            onChange={(next) => setPicked({ key: dateRangeKey, period: next })}
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            <ReportDateRangeControl
+              decl={dateRangeDecl}
+              value={period}
+              onChange={(next) => setPicked({ key: dateRangeKey, period: next })}
+            />
+            {compareOffered ? (
+              <ReportCompareToggle
+                checked={compareOn}
+                available={!!timeWindow}
+                onChange={(on) => setComparePicked({ key: dateRangeKey, on })}
+              />
+            ) : null}
+          </div>
         ) : null}
         <ReportExportControl exportOptions={report.exportOptions} label={report.label} name={report.name} snapshot={tableSnapshot} dataSource={dataSource} />
       </div>

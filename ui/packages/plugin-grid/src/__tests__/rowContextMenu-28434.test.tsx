@@ -128,8 +128,15 @@ async function settle() {
 }
 
 const contextMenu = () => screen.queryByTestId('row-context-menu');
+/**
+ * The row's items of a menu: a menu opened on a data cell lists that cell's
+ * own items first (objectstack#36289, pinned in `cellContextMenu-36289`),
+ * which these pins leave out.
+ */
 const itemIds = (menu: HTMLElement) =>
-  within(menu).queryAllByRole('menuitem').map((el) => el.getAttribute('data-testid'));
+  within(menu).queryAllByRole('menuitem')
+    .map((el) => el.getAttribute('data-testid'))
+    .filter((id) => !id?.startsWith('row-context-cell-') && id !== 'row-context-field-history');
 
 /** The "⋮" items of a row, read off its real menu, which is closed again. */
 async function kebabItemIds(name: string): Promise<(string | null)[]> {

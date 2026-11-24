@@ -98,11 +98,15 @@ export interface ObjectDefLike {
    */
   fieldGroups?: Array<Partial<NonNullable<ServiceObject['fieldGroups']>[number]>>;
   /**
-   * Spec `enable` capability toggles. Only `files` is read here:
-   * `enable.files === true` (opt-in, objectstack-ai/objectstack#2727) makes the synthesizer emit an
-   * Attachments tab beside Details/Related (objectstack#4358).
+   * Spec `enable` capability toggles. `enable.files === true` (opt-in,
+   * objectstack-ai/objectstack#2727) makes the synthesizer emit an
+   * Attachments tab beside Details/Related (objectstack#4358). The activity
+   * stream tab follows the stream's three sources (objectstack#36693): it is
+   * left out when `feeds` and `activities` are both `false` (opt-out, spec
+   * default on) and `trackHistory` is not `true` (opt-in), since such a
+   * stream has nothing to draw (`streamHasSource`).
    */
-  enable?: { files?: boolean; [key: string]: any };
+  enable?: { files?: boolean; feeds?: boolean; activities?: boolean; trackHistory?: boolean; [key: string]: any };
   /**
    * The spec's `relatedLists` (objectstack#35897): the record page's tabs
    * beside the overview, in order. Read here for the three built-in tab names
@@ -990,7 +994,7 @@ export function buildDefaultTabs(
     /**
      * The Timeline tab's content (objectstack#27055); `buildDefaultPageSchema`
      * passes the `discussion` slot here. Absent: the default stream, unless
-     * `hideDiscussion`.
+     * `hideDiscussion` or the object's stream has no source (objectstack#36693).
      */
     timeline?: any[];
   } = {},
@@ -1072,7 +1076,7 @@ function synthTabs(
   // (objectstack#34590 kept the stream last). The stream tab's token is
   // `Activity stream`, which the strip reads as `detail.timeline` (「动态」); a
   // bare `Timeline` is an author's word.
-  const timeline = options.timeline ?? (options.hideDiscussion ? [] : [buildDefaultTimeline()]);
+  const timeline = options.timeline ?? (options.hideDiscussion || !streamHasSource(def) ? [] : [buildDefaultTimeline()]);
   for (const rel of sides) {
     items.push({
       label: rel.title ?? rel.objectName,
@@ -1193,6 +1197,24 @@ export function buildDefaultDiscussion(): any {
 }
 
 /**
+ * objectstack#36693 — whether the default record page's activity stream has a
+ * source to draw. The stream merges three, each switched by the object
+ * (`buildDefaultTimeline`): the discussion (`enable.feeds`, opt-out), the
+ * activity (`enable.activities`, opt-out) and the field changes
+ * (`enable.trackHistory`, opt-in; a field's own `trackHistory` /
+ * `fieldHistory` only decide whether a change shows its values). With all
+ * three off the 动态 tab would be empty, so the synthesizer leaves it out, the
+ * way the Attachments tab follows `enable.files`. A `relatedLists` entry
+ * `'sys_activity'` does not bring it back (`arrangeDeclaredTabs` only places
+ * tabs that were built). An authored page, or an authored `discussion` slot,
+ * draws what its author placed.
+ */
+function streamHasSource(def: ObjectDefLike | undefined): boolean {
+  const enable = def?.enable;
+  return enable?.feeds !== false || enable?.activities !== false || enable?.trackHistory === true;
+}
+
+/**
  * Sub-builder: the timeline stream (objectstack#27055, Target 3) — ONE
  * `record:activity` merging the discussion (`enable.feeds`), the activity
  * (`enable.activities`, `sys_activity`) and the field changes
@@ -1287,11 +1309,12 @@ export function buildDefaultPageSchema(
   }
 
   // The timeline stream's content (objectstack#27055): an authored
-  // `discussion` slot replaces it; `hideDiscussion` drops it.
+  // `discussion` slot replaces it; `hideDiscussion` drops it, and so does an
+  // object whose stream has no source (objectstack#36693, `streamHasSource`).
   const timeline =
     'discussion' in slots && slots.discussion !== undefined
       ? toNodeArray(slots.discussion)
-      : options.hideDiscussion
+      : options.hideDiscussion || !streamHasSource(def)
         ? []
         : [buildDefaultTimeline()];
 

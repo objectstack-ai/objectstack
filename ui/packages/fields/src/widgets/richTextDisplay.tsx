@@ -36,8 +36,9 @@ import { EmptyValue } from '@object-ui/components';
 import { coerceToSafeValue } from '../coerceToSafeValue.js';
 import { renderSanitizedHtml } from './sanitizedHtml.js';
 import type { CellRendererProps } from '../index.js';
+import { recoverableLazy } from '../recoverableLazy.js';
 
-const LazyMarkdownContent = React.lazy(() => import('./MarkdownContent.js'));
+const LazyMarkdownContent = recoverableLazy(() => import('./MarkdownContent.js'));
 
 /**
  * The two faces a rich-content value is drawn in, shared by the markdown and

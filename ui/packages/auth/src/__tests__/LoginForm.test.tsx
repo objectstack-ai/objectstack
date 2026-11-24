@@ -497,6 +497,23 @@ describe('LoginForm — "Sign in with SSO" with no email (objectstack#32087)', (
       fetchSpy.mockRestore();
     }
   });
+
+  it('objectstack#36732 — the SSO round trip comes back to the console root, never the retired /home', async () => {
+    const fetchSpy = ssoFetchSpy();
+    try {
+      renderLogin(createMockClient({ features: { sso: true } }));
+      const button = await screen.findByRole('button', SSO_BUTTON);
+      fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@corp.example' } });
+      fireEvent.click(button);
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      const body = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body));
+      expect(body.callbackURL.endsWith('/')).toBe(true);
+      expect(body.callbackURL).not.toContain('/home');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });
 
 // objectstack#32432 — a refusal is mapped by `code` and `details.cause`, never by

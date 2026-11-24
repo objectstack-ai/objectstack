@@ -27,7 +27,7 @@ export interface CommentAuthorAvatarProps {
  */
 export const CommentAuthorAvatar: React.FC<CommentAuthorAvatarProps> = ({ name, avatarUrl, className }) => (
   <Avatar className={cn('size-5 shrink-0', className)} data-comment-author-avatar="">
-    {avatarUrl && <AvatarImage src={avatarUrl} alt={name} className="object-cover" />}
+    {avatarUrl && <AvatarImage src={avatarUrl} alt={name} />}
     <AvatarFallback className="text-[9px] font-medium" aria-hidden={avatarUrl ? undefined : true}>
       {getPersonInitials(name)}
     </AvatarFallback>

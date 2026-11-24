@@ -103,7 +103,11 @@ const itemIds = (menu: HTMLElement) =>
   within(menu).queryAllByRole('menuitem').map((el) => el.getAttribute('data-testid'));
 const OPEN_ITEMS = ['row-context-open', 'row-context-open-new-tab'];
 
-/** Desktop: the row's context menu, minus Open / Open in new tab. */
+/**
+ * Desktop: the row's context menu, minus Open / Open in new tab and minus the
+ * cell's own section a menu opened on a data cell lists first
+ * (objectstack#36289): the row's actions only.
+ */
 async function desktopRowActions(): Promise<Record<string, (string | null)[]>> {
   setWidth(1280);
   renderGrid();
@@ -116,7 +120,9 @@ async function desktopRowActions(): Promise<Record<string, (string | null)[]>> {
     const cell = within(screen.getByText(row.name).closest('tr') as HTMLElement).getByText(row.status);
     act(() => { fireEvent.contextMenu(cell, { button: 2, clientX: 40, clientY: 60 }); });
     const menu = await screen.findByTestId('row-context-menu');
-    out[row.name] = itemIds(menu).filter((id) => !OPEN_ITEMS.includes(id ?? ''));
+    out[row.name] = itemIds(menu).filter(
+      (id) => !OPEN_ITEMS.includes(id ?? '') && !id?.startsWith('row-context-cell-') && id !== 'row-context-field-history',
+    );
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByTestId('row-context-menu')).toBeNull());
   }

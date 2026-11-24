@@ -18,3 +18,4 @@ export {
     resolveMaxRequestBodyBytes,
     type RequestBodyGuard,
 } from './body-limit';
+export * from './door-table-member';

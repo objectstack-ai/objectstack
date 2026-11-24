@@ -3102,14 +3102,25 @@ export const NavigationConfigSchema = lazySchema(() => strictObject({
   openNewTab: z.boolean().default(false).describe('Open the record\'s full page in a new browser tab when it is clicked; rows that open nothing stay that way, and a phone opens the page in place'),
   
   /**
-   * [#2578] Overlay size for a drawer detail — coarse T-shirt buckets,
-   * aligned with `FormView.modalSize` (`page` mode ignores it). `'auto'`
-   * (default): the renderer derives the size from the object's field count and
-   * clamps it to the client viewport, so AI writes nothing — it cannot know the
-   * client width. Explicit buckets are a coarse, viewport-independent override.
+   * [#2578] Width of the record drawer, as a coarse T-shirt bucket. Each
+   * explicit bucket is a pixel cap the renderer clamps to the viewport
+   * (`min(92vw, CAP)`): sm 480, md 720, lg 960, xl 1200, full 1600.
+   *
+   * `'auto'` (default) is the host's fixed default width, the same for every
+   * object whatever its field count — nothing is derived from the object's
+   * fields. The console's record side panel (opened from an object's list, and
+   * the drawer level over a record page) opens at `min(92vw, 460px)`; a page
+   * block's drawer opens at that block's own default (`min(960px, 60vw)` for
+   * the grid, kanban, calendar, gantt and tree; 42rem for the list, gallery,
+   * map and timeline). A width the reader drags is remembered and wins over
+   * both `'auto'` and a bucket.
+   *
+   * The key has no effect where the record opens as a page rather than a
+   * drawer (in the console every record opens as a page on a phone), nor on a
+   * phone-width screen, where a block's drawer fills the screen.
    */
   size: z.enum(['auto', 'sm', 'md', 'lg', 'xl', 'full']).default('auto')
-    .describe("Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."),
+    .describe("Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it."),
 
   /**
    * @deprecated [#2578 → `size`] A pixel/percent width cannot be authored blind:

@@ -10,8 +10,9 @@
  * Data pillar — object Settings view (builder-ui Phase B).
  *
  * Stacked cards, the business ones first and the developer options last
- * (objectstack#36512). Every setting's title speaks the author's language and
- * the metadata key it writes is small print beside it (`SettingKey`).
+ * (objectstack#36512). Every setting's title speaks the author's language;
+ * the metadata key it writes stays off the panel at rest and is the title's
+ * hover text (objectstack#36746, superseding #36512's small print beside it).
  *  1. Basics — hosts the SAME default inspector metadata-admin uses
  *     (`getMetadataDefaultInspector('object')` → ObjectDefaultInspector), in
  *     its business half: label / pluralLabel / icon / description, one
@@ -150,35 +151,30 @@ const PICKER_FULL = 'h-7 px-2 py-1 text-[12px]';
 const PICKER_INLINE = 'h-6 w-auto gap-1 px-1.5 py-0.5 text-[11px] text-muted-foreground';
 
 /**
- * The metadata key a setting writes, drawn as small print beside its title:
- * the developer's handle on the setting (what code and the API spell), kept
- * out of the title itself, which speaks the author's language. One click
- * selects the whole key for copying. It sits OUTSIDE the setting's `<label>`,
- * so selecting it never opens a picker or flips a switch, and the control's
- * accessible name stays the title alone.
+ * The metadata key a setting writes — the developer's handle on it (what code
+ * and the API spell) — as the hover text of the setting's title, after the
+ * object picker's `nameOnHover` (objectstack#36746). At rest the panel shows
+ * the author's words only. The hover text rides on a wrapper, not on the
+ * `<label>`, so the control's accessible name stays the title alone.
  */
-export function SettingKey({ name }: { name: string }) {
+function SettingKeyHover({ settingKey, className, children }: { settingKey: string; className?: string; children: React.ReactNode }) {
   return (
-    <code
-      data-testid={`setting-key-${name}`}
-      className="select-all rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
-    >
-      {name}
-    </code>
+    <span title={settingKey} data-setting-key={settingKey} className={className ?? 'block w-fit'}>
+      {children}
+    </span>
   );
 }
 
-/** A setting's title (its control's label when `htmlFor` is given) and its key. */
+/** A setting's title (its control's label when `htmlFor` is given), its key on hover. */
 function SettingHeading({ title, settingKey, htmlFor }: { title: string; settingKey: string; htmlFor?: string }) {
   return (
-    <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+    <SettingKeyHover settingKey={settingKey} className="mb-1 block w-fit">
       {htmlFor ? (
         <label htmlFor={htmlFor} className="text-[11px] text-muted-foreground">{title}</label>
       ) : (
         <span className="text-[11px] text-muted-foreground">{title}</span>
       )}
-      <SettingKey name={settingKey} />
-    </div>
+    </SettingKeyHover>
   );
 }
 
@@ -243,7 +239,6 @@ export function ObjectSettingsPanel({
   // mounted replaces the "not registered" note below without a remount.
   const DefaultInspector = useRegisteredMetadataDefaultInspector('object');
   const idBase = React.useId();
-  const renderKey = React.useCallback((key: string) => <SettingKey name={key} />, []);
   const controlId = (key: string) => `${idBase}-${key}`;
 
   const fields = React.useMemo(() => readFields(draft.fields).entries, [draft.fields]);
@@ -354,7 +349,7 @@ export function ObjectSettingsPanel({
               readOnly={!!disabled}
               locale={locale}
               onBlockingIssuesChange={onBlockingIssuesChange}
-              split={{ part: 'business', renderKey }}
+              split={{ part: 'business', keysOnHover: true }}
             />
           ) : (
             <p className="text-[12px] text-muted-foreground">{t('engine.studio.settings.noInspector', locale)}</p>
@@ -530,7 +525,7 @@ export function ObjectSettingsPanel({
             const raw = enable[key];
             const checked = optIn ? raw === true : raw !== false;
             // The title and the description both label the switch; the key
-            // between them does not (see `SettingKey`).
+            // is the title's hover text only (see `SettingKeyHover`).
             const id = controlId(`enable.${key}`);
             return (
               <div key={key} className="flex items-start gap-2">
@@ -544,10 +539,9 @@ export function ObjectSettingsPanel({
                   className="mt-0.5"
                 />
                 <span className="min-w-0">
-                  <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <SettingKeyHover settingKey={`enable.${key}`}>
                     <label htmlFor={id} className="text-[12px]">{t(labelKey, locale)}</label>
-                    <SettingKey name={`enable.${key}`} />
-                  </span>
+                  </SettingKeyHover>
                   <label htmlFor={id} className="block text-[11px] text-muted-foreground">{t(descKey, locale)}</label>
                 </span>
               </div>
@@ -574,7 +568,7 @@ export function ObjectSettingsPanel({
               onPatch={onPatch}
               readOnly={!!disabled}
               locale={locale}
-              split={{ part: 'developer', renderKey }}
+              split={{ part: 'developer', keysOnHover: true }}
             />
           </div>
         </section>

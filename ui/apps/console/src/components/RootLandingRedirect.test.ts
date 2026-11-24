@@ -1,7 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { resolveLandingPath, resolvePhoneLandingPath, isAppListConclusive } from './RootLandingRedirect';
+import {
+  resolveLandingPath,
+  resolvePhoneLandingPath,
+  resolveDesktopLandingPath,
+  isAppListConclusive,
+} from './RootLandingRedirect';
 
 describe('resolveLandingPath', () => {
   it('routes to the App marked isDefault (isDefault now ROUTES, not just badges)', () => {
@@ -224,7 +229,63 @@ describe('resolvePhoneLandingPath — the last app first, then the desktop order
     ).toBe('/apps/cloud_control');
   });
 
-  it('CONTROL — the desktop resolver does not read the last app', () => {
+  it('CONTROL — the phone\'s no-record order does not read the last app', () => {
     expect(resolveLandingPath(APPS)).toBe('/apps/cloud_control');
+  });
+});
+
+// objectstack#36732 — from 768 px up the platform home page is retired: the
+// last-used app, then the declared default, then the first PRODUCT app; only a
+// viewer with no product app is left on /home (its no-apps empty state).
+describe('resolveDesktopLandingPath — the retired home page lands in an app', () => {
+  const SETUP = { name: 'setup', _packageId: 'com.objectstack.setup' };
+  const STUDIO = { name: 'studio', _packageId: 'com.objectstack.studio' };
+  const APPS = [
+    SETUP,
+    { name: 'crm', _packageId: 'com.acme.crm' },
+    { name: 'cloud_control', isDefault: true },
+    { name: 'service' },
+  ];
+
+  it('the last-used app beats the declared default', () => {
+    expect(resolveDesktopLandingPath(APPS, 'service')).toBe('/apps/service');
+    expect(resolveDesktopLandingPath(APPS, 'crm')).toBe('/apps/com.acme.crm');
+  });
+
+  it('a last-used Setup is still where the person was', () => {
+    expect(resolveDesktopLandingPath(APPS, 'setup')).toBe('/apps/com.objectstack.setup');
+  });
+
+  it('no record yet: the declared default', () => {
+    expect(resolveDesktopLandingPath(APPS, null)).toBe('/apps/cloud_control');
+  });
+
+  it('THE FIX: no record and no default — the first product app, not /home', () => {
+    expect(resolveDesktopLandingPath([SETUP, { name: 'a' }, { name: 'b' }], null)).toBe('/apps/a');
+  });
+
+  it('the first product app skips the platform built-ins, hidden and switched-off apps', () => {
+    expect(
+      resolveDesktopLandingPath(
+        [SETUP, STUDIO, { name: 'secret', hidden: true }, { name: 'off', active: false }, { name: 'sales' }],
+        null,
+      ),
+    ).toBe('/apps/sales');
+  });
+
+  it('only built-ins (a fresh environment, objectui#4048): /home, the no-apps empty state', () => {
+    expect(resolveDesktopLandingPath([SETUP, STUDIO], null)).toBe('/home');
+    expect(resolveDesktopLandingPath([{ name: 'setup' }], null)).toBe('/home');
+    expect(resolveDesktopLandingPath([], null)).toBe('/home');
+    expect(resolveDesktopLandingPath(undefined, null)).toBe('/home');
+  });
+
+  it('a last app that is gone, hidden or switched off is ignored', () => {
+    expect(resolveDesktopLandingPath(APPS, 'removed')).toBe('/apps/cloud_control');
+    expect(resolveDesktopLandingPath([{ name: 'secret', hidden: true }, { name: 'a' }], 'secret')).toBe('/apps/a');
+  });
+
+  it('CONTROL — the phone keeps its app list for several apps and no record', () => {
+    expect(resolvePhoneLandingPath([SETUP, { name: 'a' }, { name: 'b' }], null)).toBe('/home');
   });
 });

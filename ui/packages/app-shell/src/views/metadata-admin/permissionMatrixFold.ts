@@ -23,25 +23,39 @@
  * class by scanning source text, so a template literal would generate no CSS.
  * `PermissionMatrixEditor.fold-35061.test.tsx` checks that every string names
  * {@link PERM_MATRIX_FOLD_WIDTH}.
+ *
+ * objectstack#36744 — one number. The fold width IS the flat form's table
+ * floor ({@link PERM_MATRIX_FLAT_FLOOR}): the flat form is drawn only where it
+ * fits. The fold width was 1000 px while the floor was 1304 px, so between the
+ * two the flat table overflowed the pane and the right-pinned bulk column sat
+ * over the write-scope column, with nothing to say the pane scrolled sideways
+ * (a 1440 px window gives a 1200 px pane, inside that band).
  */
 
-/** The pane width (px) at and above which the matrix is fully flat. */
-export const PERM_MATRIX_FOLD_WIDTH = 1000;
+/**
+ * The flat form's table floor (px): the object column plus the fixed columns
+ * (record-access badge `w-28`, eight boxes at 52 px, two scope pickers `w-36`,
+ * the bulk strip `w-56`) — 1040 px — leaves the object name 264 px.
+ */
+export const PERM_MATRIX_FLAT_FLOOR = 1304;
+
+/** The pane width (px) at and above which the matrix is fully flat: exactly where the flat table fits. */
+export const PERM_MATRIX_FOLD_WIDTH = PERM_MATRIX_FLAT_FLOOR;
 
 /** The four boxes that stay flat in the folded form, in column order. */
 export const PERM_MATRIX_FLAT_KEYS = ['allowCreate', 'allowRead', 'allowEdit', 'allowDelete'] as const;
 
 /** On a cell drawn only in the flat form: not displayed below the fold width. */
-export const PERM_FLAT_ONLY_CELL = 'hidden @min-[1000px]:table-cell';
+export const PERM_FLAT_ONLY_CELL = 'hidden @min-[1304px]:table-cell';
 
 /** On a cell or row drawn only in the folded form: not displayed at and above the fold width. */
-export const PERM_FOLDED_ONLY = '@min-[1000px]:hidden';
+export const PERM_FOLDED_ONLY = '@min-[1304px]:hidden';
 
 /** On the flat bulk strip: not displayed below the fold width, a flex row at and above it. */
-export const PERM_FLAT_ONLY_FLEX = 'hidden @min-[1000px]:flex';
+export const PERM_FLAT_ONLY_FLEX = 'hidden @min-[1304px]:flex';
 
 /** On the matrix table: the 1304 px floor of the flat form applies only where the flat form is drawn. */
-export const PERM_MATRIX_TABLE_FLOOR = '@min-[1000px]:min-w-[1304px]';
+export const PERM_MATRIX_TABLE_FLOOR = '@min-[1304px]:min-w-[1304px]';
 
 /** On the bulk column's header: the flat strip's width, only where the strip is drawn. */
-export const PERM_BULK_COLUMN_WIDTH = '@min-[1000px]:w-56';
+export const PERM_BULK_COLUMN_WIDTH = '@min-[1304px]:w-56';
