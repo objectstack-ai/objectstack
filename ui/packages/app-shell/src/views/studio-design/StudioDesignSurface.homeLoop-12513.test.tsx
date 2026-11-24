@@ -3,7 +3,7 @@
 /**
  * objectui#12513 — the Studio home loop. Inside a package the header's first
  * button and the package switcher's first row both returned to the Studio
- * landing (`/studio`); objectstack#36501 replaced both with 「‹ Back to app」,
+ * landing (`/studio`); objectstack#36501 replaced both with 「‹ Back to app」 (since objectstack#36899 right after the menu toggle),
  * and the first case below now says so. The Organization flows empty block's way out to
  * Setup › Packaged automation retired with that page's flows half (objectstack
  * ADR-0146 D11, N-28): the block now says where a packaged flow is changed,
@@ -212,14 +212,18 @@ function renderAt(url: string) {
 }
 
 describe('Studio home loop (objectui#12513)', () => {
-  it('the header’s first button is 「‹ Back to app」 now, not Studio home (objectstack#36501)', async () => {
+  it('the header’s first way out is 「‹ Back to app」 now, not Studio home (objectstack#36501)', async () => {
     // The Studio-home button and the switcher's Studio-home row were removed
-    // with the switcher: the landing is reached from the app.
+    // with the switcher: the landing is reached from the app. objectstack#36899
+    // — the left menu's show / hide control leads the bar, so the way out is
+    // the button right after it.
     renderAt(`/studio/${SHOWCASE}/automations`);
 
     const back = await screen.findByTestId('studio-back-to-app');
     const header = screen.getByTestId('studio-shell-header');
-    expect(within(header).getAllByRole('button')[0]).toBe(back);
+    const buttons = within(header).getAllByRole('button');
+    expect(buttons[0]).toBe(within(header).getByTestId('studio-menu-toggle'));
+    expect(buttons[1]).toBe(back);
     expect(within(header).queryByRole('button', { name: 'Studio home' })).toBeNull();
   });
 

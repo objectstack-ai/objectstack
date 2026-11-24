@@ -99,6 +99,7 @@ import {
 } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { objectNotFoundError } from '../utils/object-not-found.js';
+import { objectPackageDisabledError } from '../utils/object-package-disabled.js';
 import { recordNotFoundError } from '../utils/record-not-found.js';
 import {
   assertAssignableUser,
@@ -203,7 +204,7 @@ export type ChangeOwnerTarget = { ownerId: string; queue?: undefined } | { queue
  * The slice of the data engine this module reads and writes through — the
  * engine's own public methods, so every write takes the ordinary path.
  */
-export interface ChangeOwnerEngine extends Pick<UserWorkEngine, 'find' | 'update'> {
+export interface ChangeOwnerEngine extends Pick<UserWorkEngine, 'find' | 'update' | 'registry'> {
   /** The registered object definition, `undefined` when no object has the name. */
   getSchema(object: string): unknown;
   /** Every registered object definition — read to find the cascades declared to an object. */
@@ -332,12 +333,22 @@ export function changeOwnerOffRefusal(object: string, reason: string): Error {
 /**
  * The object's definition, when it offers Change Owner and can take the
  * target; throws otherwise, before anything is read or written: `404
- * OBJECT_NOT_FOUND`, `403 CHANGE_OWNER_DISABLED`, or `400 VALIDATION_ERROR`
- * for a queue target on an object with no queue column.
+ * OBJECT_NOT_FOUND`, `404 OBJECT_PACKAGE_DISABLED`, `403
+ * CHANGE_OWNER_DISABLED`, or `400 VALIDATION_ERROR` for a queue target on an
+ * object with no queue column.
+ *
+ * [#36261] A disabled package's object serves no data door — every `/data`
+ * write answers it `404 OBJECT_PACKAGE_DISABLED` — so neither does this one:
+ * refused with that door's own envelope, asked of the registry predicate the
+ * data plane asks (`isObjectPackageDisabled`), before the object's switch is
+ * read and before any write or notification. `getSchema` still resolves such
+ * an object (disable is reversible and keeps it registered), so the switch
+ * alone would let it through.
  */
 function offeredDefinition(engine: ChangeOwnerEngine, object: string, target: ChangeOwnerTarget): AnyRec {
   const def = asRecord(engine.getSchema(object));
   if (!def) throw objectNotFoundError(object);
+  if (engine.registry?.isObjectPackageDisabled?.(object) === true) throw objectPackageDisabledError(object);
   const reason = changeOwnerOffReason(object, def);
   if (reason) throw changeOwnerOffRefusal(object, reason);
   if (target.queue !== undefined) {
@@ -699,9 +710,9 @@ export async function changeRecordOwner(
  * the caller, one by-id update each, and report every row that did not move.
  *
  * Refuses the whole call before any write: an empty list, a list longer than
- * the cap, a repeated id (`400 VALIDATION_ERROR`), an object that does not
- * offer the action (`403 CHANGE_OWNER_DISABLED`), and a target the single form
- * refuses.
+ * the cap, a repeated id (`400 VALIDATION_ERROR`), an object of a disabled
+ * package (`404 OBJECT_PACKAGE_DISABLED`), an object that does not offer the
+ * action (`403 CHANGE_OWNER_DISABLED`), and a target the single form refuses.
  */
 export async function changeRecordsOwner(
   engine: ChangeOwnerEngine,

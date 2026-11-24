@@ -11,6 +11,7 @@
  */
 
 import type { InstalledPackageRow } from '../metadata-admin/PackagesPage.js';
+import { STUDIO_ROOT_PATH } from './studioAddress.js';
 
 /**
  * One sonner id for EVERY `fetchPackages()` failure on this surface
@@ -25,7 +26,7 @@ import type { InstalledPackageRow } from '../metadata-admin/PackagesPage.js';
 export const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
 
 /** objectui#12513 — the Studio landing (`BuilderLanding`). */
-export const STUDIO_LANDING_PATH = '/studio';
+export const STUDIO_LANDING_PATH = STUDIO_ROOT_PATH;
 
 /**
  * The record the standard detail/management sheet opens on: a package's full

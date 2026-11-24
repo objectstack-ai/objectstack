@@ -26,6 +26,11 @@ import type { CjkPlugin, PluginConfig } from "streamdown";
  * the emphasis tokenizer; ASCII emphasis, code spans and backslash escapes
  * keep their CommonMark meaning. The `parseOnly` entry leaves out the
  * markdown serializer half, which the chat never runs.
+ *
+ * The manual reader carries the same rule in `@object-ui/plugin-markdown`
+ * (`src/MarkdownImpl.tsx`, its react-markdown `remarkPlugins`). Neither
+ * package depends on the other, so each imports the plugin itself; change the
+ * two together.
  */
 const CJK_EMPHASIS: CjkPlugin = {
   name: "cjk",

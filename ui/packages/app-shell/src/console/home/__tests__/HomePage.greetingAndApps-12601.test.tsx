@@ -91,13 +91,14 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: state.isAdmin, isResolved: true }),
 }));
 
-// One custom agent and no ask or build agent: AI is on here, so the build chip
-// keeps its "Build an app" form (objectstack#26614 gives the agent-less
-// deployment its own, `HomePage.noAgentsBuildChip-26614.test.tsx`), and no AI
-// CTA joins the greeting row, which holds the builder chips alone.
+// The build agent served beside a custom one, with the ask and authoring CTA
+// predicates stubbed off: the build chip keeps its "Build an app" form (an
+// agent-less deployment, and since objectstack#36969 one that serves no build
+// agent, gets its Studio form, `HomePage.noAgentsBuildChip-26614.test.tsx`),
+// and no AI CTA joins the greeting row, which holds the builder chips alone.
 vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@object-ui/plugin-chatbot/core')>()),
-  useAgents: () => ({ agents: [{ name: 'custom_helper' }] }),
+  useAgents: () => ({ agents: [{ name: 'build' }, { name: 'custom_helper' }] }),
   isAskAgent: () => false,
   agentHasCapability: () => false,
 }));
@@ -156,6 +157,9 @@ vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead:
 // like every other source this page reads.
 vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
+// The console's preview code loads `@objectstack/lint` lazily; paid at import,
+// not inside a test's clock.
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 
 const CRM = { name: 'crm', label: 'CRM', icon: 'Building2' };

@@ -298,7 +298,8 @@ import {
 } from './engine-top-level.js';
 import type {
   AdmittedValueShapeViolationTally, AutonumberReaders, CascadeDeleteSet, CascadeIssuedDelete, DatasourceDef,
-  EngineMiddleware, EngineReadOptions, FieldOwnedFileReadAuthorizer, FormulaFaultSink, FormulaPlanEntry,
+  EngineMiddleware, EngineMiddlewareEntry, EngineMiddlewareOptions, EngineReadOptions, FieldOwnedFileReadAuthorizer,
+  FormulaFaultSink, FormulaPlanEntry,
   FormulaRelated, FunctionEntry, FunctionRegistrationOptions, HeldFileResolver, HookEntry, HookHandler,
   IssuedAutonumber, MigrationFlagRead, OperationContext, PermissionResolution, ReadableIdsChain, ReadableIdsSecurity,
   ReadableIdsSecurityResolution, TransactionScope, UnservableControlledByParentMaster, WriteWallVerdict,
@@ -570,10 +571,7 @@ export class ObjectQL implements IObjectQLEngine {
   ]);
 
   // Middleware chain (onion model)
-  private middlewares: Array<{
-    fn: EngineMiddleware;
-    object?: string;
-  }> = [];
+  private middlewares: EngineMiddlewareEntry[] = [];
 
   // Action registry: key = "objectName:actionName" — the UNQUALIFIED slot, what
   // a call that names no package runs ([ADR-0150 D5, #31697]: two packages
@@ -1890,9 +1888,9 @@ export class ObjectQL implements IObjectQLEngine {
    * Register a middleware function
    * Middlewares execute in onion model around every data operation.
    * @param fn The middleware function
-   * @param options Optional: target object filter
+   * @param options Optional: target object filter; [#34700] the search fields it withholds (`EngineMiddlewareOptions`)
    */
-  registerMiddleware(fn: EngineMiddleware, options?: { object?: string }): void {
+  registerMiddleware(fn: EngineMiddleware, options?: EngineMiddlewareOptions): void {
     // [#29986 codemod] The body moved to `engine-middleware-and-context.ts` (see `MiddlewareAndContextHost`).
     return MiddlewareAndContextFacet.registerMiddleware.call(middlewareAndContextHost.of(this), fn, options);
   }
@@ -5921,6 +5919,7 @@ export class ObjectQL implements IObjectQLEngine {
       get logger() { return engine.logger; },
       lowerRelationConditions: (...a) => engine.lowerRelationConditions(...a),
       maskSecretFields: (...a) => engine.maskSecretFields(...a),
+      get middlewares() { return engine.middlewares; },
       permissionResolution: (...a) => engine.permissionResolution(...a),
       get relatedSchemaOf() { return engine.relatedSchemaOf; },
       reportFindFailure: (...a) => engine.reportFindFailure(...a),

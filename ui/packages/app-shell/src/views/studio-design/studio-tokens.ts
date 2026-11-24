@@ -13,44 +13,35 @@
  */
 
 /**
- * Shell header (objectui#12509). From `sm` up: one 48 px row, a three-column
- * grid so the pillar switcher centers. The right column never drops below its
- * content (Create app, Changes, Publish), so on a tight row the switcher moves
- * left and the package chip truncates instead of anything sliding under the
- * switcher. Below `sm`: two rows, the package and its actions on the first,
- * the switcher at full width on the second (`STUDIO_HEADER_PILLAR_NAV`).
+ * Shell header (objectui#12509). One 48 px row at every width, two columns:
+ * the left menu's control and the way back to the app at the left, the
+ * package actions at the right. The right column never drops below its
+ * content (Create app, Changes, Publish, Cancel, Save), so on a tight row the
+ * app's name truncates instead of anything sliding under the actions.
+ * objectstack#36899 — the pillar switcher that sat in a middle column (and on
+ * a second row below `sm`) is gone: the left menu is Studio's navigation.
  */
 export const STUDIO_HEADER =
-  '@container/studio-header grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b px-3 py-2 sm:h-12 sm:grid-cols-[minmax(0,1fr)_auto_minmax(max-content,1fr)] sm:py-0';
-/** The pillar switcher: its own full-width row below `sm`, the middle column from `sm` up. */
-export const STUDIO_HEADER_PILLAR_NAV =
-  'order-last col-span-2 flex items-center gap-0.5 rounded-lg bg-muted p-[3px] sm:order-none sm:col-span-1';
-/** One switcher segment: an equal share of the row below `sm`, its own width from `sm` up. */
-export const STUDIO_HEADER_PILLAR =
-  'inline-flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 text-[13px] transition-colors sm:flex-none sm:shrink-0 xl:px-3';
+  '@container/studio-header grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 border-b px-3';
 
 /**
  * objectui#12611 — the header's left column is a container: its width is the
  * grid track's, so what it holds folds to the room the column really has (the
- * pillar switcher and the actions beside it), never the viewport.
+ * actions beside it), never the viewport.
  * objectstack#36501 — it holds 「‹ Back to app」, the app's name and the
  * Studio mark, and the app's name is the piece that truncates.
  */
 export const STUDIO_HEADER_PACKAGE_COLUMN = '@container';
 
 /**
- * objectstack#34725 — the pillar names, and the words of "All metadata" and
- * Create app, answer the top bar's OWN width, not the viewport's: the right
- * panel beside it is resizable now (the console drawer's 420 px, dragged up to
- * the canvas's 520 px floor), so a 1163 px window can leave the bar 520 px. A
- * viewport breakpoint kept the names on and pushed the bar's right end, the AI
- * assistant's robot, under the panel. The thresholds are the bar widths the
- * old breakpoints gave beside the old fixed slot: 724 px (1024 − 300) for the
- * four pillar names, 920 px (1280 − 360) for the two longer words. Below them
- * the names stay in the accessible name and the tooltip. Literal class
- * strings: Tailwind finds a class by scanning source.
+ * objectstack#34725 — Create app's word answers the top bar's OWN width, not
+ * the viewport's: the right panel beside it is resizable (the console drawer's
+ * 420 px, dragged up to the canvas's 520 px floor), so a 1163 px window can
+ * leave the bar 520 px, and a viewport breakpoint pushed the bar's right end,
+ * the AI assistant's robot, under the panel. Below 920 px of bar the word stays
+ * in the accessible name and the tooltip. A literal class string: Tailwind
+ * finds a class by scanning source.
  */
-export const STUDIO_HEADER_PILLAR_NAME = 'sr-only @min-[724px]/studio-header:not-sr-only';
 export const STUDIO_HEADER_WIDE_WORD = 'sr-only @min-[920px]/studio-header:not-sr-only';
 
 /** Rail: 240 px, the sidebar surface, a right border. */

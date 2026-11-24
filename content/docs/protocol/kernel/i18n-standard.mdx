@@ -574,9 +574,14 @@ through the one the renderer reads for that node:
 |:---|:---|:---|
 | a form field, a composite's child | `FormFieldSpec.label` / `helpText` / `placeholder` | `resolveMetadataFormLabels(form, type, bundle, opts)` |
 | a property of a repeater row (a table column header) | the JSON Schema `items.properties[k].title` | `resolveMetadataFormSchemaTitles(schema, type, bundle, opts)` |
+| a column of the type's Studio list (`METADATA_LIST_REGISTRY`) | the served `list.columns[].label` | `resolveMetadataListLabels(list, type, bundle, opts)` |
 
-Both run in `GET /api/v1/meta`, which serves every type's `form` and `schema`
-already localised for the request's locale; a client deriving the schema itself
+A list column reads the field slot of its own path, so a column and the form
+field of the same key read the same words. `os i18n extract` emits that slot for
+a column path the form does not declare, with the column's header as the source.
+
+All three run in `GET /api/v1/meta`, which serves every type's `form`, `list`
+and `schema` already localised for the request's locale; a client deriving the schema itself
 with `z.toJSONSchema` applies the second one to its own copy, over a bundle it
 carries itself. Only `label` crosses over to the schema (as `title`); `helpText`
 and `placeholder` stay on the form.

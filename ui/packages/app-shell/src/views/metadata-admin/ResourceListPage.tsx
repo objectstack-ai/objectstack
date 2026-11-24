@@ -5,20 +5,17 @@
  * (Phase 3c).
  *
  * Reads `/meta/:type`, applies registry-driven columns + search +
- * source/overlay filters, and renders an ObjectGrid-like table.
- * Each row links to its EditPage at `./:name?type=…`.
- *
- * No virtualisation in MVP — metadata lists are typically < 200 items
- * per type, well under the threshold where it'd matter.
+ * source/overlay filters, and draws the rows in the record list's
+ * `ObjectGrid` (objectstack#36897: every type's list is the same table,
+ * `metadataListGrid.ts`), a page at a time. Each row links to its EditPage
+ * at `./:name?type=…`.
  */
 
 import * as React from 'react';
-import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Search, RefreshCw, AlertTriangle, Lock, Copy } from 'lucide-react';
 import {
   Button,
-  HorizontalOverflowBox,
-  PINNED_RIGHT_SEAM_SHADOW_CLASSES,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -58,7 +55,7 @@ import {
   resolveResourceConfig,
 } from './registry.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
-import { servedListColumns, withExtraColumns, type ListColumns } from './servedListColumns.js';
+import { servedListColumns, valueAtPath, withExtraColumns, type ListColumns } from './servedListColumns.js';
 import { buildPackageScopeOptions } from './package-scope.js';
 import { ENVIRONMENT_SCOPE_QUERY, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
@@ -104,6 +101,36 @@ import { useAdapter, useMetadata } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { SharingRuleCloneDialog, type SharingRuleCloneDialogProps } from './SharingRuleCloneDialog.js';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
+import {
+  applyListState,
+  DEFAULT_LIST_SORT,
+  decodeListSort,
+  decodeListState,
+  LIST_SORT_KEYS,
+  listContextQuery,
+  scopeListRows,
+  writeListState,
+  type ListRowReader,
+  type ListSortKey,
+  type MetadataListState,
+} from './metadataListState.js';
+import { useListScrollRestore } from './useListScrollRestore.js';
+import { LIST_CREATE_DIALOG_TYPES, MetadataListCreateDialog } from './MetadataListCreateDialog.js';
+import { ObjectGrid } from '@object-ui/plugin-grid';
+import {
+  LIST_PAGE_PARAM,
+  MetadataListSource,
+  gridSortOf,
+  listSortOfGrid,
+  metadataGridField,
+  metadataListGridSchema,
+  metadataListObjectSchema,
+  pageWindow,
+  type MetadataGridColumn,
+} from './metadataListGrid.js';
+import { useListChangedAt } from './listChangedAt.js';
+import { useListDraftMarks } from './listDraftMarks.js';
+import { ListChangedCell } from './ListChangedCell.js';
 
 /**
  * objectui#12982 — the Clone dialog of a declaration-only catalog
@@ -198,9 +225,40 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [query, setQuery] = React.useState('');
-  const [sourceFilter, setSourceFilter] = React.useState<string>('all');
   const [searchParams, setSearchParams] = useSearchParams();
+  // objectstack#36896 — the list's filters and sort live in its address
+  // (`metadataListState.ts`): a refresh keeps them, × / Back from a detail
+  // returns to them, and each row link carries them for the detail's ‹ ›.
+  // Every write replaces the history entry. The search box keeps its own
+  // draft, so a keystroke never waits on the router to echo the address back
+  // (the router commits a location in a transition): the draft follows the
+  // address only on a navigation this page did not write — a link to the list
+  // (PUSH) or Back / Forward (POP) — never on a REPLACE, which is this page's
+  // own write or the package repair below, both keeping the text.
+  const search = searchParams.toString();
+  const urlListState = React.useMemo(() => decodeListState(new URLSearchParams(search)), [search]);
+  const [queryDraft, setQueryDraft] = React.useState(urlListState.query);
+  const navigationType = useNavigationType();
+  const routeLocation = useLocation();
+  React.useEffect(() => {
+    if (navigationType !== 'REPLACE') setQueryDraft(urlListState.query);
+  }, [routeLocation.key, navigationType, urlListState.query]);
+  const listState: MetadataListState = { ...urlListState, query: queryDraft };
+  const updateListState = React.useCallback(
+    (patch: Partial<MetadataListState>) => {
+      // A changed filter or sort starts the table over at its first page.
+      setSearchParams(
+        (prev) => {
+          const next = writeListState(prev, { ...decodeListState(prev), ...patch });
+          next.delete(LIST_PAGE_PARAM);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+  const { query, source: sourceFilter, status: statusFilter, customizedOnly: onlyCustomized } = listState;
   const [refreshKey, setRefreshKey] = React.useState(0);
   // objectui#7611 — the ENVIRONMENT scope (`?scope=environment`): the Setup
   // catalog. The list is the registry's whole list for the type, not one
@@ -235,7 +293,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     const pair = customizationPackageId(host.packageId);
     return pair.ok ? pair.value : null;
   }, [host?.packageId]);
-  const [onlyCustomized, setOnlyCustomized] = React.useState(false);
   // objectstack#27356 — under Setup the header names the page as the sidebar
   // entry that opens it does ("Positions"); the type's label otherwise.
   const { app } = useExpressionContext();
@@ -247,7 +304,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // verdict has none, and the package door is refused the same way.
   const walled = useWalledCatalogReadOnly(type);
   const activation = envScope && hasCatalogActivation(type);
-  const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'inactive'>('all');
   // The activation ledger's answer for the switch column, with the names the
   // door refuses to switch (`catalog-activation.ts`). `null` while unread,
   // `'error'` when the read was refused or failed, with the server's words for
@@ -414,7 +470,19 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // writable base exists, create into it (defaulting away from the Local/null
   // scope); when none exists yet, prompt to create a base first.
   const [showCreateBase, setShowCreateBase] = React.useState(false);
+  // objectstack#36897 — in the Studio area an object or a flow is created in
+  // the list's own dialog (`MetadataListCreateDialog`), and on a read-only
+  // base every create lands in the base's `.custom` pair (ADR-0146 D3) — where
+  // the area opens one there (`host.pairCreate`; none where the ensure door
+  // refuses this caller, as on the pillars).
+  const createInPair = !!host?.readOnly && host.pairCreate === true;
+  const createInDialog = !!host?.packageId && LIST_CREATE_DIALOG_TYPES.includes(type);
+  const [createOpen, setCreateOpen] = React.useState(false);
   const handleCreate = React.useCallback(() => {
+    if (createInDialog) {
+      setCreateOpen(true);
+      return;
+    }
     // An environment-authored item belongs to no package (ADR-0131 D3).
     if (envScope) {
       navigate(`./new?${ENVIRONMENT_SCOPE_QUERY}`);
@@ -443,7 +511,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       return;
     }
     navigate(`./new${pkgSuffix}`);
-  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg]);
+  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg, createInDialog]);
 
   // objectui#7611 — the activation state the switch column shows. Re-read on
   // the list's own refresh, never on an unrelated render. The anchors arrive
@@ -591,6 +659,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       cancelled = true;
     };
   }, [client, type, refreshKey, listInclude]);
+  // objectstack#36898 — each item's change time and its pending-draft mark.
+  const changedAt = useListChangedAt(client, type, listInclude ? { include: listInclude } : undefined, refreshKey);
+  const draftMarkOf = useListDraftMarks(client, type, refreshKey);
 
   const searchableFields = config.searchableFields ?? ['name', 'label', 'description'];
   // Structural scope — every row this package could ever show for this
@@ -599,26 +670,16 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // a package with zero items of a type reads as "暂无…条目", not "no match
   // for an (empty) query" just because *other* packages own rows of the
   // same type (server list() is not package-scoped; we scope client-side).
+  //
+  // The per-type hide hook (e.g. `view` drops the bare aggregated container
+  // the framework keeps for runtime dual-read) applies first. objectui#7611 —
+  // the environment scope is the whole registry list, and so is the area's
+  // cross-package leg (objectstack#29566). Otherwise the project-package scope
+  // is mandatory: nothing until a concrete package is active, then only rows
+  // tagged with it — under the area, with its pair's (ADR-0146 D3).
+  // `scopeListRows` is shared with the detail's ‹ › order.
   const scopedItems = React.useMemo(
-    () =>
-      items.filter((row) => {
-        // Per-type hide hook (e.g. `view` drops the bare aggregated
-        // container the framework keeps for runtime dual-read).
-        if (config.listFilter && !config.listFilter(row.item)) return false;
-        // objectui#7611 — the environment scope is the whole registry list,
-        // and so is the area's cross-package leg (objectstack#29566).
-        if (envScope || allLeg) return true;
-        // Mandatory project-package scope: show nothing until a concrete
-        // project package is active, then only rows tagged with it. The
-        // 'sys_metadata' sentinel and untagged rows never match.
-        if (!activePackage) return false;
-        const pkg = (row.item as any)?._packageId;
-        // Only rows tagged with the active writable base match. Untagged /
-        // `sys_metadata`-provenance legacy rows have no scope of their own
-        // (ADR-0070 D5 — the package-less "Local / Custom" scope is removed).
-        // Under the area a base's list also holds its pair's items (ADR-0146 D3).
-        return pkg === activePackage || (pairId !== null && pkg === pairId);
-      }),
+    () => scopeListRows(items, { listFilter: config.listFilter, unscoped: envScope || allLeg, activePackage, pairId }),
     [items, activePackage, config, envScope, allLeg, pairId],
   );
 
@@ -673,20 +734,29 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     customizations.status === 'read' && (markedCount > 0 || customizationTotal(customizations.read) > 0);
   const filteringCustomized = onlyCustomized && showCustomizedFilter;
 
-  // User-driven filters (search query + source provenance) on top of scope.
-  const filtered = scopedItems.filter((row) => {
-    if (!matchesQuery(row.item, query, searchableFields)) return false;
-    if (sourceFilter !== 'all' && row.source !== sourceFilter) return false;
-    if (filteringCustomized && markOf(row) === null) return false;
-    if (activation && statusFilter !== 'all') {
-      // Only a KNOWN state filters: while the ledger is unread or unreadable,
-      // no item is either active or inactive to this filter.
-      if (!ledger || ledger === 'error') return false;
-      const name = String(row.item.name ?? '');
-      if ((statusFilter === 'active') !== isCatalogHolderActive(ledger, name, holdingOfRow(row))) return false;
-    }
-    return true;
-  });
+  // User-driven filters and the sort on top of scope (objectstack#36896): the
+  // one implementation the detail's ‹ › order reads too (`metadataListState.ts`).
+  const rowReader: ListRowReader<ItemRow> = {
+    name: (row) => String(row.item[config.primaryKey ?? 'name'] ?? ''),
+    changedAt: (row) => changedAt?.[String(row.item[config.primaryKey ?? 'name'] ?? '')],
+    label: (row) => (typeof row.item.label === 'string' ? row.item.label : undefined),
+    matches: (row, q) => matchesQuery(row.item, q, searchableFields),
+    source: (row) => row.source,
+    ...(showCustomizedFilter ? { customized: (row: ItemRow) => markOf(row) !== null } : {}),
+    // Only a KNOWN state filters: while the ledger is unread or unreadable, no
+    // item is either active or inactive to this filter.
+    ...(activation
+      ? {
+          active: (row: ItemRow) =>
+            !ledger || ledger === 'error'
+              ? null
+              : isCatalogHolderActive(ledger, String(row.item.name ?? ''), holdingOfRow(row)),
+        }
+      : {}),
+  };
+  const filtered = applyListState(scopedItems, listState, rowReader, locale);
+  // The list context every row link carries to its detail (decision 10).
+  const listContext = listContextQuery(listState);
 
   // Compute source + invalid counts for filter / header stats.
   const sourceCounts = React.useMemo(() => {
@@ -741,7 +811,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const typeWritable = !!(entry?.allowEnvironmentOverlay || entry?.allowRuntimeCreate);
   // A declaration-only catalog is never authored here: its items are created
   // on the authored object's page.
-  const canCreate = typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && !host?.readOnly;
+  const canCreate =
+    typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && (!host?.readOnly || createInPair);
   // The wall is the gate to NAME only where the type would otherwise admit a
   // write: a type with no runtime write channel is read-only for the operator
   // too, and its page says nothing about the wall.
@@ -760,6 +831,12 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   };
 
   const refresh = () => setRefreshKey((k) => k + 1);
+  // objectstack#36896 — × / Back from a detail lands where the list was: the
+  // position is kept per list address and restored once the rows are drawn.
+  const scrollAnchorRef = useListScrollRestore<HTMLDivElement>(
+    `${routeLocation.pathname}?${search}`,
+    !loading && filtered.length > 0,
+  );
   const createButton = canCreate && (
     <Button
       size="sm"
@@ -791,19 +868,345 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     </>
   );
 
-  // objectui#13091 — the row's controls pinned to the table's right edge: the
-  // Clone column at `right-0`, at its fixed width, and the Active column just
-  // left of it. The first pinned column draws the seam shadow.
-  const pinned = activation || !!CloneDialog;
-  const cloneCellPin = CloneDialog
-    ? cn(PINNED_CELL_CLASSES, 'right-0 w-28 min-w-28', !activation && PINNED_SEAM_CLASSES)
-    : undefined;
-  const activeCellPin = activation
-    ? cn(PINNED_CELL_CLASSES, CloneDialog ? 'right-28' : 'right-0', PINNED_SEAM_CLASSES)
-    : undefined;
+  // objectstack#36897 — what each row of the table draws, by its row key:
+  // `ObjectGrid` keeps a row's key and its column values only, so the item,
+  // its package, lock and diagnostics are looked up here, never carried on
+  // the grid's row.
+  const rowInfos = new Map<string, MetadataRowInfo>();
+  const gridRowsAll = filtered.map((row, i) => {
+    const info = metadataRowInfo(row, i);
+    rowInfos.set(info.id, info);
+    const values: Record<string, unknown> = { id: info.id };
+    shownColumns.forEach((c, ci) => {
+      values[metadataGridField(ci)] = gridValue(valueAtPath(row.item, c.key));
+    });
+    return values;
+  });
+  const rowInfoOf = (rec: unknown): MetadataRowInfo | undefined =>
+    rowInfos.get(String((rec as { id?: unknown } | null)?.id ?? ''));
+  function metadataRowInfo(row: ItemRow, i: number): MetadataRowInfo {
+    const pk = config.primaryKey ?? 'name';
+    const name = String(row.item[pk] ?? `(unnamed-${i})`);
+    const holding = holdingOfRow(row);
+    // ADR-0048 — link to this row's OWNING package so the editor resolves the
+    // right item even in the unscoped "all" list where two packages may ship
+    // the same name. Falls back to the workspace suffix for runtime/overlay-only
+    // rows (no real package, or the `sys_metadata` rehydration sentinel). The
+    // environment scope keeps its own scope instead: the editor reads the name
+    // as a caller with no package does (ADR-0150 D5, `holdingOfRead`).
+    const rowPkg = (row.item as { _packageId?: string })._packageId;
+    const editSuffix = envScope
+      ? pkgSuffix
+      : rowPkg && rowPkg !== 'sys_metadata'
+        ? `?package=${encodeURIComponent(rowPkg)}`
+        : pkgSuffix;
+    // objectstack#26649 — two members of one name are two rows; each opens its
+    // OWN member. objectstack#36896 (decision 10) — and the list's filters and
+    // sort ride along, for the detail's ‹ ›.
+    const member = bundleMemberOf(row.item, config.bundleMemberField);
+    const href = `./${encodeURIComponent(name)}${withQueryParam(
+      withQueryParam(editSuffix, member ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(member)}` : ''),
+      listContext,
+    )}`;
+    const invalid = row.diagnostics?.valid === false;
+    const warnList = row.diagnostics?.warnings ?? [];
+    return {
+      id: `${i}:${name}`,
+      row,
+      name,
+      holding,
+      rowPkg,
+      member: member || undefined,
+      href,
+      invalid,
+      warnOnly: !invalid && warnList.length > 0,
+    };
+  }
+
+  // The table's columns: the list's own, then the source (with the lock),
+  // then the row's controls — the Active switch, Clone, or both in one cell —
+  // pinned at its right edge (objectui#13091). One column, because the grid
+  // holds one column at that edge.
+  const gridColumns: MetadataGridColumn[] = [
+    ...shownColumns.map((c, ci) => ({
+      key: c.key,
+      label: localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c),
+      width: c.width,
+    })),
+    // objectstack#36898 — the item's change time and its pending-draft mark.
+    { key: CHANGED_COLUMN, label: t('engine.list.col.changedAt', locale) },
+    { key: SOURCE_COLUMN, label: t('engine.list.col.source', locale) },
+    ...(activation || CloneDialog
+      ? [
+          {
+            key: CONTROLS_COLUMN,
+            label: t(activation ? 'engine.catalog.col.active' : 'engine.list.col.actions', locale),
+            pinnedRight: true,
+          },
+        ]
+      : []),
+  ];
+  // A header sorts by what it reads: the first column drawn label-first is
+  // headed (and sorted by) the label, otherwise by the API name.
+  const sortKeyOfColumn = (c: MetadataGridColumn): ListSortKey | undefined =>
+    c.key === primaryKey
+      ? labelColumn
+        ? 'label'
+        : 'name'
+      : c.key === 'label'
+        ? 'label'
+        : c.key === CHANGED_COLUMN
+          ? 'changed'
+          : undefined;
+  const typeEntryLabel = entry?.label ?? type;
+  const gridSchema = React.useMemo(
+    () => metadataListGridSchema(type, gridColumns, sortKeyOfColumn, LIST_PAGE_SIZE),
+    // Re-keyed on the columns' content, never on the array's identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [type, JSON.stringify(gridColumns), primaryKey, !!labelColumn],
+  );
+  const gridSource = React.useMemo(
+    () => new MetadataListSource(gridRowsAll, metadataListObjectSchema(type, typeEntryLabel, gridColumns)),
+    // The source answers the schema; the rows reach the grid as `data`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [type, JSON.stringify(gridColumns), typeEntryLabel],
+  );
+  const listPage = Number(searchParams.get(LIST_PAGE_PARAM) ?? '1');
+  const gridPage = pageWindow(gridRowsAll, listPage, LIST_PAGE_SIZE);
+  const setListPage = React.useCallback(
+    (next: number) => {
+      setSearchParams(
+        (prev) => {
+          const out = new URLSearchParams(prev);
+          if (next <= 1) out.delete(LIST_PAGE_PARAM);
+          else out.set(LIST_PAGE_PARAM, String(next));
+          return out;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const cellClass = inSetup ? 'align-middle' : 'align-top';
+  const firstCell = (info: MetadataRowInfo, c: ListColumns[number]) => {
+    const { row } = info;
+    const value = valueAtPath(row.item, c.key);
+    const cell = c.render ? c.render(row.item[c.key], row.item) : defaultCell(value);
+    const errorList = row.diagnostics?.errors ?? [];
+    const warnList = row.diagnostics?.warnings ?? [];
+    const lines = (list: Array<{ path?: string; message: string }>) =>
+      list
+        .slice(0, 3)
+        .map((e) => `${e.path || '(root)'}: ${e.message}`)
+        .join('\n') + (list.length > 3 ? `\n+${list.length - 3} more` : '');
+    const labelValue = labelColumn ? row.item[labelColumn.key] : undefined;
+    const hasLabel = labelValue != null && labelValue !== '';
+    // ADR-0146 D3 — the row's customization mark: under a base, from its
+    // served read; in the cross-package leg, an item of a pair names its base.
+    const mark = markOf(row);
+    const pairBase = host && host.packageId === null ? customizationBaseOfRow(info.rowPkg) : null;
+    return (
+      <span
+        className={cn('inline-flex items-center gap-1.5', cellClass)}
+        data-testid={`metadata-row-${info.name}`}
+      >
+        {info.invalid && (
+          <span
+            className="inline-flex"
+            aria-label={t('engine.list.invalidTitle', locale)}
+            title={`${tFormat('engine.list.invalidCount', locale, { count: errorList.length })}\n${lines(errorList)}`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0" />
+          </span>
+        )}
+        {info.warnOnly && (
+          <span
+            className="inline-flex"
+            aria-label={t('engine.list.warnTitle', locale)}
+            title={`${tFormat('engine.list.warnCount', locale, { count: warnList.length })}\n${lines(warnList)}`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+          </span>
+        )}
+        {labelColumn && hasLabel ? (
+          <span className="min-w-0">
+            <Link to={info.href} className="text-primary hover:underline">
+              {labelColumn.render ? labelColumn.render(labelValue, row.item) : defaultCell(labelValue)}
+            </Link>
+            <span className="block font-mono text-xs text-muted-foreground" data-testid="metadata-row-api-name">
+              {cell}
+            </span>
+          </span>
+        ) : (
+          <Link to={info.href} className="text-primary hover:underline font-mono">
+            {cell}
+          </Link>
+        )}
+        {mark && customizations.status === 'read' ? (
+          <CustomizationMark
+            kind={mark}
+            baseName={customizations.baseName}
+            pairId={customizations.index.pairId}
+            locale={locale}
+          />
+        ) : pairBase ? (
+          <CustomizationMark kind="customizationOf" baseName={pairBase} pairId={info.rowPkg} locale={locale} />
+        ) : null}
+      </span>
+    );
+  };
+  const cellDraws: Record<string, (value: unknown, rec: unknown) => React.ReactNode> = {};
+  shownColumns.forEach((c, ci) => {
+    cellDraws[metadataGridField(ci)] = (_value, rec) => {
+      const info = rowInfoOf(rec);
+      if (!info) return null;
+      if (ci === 0) return firstCell(info, c);
+      const value = info.row.item[c.key];
+      const cell = c.render ? c.render(value, info.row.item) : defaultCell(valueAtPath(info.row.item, c.key));
+      // objectstack#27356 — two lines at most, so a row stays a row on a
+      // phone; the whole text on hover.
+      return inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
+        <span className="line-clamp-2" title={value}>
+          {cell}
+        </span>
+      ) : (
+        cell
+      );
+    };
+  });
+  // The page's own columns are drawn under their place in `gridColumns`.
+  const pageField = (key: string) => metadataGridField(gridColumns.findIndex((c) => c.key === key));
+  cellDraws[pageField(CHANGED_COLUMN)] = (_value, rec) => {
+    const info = rowInfoOf(rec);
+    if (!info) return null;
+    return (
+      <ListChangedCell
+        changedAt={changedAt?.[info.name]}
+        draft={draftMarkOf({ name: info.name, packageId: info.rowPkg, member: info.member })}
+        locale={locale}
+      />
+    );
+  };
+  cellDraws[pageField(SOURCE_COLUMN)] = (_value, rec) => {
+    const info = rowInfoOf(rec);
+    if (!info) return null;
+    const { row } = info;
+    const sourceDesc =
+      row.source === 'artifact'
+        ? `${t('engine.list.source.artifactDesc', locale)}${row.item._packageId ? ` (${String(row.item._packageId)})` : ''}`
+        : t('engine.list.source.runtimeDesc', locale);
+    const lock = row.item._lock as string | undefined;
+    return (
+      <span className="inline-flex items-center">
+        {lock && lock !== 'none' && (
+          <span
+            className="inline-flex items-center mr-1 text-amber-600 dark:text-amber-400"
+            title={(row.item._lockReason as string | undefined) ?? `_lock=${String(lock)}`}
+            data-testid="metadata-row-lock"
+          >
+            <Lock className="h-3 w-3" />
+          </span>
+        )}
+        {inSetup ? (
+          // Under Setup the source is plain text with its explanation in a
+          // tooltip, not a chip on every row (objectui#12606).
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help text-xs text-muted-foreground" data-testid="metadata-row-source">
+                  {t(`engine.list.source.${row.source}`, locale)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="left" className="max-w-xs text-xs">
+                {sourceDesc}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <Badge
+            variant="outline"
+            className={
+              'text-[10px] ' +
+              (row.source === 'artifact'
+                ? 'border-sky-500/50 text-sky-700 dark:text-sky-300'
+                : 'border-emerald-500/50 text-emerald-700 dark:text-emerald-300')
+            }
+            title={sourceDesc}
+          >
+            {t(`engine.list.source.${row.source}`, locale)}
+          </Badge>
+        )}
+      </span>
+    );
+  };
+  if (activation || CloneDialog) {
+    cellDraws[pageField(CONTROLS_COLUMN)] = (_value, rec) => {
+      const info = rowInfoOf(rec);
+      if (!info) return null;
+      return (
+        <span className="inline-flex items-center gap-2">
+          {activation && (
+            <CatalogActiveCell
+              itemName={info.name}
+              holding={info.holding}
+              ledger={ledger}
+              refusal={ledgerRefusal}
+              canSwitch={canAuthor && !walled}
+              busy={switching === switchKeyOf(info.name, info.holding)}
+              locale={locale}
+              onToggle={(itemName, enabled) => toggleActive(itemName, enabled, info.holding)}
+            />
+          )}
+          {CloneDialog && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 max-w-[88px] px-2 text-xs"
+              onClick={() => setCloning(info.row.item)}
+              title={t('engine.sharingRule.clone.action', locale)}
+              data-testid={`catalog-clone-${info.name}`}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              <span className="truncate">{t('engine.sharingRule.clone.action', locale)}</span>
+            </Button>
+          )}
+        </span>
+      );
+    };
+  }
+
+  // The grid keeps the cells it was handed as table state, re-seeded a commit
+  // after they change; so the cells it holds are stable and draw through the
+  // latest render's drawers, and a ledger or mark that changes redraws at once.
+  const cellDrawsRef = React.useRef(cellDraws);
+  cellDrawsRef.current = cellDraws;
+  const cellKeys = Object.keys(cellDraws).join(',');
+  const hostCells = React.useMemo(
+    () =>
+      Object.fromEntries(
+        cellKeys.split(',').map((key) => [key, (value: unknown, rec: unknown) => cellDrawsRef.current[key]?.(value, rec) ?? null]),
+      ),
+    [cellKeys],
+  );
 
   const body = (
-      <div className="p-6 space-y-4">
+      <div className="p-6 space-y-4" ref={scrollAnchorRef}>
+        {createInDialog && host?.packageId && (
+          <MetadataListCreateDialog
+            type={type}
+            open={createOpen}
+            onOpenChange={setCreateOpen}
+            packageId={host.packageId}
+            inPair={createInPair}
+            locale={locale}
+            onCreated={({ name, packageId }) => {
+              setCreateOpen(false);
+              refresh();
+              navigate(`./${encodeURIComponent(name)}?package=${encodeURIComponent(packageId)}`);
+            }}
+          />
+        )}
         <CreatePackageDialog
           open={showCreateBase}
           onOpenChange={setShowCreateBase}
@@ -817,10 +1220,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               className={cn('pl-8', inSetup && 'h-8')}
               placeholder={t('engine.list.search', locale)}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQueryDraft(e.target.value);
+                updateListState({ query: e.target.value });
+              }}
+              data-testid="metadata-list-search"
             />
           </div>
-          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+          <Select value={sourceFilter} onValueChange={(v) => updateListState({ source: v as MetadataListState['source'] })}>
             {/* Under Setup the source select is a filter chip (objectui#12606). */}
             <SelectTrigger
               className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[180px]'}
@@ -835,7 +1242,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             </SelectContent>
           </Select>
           {activation && (
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+            <Select value={statusFilter} onValueChange={(v) => updateListState({ status: v as typeof statusFilter })}>
               <SelectTrigger
                 className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[150px]'}
                 data-testid="catalog-status-filter"
@@ -855,12 +1262,32 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               variant={filteringCustomized ? 'default' : 'outline'}
               className={inSetup ? 'h-8 rounded-full px-3 text-xs' : undefined}
               aria-pressed={filteringCustomized}
-              onClick={() => setOnlyCustomized((v) => !v)}
+              onClick={() => updateListState({ customizedOnly: !onlyCustomized })}
               data-testid="metadata-only-customizations"
             >
               {tFormat('engine.list.customizations.only', locale, { marked: markedCount })}
             </Button>
           )}
+          {/* objectstack#36896 — the sort; by API name, A to Z, by default. */}
+          <Select
+            value={encodeSortOption(listState.sort)}
+            onValueChange={(v) => updateListState({ sort: decodeListSort(v) })}
+          >
+            <SelectTrigger
+              className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[180px]'}
+              aria-label={t('engine.list.sort', locale)}
+              data-testid="metadata-list-sort"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {t(`engine.list.sort.${o.key}.${o.dir}`, locale)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         {customizations.status === 'failed' && (
           <div className="text-xs text-muted-foreground" data-testid="metadata-customizations-failed">
@@ -985,276 +1412,36 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
           </Empty>
         )}
         {!loading && filtered.length > 0 && (
-          // objectui#13091 — a table wider than its box says so (the shared
-          // overflow affordance, objectui#12708), and the row's controls (the
-          // Active switch, Clone) stay pinned at its right edge, the seam
-          // shadow on the first of them (objectui#12463).
-          <HorizontalOverflowBox
-            seam={pinned ? 'pinned' : 'edge'}
-            outerClassName="border rounded-lg overflow-hidden"
-            data-testid="metadata-list-scroller"
-          >
-            {/* Separated borders: Chrome paints a sticky cell of a collapsed-border
-                table without covering the text scrolling beneath its edge
-                (objectui#13091), so the row dividers are drawn on the cells. */}
-            <table className="w-full text-sm border-separate border-spacing-0">
-              {/* Under Setup the table reads as the console's record list
-                  (objectui#12606): sentence-case headers, the grid's 36px
-                  rows, middle-aligned cells. */}
-              <thead
-                className={
-                  inSetup
-                    ? 'bg-muted/30 text-xs text-muted-foreground'
-                    : 'bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground'
-                }
-              >
-                <tr className={HEAD_ROW_TINT}>
-                  {shownColumns.map((c, ci) => (
-                    <th
-                      key={c.key}
-                      className={cn('px-3 text-left font-medium', inSetup ? 'h-9 py-0' : 'py-2')}
-                      style={c.width ? { width: c.width } : undefined}
-                    >
-                      {localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c)}
-                    </th>
-                  ))}
-                  <th className={cn('px-3 text-right font-medium w-[80px]', inSetup ? 'h-9 py-0' : 'py-2')}>{t('engine.list.col.source', locale)}</th>
-                  {activation && (
-                    <th className={cn('px-3 text-left font-medium w-[90px]', inSetup ? 'h-9 py-0' : 'py-2', activeCellPin)}>
-                      {t('engine.catalog.col.active', locale)}
-                    </th>
-                  )}
-                  {CloneDialog && (
-                    <th className={cn('px-3', inSetup ? 'h-9 py-0' : 'py-2', cloneCellPin)}>
-                      <span className="sr-only">{t('engine.list.col.actions', locale)}</span>
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="[&>tr+tr>td]:border-t">
-                {filtered.map((row, i) => {
-                  const pk = config.primaryKey ?? 'name';
-                  const name = String(row.item[pk] ?? `(unnamed-${i})`);
-                  const rowHolding = holdingOfRow(row);
-                  // ADR-0048 — link to this row's OWNING package so the editor
-                  // resolves the right item even in the unscoped "all" list
-                  // where two packages may ship the same name. Falls back to the
-                  // workspace suffix for runtime/overlay-only rows (no real
-                  // package, or the `sys_metadata` rehydration sentinel).
-                  const rowPkg = (row.item as any)._packageId as string | undefined;
-                  // The environment scope keeps its own scope instead: the
-                  // editor reads the name as a caller with no package does
-                  // (ADR-0150 D5, `holdingOfRead`) — the name's one holder, or
-                  // the environment's own set where it holds the name; a name
-                  // two packages hold is refused by name alone, and the editor
-                  // then draws no holder's sections (objectstack#32774).
-                  const rowEditSuffix = envScope
-                    ? pkgSuffix
-                    : rowPkg && rowPkg !== 'sys_metadata'
-                      ? `?package=${encodeURIComponent(rowPkg)}`
-                      : pkgSuffix;
-                  const invalid = row.diagnostics?.valid === false;
-                  const errorList = row.diagnostics?.errors ?? [];
-                  const warnList = (row.diagnostics as any)?.warnings ?? [];
-                  const warnOnly = !invalid && warnList.length > 0;
-                  const errorTitle = invalid
-                    ? errorList
-                        .slice(0, 3)
-                        .map((e) => `${e.path || '(root)'}: ${e.message}`)
-                        .join('\n') +
-                      (errorList.length > 3 ? `\n+${errorList.length - 3} more` : '')
-                    : warnOnly
-                      ? warnList
-                          .slice(0, 3)
-                          .map((w: any) => `${w.path || '(root)'}: ${w.message}`)
-                          .join('\n') +
-                        (warnList.length > 3 ? `\n+${warnList.length - 3} more` : '')
-                      : '';
-                  const cellClass = inSetup ? 'h-9 px-3 py-1.5 align-middle' : 'px-3 py-2 align-top';
-                  const sourceDesc =
-                    row.source === 'artifact'
-                      ? `${t('engine.list.source.artifactDesc', locale)}${row.item._packageId ? ` (${row.item._packageId})` : ''}`
-                      : t('engine.list.source.runtimeDesc', locale);
-                  // objectstack#26649 — two members of one name are two rows;
-                  // each opens its OWN member. A row that declares none is the
-                  // canonical member, which the bare name already opens.
-                  const rowMember = bundleMemberOf(row.item, config.bundleMemberField);
-                  const rowHref = `./${encodeURIComponent(name)}${withQueryParam(
-                    rowEditSuffix,
-                    rowMember ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(rowMember)}` : '',
-                  )}`;
-                  // ADR-0146 D3 — the row's customization mark: under a base,
-                  // from its served read; in the cross-package leg, an item of a
-                  // pair names its base.
-                  const mark = markOf(row);
-                  const pairBase = host && host.packageId === null ? customizationBaseOfRow(rowPkg) : null;
-                  const markNode =
-                    mark && customizations.status === 'read' ? (
-                      <CustomizationMark
-                        kind={mark}
-                        baseName={customizations.baseName}
-                        pairId={customizations.index.pairId}
-                        locale={locale}
-                      />
-                    ) : pairBase ? (
-                      <CustomizationMark kind="customizationOf" baseName={pairBase} pairId={rowPkg} locale={locale} />
-                    ) : null;
-                  return (
-                    <tr
-                      key={name + i}
-                      data-testid={`metadata-row-${name}`}
-                      onClick={(e) => openRowFromClick(e, () => navigate(rowHref))}
-                      className={cn(
-                        'cursor-pointer hover:bg-accent/50',
-                        invalid ? 'bg-destructive/[0.04]' : warnOnly ? 'bg-amber-500/[0.05]' : '',
-                        // The same fills, for the pinned cells to layer over
-                        // their opaque background.
-                        invalid ? INVALID_ROW_TINT : warnOnly ? WARN_ROW_TINT : '',
-                        HOVER_ROW_TINT,
-                      )}
-                    >
-                      {shownColumns.map((c, ci) => {
-                        const value = row.item[c.key];
-                        const cell = c.render ? c.render(value, row.item) : defaultCell(value);
-                        const labelValue = labelColumn ? row.item[labelColumn.key] : undefined;
-                        const hasLabel = labelValue != null && labelValue !== '';
-                        return (
-                          <td key={c.key} className={cellClass}>
-                            {ci === 0 ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                {invalid && (
-                                  <span
-                                    className="inline-flex"
-                                    aria-label={t('engine.list.invalidTitle', locale)}
-                                    title={`${tFormat('engine.list.invalidCount', locale, { count: errorList.length })}\n${errorTitle}`}
-                                  >
-                                    <AlertTriangle className="w-3.5 h-3.5 text-destructive shrink-0" />
-                                  </span>
-                                )}
-                                {warnOnly && (
-                                  <span
-                                    className="inline-flex"
-                                    aria-label={t('engine.list.warnTitle', locale)}
-                                    title={`${tFormat('engine.list.warnCount', locale, { count: warnList.length })}\n${errorTitle}`}
-                                  >
-                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-                                  </span>
-                                )}
-                                {labelColumn && hasLabel ? (
-                                  <span className="min-w-0">
-                                    <Link to={rowHref} className="text-primary hover:underline">
-                                      {labelColumn.render ? labelColumn.render(labelValue, row.item) : defaultCell(labelValue)}
-                                    </Link>
-                                    <span
-                                      className="block font-mono text-xs text-muted-foreground"
-                                      data-testid="metadata-row-api-name"
-                                    >
-                                      {cell}
-                                    </span>
-                                  </span>
-                                ) : (
-                                  <Link
-                                    to={rowHref}
-                                    className="text-primary hover:underline font-mono"
-                                  >
-                                    {cell}
-                                  </Link>
-                                )}
-                                {markNode}
-                              </span>
-                            ) : inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
-                              // objectstack#27356 — two lines at most, so a row
-                              // stays a row on a phone; the whole text on hover.
-                              <span className="line-clamp-2" title={value}>
-                                {cell}
-                              </span>
-                            ) : (
-                              cell
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td className={cn(cellClass, 'text-right')}>
-                        {(row.item._lock as string | undefined) && row.item._lock !== 'none' && (
-                          <span
-                            className="inline-flex items-center mr-1 text-amber-600 dark:text-amber-400"
-                            title={
-                              (row.item._lockReason as string | undefined)
-                              ?? `_lock=${String(row.item._lock)}`
-                            }
-                          >
-                            <Lock className="h-3 w-3" />
-                          </span>
-                        )}
-                        {inSetup ? (
-                          // Under Setup the source is plain text with its
-                          // explanation in a tooltip, not a chip on every row
-                          // (objectui#12606).
-                          <TooltipProvider delayDuration={200}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span
-                                  className="cursor-help text-xs text-muted-foreground"
-                                  data-testid="metadata-row-source"
-                                >
-                                  {t(`engine.list.source.${row.source}`, locale)}
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent side="left" className="max-w-xs text-xs">
-                                {sourceDesc}
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className={
-                              'text-[10px] ' +
-                              (row.source === 'artifact'
-                                ? 'border-sky-500/50 text-sky-700 dark:text-sky-300'
-                                : 'border-emerald-500/50 text-emerald-700 dark:text-emerald-300')
-                            }
-                            title={sourceDesc}
-                          >
-                            {t(`engine.list.source.${row.source}`, locale)}
-                          </Badge>
-                        )}
-                      </td>
-                      {activation && (
-                        <td className={cn(cellClass, activeCellPin)}>
-                          <CatalogActiveCell
-                            itemName={name}
-                            holding={rowHolding}
-                            ledger={ledger}
-                            refusal={ledgerRefusal}
-                            canSwitch={canAuthor && !walled}
-                            busy={switching === switchKeyOf(name, rowHolding)}
-                            locale={locale}
-                            onToggle={(itemName, enabled) => toggleActive(itemName, enabled, rowHolding)}
-                          />
-                        </td>
-                      )}
-                      {CloneDialog && (
-                        <td className={cn(cellClass, 'text-right', cloneCellPin)}>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 max-w-[88px] px-2 text-xs"
-                            onClick={() => setCloning(row.item)}
-                            title={t('engine.sharingRule.clone.action', locale)}
-                            data-testid={`catalog-clone-${name}`}
-                          >
-                            <Copy className="h-3.5 w-3.5 mr-1" />
-                            <span className="truncate">{t('engine.sharingRule.clone.action', locale)}</span>
-                          </Button>
-                        </td>
-                      )}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </HorizontalOverflowBox>
+          // objectstack#36897 — every type's list is the same table: the
+          // record list's `ObjectGrid`, fed the rows above in their order
+          // (`metadataListGrid.ts`), its cells drawn here by row key.
+          <div className="border rounded-lg overflow-hidden" data-testid="metadata-list-scroller">
+            <ObjectGrid
+              schema={gridSchema}
+              dataSource={gridSource}
+              data={gridPage.rows}
+              manualPagination
+              rowCount={filtered.length}
+              page={gridPage.page}
+              pageSize={LIST_PAGE_SIZE}
+              onPageChange={setListPage}
+              sort={gridSortOf(listState.sort, gridColumns, sortKeyOfColumn)}
+              onSortChange={(next) => updateListState({ sort: listSortOfGrid(next, gridColumns, sortKeyOfColumn) ?? DEFAULT_LIST_SORT })}
+              search={query}
+              hostCells={hostCells}
+              rowTint={(rec) => {
+                const info = rowInfoOf(rec);
+                return info?.invalid ? 'red' : info?.warnOnly ? 'amber' : null;
+              }}
+              rowOpensRecord={false}
+              cellSelection={false}
+              onRowClick={(rec, event) => {
+                const info = rowInfoOf(rec);
+                if (!info || (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey))) return;
+                navigate(info.href);
+              }}
+            />
+          </div>
         )}
       </div>
   );
@@ -1352,52 +1539,38 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   );
 }
 
-/**
- * objectui#13091 — a cell pinned to the right edge of the list's overflow box.
- * It paints an opaque background, because the other columns scroll beneath
- * it, and layers its row's fill (`--os-row-tint`, the convention `data-table`
- * keeps for its sticky cells) over it, so a pinned cell reads as part of its
- * row. The Clone column is the fixed `w-28` the Active column's `right-28`
- * offset counts on; its button truncates its label to stay inside it.
- *
- * Complete literals: Tailwind v4 builds only from scanned source text.
- */
-const PINNED_CELL_CLASSES =
-  'sticky z-10 bg-background bg-[image:linear-gradient(var(--os-row-tint,transparent),var(--os-row-tint,transparent))]';
-const PINNED_SEAM_CLASSES = `border-l border-border ${PINNED_RIGHT_SEAM_SHADOW_CLASSES}`;
-const HEAD_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-muted)_30%,transparent)]';
-const INVALID_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-destructive)_4%,transparent)]';
-const WARN_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-amber-500)_5%,transparent)]';
-const HOVER_ROW_TINT = 'hover:[--os-row-tint:color-mix(in_oklab,var(--color-accent)_50%,transparent)]';
+/** The page columns after the list's own (`metadataListGrid.ts` keys none of them as a field). */
+const CHANGED_COLUMN = '__changed';
+const SOURCE_COLUMN = '__source';
+const CONTROLS_COLUMN = '__controls';
 
-/**
- * The whole row opens its item (objectstack#25333), the way a record list's
- * row does. The first cell keeps its link, which is what a keyboard, a screen
- * reader and a modified click (new tab) use; this handler is the pointer's
- * larger target and stands aside for everything the row already does:
- *
- *  - a click on a control in the row (the link itself, the Active switch,
- *    Clone, a tooltip trigger) is that control's;
- *  - a click that reached the row through a React portal (a dialog a row
- *    control opened) did not happen on the row;
- *  - a modified or non-primary click, and a click that ends a text selection,
- *    are the browser's.
- */
-export function openRowFromClick(e: React.MouseEvent<HTMLElement>, open: () => void): void {
-  if (e.defaultPrevented || e.button !== 0) return;
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  const target = e.target as Node | null;
-  if (!target || !e.currentTarget.contains(target)) return;
-  const el = target instanceof Element ? target : target.parentElement;
-  if (el?.closest(ROW_OWN_CONTROLS)) return;
-  const selection = typeof window !== 'undefined' ? window.getSelection?.() : null;
-  if (selection && !selection.isCollapsed && selection.toString().trim() !== '') return;
-  open();
+/** Rows per page of the list. */
+const LIST_PAGE_SIZE = 50;
+
+/** What one row of the table draws, looked up by its row key (objectstack#36897). */
+interface MetadataRowInfo {
+  id: string;
+  row: ItemRow;
+  name: string;
+  holding: PermissionSetHolding | undefined;
+  rowPkg: string | undefined;
+  /** The bundle member the row is (objectstack#26649), for its draft mark. */
+  member: string | undefined;
+  href: string;
+  invalid: boolean;
+  warnOnly: boolean;
 }
 
-const ROW_OWN_CONTROLS =
-  'a,button,input,select,textarea,label,summary,[role="button"],[role="switch"],[role="checkbox"],[role="menuitem"],[role="link"],[contenteditable="true"]';
-
+/** A column value as the grid's row keeps it: a scalar as is, anything else as its JSON. */
+function gridValue(value: unknown): string | number | boolean | null {
+  if (value == null) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
 
 /**
  * objectstack#26649 — the member column of a type whose identity is a pair,
@@ -1407,6 +1580,16 @@ const ROW_OWN_CONTROLS =
 function withBundleMemberColumn(columns: ListColumns, field: string | undefined): ListColumns {
   if (!field || columns.some((c) => c.key === field)) return columns;
   return [...columns.slice(0, 1), { key: field, label: field }, ...columns.slice(1)];
+}
+
+/** The sort control's options: every sort key, each way (`metadataListState.ts`). */
+const SORT_OPTIONS: ReadonlyArray<{ value: string; key: ListSortKey; dir: 'asc' | 'desc' }> = LIST_SORT_KEYS.flatMap(
+  (key) => (['asc', 'desc'] as const).map((dir) => ({ value: `${dir === 'desc' ? '-' : ''}${key}`, key, dir })),
+);
+
+/** The sort control's value for a sort (`name`, `-label`). */
+function encodeSortOption(sort: MetadataListState['sort']): string {
+  return `${sort.dir === 'desc' ? '-' : ''}${sort.key}`;
 }
 
 /** `suffix` (`''` or `?a=b`) with one more `key=value` pair, when there is one. */

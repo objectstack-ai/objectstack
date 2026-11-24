@@ -114,21 +114,29 @@ hand:
   validation rules and hooks apply. It answers what moved, what failed and how
   many remain; call it again until `remaining` is 0.
 
-The owner field of a detail object (`sharingModel: 'controlled_by_parent'`)
-is neither counted nor moved. On a detail the owner records who did the work
-(the person on a timesheet, the spender on an expense line), not who holds
-it; handing it over would make the successor appear to have done that work.
-A detail row that names its master is reached through that master, so hand
-over the master record instead. The detail's other user fields, such as an
-approver, are counted and moved as usual.
+Some holdings are counted but not moved, and the count says why on each row
+(`transferable: false` with a `reason`):
 
-One row class has no master to hand over: a detail row whose master reference
-is empty, on a detail whose master is optional (declared `required: false`).
-Its owner reads and writes it, beside holders of View All / Modify All on the
-detail. Its owner is not counted or moved either, so after the ban only View
-All / Modify All holders reach it. To give such rows to someone else, a holder
-of Modify All on the detail filters the detail by owner and edits the owner by
-hand.
+- `multi_valued`: a user field that lists several people. Replacing one person
+  in a list is a different edit from reassigning a record.
+- `transfer_off`: the owner field of an object whose Change Owner switch,
+  `userActions.transfer`, is off. The hand-over follows the same switch as the
+  Change Owner action, so an object that turns it off keeps its records'
+  owners where they are. The switch defaults to off on a detail object
+  (`sharingModel: 'controlled_by_parent'`): there the owner usually records
+  who did the work (the person on a timesheet, the spender on an expense
+  line), and a detail row that names its master is reached through that
+  master, so hand over the master record instead. A detail whose owner really
+  holds the record (a contact under an account) sets `userActions.transfer:
+  true`, and the hand-over then moves its owner like any other. The rule is
+  per object: on a switched-off detail whose master is optional (declared
+  `required: false`), a row with an empty master reference keeps its owner
+  too, and after the ban only holders of View All / Modify All on the detail
+  reach it; a holder of Modify All moves it by filtering the detail by owner
+  and editing the owner by hand.
+
+The switch governs only the platform owner field: an object's other user
+fields, such as an approver, are counted and moved as usual.
 
 The hand-over is optional and never delays the ban. Once a user is banned, a
 new record or edit that sets a user field to them is refused with the field

@@ -612,8 +612,9 @@ describe('[#8663] validateHookBodyWrites — unprovisioned anchor writes', () =>
 // at run time, this time wearing the checker's badge.
 //
 // This site is the delicate one of the three, because it parses a SYNTHESISED
-// wrapper: `async function __body(ctx) { … }`, the shape the runtime compiles a
-// hook body into. So "unparseable" here could in principle mean the wrapper is
+// parse enclosure: `async function __body(ctx) { … }`, a function-body context
+// like the runtime's own `(ctx)` wrapper (`action-body-wrapper.ts` says why it is
+// not a second spelling of it). So "unparseable" here could in principle mean the enclosure is
 // wrong rather than the author's source, and blaming an author for the checker's
 // own bug would be a worse defect than the one being fixed. `the wrapper is not
 // what fails` below is the mechanical proof that it cannot be.
@@ -666,7 +667,7 @@ describe('an unparseable hook body is reported, not scored clean (#10653)', () =
   });
 
   it('a body the runtime itself could not compile is the author’s, and is reported', () => {
-    // A hook body runs as `new AsyncFunction('ctx', source)`. `return`/`await`
+    // A hook body runs as the body of `(async (ctx) => { … })`. `return`/`await`
     // are legal there and must stay legal here (they parse inside the wrapper),
     // while a body that is not a function body at all is a real author error.
     expect(extractHookBodyWriteSet('await ctx.api.object("a").insert({});\nreturn 1;').parseFailure).toBeUndefined();

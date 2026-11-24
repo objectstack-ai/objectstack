@@ -21,6 +21,7 @@ import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import type { DataSource, FormField, QueryParams, LookupColumnDef, LookupFieldMetadata } from '@object-ui/types';
 import { RecordPickerDialog, lookupFiltersToRecord } from './RecordPickerDialog.js';
 import {
+  collapseReference,
   readRecordBeingEdited,
   readsRecord,
   resolveLookupFilters,
@@ -865,7 +866,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const dependentFilter = useMemo<Record<string, any> | undefined>(() => {
     const f: Record<string, any> = {};
     for (const { field, param } of dependsOn) {
-      const v = resolvedDependentValues[field];
+      // A record page hands over the record as the server returned it, so a
+      // lookup parent can arrive populated — its id is what the filter compares.
+      const v = collapseReference(resolvedDependentValues[field]);
       if (v === undefined || v === null || v === '') continue;
       f[param] = typeof v === 'number' ? v : String(v);
     }
@@ -898,7 +901,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const searchQuery = popoverQuery.search;
   const loading = popoverQuery.loading;
   const totalCount = popoverQuery.total;
-  const error = popoverQuery.error ?? createError;
+  // The fetch error alone gates the list. A create error — a failed inline
+  // create, or a quick-created record this picker will not take
+  // (objectstack#36865) — is a notice drawn above the list instead: the
+  // candidates stay listed and selectable, so the user can pick an existing
+  // record right after reading why the new one was not chosen.
+  const error = popoverQuery.error;
+  // The notice belongs to the panel it was raised in: closing the picker
+  // clears it, so a later open starts clean.
+  useEffect(() => {
+    if (!isOpen) setCreateError(null);
+  }, [isOpen]);
   // Built from the row with its relations collapsed to ids — see
   // `candidateExpand` for why the option never sees the expanded form.
   const fetchedOptions = useMemo(
@@ -1633,6 +1646,41 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     perms,
   }).allowed;
   const canCreate = !!onCreateNew || (allowCreate && createGranted && (hasActionProvider || hasDataSource));
+  // objectstack#36865 — a record made through quick-create is selected only
+  // when this picker could have offered it. The create form takes whatever the
+  // user enters, so the new record can fail the field's `lookupFilters` (a
+  // `draft` where the field asks for `approved`); selected anyway, it sat in
+  // the field until the server refused the save or the action. So the new id
+  // is re-read through the picker's own filter — `popoverFilter` merged with
+  // the id through `mergeFilterNodes`, the recents rail's query — and the
+  // SERVER decides, exactly as it does for every listed candidate. Absent
+  // from the answer: not selected, and the picker reopens saying why. A
+  // picker with no filter, or no data source to ask, selects as before.
+  // A failed re-read is reported as unchecked, never read as a pass.
+  const admitCreated = useCallback(
+    async (created: Record<string, unknown>): Promise<boolean> => {
+      if (!popoverFilter || !hasDataSource || !dataSource || !referenceTo) return true;
+      const rid = recordValue(created, idField);
+      if (rid === undefined || rid === null) return true;
+      let admitted = false;
+      try {
+        const res = await dataSource.find(referenceTo, {
+          $filter: mergeFilterNodes(popoverFilter, { [idField]: rid }),
+          $top: 1,
+        } as QueryParams);
+        const rows = (res as any)?.data ?? res ?? [];
+        admitted = Array.isArray(rows) && rows.length > 0;
+        if (!admitted) setCreateError(t('lookup.createdOutsideFilters'));
+      } catch {
+        // Fail closed, and say the record EXISTS: a bare transport error read
+        // as "the create failed" invites a second, duplicate create.
+        setCreateError(t('lookup.createdUnchecked'));
+      }
+      if (!admitted) setIsOpen(true);
+      return admitted;
+    },
+    [popoverFilter, hasDataSource, dataSource, referenceTo, idField, t],
+  );
   const handleCreateNew = useCallback(
     async (q: string) => {
       const label = (q || '').trim();
@@ -1673,6 +1721,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           },
         } as any);
         if (result?.success && result.data) {
+          if (!(await admitCreated(result.data))) return;
           const opt = recordToOption(result.data, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo);
           handleSelect(opt, result.data);
           return;
@@ -1689,6 +1738,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       setCreating(true);
       try {
         const created = await (dataSource as any).create(referenceTo, { ...(dependentFilter ?? {}), [displayField]: label });
+        if (!(await admitCreated(created))) return;
         const opt = recordToOption(created, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo);
         handleSelect(opt, created);
       } catch (err) {
@@ -1697,7 +1747,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         setCreating(false);
       }
     },
-    [onCreateNew, allowCreate, createGranted, referenceTo, hasActionProvider, execute, dataSource, displayField, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, handleSelect, perms, dependentFilter],
+    [onCreateNew, allowCreate, createGranted, referenceTo, hasActionProvider, execute, dataSource, displayField, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, handleSelect, perms, dependentFilter, admitCreated],
   );
 
   /**
@@ -2099,6 +2149,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   />
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Create notice — above the list, never in place of it. */}
+          {createError && (
+            <div className="flex shrink-0 items-start gap-2 px-3 pb-2 text-sm text-destructive" role="alert" data-testid="lookup-create-error">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <p>{createError}</p>
             </div>
           )}
 

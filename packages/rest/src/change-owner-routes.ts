@@ -61,6 +61,7 @@ import {
     changeRecordOwner,
     changeRecordsOwner,
     objectNotFoundError,
+    objectPackageDisabledError,
     transferCascadeRelations,
     UserWorkTransferRefusal,
     type ChangeOwnerCascadeRelation,
@@ -263,6 +264,9 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
                 if (!engine) return sendError(res, 501, 'NOT_IMPLEMENTED', 'No data engine is configured on this deployment');
                 const def = engine.getSchema(object);
                 if (!def || typeof def !== 'object') throw objectNotFoundError(object);
+                // [#36261] The write doors' order (core's `offeredDefinition`): an object of a
+                // disabled package offers no Change Owner, so its dialog lists nothing either.
+                if (engine.registry?.isObjectPackageDisabled?.(object) === true) throw objectPackageDisabledError(object);
                 const reason = changeOwnerOffReason(object, def);
                 if (reason) throw changeOwnerOffRefusal(object, reason);
                 return sendOk(res, { object, cascades: transferCascadeRelations(engine, object) });
