@@ -24,6 +24,10 @@
  *   - a save writes only its own key's row, by the id the load found, or finds
  *     then creates it; a key outside the family writes nothing;
  *   - a failed read loads as no rows and is reported.
+ *
+ * And a save issued while the load is still in flight, for a key adapter or a
+ * family key, waits for that load and writes the row it returned, without a
+ * per-key read of its own (objectstack-ai/objectstack#37109, last describe).
  */
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackAdapter } from './index';
@@ -225,5 +229,84 @@ describe('a key family rides the shared read (objectui#12418)', () => {
     held[0].respond(500, { success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } });
     await expect(load).resolves.toEqual({});
     expect(onError).toHaveBeenCalledWith('load', expect.anything());
+  });
+});
+
+describe('a save issued while the load is in flight waits for it (objectstack-ai/objectstack#37109)', () => {
+  const perKeyRead = (key: string) => `["key","=","${key}"]`;
+
+  it('a key adapter writes the row the shared read returned, and sends no per-key read', async () => {
+    const { ds, held } = await heldAdapter();
+    const favorites = createObjectStackUserStateAdapter<string>({ dataSource: ds, userId: 'u1', key: 'ui.favorites' });
+    const recent = createObjectStackUserStateAdapter<string>({ dataSource: ds, userId: 'u1', key: 'ui.recent' });
+    const loads = Promise.all([favorites.load(), recent.load()]);
+    await drain();
+    expect(gets(held)).toHaveLength(1);
+
+    // The recents flush lands before the shared read has answered.
+    const saving = recent.save(['b', 'a']);
+    await drain();
+    expect(gets(held)).toHaveLength(1);
+    expect(writes(held)).toHaveLength(0);
+
+    held[0].respond(200, rows([{ id: 'rec', user_id: 'u1', key: 'ui.recent', value: ['a'] }]));
+    await loads;
+    await drain();
+
+    expect(gets(held)).toHaveLength(1);
+    expect(held.some((r) => r.path.includes(perKeyRead('ui.recent')))).toBe(false);
+    expect(writes(held)).toHaveLength(1);
+    expect(writes(held)[0].path).toBe('/api/v1/data/sys_user_preference/rec');
+    expect((writes(held)[0].body as { value: unknown }).value).toEqual(['b', 'a']);
+    writes(held)[0].respond(200, ok);
+    await saving;
+  });
+
+  it('a family key writes the row the shared read returned, and sends no per-key read', async () => {
+    const { ds, held } = await heldAdapter();
+    const recent = createObjectStackUserStateAdapter<string>({ dataSource: ds, userId: 'u1', key: 'ui.recent' });
+    const lists = createObjectStackUserPreferenceFamily<{ viewOrder?: string[] }>({ dataSource: ds, userId: 'u1', prefix: PREFIX });
+    const loads = Promise.all([recent.load(), lists.load()]);
+    await drain();
+
+    const saving = lists.save('ui.list.account', { viewOrder: ['b'] });
+    await drain();
+    expect(gets(held)).toHaveLength(1);
+    expect(writes(held)).toHaveLength(0);
+
+    held[0].respond(200, rows([{ id: 'acc', user_id: 'u1', key: 'ui.list.account', value: { viewOrder: ['a'] } }]));
+    await loads;
+    await drain();
+
+    expect(gets(held)).toHaveLength(1);
+    expect(held.some((r) => r.path.includes(perKeyRead('ui.list.account')))).toBe(false);
+    expect(writes(held)).toHaveLength(1);
+    expect(writes(held)[0].path).toBe('/api/v1/data/sys_user_preference/acc');
+    writes(held)[0].respond(200, ok);
+    await saving;
+  });
+
+  it('after a failed load the waiting save finds its own row, then creates it', async () => {
+    const { ds, held } = await heldAdapter();
+    const favorites = createObjectStackUserStateAdapter<string>({ dataSource: ds, userId: 'u1', key: 'ui.favorites' });
+    const recent = createObjectStackUserStateAdapter<string>({ dataSource: ds, userId: 'u1', key: 'ui.recent' });
+    const loads = Promise.all([favorites.load(), recent.load()]);
+    await drain();
+
+    const saving = recent.save(['a']);
+    await drain();
+    held[0].respond(500, { success: false, error: { code: 'INTERNAL_ERROR', message: 'boom' } });
+    await expect(loads).resolves.toEqual([[], []]);
+    await drain();
+
+    expect(gets(held)).toHaveLength(2);
+    expect(gets(held)[1].path).toContain(perKeyRead('ui.recent'));
+    gets(held)[1].respond(200, rows([]));
+    await drain();
+    expect(writes(held)).toHaveLength(1);
+    expect(writes(held)[0].method).toBe('POST');
+    expect(writes(held)[0].body).toEqual({ user_id: 'u1', key: 'ui.recent', value: ['a'] });
+    writes(held)[0].respond(200, ok);
+    await saving;
   });
 });
