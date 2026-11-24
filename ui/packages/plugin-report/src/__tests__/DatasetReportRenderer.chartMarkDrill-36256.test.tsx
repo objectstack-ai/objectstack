@@ -94,3 +94,47 @@ describe('a report chart mark drills like its table line (#36256)', () => {
     expect(chartProps!.onChartClick).toBeUndefined();
   });
 });
+
+// objectstack-ai/objectstack#37033 — a matrix cell's drill list shows the
+// fields the cell stands for: the down dimension's, the across dimension's
+// and the measured one, the same defaults a summary line gets.
+describe('a report matrix cell drills with its grouped and measured fields (#37033)', () => {
+  it('emits the down, across and measured fields for a matrix cell', async () => {
+    const onDrill = vi.fn();
+    const source = {
+      queryDataset: vi.fn(async () => ({
+        rows: [{ status: 'Todo', priority: 'Medium', total_hours: 5 }],
+        object: 'showcase_task',
+        dimensionFields: { status: 'status', priority: 'priority' },
+        drillRawRows: [{ status: 'todo', priority: 'medium' }],
+        drillScopes: { total_hours: { estimate_hours: { $null: false } } },
+      })),
+    };
+    render(
+      <DatasetReportRenderer
+        report={{ name: 'status_priority', type: 'matrix', dataset: 'task_metrics', rows: ['status'], columns: ['priority'], values: ['total_hours'] }}
+        dataSource={source}
+        onDrill={onDrill}
+      />,
+    );
+    const cells = await screen.findAllByTestId('dataset-drill-cell');
+    fireEvent.click(cells[0]);
+
+    expect(onDrill).toHaveBeenCalledTimes(1);
+    const [args] = onDrill.mock.calls[0];
+    // The filter still lists exactly the records the measure counted.
+    expect(JSON.stringify(args.objectFilter)).toContain('estimate_hours');
+    expect(JSON.stringify(args.objectFilter)).toContain('medium');
+    expect(args.fields).toEqual(['status', 'priority', 'estimate_hours']);
+  });
+
+  it('keeps a summary line drill on its grouped and measured fields (control)', async () => {
+    const onDrill = vi.fn();
+    const { chart: _chart, ...tableOnly } = report;
+    render(<DatasetReportRenderer report={tableOnly} dataSource={makeSource()} onDrill={onDrill} />);
+    const rows = await screen.findAllByTestId('dataset-drill-row');
+    fireEvent.click(rows[0]);
+    expect(onDrill).toHaveBeenCalledTimes(1);
+    expect(onDrill.mock.calls[0][0].fields).toEqual(['stage', 'amount']);
+  });
+});

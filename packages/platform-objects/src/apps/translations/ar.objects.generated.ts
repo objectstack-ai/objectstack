@@ -4627,5 +4627,90 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "مهمة",
+    pluralLabel: "المهام",
+    description: "أمور يجب إنجازها، مع مسؤول وموعد استحقاق.",
+    fields: {
+      title: {
+        label: "العنوان"
+      },
+      description: {
+        label: "الوصف"
+      },
+      status: {
+        label: "الحالة",
+        options: {
+          todo: "قيد الانتظار",
+          in_progress: "قيد التنفيذ",
+          done: "مكتملة"
+        }
+      },
+      due_at: {
+        label: "موعد الاستحقاق"
+      },
+      assignee_id: {
+        label: "المسؤول"
+      },
+      completed_at: {
+        label: "وقت الإكمال",
+        help: "تكتبه المنصة عندما تصبح الحالة مكتملة، وتمسحه عندما تتغير عنها."
+      },
+      owner_id: {
+        label: "المالك"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "المسندة إليّ",
+        emptyState: {
+          title: "لا توجد مهام مسندة إليك",
+          message: "تظهر هنا المهام المفتوحة المسندة إليك."
+        }
+      },
+      created_by_me: {
+        label: "التي أنشأتُها",
+        emptyState: {
+          title: "لا توجد مهام بعد",
+          message: "تظهر هنا المهام التي تنشئها."
+        }
+      },
+      all: {
+        label: "كل المهام"
+      }
+    }
+  },
+  sys_note: {
+    label: "ملاحظة",
+    pluralLabel: "الملاحظات",
+    description: "ملاحظات: عنوان ونص منسّق.",
+    fields: {
+      title: {
+        label: "العنوان"
+      },
+      body: {
+        label: "النص"
+      },
+      heading: {
+        label: "العنوان المعروض",
+        help: "العنوان، أو السطر الأول من النص عندما يكون العنوان فارغًا. تحافظ عليه المنصة."
+      },
+      owner_id: {
+        label: "المالك"
+      }
+    },
+    _views: {
+      mine: {
+        label: "ملاحظاتي",
+        emptyState: {
+          title: "لا توجد ملاحظات بعد",
+          message: "تظهر هنا الملاحظات التي تكتبها."
+        }
+      },
+      all: {
+        label: "كل الملاحظات"
+      }
+    }
   }
 };

@@ -4627,5 +4627,90 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "Tarea",
+    pluralLabel: "Tareas",
+    description: "Cosas por hacer, con un responsable y una fecha de vencimiento.",
+    fields: {
+      title: {
+        label: "Título"
+      },
+      description: {
+        label: "Descripción"
+      },
+      status: {
+        label: "Estado",
+        options: {
+          todo: "Pendiente",
+          in_progress: "En curso",
+          done: "Completada"
+        }
+      },
+      due_at: {
+        label: "Vencimiento"
+      },
+      assignee_id: {
+        label: "Responsable"
+      },
+      completed_at: {
+        label: "Completada el",
+        help: "La plataforma lo escribe cuando el estado pasa a Completada y lo borra cuando deja de serlo."
+      },
+      owner_id: {
+        label: "Propietario"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Asignadas a mí",
+        emptyState: {
+          title: "No tienes tareas asignadas",
+          message: "Aquí aparecen las tareas abiertas que tienes asignadas."
+        }
+      },
+      created_by_me: {
+        label: "Creadas por mí",
+        emptyState: {
+          title: "Aún no hay tareas",
+          message: "Aquí aparecen las tareas que creas."
+        }
+      },
+      all: {
+        label: "Todas las tareas"
+      }
+    }
+  },
+  sys_note: {
+    label: "Nota",
+    pluralLabel: "Notas",
+    description: "Notas: un título y un cuerpo con formato.",
+    fields: {
+      title: {
+        label: "Título"
+      },
+      body: {
+        label: "Cuerpo"
+      },
+      heading: {
+        label: "Encabezado",
+        help: "El título o, si está vacío, la primera línea del cuerpo. Lo mantiene la plataforma."
+      },
+      owner_id: {
+        label: "Propietario"
+      }
+    },
+    _views: {
+      mine: {
+        label: "Mis notas",
+        emptyState: {
+          title: "Aún no hay notas",
+          message: "Aquí aparecen las notas que escribes."
+        }
+      },
+      all: {
+        label: "Todas las notas"
+      }
+    }
   }
 };

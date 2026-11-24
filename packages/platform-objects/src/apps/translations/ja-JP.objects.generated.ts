@@ -4627,5 +4627,90 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "タスク",
+    pluralLabel: "タスク",
+    description: "担当者と期限のある、やるべきこと。",
+    fields: {
+      title: {
+        label: "タイトル"
+      },
+      description: {
+        label: "説明"
+      },
+      status: {
+        label: "ステータス",
+        options: {
+          todo: "未着手",
+          in_progress: "進行中",
+          done: "完了"
+        }
+      },
+      due_at: {
+        label: "期限"
+      },
+      assignee_id: {
+        label: "担当者"
+      },
+      completed_at: {
+        label: "完了日時",
+        help: "ステータスが「完了」になるとプラットフォームが記録し、「完了」でなくなると消去します。"
+      },
+      owner_id: {
+        label: "所有者"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "自分の担当",
+        emptyState: {
+          title: "担当のタスクはありません",
+          message: "あなたが担当する未完了のタスクがここに表示されます。"
+        }
+      },
+      created_by_me: {
+        label: "自分が作成",
+        emptyState: {
+          title: "タスクはまだありません",
+          message: "作成したタスクがここに表示されます。"
+        }
+      },
+      all: {
+        label: "すべてのタスク"
+      }
+    }
+  },
+  sys_note: {
+    label: "メモ",
+    pluralLabel: "メモ",
+    description: "メモ：タイトルと書式付きの本文。",
+    fields: {
+      title: {
+        label: "タイトル"
+      },
+      body: {
+        label: "本文"
+      },
+      heading: {
+        label: "見出し",
+        help: "タイトル。タイトルが空のときは本文の最初の行です。プラットフォームが管理します。"
+      },
+      owner_id: {
+        label: "所有者"
+      }
+    },
+    _views: {
+      mine: {
+        label: "自分のメモ",
+        emptyState: {
+          title: "メモはまだありません",
+          message: "作成したメモがここに表示されます。"
+        }
+      },
+      all: {
+        label: "すべてのメモ"
+      }
+    }
   }
 };

@@ -2459,25 +2459,20 @@ function DatasetMatrixTable({
     if (scope === undefined) return;
     // objectstack-ai/objectstack#1752: include the date-bucket range sidecar so an "X by time" cell scopes
     // to the clicked time bucket, not every bucket in that row/column.
-    const cellRanges = state.drillRanges?.[index];
-    const hasRange = !!cellRanges && Object.keys(cellRanges).length > 0;
-    let objectFilter: Record<string, unknown> | undefined;
-    if (state.object && datasetDrillHasRelationshipPath(drillDims, state.dimensionFields)) {
-      const object = state.object;
-      resolveRelationshipDrill(object, scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges, dataSource, (resolved) =>
-        onDrill!({ dataset, groupKey: { ...rowKey, ...colKey }, runtimeFilter, object, objectFilter: resolved }));
-      return;
-    }
-    if (state.object && (drillDims.length > 0 || hasRange)) {
-      const built = drillFilterOrRefusal(scope, state.drillRawRows?.[index], drillDims, state.dimensionFields ?? {}, runtimeFilter, cellRanges);
-      // Refused: no drill at all — see `drillFilterOrRefusal`.
-      if (built === null) return;
-      objectFilter = built;
-    } else if (Object.keys(scope).length > 0) {
-      // The host's groupKey fallback cannot carry the scope: no drill.
-      return;
-    }
-    onDrill!({ dataset, groupKey: { ...rowKey, ...colKey }, runtimeFilter, object: state.object, objectFilter });
+    // The same builder as a summary line, so a cell's drill list also shows
+    // its down + across fields and the measured one by default (#37033).
+    emitBucketDrill({
+      state,
+      dataset,
+      groupKey: { ...rowKey, ...colKey },
+      drillDims,
+      rawRow: state.drillRawRows?.[index],
+      rowRanges: state.drillRanges?.[index],
+      scope,
+      runtimeFilter,
+      dataSource,
+      onDrill: onDrill!,
+    });
   };
 
   // Single measure → one column per across-bucket; multiple → bucket × measure.
