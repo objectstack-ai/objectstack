@@ -23,7 +23,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const servedObject = {
   name: 'showcase_account',
@@ -89,11 +89,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/** The router's query: the address the designer writes its tab into. */
+function Where() {
+  return <span data-testid="where">{useLocation().search}</span>;
+}
+const tabInAddress = () => new URLSearchParams(screen.getByTestId('where').textContent ?? '').get('tab');
+
 async function renderPillar(props: { readOnly?: boolean } = {}) {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/metadata/object/showcase_account']}>
       <SurfaceDeepLinkProvider>
         <DataPillar packageId="com.example.showcase" objectName="showcase_account" readOnly={props.readOnly} />
+        <Where />
       </SurfaceDeepLinkProvider>
     </MemoryRouter>,
   );
@@ -181,13 +188,13 @@ describe('the object designer’s tab row (objectui#12450, objectstack#36904)', 
     expect(screen.getByTestId('data-tabs-advanced')).toHaveAttribute('aria-pressed', 'true');
     // Validations is not one of the two the middle band folds.
     expect(screen.getByTestId('data-tabs-advanced-first')).toHaveAttribute('aria-pressed', 'false');
-    expect(new URL(window.location.href).searchParams.get('tab')).toBe('validations');
+    await waitFor(() => expect(tabInAddress()).toBe('validations'));
 
     await userEvent.click(screen.getByTestId('data-tab-flat-settings'));
     await waitFor(() => expect(screen.getByTestId('settings-panel')).toBeInTheDocument());
     expect(screen.queryByTestId('rules-panel')).toBeNull();
     expect(validations).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('data-tab-flat-settings')).toHaveAttribute('aria-pressed', 'true');
-    expect(new URL(window.location.href).searchParams.get('tab')).toBe('settings');
+    await waitFor(() => expect(tabInAddress()).toBe('settings'));
   });
 });

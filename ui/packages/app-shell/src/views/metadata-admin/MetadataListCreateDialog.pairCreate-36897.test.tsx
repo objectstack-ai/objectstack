@@ -169,7 +169,7 @@ describe('list 「新建」 for an object: the create the object designer no lon
     const onCreated = open('object', 'com.example.crm', false);
     fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Visit', 'visit');
     await waitFor(() => expect(taken).toHaveBeenCalled());
-    expect(await screen.findByText(/crm_visit/)).toBeInTheDocument();
+    expect(await screen.findByTestId('object-create-taken')).toHaveTextContent('crm_visit');
     expect(save).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
     expect(onCreated).not.toHaveBeenCalled();

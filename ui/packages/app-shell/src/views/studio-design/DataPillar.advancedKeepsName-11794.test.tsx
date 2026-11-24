@@ -61,7 +61,8 @@ import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 import { t } from '../metadata-admin/i18n';
 
 const ADVANCED = t('engine.studio.data.tab.advanced', 'en');
-const PANELS = ['rules', 'hooks', 'actions', 'api', 'settings'].map((k) => t(`engine.studio.data.tab.${k}`, 'en'));
+// #36513's order (objectstack#36904): validations, actions, settings, hooks, API.
+const PANELS = ['rules', 'actions', 'settings', 'hooks', 'api'].map((k) => t(`engine.studio.data.tab.${k}`, 'en'));
 const VALIDATIONS = t('engine.studio.data.tab.rules', 'en');
 
 afterEach(() => {

@@ -77,29 +77,33 @@ export interface ObjectDesignerTabState {
 }
 
 /**
- * The open tab, seeded from the address and written back to it (replace), as
- * `useItemToolTab` does for the generic item page: read in the initializer,
- * written with `history.replaceState`, re-written after a router navigation
- * drops it. A tool tab not offered to this caller (History without the trail
- * capabilities) opens Records.
+ * The open tab, seeded from the address and written back to it (a replace
+ * navigation of the router's own location, so the router and the address
+ * never disagree, and ‹ › and × read the same query). A tool tab not offered
+ * to this caller (History without the trail capabilities) opens Records.
  */
 export function useObjectDesignerTab(tools: readonly ItemToolTab[]): ObjectDesignerTabState {
-  const [choice, setChoice] = React.useState<string | null>(() =>
-    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get(ITEM_TOOL_TAB_PARAM),
-  );
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [choice, setChoice] = React.useState<string | null>(() => searchParams.get(ITEM_TOOL_TAB_PARAM));
   const location = readObjectDesignerTab(choice, tools);
   const address = objectDesignerTabAddress(location);
 
-  const [searchParams] = useSearchParams();
-  const routerSearch = searchParams.toString();
+  const inAddress = searchParams.get(ITEM_TOOL_TAB_PARAM);
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    if ((url.searchParams.get(ITEM_TOOL_TAB_PARAM) ?? null) === address) return;
-    if (address) url.searchParams.set(ITEM_TOOL_TAB_PARAM, address);
-    else url.searchParams.delete(ITEM_TOOL_TAB_PARAM);
-    window.history.replaceState(window.history.state, '', url.toString());
-  }, [address, routerSearch]);
+    if ((inAddress ?? null) === address) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (address) next.set(ITEM_TOOL_TAB_PARAM, address);
+        else next.delete(ITEM_TOOL_TAB_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+    // Keyed on the values alone: `setSearchParams` is re-minted with every
+    // search change (objectui#8640 — never key on a hook's identity).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, inAddress]);
 
   const selectView = React.useCallback((view: ObjectDesignerView) => {
     setChoice(objectDesignerTabAddress({ view, tool: null }));

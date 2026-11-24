@@ -11,9 +11,10 @@
  * - the More menu went with it: its one entry was Add field, and the header
  *   has no object-level action to put in one.
  *
- * objectstack#28239 (maintainer rulings D-5 / D-7) — the one group the header
- * does carry is the item toolbar: the item tools Setup's item page opens,
- * the same five on every tab.
+ * objectstack#36904 (epic objectstack#36890 decisions 7 and 8) — the header is
+ * the full-screen item header: × back to the list and ‹ › through it, the same
+ * on every tab. The five item tools it carried (objectstack#28239) are tabs
+ * now (`DataPillar.flatTabs-12450.test.tsx`), so no tool button is left.
  *
  * The REAL `DataPillar`; the records grid and the Settings panel are stubbed,
  * because only the header is under test.
@@ -66,15 +67,12 @@ import { t } from '../metadata-admin/i18n';
 
 const RECORDS = t('engine.studio.data.tab.records', 'en');
 const FORM = t('engine.studio.data.tab.form', 'en');
-const TOGGLE_RAIL = t('engine.studio.toggleRail', 'en');
-/** objectstack#28239 — the item toolbar, the same on every tab. */
-const ITEM_TOOLS = [
-  ['layers', t('engine.edit.layers', 'en')],
-  ['references', t('engine.edit.references', 'en')],
-  ['history', t('engine.edit.history', 'en')],
-  ['audit', t('engine.edit.auditTab', 'en')],
-  ['source', t('engine.edit.inspector.source', 'en')],
-].map(([tool, label]) => `button|studio-item-tool-${tool}|${label}|`);
+/** objectstack#36904 — × and ‹ ›, the same on every tab. */
+const DETAIL_CONTROLS = [
+  ['close', t('engine.studio.detailHeader.close', 'en')],
+  ['previous', t('engine.studio.detailHeader.previous', 'en')],
+  ['next', t('engine.studio.detailHeader.next', 'en')],
+].map(([control, label]) => `button|studio-detail-${control}|${label}|`);
 
 afterEach(() => {
   cleanup();
@@ -136,9 +134,9 @@ describe('the Data pillar’s object header actions (objectui#12511)', () => {
     expect(seen.form).toEqual(seen.records);
     expect(seen.settings).toEqual(seen.records);
     expect(seen.recordsAgain).toEqual(seen.records);
-    // And that set is the mobile rail toggle and the item toolbar: the header
-    // draws no other action of its own on any tab.
-    expect(seen.records).toEqual([`button||${TOGGLE_RAIL}|`, ...ITEM_TOOLS]);
+    // And that set is × and ‹ ›: the header draws no other action of its own
+    // on any tab, and no item tool button.
+    expect(seen.records).toEqual(DETAIL_CONTROLS);
   });
 
   it('Object settings, More and the header Add field are gone; the Settings tab opens the panel', async () => {
@@ -159,7 +157,7 @@ describe('the Data pillar’s object header actions (objectui#12511)', () => {
     expect(seen.settings).toEqual(seen.records);
     // An object takes no environment overlay, so the read-only mark is plain
     // text, not a control (#27356 row 13).
-    expect(seen.records).toEqual([`button||${TOGGLE_RAIL}|`, ...ITEM_TOOLS]);
+    expect(seen.records).toEqual(DETAIL_CONTROLS);
     expect(screen.getByTestId('studio-readonly-link')).toHaveTextContent(t('engine.studio.pkg.readonly', 'en-US'));
   });
 });

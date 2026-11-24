@@ -206,33 +206,6 @@ describe('DataPillar — Save is gated on the field inspector’s CEL verdict (#
  * flush-or-ask switch: an edit the CEL verdict holds cannot be sent, so a
  * switch to another object asks before its load replaces the buffer.
  */
-describe('DataPillar — a switch to another object over a held formula (objectstack#27485)', () => {
-  it('asks; declined, the edit stays; agreed, it is dropped unsent', async () => {
-    const box = await openFormulaField();
-    fireEvent.change(box, { target: { value: 'record.est_hours *' } });
-    await new Promise((r) => setTimeout(r, 2300));
-    expect(mockClient.save).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: /Site/ }));
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(box.value).toBe('record.est_hours *');
-
-    confirmSpy.mockReturnValue(true);
-    fireEvent.click(screen.getByRole('button', { name: /Site/ }));
-    await waitFor(() => expect(screen.queryByText('Est hours')).toBeNull(), { timeout: 3000 });
-    await new Promise((r) => setTimeout(r, 2300));
-    expect(mockClient.save).not.toHaveBeenCalled();
-  });
-});
-
-/** The ways the field inspector closes (the card's step 4). */
-const CLOSERS: Array<[string, () => void]> = [
-  ['its Close button', () => fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])],
-  ['Escape', () => fireEvent.keyDown(document.body, { key: 'Escape' })],
-  ['another field card', () => fireEvent.click((screen.getByText('Est hours').closest('.cursor-grab') as HTMLElement))],
-  ['the Records tab', () => fireEvent.click(screen.getByRole('button', { name: 'Records' }))],
-];
-
 describe('DataPillar — the CEL hold belongs to the draft, not to the open inspector (objectstack#27485)', () => {
   async function breakFormula(): Promise<HTMLTextAreaElement> {
     const box = await openFormulaField();
