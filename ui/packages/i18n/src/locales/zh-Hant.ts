@@ -3773,7 +3773,7 @@ const zhHant = {
       notWritable: '這個應用的定製包不可寫，選單無法儲存。',
       storedUnread: '無法讀取這個應用已儲存的選單，所以沒有儲存任何內容。',
       publishedMoved: '儲存期間有人釋出了這個應用的選單，所以沒有儲存任何內容。再次儲存即可把你的修改應用在他們的修改之上。',
-      translationPendingDraft: '這個應用在目前語言下的選單名稱在 Studio 裡有未釋出的改動。請先在那裡釋出或放棄，再儲存。',
+      translationPendingDraft: '這個應用在當前語言下的選單名稱在 Studio 裡有未釋出的改動。請先在那裡釋出或放棄，再儲存。',
       keyboardHint: '拖動選單項即可移動；也可以聚焦後按空格鍵，再用方向鍵移動。按回車鍵開啟。',
       newDashboard: '新建儀表盤…',
       newDashboardTitle: '新建儀表盤',
