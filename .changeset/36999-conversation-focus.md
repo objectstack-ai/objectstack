@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@object-ui/plugin-chatbot': patch
 '@object-ui/app-shell': patch
 '@object-ui/i18n': patch
@@ -8,7 +8,7 @@
 feat(console): a chat conversation can be pinned to one record — sent as `context.focus` on every turn, shown as a chip in the composer, kept across navigation — where the agent declares `capabilities.focus`
 
 Clause-②: yes
-Metadata-protocol: none
+Metadata-protocol: added
 
 **Contract (`@objectstack/spec`).** `ToolExecutionContext` gains `focus?: { object: string; id: string }[]`, beside `surfaceContext`: the record(s) the conversation is pinned to, as the client reports them on every turn. Client-reported and advisory, never an access decision; a consumer re-reads the record as the caller. At most one entry in phase 1. The agent catalog row (`AiAgentCapabilitiesSchema`, `GET /api/v1/ai/agents`) gains an optional `capabilities.focus: boolean`: an agent that honours the focus says so, and an absent flag reads as false. Both are additions; nothing is removed or renamed, and every catalog row served before the flag still parses.
 
