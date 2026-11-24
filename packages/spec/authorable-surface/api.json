@@ -943,6 +943,7 @@
     "api/GetObjectPermissionsResponse:object",
     "api/GetObjectPermissionsResponse:permissions",
     "api/GetPackageCustomizationsRequest:packageId",
+    "api/GetPackageCustomizationsResponse:arrangements",
     "api/GetPackageCustomizationsResponse:contributions",
     "api/GetPackageCustomizationsResponse:counts",
     "api/GetPackageCustomizationsResponse:extensions",
