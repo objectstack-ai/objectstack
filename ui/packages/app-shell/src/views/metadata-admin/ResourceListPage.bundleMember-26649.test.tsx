@@ -20,6 +20,8 @@
  *  - a row that declares no member (the canonical one) links by its name alone;
  *  - CONTROL: a type with no members gets no column and no `?member=`.
  */
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';

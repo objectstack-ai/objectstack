@@ -8,6 +8,8 @@
  * The same page outside Setup is the control: the API name column, the Label
  * column and the type's label as the title, as before.
  */
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom';

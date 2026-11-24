@@ -35,6 +35,9 @@
  *    the ledger read refuses reads a plain-language state, with the server's
  *    own sentence for why, never a bare "?".
  */
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';

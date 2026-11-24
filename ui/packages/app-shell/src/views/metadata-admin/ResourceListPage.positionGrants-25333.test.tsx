@@ -24,6 +24,9 @@
  *    the localized header, and a position without one shows the empty cell
  *    (objectstack#25909).
  */
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
+import '@object-ui/plugin-detail';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
