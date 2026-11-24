@@ -21,6 +21,9 @@
  * (`packages/runtime/src/domains/meta-list-projection-parity.test.ts`).
  */
 
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
+// (`check:test-source-alias`: `rest-server.ts` reaches it through a dynamic import).
+import '@objectstack/objectql';
 import { describe, it, expect, vi } from 'vitest';
 import { createMetaListAnswer, metaListNames } from './meta-item-read-gate.js';
 import { RestServer } from './rest-server.js';

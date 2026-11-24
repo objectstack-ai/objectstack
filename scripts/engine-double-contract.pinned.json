@@ -1362,6 +1362,11 @@
       "pinned": 2
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.meta-list-changed-at.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.meta-list-runtime-baseline-dedup.test.ts",
       "verb": "findOne",
       "pinned": 1
