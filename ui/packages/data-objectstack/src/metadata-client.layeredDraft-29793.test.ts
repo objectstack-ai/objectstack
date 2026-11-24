@@ -73,3 +73,29 @@ describe('MetadataClient.layered() forwards the stored draft layer (objectstack#
     });
   }
 });
+
+/**
+ * objectstack#36902 — the published row's version (`overlayVersion`) is
+ * forwarded the same way: the pinned publish of a Studio Save sends it as
+ * `If-Match` (objectstack#36601), and the client rebuilding its result field
+ * by field dropped it, so every such publish went unpinned.
+ */
+describe('MetadataClient.layered() forwards the published version (objectstack#36902)', () => {
+  it('the conforming fixture still parses with the version served', () => {
+    expect(GetMetaItemLayeredResponseSchema.safeParse({ ...CONFORMING, overlayVersion: 'v7' }).success).toBe(true);
+  });
+
+  for (const [branch, body] of [['conforming', CONFORMING], ['degraded', DEGRADED]] as const) {
+    it(`${branch}: a served version arrives as served, and a served null as null`, async () => {
+      expect((await clientAnswering({ ...body, overlayVersion: 'v7' }).layered('object', 'ticket')).overlayVersion).toBe('v7');
+      const none = await clientAnswering({ ...body, overlayVersion: null }).layered('object', 'ticket');
+      expect('overlayVersion' in none).toBe(true);
+      expect(none.overlayVersion).toBeNull();
+    });
+
+    it(`${branch}: a version the server did not serve stays absent`, async () => {
+      const layered = await clientAnswering(body).layered('object', 'ticket');
+      expect('overlayVersion' in layered).toBe(false);
+    });
+  }
+});
