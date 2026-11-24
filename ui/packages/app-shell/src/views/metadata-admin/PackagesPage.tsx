@@ -1271,7 +1271,7 @@ export function PackageDetailSheet({
         {!authoring && !writable && !isKernel && !isCustomizationPackage(id) && (
           <>
             <Separator className="my-4" />
-            <PackageCustomizationsPanel packageId={id} locale={locale} onNavigate={() => onOpenChange(false)} />
+            <PackageCustomizationsPanel key={id} packageId={id} locale={locale} onNavigate={() => onOpenChange(false)} />
           </>
         )}
 

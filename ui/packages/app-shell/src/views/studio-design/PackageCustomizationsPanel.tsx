@@ -83,8 +83,9 @@ export function PackageCustomizationsPanel({
   const client = useMetadataClient();
   const [state, setState] = React.useState<ReadState>({ status: 'loading' });
   React.useEffect(() => {
+    // A new package is a new mount (the sheet keys the panel on the id), so
+    // the state starts at `loading` without a reset here.
     let cancelled = false;
-    setState({ status: 'loading' });
     fetchPackageCustomizations(packageId)
       .then(async (read) => {
         // objectstack#34724 — a switched-off action's link needs its object,
