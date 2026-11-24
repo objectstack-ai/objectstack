@@ -49,6 +49,7 @@ vi.mock('@object-ui/fields', async (importOriginal) => ({
   ),
 }));
 
+import { builtInLocales } from '@object-ui/i18n/locales';
 import { AdapterCtx, MetadataCtx } from '@object-ui/react';
 import { ActionParamDialog } from './ActionParamDialog';
 import { splitAssignedWork } from './userAssignedWork';
@@ -148,8 +149,7 @@ describe('the ban dialog says how many records the user holds (objectstack#30205
     expect(screen.queryByTestId('user-assigned-work-handover')).toBeNull();
   });
 
-  it('objectstack#35399: every UI locale words the kept owner with its own sentence, apart from the multi-valued one', async () => {
-    const { builtInLocales } = await import('@object-ui/i18n/locales');
+  it('objectstack#35399: every UI locale words the kept owner with its own sentence, apart from the multi-valued one', () => {
     const locales = Object.entries(builtInLocales as Record<string, any>);
     expect(locales.length).toBeGreaterThan(0);
     for (const [lang, catalog] of locales) {
