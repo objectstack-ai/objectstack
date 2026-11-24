@@ -8,8 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { DraftChange } from '@object-ui/data-objectstack';
-import { draftEntryOf, draftMarkKindOf } from './listDraftMarks';
-import type { PendingDraftEntry } from '../../preview/usePendingDrafts';
+import { draftEntryOf, draftMarkKindOf, type ListDraftEntry } from './listDraftMarks';
 
 const change = (by: DraftChange['by']): DraftChange =>
   ({ path: ['label'], by, actor: 'u1', at: '2026-11-24T10:00:00Z' }) as DraftChange;
@@ -28,7 +27,7 @@ describe('AI or a person (objectstack#36898)', () => {
 });
 
 describe('which row a ledger row marks (objectstack#36898)', () => {
-  const entry = (over: Partial<PendingDraftEntry>): PendingDraftEntry => ({
+  const entry = (over: Partial<ListDraftEntry>): ListDraftEntry => ({
     type: 'dashboard',
     name: 'sales_board',
     packageId: 'com.acme.crm',

@@ -3,12 +3,12 @@
 /**
  * objectstack#36898 — the generic metadata list's 「修改时间」 column and its
  * 「有未发布的改动」 mark, on the real page. The metadata client and the
- * pending-drafts ledger are stubbed. Pinned, each with its control:
+ * pending-drafts ledger it reads are stubbed. Pinned, each with its control:
  *
  *  - an item served from a stored row shows its time; a code-shipped item an
  *    empty cell, with no error;
  *  - `?sort=-changed` draws newest first, code-shipped items last;
- *  - an item on the ledger is marked, the AI's draft apart from a person's;
+ *  - an item on the `_drafts` ledger is marked, the AI's draft apart from a person's;
  *    an item off the ledger (published) carries no mark.
  */
 import '@testing-library/jest-dom/vitest';
@@ -36,6 +36,7 @@ const CLIENT = {
   list: async (type: string) => (type === 'skill' ? ITEMS : []),
   listResponse: async (type: string) =>
     type === 'skill' ? { items: ITEMS, changedAt: CHANGED_AT } : { items: [] },
+  listDrafts: async () => ledger.entries,
   getDraft: async (_type: string, name: string) => ({ type: 'skill', name, item: {}, draftChanges: DRAFT_CHANGES[name] }),
 };
 const SKILL_ENTRY = { type: 'skill', label: 'Skill', allowEnvironmentOverlay: false, allowRuntimeCreate: true };
@@ -50,15 +51,6 @@ vi.mock('./useMetadata', async (importOriginal) => ({
 vi.mock('./i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadataLocale: () => 'en-US',
-}));
-vi.mock('../../preview/usePendingDrafts', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  usePendingDrafts: () => ({
-    count: ledger.entries.length,
-    entries: ledger.entries,
-    refresh: async () => {},
-    behindSave: false,
-  }),
 }));
 vi.mock('../../hooks/useCanAuthorMetadata', () => ({ useCanAuthorMetadata: () => true }));
 vi.mock('../../hooks/useTenancyPosture', async (importOriginal) => ({

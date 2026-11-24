@@ -630,7 +630,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   }, [client, type, refreshKey, listInclude]);
   // objectstack#36898 — each item's change time and its pending-draft mark.
   const changedAt = useListChangedAt(client, type, listInclude ? { include: listInclude } : undefined, refreshKey);
-  const draftMarkOf = useListDraftMarks(client, type);
+  const draftMarkOf = useListDraftMarks(client, type, refreshKey);
 
   const searchableFields = config.searchableFields ?? ['name', 'label', 'description'];
   // Structural scope — every row this package could ever show for this
