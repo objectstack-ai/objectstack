@@ -540,23 +540,56 @@ export async function detailRowHeldByLockingApproval(
   objectName: string,
   recordId: string,
 ): Promise<boolean> {
-  if (isApprovalBookkeepingObject(objectName)) return false;
+  return (await detailRowsHeldByLockingApproval(engine, objectName, [recordId])).has(recordId);
+}
+
+/**
+ * {@link detailRowHeldByLockingApproval} for many rows of one object at once:
+ * the ids among `recordIds` that are DETAIL rows of a master held by a LOCKING
+ * pending approval. One SYSTEM read of the rows' FK columns for the whole list,
+ * then one lookup per `master_detail` edge for every master those rows name —
+ * `1 + edges` reads whatever the list's length, never one per row — and the
+ * same judgement ({@link lockingRequestsForRecords}), so a page asked at once
+ * and a row asked alone cannot disagree. An object with no `master_detail`
+ * edge reads nothing.
+ *
+ * ⚠️ Like the one-row form, it answers for the rows, not for a caller, and the
+ * FK read is SYSTEM.
+ */
+export async function detailRowsHeldByLockingApproval(
+  engine: Pick<MinimalEngine, 'find' | 'getSchema'>,
+  objectName: string,
+  recordIds: ReadonlyArray<string>,
+): Promise<Set<string>> {
+  const held = new Set<string>();
+  if (recordIds.length === 0 || isApprovalBookkeepingObject(objectName)) return held;
   const edges = masterEdgesOf(engine, objectName);
-  if (edges.length === 0) return false;
+  if (edges.length === 0) return held;
   const rows = await engine.find(objectName, {
-    where: { id: recordId },
+    // One id keeps the by-id shape the one-row read always sent.
+    where: recordIds.length === 1 ? { id: recordIds[0] } : { id: { $in: [...recordIds] } },
     fields: ['id', ...edges.map((e) => e.fk)],
-    limit: 1,
+    limit: recordIds.length,
     // SYSTEM_CTX's arrays are `as const` (readonly); the declared type wants mutable ones.
     context: { ...SYSTEM_CTX, positions: [], permissions: [] },
   } satisfies EngineQueryOptions);
-  const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
-  if (!row) return false;
+  const found = (Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>;
+  if (found.length === 0) return held;
   for (const e of edges) {
-    const masterId = scalarFk(row[e.fk]);
-    if (masterId && (await lockingRequestsForRecords(engine, e.master, [masterId])).length > 0) return true;
+    const masterIds = Array.from(new Set(
+      found.map((row) => scalarFk(row[e.fk])).filter((id): id is string => id !== null),
+    ));
+    if (masterIds.length === 0) continue;
+    const heldMasters = new Set(
+      (await lockingRequestsForRecords(engine, e.master, masterIds)).map((p) => String(p?.record_id ?? '')),
+    );
+    if (heldMasters.size === 0) continue;
+    for (const row of found) {
+      const masterId = scalarFk(row[e.fk]);
+      if (masterId && heldMasters.has(masterId)) held.add(String(row.id));
+    }
   }
-  return false;
+  return held;
 }
 
 /**
