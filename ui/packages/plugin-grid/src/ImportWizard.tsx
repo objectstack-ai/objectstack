@@ -557,6 +557,23 @@ function extractQuotedValue(message?: string): string | undefined {
 }
 
 /**
+ * The `field` the server names on an OBJECT-LEVEL refusal: the rule validator
+ * attributes a rule that declares no field to this sentinel. It names no
+ * column, so a row error carrying it is shown as the message alone, the way a
+ * record form's banner shows a record-level refusal.
+ */
+const RECORD_LEVEL_FIELD = '_record';
+
+/**
+ * The label a row error is prefixed with: the field's label, else its API
+ * name, and none for a record-level refusal or a row error naming no field.
+ */
+function rowErrorFieldLabel(field: string | undefined, fieldLabelByName: Map<string, string>): string | undefined {
+  if (!field || field === RECORD_LEVEL_FIELD) return undefined;
+  return fieldLabelByName.get(field) ?? field;
+}
+
+/**
  * Turn one failed dry-run row into a friendly, localizable error line.
  *
  * The server keys each error by a field's api-name, bakes that same api-name
@@ -574,7 +591,7 @@ function formatDryRunError(
   value: string | undefined,
   t: (key: string, vars?: Record<string, unknown>) => string,
 ): { fieldLabel?: string; message: string } {
-  const fieldLabel = r.field ? (fieldLabelByName.get(r.field) ?? r.field) : undefined;
+  const fieldLabel = rowErrorFieldLabel(r.field, fieldLabelByName);
   // Prefer the value the row actually supplied; fall back to the token the
   // server echoed into its message.
   const shown = (value ?? '').trim() || extractQuotedValue(r.error) || '';
@@ -3073,7 +3090,8 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
     const errorsByRow = new Map<number, string>();
     for (const e of result.errors) {
       if (e.row < 1) continue; // top-level (row 0) errors have no source row
-      const prefix = e.field ? `${e.field}: ` : '';
+      const fieldLabel = rowErrorFieldLabel(e.field, fieldLabelByName);
+      const prefix = fieldLabel ? `${fieldLabel}: ` : '';
       const existing = errorsByRow.get(e.row);
       errorsByRow.set(e.row, existing ? `${existing}; ${prefix}${e.message}` : `${prefix}${e.message}`);
     }
@@ -3090,7 +3108,7 @@ export const ImportWizard: React.FC<ImportWizardProps> = ({
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 0);
     } catch { /* non-browser env */ }
-  }, [result, headers, rows, mapping, objectName]);
+  }, [result, headers, rows, mapping, objectName, fieldLabelByName]);
 
   const handleClose = useCallback(() => { reset(); onOpenChange?.(false); onCancel?.(); }, [reset, onOpenChange, onCancel]);
 

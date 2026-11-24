@@ -14,7 +14,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, cleanup, screen, within } from '@testing-library/react';
+import { render, cleanup, screen, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 // Dynamic imports the page's anchors and editors reach, paid at collection
 // rather than inside a case's clocked window.
@@ -80,14 +80,17 @@ function mount(search = '') {
   );
 }
 
-const cellOf = (name: string) => within(screen.getByTestId(`metadata-row-${name}`)).getByTestId('metadata-changed-cell');
+/** The row of an item: its test id sits on the row's identity cell (objectstack#36897, the grid's table). */
+const rowOf = (name: string) => screen.getByTestId(`metadata-row-${name}`).closest('tr') as HTMLElement;
+const findRowOf = async (name: string) => (await screen.findByTestId(`metadata-row-${name}`)).closest('tr') as HTMLElement;
+const cellOf = (name: string) => within(rowOf(name)).getByTestId('metadata-changed-cell');
 
 describe('the 「修改时间」 column (objectstack#36898)', () => {
   it('an item with a stored row shows its time; a code-shipped item an empty cell', async () => {
     mount();
     await screen.findByRole('table');
     expect(await screen.findByRole('columnheader', { name: 'Modified' })).toBeInTheDocument();
-    const time = await within(screen.getByTestId('metadata-row-by_ai')).findByText(
+    const time = await within(rowOf('by_ai')).findByText(
       new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(Date.parse(CHANGED_AT.by_ai)),
     );
     expect(time.closest('time')).toHaveAttribute('dateTime', CHANGED_AT.by_ai);
@@ -96,12 +99,22 @@ describe('the 「修改时间」 column (objectstack#36898)', () => {
 
   it('`?sort=-changed` draws newest first, the code-shipped item last', async () => {
     mount('&sort=-changed');
-    await within(await screen.findByTestId('metadata-row-by_ai')).findByText(/2026/);
+    await within(await findRowOf('by_ai')).findByText(/2026/);
     const order = screen
-      .getAllByTestId(/^metadata-row-/)
-      .filter((el) => el.tagName === 'TR')
-      .map((tr) => tr.getAttribute('data-testid'));
+      .getAllByTestId(/^metadata-row-(?!api-name$|source$|lock$)/)
+      .map((cell) => cell.getAttribute('data-testid'));
     expect(order).toEqual(['metadata-row-by_ai', 'metadata-row-by_person', 'metadata-row-shipped']);
+  });
+
+  it('objectstack#36897 — a click on the Modified header sorts by it: oldest first, the code-shipped item still last', async () => {
+    mount();
+    await within(await findRowOf('by_ai')).findByText(/2026/);
+    fireEvent.click(screen.getByRole('columnheader', { name: 'Modified' }));
+    await vi.waitFor(() =>
+      expect(
+        screen.getAllByTestId(/^metadata-row-(?!api-name$|source$|lock$)/).map((cell) => cell.getAttribute('data-testid')),
+      ).toEqual(['metadata-row-by_person', 'metadata-row-by_ai', 'metadata-row-shipped']),
+    );
   });
 });
 
@@ -125,7 +138,7 @@ describe('the 「有未发布的改动」 mark (objectstack#36898)', () => {
   it('an item off the ledger — published — carries no mark (control)', async () => {
     mount();
     await screen.findByRole('table');
-    await within(screen.getByTestId('metadata-row-by_ai')).findByText(/2026/);
+    await within(rowOf('by_ai')).findByText(/2026/);
     expect(screen.queryByTestId('metadata-draft-mark')).toBeNull();
   });
 });

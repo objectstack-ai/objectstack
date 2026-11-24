@@ -110,10 +110,6 @@ import {
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 // objectui#11773 — every draft save of an existing item sends the version its buffer was built on.
 // objectstack#26858 — the served verdict a flow's inspectors read at their own paths.
-import {
-  DESIGNER_SURFACE_PARAM,
-  formatSurfaceParam,
-} from '../metadata-admin/nav-selection.js';
 import { fetchPendingDrafts, usePendingDrafts } from '../../preview/usePendingDrafts.js';
 import { emitMetadataRefresh, subscribeMetadataRefresh } from '../../assistant/assistantBus.js';
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
@@ -181,6 +177,7 @@ import {
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
 import { toast } from 'sonner';
+import { studioPillarItemAddress, studioPillarPath } from './studioAddress.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
 type PublishBackfillReceipt = NonNullable<
@@ -295,7 +292,7 @@ export function StudioDesignSurface(props: StudioDesignSurfaceProps): React.Reac
   const pairBase = props.area ? null : customizationPairBaseOf(params.packageId ?? null);
   if (pairBase !== null) {
     const tab = params.tab ?? STUDIO_HOME_PILLAR;
-    return <Navigate to={`/studio/${encodeURIComponent(pairBase)}/${tab}${location.search}`} state={location.state} replace />;
+    return <Navigate to={studioPillarPath(pairBase, tab, { search: location.search })} state={location.state} replace />;
   }
   return <StudioDesignSurfaceBody {...props} />;
 }
@@ -931,7 +928,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const shellNavigate = useNavigate();
   React.useEffect(() => {
     openAccessRef.current = () => {
-      if (confirmLeavePillar()) shellNavigate(`/studio/${scopeSegment}/access`);
+      if (confirmLeavePillar()) shellNavigate(studioPillarPath(scopeSegment, 'access', { segmentEncoding: 'verbatim' }));
     };
   });
   // objectui#11181 — `label` is the app's own `I18nLabel` (a plain string or an
@@ -1228,9 +1225,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       const reachable = packageId !== null || pillar === STUDIO_ORG_SCOPE_PILLAR;
       if (pillar && pillar !== tab && reachable) {
         if (!confirmLeavePillar()) return false;
-        shellNavigate(
-          `/studio/${scopeSegment}/${pillar}?${DESIGNER_SURFACE_PARAM}=${encodeURIComponent(formatSurfaceParam(target))}`,
-        );
+        shellNavigate(studioPillarItemAddress(scopeSegment, pillar, target, { segmentEncoding: 'verbatim' }));
       }
       setChangesOpen(false);
     },
@@ -1314,7 +1309,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
               {(packageId === null ? PILLARS.filter((p) => p.key === STUDIO_ORG_SCOPE_PILLAR) : pkgMissing ? [] : [...PILLARS, METADATA_AREA_TAB]).map((p) => (
                 <Link
                   key={p.key}
-                  to={p.key === STUDIO_METADATA_AREA ? studioMetadataAreaPath(scopeSegment) : `/studio/${scopeSegment}/${p.key}`}
+                  to={p.key === STUDIO_METADATA_AREA ? studioMetadataAreaPath(scopeSegment) : studioPillarPath(scopeSegment, p.key, { segmentEncoding: 'verbatim' })}
                   aria-current={tab === p.key ? 'page' : undefined}
                   // No click handler of its own (objectui#13253): a dirty
                   // pillar is registered with the shell's seam, whose
