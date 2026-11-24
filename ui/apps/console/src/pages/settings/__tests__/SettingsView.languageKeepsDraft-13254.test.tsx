@@ -62,7 +62,7 @@ const PAYLOADS: Record<string, unknown> = {
 const fetchMock = vi.fn();
 
 function ok(body: unknown): Response {
-  return { ok: true, status: 200, statusText: 'OK', json: async () => body } as unknown as Response;
+  return { ok: true, status: 200, statusText: 'OK', headers: new Headers(), json: async () => body } as unknown as Response;
 }
 
 /**
@@ -254,6 +254,7 @@ describe('the load-failure card (objectui#13254: translated at render, not in th
       ok: false,
       status: 403,
       statusText: 'Forbidden',
+      headers: new Headers(),
       json: async () => ({ success: false, error: { code: 'FORBIDDEN', message: 'Not allowed to read localization' } }),
     }));
     renderPage();
