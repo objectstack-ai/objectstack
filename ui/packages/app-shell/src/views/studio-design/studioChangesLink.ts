@@ -19,7 +19,7 @@
  * `ChatPane`: inside the package's Studio the param goes onto the current
  * location, so the surface stays mounted and keeps its selection; from
  * anywhere else (the full-page chat, the console dock) the link opens the
- * package's Interfaces pillar with it.
+ * package's Studio home (the Data pillar) with it.
  */
 
 /** The query key the surface reads. */
@@ -40,8 +40,8 @@ export interface StudioChangesTarget {
  *  - Already on one of that package's Studio pillars: the same path, search
  *    and hash with the param set, replacing the entry. No route changes, so
  *    nothing remounts.
- *  - Anywhere else: the package's Interfaces pillar with the param, as a new
- *    entry (Back returns to where the user was).
+ *  - Anywhere else: the package's Studio home (the Data pillar) with the
+ *    param, as a new entry (Back returns to where the user was).
  */
 export function studioChangesReviewTarget(
   packageId: string,
@@ -55,7 +55,7 @@ export function studioChangesReviewTarget(
     return { to: `${current.pathname}?${params.toString()}${current.hash ?? ''}`, replace: true };
   }
   return {
-    to: `${base}/interfaces?${STUDIO_CHANGES_PARAM}=${STUDIO_CHANGES_REVIEW}`,
+    to: `${base}/data?${STUDIO_CHANGES_PARAM}=${STUDIO_CHANGES_REVIEW}`,
     replace: false,
   };
 }

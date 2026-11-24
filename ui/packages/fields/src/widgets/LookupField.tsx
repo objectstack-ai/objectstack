@@ -42,11 +42,12 @@ import {
   planDeclaredLookupAutofill,
   readLookupAutofillTargets,
   withheldAutofillMessage,
+  withheldStillStands,
   type AutofillCurrencyContext,
   type LookupAutofillPair,
   type WithheldAutofill,
 } from './lookupAutofill.js';
-import { useFollowedParentRecord } from './followedParentRow.js';
+import { useFollowedParentRead } from './followedParentRow.js';
 import { getCellRendererResolver } from './_cell-renderer-bridge.js';
 // The one place a lookup column's display value is decided — shared with the
 // "browse all records" picker (RecordPickerDialog) so a single `lookupColumns`
@@ -1229,16 +1230,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     () => (autofillTargets ? Object.values(autofillTargets).find((d) => recordCurrencyPath(d as never)) : undefined),
     [autofillTargets],
   );
-  const editedRecordForCurrency = useFollowedParentRecord(followingTarget as never, resolvedDependentValues, dataSource);
-  const followingPath = followingTarget ? recordCurrencyPath(followingTarget as never) : undefined;
-  const followedParentHeld = followingPath ? resolvedDependentValues?.[followingPath.via] : undefined;
-  // The parent read has not landed yet: the record names a parent by its id,
-  // and its code is not on the record the resolver reads.
-  const followedParentPending =
-    !!followingPath &&
-    (typeof followedParentHeld === 'string' || typeof followedParentHeld === 'number') &&
-    followedParentHeld !== '' &&
-    !(editedRecordForCurrency?.[followingPath.via] && typeof editedRecordForCurrency[followingPath.via] === 'object');
+  const { record: editedRecordForCurrency, state: followedParentState } = useFollowedParentRead(
+    followingTarget as never,
+    resolvedDependentValues,
+    dataSource,
+  );
+  // The opening fill waits only while the parent read is out. A read that
+  // failed or cannot run ends the wait: what does not depend on the parent's
+  // code fills, and an amount that does is withheld with a note
+  // (`targetCurrencyUnread`).
+  const followedParentPending = followedParentState === 'pending';
+  const followedParentUnread = followedParentState === 'unread';
   const autofillCurrency = !!autofillTargets;
   /** The currency context of a pick of `row` (`crossCurrencyRefusal`), or none without stamped targets. */
   const currencyFor = useCallback(
@@ -1248,10 +1250,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       return {
         home: homeCurrency,
         sourceCurrency: (source, v) => pickedAmountCurrencyOf(sourceFields?.[source] as never, v, row),
-        targetCurrency: (target) => amountCurrencyOf(autofillTargets[target] as never, editedRecordForCurrency),
+        targetCurrency: (target, writes) => {
+          const def = autofillTargets[target];
+          if (followedParentUnread && recordCurrencyPath(def as never)) {
+            return amountCurrencyOf(def as never) ? { kind: 'unread' } : undefined;
+          }
+          return amountCurrencyOf(def as never, editedRecordForCurrency, writes);
+        },
       };
     },
-    [autofillTargets, refObjectSchema, homeCurrency, editedRecordForCurrency],
+    [autofillTargets, refObjectSchema, homeCurrency, editedRecordForCurrency, followedParentUnread],
   );
   /** What the last fill left empty, for the record it picked; said under the field. */
   const [withheldFill, setWithheldFill] = useState<{ picked: string; items: readonly WithheldAutofill[] } | null>(null);
@@ -2352,16 +2360,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     );
   }
 
-  // objectstack#36249 — what the last fill left empty because the picked
+  // objectstack#36249 — what the last fill did not copy because the picked
   // amount is in another currency, while the field still holds that pick and
-  // the target is still empty.
+  // the target still holds what it held at the pick (empty, or the earlier
+  // value a re-pick left in place).
   const heldNow = normalizeId(value);
   const withheldShown =
     withheldFill && heldNow != null && String(heldNow) === withheldFill.picked
-      ? withheldFill.items.filter((w) => {
-          const held = resolvedDependentValues?.[w.target];
-          return held === undefined || held === null || held === '';
-        })
+      ? withheldFill.items.filter((w) => withheldStillStands(w, resolvedDependentValues?.[w.target]))
       : [];
   const withheldLabel = (target: string): string => {
     const label = (autofillTargets?.[target] as { label?: unknown } | undefined)?.label;

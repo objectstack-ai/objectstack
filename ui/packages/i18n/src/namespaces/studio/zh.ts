@@ -3086,6 +3086,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pillar.automations': '自动化',
   'engine.studio.pillar.interfaces': '界面',
   'engine.studio.pillar.access': '权限',
+  // objectstack#36502 — 旧「界面」链接落地时的提示。
+  'engine.studio.interfacesRetired.sentence': '界面的修改已经搬到应用里',
+  'engine.studio.interfacesRetired.backToApp': '回到应用',
+  'engine.studio.interfacesRetired.dismiss': '关闭',
   'engine.studio.pillar.metadata': '全部元数据',
   // Header · package-level publish + app bridge
   'engine.studio.changes': '变更',
@@ -4353,6 +4357,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.itemTools.sourceReadOnly': '只读：此项无法在这里编辑。',
   'engine.studio.itemTools.layersFailed': '无法读取此项的分层：{message}',
   'engine.studio.itemTools.layersRetry': '重试',
+  // Studio 详情头部：每种全屏详情共用的头部（objectstack#36892）。
+  'engine.studio.detailHeader.close': '关闭并返回列表',
+  'engine.studio.detailHeader.previous': '上一个',
+  'engine.studio.detailHeader.next': '下一个',
+  'engine.studio.detailHeader.position': '第 {index} 项，共 {total} 项',
+  'engine.studio.detailHeader.notInList': '不在当前列表中',
+  'engine.studio.detailHeader.package': '来自包 {package}',
+  'engine.studio.detailHeader.more': '更多',
 };
 
 export default STUDIO_ZH;
