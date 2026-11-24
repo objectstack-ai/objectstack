@@ -937,22 +937,30 @@ export function readPlatformEntry(
 }
 
 /**
+ * [#37013] Whether `key`, a slot of a by-package type holding `item`, is the
+ * platform's record: package-less, and the item the platform registered.
+ */
+export function isPlatformSlot(key: string, item: unknown): boolean {
+  return slotPackageOf(key) === undefined && isPlatformOrigin(item);
+}
+
+/**
  * [#37013] What a removal the platform makes takes out of the store: the
- * name's package-less slots — the platform's record — and ⛔ never a
- * package's slot of the name, however many packages hold it (nothing is
- * refused: the removal names whose item it is). `packagelessOnly` carries
- * that scope to each loader's delete and each cluster peer, as for the
- * environment's removal beside one package ({@link storeRemovalKeys}). A type
- * outside {@link PACKAGE_SLOTTED_STORE_TYPES} keeps one item per name, and
- * removes it.
+ * name's package-less slots that hold the platform's record
+ * ({@link isPlatformSlot}), and ⛔ never a package's slot of the name nor the
+ * environment's own item in the bare slot, however many packages hold the
+ * name (nothing is refused: the removal names whose item it is).
+ * `platformOnly` carries that scope to each loader's delete and each cluster
+ * peer. A type outside {@link PACKAGE_SLOTTED_STORE_TYPES} keeps one item per
+ * name, and removes it.
  */
 export function storePlatformRemovalKeys(
   store: ReadonlyMap<string, unknown> | undefined,
   type: string,
   name: string,
-): { keys: string[]; packagelessOnly?: true } {
+): { keys: string[]; platformOnly?: true } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { keys: storeKeysNamed(store, type, name) };
-  return { keys: storeKeysNamed(store, type, name).filter((key) => slotPackageOf(key) === undefined), packagelessOnly: true };
+  return { keys: storeKeysNamed(store, type, name).filter((key) => isPlatformSlot(key, store!.get(key))), platformOnly: true };
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */

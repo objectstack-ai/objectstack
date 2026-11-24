@@ -2392,9 +2392,14 @@ export class DatabaseLoader implements MetadataLoader {
       const bySlot = await this.rowSlots(type, name);
       const keys = options?.packageId === undefined && options?.packagelessOnly === true
         ? [...bySlot.keys()].filter((key) => slotPackageOf(key) === undefined)
-        : storeRemovalKeys(bySlot, type, name, options?.packageId).keys;
+        : options?.packageId === undefined && options?.platformOnly === true
+          ? [...bySlot.keys()].filter((key) => slotPackageOf(key) === undefined)
+          : storeRemovalKeys(bySlot, type, name, options?.packageId).keys;
+      // [#37013] The platform's withdrawal takes its own rows only: a
+      // package-less row whose stored body the platform wrote.
+      const taken = (row: Record<string, unknown>) => options?.platformOnly !== true || isPlatformOrigin(storedRowBodyOf(row));
       for (const key of keys) {
-        for (const row of bySlot.get(key) ?? []) await this._delete(this.tableName, row.id as string);
+        for (const row of bySlot.get(key) ?? []) if (taken(row)) await this._delete(this.tableName, row.id as string);
       }
       if (keys.length > 0) this.invalidate(type, name);
       return;

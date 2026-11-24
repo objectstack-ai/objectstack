@@ -54,8 +54,13 @@ export type MetadataLock = z.input<typeof MetadataLockSchema>;
 export const MetadataLockSourceSchema = z.enum(['artifact', 'package', 'env-forced']);
 export type MetadataLockSource = z.input<typeof MetadataLockSourceSchema>;
 
-/** Where the metadata item originated. */
-export const MetadataProvenanceSchema = z.enum(['package', 'org', 'env-forced']);
+/**
+ * Where the metadata item originated. `'platform'` (#37013) marks a record the
+ * platform's own code registers at boot (a built-in skill, agent or tool):
+ * the metadata service stamps it only on such a registration, and strips it
+ * from every package and environment write.
+ */
+export const MetadataProvenanceSchema = z.enum(['package', 'org', 'env-forced', 'platform']);
 export type MetadataProvenance = z.input<typeof MetadataProvenanceSchema>;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -108,9 +113,11 @@ export const MetadataProtectionFields = {
    * `'package'` — introduced by a loader from npm-package source.
    * `'org'`     — authored by a tenant via the metadata API.
    * `'env-forced'` — emergency overrides via the unlock list.
+   * `'platform'` — registered by the platform's own code at boot; set by the
+   *               metadata service only, never by a package or tenant write.
    */
   _provenance: MetadataProvenanceSchema.optional().describe(
-    'Origin of the item (package | org | env-forced).',
+    'Origin of the item (package | org | env-forced | platform).',
   ),
 
   /** Owning package machine id (e.g. `com.objectstack.setup`). */

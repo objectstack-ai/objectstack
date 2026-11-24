@@ -511,6 +511,12 @@ interface ClusterMetadataRemoval {
    * name's package-less slots from its in-memory copy, never a package's.
    */
   packagelessOnly?: true;
+  /**
+   * [#37013] The platform withdrew its own record: a peer deletes the name's
+   * package-less slots holding the platform's record, never a package's item
+   * nor the environment's own.
+   */
+  platformOnly?: true;
 }
 
 /**
@@ -522,12 +528,14 @@ interface ClusterMetadataRemoval {
 function receivedRemovalOf(payload: ClusterMetadataChangedPayload): ClusterMetadataRemoval | undefined {
   const removal: unknown = payload.removal;
   if (removal === null || typeof removal !== 'object') return undefined;
-  const { packageId, registryOnly, packagelessOnly } = removal as { packageId?: unknown; registryOnly?: unknown; packagelessOnly?: unknown };
+  const { packageId, registryOnly, packagelessOnly, platformOnly } = removal as { packageId?: unknown; registryOnly?: unknown; packagelessOnly?: unknown; platformOnly?: unknown };
   if (registryOnly !== undefined && registryOnly !== true) return undefined;
   const only: { registryOnly?: true } = registryOnly === true ? { registryOnly: true } : {};
   // [#32560] Read wrongly, a package-less-only removal would delete by name
   // and take the package's item: one that is not `true` is dropped too.
   if (packagelessOnly !== undefined) return packagelessOnly === true && packageId === undefined ? { packagelessOnly, ...only } : undefined;
+  // [#37013] …and so would a platform-only one, taking the environment's item.
+  if (platformOnly !== undefined) return platformOnly === true && packageId === undefined ? { platformOnly, ...only } : undefined;
   if (packageId !== undefined && typeof packageId !== 'string') return undefined;
   return {
     ...(packageId !== undefined ? { packageId } : {}),
@@ -2420,7 +2428,7 @@ export class MetadataManager implements IMetadataService {
     type = canonicalMetadataServiceType(type);
     // [#37013] The platform's withdrawal of its own record takes the name's
     // package-less slots only, judged with nothing to refuse.
-    const judged: { keys: readonly string[]; packageId?: string; packagelessOnly?: true } =
+    const judged: { keys: readonly string[]; packageId?: string; packagelessOnly?: true; platformOnly?: true } =
       removal ?? (options?.origin === 'platform' && options.packageId === undefined
         ? storePlatformRemovalKeys(this.registry.get(type), type, name)
         : await this.removalOf(type, name, options?.packageId));
@@ -2428,7 +2436,7 @@ export class MetadataManager implements IMetadataService {
     // [#32560] How each loader's delete (and each peer's) is scoped.
     const scope: ClusterMetadataRemoval = packageId !== undefined
       ? { packageId }
-      : judged.packagelessOnly ? { packagelessOnly: true } : {};
+      : judged.packagelessOnly ? { packagelessOnly: true } : judged.platformOnly ? { platformOnly: true } : {};
     // ── 1. Storage first ────────────────────────────────────────────────
     // Delete from database-backed loaders that declare write capability, and
     // [ADR-0150 D4, #32246, #32353] from the in-memory loaders (the artifact
@@ -2522,6 +2530,8 @@ export class MetadataManager implements IMetadataService {
     // slots only. Every other delete keeps its by-name call, byte for byte.
     if (scope.packageId !== undefined) await del.call(loader, type, name, { packageId: scope.packageId });
     else if (scope.packagelessOnly) await del.call(loader, type, name, { packagelessOnly: true });
+    // [#37013] The platform's withdrawal: its own record only.
+    else if (scope.platformOnly) await del.call(loader, type, name, { platformOnly: true });
     else await del.call(loader, type, name);
   }
 
@@ -4658,6 +4668,10 @@ export class MetadataManager implements IMetadataService {
           if (removal?.packageId !== undefined && p.event.name && PACKAGE_SLOTTED_STORE_TYPES.has(p.type)) {
             const store = this.registry.get(p.type);
             this.deleteRegistryEntries(p.type, p.event.name, storeRemovalKeys(store, p.type, p.event.name, removal.packageId).keys);
+            this.invalidateListCache(p.type);
+          } else if (removal?.platformOnly && p.event.name && PACKAGE_SLOTTED_STORE_TYPES.has(p.type)) {
+            // [#37013] The platform's record only, as the origin dropped it.
+            this.deleteRegistryEntries(p.type, p.event.name, storePlatformRemovalKeys(this.registry.get(p.type), p.type, p.event.name).keys);
             this.invalidateListCache(p.type);
           } else {
             this.invalidateForForeignWrite(p.type, p.event.name);

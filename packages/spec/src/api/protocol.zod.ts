@@ -552,7 +552,7 @@ const MetadataProtectionEnvelopeFields = {
     + 'resolved item declares `_lockDocsUrl`.',
   ),
   provenance: MetadataProvenanceSchema.optional().describe(
-    'Where the item came from (package | org | env-forced). Present only when the '
+    'Where the item came from (package | org | env-forced | platform). Present only when the '
     + 'resolved item declares `_provenance`.',
   ),
   packageId: z.string().optional().describe(

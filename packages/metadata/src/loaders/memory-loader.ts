@@ -44,6 +44,7 @@ import {
   storedNameOf,
   storeKeysNamed,
   storeRemovalKeys,
+  storePlatformRemovalKeys,
   storeWriteKey,
 } from '../package-slotted-store.js';
 
@@ -255,7 +256,9 @@ export class MemoryLoader implements MetadataLoader {
           ? storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === packageId)
           : options?.packagelessOnly === true
             ? storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === undefined)
-            : storeRemovalKeys(typeStore, type, name).keys;
+            : options?.platformOnly === true
+              ? storePlatformRemovalKeys(typeStore, type, name).keys
+              : storeRemovalKeys(typeStore, type, name).keys;
         for (const key of keys) typeStore.delete(key);
       } else {
         typeStore.delete(name);
