@@ -1152,6 +1152,22 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       : undefined;
   const { def: laneTargetDef } = useSettledSchema<any>(laneTargetObject, dataSource);
 
+  // Use grouping.fields[0].field as swimlaneField fallback when no explicit swimlaneField
+  const effectiveSwimlaneField = schema.swimlaneField
+    || (schema.grouping?.fields?.[0]?.field);
+
+  /**
+   * objectstack#36930 — the swimlane field's referenced object, read once per
+   * board, so a reference swimlane is titled by the target's declared
+   * `nameField` (ADR-0079: the one canonical primary-title pointer) exactly as
+   * a column lane over the same reference is (`laneTargetDef` above). Handed
+   * to the board as a PROP (`swimlaneTargetDef`), never a schema key. No read
+   * when the swimlane field names no object.
+   */
+  const swimlaneFieldDef = effectiveSwimlaneField ? objectDef?.fields?.[effectiveSwimlaneField] : undefined;
+  const swimlaneTargetObject = typeof swimlaneFieldDef?.reference === 'string' ? swimlaneFieldDef.reference : '';
+  const { def: swimlaneTargetDef } = useSettledSchema<any>(swimlaneTargetObject, dataSource);
+
   // Enhance data with title mapping and ensure IDs
   // The host predicate scope a card's declared deadline is judged in
   // (objectui#11815).
@@ -1790,10 +1806,6 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   const cardDisplay = useMemo(() => ({ showFieldLabels }), [showFieldLabels]);
 
   // Clone schema to inject data and className
-  // Use grouping.fields[0].field as swimlaneField fallback when no explicit swimlaneField
-  const effectiveSwimlaneField = schema.swimlaneField
-    || (schema.grouping?.fields?.[0]?.field);
-
   const effectiveSchema = {
       ...schema,
       data: effectiveData,
@@ -2345,6 +2357,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // definition, never an authoring surface. On the schema bag it was
         // reachable by an author through `BaseSchema`'s passthrough.
         objectFields={objectDef?.fields}
+        // objectstack#36930 — the swimlane field's target object, so a
+        // reference swimlane is titled by its `nameField` (see
+        // `swimlaneTargetDef` above). A PROP for the reason `objectFields` is.
+        swimlaneTargetDef={swimlaneTargetDef ?? undefined}
         // A PROP, not a schema key (objectui#9342, executing the ruling on PR
         // objectui#9338) — the same remedy `objectFields` above took one card
         // earlier. `handleCardMove` owns the optimistic write, the

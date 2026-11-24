@@ -2964,7 +2964,7 @@ export class MCPServerRuntime {
     });
 
     if (skillBridge) {
-      registerSkillPrompts(server, skillBridge);
+      registerSkillPrompts(server, skillBridge, this.config.logger ? { logger: this.config.logger } : {});
     }
 
     if (opts.bridge) {

@@ -25,6 +25,8 @@
  */
 
 import { inMenuOrder } from '../views/metadata-admin/previews/AppNavCanvas.js';
+import { clearedLabel, renamedLabel } from '../views/metadata-admin/previews/navItemLabel.js';
+import type { I18nLabel } from '@objectstack/spec/ui';
 
 /** One menu entry, as the app document holds it. */
 export type MenuEntry = Readonly<Record<string, unknown>> & { readonly id?: unknown; readonly type?: unknown };
@@ -763,7 +765,11 @@ export function labelGoesToTranslation(
 
 /** The label edits of a menu that are translations, and the menu left to store. */
 export interface MenuLabelSplit {
-  /** `edited` with each translated label put back as served (an added entry's taken off). */
+  /**
+   * `edited` with each translated label put back as served (an added entry's
+   * taken off), and each label stored over an inline locale map merged into
+   * that map (objectstack#36876).
+   */
   readonly navigation: Menu;
   /** The translated labels, by the edited entry's id; `null` drops the entry's translation. */
   readonly labels: ReadonlyMap<string, string | null>;
@@ -778,12 +784,22 @@ export interface MenuLabelSplit {
  * for the source language to set (review N5 of objectstack#36437). A cleared
  * name drops the entry's translation (`null`). `storedById` is the stored
  * entry behind each served one (`storedEntriesById`).
+ *
+ * A label that stays for the stored label over an inline locale map
+ * (`{ en: 'Orders', 'zh-CN': '订单' }`) never replaces the map
+ * (objectstack#36876): only the entry the editor showed in `shownIn`, the
+ * session language each label was shown and typed in, takes the new name,
+ * and a cleared name drops only that entry; every other language keeps its
+ * text. The entry is the Studio nav editors' own choice (`renamedLabel` /
+ * `clearedLabel`), never a second copy of it. A plain-string label is
+ * replaced as before.
  */
 export function splitLabelEdits(
   served: Menu,
   edited: Menu,
   storedById: ReadonlyMap<string, MenuEntry>,
   language: MenuLabelLanguage,
+  shownIn: string,
 ): MenuLabelSplit {
   const s = locate(served, idOf);
   const labels = new Map<string, string | null>();
@@ -806,6 +822,14 @@ export function splitLabelEdits(
         if (text !== null || was) labels.set(id, text);
         const { label: _typed, ...rest } = next as Record<string, unknown>;
         next = was && was.label !== undefined ? { ...rest, label: was.label } : rest;
+      } else if (relabelled && was && isLocaleMap(was.label)) {
+        // The stored label, shown as served: the served map is the stored one.
+        const { label: _typed, ...rest } = next as Record<string, unknown>;
+        const label =
+          typeof typed === 'string' && typed
+            ? renamedLabel(was.label as I18nLabel, typed, shownIn)
+            : clearedLabel(was.label as I18nLabel, shownIn);
+        next = label === undefined ? rest : { ...rest, label };
       }
       if (next !== entry) changed = true;
       return next;
@@ -813,4 +837,9 @@ export function splitLabelEdits(
     return changed ? out : entries;
   };
   return { navigation: visit(edited), labels };
+}
+
+/** Whether a label is an inline locale map, not a plain string. */
+function isLocaleMap(label: unknown): boolean {
+  return !!label && typeof label === 'object' && !Array.isArray(label);
 }

@@ -488,6 +488,7 @@ import {
   CHANGE_KIND_ROWS,
   UI_SCRIPTS_SUITE_ROOTS,
   SPEC_MIGRATION_ENTRY_ROOTS,
+  FIELD_SCHEMA_KEY_DECLARATIONS,
   MANDATORY_TIER_GLOB_ROWS,
   SUSPECT_TIER_GLOB_ROWS,
   GENERATED_MODULE_SOURCES,
@@ -508,6 +509,7 @@ export {
   GENERATED_MODULE_SOURCES,
   UI_SCRIPTS_SUITE_ROOTS,
   SPEC_MIGRATION_ENTRY_ROOTS,
+  FIELD_SCHEMA_KEY_DECLARATIONS,
 };
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
@@ -12158,6 +12160,124 @@ export function readBySpecMigrationEntryConsumers(path, roots = SPEC_MIGRATION_E
 }
 
 /**
+ * The members an object literal declares at its own depth, in source order: a key by its name (a quoted key by
+ * its content), a spread as `...` and the name path it spreads, a computed key as its bracketed source text.
+ * `open` is the offset of the literal's opening brace in `source`. Returns null when the literal does not close
+ * where the brackets say it does, so a reader that lost its place says so instead of answering a short list.
+ *
+ * Read over `maskCommentsAndLiterals`, whose blanking keeps every offset: a brace or a comma inside a comment,
+ * a string, a template or a regex is not structure, and a quoted key's name is read back from `source` between
+ * the delimiters the mask keeps. ⚠ A comma inside type arguments at the literal's own depth (an `as` cast to a
+ * two-parameter generic) reads as a separator; the text after it never opens a member, because a member is a
+ * name followed by its colon, paren, comma or closing brace, so the cost is nil on every declaration this reads
+ * today, and the live census in the self-test holds the read against both closure tables.
+ */
+export function objectLiteralMembers(source, open, masked = maskCommentsAndLiterals(source)) {
+  if (masked[open] !== '{') return null;
+  const members = [];
+  let depth = 0;
+  let atMember = true;
+  let computedAt = -1;
+  for (let k = open + 1; k < masked.length; k++) {
+    const c = masked[k];
+    if (depth === 0 && atMember && !/\s/.test(c)) {
+      atMember = false;
+      const rest = masked.slice(k, k + 200);
+      const spread = /^\.\.\.\s*([A-Za-z_$][\w$.]*)/.exec(rest);
+      const named = /^(?:(?:get|set|async)\s+)?\*?\s*([A-Za-z_$][\w$]*)\s*\??\s*[:(,}<]/.exec(rest);
+      if (spread) members.push(`...${spread[1]}`);
+      else if (c === "'" || c === '"') {
+        const end = masked.indexOf(c, k + 1);
+        if (end < 0) return null;
+        members.push(source.slice(k + 1, end));
+        k = end;
+        continue;
+      } else if (c === '[') computedAt = k;
+      else if (named) members.push(named[1]);
+    }
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === '}' || c === ']' || c === ')') {
+      if (depth === 0) return c === '}' ? members : null;
+      depth--;
+      if (depth === 0 && c === ']' && computedAt >= 0) {
+        members.push(source.slice(computedAt, k + 1));
+        computedAt = -1;
+      }
+    } else if (c === ',' && depth === 0) atMember = true;
+  }
+  return null;
+}
+
+/**
+ * The key set one `FIELD_SCHEMA_KEY_DECLARATIONS` row reads, sorted, or null when the declaration is not where
+ * the row says it is. `declares` names the binding; `call` (when set) names the call whose argument number
+ * `argument` (from 0) is the object literal; with no `call` the literal follows the `=` directly.
+ */
+export function declaredKeySet(source, { declares, call = null, argument = 0 }) {
+  const masked = maskCommentsAndLiterals(source);
+  const decl = new RegExp(`\\b(?:const|let|var)\\s+${declares}\\b[^=]*=`).exec(masked);
+  if (!decl) return null;
+  let at = decl.index + decl[0].length;
+  if (call !== null) {
+    const callAt = masked.indexOf(`${call}(`, at);
+    if (callAt < 0) return null;
+    at = callAt + call.length + 1;
+    // Step over the arguments before the one the row names: each ends at a comma at the call's own depth.
+    for (let skipped = 0; skipped < argument; skipped++) {
+      let depth = 0;
+      let k = at;
+      for (; k < masked.length; k++) {
+        const c = masked[k];
+        if (c === '{' || c === '[' || c === '(') depth++;
+        else if (c === '}' || c === ']' || c === ')') {
+          if (depth === 0) return null;
+          depth--;
+        } else if (c === ',' && depth === 0) break;
+      }
+      if (k >= masked.length) return null;
+      at = k + 1;
+    }
+  }
+  const lead = masked.slice(at).search(/\S/);
+  if (lead < 0) return null;
+  const members = objectLiteralMembers(source, at + lead, masked);
+  return members === null ? null : [...members].sort();
+}
+
+/**
+ * Does this change set change FieldSchema's key set? The trigger for the closure pins outside the spec package
+ * (`CHANGE_KIND_ROWS`, the `field-schema-key-set` row): two tables in other packages classify every FieldSchema
+ * key and a third counts them, so a key added, removed or renamed reds their suites while the spec package's
+ * own stay green.
+ *
+ * Read from the DIFF, as the README claim net is: the declaration's members at the change set's base (the merge
+ * base `readReadmeNetBase` reads, memoised once) against the working tree, per declaring file. An edit that
+ * leaves the members alone (prose, a `.describe()`, a refine, a nested schema) derives nothing; a file created
+ * or deleted, or a declaration this reader cannot find on either side, derives the row, because a reader that
+ * lost its place must read wide, never quiet. A surface named before its code (the PM's derivation at
+ * dispatch, where the file is unchanged) derives nothing either, and that asymmetry is the honest one: the
+ * question is about a diff, and the dev's re-derivation off the merge base is where the missed suites cost the
+ * CI round trip.
+ *
+ * @param {string} path repo-relative
+ * @param {{ readHead?: (rel: string) => string|null, readBase?: (rel: string) => string|null,
+ *           declarations?: typeof FIELD_SCHEMA_KEY_DECLARATIONS }} [io] injectable for the self-test
+ */
+export function changesFieldSchemaKeySet(path, { readHead = readTrackedSource, readBase = readReadmeNetBase, declarations = FIELD_SCHEMA_KEY_DECLARATIONS } = {}) {
+  const rel = path.replace(/^\.\//, '');
+  const row = declarations.find((d) => d.path === rel);
+  if (!row) return false;
+  const head = readHead(rel) ?? null;
+  const base = readBase(rel) ?? null;
+  if (head === base) return false;
+  if (head === null || base === null) return true;
+  const after = declaredKeySet(head, row);
+  const before = declaredKeySet(base, row);
+  if (after === null || before === null) return true;
+  return JSON.stringify(after) !== JSON.stringify(before);
+}
+
+/**
  * The one shape a PACKAGE-TEST subset gate's name may take: `pnpm --filter PKG exec vitest run FILE`, FILE
  * relative to that package, one file and no other argument. Returns the FILE, or null.
  *
@@ -12226,6 +12346,7 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'adr-anchored-file': (path) => breaksAnAdrAnchor(path),
   'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
   'spec-migration-entry': (path) => readBySpecMigrationEntryConsumers(path),
+  'field-schema-key-set': (path) => changesFieldSchemaKeySet(path),
   // One per population net (#31257), each bound to its own net.
   ...Object.fromEntries(Object.entries(POPULATION_NETS).map(([key, net]) => [key, (path) => reachesPopulationNet(path, net)])),
   'published-readme-claim': (path) => takesAReadmeClaim(path),

@@ -901,6 +901,25 @@ describe('namespace-relative cards', () => {
     expect(n.expect.appNavTargets).toEqual(['democrm_account', 'democrm_overview']);
   });
 
+  it("prefixes an operation's `via` with its agent action, so the route the scorer looks for is the action the build declares", () => {
+    // The loader's rule — a `via` is one of `run.agentActions` on the operation's object — must
+    // hold on the namespaced card too: the grader matches `via` against the build's actions by
+    // name, and a bare `via` beside a prefixed action never matches.
+    let routed = 0;
+    for (const f of ['leave_balances', 'requisition_to_receipt', 'travel_expense']) {
+      const card = namespacedScenario(load(resolve(HERE, `../../../../../docs/qa/scenarios/${f}.json`))).card;
+      for (const op of card.run.operations.filter((o) => o.via !== undefined)) {
+        routed += 1;
+        expect(card.run.agentActions!.some((a) => a.name === op.via && a.object === op.object), `${f} ${op.id} via ${op.via}`).toBe(true);
+      }
+    }
+    expect(routed).toBe(3);
+    const leave = namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios/leave_balances.json'))).card;
+    expect(leave.run.operations.find((o) => o.via !== undefined)!.via).toBe('demoleave_decide_approval_step');
+    expect(crm.card.run.operations.every((o) => o.via === undefined)).toBe(true);
+    expect(namespacedScenario(crm).card.run.operations.every((o) => !('via' in o))).toBe(true); // no `via` invented
+  });
+
   it("template mode's host is named after the code, never the app's namespace", () => {
     expect(templateHostName(crm.card)).toBe('hostcrm');
   });
