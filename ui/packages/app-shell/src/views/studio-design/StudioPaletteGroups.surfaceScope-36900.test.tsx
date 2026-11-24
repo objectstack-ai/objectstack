@@ -257,34 +257,41 @@ describe("on a package, the palette lists the left menu and the package's items 
     );
   });
 
-  it('opens an item through the page, at the address the one builder gives', async () => {
+  /** Mount, pick one entry and read what the page was asked to open: a pick closes the palette. */
+  async function openedBy(value: string): Promise<unknown> {
     const { open } = mount(PKG);
     await itemsListed();
+    pick(value);
+    const [to] = open.mock.calls.at(-1) ?? [];
+    cleanup();
+    return to;
+  }
 
-    pick(`studio-item object ${PKG} crm_account`);
-    expect(open).toHaveBeenLastCalledWith('/studio/com.acme.crm/data?surface=object%3Acrm_account');
-    pick(`studio-item permission ${PKG} sales_rep`);
-    expect(open).toHaveBeenLastCalledWith('/studio/com.acme.crm/access?surface=permission%3Asales_rep');
-    pick(`studio-item dashboard ${PKG} crm_pipeline`);
-    expect(open).toHaveBeenLastCalledWith('/studio/com.acme.crm/metadata/dashboard/crm_pipeline?package=com.acme.crm');
-    pick(`studio-item hook ${PAIR} on_lead_created`);
-    expect(open).toHaveBeenLastCalledWith(
+  it('opens an item through the page, at the address the one builder gives', async () => {
+    expect(await openedBy(`studio-item object ${PKG} crm_account`)).toBe(
+      '/studio/com.acme.crm/data?surface=object%3Acrm_account',
+    );
+    expect(await openedBy(`studio-item permission ${PKG} sales_rep`)).toBe(
+      '/studio/com.acme.crm/access?surface=permission%3Asales_rep',
+    );
+    expect(await openedBy(`studio-item dashboard ${PKG} crm_pipeline`)).toBe(
+      '/studio/com.acme.crm/metadata/dashboard/crm_pipeline?package=com.acme.crm',
+    );
+    expect(await openedBy(`studio-item hook ${PAIR} on_lead_created`)).toBe(
       '/studio/com.acme.crm/metadata/hook/on_lead_created?package=com.acme.crm.custom',
     );
   });
 
-  it('opens a menu entry where the menu entry goes', async () => {
-    const { open } = mount(PKG);
-    await itemsListed();
+  it('opens a menu entry where the menu entry goes, and the palette closes', async () => {
+    expect(await openedBy('studio-entry type:hook')).toBe('/studio/com.acme.crm/metadata/hook?package=com.acme.crm');
+    expect(await openedBy('studio-entry orgFlows')).toBe('/studio/~org/automations');
+    expect(await openedBy('studio-entry owd')).toBe('/studio/com.acme.crm/access?surface=owd%3Aoverview');
+    expect(await openedBy('studio-entry diagnostics')).toBe('/studio/com.acme.crm/metadata/_diagnostics');
 
-    pick('studio-entry type:hook');
-    expect(open).toHaveBeenLastCalledWith('/studio/com.acme.crm/metadata/hook?package=com.acme.crm');
-    pick('studio-entry orgFlows');
-    expect(open).toHaveBeenLastCalledWith('/studio/~org/automations');
-    pick('studio-entry owd');
-    expect(open).toHaveBeenLastCalledWith('/studio/com.acme.crm/access?surface=owd%3Aoverview');
+    mount(PKG);
+    await itemsListed();
     pick('studio-entry diagnostics');
-    expect(open).toHaveBeenLastCalledWith('/studio/com.acme.crm/metadata/_diagnostics');
+    await waitFor(() => expect(document.querySelector('[cmdk-input]')).toBeNull());
   });
 
   it("opens a package through the page too, and the palette's own landing navigation is not used", async () => {

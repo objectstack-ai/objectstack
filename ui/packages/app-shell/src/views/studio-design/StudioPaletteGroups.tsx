@@ -103,21 +103,27 @@ const ENTRY_LABEL_KEYS: Record<Exclude<StudioMenuEntry['kind'], 'type'>, string>
  * The items of a package's palette: each listed type's served list, scoped to
  * the package and its pair. `types` is `null` until the menu's rule has
  * answered, so the lists are read once, for the types the menu settled on.
+ * The read is keyed on the package and the type names, never on the identity
+ * of the memoised `types` (`ui/AGENTS.md` #10).
  */
 function useStudioPaletteItems(
   client: ReturnType<typeof useMetadataClient>,
   packageId: string | null,
   types: readonly RichMetadataTypeEntry[] | null,
 ): { items: StudioPaletteItem[]; loading: boolean } {
-  const [read, setRead] = React.useState<{ types: readonly RichMetadataTypeEntry[]; items: StudioPaletteItem[] } | null>(
-    null,
-  );
+  const key = packageId && types ? `${packageId}|${types.map((e) => e.type).join(',')}` : null;
+  const typesRef = React.useRef(types);
+  React.useLayoutEffect(() => {
+    typesRef.current = types;
+  });
+  const [read, setRead] = React.useState<{ key: string; items: StudioPaletteItem[] } | null>(null);
   React.useEffect(() => {
-    if (!packageId || !types) return;
+    const listed = typesRef.current;
+    if (!key || !packageId || !listed) return;
     let cancelled = false;
     const packages = studioPalettePackages(packageId);
     Promise.all(
-      types
+      listed
         .filter((entry) => !STUDIO_PALETTE_ITEMLESS_TYPES.has(entry.type))
         .map(async (entry) => {
           const config = resolveResourceConfig(entry.type, entry);
@@ -133,14 +139,14 @@ function useStudioPaletteItems(
           }
         }),
     ).then((lists) => {
-      if (!cancelled) setRead({ types, items: lists.flat() });
+      if (!cancelled) setRead({ key, items: lists.flat() });
     });
     return () => {
       cancelled = true;
     };
-  }, [client, packageId, types]);
+  }, [client, packageId, key]);
   if (!packageId) return { items: [], loading: false };
-  if (!types || read?.types !== types) return { items: [], loading: true };
+  if (!key || read?.key !== key) return { items: [], loading: true };
   return { items: read.items, loading: false };
 }
 
