@@ -176,6 +176,27 @@ describe('the list chain keys `changedAt` by the names it still lists', () => {
         expect({ items: none.items, has: 'changedAt' in none }).toEqual({ items: [], has: false });
     });
 
+    it('two packages\' items of one name, the stored one withheld: the name loses its entry, never the withheld item\'s time', async () => {
+        // Package A's `d` is served from a stored row and audience-gated; package B's `d` is code-shipped.
+        // The store's entry for `d` is A's row time (the latest of the name's items), so once the gate
+        // drops A's item the entry would date B's item, which has no stored row, with A's change.
+        const dashboards = [
+            { name: 'd', label: 'A', _packageId: 'com.a', requiredPermissions: ['view_finance'] },
+            { name: 'd', label: 'B', _packageId: 'com.b' },
+            { name: 'ops', label: 'Ops', _packageId: 'com.b' },
+        ];
+        const raw = { type: 'dashboard', items: structuredClone(dashboards), changedAt: { d: TIMES.build_in_flight, ops: TIMES.crm } };
+        const { sources } = chainSources({ caller: member });
+        const answer: any = await createMetaListAnswer(sources, { metaType: 'dashboard', query: {}, previewDrafts: false })(raw);
+        expect((answer.data.items as any[]).map((it) => `${it.name}:${it.label}`)).toEqual(['d:B', 'ops:Ops']);
+        expect(answer.data.changedAt).toEqual({ ops: TIMES.crm });
+        // Control: a caller who holds the permission is listed both items of `d`, and keeps its entry.
+        const { sources: full } = chainSources({ caller: { userId: 'u2', systemPermissions: ['view_finance'] } });
+        const all: any = await createMetaListAnswer(full, { metaType: 'dashboard', query: {}, previewDrafts: false })(structuredClone(raw));
+        expect((all.data.items as any[]).map((it) => `${it.name}:${it.label}`)).toEqual(['d:A', 'd:B', 'ops:Ops']);
+        expect(all.data.changedAt).toEqual({ d: TIMES.build_in_flight, ops: TIMES.crm });
+    });
+
     it('control: a caller the gate does not narrow keeps every entry, and an envelope with no `changedAt` gains none', async () => {
         expect((await answerOf({}, null)).changedAt).toEqual(TIMES);
         const bare = await answerOf({}, member, { type: 'app', items: structuredClone(APPS) });
