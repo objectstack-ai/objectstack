@@ -217,7 +217,7 @@ describe('Data pillar field rail — a field click must never be a no-op (#6795 
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     const card = (await screen.findByText('Title')).closest('.cursor-grab') as HTMLElement;
     expect(card).toBeTruthy();
     fireEvent.click(card);

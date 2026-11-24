@@ -49,6 +49,9 @@ const en = {
     noRecords: 'No records found',
     createNew: 'Create new',
     createNamed: 'Create new "{{name}}"',
+    // objectstack#36865 — a quick-created record the field's lookupFilters exclude is not selected; this says why.
+    createdOutsideFilters: "The record was created, but it does not match this field's filters, so it cannot be chosen here.",
+    createdUnchecked: "The record was created, but it could not be checked against this field's filters, so it was not chosen. Search for it here rather than creating it again.",
     showingResults: 'Showing {{shown}} of {{total}} results',
     showAllResults: 'Show all results ({{count}})',
     selectedBadge: 'Selected',
@@ -197,6 +200,10 @@ const en = {
     // handler for an undoable success toast.
     failed: 'Action failed',
     parallelFailed: 'One or more parallel actions failed',
+    // A `type: 'api'` action whose backing service this deployment does not
+    // run or cannot reach (503 SERVICE_UNAVAILABLE, 501 NOT_IMPLEMENTED, a route
+    // miss), shown instead of the server's operator prose (objectstack#36840).
+    serviceUnavailable: 'This action needs a service that is not available in this environment. Contact your administrator.',
     // The two row-count refusals of a single-record action launched from a
     // list toolbar (`resolveServerActionRecordId` in `@object-ui/core`); the
     // runner asks for them before any confirmation or param dialog opens
@@ -1157,6 +1164,8 @@ const en = {
       aggregateNotCompleted: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
       resultNotConfirmed: ' \u00b7 Not confirmed {{count}}',
       notConfirmedRecords: 'The action did not report on these records. Check their current values:',
+      resultRefused: ' \u00b7 Refused {{count}}',
+      refusedRecords: 'The action refused these records:',
       aggregateUnreadable: 'The action finished, but its result could not be read, so it is not known which records were changed. The list shows their current values when you close this.',
       retry: 'Retry',
       downloadErrorCsv: 'Download error CSV',
@@ -4213,7 +4222,7 @@ const en = {
     },
     language: {
       title: 'Language',
-      description: 'The language used for notifications and messages sent to you. The interface language is chosen separately, from the globe menu.',
+      description: 'The language of the interface and of the notifications and messages sent to you. It is the same setting as the globe menu, so changing one changes the other.',
       label: 'Preferred language',
       systemDefault: 'Use the deployment default',
       save: 'Save',
@@ -4653,8 +4662,8 @@ const en = {
   search: {
     title: 'Search',
     back: 'Back',
-    placeholder: 'Search objects, dashboards, pages, reports…',
-    inputAriaLabel: 'Search objects, dashboards, pages, reports',
+    placeholder: 'Search objects, dashboards, pages, reports, components, docs…',
+    inputAriaLabel: 'Search objects, dashboards, pages, reports, components, docs',
     resultsCount: '{{count}} result for "{{query}}"',
     resultsCount_one: '{{count}} result for "{{query}}"',
     resultsCount_other: '{{count}} results for "{{query}}"',
@@ -4667,10 +4676,16 @@ const en = {
     typeDashboards: 'Dashboards',
     typePages: 'Pages',
     typeReports: 'Reports',
+    typeComponents: 'Components',
+    typeDocs: 'Docs',
+    typeUrls: 'Links',
     badgeObject: 'object',
     badgeDashboard: 'dashboard',
     badgePage: 'page',
     badgeReport: 'report',
+    badgeComponent: 'component',
+    badgeDoc: 'doc',
+    badgeUrl: 'link',
   },
   empty: {
     objectNotFound: 'Object Not Found',

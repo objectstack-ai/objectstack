@@ -36,7 +36,7 @@
 
 import * as React from 'react';
 import { SchemaRendererContext } from '@object-ui/react';
-import { activeFlowsBundle, useObjectTranslation } from '@object-ui/i18n';
+import { activeFlowsBundle, flowsResolveOptions, useObjectTranslation } from '@object-ui/i18n';
 import { RecordUpdateStartsResponseSchema, type RecordUpdateStart } from '@objectstack/spec/api';
 import { translateFlow } from '@objectstack/spec/system';
 import { useDetailTranslation } from './useDetailTranslation';
@@ -100,10 +100,14 @@ export function StageChangeStarts({ flows }: { flows: readonly RecordUpdateStart
   const { t } = useDetailTranslation();
   const { i18n, language } = useObjectTranslation();
   if (flows.length === 0) return null;
+  // The server's declared fallback chain rides along (objectstack#36809), so
+  // a flow the reader's language does not name reads the fallback locale's
+  // label before the authored one, as the server's own reads do.
+  const resolveOptions = flowsResolveOptions(i18n, language);
   const labelOf = (flow: RecordUpdateStart): string => {
     const bundle = activeFlowsBundle(i18n, language, flow.name);
     if (!bundle) return flow.label;
-    const translated = translateFlow({ name: flow.name, label: flow.label }, bundle, { locale: language }).label;
+    const translated = translateFlow({ name: flow.name, label: flow.label }, bundle, resolveOptions).label;
     return typeof translated === 'string' && translated ? translated : flow.label;
   };
   return (

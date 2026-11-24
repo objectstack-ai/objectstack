@@ -85,15 +85,32 @@ describe('hook-body-does-not-compile / job-body-does-not-compile · the wrapper 
     expect(hostCompileFailure(hookBodyFunctionExpression(REDECLARED_LOCAL))?.error).toContain('already been declared');
   });
 
-  it('takes the action rule\'s severity split: a regular-expression pattern warns, its token is refused', () => {
+  it('takes the action rule\'s severity split: a dialect-gap pattern warns, a pattern QuickJS refuses and a bad token are refused', () => {
+    // The warning row holds where the host refuses the dialect gap (Node 22's V8, `.nvmrc`); a later V8 that
+    // accepts duplicate named groups leaves no finding for that hook.
+    const hostRefusesGap = (() => {
+      try {
+        new RegExp('(?<a>x)|(?<a>y)');
+        return false;
+      } catch {
+        return true;
+      }
+    })();
+    if (Number(process.versions.node.split('.')[0]) <= 22) expect(hostRefusesGap, `Node ${process.versions.node}`).toBe(true);
     const fs = validateHookAndJobBodyCompiles({
-      hooks: [hook('h1', 'return /(?<a>x)|(?<a>y)/.test(ctx.input.s);'), hook('h2', 'return /abc;')],
-      jobs: [job('j1', 'return /a/gg;')],
+      hooks: [
+        hook('h1', 'return /(?<a>x)|(?<a>y)/.test(ctx.input.s);'),
+        hook('h2', 'return /abc;'),
+        hook('h3', 'return /[b-a]/.test(ctx.input.s);'),
+      ],
+      jobs: [job('j1', 'return /a/gg;'), job('j2', 'return /(/.test("x");')],
     });
     expect(fs.map((f) => [f.rule, f.severity, f.path])).toEqual([
-      [HOOK_BODY_DOES_NOT_COMPILE, 'warning', 'hooks[0].body.source'],
+      ...(hostRefusesGap ? [[HOOK_BODY_DOES_NOT_COMPILE, 'warning', 'hooks[0].body.source']] : []),
       [HOOK_BODY_DOES_NOT_COMPILE, 'error', 'hooks[1].body.source'],
+      [HOOK_BODY_DOES_NOT_COMPILE, 'error', 'hooks[2].body.source'],
       [JOB_BODY_DOES_NOT_COMPILE, 'error', 'jobs[0].body.source'],
+      [JOB_BODY_DOES_NOT_COMPILE, 'error', 'jobs[1].body.source'],
     ]);
   });
 
@@ -115,6 +132,14 @@ describe('hook-body-does-not-compile / job-body-does-not-compile · the wrapper 
     const [f] = validateHookAndJobBodyCompiles({ hooks: [lowered] }, { loweredHookRefs: new Set(['hooks.lowered']) });
     expect(f.path).toBe('hooks[0].handler');
     expect(f.message).toContain('lowered from the inline handler');
+    // The author wrote a handler, not a body.source: the fix names what they wrote.
+    expect(f.hint).toContain('inline handler');
+    expect(f.hint).not.toContain('body.source');
+  });
+
+  it('a hook written with body.source keeps the body.source hint', () => {
+    const [f] = validateHookAndJobBodyCompiles({ hooks: [hook('direct', REDECLARED_LOCAL)] });
+    expect(f.hint).toContain('Fix body.source');
   });
 
   it('never runs the body: a source that closes the wrapper early compiles and nothing in it executes', () => {

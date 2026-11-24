@@ -38,9 +38,13 @@ const AGENTS: Record<string, unknown>[] = [{ name: 'helper', label: 'Helper', mo
 const QUEUES: Record<string, unknown>[] = [{ name: 'tier1', label: 'Tier 1', members: [{ type: 'user', id: 'a' }, { type: 'user', id: 'b' }] }];
 const SKILLS: Record<string, unknown>[] = [{ name: 'triage', label: 'Triage', tools: ['a', 'b'] }];
 
+const VIEWS: Record<string, unknown>[] = [
+  { name: 'all_accounts', object: 'account', label: 'All accounts', viewKind: 'list', config: { type: 'kanban' } },
+];
+
 const CLIENT = {
   list: async (type: string) =>
-    type === 'hook' ? HOOKS : type === 'agent' ? AGENTS : type === 'queue' ? QUEUES : type === 'skill' ? SKILLS : [],
+    type === 'hook' ? HOOKS : type === 'agent' ? AGENTS : type === 'queue' ? QUEUES : type === 'skill' ? SKILLS : type === 'view' ? VIEWS : [],
 };
 
 // Headers as the server serves them to a zh-CN reader.
@@ -98,6 +102,19 @@ const QUEUE_ENTRY = {
 };
 // Control: a type that serves no list.
 const SKILL_ENTRY = { type: 'skill', label: 'Skill', allowEnvironmentOverlay: false, allowRuntimeCreate: true };
+const VIEW_ENTRY = {
+  type: 'view',
+  label: 'View',
+  allowEnvironmentOverlay: false,
+  allowRuntimeCreate: true,
+  list: {
+    data: { provider: 'schema', schemaId: 'view' },
+    columns: [
+      { field: 'name', label: 'Name' },
+      { field: 'type', label: 'Type', type: 'badge' },
+    ],
+  },
+};
 
 vi.mock('./useMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -105,7 +122,7 @@ vi.mock('./useMetadata', async (importOriginal) => ({
   useMetadataTypes: () => ({
     loading: false,
     error: null,
-    entries: [HOOK_ENTRY, AGENT_ENTRY, QUEUE_ENTRY, SKILL_ENTRY],
+    entries: [HOOK_ENTRY, AGENT_ENTRY, QUEUE_ENTRY, SKILL_ENTRY, VIEW_ENTRY],
   }),
 }));
 
@@ -196,5 +213,10 @@ describe('the generic list reads the served columns (objectstack#36860)', () => 
     mount('queue');
     expect((await headersOf()).slice(0, 3)).toEqual(['Name', 'Members', 'Package']);
     expect((await rowOf('tier1')).slice(0, 2)).toEqual(['tier1', '2 people']);
+  });
+
+  it('the view list keeps its derived display type through its console cell override', async () => {
+    mount('view');
+    expect((await rowOf('all_accounts')).slice(0, 2)).toEqual(['all_accounts', 'kanban']);
   });
 });

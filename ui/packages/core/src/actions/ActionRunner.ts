@@ -976,6 +976,12 @@ export interface ActionParamDef {
   lookupFilters?: unknown[];
   /** Page size for the typeahead popover. */
   lookupPageSize?: number;
+  /**
+   * The field's `allowCreate` (`@objectstack/spec` `FieldSchema.allowCreate`):
+   * `false` keeps quick-create ("+ New") out of the param's picker. Absent, the
+   * picker applies its own default.
+   */
+  allowCreate?: boolean;
   /** Form-field dependencies that gate / parameterise the picker query. */
   dependsOn?: unknown[];
 
