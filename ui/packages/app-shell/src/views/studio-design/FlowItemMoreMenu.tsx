@@ -1,7 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * FlowItemMoreMenu — the Automations pillar's ⋯ menu on an open flow.
+ * FlowItemMoreMenu — the flow designer's ⋯ menu items, and their dialogs.
+ *
+ * objectstack#36903 — the designer is a full-screen item page now, whose
+ * header (`ResourceDetailHeader`) draws the ⋯ and the items the narrow header
+ * folds into it; {@link useFlowItemMenu} hands it the flow's own items, and
+ * the dialogs they open, to draw beside the header.
  *
  *  - **New similar** (objectstack#28567, ADR-0146 D4 · Q6): the flow clone
  *    door (`POST /api/v1/automation/<name>/clone`) under a NEW machine name and
@@ -42,20 +47,15 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuTrigger,
   Input,
   Label,
 } from '@object-ui/components';
 import { actionErrorDetail } from '@object-ui/core';
-import { StudioItemHeaderFoldedItems } from './StudioItemHeader.js';
-import { Copy, Loader2, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Copy, Loader2, Trash2 } from 'lucide-react';
 import { t, tFormat, translateMetadataType } from '../metadata-admin/i18n.js';
 import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
 import { apiBase } from '../../utils/apiBase.js';
-import { STUDIO_HEADER_ICON_BUTTON } from './studio-tokens.js';
 
 /** What the clone door saved: the copy's name, the package it names, and its sentence. */
 export interface FlowCopied {
@@ -141,19 +141,25 @@ interface NewSimilarDraft {
   refusal: string | null;
 }
 
+/** The flow's ⋯ items (`null` when it has none) and the dialogs they open. */
+export interface FlowItemMenu {
+  items: React.ReactNode | null;
+  dialogs: React.ReactNode;
+}
+
 /**
  * `label` is the flow's display label; `disabled` holds the menu's actions
  * while a save is in flight. `onDelete` draws Delete flow (a writable
  * package's flow); `newSimilar` draws New similar.
  */
-export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newSimilar }: {
+export function useFlowItemMenu({ name, label, locale, disabled, onDelete, newSimilar }: {
   name: string;
   label: string;
   locale: string;
   disabled?: boolean;
   onDelete?: () => void;
   newSimilar?: FlowNewSimilarProps;
-}): React.ReactElement {
+}): FlowItemMenu {
   const [confirming, setConfirming] = React.useState(false);
   const [copy, setCopy] = React.useState<NewSimilarDraft | null>(null);
   const vars = { type: 'flow', name, typeLabel: translateMetadataType('flow', locale), item: label || name };
@@ -192,47 +198,36 @@ export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newS
     newSimilar.onCopied(outcome.copy);
   };
 
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            data-testid="auto-item-more"
-            aria-label={t('engine.studio.if.more', locale)}
-            title={t('engine.studio.if.more', locale)}
-            className={STUDIO_HEADER_ICON_BUTTON}
+  const items =
+    newSimilar || onDelete ? (
+      <>
+        {newSimilar && (
+          <DropdownMenuItem
+            data-testid="auto-item-new-similar"
+            disabled={disabled || newSimilar.blocked !== null}
+            title={newSimilar.blocked ?? t('engine.studio.auto.newSimilar.hint', locale)}
+            onSelect={openNewSimilar}
           >
-            <MoreHorizontal className="h-4 w-4" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-52">
-          {/* objectstack#29693 — what the flow header's title row folded away, on a narrow row. */}
-          <StudioItemHeaderFoldedItems />
-          {newSimilar && (
-            <DropdownMenuItem
-              data-testid="auto-item-new-similar"
-              disabled={disabled || newSimilar.blocked !== null}
-              title={newSimilar.blocked ?? t('engine.studio.auto.newSimilar.hint', locale)}
-              onSelect={openNewSimilar}
-            >
-              <Copy className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-              {t('engine.studio.auto.newSimilar.action', locale)}
-            </DropdownMenuItem>
-          )}
-          {onDelete && (
-            <DropdownMenuItem
-              data-testid="auto-item-delete"
-              disabled={disabled}
-              className="text-destructive focus:text-destructive"
-              onSelect={() => setConfirming(true)}
-            >
-              <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-              {t('engine.studio.auto.deleteFlow', locale)}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <Copy className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+            {t('engine.studio.auto.newSimilar.action', locale)}
+          </DropdownMenuItem>
+        )}
+        {onDelete && (
+          <DropdownMenuItem
+            data-testid="auto-item-delete"
+            disabled={disabled}
+            className="text-destructive focus:text-destructive"
+            onSelect={() => setConfirming(true)}
+          >
+            <Trash2 className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+            {t('engine.studio.auto.deleteFlow', locale)}
+          </DropdownMenuItem>
+        )}
+      </>
+    ) : null;
+
+  const dialogs = (
+    <>
       {onDelete && (
         <AlertDialog open={confirming} onOpenChange={setConfirming}>
           <AlertDialogContent data-testid="auto-delete-confirm-dialog">
@@ -312,4 +307,5 @@ export function FlowItemMoreMenu({ name, label, locale, disabled, onDelete, newS
       )}
     </>
   );
+  return { items, dialogs };
 }

@@ -26,24 +26,42 @@
  *
  * ## What the scope offers, and what it does not
  *
- * Flows only, which is what the ruling on objectui#11553 asks for: the
- * Automations pillar, listing every flow that belongs to no package and opening
- * it editable, because it is the organization's own. It offers no "New" flow:
- * new authoring stays package-first, and this scope exists to reach flows that
- * already exist without a package (a clone is the measured producer).
+ * Flows only, which is what the ruling on objectui#11553 asks for: every flow
+ * that belongs to no package, listed and opened editable, because it is the
+ * organization's own. It offers no "New" flow: new authoring stays
+ * package-first, and this scope exists to reach flows that already exist
+ * without a package (a clone is the measured producer).
+ *
+ * ## Where it lives (objectstack#36903)
+ *
+ * In its own leg of the "All metadata" area, as a package's flows are in
+ * theirs: the list at `/studio/~org/metadata/flow`, a flow full-screen at
+ * `/studio/~org/metadata/flow/<name>`. Both carry the list's source filter
+ * `?source=runtime`: an item with no owning package is the list's `runtime`
+ * source (`classifyProvenance`, the reading {@link isPackageLessItem} gives
+ * it), so the list shows the scope's flows and the designer's ‹ › walk them
+ * and nothing else. The old `/studio/~org/automations` address redirects here
+ * (`automationsPillarRedirect.ts`).
  */
 
 import { canonicalMetaUrlType } from '@objectstack/spec/shared';
+import { LIST_SOURCE_PARAM } from '../metadata-admin/metadataListState.js';
 import {
-  STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
-  studioPillarItemAddress,
-  studioPillarPath,
+  STUDIO_ORG_SCOPE_TYPE,
+  studioMetadataAreaAddress,
+  studioMetadataItemAddress,
 } from './studioAddress.js';
 
 // objectstack#36895 — the scope's reserved segment and its one pillar are
 // Studio address vocabulary, owned by `studioAddress.ts`; re-exported here.
-export { STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_PILLAR } from './studioAddress.js';
+export { STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_PILLAR, STUDIO_ORG_SCOPE_TYPE } from './studioAddress.js';
+
+/**
+ * objectstack#36903 — the list source the scope's addresses carry: the items
+ * with no owning package (`metadataListState.ts`'s `runtime`).
+ */
+export const STUDIO_ORG_SCOPE_SOURCE = 'runtime';
 
 /** Whether a `/studio/:packageId` route segment names the package-less scope. */
 export function isStudioOrgScope(segment: string | null | undefined): boolean {
@@ -51,14 +69,20 @@ export function isStudioOrgScope(segment: string | null | undefined): boolean {
 }
 
 /**
- * The package-less scope's Automations pillar, optionally opened on one flow
- * through the pillar's `?surface=` deep link.
+ * The package-less scope's flows (objectstack#36903): its list in the area,
+ * or one flow's full-screen designer, each with the scope's source filter.
  */
 export function studioOrgScopePath(surface?: { type: string; name: string }): string {
   // The reserved segment is written as it is, as it always was (`~` is outside
   // every package-id alphabet, and `encodeURIComponent` leaves it unchanged).
-  if (!surface) return studioPillarPath(STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_PILLAR, { segmentEncoding: 'verbatim' });
-  return studioPillarItemAddress(STUDIO_ORG_SCOPE_SEGMENT, STUDIO_ORG_SCOPE_PILLAR, surface, { segmentEncoding: 'verbatim' });
+  const query = `${LIST_SOURCE_PARAM}=${STUDIO_ORG_SCOPE_SOURCE}`;
+  if (!surface) {
+    return studioMetadataAreaAddress(STUDIO_ORG_SCOPE_SEGMENT, encodeURIComponent(STUDIO_ORG_SCOPE_TYPE), {
+      query,
+      segmentEncoding: 'verbatim',
+    });
+  }
+  return studioMetadataItemAddress(STUDIO_ORG_SCOPE_SEGMENT, surface.type, surface.name, { query, segmentEncoding: 'verbatim' });
 }
 
 /**
