@@ -1330,6 +1330,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.discardDraftConfirmBody': 'The published version stays as it is; only the unpublished changes are removed.',
   'engine.edit.draftDiscarded': 'Draft discarded: {item}',
   'engine.edit.draftPending': 'Pending changes — save lives in a draft. Click Publish to release.',
+  'engine.edit.unpublishedChanges': 'This item has unpublished changes. Publish or discard them here.',
+  'engine.edit.unpublishedPublishDirty': 'Saving makes these changes live together with your edits.',
   'engine.edit.rollback': 'Rollback to this version',
   'engine.edit.rollbackConfirm': 'Restore version {version}? This writes the historical body back as the current published overlay.',
   'engine.edit.rollbackConfirmTitle': 'Restore {item} to version {version}?',
@@ -1753,9 +1755,6 @@ const STUDIO_EN: Record<string, string> = {
     'You have unsaved changes. Leave this page anyway?',
   'engine.edit.saving': 'Saving…',
   'engine.edit.savedAt': 'Saved {time}',
-  'engine.edit.autoSaveOn': 'Auto-save is on — click to disable',
-  'engine.edit.autoSaveOff': 'Auto-save is off — click to enable',
-  'engine.edit.autoSavingShortly': 'Auto-saving…',
   'engine.edit.notSavedHeld': 'Not saved — fix the errors to save',
   'engine.edit.destructive': 'Destructive change',
   'engine.edit.destructiveHint':

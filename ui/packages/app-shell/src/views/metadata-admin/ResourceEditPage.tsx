@@ -8,9 +8,11 @@
  *      sees code vs overlay vs effective.
  *   2. Renders a SchemaForm against the JSONSchema in the type's
  *      `/meta/types` registry row.
- *   3. Save → PUT, with automatic destructive-change handling: a 409
- *      `destructive_change` response opens a confirmation dialog
- *      listing the issues, and on confirm we retry with `?force=true`.
+ *   3. Save → the item's draft PUT, then that one item's publish, so a
+ *      Save takes effect at once (objectstack#36902), with automatic
+ *      destructive-change handling: a 409 `destructive_change` response
+ *      opens a confirmation dialog listing the issues, and on confirm we
+ *      retry with `?force=true`.
  *   4. Reset overlay → DELETE (overlay only).
  *   5. References tab → calls `client.references()` and lists
  *      back-pointers so admins know what will break before deleting.
@@ -40,10 +42,7 @@ import {
   MousePointer2,
   SlidersHorizontal,
   FileCode2,
-  Zap,
-  ZapOff,
   Send,
-  Undo2,
   Lock,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -86,7 +85,7 @@ import type {
 // The ONE draft-envelope reader (objectui#8181). Its docblock carries the
 // read-decoration contract objectui#7603 established here; it was hoisted so
 // the three sibling copies could stop re-deriving it.
-import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
+import { extractDraftBody, formatMetadataError, readDraftChanges, type DraftChange } from '@object-ui/data-objectstack';
 import { PageShell, WritabilityBadge } from './PageShell.js';
 import { ResourceDetailHeader } from './ResourceDetailHeader.js';
 import {
@@ -123,10 +122,14 @@ import {
   type RichMetadataTypeEntry,
 } from './useMetadata.js';
 // objectui#11773 — the draft save's optimistic-concurrency guard and its dialog.
-import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
+import { isPublishConflictKeptEditing, publishedPinOf, readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
+// objectstack#36902 — Save takes effect at once; the AI draft's notice is the designers'.
+import { isAiDraft, publishDetailSave } from './detailSaveAtOnce.js';
+import { StudioAiDraftNotice } from '../studio-design/StudioAiDraftNotice.js';
+import { publishFailureOf, publishRefusal, type StudioRefusal } from '../studio-design/metadataError.js';
+import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 // objectstack#29148 — the one strip a Studio editor draws for a refused draft read.
 import { StudioRefusalStrip } from '../studio-design/StudioRefusalStrip.js';
-import type { StudioRefusal } from '../studio-design/metadataError.js';
 import {
   BUNDLE_MEMBER_PARAM,
   getMetadataResource,
@@ -1060,8 +1063,19 @@ function MetadataResourceEditPageImpl({
     save: saveDraftVersioned,
     recordRead: recordDraftRead,
     forget: forgetDraftVersion,
+    recordPublished: recordPublishedVersion,
+    publish: publishPinned,
     dialog: draftConflictDialog,
   } = useDraftSaveGuard(client, reloadFromServer);
+  // objectstack#36902 — the pending draft's per-key provenance (`draftChanges`),
+  // `null` with no draft or none recorded: an AI-written draft gets the
+  // designers' notice and its discard (decision 1), a person's the
+  // "unpublished changes" line with its own Publish and Discard (decision 14).
+  const [draftChanges, setDraftChanges] = React.useState<DraftChange[] | null>(null);
+  // objectstack#36902 — why the item's own publish was refused, in the
+  // designers' words (`publishRefusal`), the server's text behind Details.
+  const [publishRefused, setPublishRefused] = React.useState<StudioRefusal | null>(null);
+  const [discardingAiDraft, setDiscardingAiDraft] = React.useState(false);
 
   // Form edit mode. The form is read-only by default — admins land in a
   // "view" state and must click Edit to mutate, mirroring the Salesforce /
@@ -1163,7 +1177,7 @@ function MetadataResourceEditPageImpl({
     : `${type}:${name}:default`;
   // objectstack#27629 — the verdict belongs to the DRAFT, not to the selection
   // (the ruling on objectstack#27485, ported here from Studio's Data pillar).
-  // Expiring it with the selection released Save and the autosave the moment
+  // Expiring it with the selection released Save the moment
   // the author cleared or changed it, while the broken text stayed in the
   // draft. So each selection's last live verdict is kept with the stamp of the
   // draft slice it judged (`selectionSlicePath`, fingerprinted the way a server
@@ -1259,6 +1273,7 @@ function MetadataResourceEditPageImpl({
   React.useEffect(() => {
     setSaveRefusal(null);
     setInspectorVerdicts({});
+    setPublishRefused(null);
   }, [type, name]);
   React.useEffect(() => {
     if (!editing) setSelection(null);
@@ -1269,31 +1284,10 @@ function MetadataResourceEditPageImpl({
   const draftSnapshotRef = React.useRef<Record<string, unknown> | null>(null);
 
   // Last successful save timestamp — surfaced as "Saved HH:MM" indicator
-  // next to the icon-only Save button.
+  // next to the Save button. objectstack#36902 — there is no auto-save: a
+  // Save makes the item live, so it is the author's to press (as #36511 did
+  // for the designers).
   const [lastSavedAt, setLastSavedAt] = React.useState<Date | null>(null);
-
-  // Auto-save toggle, persisted per-browser. Defaults to on for an
-  // "it just works" experience; users can disable it from the toolbar.
-  const [autoSaveEnabled, setAutoSaveEnabled] = React.useState<boolean>(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      const v = window.localStorage.getItem('metadata-admin:autosave');
-      return v === null ? true : v === '1';
-    } catch {
-      return true;
-    }
-  });
-  React.useEffect(() => {
-    try {
-      window.localStorage.setItem('metadata-admin:autosave', autoSaveEnabled ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
-  }, [autoSaveEnabled]);
-  // Tracks the last draft snapshot we attempted to auto-save, so a
-  // validation failure does not loop on the same payload — auto-save
-  // only retries once the user mutates the draft again.
-  const lastAutoSaveSnapshotRef = React.useRef<string | null>(null);
 
   // Prefetch object name list once — fuels the `ref:object` widget.
   // We don't block render on it; the widget shows a "Loading…" state.
@@ -1557,7 +1551,11 @@ function MetadataResourceEditPageImpl({
         // objectui#11773 — the next save is pinned to what the draft read
         // served: its version, or "no draft row" when none was pending.
         recordDraftRead(type, name, draftPackage, draftRead.pin);
+        // objectstack#36902 — and the Save's publish is pinned to the published
+        // row the layers served (objectstack#36601), at the address it writes.
+        recordPublishedVersion(type, name, draftPackage, publishedPinOf(lay));
         setHasDraft(!!draftReal);
+        setDraftChanges(draftReal ? readDraftChanges(draftResp) : null);
         setLoading(false);
       } catch (err: any) {
         if (!cancelled) {
@@ -1580,7 +1578,7 @@ function MetadataResourceEditPageImpl({
     return () => {
       cancelled = true;
     };
-  }, [client, type, name, ownerPackageId, bundleMember, createMode, reloadKey, locale, recordDraftRead]);
+  }, [client, type, name, ownerPackageId, bundleMember, createMode, reloadKey, locale, recordDraftRead, recordPublishedVersion]);
 
   // Related drawer state. `null` = closed. We avoid querystring round-
   // trips on every keystroke; URL state is best-effort sync via effect
@@ -1993,6 +1991,7 @@ function MetadataResourceEditPageImpl({
   async function doSave(force: boolean) {
     setSaving(true);
     setError(null);
+    setPublishRefused(null);
     setIssues([]);
     if (createMode) {
       setRevealIssues(true);
@@ -2098,57 +2097,115 @@ function MetadataResourceEditPageImpl({
         setSaving(false);
         return;
       }
-      // Save lands in the draft buffer — the runtime keeps serving the
-      // last published version until the operator clicks Publish. The
-      // backend defaults to publish mode for backward-compatibility, so
-      // Studio must opt into draft explicitly.
-      // Bind to the active software package (sys_metadata.package_id) when a
-      // real package scope is carried in the URL (`?package=`). The backend
-      // stamps it on create and preserves an existing binding on update, so
-      // env-local overlays (no `?package=`) are unaffected.
+      // objectstack#36902 (epic objectstack#36890 decision 1) — a Save takes
+      // effect at once, as the designers' Save does (objectstack#36511): the
+      // item's draft (`PUT ?mode=draft`), then that one item's own publish
+      // (`publishDetailSave`), never the package's batch. The draft binds to
+      // the active software package (`?package=`) when the URL carries one;
+      // the publish names the same package and member.
       const activePackage = readActivePackageBinding();
       const saveOptions = {
         force,
         mode: 'draft' as const,
         ...(activePackage ? { packageId: activePackage } : {}),
       };
+      // The draft pending before this save — the AI assistant's, or a
+      // person's from before Save took effect at once. A refused publish keeps
+      // it, now carrying these edits; with none, it takes back the one this
+      // save wrote.
+      const hadDraft = !createMode && hasDraft;
+      // objectstack#28680 — whether this save gives the item its first layer.
+      const firstPublish = createMode || holdsNoLayer(layered);
       // objectui#11773 — a create, with nothing read, is the first-write pin
       // (`If-None-Match: *`): the door refuses it where the name already holds
       // a draft instead of writing over it, and reads it as a create. A save of
       // the item this editor loaded sends the pin its load or last save held.
+      let wroteDraft = true;
       if (createMode) {
         // objectui#7611 — a type whose edit page writes the live item creates
-        // it live too (`createLive`), so the page that opens next reads what
-        // was created and no draft is left behind for a Publish to replay.
-        const createOptions =
-          config.createLive && !activePackage ? { force } : saveOptions;
-        await client.save<any>(type, savedName, itemToSave, { ...createOptions, ifNoneMatch: '*' });
+        // it live too (`createLive`): nothing is left in the draft to publish.
+        const live = !!config.createLive && !activePackage;
+        await client.save<any>(type, savedName, itemToSave, { ...(live ? { force } : saveOptions), ifNoneMatch: '*' });
+        wroteDraft = !live;
       } else if ((await saveDraftVersioned(type, savedName, itemToSave, saveOptions)) === 'reloaded') {
         // The author chose the saved version; the load effect replaces the draft.
         return;
+      }
+      if (wroteDraft) {
+        // objectstack#34818 — a flow whose Problems tab lists the draft's
+        // publish checks: the author has read them (`publishChecksShown.ts`).
+        const reviewedChecks = type === 'flow' && (draftDiagnostics?.warnings?.length ?? 0) > 0;
+        if (reviewedChecks) markPublishChecksShown(type, savedName);
+        let live: Awaited<ReturnType<typeof publishDetailSave>>;
+        try {
+          live = await publishDetailSave(
+            client,
+            { type, name: savedName, ...(activePackage ? { packageId: activePackage } : {}), ...memberScope },
+            hadDraft,
+            // objectstack#36601 — pinned to the published row the load read; a
+            // create read nothing, and its draft's first-write pin stands.
+            createMode ? undefined : publishPinned,
+          );
+        } finally {
+          if (reviewedChecks) clearPublishChecksShown(type, savedName);
+        }
+        // The published row moved and the author chose to reload it.
+        if (live.kind === 'reloaded') return;
+        if (live.kind === 'refused') {
+          // objectstack#36902 item 6 — nothing went live: the reason is shown,
+          // and the edits stay on the page, unsaved.
+          if (live.draftDiscarded) {
+            setHasDraft(false);
+            setDraftChanges(null);
+            if (!createMode) recordDraftRead(type, savedName, activePackage, { ifNoneMatch: '*' });
+          }
+          setPublishRefused(
+            isPublishConflictKeptEditing(live.error)
+              ? { message: live.error instanceof Error ? live.error.message : String(live.error) }
+              : publishRefusal(publishFailureOf(type, savedName, live.error), type, itemToSave as Record<string, unknown>, locale),
+          );
+          return;
+        }
       }
       // Refresh layered + draft state after save — scope to the same package
       // as the initial load (ADR-0048) so a same-name collision re-reads this
       // package's own row, not another's.
       const refreshScope = { ...(ownerPackageId ? { packageId: ownerPackageId } : {}), ...memberScope };
-      // objectui#11799 — this save went into a draft, which makes no layer. An
-      // item this page loaded with no layer still has none, and an item it
-      // just created has never been published (the page then navigates to the
-      // item, whose load reads it afresh). `/layers` answers 404 for both, so
-      // it is not asked: the answer already held stands.
+      // objectui#11799 — a create's page navigates to the item, whose load
+      // reads it afresh, so `/layers` is not asked here.
       // objectstack#29793, objectstack#30786 — …except for a type whose buffer
-      // IS a layer (`editsAuthoredLayers`: the stored `draft` this save just
-      // wrote, which a caller the server serves that layer to is answered for a
-      // draft-only name too).
-      const layerless = !editsAuthoredLayers(type) && (createMode || (savedName === name && holdsNoLayer(layered)));
-      const [lay, draftResp] = await Promise.all([
+      // IS a layer (`editsAuthoredLayers`).
+      const layerless = !editsAuthoredLayers(type) && createMode;
+      const [lay, draftRead] = await Promise.all([
         layerless ? layered : client.layered<any>(type, savedName, refreshScope),
-        client.getDraft<any>(type, savedName, refreshScope).catch(() => null),
+        // objectui#11773 — read at the address the next save writes, so its answer pins that save.
+        readDraftForSave<any>(client, type, savedName, activePackage, bundleMember),
       ]);
       if (!layerless) setLayered(lay);
+      if (wroteDraft && firstPublish && !activePackage) {
+        // objectstack#28680 — a package-less page or dashboard made live for
+        // the first time joins app navigation. Not awaited: each app write
+        // reports itself (a toast with Undo, or its failure).
+        void navigationWrites.created(type, savedName, lay?.effective ?? itemToSave);
+      }
+      if ('refused' in draftRead) {
+        setDraftRefused({
+          message: t('engine.studio.refusal.draftUnreadable', locale),
+          detail: formatMetadataError(draftRead.refused),
+        });
+        setLoadFailed(true);
+        return;
+      }
+      const draftResp = draftRead.answer;
       const draftReal = extractDraftBody(draftResp);
       setHasDraft(!!draftReal);
+      setDraftChanges(draftReal ? readDraftChanges(draftResp) : null);
       setDraftDiagnostics(draftReal ? draftEnvelopeDiagnostics(draftResp) : undefined);
+      if (!createMode) {
+        // What remains pins the next save (normally "no draft row") and its publish.
+        recordDraftRead(type, savedName, activePackage, draftRead.pin);
+        recordPublishedVersion(type, savedName, activePackage, publishedPinOf(lay));
+      }
       // The served draft is the whole document the save just stored (see the
       // load effect, objectui#10765): take it as-is. ⛔ Not spread over
       // `effective` — that is the PUBLISHED layer, and a spread would bring a
@@ -2175,7 +2232,6 @@ function MetadataResourceEditPageImpl({
       setDraft(fresh);
       draftSnapshotRef.current = fresh;
       setLastSavedAt(new Date());
-      lastAutoSaveSnapshotRef.current = JSON.stringify(fresh);
       setDestructiveIssues(null);
       setPendingItem(null);
       // The server took this document, so whatever it refused before is
@@ -2375,6 +2431,8 @@ function MetadataResourceEditPageImpl({
       if (resetSemantic) {
         const lay = await client.layered<any>(type, name, layeredScope);
         setLayered(lay);
+        // objectstack#36902 — the next Save's publish is pinned to the row read.
+        recordPublishedVersion(type, name, activePackage, publishedPinOf(lay));
         // objectstack#29793 — the published item as its author wrote it.
         const fresh = authoredPublished(type, lay as AuthoredLayers);
         setDraft(fresh);
@@ -2397,11 +2455,14 @@ function MetadataResourceEditPageImpl({
     }
   }
 
-  // Promote the pending draft to the active overlay. Mirrors `doSave`'s
-  // refresh pattern so the editor stays in sync with the new baseline.
+  // objectstack#36902 (decision 14) — publish a draft that was already pending
+  // (a person's from before Save took effect at once): that one item, pinned
+  // like a Save's publish. Mirrors `doSave`'s refresh pattern so the editor
+  // stays in sync with the new baseline.
   async function doPublish() {
     setPublishing(true);
     setError(null);
+    setPublishRefused(null);
     try {
       // State the SAME package the save step already stated — read from the
       // same single source, so the two calls of one loop can never disagree.
@@ -2420,13 +2481,25 @@ function MetadataResourceEditPageImpl({
       const reviewedChecks = type === 'flow' && (draftDiagnostics?.warnings?.length ?? 0) > 0;
       if (reviewedChecks) markPublishChecksShown(type, name);
       try {
-        await client.publish<any>(type, name, {
+        // objectstack#36601 — pinned to the published row the load read.
+        const outcome = await publishPinned(client, type, name, {
           ...(activePackage ? { packageId: activePackage } : {}),
           ...memberScope,
         });
+        // The published row moved and the author chose to reload it.
+        if (outcome === 'reloaded') return;
+      } catch (err) {
+        // objectstack#36902 item 6 — the refusal's reason, in the designers' words.
+        setPublishRefused(
+          isPublishConflictKeptEditing(err)
+            ? { message: err instanceof Error ? err.message : String(err) }
+            : publishRefusal(publishFailureOf(type, name, err), type, refusalProbeBody(draft), locale),
+        );
+        return;
       } finally {
         if (reviewedChecks) clearPublishChecksShown(type, name);
       }
+      emitMetadataRefresh();
       // objectui#11773 — the draft is re-read at the address the next save
       // writes, so its answer pins that save (see the load effect).
       const [lay, draftRead] = await Promise.all([
@@ -2454,6 +2527,7 @@ function MetadataResourceEditPageImpl({
       }
       const draftReal = extractDraftBody(draftResp);
       setHasDraft(!!draftReal);
+      setDraftChanges(draftReal ? readDraftChanges(draftResp) : null);
       setDraftDiagnostics(draftReal ? draftEnvelopeDiagnostics(draftResp) : undefined);
       // After a publish the promoted body IS `effective` and the draft row is
       // normally gone; a draft that does remain is a whole document and is
@@ -2479,6 +2553,7 @@ function MetadataResourceEditPageImpl({
       // the re-read says what the next save is pinned to (normally "no draft
       // row").
       recordDraftRead(type, name, activePackage, draftRead.pin);
+      recordPublishedVersion(type, name, activePackage, publishedPinOf(lay));
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
@@ -2503,6 +2578,39 @@ function MetadataResourceEditPageImpl({
     });
   }
 
+  // objectstack#36902 (decision 1, the designers' rule of objectstack#36660) —
+  // drop the AI assistant's draft of this one item, at the package and member
+  // it was read at (`DELETE /meta/:type/:name?state=draft`), back to the live
+  // version. Edits not yet saved go with it, so they are asked about first.
+  async function discardAiDraft() {
+    if (isDirty && !window.confirm(t('engine.studio.aiDraft.discardConfirmUnsaved', locale))) return;
+    setDiscardingAiDraft(true);
+    setError(null);
+    setPublishRefused(null);
+    try {
+      const activePackage = readActivePackageBinding();
+      await client.reset(type, name, {
+        state: 'draft',
+        ...(activePackage ? { packageId: activePackage } : {}),
+        ...memberScope,
+      });
+      setHasDraft(false);
+      setDraftChanges(null);
+      // The load installs the live version and pins the next save to it.
+      setReloadKey((k) => k + 1);
+      // The ledger behind Changes re-reads, one item fewer.
+      emitMetadataRefresh();
+    } catch (err) {
+      setError(
+        tFormat('engine.studio.aiDraft.discardFailed', locale, {
+          reason: formatMetadataError(err),
+        }),
+      );
+    } finally {
+      setDiscardingAiDraft(false);
+    }
+  }
+
   async function runDiscardDraft(item: string) {
     setSaving(true);
     setError(null);
@@ -2523,12 +2631,16 @@ function MetadataResourceEditPageImpl({
       // with no layer still has none, and `/layers` would answer 404.
       const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name, layeredScope);
       setLayered(lay);
+      // objectstack#36902 — the next Save's publish is pinned to the row read.
+      recordPublishedVersion(type, name, activePackage, publishedPinOf(lay));
       // objectstack#29793 — the published item as its author wrote it.
       const fresh = authoredPublished(type, lay as AuthoredLayers);
       setDraft(fresh);
       draftSnapshotRef.current = fresh;
       setHasDraft(false);
+      setDraftChanges(null);
       setDraftDiagnostics(undefined);
+      emitMetadataRefresh();
       // objectui#12303 — the discard is said, naming what it discarded, through
       // the console's shared toast (`sonner`, the one Studio's publish uses).
       // Only here, after the DELETE and the re-read landed: a refused discard
@@ -2604,42 +2716,13 @@ function MetadataResourceEditPageImpl({
     },
   });
 
-  // Auto-save: debounce edits and persist silently once the user pauses
-  // for AUTOSAVE_DEBOUNCE_MS. Skipped for create mode (need an explicit
-  // name first), read-only forms, and while a save is already in flight.
-  // We track the last attempted snapshot so a validation failure doesn't
-  // loop on the same payload — the user has to mutate the draft again.
-  const AUTOSAVE_DEBOUNCE_MS = 1500;
-  // Keep doSave fresh inside the effect without re-arming the timer on
-  // every render.
+  // objectstack#36902 — no auto-save timer: a Save makes the item live, so it
+  // is sent only by the button, ⌘S and the destructive-change confirmation.
+  // Keep doSave fresh for the shortcut without re-binding it on every render.
   const doSaveRef = React.useRef(doSave);
   React.useEffect(() => {
     doSaveRef.current = doSave;
   });
-  React.useEffect(() => {
-    if (!autoSaveEnabled) return;
-    if (createMode || readOnly || !editing || !isDirty || saving) return;
-    // Autosave is a save door like any other: gating only the button would let
-    // the timer publish the malformed definition a second later (objectui#4306).
-    if (inspectorBlocking > 0) return;
-    // Second validation term, and the one that survives a selection change.
-    // The timer is the door the wedge (`9073cf018`) actually came through: it
-    // re-sent the refused document on every later edit, silently, so the
-    // designer showed the rename as applied while the server held none of it.
-    if (refusalBlocking > 0) return;
-    let snap: string;
-    try {
-      snap = JSON.stringify(draft);
-    } catch {
-      return;
-    }
-    if (snap === lastAutoSaveSnapshotRef.current) return;
-    const handle = window.setTimeout(() => {
-      lastAutoSaveSnapshotRef.current = snap;
-      doSaveRef.current(false);
-    }, AUTOSAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(handle);
-  }, [draft, isDirty, editing, saving, createMode, readOnly, autoSaveEnabled, inspectorBlocking, refusalBlocking]);
 
   // Keyboard shortcut — ⌘S / Ctrl+S triggers save when dirty.
   React.useEffect(() => {
@@ -2648,8 +2731,8 @@ function MetadataResourceEditPageImpl({
         if (!canWrite || readOnly) return;
         if (!editing && !createMode) return;
         e.preventDefault();
-        // Third save door — the shortcut must respect the same gate as the
-        // button and the autosave timer (objectui#4306).
+        // Second save door — the shortcut must respect the same gate as the
+        // button (objectui#4306).
         if (!saving && (createMode || isDirty) && inspectorBlocking === 0 && refusalBlocking === 0) {
           doSaveRef.current(false);
         }
@@ -2959,7 +3042,6 @@ function MetadataResourceEditPageImpl({
         <SaveStatusIndicator
           saving={saving}
           isDirty={isDirty}
-          autoSaveEnabled={autoSaveEnabled}
           // The same two terms that return the auto-save effect early and
           // disable Save: while either holds, no save is coming, so the chip
           // must not promise one. Read, never recomputed.
@@ -2969,25 +3051,6 @@ function MetadataResourceEditPageImpl({
           createMode={!!createMode}
           locale={locale}
         />
-      )}
-      {canWrite && (editing || createMode) && !createMode && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setAutoSaveEnabled((v) => !v)}
-          className="h-7 w-7 p-0 text-muted-foreground"
-          title={
-            autoSaveEnabled
-              ? t('engine.edit.autoSaveOn', locale)
-              : t('engine.edit.autoSaveOff', locale)
-          }
-        >
-          {autoSaveEnabled ? (
-            <Zap className="h-3.5 w-3.5 text-emerald-600" />
-          ) : (
-            <ZapOff className="h-3.5 w-3.5" />
-          )}
-        </Button>
       )}
       {canWrite && !createMode && editing && !PreviewComponent && (
         <Button
@@ -3051,49 +3114,17 @@ function MetadataResourceEditPageImpl({
           )}
         </DisabledControlReason>
       )}
-      {/* Publish / Discard draft — only when there is a pending draft.
-          Save writes to the draft buffer; the runtime keeps serving the
-          published version until the operator clicks Publish. */}
-      {canWrite && !createMode && hasDraft && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={doDiscardDraft}
-          disabled={saving || publishing}
-          className="h-7 w-7 p-0 text-muted-foreground"
-          title={t('engine.edit.discardDraft', locale)}
-        >
-          <Undo2 className="h-3.5 w-3.5" />
-        </Button>
-      )}
-      {canWrite && !createMode && hasDraft && (
-        <Button
-          size="sm"
-          onClick={doPublish}
-          disabled={saving || publishing || isDirty}
-          className="h-7 px-2 relative bg-emerald-600 hover:bg-emerald-700 text-emerald-50"
-          title={
-            isDirty
-              ? t('engine.edit.publishBlockedDirty', locale)
-              : t('engine.edit.publish', locale)
-          }
-        >
-          {publishing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <>
-              <Send className="h-3.5 w-3.5 mr-1" />
-              <span className="text-xs">{t('engine.edit.publish', locale)}</span>
-            </>
-          )}
-        </Button>
-      )}
+      {/* objectstack#36902 — no Publish here: Save makes the item live. A
+          draft that was already pending is published or discarded from its
+          own line above the editor (decision 14). */}
     </>
   );
 
   // objectstack#36901 (decision 8) — the draft review is a status chip in the
   // header, not a sheet trigger among the tools: shown while a draft is
   // pending, it opens the review (ADR-0033 Phase B), as `?review=1` does.
+  // objectstack#36902 — a pending draft some key of which the AI assistant wrote.
+  const aiDraft = !createMode && hasDraft && isAiDraft(draftChanges);
   const draftChangeCount = hasDraft && !createMode ? computeDraftChangeCount(layered?.effective ?? null, draft) : 0;
   const reviewChip =
     !createMode && hasDraft ? (
@@ -3114,7 +3145,7 @@ function MetadataResourceEditPageImpl({
 
   // objectstack#36901 (decision 8) — the body the open tab draws. The canvas
   // (Preview) and the details form edit the ONE draft this page holds, and the
-  // header's Save, ⌘S and autosave save it whichever tab is open (decision 4):
+  // header's Save and ⌘S save it whichever tab is open (decision 4):
   // a tab switch keeps every unsaved edit, so it asks nothing. A create draft
   // draws the canvas when its type authors there (`CREATE_MODE_CANVAS_TYPES`).
   const activeTab = itemTab.location.tab;
@@ -3170,7 +3201,7 @@ function MetadataResourceEditPageImpl({
             : 'p-6 space-y-6 max-w-7xl'
         }
       >
-        {(error || readOnly || hasDraft || isLocked || walledDeciding) && (
+        {(error || publishRefused || readOnly || hasDraft || isLocked || walledDeciding) && (
           <div
             className={
               canvasOpen
@@ -3226,10 +3257,32 @@ function MetadataResourceEditPageImpl({
                 )}
               </div>
             )}
-            {hasDraft && !createMode && (
-              <div className="text-xs text-emerald-900 border border-emerald-300 bg-emerald-50 rounded p-3 dark:text-emerald-200 dark:border-emerald-700/50 dark:bg-emerald-950/30 flex items-center gap-3">
+            {/* objectstack#36902 item 6 — the item's own publish was refused:
+                nothing went live, and the reason says why. */}
+            {publishRefused && (
+              <StudioRefusalStrip refusal={publishRefused} locale={locale} className="px-3 py-2 text-sm" />
+            )}
+            {/* objectstack#36902 (decision 1) — the AI assistant's draft is the
+                version on screen: Save makes it live too, and its discard
+                drops that one item's draft, the designers' line. */}
+            {aiDraft && (
+              <StudioAiDraftNotice
+                locale={locale}
+                onDiscard={canWrite ? () => void discardAiDraft() : undefined}
+                busy={discardingAiDraft || saving || publishing}
+              />
+            )}
+            {/* objectstack#36902 (decision 14) — a person's draft from before
+                Save took effect at once: marked as unpublished changes, and
+                published or discarded here, this one item. */}
+            {hasDraft && !createMode && !aiDraft && (
+              <div
+                data-testid="resource-unpublished-changes"
+                role="status"
+                className="text-xs text-emerald-900 border border-emerald-300 bg-emerald-50 rounded p-3 dark:text-emerald-200 dark:border-emerald-700/50 dark:bg-emerald-950/30 flex items-center gap-3"
+              >
                 <Send className="h-3.5 w-3.5 shrink-0" />
-                <span className="flex-1">{t('engine.edit.draftPending', locale)}</span>
+                <span className="flex-1">{t('engine.edit.unpublishedChanges', locale)}</span>
                 {canWrite && (
                   <>
                     <Button
@@ -3238,6 +3291,7 @@ function MetadataResourceEditPageImpl({
                       onClick={doDiscardDraft}
                       disabled={saving || publishing}
                       className="h-7"
+                      data-testid="resource-draft-discard"
                     >
                       {t('engine.edit.discardDraft', locale)}
                     </Button>
@@ -3245,7 +3299,9 @@ function MetadataResourceEditPageImpl({
                       size="sm"
                       onClick={doPublish}
                       disabled={saving || publishing || isDirty}
+                      title={isDirty ? t('engine.edit.unpublishedPublishDirty', locale) : undefined}
                       className="h-7 bg-emerald-600 hover:bg-emerald-700 text-emerald-50"
+                      data-testid="resource-draft-publish"
                     >
                       {publishing ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -4023,26 +4079,21 @@ function MetadataResourceEditPageImpl({
 }
 
 /**
- * SaveStatusIndicator — small inline label next to the Save icon that
- * communicates auto-save state so the icon-only button is not a black
- * box. Six states, each stamped on `data-state`:
+ * SaveStatusIndicator — small inline label next to the Save button. Four
+ * states, each stamped on `data-state` (objectstack#36902: no auto-save, so
+ * an unsaved edit waits for Save):
  *   - saving        → "Saving…" with spinner
  *   - dirty + held  → "Not saved" (destructive): a save door is shut — the
  *                     server refused this draft or the inspector holds a
- *                     fault — so neither the timer nor the button will save
- *                     it; the reason rides on the chip's title
- *   - dirty + on    → "Auto-saving…" (subtle, amber)
- *   - dirty + off   → "Unsaved" (amber)
- *   - clean + ts    → "Saved 14:32" (muted)
+ *                     fault — so the button will not save it; the reason
+ *                     rides on the chip's title
+ *   - dirty         → "Unsaved" (amber)
+ *   - clean + ts    → "Saved 14:32" (muted): the item is live
  *   - createMode    → hidden until first save
- *
- * `held` outranks the auto-save promise: the auto-save effect returns early on
- * the same terms, so "Auto-saving…" there would promise a save that never comes.
  */
 function SaveStatusIndicator({
   saving,
   isDirty,
-  autoSaveEnabled,
   held,
   heldReason,
   lastSavedAt,
@@ -4051,7 +4102,6 @@ function SaveStatusIndicator({
 }: {
   saving: boolean;
   isDirty: boolean;
-  autoSaveEnabled: boolean;
   /** A save door is shut on this draft (server refusal or inspector fault). */
   held: boolean;
   /** Why it is shut — the Save button's own explanation. */
@@ -4095,13 +4145,11 @@ function SaveStatusIndicator({
     return (
       <span
         data-testid="save-status"
-        data-state={autoSaveEnabled ? 'autosave-pending' : 'unsaved'}
+        data-state="unsaved"
         className="text-xs text-amber-600 dark:text-amber-300 hidden md:inline-flex items-center gap-1"
       >
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
-        {autoSaveEnabled
-          ? t('engine.edit.autoSavingShortly', locale)
-          : t('engine.edit.unsaved', locale)}
+        {t('engine.edit.unsaved', locale)}
       </span>
     );
   }
