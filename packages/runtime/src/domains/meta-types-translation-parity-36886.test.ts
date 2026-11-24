@@ -11,8 +11,10 @@
  * of a `RestServer` host got Chinese.
  *
  * Pinned, each against a control: both dispatcher doors (`GET /meta` and
- * `GET /meta/types`) answer the same entries as `RestServer`, translated; an
- * en request and a host with no i18n service answer the listing untranslated.
+ * `GET /meta/types`) answer the same entries as `RestServer`, translated, and
+ * carry `Vary: Accept-Language` as `RestServer` does, so a shared cache never
+ * hands one reader's language to another; an en request and a host with no
+ * i18n service answer the listing untranslated.
  */
 import { describe, it, expect, vi } from 'vitest';
 // Paid at collection: the dispatcher reaches it through a dynamic import.
@@ -70,7 +72,7 @@ function bootDispatcher(withI18n = true) {
         const request = { headers: { 'accept-language': locale }, url: `http://localhost/api/v1${path}` };
         const res = await dispatcher.dispatch('GET', path, undefined, {}, { request } as any);
         expect(res.response?.status).toBe(200);
-        return (res.response?.body as any)?.data;
+        return { data: (res.response?.body as any)?.data, vary: (res.response as any)?.headers?.Vary };
     };
 }
 
@@ -86,9 +88,15 @@ function bootRest() {
     const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === '/api/v1/meta');
     return async (locale: string) => {
         let body: any;
-        const res: any = { status: vi.fn(() => res), header: vi.fn(() => res), send: vi.fn(() => res), json: vi.fn((b: any) => { body = b; return res; }) };
+        const headers: Record<string, string> = {};
+        const res: any = {
+            status: vi.fn(() => res),
+            header: vi.fn((name: string, value: string) => { headers[name] = value; return res; }),
+            send: vi.fn(() => res),
+            json: vi.fn((b: any) => { body = b; return res; }),
+        };
         await route.handler({ method: 'GET', params: {}, query: {}, body: {}, headers: { 'accept-language': locale } }, res);
-        return body;
+        return { data: body, vary: headers.Vary };
     };
 }
 
@@ -103,20 +111,28 @@ const read = (data: any) => {
 
 describe('the dispatcher translates the types listing as RestServer does (objectstack#36886)', () => {
     it('both dispatcher doors answer zh-CN with the labels, form and list headers RestServer answers', async () => {
-        const reference = read(await bootRest()('zh-CN'));
+        const rest = await bootRest()('zh-CN');
+        const reference = read(rest.data);
         expect(reference).toEqual({ label: '钩子', form: '事件', headers: ['名称', '事件'] });
         const dispatch = bootDispatcher();
-        expect(read(await dispatch('/meta', 'zh-CN'))).toEqual(reference);
-        expect(read(await dispatch('/meta/types', 'zh-CN'))).toEqual(reference);
+        expect(read((await dispatch('/meta', 'zh-CN')).data)).toEqual(reference);
+        expect(read((await dispatch('/meta/types', 'zh-CN')).data)).toEqual(reference);
+    });
+
+    it('both dispatcher doors vary on Accept-Language, as RestServer does', async () => {
+        expect((await bootRest()('zh-CN')).vary).toBe('Accept-Language');
+        const dispatch = bootDispatcher();
+        expect((await dispatch('/meta', 'zh-CN')).vary).toBe('Accept-Language');
+        expect((await dispatch('/meta/types', 'zh-CN')).vary).toBe('Accept-Language');
     });
 
     it('control — an en request answers the listing as declared', async () => {
         const dispatch = bootDispatcher();
-        expect(read(await dispatch('/meta', 'en'))).toEqual({ label: 'Hook', form: undefined, headers: ['Name', 'Events'] });
+        expect(read((await dispatch('/meta', 'en')).data)).toEqual({ label: 'Hook', form: undefined, headers: ['Name', 'Events'] });
     });
 
     it('control — a host with no i18n service answers the listing as declared', async () => {
         const dispatch = bootDispatcher(false);
-        expect(read(await dispatch('/meta/types', 'zh-CN'))).toEqual({ label: 'Hook', form: undefined, headers: ['Name', 'Events'] });
+        expect(read((await dispatch('/meta/types', 'zh-CN')).data)).toEqual({ label: 'Hook', form: undefined, headers: ['Name', 'Events'] });
     });
 });
