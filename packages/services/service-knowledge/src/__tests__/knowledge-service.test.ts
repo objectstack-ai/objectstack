@@ -122,6 +122,12 @@ describe('KnowledgeService — permission-aware search', () => {
       { chunkId: 'c2', documentId: 'd2', sourceId: 'http_src', score: 0.5, snippet: 'web' },
     ];
     const { svc } = buildSetup(hits);
+    // The fixture's http hit names a source, so the source is registered: a
+    // hit is served only as a registered source it was searched for.
+    svc.registerSource({
+      id: 'http_src', label: 'HTTP', adapter: 'memory',
+      source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'],
+    });
     const out = await svc.search('q');
     expect(out.map((h) => h.documentId)).toEqual(['d2']);
   });
@@ -199,7 +205,8 @@ describe('KnowledgeService — permission-aware search', () => {
     const svc = new KnowledgeService();
     svc.registerAdapter('memory', adapter);
     svc.registerSource(objectSource('s1', 'task'));
-    const out = await svc.search('q', { topK: 2 });
+    // System context: an object source is searched for no other caller without an engine.
+    const out = await svc.search('q', { topK: 2, executionContext: { positions: [], permissions: [], isSystem: true } });
     expect(out.map((h) => h.documentId)).toEqual(['d2', 'd3']);
   });
 
@@ -209,7 +216,7 @@ describe('KnowledgeService — permission-aware search', () => {
     svc.registerAdapter('memory', a);
     svc.registerSource(objectSource('s1', 'task'));
     svc.registerSource(objectSource('s2', 'note'));
-    await svc.search('q', { sourceIds: ['s2'] });
+    await svc.search('q', { sourceIds: ['s2'], executionContext: { positions: [], permissions: [], isSystem: true } });
     expect(a.searchSpy).toHaveBeenCalledOnce();
     const callArg = a.searchSpy.mock.calls[0][1] as { source: KnowledgeSource };
     expect(callArg.source.id).toBe('s2');

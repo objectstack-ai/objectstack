@@ -132,6 +132,99 @@ describe('OpenAIEmbedder', () => {
   });
 });
 
+describe('OpenAIEmbedder batching (per-request input cap)', () => {
+  /** Answers each request with one vector per input: `[n]` for input `t<n>`. */
+  function echoFetch(failOnCall?: number): ReturnType<typeof vi.fn> {
+    let call = 0;
+    return vi.fn(async (_url: string, init: RequestInit) => {
+      call++;
+      if (call === failOnCall) {
+        return new Response('{"error":"too many inputs"}', { status: 400, statusText: 'Bad Request' });
+      }
+      const { input } = JSON.parse(init.body as string) as { input: string[] };
+      return new Response(
+        JSON.stringify({ data: input.map((t) => ({ embedding: [Number(t.slice(1))] })) }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+  }
+  const inputs = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
+  const sentSizes = (f: ReturnType<typeof vi.fn>) =>
+    f.mock.calls.map((c) => (JSON.parse((c[1] as RequestInit).body as string).input as string[]).length);
+
+  it('splits input above the cap and preserves input order', async () => {
+    const f = echoFetch();
+    // text-embedding-v3 is documented at 10 inputs per request.
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v3', fetch: f as unknown as typeof fetch });
+    const out = await e.embed(inputs(25));
+    expect(sentSizes(f)).toEqual([10, 10, 5]);
+    expect(out).toEqual(Array.from({ length: 25 }, (_, i) => [i]));
+  });
+
+  it('sends exactly-cap input as one request', async () => {
+    const f = echoFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v3', fetch: f as unknown as typeof fetch });
+    await e.embed(inputs(10));
+    expect(sentSizes(f)).toEqual([10]);
+  });
+
+  it('sends cap + 1 inputs as two requests', async () => {
+    const f = echoFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v3', fetch: f as unknown as typeof fetch });
+    const out = await e.embed(inputs(11));
+    expect(sentSizes(f)).toEqual([10, 1]);
+    expect(out[10]).toEqual([10]);
+  });
+
+  it('fails the call on a failing batch, naming its index, and sends no later batch', async () => {
+    const f = echoFetch(2);
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v3', fetch: f as unknown as typeof fetch });
+    const err = await e.embed(inputs(25)).then(
+      () => undefined,
+      (x: unknown) => x as Error,
+    );
+    expect(err?.message).toContain('400 Bad Request: {"error":"too many inputs"}');
+    expect(err?.message).toContain('batch index 1 of 3 (0-based), inputs 10..19');
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('honours an explicit maxBatchSize over the known-model cap', async () => {
+    const f = echoFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', maxBatchSize: 3, fetch: f as unknown as typeof fetch });
+    const out = await e.embed(inputs(7));
+    expect(sentSizes(f)).toEqual([3, 3, 1]);
+    expect(out).toEqual(Array.from({ length: 7 }, (_, i) => [i]));
+  });
+
+  it('refuses a maxBatchSize that is not a positive integer', () => {
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      expect(() => new OpenAIEmbedder({ apiKey: 'k', maxBatchSize: bad })).toThrow(
+        /maxBatchSize must be a positive integer/,
+      );
+    }
+  });
+
+  it('batches an unknown model at the conservative default and warns once per instance', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const f = echoFetch();
+      const e = new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', fetch: f as unknown as typeof fetch });
+      await e.embed(inputs(12));
+      await e.embed(inputs(12));
+      expect(sentSizes(f)).toEqual([10, 2, 10, 2]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain("'my-gateway-model'");
+
+      // A known model, or an explicit override, stays silent.
+      new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-3-small', fetch: f as unknown as typeof fetch });
+      new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', maxBatchSize: 50, fetch: f as unknown as typeof fetch });
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 describe('createOpenAIEmbedder presets', () => {
   it('maps preset names to baseUrl', () => {
     const e = createOpenAIEmbedder({
