@@ -184,26 +184,36 @@ export class KnowledgeService implements IKnowledgeService {
    * a `limit`, and no `upsert` holds more than one page. Each row goes through
    * the same {@link recordToDocument} gate as the event sync.
    *
+   * Only an EMPTY page ends the walk: a page may come back short of its
+   * `limit` with rows still after it (an `afterFind` hook may drop rows).
+   *
    * `opts.limit` caps the TOTAL number of rows the walk reads (the last page is
-   * shortened to it); `opts.dryRun` asks `count` under the source's `where`
-   * instead of reading rows, and reports that count (capped by `limit`).
+   * shortened to it; a fractional cap is floored, a negative or non-finite one
+   * is refused with `ok: false`); `opts.dryRun` asks `count` under the
+   * source's `where` instead of reading rows, and reports that count (capped
+   * by `limit`).
    *
    * ## Failure
    *
-   * A page whose read or upsert fails ends the walk: the result is
-   * `ok: false`, its `message` names the page (1-based) and the id it
-   * continued after, and `discovered` / `indexed` count the pages done before
-   * it. Pages already upserted stay in the index; nothing is rolled back.
+   * A page whose read, document build or upsert fails ends the walk: the
+   * result is `ok: false`, its `message` names the page (1-based) and the id
+   * it continued after, and `discovered` / `indexed` count the pages done
+   * before it. Pages already upserted stay in the index; nothing is rolled
+   * back.
    *
-   * ## One walk per source at a time
+   * ## What is serialized, and what is not
    *
-   * Walks of one source run one after another in this process: a second
-   * `reindexSource` of a source waits until the first has finished, so their
-   * pages never interleave (the same promise chain as the record sync,
-   * `chainAfter`). Walks of different sources run concurrently.
+   * Walks of one source run one after another in this process (a per-source
+   * `chainAfter` chain): a second `reindexSource` of a source waits until the
+   * first has finished, so the two walks' pages never interleave. Walks of
+   * different sources run concurrently.
    *
-   * Documents of rows that no longer exist or no longer match are NOT removed
-   * by a reindex.
+   * Record events do NOT wait for a walk: the record sync has its own
+   * per-document chain. A row updated or deleted between a page's read and
+   * that page's upsert is written back from the older read — a deleted row's
+   * document then stays in the index as a ghost, because a reindex removes no
+   * documents (documents of rows that no longer exist or no longer match wait
+   * for the index purge, #37096).
    */
   async reindexSource(
     sourceId: string,
@@ -248,8 +258,19 @@ export class KnowledgeService implements IKnowledgeService {
     opts: KnowledgeReindexOptions,
   ): Promise<KnowledgeReindexResult> {
     const object = objSource.object;
-    // `limit` keeps its meaning: a cap on the TOTAL rows the walk takes.
-    const cap = opts.limit;
+    // `limit` keeps its meaning: a cap on the TOTAL rows the walk takes. A
+    // fractional cap is floored; a negative or non-finite one is refused
+    // rather than read as "nothing to do".
+    if (opts.limit !== undefined && !(typeof opts.limit === 'number' && Number.isFinite(opts.limit) && opts.limit >= 0)) {
+      return {
+        ok: false,
+        object,
+        discovered: 0,
+        indexed: 0,
+        message: `reindex of source '${source.id}' refused: limit must be a non-negative finite number, got ${String(opts.limit)}.`,
+      };
+    }
+    const cap = opts.limit === undefined ? undefined : Math.floor(opts.limit);
     // RLS-bypassing system context — this is a server-side admin op.
     const context = systemContext();
 
@@ -296,19 +317,26 @@ export class KnowledgeService implements IKnowledgeService {
           { context },
         );
       } catch (err) {
-        return stopped(`the read failed: ${(err as Error).message}`);
+        return stopped(`the read failed: ${errorText(err)}`);
       }
+      // Only an EMPTY page ends the walk. A short page does not: `find` does
+      // not promise `min(limit, remaining)` rows — an `afterFind` hook may drop
+      // rows from a page — so rows after a short page can still exist.
       if (!Array.isArray(rows) || rows.length === 0) break;
 
-      const docs = rows.map((row) => recordToDocument(source, objSource, row, schema));
+      let docs: KnowledgeDocument[];
+      try {
+        docs = rows.map((row) => recordToDocument(source, objSource, row, schema));
+      } catch (err) {
+        return stopped(`building the page's documents failed: ${errorText(err)}`);
+      }
       try {
         await adapter.upsert(docs, { source, reason: 'reindex' });
       } catch (err) {
-        return stopped(`the adapter upsert failed: ${(err as Error).message}`);
+        return stopped(`the adapter upsert failed: ${errorText(err)}`);
       }
       discovered += rows.length;
       indexed += docs.length;
-      if (rows.length < want) break;
 
       // The next page continues after this page's last id. A last row with no
       // id, or one that did not move past the cursor (an engine that ignored
@@ -425,11 +453,14 @@ export class KnowledgeService implements IKnowledgeService {
    * subscriber in turn, so this handler runs inside the write's async context,
    * and its system-context re-read rides the same open transaction through the
    * engine's ambient transaction store: it sees the row the write just made.
-   * If that unit then rolls back, the index is wrong in one of two ways until
-   * the row's next event or a `reindexSource`: on a match, the document stays
-   * built from a row that never committed; on a miss, the uncommitted row did
-   * not match and the document was deleted, so the committed row — which may
-   * still match — is missing from the index.
+   * If that unit then rolls back, the index is wrong in one of two ways: on a
+   * match, the document stays built from a row that never committed; on a
+   * miss, the uncommitted row did not match and the document was deleted, so
+   * the committed row — which may still match — is missing from the index.
+   * The row's next event or a `reindexSource` repairs a row that still exists;
+   * a document built from an INSERT that rolled back has no row left to
+   * repair it from, and a reindex removes no documents — it stays until the
+   * index purge (#37096).
    * `data.record.restored` is published after the restore's own unit has
    * committed. Bulk events (`data.records.*`) carry a count, not records, and
    * are not synced here — see the plugin's event bridge.
@@ -818,6 +849,11 @@ export function objectSourcesFor(sources: KnowledgeSource[], object: string): Kn
  */
 function systemContext(): ExecutionContext {
   return { positions: [], permissions: [], systemPermissions: [], isSystem: true };
+}
+
+/** A thrown value's text: an `Error`'s message, anything else as a string. */
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** A record id the event sync can re-read by: a non-empty string or a finite number. */

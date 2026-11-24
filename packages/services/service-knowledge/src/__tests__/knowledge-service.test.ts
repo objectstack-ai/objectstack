@@ -453,6 +453,12 @@ describe('recordToDocument withholds credential-class and internal fields', () =
 
 type PagedRow = Record<string, unknown>;
 
+/** The double's id order: numbers numerically, anything else by string. */
+function compareIds(a: unknown, b: unknown): number {
+  if (typeof a === 'number' && typeof b === 'number') return a - b;
+  return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
+}
+
 function pagedEngine(rowsIn: PagedRow[]) {
   const rows = [...rowsIn];
   let hold: Promise<void> | undefined;
@@ -470,7 +476,7 @@ function pagedEngine(rowsIn: PagedRow[]) {
         if (key !== 'id' || ops.length !== 1 || ops[0] !== '$gt') {
           throw new Error(`engine double: condition ${JSON.stringify(value)} on '${key}' is not implemented`);
         }
-        if (!(String(row.id) > String((value as { $gt: unknown }).$gt))) return false;
+        if (!(compareIds(row.id, (value as { $gt: unknown }).$gt) > 0)) return false;
         continue;
       }
       if (row[key] !== value) return false;
@@ -491,7 +497,7 @@ function pagedEngine(rowsIn: PagedRow[]) {
     if (options?.context?.isSystem !== true) throw new Error('engine double: expected the system context');
     const page = rows
       .filter((r) => matches(r, query.where))
-      .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0))
+      .sort((a, b) => compareIds(a.id, b.id))
       .slice(0, query.limit)
       .map((r) => ({ ...r }));
     const gate = hold;
@@ -566,8 +572,9 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
     const res = await h.svc.reindexSource('s1');
     expect(res).toEqual({ ok: true, object: 'task', discovered: 101, indexed: 101 });
     expect(upsertedIds(h.adapter)).toEqual([ids(0, 100), ids(100, 101)]);
-    // The second page came back short, so no third read.
-    expect(h.find).toHaveBeenCalledTimes(2);
+    // A short page is not the end — only the empty third read is.
+    expect(h.find).toHaveBeenCalledTimes(3);
+    expect(h.find.mock.calls[2][1].where).toEqual({ id: { $gt: 'r100' } });
     for (const call of h.find.mock.calls) expect(call[1].limit).toBe(REINDEX_PAGE_SIZE);
     for (const call of h.adapter.upsertSpy.mock.calls as unknown as Array<[KnowledgeDocument[], { reason: string }]>) {
       expect(call[0].length).toBeLessThanOrEqual(REINDEX_PAGE_SIZE);
@@ -606,6 +613,76 @@ describe('KnowledgeService — the reindex walk pages by id', () => {
     const h = reindexHarness(taskRows(120));
     const res = await h.svc.reindexSource('s1', { limit: 500 });
     expect(res).toEqual({ ok: true, object: 'task', discovered: 120, indexed: 120 });
+  });
+
+  it('a short page is not the end: a page that lost a row to a hook does not stop the walk', async () => {
+    const h = reindexHarness(taskRows(250));
+    const real = h.find.getMockImplementation()!;
+    // An afterFind-style drop: the first full page comes back with 99 of its 100 rows.
+    h.find.mockImplementation(async (o, q, opt) => {
+      const page = await real(o, q, opt);
+      return h.find.mock.calls.length === 1 ? page.filter((r) => r.id !== 'r049') : page;
+    });
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 249, indexed: 249 });
+    expect(upsertedIds(h.adapter).map((p) => p.length)).toEqual([99, 100, 50]);
+    expect(upsertedIds(h.adapter).flat()).toEqual(ids(0, 250).filter((id) => id !== 's1:r049'));
+    expect(h.find).toHaveBeenCalledTimes(4);
+  });
+
+  it('numeric ids: the cursor keeps the number and the pages follow numeric order', async () => {
+    const rows = taskRows(150).map((r) => ({ ...r, id: Number(String(r.id).slice(1)) + 1 }));
+    const h = reindexHarness(rows);
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150 });
+    const want = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, k) => `s1:${from + k}`);
+    expect(upsertedIds(h.adapter)).toEqual([want(1, 100), want(101, 150)]);
+    expect(h.find.mock.calls.map((c) => c[1].where)).toEqual([undefined, { id: { $gt: 100 } }, { id: { $gt: 150 } }]);
+  });
+
+  it('a fractional limit is floored', async () => {
+    const h = reindexHarness(taskRows(250));
+    const res = await h.svc.reindexSource('s1', { limit: 150.7 });
+    expect(res).toEqual({ ok: true, object: 'task', discovered: 150, indexed: 150 });
+    expect(h.find.mock.calls.map((c) => c[1].limit)).toEqual([100, 50]);
+  });
+
+  it.each([[-1], [Number.NaN], [Number.POSITIVE_INFINITY]])('limit %s is refused with ok:false, reading nothing', async (limit) => {
+    const h = reindexHarness(taskRows(10));
+    for (const dryRun of [false, true]) {
+      const res = await h.svc.reindexSource('s1', { limit, dryRun });
+      expect(res).toMatchObject({ ok: false, object: 'task', discovered: 0, indexed: 0 });
+      expect(res.message).toContain('limit must be a non-negative finite number');
+    }
+    expect(h.find).not.toHaveBeenCalled();
+    expect(h.count).not.toHaveBeenCalled();
+    expect(h.adapter.upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it("a page whose documents cannot be built ends the walk with ok:false naming the page", async () => {
+    const h = reindexHarness(taskRows(150));
+    const real = h.find.getMockImplementation()!;
+    h.find.mockImplementation(async (o, q, opt) => {
+      const page = await real(o, q, opt);
+      if (h.find.mock.calls.length === 2) {
+        Object.defineProperty(page[3], 'title', { get() { throw new Error('unreadable column'); } });
+      }
+      return page;
+    });
+    const res = await h.svc.reindexSource('s1');
+    expect(res).toMatchObject({ ok: false, discovered: 100, indexed: 100 });
+    expect(res.message).toContain('page 2');
+    expect(res.message).toContain('unreadable column');
+    expect(h.adapter.upsertSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a thrown non-Error is reported by its text', async () => {
+    const h = reindexHarness(taskRows(10));
+    h.adapter.upsertSpy.mockImplementationOnce(async () => { throw 'quota exhausted'; });
+    const res = await h.svc.reindexSource('s1');
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain('quota exhausted');
+    expect(res.message).not.toContain('undefined');
   });
 
   it('dryRun counts under the where, capped by limit, and reads no rows', async () => {
