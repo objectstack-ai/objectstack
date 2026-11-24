@@ -369,6 +369,28 @@ describe('the pane\'s top bar names the record (objectstack#27524)', () => {
   });
 });
 
+describe('the pane\'s bar while the record is read (objectstack#36235)', () => {
+  it('holds a placeholder in the record row until the read lands, never the record\'s id', async () => {
+    const read = deferredRead('r-1');
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}?recordId=r-1`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <PaneHost dataSource={read.dataSource} />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(read.dataSource.findOne).toHaveBeenCalled(), { timeout: 5000 });
+    const bar = () => document.querySelector('[data-record-top-bar]') as HTMLElement | null;
+    expect(bar()).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title-pending]')).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title]')).toBeNull();
+    expect(bar()!.textContent).not.toMatch(/#r-1/);
+    read.answer();
+    await waitFor(() => expect(document.querySelector('[data-record-bar-title] h1')?.textContent).toBe('Record r-1'), { timeout: 5000 });
+    expect(document.querySelector('[data-record-drawer-title-pending]')).toBeNull();
+  });
+});
+
 describe('the record row leads with the object\'s colour tile (objectstack#35985)', () => {
   it('on the page: the tile in the object\'s colour, before the record\'s name', async () => {
     mountPage(`/apps/${APP}/${LEAD}/record/r-1`);
