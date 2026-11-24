@@ -1,17 +1,21 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Setup → Installed Apps opens this page with `?source=marketplace`
- * (objectui#13356): the nav item declares
+ * Setup → Installed Apps opened this page with `?source=marketplace`
+ * (objectui#13356): the nav item declared
  * `{ type: 'component', componentRef: 'developer:packages', params: { source: 'marketplace' } }`
- * and the sidebar sends a component item's `params` as the query string.
+ * and the sidebar sends a component item's `params` as the query string. The
+ * entry retired with objectstack#36834 (Setup → Packages lists every source,
+ * with a Source filter), and its address still opens the list filtered.
  *
- * - That view is titled "Installed Apps", the entry that opened it.
+ * - That address opens the administration face, titled "Packages" like every
+ *   view of this list, its Source filter on marketplace (objectstack#36834).
  * - With no marketplace install, its empty state says no app is installed
  *   from the marketplace yet, not that filters match nothing.
  * - "No packages match your filters." stays for a filter the viewer set: the
  *   search hiding the marketplace installs that exist, or another Source.
- * - Setup → Packages (no `source`) keeps its title and empty states.
+ * - The development surface (no `face`, no `source`) keeps its title,
+ *   description and empty states.
  *
  * The wire is stubbed (`fetch`), the runtime config is the real module booted
  * over a served body, and `marketplaceApi` is not mocked.
@@ -95,7 +99,7 @@ async function serve(packages: unknown[], ledger: unknown[] = []) {
 }
 
 const SETUP_BASE = '/apps/setup';
-/** Setup's Installed Apps entry as objectstack declares it. */
+/** Setup's retired Installed Apps entry as objectstack declared it: its address is still served. */
 const INSTALLED_APPS_ITEM = {
   id: 'nav_installed_apps',
   type: 'component',
@@ -131,18 +135,21 @@ afterEach(() => {
   resetRuntimeConfigForTesting();
 });
 
-describe('Setup → Installed Apps (objectui#13356)', () => {
+describe('the retired Installed Apps address (objectui#13356, objectstack#36834)', () => {
   it('the Installed Apps entry opens this page with `?source=marketplace`', () => {
     expect(installedAppsUrl()).toBe(`${PACKAGES_PATH}?source=marketplace`);
   });
 
-  it('is titled "Installed Apps", not "Packages"', async () => {
+  it('opens the administration face, titled "Packages", filtered to marketplace installs', async () => {
     await serve([CODE, MARKET, AUTHORED], [LEDGER_TODO]);
     renderAt(installedAppsUrl());
 
-    expect(await screen.findByRole('heading', { name: row('engine.packages.installedApps.title') })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: row('engine.packages.title') })).toBeNull();
+    expect(await screen.findByRole('heading', { name: row('engine.packages.title') })).toBeInTheDocument();
+    expect(screen.getByText(row('engine.packages.admin.description'))).toBeInTheDocument();
     expect(await screen.findByTestId('pkg-row-com.example.todo')).toBeInTheDocument();
+    expect(screen.queryByTestId('pkg-row-com.acme.code')).toBeNull();
+    expect(screen.queryByTestId('pkg-row-app.b2r4')).toBeNull();
+    expect(screen.getByTestId('pkg-source-picker-marketplace')).toHaveAttribute('data-state', 'on');
   });
 
   it.each([
@@ -156,7 +163,7 @@ describe('Setup → Installed Apps (objectui#13356)', () => {
     expect(empty).toHaveTextContent(row('engine.packages.installedApps.empty'));
     expect(screen.queryByText(row('engine.packages.emptyFiltered'))).toBeNull();
     expect(screen.queryByText(row('engine.packages.emptyCreate'))).toBeNull();
-    expect(screen.getByRole('heading', { name: row('engine.packages.installedApps.title') })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: row('engine.packages.title') })).toBeInTheDocument();
   });
 
   it('a search that hides the marketplace installs that exist still says no package matches the filters', async () => {
@@ -171,7 +178,7 @@ describe('Setup → Installed Apps (objectui#13356)', () => {
 
   it('reads in zh-CN from the catalogue rows', async () => {
     for (const key of [
-      'engine.packages.installedApps.title',
+      'engine.packages.admin.description',
       'engine.packages.installedApps.empty',
       'engine.packages.installedApps.emptyHint',
     ]) {
@@ -181,20 +188,23 @@ describe('Setup → Installed Apps (objectui#13356)', () => {
     await serve([CODE]);
     renderAt(installedAppsUrl(), 'zh');
 
-    expect(await screen.findByRole('heading', { name: row('engine.packages.installedApps.title', 'zh') })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: row('engine.packages.title', 'zh') })).toBeInTheDocument();
+    expect(screen.getByText(row('engine.packages.admin.description', 'zh'))).toBeInTheDocument();
     expect(await screen.findByTestId('packages-installed-apps-empty')).toHaveTextContent(
       row('engine.packages.installedApps.empty', 'zh'),
     );
   });
 });
 
-describe('Setup → Packages is unchanged (objectui#13356)', () => {
-  it('with no `source` it is titled "Packages"', async () => {
+describe('the development surface is unchanged (objectui#13356)', () => {
+  it('with no `face` and no `source` it is titled "Packages", with the development description', async () => {
     await serve([CODE, MARKET], [LEDGER_TODO]);
     renderAt(PACKAGES_PATH);
 
     expect(await screen.findByRole('heading', { name: row('engine.packages.title') })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: row('engine.packages.installedApps.title') })).toBeNull();
+    expect(screen.getByText(row('engine.packages.description'))).toBeInTheDocument();
+    expect(screen.queryByText(row('engine.packages.admin.description'))).toBeNull();
+    expect(screen.queryByTestId('pkg-source-picker')).toBeNull();
   });
 
   it('with nothing installed it offers to create the first package', async () => {
