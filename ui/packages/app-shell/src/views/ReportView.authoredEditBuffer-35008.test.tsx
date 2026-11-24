@@ -189,7 +189,9 @@ describe('the report quick edit edits the authored report (objectstack#35008, Re
     mountReport();
     const [type, name, body, opts] = await openEditAndSave();
 
-    expect([type, name, opts]).toEqual(['report', 'task_overview', { mode: 'draft' }]);
+    // objectstack#36374 — Save stages the body and publishes it in the same press.
+    expect([type, name, opts]).toEqual(['report', 'task_overview', { mode: 'draft', ifNoneMatch: '*' }]);
+    expect(client.value.publish).toHaveBeenCalledWith('report', 'task_overview');
     // Read at the package the served report came from.
     expect(client.value.layered).toHaveBeenCalledWith('report', 'task_overview', { packageId: PKG });
     expect(body.label).toBe(SOURCE.label);

@@ -30,8 +30,14 @@
  * With no signed-in reader there is no entry: nothing is read or written, and
  * the list opens on its view's own layout.
  *
- * A sign-out clears this browser's storage, these entries with it
- * (`@object-ui/auth`'s signed-out purge).
+ * A sign-out, or a session that ends on its own, keeps these entries for the
+ * same reader; a different person signing in on this browser clears them with
+ * everything else (objectstack#36110). `@object-ui/auth`'s signed-out purge
+ * keeps the `list-layout:` family by prefix, and only while an entry holds the
+ * shape above and nothing more: a part added here that the purge does not
+ * know loses the entry at the next sign-out. The purge spells the prefix out
+ * (it cannot import this package); `context/__tests__/signOutPurge.test.tsx`
+ * holds the two together by writing through this module and signing out.
  *
  * @module
  */

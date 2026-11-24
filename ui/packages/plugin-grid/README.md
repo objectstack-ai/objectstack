@@ -957,6 +957,49 @@ schema key: list metadata cannot set it. The console passes `false` for a view
 authored `navigation: { mode: 'none' }` and for an object whose data API serves
 no single-record read (objectstack#33317).
 
+### A cell's own menu items
+
+Right-clicking a data cell opens the row's context menu in two sections
+(objectstack#36289). Above a separator, the cell's own items: **Copy**,
+**Paste**, **Clear**, then **Change history** (below). Under it, the row's
+items, unchanged: Open, Open in new tab and the row's actions. A right-click
+off a data cell (the selection cell, the row's "⋮" cell) opens the row's
+section only.
+
+- **Copy** writes the cell's value to the clipboard, as Ctrl/Cmd+C on the
+  selected cell does. A masked cell copies nothing, so it is unavailable there.
+- **Paste** reads the clipboard and writes it into the cell as a paste on the
+  selected cell does: the same conversion, the checks the cell's editor makes
+  (required, length, range, the email and URL shape) and the same save. Text
+  the column cannot read, or a value the checks refuse, is not saved and the
+  cell says why. When the browser will not hand the clipboard over, the cell
+  says so and names Ctrl/Cmd+V. It is offered on text, number, currency,
+  percent, email, URL, phone, date and single-choice fields (an option is
+  matched by value or label), and is unavailable on any other type.
+- **Clear** empties the cell and saves it, as Backspace on the selected cell
+  does. It is unavailable on a required field and on a yes/no field.
+- Paste and Clear are unavailable on a cell the reader may not edit: a
+  read-only or calculated field, a grid that is not editable, a record the
+  reader may not update.
+
+`data-table` hands these to the host's `renderRowContextMenu` as
+`context.cell` (`copy`, `paste`, `clear`, each absent where the table refuses
+it), beside `context.column`. A grid that offers no row action and no
+selection opens the menu for a cell only when the cell can be changed or has a
+change history; otherwise the browser's own menu stays.
+
+### A cell's change history
+
+Right-clicking a cell of a field the object declares adds **Change history**
+to the row's context menu, when the grid's data source can read activity
+(`find`), the field's changes are recorded with their values
+(`resolveFieldHistory` from `@objectstack/spec/data`) and the reader may read
+the field. Choosing it opens
+`@object-ui/plugin-detail`'s `FieldHistoryPopover` at that point: that
+record's changes of that field, newest first, ten at a time, or **No changes
+recorded** with who created the record. `data-table` names the cell's column to
+the host's `renderRowContextMenu` as `context.column`.
+
 ### Inline Editing
 
 Enable inline cell editing for quick updates:

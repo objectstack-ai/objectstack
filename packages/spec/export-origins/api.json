@@ -527,6 +527,7 @@
     "GetMetaTypesRequest": "src/api/protocol.zod.ts#GetMetaTypesRequest (type)",
     "GetMetaTypesRequestSchema": "src/api/protocol.zod.ts#GetMetaTypesRequestSchema (const)",
     "GetMetaTypesResponse": "src/api/protocol.zod.ts#GetMetaTypesResponse (type)",
+    "GetMetaTypesResponseParsed": "src/api/protocol.zod.ts#GetMetaTypesResponseParsed (type)",
     "GetMetaTypesResponseSchema": "src/api/protocol.zod.ts#GetMetaTypesResponseSchema (const)",
     "GetNotificationPreferencesRequest": "src/api/protocol.zod.ts#GetNotificationPreferencesRequest (type)",
     "GetNotificationPreferencesRequestSchema": "src/api/protocol.zod.ts#GetNotificationPreferencesRequestSchema (const)",

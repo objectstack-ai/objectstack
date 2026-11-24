@@ -173,6 +173,15 @@ export {
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
   FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
+  // #35143 — the second batch of publish-time flow checks.
+  validateFlowSubflowTargets,
+  FLOW_TRIGGER_OBJECT_MISSING,
+  FLOW_CONDITION_OPTION_LABEL,
+  FLOW_TIME_RELATIVE_SHADOWED,
+  FLOW_TIME_RELATIVE_KEY_MISPLACED,
+  FLOW_TIME_RELATIVE_DATE_FIELD_INVALID,
+  FLOW_SCHEDULE_TIMEZONE_MISSING,
+  FLOW_SUBFLOW_UNKNOWN,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -403,6 +412,7 @@ export {
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_CROSS_SET_FIELD_REOPEN,
   SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
@@ -711,6 +721,12 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
+export {
+  validateObjectActionLayout,
+  OBJECT_ACTION_LAYOUT_UNKNOWN,
+  OBJECT_ACTION_LAYOUT_NOT_PLACED,
+} from './validate-object-action-layout.js';
+export type { ObjectActionLayoutFinding } from './validate-object-action-layout.js';
 export { validateActionObjectBinding, ACTION_NO_OBJECT_BINDING } from './validate-action-object-binding.js';
 export type { ActionObjectBindingFinding } from './validate-action-object-binding.js';
 export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validate-flow-node-executors.js';
@@ -1099,6 +1115,8 @@ export {
   validateFlowNodeWrites,
   FLOW_NODE_WRITE_UNKNOWN_FIELD,
   FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
+  FLOW_NODE_WRITE_UNKNOWN_OPTION,
+  FLOW_NODE_WRITE_DATE_HELPER_TEXT,
   FLOW_WRITE_NODE_TYPES,
   FLOW_WRITE_NODE_TYPES_DEFERRED,
 } from './validate-flow-node-writes.js';
@@ -1173,6 +1191,7 @@ export {
   FLOW_DECISION_INCLUSIVE_OVERLAP,
   FLOW_APPROVAL_DECISION_UNROUTED,
   FLOW_HTTP_TIMEOUT_MISSING,
+  FLOW_CREATE_UPDATE_PAIR,
 } from './lint-flow-patterns.js';
 
 // A credential typed as a literal into a served flow position — the advisory,

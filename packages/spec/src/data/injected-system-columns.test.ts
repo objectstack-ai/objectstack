@@ -3,7 +3,9 @@
 import { describe, it, expect } from 'vitest';
 
 import { AUDIT_PROVENANCE_FIELDS } from './field-group-layout';
-import { resolveInjectedSystemColumns } from './injected-system-columns';
+import { resolveInjectedSystemColumns, SYNC_PROVENANCE_COLUMNS, SYNC_PROVENANCE_PREFIX } from './injected-system-columns';
+import { injectedSystemColumnDefs, SYNC_PROVENANCE_FIELD_DEFS } from './injected-system-column-provenance';
+import { FieldSchema } from './field.zod';
 
 // ---------------------------------------------------------------------------
 // [#5378] The per-object injected-column derivation.
@@ -216,5 +218,62 @@ describe('resolveInjectedSystemColumns — the deployment\'s platform-global dec
 
   it('a nameless record is never declared, whatever the declaration names', () => {
     expect(resolveInjectedSystemColumns({}, { platformGlobalObjects: [''] }).tenant).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [ADR-0153 D4] The five `_sync_` provenance columns, on a `synced` object only.
+// ---------------------------------------------------------------------------
+describe("resolveInjectedSystemColumns — the sync-in provenance columns of a managedBy: 'synced' object", () => {
+  const synced = { name: 'erp_customer', managedBy: 'synced', fields: { code: { type: 'text' } } };
+
+  it('plans the five columns, in the order the constant declares them', () => {
+    const plan = resolveInjectedSystemColumns(synced);
+    expect(plan.sync).toBe(true);
+    expect(SYNC_PROVENANCE_COLUMNS).toEqual([
+      '_sync_source', '_sync_external_id', '_sync_pulled_at', '_sync_run_id', '_sync_deleted_at',
+    ]);
+    for (const column of SYNC_PROVENANCE_COLUMNS) expect(plan.names.has(column)).toBe(true);
+  });
+
+  it('every planned column carries the reserved prefix no author field may take', () => {
+    for (const column of SYNC_PROVENANCE_COLUMNS) expect(column.startsWith(SYNC_PROVENANCE_PREFIX)).toBe(true);
+  });
+
+  it('a synced object keeps tenant and audit, and gets no ownership anchor', () => {
+    expect(resolveInjectedSystemColumns(synced)).toMatchObject({
+      tenant: true, audit: true, owner: false, owningBusinessUnit: false, queue: false, sync: true,
+    });
+  });
+
+  it('CONTROL: no other bucket, and no unmanaged object, plans them', () => {
+    for (const managedBy of [undefined, 'platform', 'config', 'system-data', 'engine-owned', 'append-only']) {
+      const plan = resolveInjectedSystemColumns({ name: 'erp_customer', ...(managedBy ? { managedBy } : {}) });
+      expect(plan.sync).toBe(false);
+      for (const column of SYNC_PROVENANCE_COLUMNS) expect(plan.names.has(column)).toBe(false);
+    }
+  });
+
+  it('the hard opt-out withholds them too (systemFields: false)', () => {
+    const plan = resolveInjectedSystemColumns({ ...synced, systemFields: false });
+    expect(plan.sync).toBe(false);
+    expect([...plan.names]).toEqual(['id']);
+  });
+
+  it('the definitions table answers each planned column, read-only and system-owned', () => {
+    const defs = injectedSystemColumnDefs(synced);
+    for (const column of SYNC_PROVENANCE_COLUMNS) {
+      expect(defs[column]).toBe(SYNC_PROVENANCE_FIELD_DEFS[column]);
+      expect(defs[column]).toMatchObject({ readonly: true, system: true, hidden: true, required: false });
+    }
+    expect(SYNC_PROVENANCE_FIELD_DEFS._sync_pulled_at.type).toBe('datetime');
+    expect(SYNC_PROVENANCE_FIELD_DEFS._sync_deleted_at.type).toBe('datetime');
+    expect(SYNC_PROVENANCE_FIELD_DEFS._sync_run_id.type).toBe('text');
+  });
+
+  it('every definition parses as a field, so the served columns describe themselves validly', () => {
+    for (const column of SYNC_PROVENANCE_COLUMNS) {
+      expect(FieldSchema.safeParse(SYNC_PROVENANCE_FIELD_DEFS[column]).success).toBe(true);
+    }
   });
 });

@@ -349,3 +349,34 @@ describe('CommentsPage — the top bar', () => {
     expect(within(threadBack).getByText('Comments')).toHaveClass('truncate');
   });
 });
+
+describe('CommentsPage — opened at a comment (objectstack#36410)', () => {
+  it('a thread opened at a reply scrolls to it and marks it', () => {
+    const box = (top: number, height: number) =>
+      ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute('data-comments-thread')) return box(100, 400);
+      if (this.getAttribute('data-comment-id') === 'r2') return box(700, 40);
+      return box(0, 0);
+    });
+    const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.hasAttribute('data-comments-thread') ? 400 : 0;
+    });
+    try {
+      renderPage({ threadId: 'c1', focusCommentId: 'r2' });
+      expect(page()).toHaveAttribute('data-comments-page', 'thread');
+      expect(commentEl('r2')).toHaveAttribute('data-comment-target', 'true');
+      // 700 - 100 - (400 - 40) / 2
+      expect((document.querySelector('[data-comments-thread]') as HTMLElement).scrollTop).toBe(420);
+    } finally {
+      rect.mockRestore();
+      height.mockRestore();
+    }
+  });
+
+  it('CONTROL: a thread opened without one opens at its top, nothing marked', () => {
+    renderPage({ threadId: 'c1' });
+    expect(document.querySelector('[data-comment-target]')).toBeNull();
+    expect((document.querySelector('[data-comments-thread]') as HTMLElement).scrollTop).toBe(0);
+  });
+});

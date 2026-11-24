@@ -43,6 +43,7 @@ import { useRecordChangeOwnerOffer } from './changeOwner.js';
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { PublishRecordEditCommand, type RecordHeaderEditEntry } from './recordPaletteEdit.js';
 import { RecordEditStateController, bodyTablesSaveTogether, isMasterDetailChild, withDetailWritesWithheld, type RecordEditStateControl, type RecordEditStateEntry } from './recordEditState.js';
 import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
 import { phoneRecordHeader } from './recordPhoneHeader.js';
@@ -64,7 +65,7 @@ import {
 import { applySavedRecordEcho } from './recordSaveEcho.js';
 import { authoredRecordPageApplies } from './recordPageSurface.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_COMMENTS_PARAM, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
+import { RECORD_COMMENT_PARAM, RECORD_COMMENTS_PARAM, RECORD_COMMENTS_PUSHED_STATE as COMMENTS_PUSHED, RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -74,6 +75,9 @@ import { editFormLockedByState } from '../utils/editFormLockedByState.js';
 import { matchAppBySegment, resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { useShellPageActionsSlot, useShellSidebarExpandSlot } from '../layout/shellPageActionsSlot.js';
+import { DesignModeHeaderPins, useObjectPins } from '../layout/DesignModeHeaderPins.js';
+import { headerReadsPins } from '../layout/designModeHeaderPinsModel.js';
+import { useDesignModeActive } from '../layout/designMode.js';
 import { recycleBinRefusalLabelsOf, recycleBinRestoreOf } from '../utils/recycleBinRestore.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import type { TranslateFn } from '@object-ui/i18n';
@@ -86,8 +90,8 @@ import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/Navig
 // Both sets are derived, not restated — see record-detail-system-fields.ts.
 import { deriveRecordDetailSections } from './recordDetailSections.js';
 import type { DataSource, FeedItem, Reaction, RecordPageOperation, RecordPagePayload } from '@object-ui/types';
-import { placedHeaderActions } from '@object-ui/types';
-import type { ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
+import { arrangedHeaderActions, placedHeaderActions } from '@object-ui/types';
+import type { ActionContext, ActionDef, ActionParamDef, ActionResult, ConfirmationHandler, ParamCollectionHandler } from '@object-ui/core';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useRecordApprovals, openApprovalOf, isSubmitterOf } from '../hooks/useRecordApprovals.js';
 import { RecordAttachmentsPanel } from './RecordAttachmentsPanel.js';
@@ -1070,6 +1074,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [heldRecordTitle, setHeldRecordTitle] = useState<{ record: string; title: string } | undefined>();
   const recordTitle = heldRecordTitle?.record === routeRecordKey ? heldRecordTitle.title : undefined;
   const objectDef = objects.find((o: any) => o.name === objectName);
+  // objectstack#36366 — the object's action arrangement as the header draws
+  // it: staged under the design mode, else as served. Keyed on content for the
+  // synthesized page's memo below.
+  const objectPins = useObjectPins(objectDef as any);
+  const recordPinsKey = JSON.stringify(objectPins.record ?? null);
+  const designModeOn = useDesignModeActive();
   // objectui#13385 (maintainer ruling, option B) — a record page inside the
   // Setup app draws no floating `ManagedByBadge`; the header's object-label
   // chip carries the badge's note instead. Read off the route's `:appName`, so
@@ -1087,10 +1097,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // In a pane, the record's title is what its top bar's breadcrumb names
   // (objectstack#27524, Target 7); the pane's slot for the record's ⊟ is there
   // too (`RecordPaneBarToggles` below).
+  // The report itself waits for `recordCrumbName` below (objectstack#36235).
   const paneBar = useRecordPaneBar();
-  useEffect(() => {
-    if (embedded && recordId) paneBar?.reportTitle(recordId, recordTitle);
-  }, [embedded, paneBar, recordId, recordTitle]);
   // objectstack#35593 — the page's top bar is the record's one header row: its
   // two slots for the record header (`page:header` draws its name and tags,
   // and its button group, into them), and whether a header holds the bar,
@@ -1347,6 +1355,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const commentsParam = commentsPageOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
   const commentsPageOpen = commentsParam !== null;
   const commentsPageThread = commentsParam ? commentsParam : null;
+  // objectstack#36410 — a comment notice's link (`?comments={thread}`, and
+  // `&comment={reply}` for a reply): on the desktop it opens the panel at
+  // that thread, whatever this browser last chose, without changing the
+  // choice; on the phone the page above opens at it. The comment to scroll
+  // to rides with either.
+  const commentsLinkParam = commentsPanelOffered ? tabSearchParams.get(RECORD_COMMENTS_PARAM) : null;
+  const commentsLinkThread = commentsLinkParam ? commentsLinkParam : null;
+  const commentsLinkComment = commentsLinkThread || commentsPageThread ? tabSearchParams.get(RECORD_COMMENT_PARAM) || null : null;
   // Opening pushes an entry (Back and 「‹」 return to the record where it was
   // scrolled: the record stays mounted under the page), a thread pushes one
   // over the list, and 「‹」 pops the entry this view pushed or, on an entry a
@@ -1354,6 +1370,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const openCommentsPage = useCallback((thread?: string) => {
     const sp = new URLSearchParams(location.search);
     sp.set(RECORD_COMMENTS_PARAM, thread ?? '');
+    // Another thread, or the list: the linked comment was the old thread's.
+    sp.delete(RECORD_COMMENT_PARAM);
     const state = location.state && typeof location.state === 'object' ? location.state : {};
     setTabSearchParams(sp, { state: { ...(state as object), [COMMENTS_PUSHED]: true } });
   }, [setTabSearchParams, location.search, location.state]);
@@ -1365,6 +1383,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const sp = new URLSearchParams(location.search);
     if (sp.get(RECORD_COMMENTS_PARAM)) sp.set(RECORD_COMMENTS_PARAM, '');
     else sp.delete(RECORD_COMMENTS_PARAM);
+    sp.delete(RECORD_COMMENT_PARAM);
     setTabSearchParams(sp, { replace: true, state: location.state });
   }, [setTabSearchParams, location.search, location.state, navigate]);
   // Closed, the focus goes back to the comments icon that opened the page.
@@ -1375,8 +1394,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     commentsPageWasOpen.current = commentsPageOpen;
   }, [commentsPageOpen]);
-  const [commentsOpenChosen, setCommentsOpen] = useCommentsPanelOpen();
-  const commentsOpen = commentsPanelOffered && commentsOpenChosen;
+  const [commentsOpenChosen, setCommentsOpenChosen] = useCommentsPanelOpen();
+  const commentsOpen = commentsPanelOffered && (commentsOpenChosen || commentsLinkThread !== null);
+  // Closing a panel a link opened drops the link's params (replacing the
+  // entry), so it stays closed; opening or closing is still the reader's
+  // stored choice.
+  const setCommentsOpen = useCallback((open: boolean) => {
+    if (!open && commentsLinkThread !== null) {
+      const sp = new URLSearchParams(location.search);
+      sp.delete(RECORD_COMMENTS_PARAM);
+      sp.delete(RECORD_COMMENT_PARAM);
+      setTabSearchParams(sp, { replace: true, state: location.state });
+    }
+    setCommentsOpenChosen(open);
+  }, [commentsLinkThread, location.search, location.state, setTabSearchParams, setCommentsOpenChosen]);
   const commentsPlacement = commentsPanelPlacement(useWindowWidth());
   const recordPageTier = useRecordPageTier(pageRootEl, {
     enabled: pageColumnsEligible,
@@ -2231,7 +2262,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
    *   declared action is absent from `objects`, so it keeps that route too,
    *   as every flow click did before.
    */
-  const flowHandler = useCallback(async (action: ActionDef) => {
+  const flowHandler = useCallback(async (action: ActionDef, context?: ActionContext) => {
     const flowName = action.target || action.name;
     if (!flowName) {
       return { success: false, error: 'No flow target provided for flow action' };
@@ -2294,8 +2325,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         });
       }
       // Ended `refused`: the Close-only notice carries the engine's sentence,
-      // titled with the action the user clicked.
-      if (judged.followUp?.kind === 'refusal') {
+      // titled with the action the user clicked. A caller that reports the
+      // refusal itself (`reportsRefusal`, the per-record bulk fan-out of a
+      // list on this page) gets it on `judged.result.refusal` instead, as
+      // useConsoleActionRuntime's copy does, so no notice stacks on its result.
+      if (judged.followUp?.kind === 'refusal' && context?.reportsRefusal !== true) {
         setFlowRefusal({ open: true, title: action.label, message: judged.followUp.message });
       }
       if (judged.refresh) notifyViewChanged();
@@ -4675,8 +4709,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // (objectstack#29951), so the synthesized header and such a page draw the
     // same actions, an action another package places on the object included.
     const recordHeaderActions = (() => {
-      const base = placedHeaderActions<any>(objectDef.actions as any[] | undefined)
-        .map((a: any) => localizeActionTexts(objectDef.name, a));
+      // objectstack#36366 — the object's record scope arrangement
+      // (`actionLayout.record`): `pinned` chooses which of them are buttons, in
+      // order, and `more` orders the rest in ⋯. The same list feeds the side
+      // preview (an embedded mount) and the phone's bottom bar (the header's
+      // `bar` face). No arm: the header's own choice, as before.
+      const base = arrangedHeaderActions<any>(
+        placedHeaderActions<any>(objectDef.actions as any[] | undefined),
+        objectPins.record,
+        'record',
+      ).map((a: any) => localizeActionTexts(objectDef.name, a));
 
       // ⛔ No approval actions are injected here any more (objectui#3055).
       // They used to be two hand-written buttons (approve/reject only, no
@@ -4822,7 +4864,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // the panel's headline is the pending one. (The decision actions no longer
   // ride this list at all — objectui#3055 moved them to the declared-action
   // bar, which reads the pending row directly.)
-  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id]);
+  // `recordPinsKey`: the record scope arrangement (objectstack#36366), staged under
+  // the design mode without `objects` changing.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `objectPins` is keyed on content by `recordPinsKey`
+  }, [objectDef?.name, childRelations, t, objectPluralLabel, language, objects, approvals.available, approvals.pendingRequest, approvals.requests, user?.id, recordPinsKey]);
   // objectstack#30344 — whether this record page shows the record's field
   // history: the history gate, AND this reader's audit read answered. A read
   // the server refuses (or that fails) answers nothing, so the stream offers
@@ -4892,6 +4937,29 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     || (holdsRouteRecord
       ? (pureRecordId ? shortRecordId(pureRecordId) : '')
       : objectDef ? servedObjectLabel(objectDef, language, objectLabel) : objectName ?? '');
+  // objectstack#36235 — the pane's bar names the record by what this page
+  // reports, and draws a placeholder until it does. So the report is the
+  // record's title once the page holds the record, and the short id only for a
+  // held record with nothing to be named by; a read in flight reports nothing,
+  // and the bar never reads the raw id while the record loads. A page that
+  // settles WITHOUT the record (not found, deleted, access ended, forbidden,
+  // failed, the object unknown, the named page refused) reports the name its
+  // crumb draws then, the object's label, so the bar's placeholder ends with
+  // the read instead of standing over the page's own state.
+  const settledWithoutRecord = !isLoading && (
+    !objectDef
+    || namedPageState === 'refused'
+    || recordDeleted
+    || pageRecordStatus === 'missing'
+    || pageRecordStatus === 'accessEnded'
+    || pageRecordStatus === 'forbidden'
+    || pageRecordStatus === 'failed'
+  );
+  const paneRecordTitle = recordTitle
+    || ((holdsRouteRecord || settledWithoutRecord) && recordCrumbName ? recordCrumbName : undefined);
+  useEffect(() => {
+    if (embedded && recordId) paneBar?.reportTitle(recordId, paneRecordTitle);
+  }, [embedded, paneBar, recordId, paneRecordTitle]);
 
   // objectstack#27058, Target 3 — the top bar on a phone: one link that
   // returns where the page came from. A top-level page reads
@@ -5331,12 +5399,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
-    // objectstack#36499 — 「Configure tabs」, the first of the host's entries
-    // in the `⋯`, for an administrator who may arrange this object's tabs
-    // (`useRecordTabsConfig`'s gate: never on a phone, a drawer or a pane).
+    // objectstack#36499 — 「Configure tabs」, the first item of the `⋯`
+    // (`leadsMenu`, ahead of Refresh), for an administrator who may arrange
+    // this object's tabs (`useRecordTabsConfig`'s gate: never on a phone, a
+    // drawer or a pane).
     if (tabsConfig.offered && !tabsConfig.active && !recordEditState) {
       items.push({
         name: RECORD_TABS_CONFIG_ACTION,
+        leadsMenu: true,
         label: t('designMode.recordTabs.entry', { defaultValue: 'Configure tabs' }),
         icon: 'panels-top-left',
         type: 'script',
@@ -5573,6 +5643,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     }
     return items;
   })();
+  // objectstack#36286 — the header's Edit, offered by the ⌘K palette on the
+  // record's own page (not a drawer or a pane over a list).
+  const paletteEdit = embedded
+    ? undefined
+    : (synthSystemActions.find((action) => action.name === 'sys_edit') as RecordHeaderEditEntry | undefined);
 
   // The synth path hands ONLY business actions (authored on objectDef and
   // routed to the record_header location, e.g. Lead.convert) to the page
@@ -5986,14 +6061,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // any (`DeclaredActionsBar`'s header face says which) and the record's own
   // row otherwise. Remind is the submitter's 「催办」 here, so it is not
   // excluded as it was from the band (the approvals panel keeps its own).
-  const recordHeaderState: RecordHeaderState = {
-    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
-      <>
-        {approvalTag}
-        {headerBarForRecord ? stateLockChip : null}
-      </>
-    ) : undefined,
-    group: approvalBarMounted
+  // The pending request's levers, when the viewer has any.
+  const approvalGroup = approvalBarMounted
       ? (parts: RecordHeaderGroupParts) => (
         <>
         <ApprovalGroupBeacon onHosted={setApprovalGroupHosts} />
@@ -6009,7 +6078,36 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         />
         </>
       )
-      : undefined,
+      : undefined;
+  // objectstack#36366 — under the design mode the group ends with
+  // 「Header buttons」 (the record row, or the approval's levers, unchanged),
+  // on a header that reads the pins: not on one authored with its own
+  // `actions` list, nor on one that draws none of the object's actions.
+  const headerTakesPins = headerReadsPins(assignedPage ?? assignedSlots);
+  const recordHeaderState: RecordHeaderState = {
+    tags: approvalTag || (headerBarForRecord ? stateLockChip : null) ? (
+      <>
+        {approvalTag}
+        {headerBarForRecord ? stateLockChip : null}
+      </>
+    ) : undefined,
+    group: designModeOn && objectDef
+      ? (parts: RecordHeaderGroupParts) => (
+        <>
+        {approvalGroup ? approvalGroup(parts) : parts.recordRow}
+        {parts.face === 'row' && headerTakesPins && (
+          <DesignModeHeaderPins
+            objectDef={objectDef as any}
+            page="record"
+            actions={placedHeaderActions<any>((objectDef as any).actions).map((a: any) => localizeActionTexts(objectDef.name, a))}
+          />
+        )}
+        </>
+      )
+      : approvalGroup,
+    // objectstack#36366 — the record scope arrangement the header draws, a staged one
+    // included, for a page that places the object's actions itself.
+    actionLayout: objectPins.record,
     // objectstack#35891 — the stage tag is the stage's menu: the default
     // page draws no stage bar, so the header is where the stage moves.
     stage: (parts) => <RecordStageMenu {...parts} />,
@@ -6137,6 +6235,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             defaultValue: 'This record has a pending approval request; editing is locked',
           })}
         >
+        <PublishRecordEditCommand edit={paletteEdit} />
         <RecordEditStateController
           active={recordEditState}
           onExit={exitRecordEditState}
@@ -6500,6 +6599,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             {commentsPageOpen && (
               <CommentsPage
                 threadId={commentsPageThread}
+                focusCommentId={commentsLinkComment}
                 onOpenThread={openCommentsPage}
                 onBack={leaveCommentsPage}
                 backLabel={recordCrumbName}
@@ -6510,6 +6610,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               <RecordCommentsAside
                 placement={commentsPlacement}
                 onClose={() => setCommentsOpen(false)}
+                focusThreadId={commentsLinkThread}
+                focusCommentId={commentsLinkComment}
                 onEngage={engageComments}
               />
             )}

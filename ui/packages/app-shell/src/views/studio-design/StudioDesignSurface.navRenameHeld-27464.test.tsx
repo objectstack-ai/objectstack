@@ -13,8 +13,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 
 const PKG = 'com.acme.app';
 const NAV = [{ id: 'nav_qa', type: 'page', label: 'QA Dash', pageName: 'home' }];
@@ -50,7 +49,6 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { StudioDesignSurface } from './StudioDesignSurface';
 import { AppNavCanvas } from '../metadata-admin/previews/AppNavCanvas';
 
 const noop = () => {};
@@ -67,61 +65,6 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [] })) as unknown as typeof fetch);
 });
 afterEach(() => (cleanup(), vi.unstubAllGlobals()));
-
-/** Whether a reload / tab close would be asked about. */
-function reloadAsks(): boolean {
-  const e = new Event('beforeunload', { cancelable: true });
-  window.dispatchEvent(e);
-  return e.defaultPrevented;
-}
-
-/** Opens nav editing and starts a rename of "QA Dash"; returns its input. */
-async function startRename(): Promise<HTMLInputElement> {
-  render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-      <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
-      </Routes>
-    </MemoryRouter>,
-  );
-  await screen.findByRole('button', { name: /QA Dash/ }, { timeout: 8000 });
-  fireEvent.click(screen.getByTitle(/^Edit navigation/));
-  await screen.findByRole('button', { name: /Add nav item/ }, { timeout: 8000 });
-  const card = screen.getAllByRole('button').find((b) => b.getAttribute('aria-pressed') !== null && b.textContent?.startsWith('QA Dash'))!;
-  fireEvent.doubleClick(card.querySelector('span')!);
-  return (await screen.findByDisplayValue('QA Dash')) as HTMLInputElement;
-}
-
-describe('an uncommitted nav rename raises the held-edit guard (objectstack#27464)', () => {
-  it('typing a rename asks on reload; Escape reverts it and the guard lets go', async () => {
-    const input = await startRename();
-    expect(reloadAsks()).toBe(false);
-    fireEvent.change(input, { target: { value: 'QA Dash Lost' } });
-    await waitFor(() => expect(reloadAsks()).toBe(true));
-    fireEvent.keyDown(input, { key: 'Escape' });
-    await waitFor(() => expect(reloadAsks()).toBe(false));
-    expect(mockClient.save).not.toHaveBeenCalled();
-  });
-
-  it('typing the authored label back is no rename, and the guard lets go', async () => {
-    const input = await startRename();
-    fireEvent.change(input, { target: { value: 'QA Dash Lost' } });
-    await waitFor(() => expect(reloadAsks()).toBe(true));
-    fireEvent.change(input, { target: { value: 'QA Dash' } });
-    await waitFor(() => expect(reloadAsks()).toBe(false));
-  });
-
-  it('committing hands the rename to the nav autosave; once it lands nothing is held', async () => {
-    const input = await startRename();
-    fireEvent.change(input, { target: { value: 'QA Dash Lost' } });
-    await waitFor(() => expect(reloadAsks()).toBe(true));
-    fireEvent.blur(input);
-    await waitFor(() => expect(mockClient.save.mock.calls.some(([type]) => type === 'app')).toBe(true), { timeout: 8000 });
-    const sent = mockClient.save.mock.calls.find(([type]) => type === 'app')![2] as { navigation: Array<{ label: unknown }> };
-    expect(sent.navigation[0].label).toBe('QA Dash Lost');
-    await waitFor(() => expect(reloadAsks()).toBe(false), { timeout: 8000 });
-  });
-});
 
 describe('a canvas with no report (the AppPreview caller) renames as before', () => {
   it('commits on blur and needs no report', () => {

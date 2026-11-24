@@ -58,6 +58,9 @@ import { createAuthDomain, handleAuthRequest } from './domains/auth.js';
 import { createApprovalsActDomain, APPROVALS_ACT_ROUTE } from './domains/approvals.js';
 import { createWebhooksRedeliverDomain } from './domains/webhooks.js';
 import { createCommentsDomain } from './domains/comments.js';
+import { createPersonalViewsDomain } from './domains/personal-views.js';
+import { createAttachmentsDomain } from './domains/attachments.js';
+import { createPrintDomain } from './domains/print.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
 import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest, type ActionResumeRequest } from './action-dispatch.js';
@@ -1019,6 +1022,17 @@ export class HttpDispatcher {
         // forwarded to the `comments` slot's `handleCommentDoor`, resolved per
         // request. See `./domains/comments.ts`.
         this.domainRegistry.register(createCommentsDomain(this.domainDeps));
+        // The personal-view delete door and the attachment removal and rename
+        // doors for a kernel with no `http.server` (#36506; ruling A on
+        // #22438): exactly their method and path shapes, forwarded to the
+        // REQUEST kernel's `personal-views` / `file-attachments` member, read
+        // per request. See `./domains/own-door-bridge.ts`.
+        this.domainRegistry.register(createPersonalViewsDomain(this.domainDeps));
+        this.domainRegistry.register(createAttachmentsDomain(this.domainDeps));
+        // The print door for a kernel with no `http.server` (#36840): exactly
+        // `POST /print/records`, forwarded to the REQUEST kernel's `print`
+        // service's `handlePrintDoor`. See `./domains/print.ts`.
+        this.domainRegistry.register(createPrintDomain(this.domainDeps));
         this.domainRegistry.register(createAiDomain(this.domainDeps));
         this.domainRegistry.register(createActionsDomain(this.domainDeps));
         for (const route of createMcpDomains(this.domainDeps)) this.domainRegistry.register(route);

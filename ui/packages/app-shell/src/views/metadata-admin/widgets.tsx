@@ -53,6 +53,7 @@ import { iconNames } from 'lucide-react/dynamic.mjs';
 import { toast } from 'sonner';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useMetadataLocale, t, tFormat } from './i18n.js';
+import { fieldHistoryChoiceOf, fieldHistoryOptions, fieldHistoryValueOf } from './fieldHistoryChoice.js';
 import { isKnownViewType, viewTypeLabel } from './viewTypeLabels.js';
 import type { FormFieldSpec, FormViewSpec, VisibilityPredicate } from './form-spec.js';
 import { usePredicateScope } from '@object-ui/react';
@@ -3558,8 +3559,6 @@ function DynamicConfigWidget({ value, onChange, readOnly, fieldSpec, formData, c
 /* field-history — follow the default / on / off for `fieldHistory` (#36482)  */
 /* -------------------------------------------------------------------------- */
 
-type FieldHistoryChoice = 'default' | 'on' | 'off';
-
 /**
  * The three-way control for a `fieldHistory` key — the object's
  * `enable.fieldHistory` and a field's own (#36290). The key has no default on
@@ -3578,31 +3577,35 @@ type FieldHistoryChoice = 'default' | 'on' | 'off';
  *  - On / Off — write `true` / `false`.
  *
  * A stored value that is not a boolean reads as Default, as the writer reads
- * it (only a literal `false` turns values off).
+ * it (only a literal `false` turns values off). The choices, what each writes
+ * and their wording are `fieldHistoryChoice.ts`'s, shared with the object
+ * field inspector's Field History row (#36290).
  */
 function FieldHistoryWidget({ value, onChange, readOnly, formData, id, ariaLabelledBy, required }: WidgetProps) {
   const locale = useMetadataLocale();
-  const choice: FieldHistoryChoice = value === true ? 'on' : value === false ? 'off' : 'default';
   const row = formData ?? {};
   const defaultOn = typeof row.type === 'string'
     ? resolveFieldHistory({ type: row.type, trackHistory: row.trackHistory }, undefined)
     : true;
-  const defaultLabel = tFormat('engine.form.fieldHistoryDefault', locale, {
-    state: t(defaultOn ? 'engine.form.fieldHistoryOn' : 'engine.form.fieldHistoryOff', locale),
-  });
   return (
     <Select
-      value={choice}
-      onValueChange={(next) => onChange(next === 'on' ? true : next === 'off' ? false : undefined)}
+      value={fieldHistoryChoiceOf(value)}
+      onValueChange={(next) => onChange(fieldHistoryValueOf(next))}
       disabled={readOnly}
     >
       <SelectTrigger {...controlNaming({ id, ariaLabelledBy, required })} data-testid="field-history-choice" className="h-8 text-sm">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="default" data-default-on={defaultOn ? 'true' : 'false'}>{defaultLabel}</SelectItem>
-        <SelectItem value="on">{t('engine.form.fieldHistoryOn', locale)}</SelectItem>
-        <SelectItem value="off">{t('engine.form.fieldHistoryOff', locale)}</SelectItem>
+        {fieldHistoryOptions(defaultOn, locale).map((o) => (
+          <SelectItem
+            key={o.value}
+            value={o.value}
+            data-default-on={o.value === 'default' ? (defaultOn ? 'true' : 'false') : undefined}
+          >
+            {o.label}
+          </SelectItem>
+        ))}
       </SelectContent>
     </Select>
   );

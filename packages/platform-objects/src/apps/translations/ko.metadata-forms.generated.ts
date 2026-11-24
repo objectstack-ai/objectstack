@@ -114,7 +114,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "접기",
-        helpText: "입력 양식과 레코드 상세 페이지에서 섹션을 접을 수 있는지 여부입니다. 설정하지 않으면 없음입니다."
+        helpText: "섹션을 접을 수 있는지 여부입니다. 입력 양식은 설정을 그대로 따릅니다. 기본 레코드 페이지에서는 읽는 사람이 제목이 있는 모든 그룹을 접을 수 있으므로, 거기서는 초기 상태만 정합니다. Collapsed는 접힌 상태로, 나머지는 펼친 상태로 시작합니다. 설정하지 않으면 없음입니다."
       },
       "fieldGroups.visibleWhen": {
         label: "표시 조건",
@@ -239,6 +239,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.deleteBehavior": {
         label: "삭제 동작",
         helpText: "참조된 레코드가 삭제될 때 일어나는 일"
+      },
+      "fields.transferBehavior": {
+        label: "소유자 변경 연동",
+        helpText: "참조된 레코드의 소유자를 변경할 때, 이 필드로 그 레코드를 가리키는 레코드도 함께 옮길 수 있는지 여부"
       },
       "fields.multiple": {
         label: "다중",
@@ -468,6 +472,18 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "소유자 변경",
         helpText: "소유자 변경 작업(단건 및 일괄): 켜면 제공하고 끄면 숨깁니다. 설정하지 않으면 켜짐이며, controlled_by_parent 상세 개체에서는 꺼짐입니다. 레코드에 재할당 가능한 소유자가 있는 개체(ownership이 user이거나 미설정, managedBy 없음, sys_ 개체 아님, owner_id가 읽기 전용 아님, 외부 개체에서는 owner_id가 선언되거나 매핑됨)에서만 제공됩니다. 다른 개체에서 켜면 거부됩니다. 작업만 제어하며 owner_id의 일반 편집에는 영향을 주지 않습니다. 저장된 {enabled, visibleWhen, disabledWhen} 개체는 키별로 편집됩니다. 레코드마다 작업을 제어하려면 소스에 작성하세요."
+      },
+      actionLayout: {
+        label: "작업 배치",
+        helpText: "이 객체 작업의 순서와 버튼으로 표시할 작업을 범위별로 지정합니다: pinned(버튼 최대 3개, 순서대로)와 more(「더 보기」 메뉴의 순서. 둘 다에 없는 작업은 기본 순서로 뒤에 이어집니다). 설정하지 않으면 각 화면이 이전처럼 작업의 order로 버튼을 고릅니다."
+      },
+      "actionLayout.list": {
+        label: "목록",
+        helpText: "목록 페이지 도구 모음, {\"pinned\": [...], \"more\": [...]} 형식: 목록 도구 모음에 배치된 작업 이름; $import / $export는 pinned에만 씁니다. 고정은 최대 3개. 고정하지 않아도 페이지는 자체 가져오기 / 내보내기 메뉴를 표시합니다. os validate는 이 객체의 작업이 아니거나 목록 도구 모음에 배치되지 않은 이름을 거부하며, 그런 이름은 아무것도 표시하지 않습니다."
+      },
+      "actionLayout.record": {
+        label: "레코드",
+        helpText: "레코드 헤더(레코드 페이지, 측면 미리보기, 휴대폰 하단 바), {\"pinned\": [...], \"more\": [...]} 형식: 레코드 헤더나 그 「더 보기」 메뉴에 배치된 작업 이름. 고정은 최대 3개. os validate는 이 객체의 작업이 아니거나 레코드 페이지에 배치되지 않은 이름을 거부하며, 그런 이름은 아무것도 표시하지 않습니다."
       },
       editMode: {
         label: "편집 모드",
@@ -756,6 +772,10 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "삭제 동작",
         helpText: "참조된 레코드가 삭제될 때 일어나는 일"
+      },
+      transferBehavior: {
+        label: "소유자 변경 연동",
+        helpText: "참조된 레코드의 소유자를 변경할 때, 이 필드로 그 레코드를 가리키는 레코드도 함께 옮길 수 있는지 여부"
       },
       relatedListFilter: {
         label: "관련 목록 필터",
@@ -1068,15 +1088,54 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "시드 데이터",
-    description: "게시할 때 적용되는 픽스처 / 초기화 데이터"
+    description: "게시할 때 적용되는 픽스처 / 초기화 데이터",
+    fields: {
+      object: {
+        label: "객체"
+      },
+      mode: {
+        label: "모드"
+      }
+    }
   },
   picklist: {
     label: "선택 목록",
-    description: "선택 필드가 이름으로 참조하는 공유 옵션 목록"
+    description: "선택 필드가 이름으로 참조하는 공유 옵션 목록",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      options: {
+        label: "옵션"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   mapping: {
     label: "가져오기 매핑",
-    description: "가져올 때 이름으로 참조하는 재사용 가능한 가져오기/내보내기 필드 매핑(이름 변경 + 변환)"
+    description: "가져올 때 이름으로 참조하는 재사용 가능한 가져오기/내보내기 필드 매핑(이름 변경 + 변환)",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      targetObject: {
+        label: "대상 객체"
+      },
+      mode: {
+        label: "모드"
+      },
+      sourceFormat: {
+        label: "원본 형식"
+      }
+    }
   },
   view: {
     label: "뷰",
@@ -1400,6 +1459,9 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "잠근 작업자",
         helpText: "뷰 구성을 잠근 사용자"
+      },
+      object: {
+        label: "객체"
       }
     }
   },
@@ -1606,30 +1668,30 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "이름",
-        helpText: "snake_case 고유 식별자"
+        helpText: "이 대시보드의 고유한 내부 이름입니다. 영문 소문자, 숫자, 밑줄을 사용하며 영문자로 시작합니다(예: sales_overview)."
       },
       label: {
         label: "레이블",
-        helpText: "표시 이름"
+        helpText: "사용자에게 보이는 대시보드 제목입니다."
       },
       description: {
         label: "설명"
       },
       columns: {
         label: "열",
-        helpText: "그리드 열 수(기본값 12)"
+        helpText: "위젯을 배치할 열 수로, 1부터 24까지입니다. 비워 두면 대시보드가 위젯 너비에 맞는 폭을 고릅니다."
       },
       gap: {
         label: "간격",
-        helpText: "위젯 사이의 간격으로, 0.25rem 단위입니다(4 = 1rem)"
+        helpText: "위젯 사이에 둘 간격입니다. 숫자가 클수록 더 넓게 벌어지며, 비워 두면 기본 간격을 사용합니다."
       },
       refreshIntervalSeconds: {
         label: "새로 고침 간격(초)",
-        helpText: "자동 새로 고침(초)"
+        helpText: "대시보드가 데이터를 다시 불러오는 주기(초)입니다. 비워 두거나 0을 입력하면 자동으로 다시 불러오지 않습니다."
       },
       header: {
         label: "헤더",
-        helpText: "대시보드 헤더 구성(제목, 부제목, 작업)"
+        helpText: "대시보드 상단에 표시할 내용으로, 제목, 설명, 작업 버튼입니다."
       },
       "header.showTitle": {
         label: "제목 표시",
@@ -1657,7 +1719,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "위젯",
-        helpText: "위치와 크기가 지정된 대시보드 위젯"
+        helpText: "이 대시보드의 차트, 숫자, 표와 각각의 위치입니다."
       },
       "widgets.id": {
         label: "위젯 ID"
@@ -1712,11 +1774,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "날짜 범위",
-        helpText: "기본 날짜 범위 선택기"
+        helpText: "대시보드를 열 때 적용되는 기간과 보는 사람이 직접 날짜를 고를 수 있는지 여부입니다."
       },
       globalFilters: {
         label: "전역 필터",
-        helpText: "모든 위젯에 적용되는 필터"
+        helpText: "보는 사람이 모든 위젯을 한 번에, 또는 지정한 위젯만 좁혀 볼 수 있는 필터입니다."
       },
       "globalFilters.name": {
         label: "이름"
@@ -2178,7 +2240,8 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "레이블"
       },
       description: {
-        label: "설명"
+        label: "설명",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "유형",
@@ -2260,9 +2323,33 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "날짜 범위",
         helpText: "기본 기간과 사용자 지정 범위 전환입니다. 차원은 데이터 세트의 날짜 차원이어야 하며, 데이터 세트에 날짜 차원이 정확히 하나이면 비워 두세요."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "내보내기 옵션",
         helpText: "다운로드 형식(csv, xlsx)과 파일 이름입니다. 다운로드할 수 있는 사람은 데이터 세트 객체의 내보내기 권한이 결정합니다."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2531,7 +2618,24 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "백그라운드 작업"
+    label: "백그라운드 작업",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      schedule: {
+        label: "일정"
+      },
+      enabled: {
+        label: "사용"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   datasource: {
     label: "데이터 소스"
@@ -2541,10 +2645,41 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API 엔드포인트",
-    description: "다른 시스템이 호출해 플로우를 실행하거나 앱의 레코드를 다루는 안정적인 HTTP URL"
+    description: "다른 시스템이 호출해 플로우를 실행하거나 앱의 레코드를 다루는 안정적인 HTTP URL",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      method: {
+        label: "메서드"
+      },
+      path: {
+        label: "경로"
+      },
+      type: {
+        label: "유형"
+      },
+      "objectParams.object": {
+        label: "객체"
+      },
+      "objectParams.operation": {
+        label: "작업"
+      }
+    }
   },
   translation: {
-    label: "번역"
+    label: "번역",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      locale: {
+        label: "로캘"
+      }
+    }
   },
   email_template: {
     label: "이메일 템플릿",
@@ -2621,11 +2756,45 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "문서",
-    description: "패키지가 제공하거나 직접 작성하는 Markdown 도움말 페이지"
+    description: "패키지가 제공하거나 직접 작성하는 Markdown 도움말 페이지",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      group: {
+        label: "그룹"
+      },
+      tags: {
+        label: "태그"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   book: {
     label: "문서 책",
-    description: "도움말 페이지를 순서 있는 섹션으로 묶는 목차"
+    description: "도움말 페이지를 순서 있는 섹션으로 묶는 목차",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      audience: {
+        label: "대상"
+      },
+      groups: {
+        label: "그룹"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   permission: {
     label: "권한 세트",
@@ -2729,15 +2898,66 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "공유 규칙",
-    description: "패키지가 레코드를 공유하기 위해 선언하는 규칙으로, 조직은 설정에서 자체 규칙을 작성합니다"
+    description: "패키지가 레코드를 공유하기 위해 선언하는 규칙으로, 조직은 설정에서 자체 규칙을 작성합니다",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      object: {
+        label: "객체"
+      },
+      sharedWith: {
+        label: "공유 대상"
+      },
+      accessLevel: {
+        label: "액세스 수준"
+      }
+    }
   },
   queue: {
     label: "대기열",
-    description: "구성원 중 한 명이 레코드를 맡을 때까지 레코드가 머무를 수 있는 이름 있는 사람 집합으로, 조직은 설정에서 자체 대기열의 인원을 구성합니다"
+    description: "구성원 중 한 명이 레코드를 맡을 때까지 레코드가 머무를 수 있는 이름 있는 사람 집합으로, 조직은 설정에서 자체 대기열의 인원을 구성합니다",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      members: {
+        label: "구성원"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   assignment_rule: {
     label: "배정 규칙",
-    description: "패키지가 새 레코드를 대기열이나 사람에게 보내기 위해 선언하는 규칙"
+    description: "패키지가 새 레코드를 대기열이나 사람에게 보내기 위해 선언하는 규칙",
+    fields: {
+      name: {
+        label: "이름"
+      },
+      label: {
+        label: "레이블"
+      },
+      object: {
+        label: "객체"
+      },
+      entries: {
+        label: "항목"
+      },
+      active: {
+        label: "활성"
+      },
+      description: {
+        label: "설명"
+      }
+    }
   },
   agent: {
     label: "AI 에이전트",
@@ -2819,6 +3039,9 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "보호 장치",
         helpText: "안전 규칙과 콘텐츠 정책"
+      },
+      "model.model": {
+        label: "모델"
       }
     }
   },

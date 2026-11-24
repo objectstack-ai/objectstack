@@ -20,6 +20,11 @@
  * objectstack#34725 — the copilot draws no title bar of its own (the slot's one
  * header row holds History, widen and Close); behind History it lays the
  * conversation list, Share and the usage reading over the chat.
+ *
+ * objectstack#36969 — the copilot is the build agent, so it is available only
+ * where the catalog serves `build` (alias-aware). Where in-app building is
+ * closed the catalog keeps `ask`: the copilot renders nothing and reports no
+ * copilot, so the slot shows the properties alone, as for an empty catalog.
  */
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -136,6 +141,31 @@ describe('StudioChatDock as the right slot\'s copilot (#2477 item 2, objectui#12
     const { container } = mountCopilot((s) => reports.push(s));
     expect(container).toBeEmptyDOMElement();
     expect(reports.at(-1)).toEqual({ available: false, planPendingCount: 0 });
+  });
+});
+
+describe('StudioChatDock is available only where the catalog serves build (objectstack#36969)', () => {
+  it.each([
+    ['in-app building closed: `ask` served, `build` not', [{ name: 'ask' }]],
+    ['another agent only', [{ name: 'custom_helper' }]],
+  ])('%s: renders nothing and reports no copilot', (_case, agents) => {
+    catalog.agents = agents;
+    const reports: StudioCopilotStatus[] = [];
+    const { container } = mountCopilot((s) => reports.push(s));
+    expect(container).toBeEmptyDOMElement();
+    expect(reports.at(-1)).toEqual({ available: false, planPendingCount: 0 });
+    expect(conversationArgs).toEqual([]);
+  });
+
+  it.each([
+    ['build', [{ name: 'build' }, { name: 'ask' }]],
+    ['its legacy id', [{ name: 'metadata_assistant' }, { name: 'data_chat' }]],
+  ])('regression: with %s served it reports itself available and opens the build thread', (_served, agents) => {
+    catalog.agents = agents;
+    const reports: StudioCopilotStatus[] = [];
+    mountCopilot((s) => reports.push(s));
+    expect(reports.at(-1)).toEqual({ available: true, planPendingCount: 0 });
+    expect(conversationArgs.at(-1)).toMatchObject({ scope: 'app:app.crm:build' });
   });
 });
 

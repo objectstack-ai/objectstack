@@ -11,14 +11,16 @@
 
 import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, SetupFirstPageSlotProvider, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
 import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest } from '@object-ui/permissions';
 import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import type { DataSource } from '@object-ui/types';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
+import { FirstRunChecklist } from './pages/settings/FirstRunChecklist';
 import { InAppFormRoute } from './components/InternalFormRoute';
 import { APPROVAL_ACTION_OBJECT, APPROVAL_REQUEST_OBJECT, routeApprovalRecordReads } from './services/approvalRequestsDataSource';
+import { studioLandingPath } from '@object-ui/app-shell';
 
 const AppManagementPage = lazy(() => import('./pages/system/AppManagementPage').then(m => ({ default: m.AppManagementPage })));
 const ProfilePage = lazy(() => import('./pages/system/ProfilePage').then(m => ({ default: m.ProfilePage })));
@@ -64,7 +66,7 @@ function ObjectRedirect() {
   // objectstack ADR-0146 D1 — straight to Studio's "All metadata" area, the
   // page Setup's `…/metadata/object` route opens there.
   const target = setupMetadataStudioPath(objectName ? `object/${objectName}` : 'object', location.search, location.hash);
-  return <Navigate to={target ?? '/studio'} replace />;
+  return <Navigate to={target ?? studioLandingPath()} replace />;
 }
 
 /**
@@ -174,7 +176,7 @@ function SystemObjectRedirect({ objectName }: { objectName: string }) {
 function SystemCatalogRedirect({ type }: { type: 'position' | 'permission' }) {
   // objectstack ADR-0146 D1 — the catalog is Studio's, in the "All metadata"
   // area's cross-package leg.
-  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? '/studio'} replace />;
+  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? studioLandingPath()} replace />;
 }
 
 /**
@@ -418,6 +420,17 @@ export function ConsolePermissionsRequest(): null {
 }
 
 /**
+ * objectstack#36732 (item 5, option A) — an administrator's first-run
+ * checklist at the top of the Setup app's first page, now that the desktop's
+ * home page retired. The checklist decides who sees it (a session that may
+ * write the settings it lists) and hides once the list is done; this route
+ * sits under `ConsolePermissionsScope`, which answers the first.
+ */
+function setupFirstPageChecklist() {
+  return <FirstRunChecklist placement="top" />;
+}
+
+/**
  * The console's ONE `/auth/me/permissions` source, shared by Home and every app
  * (objectui#12700).
  *
@@ -524,10 +537,12 @@ export function AppContent() {
     <>
       <LocalizationFetchProvider endpoint={localizationEndpoint}>
         <ApprovalRecordReads>
-          <DefaultAppContent
-            extraRoutes={appRoutes}
-            extraRoutesNoApp={systemRoutes}
-          />
+          <SetupFirstPageSlotProvider value={setupFirstPageChecklist}>
+            <DefaultAppContent
+              extraRoutes={appRoutes}
+              extraRoutesNoApp={systemRoutes}
+            />
+          </SetupFirstPageSlotProvider>
         </ApprovalRecordReads>
       </LocalizationFetchProvider>
     </>

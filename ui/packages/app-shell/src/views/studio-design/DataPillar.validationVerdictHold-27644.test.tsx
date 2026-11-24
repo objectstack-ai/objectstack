@@ -278,7 +278,7 @@ describe('a server error at a validation rule\'s path holds the Data pillar Save
     await screen.findByText(REFUSAL);
     editMessage('Amount is over the cap');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
     await waitFor(() => expect(screen.getByTestId('studio-held-message')).toHaveTextContent('Amount cap'), AUTOSAVE);
     await pressStudioSave();
     expect(server.sent).toHaveLength(0);

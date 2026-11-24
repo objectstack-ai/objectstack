@@ -28,13 +28,20 @@ const Avatar = React.forwardRef<
 ))
 Avatar.displayName = AvatarPrimitive.Root.displayName
 
+/**
+ * The picture is drawn with `object-cover` by default: it fills the circle,
+ * keeps its proportions and crops the overflow. Without it the browser's
+ * default `object-fit: fill` scales each axis on its own, so a non-square
+ * photo or logo is squashed into the circle (#36610). A caller that wants a
+ * logo-style fit passes `object-contain`, which `cn` lets win.
+ */
 const AvatarImage = React.forwardRef<
   React.ElementRef<typeof AvatarPrimitive.Image>,
   React.ComponentPropsWithoutRef<typeof AvatarPrimitive.Image>
 >(({ className, ...props }, ref) => (
   <AvatarPrimitive.Image
     ref={ref}
-    className={cn("aspect-square h-full w-full", className)}
+    className={cn("aspect-square h-full w-full object-cover", className)}
     {...props}
   />
 ))

@@ -3652,6 +3652,53 @@ export interface MetaListTranslationSources {
 }
 
 /**
+ * The `/meta/types` listing in the request's locale: each entry's type label
+ * and description, its `form` labels, its `list` headers and its JSON Schema
+ * titles, all through the `metadataForms.<type>` group of the bundle.
+ *
+ * The one translation both doors run (objectstack#36886): `RestServer`'s
+ * `GET /meta/types` and the runtime dispatcher's `GET /metadata/types`, so a
+ * reader gets the same words whichever door their host serves.
+ *
+ * No bundle or no locale answers the listing as it came; an entry is never
+ * rewritten in place.
+ */
+export async function translateMetaTypesListing(
+    sources: Pick<MetaListTranslationSources, 'resolveI18nService' | 'requestLocale' | 'reportTranslationFault'>,
+    payload: unknown,
+): Promise<unknown> {
+    const listing: any = payload;
+    if (!listing || typeof listing !== 'object' || !Array.isArray(listing.entries)) return payload;
+    const i18n = await sources.resolveI18nService();
+    const bundle = translationBundleOf(i18n, (warning) => sources.reportTranslationFault?.(warning));
+    if (!bundle) return payload;
+    const locale = sources.requestLocale(i18n);
+    if (!locale) return payload;
+    const {
+        resolveMetadataTypeLabel,
+        resolveMetadataTypeDescription,
+        resolveMetadataFormLabels,
+        resolveMetadataFormSchemaTitles,
+        resolveMetadataListLabels,
+    } = await import('@objectstack/spec/system');
+    const opts = metaTranslateOptions(i18n, locale);
+    const entries = listing.entries.map((entry: any) => {
+        if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') return entry;
+        const next: any = { ...entry };
+        next.label = resolveMetadataTypeLabel(bundle, entry.type, entry.label ?? entry.type, opts);
+        const desc = resolveMetadataTypeDescription(bundle, entry.type, entry.description, opts);
+        if (desc !== undefined) next.description = desc;
+        if (entry.form) next.form = resolveMetadataFormLabels(entry.form, entry.type, bundle, opts);
+        if (entry.list) next.list = resolveMetadataListLabels(entry.list, entry.type, bundle, opts);
+        if (entry.schema && typeof entry.schema === 'object') {
+            next.schema = resolveMetadataFormSchemaTitles(entry.schema, entry.type, bundle, opts);
+        }
+        return next;
+    });
+    return { ...listing, entries };
+}
+
+/**
  * [#20320] Translate a metadata LIST — a bare array or the
  * `{ type, items }` envelope, answered in the shape it came in — for the
  * request's locale. `metaType` is the canonical singular (the caller folds its
@@ -4467,6 +4514,45 @@ function withItems(raw: unknown, items: any[]): unknown {
     return Array.isArray(raw) ? items : { ...(raw as any), items };
 }
 
+/** How many items of each `name` a list holds. */
+function itemCountsByName(list: readonly unknown[] | null): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const it of list ?? []) {
+        const name = it && typeof it === 'object' ? (it as { name?: unknown }).name : undefined;
+        if (typeof name === 'string') counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts;
+}
+
+/**
+ * [#36894] The list envelope `visible` with its `changedAt` (when the stored
+ * row each listed item serves last changed, keyed by name) keyed only by the
+ * names of which it still lists every item the store's answer `stored` listed,
+ * and without it when none is left. Anything else is answered as it is.
+ *
+ * The per-caller gate and the query filters leave items out. An entry for a
+ * name no item of which is listed tells the caller a name, and when it
+ * changed, that the answer does not list. And the store's entry for a name
+ * two or more items share is the latest of all of them, so once one of them
+ * is left out it may be that item's time, served under a name whose listed
+ * items have none or an older one: that entry is dropped too, never
+ * recomputed (the per-item times never leave the store).
+ */
+function withChangedAtOfListedNames(stored: unknown, visible: unknown): unknown {
+    const list = listItemsOf(visible);
+    if (!list || Array.isArray(visible)) return visible;
+    const changedAt = (visible as { changedAt?: unknown }).changedAt;
+    if (changedAt === undefined) return visible;
+    const { changedAt: _held, ...rest } = visible as Record<string, unknown>;
+    if (!changedAt || typeof changedAt !== 'object' || Array.isArray(changedAt)) return rest;
+    const before = itemCountsByName(listItemsOf(stored));
+    const after = itemCountsByName(list);
+    const kept = Object.entries(changedAt as Record<string, unknown>)
+        .filter(([name]) => (after.get(name) ?? 0) > 0 && (after.get(name) ?? 0) >= (before.get(name) ?? 0));
+    if (kept.length === Object.keys(changedAt).length) return visible;
+    return kept.length === 0 ? rest : { ...rest, changedAt: Object.fromEntries(kept) };
+}
+
 /**
  * [#25333, ADR-0131 D3/D4] The `position` list's `?include=grants` step: each
  * listed position gains, as served decorations beside `_packageId` and the
@@ -4577,6 +4663,11 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     is left out.
  *  8. `position` — `?include=grants`: each position as the resolver enforces
  *     it for a holder ({@link describeMetaPositionList}).
+ *  8a. [#36894] The store's `changedAt` (`GetMetaItemsResponseSchema`) keeps
+ *     only the names of which every item the store listed is still listed
+ *     ({@link withChangedAtOfListedNames}): the gate and the filters above
+ *     leave items out, and the store's entry for a name is the latest of all
+ *     its items, so it may be the time of one left out.
  *  9. The translation step ({@link translateMetaList}, reached through
  *     {@link MetaListAnswerSources.translateList}).
  *
@@ -4724,6 +4815,9 @@ export function createMetaListAnswer(
                 if (described !== list) visible = withItems(visible, described);
             }
         }
+
+        // 8a. [#36894] `changedAt` keys only the names no step above left an item of out.
+        visible = withChangedAtOfListedNames(raw, visible);
 
         // 9. The translation step ({@link translateMetaList}, through the transport's entry).
         const data = await sources.translateList(metaType, visible);

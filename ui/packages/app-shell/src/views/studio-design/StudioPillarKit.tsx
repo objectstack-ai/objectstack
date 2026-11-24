@@ -20,7 +20,6 @@ import { t, tFormat } from '../metadata-admin/i18n.js';
 import { navItemLabelText } from '../metadata-admin/previews/navItemLabel.js';
 import type { EnsuredCustomizationPackage } from './packages-io.js';
 import type { PackageCustomizationsState } from './CustomizationMark.js';
-import { toast } from 'sonner';
 
 /**
  * objectui#11786 — tells the surface's Publish what edit a pillar holds unsent
@@ -260,36 +259,6 @@ export function useShowInputFocus(rootRef: React.RefObject<HTMLElement | null>):
 export interface StudioSavedDraft {
   type: string;
   name: string;
-}
-
-/**
- * objectstack#28984 — a landed draft AUTOSAVE says what it saved, by the
- * item's label, as Studio's other writes do (publish names what went live,
- * discard says "Draft discarded: LABEL"). The top bar's "Saved HH:MM" stays,
- * but it names nothing, and only feedback that names the item counts as write
- * feedback (ruling 6545938831 ② on #28345).
- *
- * The autosave lands after every editing pause, so the toast carries one
- * sonner id per item: a later save of the same item UPDATES the toast already
- * on screen instead of stacking another (the `PACKAGE_LIST_TOAST_ID` pattern
- * above). Typing a label is one live toast, not one per pause; another item
- * saved meanwhile gets its own. Called only once the save has landed: a
- * refused save keeps its refusal strip and says nothing about saving, and a
- * conflict the author settled by reloading saved nothing.
- *
- * objectstack#34818 — the flow pillar no longer calls it: a flow's landed
- * autosave says 已保存 in the flow's own title row, read aloud with the flow's
- * name, and only a failed save raises a toast there (seat ruling 6954475081).
- */
-export function announceDraftSaved(saved: StudioSavedDraft, label: string, locale: string): void {
-  toast.success(tFormat('engine.studio.draftSaved', locale, { item: label || saved.name }), {
-    id: draftSavedToastId(saved),
-  });
-}
-
-/** The one sonner id a draft save of this item announces under. */
-function draftSavedToastId(saved: StudioSavedDraft): string {
-  return `studio-draft-saved:${saved.type}:${saved.name}`;
 }
 
 /**

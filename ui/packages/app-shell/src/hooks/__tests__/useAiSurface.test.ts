@@ -26,7 +26,7 @@ describe('useAiSurfaceEnabled', () => {
   it('is enabled when the catalog serves at least one agent (cloud / agents present)', () => {
     mockAgents.mockReturnValue(agentsResult(['ask'], false));
     const { result } = renderHook(() => useAiSurfaceEnabled());
-    expect(result.current).toEqual({ enabled: true, isLoading: false });
+    expect(result.current).toEqual({ enabled: true, isLoading: false, buildServed: false });
   });
 
   it('reports loading on the first frame before the catalog fetch has started', () => {
@@ -34,13 +34,13 @@ describe('useAiSurfaceEnabled', () => {
     // yet", not "no agents", so the guard must keep waiting (not redirect).
     mockAgents.mockReturnValue(agentsResult([], false));
     const { result } = renderHook(() => useAiSurfaceEnabled());
-    expect(result.current).toEqual({ enabled: false, isLoading: true });
+    expect(result.current).toEqual({ enabled: false, isLoading: true, buildServed: false });
   });
 
   it('reports loading while the catalog fetch is in flight', () => {
     mockAgents.mockReturnValue(agentsResult([], true));
     const { result } = renderHook(() => useAiSurfaceEnabled());
-    expect(result.current).toEqual({ enabled: false, isLoading: true });
+    expect(result.current).toEqual({ enabled: false, isLoading: true, buildServed: false });
   });
 
   it('is disabled — not loading — once a fetch resolves empty (Community Edition: no agents)', () => {
@@ -53,6 +53,24 @@ describe('useAiSurfaceEnabled', () => {
 
     mockAgents.mockReturnValue(agentsResult([], false));
     rerender();
-    expect(result.current).toEqual({ enabled: false, isLoading: false });
+    expect(result.current).toEqual({ enabled: false, isLoading: false, buildServed: false });
+  });
+});
+
+describe('useAiSurfaceEnabled — buildServed reads the build agent itself (objectstack#36969)', () => {
+  it('in-app building closed (`ask` served, `build` not): AI is on, and building is not served', () => {
+    mockAgents.mockReturnValue(agentsResult(['ask'], false));
+    const { result } = renderHook(() => useAiSurfaceEnabled());
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.buildServed).toBe(false);
+  });
+
+  it.each([
+    ['build', ['build', 'ask']],
+    ['its legacy id', ['metadata_assistant']],
+  ])('%s in the catalog: building is served', (_served, names) => {
+    mockAgents.mockReturnValue(agentsResult(names, false));
+    const { result } = renderHook(() => useAiSurfaceEnabled());
+    expect(result.current).toEqual({ enabled: true, isLoading: false, buildServed: true });
   });
 });

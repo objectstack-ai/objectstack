@@ -10,7 +10,9 @@ import {
   canMoveBy,
   entryFor,
   groupsOf,
+  inShownOrder,
   insertEntry,
+  labelGoesToTranslation,
   menuTargets,
   moveBy,
   moveEntry,
@@ -19,10 +21,12 @@ import {
   placeOf,
   rebaseMenuEdits,
   removeEntry,
+  splitLabelEdits,
   storedEntriesById,
   targetKeyFor,
   targetKeyOf,
   withEntryIds,
+  withOrderRewritten,
   type Menu,
 } from '../designModeMenuModel';
 
@@ -221,5 +225,89 @@ describe('the edits replayed on the stored menu (objectstack#36363, review 70812
     expect(served[0].id).toBe('nav_item_1');
     expect(rebaseMenuEdits(served, removeEntry(served, 'nav_item_1'), stored)).toEqual([hidden]);
     expect(storedEntriesById(served, stored).get('nav_item_1')).toBe(lead);
+  });
+});
+
+describe('a level in the sidebar order, and that order written back as `order` (objectstack#36591)', () => {
+  const at = (id: string, order?: number, children?: Menu) => ({
+    id,
+    type: children ? 'group' : 'page',
+    ...(children ? { children } : { pageName: id }),
+    ...(order === undefined ? {} : { order }),
+  });
+  const orders = (menu: Menu): unknown[] =>
+    menu.map((e) => (Array.isArray(e.children) ? [e.order, orders(e.children as Menu)] : e.order));
+
+  it('each level is put in `order`, an absent one as 0, ties as authored; the group with its children', () => {
+    const menu: Menu = Object.freeze([at('c', 2), at('a'), at('g', 1, [at('y', 1), at('x', 0)]), at('b')]);
+    expect(ids(inShownOrder(menu))).toEqual(['a', 'b', ['g', ['x', 'y']], 'c']);
+  });
+
+  it('a menu with no `order` is the menu itself', () => {
+    expect(inShownOrder(MENU)).toBe(MENU);
+  });
+
+  it('a level carrying `order` is numbered 0… in array order, every entry of it, those without one included', () => {
+    const menu: Menu = Object.freeze([at('b', 5), at('a'), at('g', 9, [at('y', 1), at('x')])]);
+    const next = withOrderRewritten(menu);
+    expect(ids(next)).toEqual(['b', 'a', ['g', ['y', 'x']]]);
+    expect(orders(next)).toEqual([0, 1, [2, [0, 1]]]);
+    expect(ids(inShownOrder(next))).toEqual(ids(next));
+  });
+
+  it('a level carrying no `order` gains none, though its group, or a group in it, does', () => {
+    const menu: Menu = Object.freeze([at('a'), at('g', undefined, [at('y', 3), at('x')]), at('h', undefined, [at('z')])]);
+    const next = withOrderRewritten(menu);
+    expect(orders(next)).toEqual([undefined, [undefined, [0, 1]], [undefined, [undefined]]]);
+    expect(next[2]).toBe(menu[2]);
+    expect(withOrderRewritten(MENU)).toBe(MENU);
+  });
+});
+
+describe('the labels that are translations (objectstack#36504)', () => {
+  const ZH = { locale: 'zh-CN', source: false };
+  const EN = { locale: 'en', source: true };
+  const stored = { id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads' };
+  const servedZh = { ...stored, label: '线索' };
+
+  it('outside the source language every label is a translation; in it, only one typed over a translation', () => {
+    expect(labelGoesToTranslation(ZH, servedZh, stored)).toBe(true);
+    expect(labelGoesToTranslation(ZH, null, undefined)).toBe(true);
+    expect(labelGoesToTranslation(EN, stored, stored)).toBe(false);
+    expect(labelGoesToTranslation(EN, null, undefined)).toBe(false);
+    expect(labelGoesToTranslation(EN, { ...stored, label: 'Leads (bundle)' }, stored)).toBe(true);
+    // An entry inheriting its target's name (no stored label) is renamed in its stored label.
+    const { label: _l, ...bare } = stored;
+    expect(labelGoesToTranslation(EN, bare, bare)).toBe(false);
+  });
+
+  it('the split puts a translated label back as served, takes an added entry\'s off, and leaves other edits', () => {
+    const served: Menu = [servedZh, { id: 'sales', type: 'group', label: '销售', children: [] }];
+    let edited = patchEntry(served, 'leads', { label: '潜在客户', icon: 'user' });
+    edited = insertEntry(edited, 'sales', 0, { id: 'nav_item_1', type: 'url', label: '帮助', url: 'https://h' });
+    const split = splitLabelEdits(served, edited, storedEntriesById(served, [stored]), ZH);
+    expect([...split.labels]).toEqual([
+      ['leads', '潜在客户'],
+      ['nav_item_1', '帮助'],
+    ]);
+    expect(split.navigation).toEqual([
+      { ...servedZh, icon: 'user' },
+      { id: 'sales', type: 'group', label: '销售', children: [{ id: 'nav_item_1', type: 'url', url: 'https://h' }] },
+    ]);
+  });
+
+  it('in the source language the split takes nothing, and hands back the menu given', () => {
+    const edited = patchEntry([stored], 'leads', { label: 'Prospects' });
+    const split = splitLabelEdits([stored], edited, storedEntriesById([stored], [stored]), EN);
+    expect(split.labels.size).toBe(0);
+    expect(split.navigation).toBe(edited);
+  });
+
+  it('an added entry whose id the stored menu took is written under a fresh id, and `writtenAs` is told', () => {
+    const writtenAs = new Map<string, string>();
+    const storedNav: Menu = [stored, { id: 'nav_item_1', type: 'page', pageName: 'secret' }];
+    const out = rebaseMenuEdits([stored], [stored, { id: 'nav_item_1', type: 'url', url: 'https://h' }], storedNav, writtenAs);
+    expect(out.map((e) => e.id)).toEqual(['leads', 'nav_item_2', 'nav_item_1']);
+    expect([...writtenAs]).toEqual([['nav_item_1', 'nav_item_2']]);
   });
 });

@@ -122,8 +122,12 @@ function isEmptyValue(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
 }
 
-/** A related record as the query compares it: an expanded row collapses to its id. */
-function collapseReference(v: unknown): unknown {
+/**
+ * A related record as the query compares it: an expanded row collapses to its id.
+ * The one rule for every candidate filter that reads a value of the host record —
+ * a `{ $record }` comparand here and a `dependsOn` parent in `LookupField`.
+ */
+export function collapseReference(v: unknown): unknown {
   if (!isRow(v) || v instanceof Date) return v;
   return v.id ?? v._id ?? v;
 }

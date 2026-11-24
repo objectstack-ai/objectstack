@@ -700,6 +700,11 @@ const WRITE_SITES: Record<string, WriteSite> = {
   // own completion attaches it (the upload adapter's `attachTo`), so the
   // `attachmentUpload` row is read where the upload is offered and no
   // `create` is called. Its delete is still a data-source write.
+  // Studio's 「新建应用」 door (objectstack#36748): the dialog's `newApp` step
+  // writes the new package's app as METADATA (a draft, then its publish), not a
+  // record through a data source; the member is named `create` like one.
+  'packages/app-shell/src/views/metadata-admin/PackageFormDialog.tsx :: PackageFormDialog > submit :: create':
+    outOfFamily("Studio's new-app door writes the new package's app metadata (draft, then publish) through the metadata client, not a record the caller browses; the Studio surface it is offered on is the author's own"),
   'packages/app-shell/src/views/RecordAttachmentsPanel.tsx :: RecordAttachmentsPanel > handleDelete :: delete':
     mapped(['attachmentDelete'], 'packages/app-shell/src/views/RecordAttachmentsPanel.tsx'),
   'packages/app-shell/src/views/RecordDetailView.tsx :: RecordDetailView > apiHandler :: update':

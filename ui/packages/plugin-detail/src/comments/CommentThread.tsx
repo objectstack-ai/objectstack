@@ -85,6 +85,15 @@ export interface RecordCommentThreadProps {
    */
   heldId?: string | null;
   onHeldActions?: (actions: CommentItemActions) => void;
+  /**
+   * objectstack#36410 — a link opened this thread at one of its comments (a
+   * comment notification). `expand`: each new value opens the replies in
+   * place, in the same commit, so the host can scroll to a reply; the reader
+   * may collapse them again after.
+   */
+  openSignal?: string | null;
+  /** The comment, by id, the link names: marked (`CommentItem` `targeted`). */
+  targetId?: string | null;
   className?: string;
 }
 
@@ -148,11 +157,20 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
   itemInteraction,
   heldId,
   onHeldActions,
+  openSignal = null,
+  targetId = null,
   className,
 }) => {
   const { t } = useDetailTranslation();
   const { root, replies } = thread;
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(openSignal != null);
+  // A link that names this thread opens it (adjusted while rendering, so the
+  // replies are drawn in the commit the host scrolls in).
+  const [openedFor, setOpenedFor] = React.useState(openSignal);
+  if (openSignal !== openedFor) {
+    setOpenedFor(openSignal);
+    if (openSignal != null) setExpanded(true);
+  }
   // Bumped by each 「回复」: the reply box takes the caret, so a second press
   // on an open thread still lands it there.
   const [replyFocus, setReplyFocus] = React.useState(0);
@@ -250,6 +268,7 @@ export const CommentThread: React.FC<RecordCommentThreadProps> = ({
       onCancelEdit={() => setEditingId(null)}
       onToggleReaction={onToggleReaction ? (emoji) => void onToggleReaction(item.id, emoji) : undefined}
       footer={footer}
+      targeted={targetId != null && String(item.id) === targetId}
     />
     );
   };

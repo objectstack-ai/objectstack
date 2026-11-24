@@ -13,14 +13,15 @@
  *    studio namespace ships (`en`, `zh`; every other language falls back to
  *    `en`).
  *  - A setting's title carries no key name in parentheses; the key it writes
- *    is small print beside the title (`SettingKey`), whole-selectable, and
- *    OUTSIDE the control's label: selecting it neither opens a picker nor
- *    flips a switch, and the control is still named by its title.
+ *    stays off the panel at rest and is the title's hover text
+ *    (objectstack#36746, which superseded the small print beside the title),
+ *    carried OUTSIDE the control's label, so the control is still named by
+ *    its title alone.
  *  - Two parts: the business settings on top and "Developer options" last,
  *    expanded with no switch, holding the internal name, the access posture
  *    and the required permissions. Both parts are the ONE object inspector,
  *    mounted twice through its `split` prop; without `split` it is drawn whole,
- *    with no key small print, for every other host.
+ *    with no key hover text, for every other host.
  *
  * The real `ObjectDefaultInspector` is registered for the whole file, so every
  * case reads the tab as the console draws it.
@@ -63,7 +64,7 @@ function renderPanel(d: Record<string, unknown>, locale: 'en-US' | 'zh-CN' = 'en
   return onPatch;
 }
 
-/** Every key the tab writes, as its small print spells it. */
+/** Every key the tab writes, as its hover text spells it. */
 const SETTING_KEYS = [
   'label',
   'pluralLabel',
@@ -79,6 +80,7 @@ const SETTING_KEYS = [
   'highlightFields',
   'relatedLists',
   'enable.trackHistory',
+  'enable.fieldHistory',
   'enable.files',
   'enable.feeds',
   'enable.activities',
@@ -127,15 +129,22 @@ describe('ObjectSettingsPanel — business wording (objectstack#36512)', () => {
     expect(document.body.textContent).not.toMatch(/security-owd-unset/);
   });
 
-  it('draws each key as whole-selectable small print beside its title, outside the label', () => {
+  it('keeps each key off the panel at rest: it is its title\'s hover text, outside the label (objectstack#36746)', () => {
     renderPanel(draft);
-    for (const key of SETTING_KEYS) {
-      const chip = screen.getByTestId(`setting-key-${key}`);
-      expect(chip.textContent).toBe(key);
-      expect(chip.className).toMatch(/select-all/);
-      expect(chip.className).toMatch(/font-mono/);
-      expect(chip.closest('label')).toBeNull();
-    }
+    const hovers = Array.from(document.querySelectorAll<HTMLElement>('[data-setting-key]'));
+    const hovered = hovers.flatMap((el) => {
+      // The hover text is the key itself, and it wraps a title the author reads.
+      expect(el.title).toBe(el.dataset.settingKey);
+      expect(el.textContent?.trim()).not.toBe('');
+      expect(el.closest('label')).toBeNull();
+      return el.title.split(' · ');
+    });
+    expect([...hovered].sort()).toEqual([...SETTING_KEYS].sort());
+    // No key is drawn as text. Only the spellings no title could carry are
+    // read: a plain word such as `name` or `label` is also an English title.
+    const text = document.body.textContent ?? '';
+    for (const key of SETTING_KEYS.filter((k) => /[A-Z.]/.test(k))) expect(text).not.toContain(key);
+    expect(document.querySelector('code')).toBeNull();
   });
 
   it('names each picker and switch by its title alone, and the title carries no key', () => {
@@ -154,13 +163,11 @@ describe('ObjectSettingsPanel — business wording (objectstack#36512)', () => {
     expect(history).toBe(screen.getByTestId('cap-trackHistory'));
   });
 
-  it('selecting a key writes nothing: a click on a switch\'s key does not flip the switch', () => {
+  it('a switch\'s title, with its key on hover, still flips the switch', () => {
     const onPatch = renderPanel(draft);
-    fireEvent.click(screen.getByTestId('setting-key-enable.feeds'));
-    fireEvent.click(screen.getByTestId('setting-key-nameField'));
-    expect(onPatch).not.toHaveBeenCalled();
     expect((screen.getByTestId('cap-feeds') as HTMLInputElement).checked).toBe(true);
-    // The title still flips it, as the whole row did before.
+    const title = screen.getByText(t('engine.studio.settings.capFeeds', 'en-US'));
+    expect(title.closest('[data-setting-key]')?.getAttribute('title')).toBe('enable.feeds');
     fireEvent.click(screen.getByText(t('engine.studio.settings.capFeeds', 'en-US')));
     expect(onPatch).toHaveBeenCalledWith({ enable: { feeds: false } });
   });
@@ -218,14 +225,14 @@ describe('ObjectSettingsPanel — business settings first, developer options las
 });
 
 describe('ObjectDefaultInspector without split — every other host (objectstack#36512)', () => {
-  it('draws the whole panel, with no key small print', () => {
+  it('draws the whole panel, with no key hover text', () => {
     render(
       <ObjectDefaultInspector type="object" name="leave_request" draft={draft} onPatch={vi.fn()} readOnly={false} locale="en-US" />,
     );
     expect(screen.getByTestId('object-name-input')).toBeTruthy();
     expect(screen.getByTestId('object-access-posture')).toBeTruthy();
     expect(screen.getByLabelText(t('designer.object.label', 'en-US'))).toBeTruthy();
-    expect(document.querySelector('[data-testid^="setting-key-"]')).toBeNull();
+    expect(document.querySelector('[data-setting-key]')).toBeNull();
     expect(screen.queryByTestId('object-inspector-business')).toBeNull();
     expect(screen.queryByTestId('object-inspector-developer')).toBeNull();
   });

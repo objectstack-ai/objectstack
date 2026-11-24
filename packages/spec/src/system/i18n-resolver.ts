@@ -403,9 +403,17 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * layer shipped that rule name, and its `fields` also carry each field a
    * code extender ADDS under a name the owner does not declare, as that
    * extender ships it — the catalog rows for such a field can only translate
-   * what its extender ships. Its scalars and every field the owner declares
+   * what its extender ships, and, where the owner declares `relatedLists`,
+   * those `relatedLists` carry each entry a code extender's list placement
+   * (`place`) splices in, as the fold splices it, so a placed tab's `label`
+   * reads the catalog. Its scalars and every field the owner declares
    * stay the owner's: an extension's `fieldPatches` are never folded in, so a
-   * patched owner field still reads as diverged.
+   * patched owner field still reads as diverged. Whether a placement applies
+   * is judged on the OWNER here and on the served object's base layer (a
+   * tenant overlay's own `relatedLists`, else the owner's) by the fold: where
+   * only a tenant overlay declares `relatedLists`, the served placed tab has
+   * no packaged counterpart, so it reads as authored and the deployment
+   * catalog does not translate its `label`.
    *
    * Supplied by the serving layer, which is the only one that knows it; when
    * it is absent the translators behave exactly as they did before #8284 (the
@@ -6329,6 +6337,38 @@ export function resolveMetadataFormLabels<T extends Record<string, any>>(
 }
 
 /**
+ * Translate the column headers of a metadata type's Studio list layout (a
+ * `METADATA_LIST_REGISTRY` entry) against the active translation bundle.
+ *
+ * A column is translated through the slot of the type's form field of the
+ * same path, `metadataForms.<type>.fields.<field>.label`, so a column header
+ * and the form label of that key read the same words. A column whose slot has
+ * no translation keeps its English header.
+ *
+ * Returns a new list object; the input is not mutated.
+ *
+ * @example
+ * ```ts
+ * const localized = resolveMetadataListLabels(METADATA_LIST_REGISTRY.hook, 'hook', bundle, { locale: 'zh-CN' });
+ * ```
+ */
+export function resolveMetadataListLabels<T extends { columns?: ReadonlyArray<Record<string, any>> }>(
+  list: T,
+  type: string,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!list || typeof list !== 'object' || !Array.isArray(list.columns)) return list;
+  if (!lookupMetadataForm(bundle, type, opts)) return list;
+  const columns = list.columns.map((column) => {
+    if (!column || typeof column !== 'object' || typeof column.field !== 'string') return column;
+    const label = lookupMetadataFormField(bundle, type, column.field, 'label', opts);
+    return label ? { ...column, label } : column;
+  });
+  return { ...list, columns };
+}
+
+/**
  * Every `metadataForms.<type>.fields.<path>` key recorded at any locale of the
  * chain — the union, so a key one locale names and another does not is still
  * visited (the per-key lookup then walks the chain in order).
@@ -6794,6 +6834,50 @@ export function resolveFlowScreenTitle(
     return literal;
   }
   return lookupFlowScreenCopy(bundle, flowName, screen.nodeId, opts)?.title ?? literal;
+}
+
+/**
+ * [#35384] Resolve an approval step's label against
+ * `flows.<flow_name>.approvals.<node_id>.label` — the `approvals` group's one
+ * key, which overlays the `approval` node's own `FlowNode.label` (the step
+ * name an approval request snapshots as `current_step_label`) — falling back
+ * to `literal`, and to `undefined` when none is given: the same
+ * bundle-then-literal order {@link resolveFlowScreenTitle} follows, across the
+ * same locale chain ({@link ResolveOptions}: the requested locale, then the
+ * DECLARED fallback chain, unless the requested locale is the authored one).
+ *
+ * Takes the flow's name and the node's id, not a flow document, because its
+ * reader holds no document: an approval request row carries the flow's name
+ * (`process_name` without its `flow:` prefix) and the node's id
+ * (`current_step`), and a list read must not read a flow per row. A caller
+ * holding a document passes the node's authored `label` as `literal`.
+ *
+ * Every depth: the key is addressed by `FlowNode.id` alone, so an approval
+ * node inside an ADR-0031 region resolves like a top-level one.
+ *
+ * ⛔ Not folded into {@link translateFlow}: that translator leaves every
+ * node's `label` alone (the Studio canvas draws it), and its document readers
+ * hand it a name-and-label stub, so a node overlay there would reach no
+ * reader of this key.
+ */
+export function resolveFlowApprovalStepLabel(
+  bundle: TranslationBundle | undefined,
+  flowName: string,
+  nodeId: string,
+  literal?: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle || !flowName || typeof nodeId !== 'string' || nodeId.length === 0) return literal;
+  for (const code of localeChain(opts)) {
+    const entry = pickData(bundle, code)?.flows?.[flowName]?.approvals;
+    if (!entry || typeof entry !== 'object') continue;
+    // Own keys only: a node id that reads as `toString` must not resolve to
+    // the map's prototype member.
+    if (!Object.prototype.hasOwnProperty.call(entry, nodeId)) continue;
+    const candidate = (entry as Record<string, { label?: unknown } | undefined>)[nodeId]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return literal;
 }
 
 /**

@@ -114,7 +114,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "Recolher",
-        helpText: "Se a seção pode ser recolhida, no formulário de entrada e na página de detalhes do registro. Não definido: nenhuma."
+        helpText: "Se a seção pode ser recolhida. O formulário de entrada segue a configuração. Na página de registro padrão, o leitor pode recolher qualquer grupo com título, então ali ela define só o estado inicial: Collapsed começa recolhida e as demais, abertas. Não definido: nenhuma."
       },
       "fieldGroups.visibleWhen": {
         label: "Visível quando",
@@ -239,6 +239,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.deleteBehavior": {
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
+      },
+      "fields.transferBehavior": {
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
       },
       "fields.multiple": {
         label: "Múltiplo",
@@ -468,6 +472,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.transfer": {
         label: "Alterar proprietário",
         helpText: "A ação Alterar proprietário, individual e em massa: ativada, é oferecida; desativada, fica oculta. Não definida: ativada, exceto desativada em um objeto de detalhe controlled_by_parent. Oferecida apenas em um objeto cujos registros têm um proprietário reatribuível (ownership user ou não definido, sem managedBy, não é um objeto sys_, owner_id não é somente leitura e, em um objeto externo, está declarado ou mapeado); ativá-la em qualquer outro objeto é recusado. Controla apenas a ação, não uma edição simples de owner_id. Um objeto {enabled, visibleWhen, disabledWhen} armazenado é editado chave por chave; escreva um no código-fonte para condicionar a ação a cada registro."
+      },
+      actionLayout: {
+        label: "Disposição das ações",
+        helpText: "A ordem das ações deste objeto e quais são botões, por escopo: pinned (no máximo 3 botões, em ordem) e more (a ordem do menu Mais; uma ação não nomeada em nenhum dos dois segue na sua ordem padrão). Sem definir: cada superfície escolhe seus botões pela ordem das ações, como antes."
+      },
+      "actionLayout.list": {
+        label: "Lista",
+        helpText: "A barra de ferramentas da página de lista, como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas na barra da lista; $import / $export apenas em pinned. No máximo 3 fixadas. Sem fixar, a página ainda mostra seu próprio menu Importar / Exportar. O os validate recusa um nome que não é uma ação deste objeto ou que não está na barra da lista; esse nome não desenha nada."
+      },
+      "actionLayout.record": {
+        label: "Registro",
+        helpText: "O cabeçalho do registro (página do registro, pré-visualização lateral, barra inferior do celular), como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas no cabeçalho do registro ou no seu menu Mais. No máximo 3 fixadas. O os validate recusa um nome que não é uma ação deste objeto ou que não está na página do registro; esse nome não desenha nada."
       },
       editMode: {
         label: "Modo de edição",
@@ -756,6 +772,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
+      },
+      transferBehavior: {
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
       },
       relatedListFilter: {
         label: "Filtro da lista relacionada",
@@ -1068,15 +1088,54 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   seed: {
     label: "Dados iniciais",
-    description: "Dados de fixture / inicialização aplicados na publicação"
+    description: "Dados de fixture / inicialização aplicados na publicação",
+    fields: {
+      object: {
+        label: "Objeto"
+      },
+      mode: {
+        label: "Modo"
+      }
+    }
   },
   picklist: {
     label: "Lista de opções",
-    description: "Lista de opções compartilhada que os campos de seleção referenciam pelo nome"
+    description: "Lista de opções compartilhada que os campos de seleção referenciam pelo nome",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      options: {
+        label: "Opções"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   mapping: {
     label: "Mapeamento de importação",
-    description: "Mapeamento de campos reutilizável para importação/exportação (renomeação + transformações), referenciado pelo nome na importação"
+    description: "Mapeamento de campos reutilizável para importação/exportação (renomeação + transformações), referenciado pelo nome na importação",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      targetObject: {
+        label: "Objeto de destino"
+      },
+      mode: {
+        label: "Modo"
+      },
+      sourceFormat: {
+        label: "Formato de origem"
+      }
+    }
   },
   view: {
     label: "Visualização",
@@ -1400,6 +1459,9 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "sharing.lockedBy": {
         label: "Bloqueado por",
         helpText: "Usuário que bloqueou a configuração da visualização"
+      },
+      object: {
+        label: "Objeto"
       }
     }
   },
@@ -1606,30 +1668,30 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "Nome",
-        helpText: "Identificador único em snake_case"
+        helpText: "Nome interno único deste painel: letras minúsculas, números e sublinhados, começando com uma letra (por exemplo, sales_overview)."
       },
       label: {
         label: "Rótulo",
-        helpText: "Nome de exibição"
+        helpText: "O título que as pessoas veem para este painel."
       },
       description: {
         label: "Descrição"
       },
       columns: {
         label: "Colunas",
-        helpText: "Colunas da grade (padrão 12)"
+        helpText: "Em quantas colunas os widgets são organizados, de 1 a 24. Deixe vazio para o painel escolher uma largura que se ajuste aos seus widgets."
       },
       gap: {
         label: "Espaçamento",
-        helpText: "Espaço entre os widgets, em passos de 0.25rem (4 = 1rem)"
+        helpText: "Quanto espaço deixar entre os widgets. Números maiores os afastam mais; deixe vazio para o espaçamento padrão."
       },
       refreshIntervalSeconds: {
         label: "Intervalo de atualização (segundos)",
-        helpText: "Atualização automática (segundos)"
+        helpText: "Com que frequência o painel recarrega os dados, em segundos. Deixe vazio ou informe 0 para desligar a recarga automática."
       },
       header: {
         label: "Cabeçalho",
-        helpText: "Configuração do cabeçalho do painel (título, subtítulo, ações)"
+        helpText: "O que aparece no topo do painel: título, descrição e botões de ação."
       },
       "header.showTitle": {
         label: "Mostrar título",
@@ -1657,7 +1719,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "Widgets",
-        helpText: "Widgets do painel com posição e dimensionamento"
+        helpText: "Os gráficos, números e tabelas deste painel, e onde cada um fica."
       },
       "widgets.id": {
         label: "ID do widget"
@@ -1712,11 +1774,11 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "Intervalo de datas",
-        helpText: "Seletor de intervalo de datas padrão"
+        helpText: "O período com que o painel abre e se os usuários podem escolher as próprias datas."
       },
       globalFilters: {
         label: "Filtros globais",
-        helpText: "Filtros aplicados a todos os widgets"
+        helpText: "Filtros que os usuários podem usar para restringir todos os widgets de uma vez, ou só os que você escolher."
       },
       "globalFilters.name": {
         label: "Nome"
@@ -2178,7 +2240,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rótulo"
       },
       description: {
-        label: "Descrição"
+        label: "Descrição",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Tipo",
@@ -2260,9 +2323,33 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Intervalo de datas",
         helpText: "Período padrão e opção de intervalo personalizado. A dimensão deve ser uma dimensão de data do conjunto de dados; deixe-a em branco quando o conjunto de dados tiver exatamente uma."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Opções de exportação",
         helpText: "Formatos de download (csv, xlsx) e nome do arquivo. Quem pode baixar é definido pela permissão de exportação no objeto do conjunto de dados."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2531,7 +2618,24 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   job: {
-    label: "Tarefa em segundo plano"
+    label: "Tarefa em segundo plano",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      schedule: {
+        label: "Agendamento"
+      },
+      enabled: {
+        label: "Ativado"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   datasource: {
     label: "Fonte de dados"
@@ -2541,10 +2645,41 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "Endpoint de API",
-    description: "Uma URL HTTP estável que outros sistemas chamam para executar um fluxo ou trabalhar com registros no app"
+    description: "Uma URL HTTP estável que outros sistemas chamam para executar um fluxo ou trabalhar com registros no app",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      method: {
+        label: "Método"
+      },
+      path: {
+        label: "Caminho"
+      },
+      type: {
+        label: "Tipo"
+      },
+      "objectParams.object": {
+        label: "Objeto"
+      },
+      "objectParams.operation": {
+        label: "Operação"
+      }
+    }
   },
   translation: {
-    label: "Tradução"
+    label: "Tradução",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      locale: {
+        label: "Idioma"
+      }
+    }
   },
   email_template: {
     label: "Modelo de e-mail",
@@ -2621,11 +2756,45 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "Documentação",
-    description: "Uma página de ajuda escrita em Markdown que um pacote fornece ou que você mesmo escreve"
+    description: "Uma página de ajuda escrita em Markdown que um pacote fornece ou que você mesmo escreve",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      group: {
+        label: "Grupo"
+      },
+      tags: {
+        label: "Marcadores"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   book: {
     label: "Livro de documentação",
-    description: "Um sumário que agrupa páginas de ajuda em seções ordenadas"
+    description: "Um sumário que agrupa páginas de ajuda em seções ordenadas",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      audience: {
+        label: "Público"
+      },
+      groups: {
+        label: "Grupos"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   permission: {
     label: "Conjunto de permissões",
@@ -2729,15 +2898,66 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   sharing_rule: {
     label: "Regra de compartilhamento",
-    description: "Uma regra que um pacote declara para compartilhar registros; as organizações criam as suas na Configuração"
+    description: "Uma regra que um pacote declara para compartilhar registros; as organizações criam as suas na Configuração",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      object: {
+        label: "Objeto"
+      },
+      sharedWith: {
+        label: "Compartilhado com"
+      },
+      accessLevel: {
+        label: "Nível de acesso"
+      }
+    }
   },
   queue: {
     label: "Fila",
-    description: "Um conjunto nomeado de pessoas em que os registros podem ficar até que uma delas assuma o registro; as organizações montam as suas na Configuração"
+    description: "Um conjunto nomeado de pessoas em que os registros podem ficar até que uma delas assuma o registro; as organizações montam as suas na Configuração",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      members: {
+        label: "Membros"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   assignment_rule: {
     label: "Regra de atribuição",
-    description: "Uma regra que um pacote declara para encaminhar novos registros a uma fila ou a uma pessoa"
+    description: "Uma regra que um pacote declara para encaminhar novos registros a uma fila ou a uma pessoa",
+    fields: {
+      name: {
+        label: "Nome"
+      },
+      label: {
+        label: "Rótulo"
+      },
+      object: {
+        label: "Objeto"
+      },
+      entries: {
+        label: "Entradas"
+      },
+      active: {
+        label: "Ativo"
+      },
+      description: {
+        label: "Descrição"
+      }
+    }
   },
   agent: {
     label: "Agente de IA",
@@ -2819,6 +3039,9 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       guardrails: {
         label: "Salvaguardas",
         helpText: "Regras de segurança e políticas de conteúdo"
+      },
+      "model.model": {
+        label: "Modelo"
       }
     }
   },

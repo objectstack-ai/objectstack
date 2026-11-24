@@ -6,16 +6,25 @@
  * app; it replaced the Studio-home button, the package switcher and the
  * top-right Open app.
  *
+ * What it names is the CURRENT PACKAGE's app, never the app the author
+ * happened to come from (objectstack#36890 decision 5): Studio is the
+ * development surface of that package's app (ADR-0084, amended 2026-11-24).
  * Where it goes, first match wins ({@link studioBackTarget}):
  *
- *   1. the app page the author came from — an app → Studio entry is an in-app
+ *   1. the app page the author came from, when that page is one of the
+ *      package's own published apps — an app → Studio entry is an in-app
  *      navigation, and `ConsoleLayout` records every app page
- *      (`utils/appReturnPage.ts`); the name is that app's;
- *   2. opened directly (a Studio URL in a new tab, a reload), the package's
- *      own published app, on its first screen;
- *   3. a package with no published app, and the package-less scope: the
- *      console's default landing (`useHomePath`), with no app name. A draft
- *      app has no running front-end yet, so it counts as none.
+ *      (`utils/appReturnPage.ts`);
+ *   2. otherwise the package's own published app, on its first screen;
+ *   3. a package with no published app, the package-less scope (`~org`) and
+ *      the cross-package leg (`~all`): the console's apps home
+ *      (`useHomePath`), with no app name. A draft app has no running
+ *      front-end yet, so it counts as none.
+ *
+ * With no app to name, the name slot names the open package — or the scope —
+ * instead (objectstack#36748, and the maintainer's ruling on #36899: show the
+ * package's name, go back to the apps home), so the bar still says what the
+ * author is building.
  *
  * Leaving asks first when a pillar holds unsaved work, like every other
  * header departure (`beforeNavigate`).
@@ -61,17 +70,22 @@ export function studioBackTarget({
   locale: string;
   landingPath: string;
 }): StudioBackTarget {
-  if (remembered) return { path: remembered.path, appLabel: remembered.label || remembered.app };
   const [first] = apps;
-  if (packageId !== null && first) {
-    const segment = encodeURIComponent(apps.length > 1 ? first.name : packageId);
-    return { path: `/apps/${segment}`, appLabel: navItemLabelText(first.label, locale) || first.name };
-  }
-  return { path: landingPath, appLabel: null };
+  if (packageId === null || !first) return { path: landingPath, appLabel: null };
+  const labelOf = (app: StudioAppTarget) => navItemLabelText(app.label, locale) || app.name;
+  // The page the author came from, when it is one of this package's apps: its
+  // record names the app by its route key, the app's name or the package id.
+  const cameFrom = remembered
+    ? (apps.find((a) => a.name === remembered.app) ?? (remembered.app === packageId ? first : undefined))
+    : undefined;
+  if (remembered && cameFrom) return { path: remembered.path, appLabel: labelOf(cameFrom) };
+  const segment = encodeURIComponent(apps.length > 1 ? first.name : packageId);
+  return { path: `/apps/${segment}`, appLabel: labelOf(first) };
 }
 
 export function StudioBackToApp({
   packageId,
+  packageLabel,
   apps,
   locale,
   beforeNavigate,
@@ -79,6 +93,12 @@ export function StudioBackToApp({
 }: {
   /** The open package, or `null` in the package-less scope. */
   packageId: string | null;
+  /**
+   * The open package's display name, or in the package-less scope and the
+   * cross-package leg the scope's: the name slot shows it when there is no
+   * app to name (objectstack#36748). Absent while the package list loads.
+   */
+  packageLabel?: string | null;
   /** The package's published apps. */
   apps: readonly StudioAppTarget[];
   locale: string;
@@ -94,6 +114,10 @@ export function StudioBackToApp({
   const title = target.appLabel
     ? tFormat('engine.studio.backToAppTitle', locale, { app: target.appLabel })
     : t('engine.studio.backToAppTitleNoApp', locale);
+  // objectstack#36748 — no app to name: the slot names the open package, or
+  // the scope (the ruling on #36899 treats the package-less entry the same way).
+  const fallbackLabel = packageLabel?.trim() || null;
+  const name = target.appLabel ?? fallbackLabel;
 
   return (
     <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px]" data-testid="studio-back">
@@ -111,14 +135,20 @@ export function StudioBackToApp({
         <ChevronLeft className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         {t('engine.studio.backToApp', locale)}
       </button>
-      {target.appLabel && (
+      {name && (
         <>
           <span aria-hidden="true" className="shrink-0 text-muted-foreground">
             ·
           </span>
-          {/* The one piece that gives way on a narrow bar. */}
-          <span data-testid="studio-back-app-name" className="min-w-0 truncate font-semibold" title={target.appLabel}>
-            {target.appLabel}
+          {/* The one piece that gives way on a narrow bar. `data-names` says
+              whether it names the app or, with none, the package. */}
+          <span
+            data-testid="studio-back-app-name"
+            data-names={target.appLabel ? 'app' : 'package'}
+            className="min-w-0 truncate font-semibold"
+            title={name}
+          >
+            {name}
           </span>
         </>
       )}

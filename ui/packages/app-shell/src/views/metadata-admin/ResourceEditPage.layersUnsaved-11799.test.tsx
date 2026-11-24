@@ -13,6 +13,11 @@
  * Each asked `/layers` again and logged the same 404. Now the answer the page
  * already holds stands, so what the author sees is what the 404 gave before.
  *
+ * Since objectstack#36902 a Save publishes the item right after its draft
+ * save, so an edit's Save does make a layer: its refresh re-reads `/layers`
+ * once, and gets the new layer. The create's refresh and the discard's still
+ * ask nothing (the create's navigation re-opens the item, which reads it).
+ *
  * The REAL page over a REAL `MetadataClient`, whose transport is an in-memory
  * server answering as the framework does: 404 for `/layers` with no layer and
  * for `?state=draft` with no draft. Requests are counted on it. The `doc`
@@ -24,13 +29,15 @@
  * keeps that 404 for every caller by design (objectstack-ai/objectstack#22397,
  * answer (a)), so the page reads it as "never published": `MetadataClient.layered()`
  * resolves the 404 as an envelope with every layer null, and the lock banner,
- * the Layers sheet and the reset verdict show their no-published-version form,
+ * the layered comparison and the reset verdict show their no-published-version form,
  * with no error. Pinned in the second describe below, with two controls: a
  * published item still gets its layers, and a failed `/layers` read (a 5xx)
  * still shows the load error.
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic import of this module: its first load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -76,6 +83,13 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
       const row = server.active.get(key);
       if (row) body = { code: null, overlay: row, overlayScope: 'env', effective: row, editable: true, deletable: true, resettable: false, lock: 'none', ...server.layerExtras.get(key) };
       else [status, body] = [404, { error: { code: 'NOT_FOUND', message: 'absent' } }];
+    } else if (seg.length === 3 && seg[2] === 'publish' && method === 'POST') {
+      const row = server.drafts.get(key);
+      if (row) {
+        server.active.set(key, row);
+        server.drafts.delete(key);
+        body = { success: true, version: `sha256:${key}` };
+      } else [status, body] = [404, { error: { code: 'NO_DRAFT', message: 'absent' } }];
     } else if (seg.length === 3 && seg[2] === 'references') {
       body = [];
     } else if (seg.length === 2 && method === 'PUT') {
@@ -141,12 +155,10 @@ beforeEach(() => {
   server.requests = [];
   server.layerExtras.clear();
   server.failLayers.clear();
-  window.localStorage.setItem('metadata-admin:autosave', '0');
   Object.defineProperty(window, 'confirm', { configurable: true, writable: true, value: vi.fn(() => true) });
 });
 afterEach(() => {
   cleanup();
-  window.localStorage.removeItem('metadata-admin:autosave');
   // objectui#12496 — the page now reopens the sheet a `?tab=` in the window
   // URL names, and opening one writes it there; reset it so a sheet one test
   // opened does not open in the next test's mount.
@@ -179,7 +191,7 @@ function renderEdit(name: string) {
 
 const source = () => screen.findByRole('textbox', { name: 'Markdown source' }, { timeout: 8000 });
 const saveButton = () => screen.getByRole('button', { name: /Save \(⌘S\)/ });
-const discardButton = () => screen.getAllByRole('button', { name: 'Discard draft' })[0]!;
+const discardButton = () => screen.getByTestId('resource-draft-discard');
 
 /** Accept the page's in-app confirm (objectui#13333) once it opens. */
 async function acceptInAppConfirm() {
@@ -188,7 +200,7 @@ async function acceptInAppConfirm() {
 }
 
 describe('MetadataResourceEditPage — no /layers re-read for an item known to have no layer (objectui#11799)', () => {
-  it('SAVE of an item whose load found no layer: the refresh asks no /layers, and the editor shows the saved draft as before', async () => {
+  it('SAVE of an item whose load found no layer publishes it: the refresh re-reads its layers once and finds the new one (objectstack#36902)', async () => {
     server.drafts.set('doc/fresh_guide', doc('fresh_guide', '# Draft'));
     renderEdit('fresh_guide');
     expect(await source()).toHaveValue('# Draft');
@@ -201,10 +213,11 @@ describe('MetadataResourceEditPage — no /layers re-read for an item known to h
     await waitFor(() => expect(puts('fresh_guide')).toBe(1));
     await settle();
 
-    expect(layersAsked('fresh_guide')).toBe(1);
-    expect(server.drafts.get('doc/fresh_guide')).toMatchObject({ content: '# Draft, edited' });
+    expect(layersAsked('fresh_guide')).toBe(2);
+    expect(server.active.get('doc/fresh_guide')).toMatchObject({ content: '# Draft, edited' });
+    expect(server.drafts.has('doc/fresh_guide')).toBe(false);
     expect(await source()).toHaveValue('# Draft, edited');
-    expect(screen.getAllByRole('button', { name: 'Discard draft' }).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('resource-unpublished-changes')).toBeNull();
   });
 
   it('CONTROL: SAVE of a published item re-reads its layers exactly once, as before', async () => {
@@ -254,7 +267,7 @@ describe('MetadataResourceEditPage — no /layers re-read for an item known to h
     await settle();
     expect(puts('new_guide')).toBe(1);
     expect(layersAsked('new_guide')).toBe(0);
-    expect(server.drafts.get('doc/new_guide')).toMatchObject({ name: 'new_guide', content: '# New' });
+    expect(server.active.get('doc/new_guide')).toMatchObject({ name: 'new_guide', content: '# New' });
   });
 
   it('DISCARD of an item whose load found no layer: no /layers re-read, and the editor is left on nothing, as before', async () => {
@@ -271,7 +284,7 @@ describe('MetadataResourceEditPage — no /layers re-read for an item known to h
     await settle();
 
     expect(layersAsked('fresh_guide')).toBe(1);
-    expect(screen.queryAllByRole('button', { name: 'Discard draft' })).toHaveLength(0);
+    expect(screen.queryByTestId('resource-draft-discard')).toBeNull();
     expect(await source()).toHaveValue('');
   });
 
@@ -298,9 +311,14 @@ describe('MetadataResourceEditPage — no /layers re-read for an item known to h
 const layersStatuses = (name: string) =>
   server.requests.filter((r) => r.method === 'GET' && r.path === `/api/v1/meta/doc/${name}/layers`).map((r) => r.status);
 
-/** Opens the Layers sheet and returns the Overlay tab, whose badge names the overlay layer. */
+/**
+ * Opens the layered comparison — the Source tab's Layers view since the item
+ * tools became tabs (objectstack#36901) — and returns its Overlay tab, whose
+ * badge names the overlay layer.
+ */
 async function overlayTab() {
-  fireEvent.click(screen.getByTitle('Layers'));
+  fireEvent.click(screen.getByTestId('item-tab-source'));
+  fireEvent.click(await screen.findByTestId('item-tab-view-layers'));
   return screen.findByRole('tab', { name: /Overlay/ });
 }
 
@@ -314,10 +332,10 @@ describe('MetadataResourceEditPage — the LOAD reads a /layers 404 as "never pu
     expect(layersStatuses('fresh_guide')).toEqual([404]);
     expect(screen.queryByText(/Failed to load/)).toBeNull();
     // The draft is pending, and nothing says it is published, locked or resettable.
-    expect(screen.getByText(/Pending changes/)).toBeInTheDocument();
+    expect(screen.getByTestId('resource-unpublished-changes')).toBeInTheDocument();
     expect(screen.queryByTestId('lock-banner-title')).toBeNull();
     expect(screen.queryByTestId('reset-or-delete-button')).toBeNull();
-    // The Layers sheet: no overlay layer, and no code layer to diff against.
+    // The layered comparison: no overlay layer, and no code layer to diff against.
     expect(await overlayTab()).toHaveTextContent('none');
     expect(screen.getByText(/No code-level artifact to compare against/)).toBeInTheDocument();
   });
@@ -354,6 +372,6 @@ describe('MetadataResourceEditPage — the LOAD reads a /layers 404 as "never pu
 
     expect(await screen.findByText('Failed to load doc/fresh_guide: metadata store unavailable', undefined, { timeout: 8000 })).toBeInTheDocument();
     expect(layersStatuses('fresh_guide')).toEqual([500]);
-    expect(screen.queryByText(/Pending changes/)).toBeNull();
+    expect(screen.queryByTestId('resource-unpublished-changes')).toBeNull();
   });
 });

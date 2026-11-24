@@ -55,6 +55,7 @@ import {
   isAggregateCompatibleWithFieldType,
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
+  resolveFieldHistory,
   SelectOptionSchema,
   SINGLE_OPTION_TYPES,
   summaryFunctionReadsField,
@@ -114,7 +115,7 @@ import {
 } from '@object-ui/components';
 import { Plus, X, ArrowUp, ArrowDown, Copy, AlertTriangle, ChevronRight, MoreHorizontal, Trash2 } from 'lucide-react';
 import { InspectorComboField, type InspectorComboOption } from './InspectorComboField.js';
-import { ObjectPicker } from './ObjectPicker.js';
+import { ObjectPicker, useObjectCatalog } from './ObjectPicker.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
 import {
   readFields,
@@ -156,6 +157,7 @@ import {
   type FormulaReturnVerdict,
 } from '../celAuthoring.js';
 import { t, tFormat, type SupportedLocale } from '../i18n.js';
+import { fieldHistoryChoiceOf, fieldHistoryOptions, fieldHistoryValueOf } from '../fieldHistoryChoice.js';
 import { FilterConditionField } from './FilterConditionField.js';
 import type { FilterCondition } from './datasetFilterCondition.js';
 import { usePickerLoad, type LoadState } from '../loadState.js';
@@ -1554,6 +1556,15 @@ export function ObjectFieldInspector({
   // A stored field computed from its `expression` (a formula is computed by
   // its type, and keeps its own readings).
   const computedByExpression = type !== 'formula' && isExpressionComputedField(def);
+  // objectstack#36290 — what an unset `fieldHistory` resolves to for this
+  // field ON THIS OBJECT: the predicate the activity writer uses, asked with
+  // the field's own `fieldHistory` left out and the object document in hand.
+  const objectEnable = draft.enable && typeof draft.enable === 'object' ? (draft.enable as { fieldHistory?: unknown }) : undefined;
+  const objectFieldHistoryOff = objectEnable?.fieldHistory === false;
+  const fieldHistoryDefaultOn = resolveFieldHistory(
+    { type: def.type, trackHistory: def.trackHistory },
+    { managedBy: draft.managedBy, enable: objectEnable },
+  );
   // The siblings an expression may read: every field but this one (a field
   // computed from itself is circular), named as every other surface names it.
   const siblingFieldNames = view.entries.map((e) => e.name).filter((n) => n !== entry.name);
@@ -2004,12 +2015,6 @@ export function ObjectFieldInspector({
               onCommit={(v) => patchDef({ hidden: v || undefined })}
               disabled={locked}
             />
-            <InspectorCheckboxField
-              label={tr('designer.field.trackHistory')}
-              value={!!def.trackHistory}
-              onCommit={(v) => patchDef({ trackHistory: v || undefined })}
-              disabled={locked}
-            />
             {/* objectstack-ai/objectstack#36425 — whether a create asks for the
                 field. On is the default and is written as no key (removed, not
                 set to `undefined`); off writes `showOnCreate: false`. A required field is always asked for (the
@@ -2024,6 +2029,31 @@ export function ObjectFieldInspector({
           {def.required === true && (
             <p data-testid="field-show-on-create-required" className="text-[11px] leading-snug text-muted-foreground">
               {tr('designer.field.showOnCreateRequired')}
+            </p>
+          )}
+          {/* objectstack#36290 — whether a change to this field shows its
+              old → new values on the record activity: Default (removes the
+              key) / On / Off, the same three choices as the metadata form's
+              `field-history` widget (`fieldHistoryChoice.ts`). This rail holds
+              the whole object, so Default is resolved against it too: the
+              object's own off wins, and the row says so. There is no Track
+              history box beside it any more: a field's `trackHistory: false`
+              reads like absent, and `true` only does what On does for a media
+              or JSON field; a stored value is kept, never written here. */}
+          <InspectorSelectField
+            label={tr('designer.field.fieldHistory')}
+            value={fieldHistoryChoiceOf(def.fieldHistory)}
+            options={fieldHistoryOptions(fieldHistoryDefaultOn, locale)}
+            onCommit={(v) => {
+              const next = fieldHistoryValueOf(v);
+              if (next === undefined) unsetDefKey('fieldHistory');
+              else patchDef({ fieldHistory: next });
+            }}
+            disabled={locked}
+          />
+          {objectFieldHistoryOff && (
+            <p data-testid="field-history-object-off" className="text-[11px] leading-snug text-muted-foreground">
+              {tr('designer.field.fieldHistoryObjectOff')}
             </p>
           )}
         </DisplayPatchLock>
@@ -2800,6 +2830,18 @@ function readDependsOn(def: Record<string, unknown>): string[] {
  * dependent-lookup links to other fields on the same record (`dependsOn`).
  * Every field choice is picked from the referenced object's live schema.
  */
+/**
+ * The label an object is shown by in the author's sentences: its catalog
+ * label, else its name; `undefined` while no object is named. Reads the same
+ * catalog the object picker beside it reads, so the request is shared.
+ */
+function useObjectLabel(name: string | undefined): string | undefined {
+  const catalog = useObjectCatalog();
+  if (!name) return undefined;
+  const entry = catalog.status === 'loaded' ? catalog.data.find((e) => e.name === name) : undefined;
+  return entry?.label || name;
+}
+
 function LookupConfigFields({
   def,
   patchDef,
@@ -2816,6 +2858,7 @@ function LookupConfigFields({
   const tr = (key: string) => t(key, locale);
   const reference = typeof def.reference === 'string' ? (def.reference as string) : undefined;
   const { fields: targetFields, loading } = useObjectFields(reference);
+  const referenceLabel = useObjectLabel(reference);
 
   const fieldOptions: InspectorComboOption[] = React.useMemo(
     () => targetFields.filter((f) => !f.hidden).map((f) => ({ value: f.name, label: f.label, hint: f.type })),
@@ -2900,7 +2943,9 @@ function LookupConfigFields({
         </div>
         {filters.length === 0 ? (
           <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-center text-[11px] text-muted-foreground">
-            {tFormat('designer.field.lookup.noFilter', locale, { ref: reference || 'related' })}
+            {referenceLabel
+              ? tFormat('designer.field.lookup.noFilter', locale, { ref: referenceLabel })
+              : tr('designer.field.lookup.setTargetFirst')}
           </p>
         ) : (
           filters.map((f, i) => (
@@ -3134,6 +3179,7 @@ function RelatedListFields({
   // so a field group of the parent can still place it (objectstack#35889).
   const defaultMode = readRelatedListMode(undefined);
   const reference = typeof def.reference === 'string' && def.reference ? (def.reference as string) : '';
+  const referenceLabel = useObjectLabel(reference || undefined);
   const setMode = (next: RelatedListMode) => {
     if (next === mode) return;
     if (next === defaultMode) unsetDefKey('relatedList');
@@ -3176,13 +3222,12 @@ function RelatedListFields({
           </button>
         ))}
       </div>
-      <p className="text-[10px] text-muted-foreground">
-        {tFormat(
-          RELATED_LIST_MODES.find((r) => r.mode === mode)!.helpKey,
-          locale,
-          { ref: reference || tr('designer.field.relatedList.parentFallback') },
-        )}
-      </p>
+      {/* Says which record page the list lands on: nothing to say until a target is set. */}
+      {referenceLabel && (
+        <p className="text-[10px] text-muted-foreground" data-testid="field-related-list-help">
+          {tFormat(RELATED_LIST_MODES.find((r) => r.mode === mode)!.helpKey, locale, { ref: referenceLabel })}
+        </p>
+      )}
       {mode !== 'hidden' && (
         <FilterConditionField
           testId="field-related-list-filter"

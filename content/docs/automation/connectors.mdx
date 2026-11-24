@@ -556,7 +556,7 @@ shape on a provider-bound instance —
 // ✗ rejected at authoring/publish:
 //   "must not inline secrets via `authentication`; reference credentials
 //    with `auth: { type, credentialRef }` instead (ADR-0097 §3)."
-authentication: { type: 'bearer', token: 'sk_live_9f…' },
+authentication: { type: 'bearer', token: 'sk_live_FAKE…' },
 
 // ✓ a reference, resolved at materialization (unset, it degrades the instance):
 auth: { type: 'bearer', credentialRef: 'BILLING_API_TOKEN' },

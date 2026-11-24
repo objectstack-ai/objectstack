@@ -115,7 +115,7 @@ const SAME_SPELLING_ON_LIVE_FACES = new Set(['$in', '$ne', '$nin', '$gt', '$lte'
  * The text family the draft preview does not evaluate on any column: it refuses
  * it `INVALID_FILTER` / 400 as an unevaluable operator, ahead of this refusal.
  */
-const PREVIEW_UNEVALUATED = new Set(['$startsWith', '$endsWith', '$icontains', '$notContains']);
+const PREVIEW_UNEVALUATED = new Set(['$startsWith', '$endsWith', '$icontains']);
 /** …and the filters the draft preview names as the native face names them. */
 const SAME_SPELLING_ON_PREVIEW = new Set(
   [...SAME_SPELLING_ON_LIVE_FACES, '$eq', 'implicit equality'].filter((label) => !PREVIEW_UNEVALUATED.has(label)),
@@ -353,4 +353,51 @@ describe('[#36168] NativeSQLStrategy: refused on every named dialect, declined o
     await svc.query(query({ tags: { $in: ['a'] } }));
     expect({ raw, aggregates }).toEqual({ raw: 0, aggregates: 1 });
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('[#36264] svc.query and svc.generateSql refuse it too, on a named dialect', () => {
+  const CUBE = {
+    name: OBJECT,
+    sql: OBJECT,
+    measures: { cnt: { label: 'Count', type: 'count', sql: '*' } },
+    dimensions: { seen: { label: 'Seen', type: 'time', sql: 'seen' }, day: { label: 'Day', type: 'time', sql: 'day' } },
+    public: true,
+  } as unknown as Cube;
+  const SHAPES: Record<string, ValueShapeFieldDef> = {
+    tags: { type: 'select', multiple: true },
+    seen: { type: 'tags' },
+    day: { type: 'datetime' },
+  };
+  const svc = new AnalyticsService({
+    cubes: [CUBE],
+    logger: quiet,
+    sourceFieldMeta: (object: string, field: string) => (object === OBJECT ? SHAPES[field] : undefined),
+    sqlDialect: () => 'postgres',
+    hasObjectMiddleware: () => false,
+    queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+    executeRawSql: async () => [],
+  } as never);
+  const ask = (door: 'query' | 'generateSql', extra: Partial<AnalyticsQuery>) =>
+    svc[door]({ cube: OBJECT, measures: ['cnt'], ...extra } as AnalyticsQuery);
+
+  for (const door of ['query', 'generateSql'] as const) {
+    it(`${door}: \$in on a multiple: true field → 400 INVALID_FILTER; CONTROL: \$contains answers`, async () => {
+      const err = await refusalOf(ask(door, { where: { tags: { $in: ['a'] } } }));
+      expect(err.code, err.message).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      await expect(ask(door, { where: { tags: { $contains: 'a' } } })).resolves.toBeDefined();
+    });
+  }
+
+  for (const door of ['query', 'generateSql'] as const) {
+    it(`${door}: a timeDimensions dateRange on such a member → 400 INVALID_FILTER; CONTROL: on a scalar time column it answers`, async () => {
+      const window = (dimension: string): Partial<AnalyticsQuery> => ({ timeDimensions: [{ dimension, dateRange: ['2026-01-01', '2026-02-01'] }] });
+      const err = await refusalOf(ask(door, window('seen')));
+      expect(err.code, err.message).toBe('INVALID_FILTER');
+      expect(err.status).toBe(400);
+      await expect(ask(door, window('day'))).resolves.toBeDefined();
+    });
+  }
 });

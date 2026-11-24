@@ -1,9 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #23933 — the install-local plugin's "Installed Apps" entry opens Setup →
- * Packages filtered to Source = marketplace (ruling B on #23892, record
- * 6216295104), and the plugin no longer ships a page of its own.
+ * objectstack#36834 — the install-local plugin's "Installed Apps" entry
+ * (`nav_marketplace_installed`) is retired: Setup's own "Packages" entry
+ * (`nav_packages`, `@objectstack/platform-objects`) lists every installed
+ * package on the list's administration face, and the page's Source filter
+ * narrows it to marketplace installs (the maintainer's ruling 「合并，只留软件包」).
  *
  * ## What this file pins
  *
@@ -13,30 +15,21 @@
  * `navigationContributions` into the app they name — the merge
  * `GET /api/v1/meta/app/setup` serves:
  *
- *   - plugin present: Setup's `group_apps` carries `nav_marketplace_installed`,
- *     a `component` entry on `developer:packages` (the component Setup's own
- *     "Packages" entry opens) with `params: { source: 'marketplace' }`, label
- *     and icon unchanged; and no `marketplace_installed` page is served;
- *   - plugin absent: the same composition carries no such entry — the entry
- *     lives and dies with the capability (cloud ADR-0009).
+ *   - plugin present: the plugin still registers `MARKETPLACE_INSTALLED_UI_BUNDLE`
+ *     under its id, and Setup's `group_apps` carries no `nav_marketplace_installed`
+ *     and no entry onto `developer:packages` from this package; no
+ *     `marketplace_installed` page is served either (retired with #23933);
+ *   - plugin absent: the same composition carries neither;
+ *   - the bundle: still exported and importable, its id unchanged, with an
+ *     empty `navigationContributions` and no `pages` — hosted tenants import and
+ *     register it, so the export is the compatibility surface, not the entry.
  *
- * The page listing is read with a positive control: the Cloud Connection UI
- * bundle registered beside it serves its `cloud_connection_settings` page
- * through the same read, so "no `marketplace_installed`" is a reading of a
- * listing that does carry plugin pages, not of an empty one.
- *
- * ## The filter spelling is objectui's, copied — not derived here
- *
- * `source` and `marketplace` are the spelling objectui#12675 published, read at
- * the commit objectstack's `.objectui-sha` pins (`5e15928b4631`, which carries
- * that card's merge `9d857c998c` as an ancestor): `packageSource.ts` declares
- * `PACKAGES_SOURCE_PARAM = 'source'` and `PACKAGE_SOURCES = ['code',
- * 'marketplace', 'authored']`, and its Packages page refuses any other value by
- * name. The console's sidebar sends a `component` entry's `params` as the
- * query string (`NavigationRenderer`'s `resolveHref`), so this entry opens
- * `/apps/APP/component/developer/packages?source=marketplace`. A different
- * spelling here would open a refusal, not a filtered list — this pin is what
- * holds the two repositories' halves to one word.
+ * Every absence is read with a positive control: Browse Marketplace
+ * (`MARKETPLACE_BROWSE_UI_BUNDLE`, registered beside it) lands in the same
+ * `group_apps` through the same read, and the Cloud Connection UI bundle serves
+ * its `cloud_connection_settings` page through the same page listing, so "no
+ * entry" is a reading of a group that does carry plugin entries, not of an empty
+ * one.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -55,15 +48,9 @@ import { installerAuthService, withInstallerGrants } from './install-local-princ
 
 type Bag = Record<string, any>;
 
-/** The entry as objectui#12675 published it for a Setup nav item. */
-const FILTERED_PACKAGES_ENTRY = {
-    id: 'nav_marketplace_installed',
-    type: 'component',
-    label: 'Installed Apps',
-    componentRef: 'developer:packages',
-    params: { source: 'marketplace' },
-    icon: 'package-check',
-};
+/** The retired entry's id, and the component every package-list entry opens. */
+const RETIRED_ID = 'nav_marketplace_installed';
+const PACKAGES_REF = 'developer:packages';
 
 /**
  * A Setup shell with the group anchor the entry lands in, and the one the Cloud
@@ -137,6 +124,8 @@ async function compose(withPlugin: boolean) {
     manifest.register(structuredClone(CLOUD_CONNECTION_UI_BUNDLE));
     manifest.register(structuredClone(MARKETPLACE_BROWSE_UI_BUNDLE));
     const protocol = kernel.getService<any>('protocol');
+    /** The manifest ids the plugin itself registered through the `manifest` service. */
+    const registered: string[] = [];
 
     if (withPlugin) {
         const routes = new Map<string, unknown>();
@@ -147,7 +136,12 @@ async function compose(withPlugin: boolean) {
         };
         const hooks = new Map<string, () => Promise<void>>();
         const services: Record<string, unknown> = {
-            manifest,
+            manifest: {
+                register(m: { id?: string }) {
+                    registered.push(String(m?.id));
+                    manifest.register(m);
+                },
+            },
             protocol,
             metadata: kernel.getService('metadata'),
             auth: installerAuthService(),
@@ -170,7 +164,7 @@ async function compose(withPlugin: boolean) {
         await plugin.start(ctx as never);
         await hooks.get('kernel:ready')?.();
     }
-    return { protocol };
+    return { protocol, registered };
 }
 
 /** Setup's `group_apps` entries, as the metadata protocol serves the merged app. */
@@ -189,22 +183,19 @@ async function servedPageNames(protocol: any): Promise<string[]> {
     return items.map((it) => it?.name).filter((n): n is string => typeof n === 'string');
 }
 
-describe('#23933 — "Installed Apps" opens Setup → Packages filtered to Source = marketplace', () => {
-    it('plugin present: the served entry is the filtered Packages component, label and icon unchanged', async () => {
-        const { protocol } = await compose(true);
-        const entries = (await setupAppsGroup(protocol)).filter((i) => i?.id === 'nav_marketplace_installed');
-        expect(entries).toHaveLength(1);
-        const entry = entries[0]!;
-        expect({
-            id: entry.id,
-            type: entry.type,
-            label: entry.label,
-            componentRef: entry.componentRef,
-            params: entry.params,
-            icon: entry.icon,
-        }).toEqual(FILTERED_PACKAGES_ENTRY);
-        // The page target is gone from the entry, not carried beside the new one.
-        expect(entry.pageName).toBeUndefined();
+describe('#36834 — "Installed Apps" is retired; Setup → Packages lists what is installed', () => {
+    it('plugin present: the bundle is still registered, and Setup carries no Installed Apps entry', async () => {
+        const { protocol, registered } = await compose(true);
+        expect(registered).toContain(MARKETPLACE_INSTALLED_UI_BUNDLE.id);
+
+        const items = await setupAppsGroup(protocol);
+        const ids = items.map((i) => i?.id);
+        // Control: the read reaches the group's plugin-contributed entries.
+        expect(ids).toContain('nav_marketplace_browse');
+        expect(ids).not.toContain(RETIRED_ID);
+        // No marketplace-filtered (or any) package-list entry from this package:
+        // Setup's one door to the list is platform-objects' `nav_packages`.
+        expect(items.filter((i) => i?.componentRef === PACKAGES_REF)).toEqual([]);
     });
 
     it('plugin present: no `marketplace_installed` page is served (control: the Cloud Connection page is)', async () => {
@@ -215,18 +206,20 @@ describe('#23933 — "Installed Apps" opens Setup → Packages filtered to Sourc
     });
 
     it('plugin absent: the same composition carries no Installed Apps entry', async () => {
-        const { protocol } = await compose(false);
+        const { protocol, registered } = await compose(false);
+        expect(registered).toEqual([]);
         const ids = (await setupAppsGroup(protocol)).map((i) => i?.id);
-        expect(ids).not.toContain('nav_marketplace_installed');
+        expect(ids).not.toContain(RETIRED_ID);
         // Control: the read reaches the group's plugin-contributed entries.
         // (Browse Marketplace, not Cloud Connection: that entry sits in
         // `group_integrations` since ruling 甲 on #25097.)
         expect(ids).toContain('nav_marketplace_browse');
     });
 
-    it('the bundle ships the entry and no page', () => {
+    it('the bundle stays exported under its id, with no nav entry and no page', () => {
+        expect(MARKETPLACE_INSTALLED_UI_BUNDLE.id).toBe('com.objectstack.cloud-connection.marketplace-installed-ui');
         expect(Object.keys(MARKETPLACE_INSTALLED_UI_BUNDLE)).not.toContain('pages');
-        const items = MARKETPLACE_INSTALLED_UI_BUNDLE.navigationContributions.flatMap((c) => c.items);
-        expect(items).toEqual([FILTERED_PACKAGES_ENTRY]);
+        // An array, so a host that walks it keeps working; empty, so it lands nothing.
+        expect(MARKETPLACE_INSTALLED_UI_BUNDLE.navigationContributions).toEqual([]);
     });
 });

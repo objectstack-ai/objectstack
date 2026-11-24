@@ -70,6 +70,11 @@ export * from './approval-service.js';
 export * from './webhook-service.js';
 // [#36469] The comment doors' slot (`comments`), for the dispatcher's hosted door.
 export * from './comment-doors-service.js';
+// [#36506] The personal-view door's slot (`personal-views`) and the attachment
+// doors served off `file-attachments`, for the dispatcher's hosted doors.
+export * from './personal-view-doors-service.js';
+export * from './attachment-doors-service.js';
+export * from './print-door-service.js';
 export * from './package-service.js';
 export * from './knowledge-service.js';
 export * from './knowledge-adapter.js';

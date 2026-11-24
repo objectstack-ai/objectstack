@@ -40,7 +40,7 @@ export const zhCN: TranslationData = {
         group_overview: { label: '总览' },
         group_apps: { label: '应用' },
         nav_marketplace_browse: { label: '浏览应用市场' },
-        nav_marketplace_installed: { label: '已安装应用' },
+        nav_packages: { label: '软件包' },
         nav_cloud_connection: { label: '云连接' },
         group_people_org: { label: '人员与组织' },
         group_access_control: { label: '访问控制' },
@@ -103,6 +103,7 @@ export const zhCN: TranslationData = {
         nav_settings_knowledge: { label: '知识库' },
         nav_settings_lifecycle: { label: '数据生命周期' },
         nav_recycle_bin: { label: '回收站' },
+        nav_public_forms: { label: '对外表单' },
         nav_notification_preferences: { label: '通知偏好' },
         nav_notification_templates: { label: '通知模板' },
 

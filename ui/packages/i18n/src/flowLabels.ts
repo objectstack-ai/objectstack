@@ -24,18 +24,27 @@
  * answers nothing for it and the drawing keeps the authored label.
  *
  * The Studio flow designer and the docs viewer's `type: flow` embed
- * (`element:metadata_viewer`) both read them here, and the flow label goes
- * through the spec's `translateFlow`, the runner's resolution path, so no two
- * surfaces can disagree about what a flow or a step is called. An edge label
+ * (`element:metadata_viewer`) both read them here. The flow label goes
+ * through the spec's `translateFlow`, the runner's resolution path, and an
+ * approval step's label through the spec's `resolveFlowApprovalStepLabel`,
+ * the server's approval reader's resolution path, both with the same resolve
+ * options, so no two surfaces can disagree about what a flow or an approval
+ * step is called. An edge label
  * has no key and stays the authored text.
  *
  * Display only: nothing here rewrites the flow, so an editor keeps working on
  * the authored label.
  */
 
-import { translateFlow, type TranslationBundle } from '@objectstack/spec/system';
+import {
+  resolveBundleLocale,
+  resolveFlowApprovalStepLabel,
+  translateFlow,
+  type ResolveOptions,
+  type TranslationBundle,
+} from '@objectstack/spec/system';
 import { useObjectTranslation } from './provider.js';
-import { activeFlowsBundle } from './flowsBundle.js';
+import { activeFlowsBundle, flowsLocaleChain, flowsResolveOptions } from './flowsBundle.js';
 
 /** A flow's translated labels in one language. Every member answers `undefined` where the bundle carries nothing. */
 export interface FlowLabelTranslations {
@@ -61,34 +70,67 @@ export interface FlowLabelTranslations {
  * `undefined` when there is no bundle (nothing to translate with).
  *
  * The flow label goes through the spec's `translateFlow`, the runner's
- * resolution path; the step label is the spec-typed address of the node's
- * name (see the module note), read by node type.
+ * resolution path, and an approval step's label through the spec's
+ * `resolveFlowApprovalStepLabel`, the server's; both are asked with the same
+ * options: `{ locale: language }` plus the server's declared `fallbackChain`
+ * and `defaultLocale` (and the negotiated `locale`) when `declared` carries
+ * them ({@link flowsResolveOptions},
+ * objectstack#36809), so a label the active language lacks reads the declared
+ * fallback locale's text before the authored one, as on the server. Any other
+ * step label is the spec-typed address of the node's name (see the module
+ * note), read by node type out of the bundle rows the same locale walk visits
+ * ({@link flowsLocaleChain}, each tag matched by `resolveBundleLocale`).
  */
 export function flowLabelTranslations(
   bundle: TranslationBundle | undefined,
   flowName: string,
   language: string,
+  declared?: Pick<ResolveOptions, 'locale' | 'fallbackChain' | 'defaultLocale'>,
 ): FlowLabelTranslations | undefined {
   if (!bundle || !flowName) return undefined;
-  const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, { locale: language }).label;
-  const flow = bundle[language]?.flows?.[flowName];
+  // `declared.locale` is the language as the server negotiated it, when the
+  // loader recorded one (`flowsResolveOptions`); else `language` as it is.
+  const resolveOptions: ResolveOptions = { ...declared, locale: declared?.locale ?? language };
+  const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, resolveOptions).label;
+  // The `nodes` and `screens` reads walk the locales the resolvers above walk
+  // (`flowsLocaleChain`), each tag matched by the spec's one locale ladder
+  // (`resolveBundleLocale`): a `zh-cn` session reads a `zh-CN` row, and a key
+  // that row lacks reads the declared fallback locale's row.
+  const flows = flowsLocaleChain(resolveOptions)
+    .map((code) => resolveBundleLocale(bundle, code))
+    .map((locale) => (locale === undefined ? undefined : bundle[locale]?.flows?.[flowName]));
   const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
+  const first = <T,>(read: (flow: NonNullable<(typeof flows)[number]>) => T | undefined): T | undefined => {
+    for (const flow of flows) {
+      if (!flow) continue;
+      const value = read(flow);
+      if (value !== undefined) return value;
+    }
+    return undefined;
+  };
   return {
     flowLabel: text(flowLabel),
     stepLabel: (node) => {
       if (typeof node.id !== 'string' || !node.id) return undefined;
-      if (node.type === 'approval') return text(flow?.approvals?.[node.id]?.label);
+      if (node.type === 'approval') {
+        return text(resolveFlowApprovalStepLabel(bundle, flowName, node.id, undefined, resolveOptions));
+      }
       if (node.type === 'screen') {
         const config = node.config && typeof node.config === 'object' ? (node.config as { title?: unknown }) : {};
         if (config.title === undefined || config.title === null || config.title === '') {
-          const title = text(flow?.screens?.[node.id]?.title);
+          const id = node.id;
+          const title = first((flow) => text(flow.screens?.[id]?.title));
           return title?.includes('{{') ? undefined : title;
         }
       }
-      return text(flow?.nodes?.[node.id]?.label);
+      const id = node.id;
+      return first((flow) => text(flow.nodes?.[id]?.label));
     },
-    screenTitle: (node) =>
-      node.type === 'screen' && typeof node.id === 'string' && node.id ? text(flow?.screens?.[node.id]?.title) : undefined,
+    screenTitle: (node) => {
+      if (node.type !== 'screen' || typeof node.id !== 'string' || !node.id) return undefined;
+      const id = node.id;
+      return first((flow) => text(flow.screens?.[id]?.title));
+    },
   };
 }
 
@@ -99,5 +141,10 @@ export function flowLabelTranslations(
  */
 export function useFlowLabelTranslations(flowName: string): FlowLabelTranslations | undefined {
   const { i18n, language } = useObjectTranslation();
-  return flowLabelTranslations(activeFlowsBundle(i18n, language, flowName), flowName, language);
+  return flowLabelTranslations(
+    activeFlowsBundle(i18n, language, flowName),
+    flowName,
+    language,
+    flowsResolveOptions(i18n, language),
+  );
 }

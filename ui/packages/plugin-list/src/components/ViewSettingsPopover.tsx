@@ -214,7 +214,7 @@ export interface ViewSettingsKanban {
   showFieldLabels?: ViewSettingsToggle;
   /** Whether a card leaves out a field that holds nothing. */
   hideEmptyFields?: ViewSettingsToggle;
-  /** The statistic each lane shows at its foot: none, a count, or a number field's sum or average. */
+  /** The statistic each lane shows at its foot: none, a count, or a number field's sum, average, minimum or maximum. */
   summary?: {
     value: ViewSettingsKanbanSummaryValue | null;
     numberFields: ReadonlyArray<{ value: string; label: string }>;
@@ -695,12 +695,18 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
   };
   const kanbanFieldLabel = (name: string) =>
     kanban?.cardFieldCandidates.find((f) => f.name === name)?.label || fieldLabel(name);
+  // objectstack#36520 — every calculation the board's `kanban.summary` takes
+  // has a name here, so an authored `avg` / `min` / `max` reads as a word, not
+  // as its raw type.
+  const summaryWords: Record<string, string> = {
+    count: t('grid.summary.count', { defaultValue: 'Count' }),
+    sum: t('grid.summary.sum', { defaultValue: 'Sum' }),
+    avg: t('list.optionsMenu.kanbanSummaryAvg', { defaultValue: 'Average' }),
+    min: t('list.optionsMenu.kanbanSummaryMin', { defaultValue: 'Minimum' }),
+    max: t('list.optionsMenu.kanbanSummaryMax', { defaultValue: 'Maximum' }),
+  };
   const summaryWord = (type: string) =>
-    type === 'count'
-      ? t('grid.summary.count', { defaultValue: 'Count' })
-      : type === 'sum'
-        ? t('grid.summary.sum', { defaultValue: 'Sum' })
-        : type;
+    Object.prototype.hasOwnProperty.call(summaryWords, type) ? summaryWords[type] : type;
   const summaryText = (value: ViewSettingsKanbanSummaryValue | null): string => {
     if (!value || value.type === 'none') return none;
     if (!value.field || value.type === 'count') return summaryWord(value.type);
@@ -1004,13 +1010,16 @@ export function ViewSettingsContent(props: ViewSettingsPopoverProps & { closeMen
     const options: Array<{ value: string; label: string; pick: ViewSettingsKanbanSummaryValue | null }> = [
       { value: 'none', label: none, pick: null },
       { value: 'count', label: summaryWord('count'), pick: { type: 'count' } },
-      // objectstack#36370 — what the board computes (`KanbanLaneSummarySchema`):
-      // a count, or a number field's sum.
-      ...summary.numberFields.map((f) => ({
-        value: `sum:${f.value}`,
-        label: `${summaryWord('sum')} · ${f.label}`,
-        pick: { type: 'sum', field: f.value },
-      })),
+      // objectstack#36370, objectstack#36520 — what the board computes
+      // (`KanbanLaneSummarySchema`): a count, or a number field's sum, average,
+      // minimum or maximum, over the same number fields.
+      ...(['sum', 'avg', 'min', 'max'] as const).flatMap((type) =>
+        summary.numberFields.map((f) => ({
+          value: `${type}:${f.value}`,
+          label: `${summaryWord(type)} · ${f.label}`,
+          pick: { type, field: f.value },
+        })),
+      ),
     ];
     const current = !summary.value || summary.value.type === 'none'
       ? 'none'

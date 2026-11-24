@@ -10,11 +10,19 @@
  * Studio, start from a template, the marketplace).
  *
  * objectstack#36485 — and the door into the design mode (`designMode.tsx`,
- * objectstack#36362): 「Edit app」 under the list, in one group with
- * 「Add app」, for the viewers the page header's 「Edit app」 was drawn for
- * (the header draws none any more). The sidebar's head is drawn from 768 px
- * up only, docked or floated over the content while the sidebar is
- * collapsed, so a phone gets no way in, as before.
+ * objectstack#36362), under the list, in one group with 「Add app」, for the
+ * viewers the page header's door was drawn for (the header draws none any
+ * more). The sidebar's head is drawn from 768 px up only, docked or floated
+ * over the content while the sidebar is collapsed, so a phone gets no way in,
+ * as before.
+ *
+ * objectstack#36758 — the design mode edits the app's layout only (its menu,
+ * header pins and page arrangement), so its door reads 「Design layout」, the
+ * word its bar shows. 「Edit app」 beside it opens this app's package in
+ * Studio: the app switcher's Studio row, on its target and posture
+ * (`useAppStudioEntry`), so the two cannot disagree. An installed
+ * (read-only) package's app reads 「View in Studio」 there, behind an eye.
+ * Each row keeps its own gate.
  *
  * The list is `useLauncherApps`', the list Home's tiles and the phone's app
  * sheet draw, so every place offers the same apps. The phone keeps
@@ -35,77 +43,28 @@ import {
   DropdownMenuTrigger,
   Input,
 } from '@object-ui/components';
-import { Blocks, Check, ChevronDown, Hammer, LayoutGrid, Plus, Store } from 'lucide-react';
+import { Check, ChevronDown, Eye, Pencil, PencilRuler, Plus } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
+import { useAuth } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment } from '../utils/index.js';
 import { appAddressSegment, appStudioDesignPath } from '../utils/appRoute.js';
 import { useServedAppLabel } from '../hooks/useServedAppLabel.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
-import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
-import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
-import { isAiStudioEnabled, isMarketplaceEnabled } from '../runtime-config.js';
-import { STUDIO_NEW_PACKAGE_PATH } from '../views/studio-design/studioNewPackage.js';
+import { useAddAppEntries, useMayAddApp } from '../hooks/useAddAppEntries.js';
 import { AppMark } from './AppMark.js';
 import { useDesignMode } from './designMode.js';
+import { useAppStudioEntry } from './ShellPageActions.js';
+import type { StudioEntry } from '../hooks/useStudioDesignGate.js';
 import { postureHasOrgWall, useTenancyPosture } from '../hooks/useTenancyPosture.js';
 
 /** The app count above which the menu draws a search field over the list. */
 export const APP_MENU_SEARCH_FROM = 8;
 
-/** The marketplace, where templates and packages are installed from. */
-const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
-
-/** One 「Add app」 choice: where it goes, and how it is named. */
-interface AddAppEntry {
-  key: string;
-  to: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
 /**
- * Whether this viewer is offered 「Add app」 at all, by the gates Home's
- * builder chips read: a workspace admin who may author metadata, on a
- * deployment that offers AI authoring or mounts a marketplace.
- */
-function useMayAddApp(): boolean {
-  const { isAdmin } = useWorkspaceAdminStatus();
-  const canAuthor = useCanAuthorMetadata();
-  return isAdmin && canAuthor && (isAiStudioEnabled() || isMarketplaceEnabled());
-}
-
-/**
- * The 「Add app」 choices: building with AI where the deployment offers AI
- * authoring and serves an agent, else a new package in Studio; templates and
- * the marketplace where a marketplace is mounted. Read only for a viewer
- * {@link useMayAddApp} lets in, so no one else pays the agent-catalog read.
- */
-function useAddAppEntries(): AddAppEntry[] {
-  const { t } = useObjectTranslation();
-  const { enabled: aiEnabled } = useAiSurfaceEnabled();
-  const entries: AddAppEntry[] = [];
-  if (isAiStudioEnabled()) {
-    entries.push(
-      aiEnabled
-        ? { key: 'build-with-ai', to: '/studio', label: t('home.buildWithAI', { defaultValue: 'Build with AI' }), icon: Hammer }
-        : { key: 'new-in-studio', to: STUDIO_NEW_PACKAGE_PATH, label: t('home.build.inStudio', { defaultValue: 'New in Studio' }), icon: Hammer },
-    );
-  }
-  if (isMarketplaceEnabled()) {
-    entries.push(
-      { key: 'template', to: MARKETPLACE_PATH, label: t('home.template.title', { defaultValue: 'Start with a template' }), icon: LayoutGrid },
-      { key: 'marketplace', to: MARKETPLACE_PATH, label: t('layout.systemNav.appMarketplace', { defaultValue: 'App Marketplace' }), icon: Store },
-    );
-  }
-  return entries;
-}
-
-/**
- * What 「Edit app」 does for this viewer, or `null` where it is not drawn: it
- * turns the shell's design mode on for the app on screen, in place.
+ * What 「Design layout」 does for this viewer, or `null` where it is not
+ * drawn: it turns the shell's design mode on for the app on screen, in place.
  *
  * Drawn on the page header's button's condition, unchanged: a workspace admin
  * holding `manage_metadata`, on an app whose package Studio lists
@@ -115,6 +74,11 @@ function useAddAppEntries(): AddAppEntry[] {
  * (objectstack#36363: its changes are saved as this environment's
  * customization), except where the customization door is walled off for this
  * caller. Not drawn where no shell holds the mode, nor while the mode is on.
+ *
+ * objectstack#36692 — while a dashboard's or a report's own editor is open
+ * it stays drawn, and choosing it refuses, saying to save or cancel those
+ * changes first: the mode's `enter` refuses while an editor holds it out
+ * (`useHoldDesignModeOut`), so the screen never shows two Save/Cancel sets.
  */
 function useEnterDesignMode(apps: Parameters<typeof matchAppBySegment>[0], activeAppName: string): (() => void) | null {
   const entry = useStudioEntryGate(appStudioDesignPath(matchAppBySegment(apps, activeAppName), true));
@@ -127,15 +91,39 @@ function useEnterDesignMode(apps: Parameters<typeof matchAppBySegment>[0], activ
   return designMode.enter;
 }
 
-/** 「Edit app」: the door into the design mode. */
-function EditAppItem({ onEnter }: { onEnter: () => void }) {
+/** 「Design layout」: the door into the design mode, named as its bar is. */
+function DesignLayoutItem({ onEnter }: { onEnter: () => void }) {
   const { t } = useObjectTranslation();
   return (
-    <DropdownMenuItem onSelect={onEnter} className="flex items-center gap-2.5 py-2" data-testid="sidebar-app-menu-edit-app">
+    <DropdownMenuItem onSelect={onEnter} className="flex items-center gap-2.5 py-2" data-testid="sidebar-app-menu-design-layout">
       <span className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
-        <Blocks className="size-4" />
+        <PencilRuler className="size-4" />
       </span>
-      <span className="flex-1 truncate">{t('topbar.editApp', { defaultValue: 'Edit app' })}</span>
+      <span className="flex-1 truncate">{t('topbar.designLayout', { defaultValue: 'Design layout' })}</span>
+    </DropdownMenuItem>
+  );
+}
+
+/**
+ * 「Edit app」: this app's package in Studio, where the app is built. An
+ * installed (read-only) package opens in Studio's browse-only posture, so its
+ * row reads 「View in Studio」 behind an eye, never a pencil.
+ */
+function StudioAppItem({ entry }: { entry: StudioEntry }) {
+  const { t } = useObjectTranslation();
+  const view = entry.posture === 'view';
+  return (
+    <DropdownMenuItem asChild className="flex items-center gap-2.5 py-2">
+      <Link to={entry.path} data-testid={view ? 'sidebar-app-menu-view-in-studio' : 'sidebar-app-menu-edit-app'}>
+        <span className="flex size-[22px] shrink-0 items-center justify-center text-muted-foreground" aria-hidden>
+          {view ? <Eye className="size-4" /> : <Pencil className="size-4" />}
+        </span>
+        <span className="flex-1 truncate">
+          {view
+            ? t('topbar.viewInStudio', { defaultValue: 'View in Studio' })
+            : t('topbar.editApp', { defaultValue: 'Edit app' })}
+        </span>
+      </Link>
     </DropdownMenuItem>
   );
 }
@@ -182,6 +170,7 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
   const { apps: launcherApps } = useLauncherApps(apps);
   const mayAddApp = useMayAddApp();
   const enterDesignMode = useEnterDesignMode(apps, activeAppName);
+  const studioEntry = useAppStudioEntry(true, activeAppName).entry;
   const [query, setQuery] = React.useState('');
 
   // The route may name an app the launcher does not offer (a direct URL to an
@@ -250,8 +239,9 @@ export function SidebarAppMenu({ activeAppName, onAppChange }: SidebarAppMenuPro
             </div>
           )}
         </div>
-        {(enterDesignMode || mayAddApp) && <DropdownMenuSeparator />}
-        {enterDesignMode && <EditAppItem onEnter={enterDesignMode} />}
+        {(enterDesignMode || studioEntry || mayAddApp) && <DropdownMenuSeparator />}
+        {enterDesignMode && <DesignLayoutItem onEnter={enterDesignMode} />}
+        {studioEntry && <StudioAppItem entry={studioEntry} />}
         {mayAddApp && <AddAppSubmenu />}
       </DropdownMenuContent>
     </DropdownMenu>

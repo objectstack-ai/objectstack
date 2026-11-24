@@ -87,7 +87,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AutomationsPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -131,9 +134,11 @@ async function outlastDebounce(): Promise<void> {
 /** Open the flow and add a Notify step on its one edge, as an author does. */
 async function addNotify(): Promise<string> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
-      <AutomationsPillar packageId={PKG} />
-    </MemoryRouter>,
+    <StudioSaveHarness>
+      <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
+        <AutomationsPillar packageId={PKG} />
+      </MemoryRouter>
+    </StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Insert node here' }, { timeout: 8000 }));
   const option = screen.getAllByRole('option').find((o) => o.textContent?.startsWith('Notify'));
@@ -168,6 +173,9 @@ describe('Automations page — a new Notify step is held until it is filled in (
     fireEvent.change(within(rail).getByPlaceholderText('Your request was approved'), {
       target: { value: 'Request approved' },
     });
+    // objectstack#36511 — filled in, the step is no longer held, and Save sends it.
+    await waitFor(() => expect(screen.queryByTestId('studio-held')).toBeNull());
+    await pressStudioSave();
     await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1), { timeout: 4000 });
     const sent = mockClient.saves[0].nodes as Array<Record<string, unknown>>;
     expect(sent.find((n) => n.id === id)).toEqual(

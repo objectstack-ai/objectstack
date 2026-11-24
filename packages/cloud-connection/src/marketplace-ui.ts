@@ -10,13 +10,12 @@
  *
  *   - no MarketplaceProxyPlugin mounted (`OS_CLOUD_URL=off`) → no
  *     "Browse Marketplace" entry → no dead page.
- *   - no MarketplaceInstallLocalPlugin → no "Installed Apps" entry.
  *
- * "Browse Marketplace" still points at the console's marketplace route.
- * "Installed Apps" opens Setup → Packages filtered to Source = marketplace
- * (#23933, ruling B on #23892): Packages is the one list of what is installed,
- * and its marketplace rows carry the actions the plugin's own Installed Apps
- * page used to (Details, Uninstall). That page is no longer shipped.
+ * "Browse Marketplace" still points at the console's marketplace route. What
+ * is installed is listed by Setup → Packages (`nav_packages`, owned by
+ * `@objectstack/platform-objects`), whose marketplace rows carry the actions
+ * the plugin's own Installed Apps page used to (Details, Uninstall); the
+ * marketplace-filtered "Installed Apps" entry retired (objectstack#36834).
  */
 
 /** "Browse Marketplace" — owned by the browse capability (the proxy). */
@@ -41,47 +40,41 @@ export const MARKETPLACE_BROWSE_UI_BUNDLE = {
 };
 
 /**
- * "Installed Apps" — owned by the local-install capability, registered by
- * `MarketplaceInstallLocalPlugin` at `kernel:ready`.
+ * The local-install capability's Setup UI bundle — registered by
+ * `MarketplaceInstallLocalPlugin` at `kernel:ready`, and by hosted tenants
+ * that import it from this package. It now carries NO navigation entry.
  *
- * The entry targets the console's `developer:packages` component (the one
- * Setup's own "Packages" entry opens) with `params: { source: 'marketplace' }`.
- * The console sends a component entry's `params` as the query string, so the
- * entry opens `/apps/APP/component/developer/packages?source=marketplace` —
- * the filter objectui#12675 published (`PACKAGES_SOURCE_PARAM = 'source'`,
- * values `code` / `marketplace` / `authored`, an unknown value refused by
- * name). A `component` entry rather than a `url` one: the target is a
- * first-party console component, and the app segment comes from the app the
- * entry is rendered in instead of a spelled-out `/apps/setup`.
+ * Its one entry, "Installed Apps" (`nav_marketplace_installed`), opened the
+ * console's `developer:packages` list filtered to marketplace installs
+ * (`params: { source: 'marketplace' }`). It retired with objectstack#36834:
+ * Setup's own "Packages" entry (`nav_packages`, `@objectstack/platform-objects`'
+ * Setup nav contributions) opens that same list on its administration face,
+ * every source, and the page's Source filter narrows it to marketplace
+ * installs. A bookmarked `?source=marketplace` link still opens the list
+ * filtered.
  *
- * The bundle carries no page. The `marketplace_installed` page it used to
- * ship (cloud ADR-0009 P2a) only redirected to that same filtered view once
- * Packages carried the marketplace row actions, so it was retired with the
- * entry's retarget.
+ * The bundle stays exported and registrable under its id, with an empty
+ * `navigationContributions`, so every host that registers it keeps compiling
+ * and booting while it drops the registration on its own schedule. The
+ * `marketplace_installed` page it used to ship (cloud ADR-0009 P2a) retired
+ * earlier, with #23933.
  */
-export const MARKETPLACE_INSTALLED_UI_BUNDLE = {
+export const MARKETPLACE_INSTALLED_UI_BUNDLE: {
+    id: string;
+    namespace: string;
+    version: string;
+    type: string;
+    scope: string;
+    name: string;
+    description: string;
+    navigationContributions: Array<typeof MARKETPLACE_BROWSE_UI_BUNDLE['navigationContributions'][number]>;
+} = {
     id: 'com.objectstack.cloud-connection.marketplace-installed-ui',
     namespace: 'sys',
-    version: '0.3.0',
+    version: '0.4.0',
     type: 'plugin',
     scope: 'system',
     name: 'Marketplace Installed UI',
-    description: 'Setup navigation for locally-installed marketplace packages: "Installed Apps" opens Packages filtered to marketplace installs.',
-    navigationContributions: [
-        {
-            app: 'setup',
-            group: 'group_apps',
-            priority: 110,
-            items: [
-                {
-                    id: 'nav_marketplace_installed',
-                    type: 'component',
-                    label: 'Installed Apps',
-                    componentRef: 'developer:packages',
-                    params: { source: 'marketplace' },
-                    icon: 'package-check',
-                },
-            ],
-        },
-    ],
+    description: 'Setup UI for locally-installed marketplace packages. It carries no navigation entry: installed packages are listed by Setup → Packages.',
+    navigationContributions: [],
 };

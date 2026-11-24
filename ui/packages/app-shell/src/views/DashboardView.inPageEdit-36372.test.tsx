@@ -50,13 +50,15 @@ const packages = vi.hoisted(() => ({
   ensure: null as null | ((base: string) => Promise<{ packageId: string; writable: boolean }>),
   ensured: [] as string[],
 }));
+/** objectstack#36364 — the navigation state the page is reached with, and its replaces. */
+const route = vi.hoisted(() => ({ state: null as unknown, navigate: null as null | ((...a: unknown[]) => void) }));
 const toasts = vi.hoisted(() => ({ success: [] as unknown[], error: [] as unknown[] }));
 
 vi.mock('../providers/MetadataProvider', () => ({ useMetadata: () => meta.value }));
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ dashboardName: 'ops_board' }),
-  useNavigate: () => vi.fn(),
-  useLocation: () => ({ pathname: '/apps/crm/dashboard/ops_board', search: '' }),
+  useNavigate: () => route.navigate ?? (() => {}),
+  useLocation: () => ({ pathname: '/apps/crm/dashboard/ops_board', search: '', hash: '', key: 'landing', state: route.state }),
 }));
 vi.mock('./useOpenRecordList', () => ({
   useRecordListDrillNavigation: () => ({ openRecordList: vi.fn(), canOpenRecordList: () => true }),
@@ -117,6 +119,8 @@ vi.mock('./metadata-admin/previews/AddWidgetPicker', () => ({
 }));
 
 import { DashboardView } from './DashboardView';
+import { DesignModeProvider, useDesignModeController } from '../layout/designMode';
+import { DesignModeBar } from '../layout/DesignModeBar';
 
 /** The served dashboard: translated for the session, with its read's decorations. */
 const served = {
@@ -181,6 +185,8 @@ beforeEach(() => {
   packages.ensured = [];
   toasts.success = [];
   toasts.error = [];
+  route.state = null;
+  route.navigate = null;
 });
 
 afterEach(() => {
@@ -341,5 +347,133 @@ describe('DashboardView in-page edit (objectstack#36372)', () => {
     expect((await screen.findAllByText('Total (served)')).length).toBeGreaterThan(0);
     expect(client.value.save).not.toHaveBeenCalled();
     expect(client.value.publish).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardView arrival from the design mode (objectstack#36364)', () => {
+  it('a dashboard the design mode just created opens its edit state on arrival, and the landing is cleared', async () => {
+    const navigate = vi.fn();
+    route.navigate = navigate;
+    route.state = { designModeNewDashboard: 'ops_board' };
+    mount();
+    expect(await screen.findByTestId('dashboard-editing-badge')).toBeInTheDocument();
+    expect(client.value.layered).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/apps/crm/dashboard/ops_board', { replace: true, state: null });
+  });
+
+  it("a landing that names another dashboard opens nothing", async () => {
+    route.state = { designModeNewDashboard: 'another_board' };
+    mount();
+    await screen.findByTestId('dashboard-edit');
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
+    expect(client.value.layered).not.toHaveBeenCalled();
+  });
+
+  it('without the Edit button (the Studio gate keeps the principal out), the landing opens nothing', async () => {
+    gate.entry = null;
+    route.state = { designModeNewDashboard: 'ops_board' };
+    mount();
+    await screen.findAllByText('Total (served)');
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.queryByTestId('dashboard-editing-badge')).not.toBeInTheDocument();
+    expect(client.value.layered).not.toHaveBeenCalled();
+  });
+});
+
+describe('DashboardView with no cards yet (objectstack#36364)', () => {
+  it('a dashboard with no cards says so instead of drawing a blank page; one with cards does not', async () => {
+    mount({ name: 'ops_board', label: 'Payment analysis', _packageId: 'crm', widgets: [] });
+    expect(await screen.findByTestId('dashboard-no-cards')).toHaveTextContent('No cards yetThis dashboard has no cards yet.');
+    cleanup();
+    mount();
+    await screen.findAllByText('Total (served)');
+    expect(screen.queryByTestId('dashboard-no-cards')).not.toBeInTheDocument();
+  });
+
+  it('the edit state draws no such notice: the editor is the place to add cards', async () => {
+    route.state = { designModeNewDashboard: 'ops_board' };
+    route.navigate = vi.fn();
+    client.value = makeClient({ layered: vi.fn(async () => ({ code: null, overlay: null, effective: { name: 'ops_board', label: 'P', widgets: [] } })) });
+    mount({ name: 'ops_board', label: 'Payment analysis', _packageId: 'crm', widgets: [] });
+    await screen.findByTestId('dashboard-editing-badge');
+    expect(screen.queryByTestId('dashboard-no-cards')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#36692 — the dashboard's own edit state and the shell's design
+ * mode are two entries that exclude each other, both ways (the maintainer's
+ * 「照 Twenty 分开」): no Edit while the mode is on, and the mode's door
+ * refuses, saying why, while the edit state is open. So the screen never
+ * shows two Save/Cancel sets, and the bar's Cancel can never end the mode
+ * under a dashboard left in edit.
+ *
+ * Real subjects added: the shell's design-mode controller and its bar.
+ */
+describe('DashboardView and the design mode exclude each other (objectstack#36692)', () => {
+  function Shell({ children }: { children: React.ReactNode }) {
+    const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
+    return (
+      <DesignModeProvider value={mode}>
+        {mode.active && <DesignModeBar mode={mode} />}
+        <button type="button" data-testid="enter-design-mode" onClick={() => mode.enter()}>
+          enter
+        </button>
+        {children}
+      </DesignModeProvider>
+    );
+  }
+
+  function mountInShell() {
+    meta.value = {
+      apps: [],
+      objects: [],
+      dashboards: [served],
+      reports: [],
+      pages: [],
+      loading: false,
+      error: null,
+      refresh: async () => {},
+      invalidate: () => {},
+      ensureType: async () => [],
+      getItem: vi.fn(async () => null),
+      getItemsByType: () => [],
+      getTypeStatus: () => 'ready',
+    };
+    render(
+      <MetadataCtx.Provider value={meta.value as React.ContextType<typeof MetadataCtx>}>
+        <Shell>
+          <DashboardView />
+        </Shell>
+      </MetadataCtx.Provider>,
+    );
+  }
+
+  it('while the mode is on, Edit is not offered; the mode left, it is again', async () => {
+    mountInShell();
+    await screen.findByTestId('dashboard-edit');
+    fireEvent.click(screen.getByTestId('enter-design-mode'));
+    expect(await screen.findByTestId('design-mode-bar')).toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-edit')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('design-mode-cancel'));
+    expect(await screen.findByTestId('dashboard-edit')).toBeInTheDocument();
+  });
+
+  it('while the edit state is open, entering the mode is refused with the prompt: one Save/Cancel set, and no bar Cancel to strand the edit', async () => {
+    mountInShell();
+    await openEdit();
+    fireEvent.click(screen.getByTestId('enter-design-mode'));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.queryByTestId('design-mode-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('design-mode-cancel')).not.toBeInTheDocument();
+    expect(toasts.error).toEqual([['Save or cancel your dashboard or report changes before designing the layout.']]);
+    expect(screen.getByTestId('dashboard-editing-badge')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-edit-save')).toBeInTheDocument();
+    // The edit state closed, the door opens.
+    fireEvent.click(screen.getByTestId('dashboard-edit-discard'));
+    fireEvent.click(screen.getByTestId('enter-design-mode'));
+    expect(await screen.findByTestId('design-mode-bar')).toBeInTheDocument();
+    expect(toasts.error).toHaveLength(1);
   });
 });

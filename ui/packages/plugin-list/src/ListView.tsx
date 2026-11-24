@@ -75,7 +75,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { ColumnSummary, GroupingConfig } from '@objectstack/spec/ui';
-import { canonicalAstOperator, isAggregateCompatibleWithFieldType, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { BOOLEAN_VALUE_TYPES, canonicalAstOperator, isAggregateCompatibleWithFieldType, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
@@ -480,6 +480,12 @@ export interface ListViewProps {
    * objectstack#35403 — the built-in bulk Change Owner, forwarded to
    * `ObjectGrid` (which declares it with this signature): the grid's selection
    * bar offers it while the host wires it.
+   *
+   * Grid-only (objectstack#36395): the grid is the one view that holds a
+   * selection of several rows. A kanban, calendar, gallery or any other view
+   * type takes none, so it ignores this prop and offers no bulk Change Owner;
+   * there, a record's owner is changed one record at a time, from its record
+   * page.
    */
   onBulkChangeOwner?: (records: any[]) => void;
   /**
@@ -759,6 +765,20 @@ export interface ListViewProps {
     rows: ReadonlyArray<Record<string, unknown>>,
     groups?: ReadonlyArray<ListViewRowGroup>,
   ) => void;
+  /**
+   * Called with the params of the read behind the rows `onRowsChange`
+   * reported — the filter, sort and search that matched them, and the window
+   * they came in — each time that query settles with a different answer
+   * (objectstack#36554). A host that reads past the rows on show re-issues
+   * it: the dashboard drill reads the ids of its whole result with it, so the
+   * record page it opens steps through every record the drill matched, not
+   * only the page drawn. Answered where `onRowsChange` answers with a row
+   * sequence, a paged grid that draws the rows it fetched; any other kind
+   * answers `null`, so a host never replays a query that is not on screen.
+   *
+   * A HOST prop, never a schema key: the query is the list's runtime state.
+   */
+  onFindParamsChange?: (findParams: Readonly<Record<string, unknown>> | null) => void;
   /**
    * The page a paged grid shows, 1-based, for a host that keeps it
    * (objectstack#30850): the console keeps it in the address, so Back from a
@@ -1739,10 +1759,11 @@ function kanbanLaneFieldOf(schema: ListViewSchema, objectDef: unknown): string |
  * objectstack#36370 — may a board's lane statistic total a field of `type`?
  * The aggregate × field-type table's `sum` row, the verdict `@objectstack/lint`
  * gives `kanban.summary` (a percent does not add, a formula stores no value),
- * less the true / false class: a board totals numbers, not yes / no counts.
+ * less the spec's boolean class (`BOOLEAN_VALUE_TYPES`, objectstack#36520): a
+ * board totals numbers, not yes / no counts.
  */
 function laneStatisticSums(type: unknown): boolean {
-  return typeof type === 'string' && type !== 'boolean' && type !== 'toggle'
+  return typeof type === 'string' && !BOOLEAN_VALUE_TYPES.has(type)
     && isAggregateCompatibleWithFieldType('sum', type);
 }
 
@@ -2423,6 +2444,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   capped = false,
   onTotalChange,
   onRowsChange,
+  onFindParamsChange,
   viewDefaults,
   onRestoreViewDefaults,
   onPersonalizationChange,
@@ -7118,6 +7140,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     }
     onRowsChangeRef.current?.(shownRowsRef.current);
   }, [shownRowsKey, shownRowsSettled]);
+  // objectstack#36554 — the query behind those rows, reported beside them and
+  // keyed the same way: on its content, never on the identity of the params
+  // object or of the callback (AGENTS.md #10). Not serialised for a host that
+  // does not ask.
+  const onFindParamsChangeRef = React.useRef(onFindParamsChange);
+  React.useEffect(() => {
+    onFindParamsChangeRef.current = onFindParamsChange;
+  });
+  const shownFindParams = rowSequenceShown ? lastFindParams : null;
+  const shownFindParamsRef = React.useRef(shownFindParams);
+  shownFindParamsRef.current = shownFindParams;
+  const shownFindParamsKey = onFindParamsChange && shownFindParams ? JSON.stringify(shownFindParams) : null;
+  React.useEffect(() => {
+    if (!shownRowsSettled) return;
+    onFindParamsChangeRef.current?.(shownFindParamsRef.current);
+  }, [shownFindParamsKey, shownRowsSettled]);
 
   // The Display panel (objectui#12423) is the default form of the toolbar's
   // settings cluster, drawn whenever it has a control to offer. Refresh is not
@@ -7429,13 +7467,18 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     ? {
         laneField: boardLaneField,
         // objectstack#36370 — the fields the board can lane on: a select or a
-        // radio, whose options are the lanes. A lookup, user, master-detail or
-        // tree field draws no sensible lanes yet (the board keys a lane on the
-        // stored value, and an expanded reference is an object), and a boolean
-        // has no options to title its lanes, so the picker leaves them out.
+        // radio, whose options are the lanes, and a single-valued reference
+        // (`EXPANDABLE_FIELD_TYPES`: lookup, user, master-detail, tree), whose
+        // lanes are the referenced records, keyed by the foreign key and
+        // titled by name (objectstack#36643). A many-valued reference puts one
+        // card in several lanes and a drag cannot say which to replace, and a
+        // boolean has no options to title its lanes, so the picker leaves
+        // them out.
         laneFieldOptions: groupOptions.filter((option) => {
-          const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[option.value]?.type;
-          return type === 'select' || type === 'radio';
+          const def = (objectDef?.fields as Record<string, { type?: unknown; multiple?: unknown } | undefined> | undefined)?.[option.value];
+          const type = typeof def?.type === 'string' ? def.type : undefined;
+          if (type === 'select' || type === 'radio') return true;
+          return !!type && EXPANDABLE_FIELD_TYPES.has(type) && def?.multiple !== true;
         }),
         // A new lane field draws every lane it offers: the lanes chosen on the
         // old field name none of its values.

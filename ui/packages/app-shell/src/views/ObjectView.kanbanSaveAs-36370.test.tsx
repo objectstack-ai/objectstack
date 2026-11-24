@@ -207,11 +207,15 @@ const openSave = async () => {
   return screen.findByTestId('list-draft-save-menu');
 };
 
-/** Every request the page sends through `fetch` that is not a read. */
+/**
+ * Every request the page sends through `fetch` that is not a read. The
+ * object-level `transfer` verdict is a read sent as a POST — a board asks it
+ * for the grid-only Change Owner note (objectstack#36395) — so it is not one.
+ */
 const writes: string[] = [];
 vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: { method?: string }) => {
   const method = (init?.method ?? 'GET').toUpperCase();
-  if (method !== 'GET') writes.push(`${method} ${String(input)}`);
+  if (method !== 'GET' && !String(input).endsWith('/api/v1/security/explain')) writes.push(`${method} ${String(input)}`);
   return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
 }));
 

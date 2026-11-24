@@ -171,6 +171,7 @@ import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
 import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } from './chatAttachments.js';
+import { studioHomePath } from '../../views/studio-design/studioAddress.js';
 
 /**
  * The app segment a record of `objectName` lives under: the object's owning
@@ -1318,8 +1319,12 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
     // A known agent that isn't deployed here (e.g. `/ai/build` with no cloud AI
     // Studio): land cleanly on the default surface rather than treating the
     // segment as a conversation id (which produced the junk `/ai/ask/build`).
+    // objectstack#36969 — a conversation the address names comes along
+    // (`/ai/build/ID` → `/ai/ask/ID`): where in-app building is closed the
+    // build agent leaves the catalog, and its old threads must still open.
     if (unavailableKnownAgent) {
-      navigate(`/ai/${friendly}${preservedQuery}`, { replace: true });
+      const tail = urlConversationId ? `/${encodeURIComponent(urlConversationId)}` : '';
+      navigate(`/ai/${friendly}${tail}${preservedQuery}`, { replace: true });
       return;
     }
     // cloud#1674 — a maker landing on BARE `/ai/ask` (no conversation) is
@@ -3139,16 +3144,18 @@ export function ChatPane({
         // The secondary door (在 Studio 中查看): Studio is the built app's
         // iteration home (direct edit + the same copilot conversation in the
         // dock, which the build's binding resumes). The package id is the
-        // canvas segment (one package = one app).
+        // canvas segment (one package = one app). objectstack#36502 — it opens
+        // the package's Studio home; the app's interfaces are designed in the
+        // running app, which the primary door opens.
         onDesignBuiltApp={(_appName, appSegment) => {
           const pkg = appSegment ?? boundPackageId;
           if (!pkg) return;
-          navigate(`/studio/${encodeURIComponent(pkg)}/interfaces`);
+          navigate(studioHomePath(pkg));
         }}
         designBuiltAppLabel={t('console.ai.viewBuiltAppInStudio', { defaultValue: 'View in Studio' })}
         // Artifact deep links: every artifact the agent built gets a one-click
         // path to where it can be edited BY HAND (object → Data, flow →
-        // Automations, dashboard/page/view/app → Interfaces). Returns null for
+        // Automations, dashboard/page/view/app → its All metadata item page). Returns null for
         // types with no direct-edit home (seed/dataset) → rendered as text.
         getArtifactAction={(artifact, appSegment) => {
           const path = artifactStudioPath(appSegment ?? boundPackageId, artifact);

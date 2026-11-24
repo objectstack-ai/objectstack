@@ -75,7 +75,7 @@ export const en: TranslationData = {
 
         // Apps / Marketplace
         nav_marketplace_browse: { label: 'Browse Marketplace' },
-        nav_marketplace_installed: { label: 'Installed Apps' },
+        nav_packages: { label: 'Packages' },
         nav_cloud_connection: { label: 'Cloud Connection' },
 
         // People & Organization
@@ -144,6 +144,7 @@ export const en: TranslationData = {
         nav_settings_knowledge: { label: 'Knowledge' },
         nav_settings_lifecycle: { label: 'Data Lifecycle' },
         nav_recycle_bin: { label: 'Recycle Bin' },
+        nav_public_forms: { label: 'Public Forms' },
         // Notifications (contributed by @objectstack/service-messaging)
         nav_notification_preferences: { label: 'Notification Preferences' },
         nav_notification_templates: { label: 'Notification Templates' },

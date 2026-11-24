@@ -67,6 +67,8 @@ import {
   navEntriesShownOncePendingReadsShow,
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
+import { isLandingPath, useSetupFirstPageSlot } from './setupFirstPageSlot.js';
+import { useInSetupApp } from './setupApp.js';
 import { useSetupAliasApprovalsTarget } from './setupAliasApprovals.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute } from './appRouteMetadataReads.js';
 import { enterAppBundle, objectViewRouteObject, prefetchObjectViewRows, readAppObjectScope } from './appObjectScope.js';
@@ -139,7 +141,10 @@ const DashboardView = routeChunk.lazy(() => import('../views/DashboardView.js').
 const PageView = routeChunk.lazy(() => import('../views/PageView.js').then(m => m.PageView));
 const ReportView = routeChunk.lazy(() => import('../views/ReportView.js').then(m => m.ReportView));
 const AppReportIndexView = routeChunk.lazy(() => import('../views/AppReportIndexView.js').then(m => m.AppReportIndexView));
+const ReportNewPage = routeChunk.lazy(() => import('../views/ReportNewPage.js').then(m => m.ReportNewPage));
 const SearchResultsPage = routeChunk.lazy(() => import('../views/SearchResultsPage.js').then(m => m.SearchResultsPage));
+// objectstack#36741 — the full-page inbox the sidebar's bell opens from 768 px up.
+const InboxPage = routeChunk.lazy(() => import('../views/inbox/InboxPage.js').then(m => m.InboxPage));
 const RecordFormPage = routeChunk.lazy(() => import('../views/RecordFormPage.js').then(m => m.RecordFormPage));
 const ComponentNavView = routeChunk.lazy(() => import('../views/ComponentNavView.js').then(m => m.ComponentNavView));
 const ObjectDataPage = routeChunk.lazy(() => import('../views/ObjectDataPage.js').then(m => m.ObjectDataPage));
@@ -184,10 +189,13 @@ const APP_ROUTE_CHUNKS: ReadonlyArray<{ path: string; chunk: { preload: () => Pr
   { path: 'dashboard/:dashboardName', chunk: DashboardView },
   { path: 'report/:reportName', chunk: ReportView },
   { path: 'reports', chunk: AppReportIndexView },
+  { path: 'reports/new', chunk: ReportNewPage },
   { path: 'page/:pageName', chunk: PageView },
   { path: 'component/:ns/:name/*', chunk: ComponentNavView },
   { path: 'design/dashboard/:dashboardName', chunk: DashboardDesignPage },
   { path: 'search', chunk: SearchResultsPage },
+  { path: 'inbox', chunk: InboxPage },
+  { path: 'inbox/:inboxTab', chunk: InboxPage },
   { path: 'create-app', chunk: CreateAppPage },
   { path: 'edit-app/:editAppName', chunk: EditAppPage },
   { path: 'system/marketplace', chunk: MarketplacePage },
@@ -1624,6 +1632,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   // view, with the sentence that says so.
                   <ObjectNotFoundState objectName={routeObjectRefusal.objectName} packageDisabled />
                 ) : (
+                <SetupFirstPageTop app={activeApp} ctx={{ currentUserId: user?.id ?? null }}>
                 <Routes>
                 <Route
                   path="/"
@@ -1684,6 +1693,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 <Route path="report/:reportName" element={<ReportView dataSource={dataSource} />} />
                 {/* objectui#13020: the app's report index, linked from the sidebar. */}
                 <Route path="reports" element={<AppReportIndexView />} />
+                {/* objectstack#36374 — the report builder for a new report. */}
+                <Route path="reports/new" element={<ReportNewPage dataSource={dataSource} />} />
                 <Route path="page/:pageName" element={<PageView />} />
                 {/* objectstack ADR-0146 D11 — the retired Setup › Packaged
                     automation page (`automation:packaged`): a bookmark opens
@@ -1702,6 +1713,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 <Route path="component/metadata/resource/*" element={<LegacyMetadataRedirect mode="resource" />} />
                 <Route path="design/dashboard/:dashboardName" element={<DashboardDesignPage />} />
                 <Route path="search" element={<SearchResultsPage />} />
+                <Route path="inbox" element={<InboxPage dataSource={dataSource} objects={allObjects} />} />
+                <Route path="inbox/:inboxTab" element={<InboxPage dataSource={dataSource} objects={allObjects} />} />
                 <Route path="create-app" element={<CreateAppPage />} />
                 <Route path="edit-app/:editAppName" element={<EditAppPage />} />
                 <Route path="system/marketplace" element={<MarketplacePage />} />
@@ -1721,6 +1734,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                     page so users always know when a URL didn't resolve. */}
                 <Route path="*" element={<RouteNotFound />} />
               </Routes>
+                </SetupFirstPageTop>
                 )}
                 {/* objectstack#32685 — after the route's element in the same
                     boundary: shown in the commit that shows the route, never
@@ -1961,6 +1975,55 @@ function carryQueryOntoLanding(target: string, search: string, hash: string): st
   for (const key of new Set(arriving.keys())) params.delete(key);
   arriving.forEach((value, key) => params.append(key, value));
   return `${beforeHash.slice(0, queryAt)}?${params.toString()}${carriedHash}`;
+}
+
+/**
+ * The route an app's root lands on for this member: `resolveLandingRoute` over
+ * the trees the member is shown, as `AppRootLanding` asks it once the reads
+ * are decided.
+ */
+function memberLandingRoute(app: any, gates: ReturnType<typeof useNavMemberGates>, ctx: NavTemplateContext): string {
+  const areas = (app?.areas || []) as Array<{ navigation?: NavigationItem[] } | null | undefined>;
+  const trees = [
+    navEntriesShownToMember(app?.navigation || [], gates),
+    ...areas.map((area) => navEntriesShownToMember(area?.navigation || [], gates)),
+  ];
+  return resolveLandingRoute(app, trees, gates.evaluateVisibility, ctx);
+}
+
+/**
+ * objectstack#36732 (item 5, option A) — the host's element above the Setup
+ * app's first page (`setupFirstPageSlot.ts`): the page Setup's root lands on
+ * for this member, asked the way `AppRootLanding` asks it, over the trees the
+ * member is shown. Drawn from 768 px up only (a phone is unchanged), and only
+ * in Setup. Where it is drawn, the page scrolls as one
+ * column: the element first, the route's page at its full height below it.
+ */
+function SetupFirstPageTop({
+  app,
+  ctx,
+  children,
+}: {
+  app: any;
+  ctx: NavTemplateContext;
+  children: ReactNode;
+}) {
+  const slot = useSetupFirstPageSlot();
+  const inSetup = useInSetupApp();
+  const phone = usePhoneViewport();
+  const gates = useNavMemberGates();
+  const location = useLocation();
+  // The path below `/apps/SEGMENT/`, the base every landing route is relative to.
+  const inAppPath = location.pathname.split('/').slice(3).join('/');
+  const onFirstPage = Boolean(slot) && inSetup && !phone && isLandingPath(inAppPath, memberLandingRoute(app, gates, ctx));
+  // The same two wrappers on every route, the slot's place held by `null`
+  // elsewhere, so moving onto or off the first page never remounts the routes.
+  return (
+    <div className={onFirstPage ? 'h-full overflow-y-auto' : 'h-full'}>
+      {onFirstPage && slot ? <div data-testid="setup-first-page">{slot()}</div> : null}
+      <div className="h-full">{children}</div>
+    </div>
+  );
 }
 
 /**

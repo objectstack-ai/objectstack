@@ -40,7 +40,7 @@ export const esES: TranslationData = {
         group_overview: { label: 'Resumen' },
         group_apps: { label: 'Aplicaciones' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
-        nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
+        nav_packages: { label: 'Paquetes' },
         nav_cloud_connection: { label: 'Conexión a la nube' },
         group_people_org: { label: 'Personas y Organización' },
         group_access_control: { label: 'Control de Acceso' },
@@ -99,6 +99,7 @@ export const esES: TranslationData = {
         nav_settings_knowledge: { label: 'Conocimiento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida de los datos' },
         nav_recycle_bin: { label: 'Papelera' },
+        nav_public_forms: { label: 'Formularios públicos' },
         nav_notification_preferences: { label: 'Preferencias de Notificación' },
         nav_notification_templates: { label: 'Plantillas de Notificación' },
 

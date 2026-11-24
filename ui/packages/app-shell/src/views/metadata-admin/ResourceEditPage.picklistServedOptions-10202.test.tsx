@@ -25,6 +25,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic import of this module: its first load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -89,6 +91,10 @@ function doorRefusal(body: Row): Array<{ path: string; message: string; code: st
 const puts: Array<{ url: string; body: Row; status: number }> = [];
 
 const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+  // The Save's own publish (objectstack#36902), and a refused publish's take-back.
+  if (init?.method === 'POST' || init?.method === 'DELETE') {
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
   if (init?.method === 'PUT') {
     const body = JSON.parse(String(init.body)) as Row;
     const issues = doorRefusal(body);
@@ -162,10 +168,10 @@ afterEach(() => {
   fetchImpl.mockClear();
 });
 
-async function outlastDebounce(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 2300));
-  });
+/** Press Save: it is explicit since objectstack#36902. */
+async function pressSave(): Promise<void> {
+  await waitFor(() => expect(screen.getByTestId('resource-save')).toBeEnabled(), { timeout: 4000 });
+  fireEvent.click(screen.getByTestId('resource-save'));
 }
 
 function renderDesigner() {
@@ -191,7 +197,7 @@ describe('metadata-admin object designer — a picklist-bound field saves withou
   it('THE PIN: an edit of an unrelated field saves; no bound field carries `options`, every other field is byte-identical', async () => {
     renderDesigner();
     await renameTitleLabel('Headline');
-    await outlastDebounce();
+    await pressSave();
     await waitFor(() => expect(puts.length).toBeGreaterThan(0), { timeout: 4000 });
 
     const sent = puts[puts.length - 1];

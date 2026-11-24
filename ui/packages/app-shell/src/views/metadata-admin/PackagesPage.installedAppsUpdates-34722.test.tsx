@@ -1,11 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#34722 — Setup → Installed Apps is the administrator's door to
- * this page (`?source=marketplace`), Studio → Packages the developer's (no
- * `source`; ADR-0146 D1, ruling 甲 on objectstack#25098).
+ * objectstack#34722 — the administrator's face of this page, first drawn for
+ * marketplace installs (`?source=marketplace`, Setup's retired Installed Apps
+ * entry); Studio → Packages the developer's (no `face`; ADR-0146 D1).
+ * objectstack#36834 extends that face to every source: Setup → Packages opens
+ * it with `?face=admin` (see "Setup → Packages: the administration face" at
+ * the end of this file), and the old marketplace address still opens it.
  *
- * On the Setup door:
+ * On the administration face:
  *   - an installed app the catalog lists at a higher version draws the
  *     marketplace's own "Update available → vX" badge (`UpdateAvailableBadge`,
  *     decided by `updateTarget`), linked to the app's marketplace page, and the
@@ -21,8 +24,8 @@
  *   - a module package (`type: 'module'` declaring its app in `dependencies`)
  *     is folded under that app's line and shown on demand;
  *   - the columns are Name, Version, Status, Source, Update, and the developer
- *     doors (Import, New Package, the platform switch, the Source chip's
- *     Show all) are not drawn.
+ *     doors (Import, the platform switch, the Source chip's Show all) are not
+ *     drawn; New Package is, and lands in Studio (objectstack#36834).
  * On the Studio door all of the developer doors and columns stay, and the
  * catalog is never asked.
  *
@@ -55,6 +58,29 @@ vi.mock('@object-ui/i18n/namespaces/marketplace', async (importOriginal) => {
   };
 });
 
+/**
+ * objectstack#36834 — the create dialog is the spec-driven package form, which
+ * this file does not drive: a stand-in answers its `onSaved` with a created id,
+ * so the case below reads what the PAGE does after a create.
+ */
+vi.mock('./PackageFormDialog', () => ({
+  PackageFormDialog: ({
+    open,
+    mode,
+    onSaved,
+  }: {
+    open: boolean;
+    mode: string;
+    onSaved?: (r: { id: string }) => void;
+  }) =>
+    open && mode === 'create' ? (
+      <button type="button" data-testid="stub-create-save" onClick={() => onSaved?.({ id: 'app.fresh' })}>
+        save
+      </button>
+    ) : null,
+}));
+
+import { resolveHref } from '@object-ui/layout';
 import { PackagesPage, type InstalledPackageRow } from './PackagesPage';
 import { t } from './i18n';
 // The page's package form reaches the CEL authoring helpers, which load these
@@ -129,6 +155,10 @@ const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 let catalogReads: string[] = [];
+/** Every non-GET request the page sent, as `METHOD path?query`. */
+let writes: string[] = [];
+/** How many times the list door was read. */
+let packagesReads = 0;
 
 /** Boot the real runtime config, then serve the package, install and catalog doors. */
 async function serve({
@@ -136,22 +166,40 @@ async function serve({
   installs = LEDGER,
   catalog = LISTED,
   marketplace = true,
+  drafts = [],
 }: {
   packages: InstalledPackageRow[];
   installs?: unknown[];
   catalog?: Catalog;
   marketplace?: boolean;
+  /** What the pending-drafts door answers for any package. */
+  drafts?: Array<{ type: string; name: string }>;
 }) {
   resetRuntimeConfigForTesting();
   vi.stubGlobal('fetch', vi.fn(async () => reply(200, { features: { installLocal: true, marketplace } })));
   await initRuntimeConfig();
   catalogReads = [];
+  writes = [];
+  packagesReads = 0;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: unknown, init?: { method?: string }) => {
-      const path = new URL(String(input), 'http://console.test').pathname;
+      const url = new URL(String(input), 'http://console.test');
+      const path = url.pathname;
       const method = (init?.method ?? 'GET').toUpperCase();
-      if (path === '/api/v1/packages') return reply(200, { success: true, data: { packages } });
+      if (method !== 'GET') writes.push(`${method} ${path}${url.search}`);
+      if (path === '/api/v1/packages') {
+        packagesReads += 1;
+        return reply(200, { success: true, data: { packages } });
+      }
+      if (path === '/api/v1/meta/_drafts') return reply(200, { success: true, data: { drafts } });
+      if (/^\/api\/v1\/packages\/[^/]+\/(enable|disable)$/.test(path) && method === 'PATCH') {
+        return reply(200, { success: true, data: {} });
+      }
+      if (/^\/api\/v1\/packages\/[^/]+\/export$/.test(path)) return reply(200, { success: true, data: { id: 'x' } });
+      if (/^\/api\/v1\/packages\/[^/]+$/.test(path) && method === 'DELETE') {
+        return reply(200, { success: true, data: {} });
+      }
       if (path === '/api/v1/cloud-connection/installed') return reply(404, {});
       if (path === '/api/v1/marketplace/install-local' && method === 'GET') {
         return reply(200, { success: true, data: { items: installs } });
@@ -181,12 +229,26 @@ function Where() {
   return <div data-testid="where">{pathname}</div>;
 }
 
+/** The page's own query string, beside it: the URL state its filters write. */
+function Search() {
+  const { search } = useLocation();
+  return <div data-testid="search">{search}</div>;
+}
+
 function renderAt(url: string, lang: 'en' | 'zh' = 'en') {
   return render(
     <I18nProvider config={{ defaultLanguage: lang, detectBrowserLanguage: false }}>
       <MemoryRouter initialEntries={[url]}>
         <Routes>
-          <Route path="/apps/:app/component/developer/packages" element={<PackagesPage />} />
+          <Route
+            path="/apps/:app/component/developer/packages"
+            element={
+              <>
+                <PackagesPage />
+                <Search />
+              </>
+            }
+          />
           <Route path="*" element={<Where />} />
         </Routes>
       </MemoryRouter>
@@ -406,7 +468,7 @@ describe('Setup → Installed Apps: an app is one line, its modules folded under
 describe('the two doors (objectstack#34722)', () => {
   const headers = () => screen.getAllByRole('columnheader').map((h) => h.textContent?.trim());
 
-  it('Setup → Installed Apps draws the administrator columns and none of the developer doors', async () => {
+  it('the administration face draws the administrator columns, New Package, and none of the developer doors', async () => {
     await serve({ packages: [HOTCRM, ...MODULES, TODO, CODE, PLATFORM] });
     renderAt(SETUP_URL);
     await settled();
@@ -420,7 +482,9 @@ describe('the two doors (objectstack#34722)', () => {
       row('engine.packages.col.actions'),
     ]);
     expect(screen.queryByRole('button', { name: row('engine.packages.import') })).toBeNull();
-    expect(screen.queryByRole('button', { name: row('engine.packages.new') })).toBeNull();
+    // objectstack#36834 — New Package is the administration face's one header
+    // action; it lands in Studio (see the create case below).
+    expect(screen.getByRole('button', { name: row('engine.packages.new') })).toBeInTheDocument();
     expect(screen.queryByTestId('pkg-show-platform')).toBeNull();
     expect(screen.queryByTestId('pkg-source-filter')).toBeNull();
     expect(screen.queryByRole('button', { name: row('engine.packages.source.showAll') })).toBeNull();
@@ -451,5 +515,221 @@ describe('the two doors (objectstack#34722)', () => {
 
     expect(screen.getByTestId('pkg-source-filter')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: row('engine.packages.source.showAll') })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// objectstack#36834 — Setup → Packages: the administration face, every source
+// ---------------------------------------------------------------------------
+
+const ADMIN_URL = '/apps/setup/component/developer/packages?face=admin';
+/** Setup's Packages entry as `@objectstack/platform-objects` declares it (`setup-packages-door.test.ts`). */
+const SETUP_PACKAGES_ITEM = {
+  id: 'nav_packages',
+  type: 'component',
+  label: 'Packages',
+  componentRef: 'developer:packages',
+  params: { face: 'admin' },
+} as const;
+
+const AUTHORED: InstalledPackageRow = {
+  manifest: { id: 'app.b2r4', name: 'My Base', version: '0.1.0', type: 'app' },
+  enabled: true,
+  source: 'authored',
+  writable: true,
+  disableable: true,
+};
+
+/** The query string the page holds, as a parsed map. */
+const query = () => new URLSearchParams(screen.getByTestId('search').textContent ?? '');
+
+describe('Setup → Packages: the administration face (objectstack#36834)', () => {
+  it('the Setup entry opens this page with `?face=admin`', () => {
+    expect(resolveHref(SETUP_PACKAGES_ITEM as never, '/apps/setup').href).toBe(ADMIN_URL);
+  });
+
+  it('lists every source, one line per app, and no platform package', async () => {
+    await serve({ packages: [HOTCRM, ...MODULES, TODO, CODE, AUTHORED, PLATFORM] });
+    renderAt(ADMIN_URL);
+    await settled();
+
+    expect(screen.getByRole('heading', { name: row('engine.packages.title') })).toBeInTheDocument();
+    expect(screen.getByText(row('engine.packages.admin.description'))).toBeInTheDocument();
+    for (const id of [HOTCRM_ID, 'com.example.todo', 'com.acme.code', 'app.b2r4']) {
+      expect(screen.getByTestId(`pkg-row-${id}`)).toBeInTheDocument();
+    }
+    // Modules fold under their app; the platform package is not listed.
+    for (const id of MODULE_IDS) expect(screen.queryByTestId(`pkg-row-${id}`)).toBeNull();
+    expect(screen.queryByTestId('pkg-row-com.objectstack.platform')).toBeNull();
+    // Only a marketplace app is asked about, and only it can carry an Update cell.
+    expect(catalogReads.sort()).toEqual(['pkg_hotcrm', 'pkg_todo']);
+    expect(screen.getByTestId(`pkg-update-${HOTCRM_ID}`)).toBeInTheDocument();
+    expect(screen.queryByTestId('pkg-update-reading-com.acme.code')).toBeNull();
+    expect(screen.queryByTestId('pkg-update-reading-app.b2r4')).toBeNull();
+  });
+
+  it('the Source filter writes `?source=` and keeps the face; All clears it', async () => {
+    await serve({ packages: [HOTCRM, TODO, CODE, AUTHORED] });
+    renderAt(ADMIN_URL);
+    await settled();
+
+    expect(screen.getByTestId('pkg-source-picker-all')).toHaveAttribute('data-state', 'on');
+    fireEvent.click(screen.getByTestId('pkg-source-picker-marketplace'));
+    await waitFor(() => expect(query().get('source')).toBe('marketplace'));
+    expect(query().get('face')).toBe('admin');
+    expect(screen.getByTestId('pkg-source-picker-marketplace')).toHaveAttribute('data-state', 'on');
+    expect(screen.queryByTestId('pkg-row-com.acme.code')).toBeNull();
+    expect(screen.queryByTestId('pkg-row-app.b2r4')).toBeNull();
+    expect(screen.getByTestId('pkg-row-com.example.todo')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('pkg-source-picker-authored'));
+    await waitFor(() => expect(query().get('source')).toBe('authored'));
+    expect(await screen.findByTestId('pkg-row-app.b2r4')).toBeInTheDocument();
+    expect(screen.queryByTestId('pkg-row-com.example.todo')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('pkg-source-picker-all'));
+    await waitFor(() => expect(query().has('source')).toBe(false));
+    expect(query().get('face')).toBe('admin');
+    expect(await screen.findByTestId('pkg-row-com.acme.code')).toBeInTheDocument();
+  });
+
+  it('the retired Installed Apps address still opens this face, filtered to marketplace', async () => {
+    await serve({ packages: [HOTCRM, TODO, CODE, AUTHORED] });
+    renderAt(SETUP_URL);
+    await settled();
+
+    expect(screen.getByTestId('pkg-source-picker-marketplace')).toHaveAttribute('data-state', 'on');
+    expect(screen.queryByTestId('pkg-row-com.acme.code')).toBeNull();
+    expect(screen.queryByRole('button', { name: row('engine.packages.import') })).toBeNull();
+    // Clearing the filter stays on the administration face.
+    fireEvent.click(screen.getByTestId('pkg-source-picker-all'));
+    await waitFor(() => expect(query().get('face')).toBe('admin'));
+    expect(await screen.findByTestId('pkg-row-com.acme.code')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: row('engine.packages.import') })).toBeNull();
+  });
+
+  it('an unknown face is refused by name, not read as the development surface', async () => {
+    await serve({ packages: [CODE] });
+    renderAt('/apps/setup/component/developer/packages?face=dev');
+
+    expect(await screen.findByTestId('packages-source-filter-error')).toHaveTextContent('dev');
+    expect(screen.queryByTestId('pkg-row-com.acme.code')).toBeNull();
+  });
+
+  const SHEET_AUTHORING = [
+    'engine.packages.detail.edit',
+    'engine.packages.detail.publish',
+    'engine.packages.detail.revert',
+    'engine.packages.detail.export',
+    'engine.packages.detail.duplicate',
+    'engine.packages.detail.adoptOrphans',
+  ];
+
+  it('the detail sheet offers View info, Disable and Delete, and links an authored package to Studio', async () => {
+    await serve({ packages: [AUTHORED], drafts: [{ type: 'object', name: 'b2r4_task' }] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-app.b2r4'));
+    const sheet = await screen.findByRole('dialog');
+
+    expect(within(sheet).getByRole('button', { name: row('engine.packages.detail.viewInfo') })).toBeInTheDocument();
+    expect(within(sheet).getByRole('button', { name: row('engine.packages.detail.disable') })).toBeInTheDocument();
+    expect(within(sheet).getByRole('button', { name: row('engine.packages.detail.deletePackage') })).toBeInTheDocument();
+    for (const key of SHEET_AUTHORING) {
+      expect(within(sheet).queryByRole('button', { name: row(key) }), key).toBeNull();
+    }
+    // Pending changes (with their Publish / Discard) and the metadata browser
+    // are authoring: not on this face, though the package has a draft.
+    expect(within(sheet).queryByText(row('engine.packages.detail.pendingChanges'))).toBeNull();
+    expect(within(sheet).queryByText(row('engine.packages.detail.browseMetadata'))).toBeNull();
+    expect(within(sheet).getByTestId('pkg-detail-open-in-studio')).toHaveAttribute('href', '/studio/app.b2r4/data');
+  });
+
+  it('CONTROL: the same package on the development surface keeps every authoring action', async () => {
+    await serve({ packages: [AUTHORED], drafts: [{ type: 'object', name: 'b2r4_task' }] });
+    renderAt(STUDIO_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-app.b2r4'));
+    const sheet = await screen.findByRole('dialog');
+
+    for (const key of SHEET_AUTHORING) {
+      expect(within(sheet).getByRole('button', { name: row(key) }), key).toBeInTheDocument();
+    }
+    expect(await within(sheet).findByText(row('engine.packages.detail.pendingChanges'))).toBeInTheDocument();
+    expect(within(sheet).queryByTestId('pkg-detail-open-in-studio')).toBeNull();
+  });
+
+  it('a code package offers no Studio link', async () => {
+    await serve({ packages: [{ ...CODE, disableable: true }] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-com.acme.code'));
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).getByRole('button', { name: row('engine.packages.detail.disable') })).toBeInTheDocument();
+    expect(within(sheet).queryByTestId('pkg-detail-open-in-studio')).toBeNull();
+  });
+
+  it('Disable confirms, sends the disable door, and says so', async () => {
+    await serve({ packages: [AUTHORED] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-app.b2r4'));
+    const sheet = await screen.findByRole('dialog');
+    fireEvent.click(within(sheet).getByRole('button', { name: row('engine.packages.detail.disable') }));
+    fireEvent.click(await screen.findByTestId('pkg-detail-disable-confirm'));
+
+    expect(await screen.findByText(row('engine.packages.detail.disabled'))).toBeInTheDocument();
+    expect(writes).toContain('PATCH /api/v1/packages/app.b2r4/disable');
+  });
+
+  it.each([
+    ['structure', '?keepData=true'],
+    ['all', ''],
+  ])('Delete keeps its keep-data choice (%s)', async (mode, qs) => {
+    await serve({ packages: [AUTHORED] });
+    renderAt(ADMIN_URL);
+    fireEvent.click(await screen.findByTestId('pkg-row-app.b2r4'));
+    const sheet = await screen.findByRole('dialog');
+    fireEvent.click(within(sheet).getByRole('button', { name: row('engine.packages.detail.deletePackage') }));
+
+    fireEvent.click(await screen.findByTestId(`pkg-detail-delete-mode-${mode}`));
+    fireEvent.change(screen.getByTestId('pkg-detail-delete-name-input'), { target: { value: 'My Base' } });
+    fireEvent.click(screen.getByTestId('pkg-detail-delete-confirm'));
+
+    await waitFor(() => expect(writes).toContain(`DELETE /api/v1/packages/app.b2r4${qs}`));
+    await waitFor(() => expect(screen.queryByTestId('pkg-detail-delete-dialog')).toBeNull());
+  });
+
+  it('New Package lands in Studio on the created package', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(ADMIN_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    fireEvent.click(screen.getByRole('button', { name: row('engine.packages.new') }));
+    fireEvent.click(await screen.findByTestId('stub-create-save'));
+
+    expect(await screen.findByTestId('where')).toHaveTextContent('/studio/app.fresh/data');
+  });
+
+  it('CONTROL: New Package on the development surface stays on the list', async () => {
+    await serve({ packages: [CODE] });
+    renderAt(STUDIO_URL);
+    await screen.findByTestId('pkg-row-com.acme.code');
+    fireEvent.click(screen.getByRole('button', { name: row('engine.packages.new') }));
+    expect(packagesReads).toBe(1);
+    fireEvent.click(await screen.findByTestId('stub-create-save'));
+
+    // The list is read again, and the page stays where it is.
+    await waitFor(() => expect(packagesReads).toBe(2));
+    expect(screen.queryByTestId('where')).toBeNull();
+    expect(screen.getByTestId('pkg-row-com.acme.code')).toBeInTheDocument();
+  });
+
+  it('reads in zh-CN from the catalogue rows', async () => {
+    for (const key of [
+      'engine.packages.admin.description',
+      'engine.packages.source.all',
+      'engine.packages.detail.openInStudio',
+      'engine.packages.face.unknown',
+      'engine.packages.face.repeated',
+    ]) {
+      expect(row(key, 'zh'), `${key}: a missing zh row echoes the key back`).not.toBe(key);
+      expect(row(key, 'zh'), `${key}: the zh row must not be the English one`).not.toBe(row(key));
+    }
   });
 });

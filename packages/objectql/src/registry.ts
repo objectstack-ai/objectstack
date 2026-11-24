@@ -35,6 +35,7 @@ import {
 import { resolveTenancyPosture, resolveSearchPinyinEnabled } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { provisionSearchCompanion } from './search-companion.js';
+import { provisionSyncProvenanceIndex, syncProvenanceColumnAdditions } from './sync-provenance-index.js';
 import type { ExtensionPlacementNote } from './registry-extension-placement.js';
 import { ObjectStackManifest, InstalledPackage, type InstalledPackageSource, customizationBasePackageId, type NamespaceObjectNameClash } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -232,7 +233,7 @@ export {
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
  * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
- * `description` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
+ * `description` / `actionLayout` / `validations` / `indexes` / `place` / `fieldGroups` / `relatedLists` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -580,7 +581,7 @@ export function applySystemFields(
   // `systemFields.tenant` only, so `systemFields: false` leaves the wall live).
   // Returning `schema` here was the last exit that decided the index by NOT
   // asking, which is how the withholding survived #8375's convergence.
-  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit && !wantQueue) {
+  if (!wantTenant && !wantAudit && !wantOwner && !wantOwningBusinessUnit && !wantQueue && !plan.sync) {
     return provisionTenantScopeIndex(schema, opts);
   }
 
@@ -711,17 +712,16 @@ export function applySystemFields(
   if (wantQueue && !schema.fields?.[QUEUE_FIELD]) {
     additions[QUEUE_FIELD] = { ...QUEUE_FIELD_DEF };
   }
+  if (plan.sync) Object.assign(additions, syncProvenanceColumnAdditions(schema)); // [ADR-0153 D4] the `_sync_` columns
 
-  // [#8375] The tenant INDEX is decided over the MERGED result, never over the
-  // input — so this function and the read-exit seam ask the same question of the
-  // same document shape. Both cases below route through it, including the one
-  // that adds no field at all (an object whose every system column is already
-  // declared still owes the index decision).
+  // [#8375] The tenant INDEX is decided over the MERGED result, never over the input, so this function and the
+  // read-exit seam ask one question of one document shape; the ADR-0153 D4 provenance index is stamped after it.
+  // Both cases below route through them, the one adding no field included (it still owes the index decision).
   if (Object.keys(additions).length === 0 && Object.keys(overrides).length === 0) {
-    return provisionTenantScopeIndex(schema, opts);
+    return provisionSyncProvenanceIndex(provisionTenantScopeIndex(schema, opts));
   }
 
-  return provisionTenantScopeIndex(
+  return provisionSyncProvenanceIndex(provisionTenantScopeIndex(
     {
       ...schema,
       // `additions` LOSE to an author's field (a declared `owner_id` is theirs);
@@ -729,7 +729,7 @@ export function applySystemFields(
       fields: { ...additions, ...(schema.fields ?? {}), ...overrides },
     },
     opts,
-  );
+  ));
 }
 
 /**

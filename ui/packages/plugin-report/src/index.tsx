@@ -37,6 +37,21 @@ export type {
 // `queryDataset`, so the client-side path had no remaining consumers.
 export { mergeFilters } from './mergeFilters';
 
+// objectstack#36374 — the report builder: one page for a new report and for
+// an existing report's Edit. Network-free: the host hands in the dataset
+// catalog and the bound dataset's members, and owns Save / Discard / Close.
+export { ReportBuilder } from './builder/ReportBuilder';
+export type { ReportBuilderProps, ReportBuilderTextBox } from './builder/ReportBuilder';
+export type {
+  ReportBuilderDataset,
+  ReportBuilderMeasure,
+  ReportBuilderDimension,
+  ReportBuilderMembers,
+  ReportBuilderMissing,
+  ReportBuilderSection,
+  ReportDraft,
+} from './builder/reportBuilderModel';
+
 // NAMESPACE — `plugin-report`, the spelling this package's consumers declare
 // (objectui#6416).
 //

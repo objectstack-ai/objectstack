@@ -193,11 +193,12 @@
  * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
  * row, the one mailbox ref DELETE aside (above). The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
  * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
- * spending it; the five advisory rows that write (`advisory_report`,
- * `advisory_create`, `advisory_collaborators_add`, `advisory_versions` and
- * `advisory_state`, below) are `repository-advisories: write`, and the two
- * that read (`advisory_read` and `advisory_list`, below) spend the same grant
- * at `read` alone (each row's `grant`), the seven rows spending it; the
+ * spending it; the seven advisory rows that write (`advisory_report`,
+ * `advisory_create`, `advisory_collaborators_add`, `advisory_versions`,
+ * `advisory_state`, `advisory_note` and `advisory_rewrite`, below) are
+ * `repository-advisories: write`, and the two that read (`advisory_read` and
+ * `advisory_list`, below) spend the same grant at `read` alone (each row's
+ * `grant`), the nine rows spending it; the
  * front-of-queue enqueue (`pr_enqueue_front`, below) and the dequeue
  * (`pr_dequeue`, below) are `merge-queues: write`, the two rows spending it —
  * GitHub's GraphQL mutations are outside that ledger,
@@ -608,7 +609,7 @@
  *   `advisory_report`            `POST …/security-advisories/reports`            `summary`, `description`; optional `severity`, `cwe_ids`
  *   `advisory_create`            `POST …/security-advisories`                    the report's keys, and `packages`
  *   `advisory_collaborators_add` `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and logins
- *   `advisory_versions`          `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `versions`: package, range, patched versions
+ *   `advisory_versions`          `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `versions`: package, range, patched versions; optional `drop`: packages
  *   `advisory_state`             `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `draft`, `closed` or `published`
  *
  * `advisory_create` is the maintainer's naming of a second way in, verbatim
@@ -626,31 +627,52 @@
  * here is `closed` once its fix merges, so `advisory_state` first moves it back
  * to `draft` (the reopen); `advisory_versions` then sets each affected
  * package's vulnerable range and patched versions; and `advisory_state` last
- * moves it to `published`. The versions row carries NO prose: its one key
- * beside the id is `versions`, a capped list of closed entries, each exactly
+ * moves it to `published`. The versions row carries NO prose: its keys
+ * beside the id are `versions`, a capped list of closed entries, each exactly
  * `package` (`NPM_PACKAGE_SHAPE`), `vulnerable_version_range`
  * (`ADVISORY_VERSION_RANGE_SHAPE`: one comparator, or a lower bound then an
- * upper bound, each an operator, one space and a release version) and
+ * upper bound, each an operator, one space and a release version or a
+ * pre-release of one, `17.0.0-rc.6` — GitHub's guide to affected versions
+ * admits one and orders it before its release — never a build tag) and
  * `patched_versions` (`ADVISORY_PATCHED_VERSIONS_SHAPE`: one to
  * `MAX_ADVISORY_PATCHED_VERSIONS` release versions, a comma and a space
- * between). `advisoryVersionEntryFailure` judges each, and also refuses a pair
- * whose bounds do not rise and a patched version inside its own range. Its
+ * between), and an optional `drop`, a capped list of npm names the action
+ * removes from the advisory. `advisoryVersionEntryFailure` judges each entry,
+ * and also refuses a pair whose bounds do not rise and a patched version
+ * inside its own range, both by semver precedence (`compareAdvisoryVersions`);
+ * the validator refuses a `drop` name that is no npm name, named twice, or
+ * also set by `versions` (`advisoryDropOverlap`) — by its position, ⛔ never
+ * its name. A drop never empties the list: `versions` names at least one
+ * entry, and the list the PATCH leaves is exactly those entries. Its
  * PATCH body is `{ vulnerabilities }` alone: per entry the npm ecosystem, the
- * name and the two version strings, never a vulnerable function.
+ * name and the two version strings, never a vulnerable function, and never
+ * the `drop`, which is the fence's and the read-back's.
  *
  * `published` is reached by ONE row and ONE transition: `advisory_state`, from
  * `draft` alone, and only once the executor's own GET reads at least one
  * `vulnerabilities` entry, every one in the versions row's spelling (the
- * `versions` fence, `ADVISORY_FENCES`) — the versions are set first. No other
+ * `versions` fence, `ADVISORY_FENCES`) — the versions are set first — and a
+ * description that is text or none and carries no seat signature line (the
+ * `notes` fence, `advisoryNoteSectionCount`: every `advisory_note` section
+ * opens with one, and none belongs in public text, so a section whose stamp
+ * or body was edited away is still seen). A publish makes the whole
+ * description public, so the working text is replaced first
+ * (`advisory_rewrite`); the refusal names the count and no byte of the text.
+ * The fence proves the description holds no seat note, not that a rewrite
+ * happened. Its window is the row's one read: a note landing between that GET
+ * and the PATCH is published, because `advisoryStateReadBack` judges the state
+ * and the versions, never the description. No other
  * field takes it as a value, and no body but the executor's `{ state }` can
  * carry it: the report's and the draft's bodies are the row's, holding no state
  * (the endpoint creates a draft and takes none), the versions row's is its
  * entries alone, and the other two PATCH bodies are the executor's
- * (`validate.mjs --self-test` pins every one). Editing an advisory's summary or
- * the text of its description, removing a collaborator, the CVE request and the
- * temporary fork are out of reach of every row; APPENDING a note to its
- * description is one row's alone, sealed inbound (`advisory_note`, the last of
- * these sections); reading an advisory's text is one row's alone,
+ * (`validate.mjs --self-test` pins every one). Editing a PUBLISHED or withdrawn
+ * advisory's text, removing a collaborator, the CVE request and the temporary
+ * fork are out of reach of every row; APPENDING a note to an unpublished
+ * advisory's description is one row's alone, sealed inbound (`advisory_note`),
+ * and REPLACING an unpublished advisory's summary and/or description is one
+ * row's alone, sealed the same way (`advisory_rewrite`, the last of these
+ * sections); reading an advisory's text is one row's alone,
  * which seals it (`advisory_read`, the next section); and listing advisories is
  * one row's alone too, narrowed to three states and five fields per advisory
  * and sealed the same way (`advisory_list`, the section after it):
@@ -690,7 +712,9 @@
  *     `advisoryVersionsLandedText`, `advisoryStateLandedText` and
  *     `advisoryFenceText` are the only spellings of an advisory row. An id
  *     exposes no content, but it is public in the log. A draft's package names
- *     and the versions row's entries are `quiet` too: a refusal never echoes one.
+ *     and the versions row's entries and `drop` names are `quiet` too: a
+ *     refusal never echoes one, and a `drop` name is spoken of by its position
+ *     in the action (`drop[1]`) alone.
  *
  * The executor's five paths (`execute.mjs`, in the shape of the hierarchy rows'):
  *
@@ -719,15 +743,18 @@
  *     `versions` fence holds. The PATCH REPLACES the whole list — GitHub's own
  *     example of the call: "To add vulnerable versions, include existing
  *     versions in the array" — so every package the advisory already lists
- *     must be one the action names, and no listed entry may be another
+ *     must be one the action names, set by `versions` or removed by name in
+ *     `drop`, so a silent drop stays impossible; every `drop` name must be a
+ *     package the advisory lists; and no listed entry may be another
  *     ecosystem's, nameless, or carry `vulnerable_functions`, which this row
  *     does not write and the PATCH would drop. It LANDS only when the answer,
- *     still `draft`, lists exactly the entries sent (`advisoryVersionsReadBack`);
+ *     still `draft`, lists exactly the entries sent and no dropped package
+ *     (`advisoryVersionsReadBack`);
  *   - `advisory_state` reads the advisory the same way and refuses an illegal
  *     transition with nothing sent (`ADVISORY_TRANSITIONS`: `draft` from
  *     `triage` — the accept — or from `closed` — the reopen; `closed` from
  *     `triage` or `draft`; `published` from `draft` alone, through the
- *     `versions` fence; nothing from `published` or `withdrawn`, and a state
+ *     `versions` and `notes` fences; nothing from `published` or `withdrawn`, and a state
  *     the table does not name fails closed). Its PATCH body is `{ state }` and
  *     nothing else, and it LANDS only when the answer shows that state
  *     (`advisoryStateReadBack`) — a publish only when the published answer
@@ -1016,6 +1043,69 @@
  *
  * The grant and the gate are `advisory_state`'s: `repository-advisories: write`, minted for the stroke alone; it
  * travels `alone`; and the stroke's target-write sender gate, write, maintain or admin on the target.
+ *
+ * ## The one row that REPLACES an advisory's text — `advisory_rewrite`, sealed like a note
+ *
+ * Publishing makes an advisory's whole description public, every appended seat note included, so a seat preparing a
+ * publish replaces the working text with the public one first: the summary, the impact, the affected packages and
+ * versions, the fix and the credits. The maintainer's words, verbatim as the body of issue 36662 records them:
+ * 「中继改不了正文，立卡现在派发处理」 and 「先解决这个问题」. A publish is then three strokes, each alone:
+ * `advisory_rewrite`, then `advisory_versions`, then `advisory_state` to `published` — a closed advisory reopened to
+ * `draft` by `advisory_state` before the versions, as before (the rewrite itself takes `closed` too).
+ *
+ *   row                request                                                              the payload carries
+ *   `advisory_rewrite` `GET`, `GET`, then `PATCH …/security-advisories/{id}`, then `GET`      `ghsa_id` and `sealed_note`
+ *
+ * REPLACE, NEVER APPEND. The PATCH sends the fields the rewrite names — `{ summary }`, `{ description }` or both — and
+ * nothing else: the text sent is the text sealed, byte for byte. The field it does not name is left as it is, and the
+ * read-back holds it to that.
+ *
+ * THE NOTE'S SEALING PATH, NOT A SECOND ONE. The field is the note's `sealed_note` (kind `sealed`), so
+ * `ADVISORY_NOTE_OPS` derives this row too; the envelope is `sealAdvisoryNote` / `openAdvisoryNote` to
+ * `ADVISORY_NOTE_RELAY_PUBLIC_KEY`, under the relay's secret `ADVISORY_NOTE_KEY_SECRET`, the seat's one-time digest key
+ * sealed in front; the validator marks the stroke `ADVISORY_NOTE_OUTPUT`=`yes` exactly as a note's, so the workflow
+ * hands the key over for it with no change of its own. What differs is the associated data: `advisorySealAad` binds
+ * the op, under the rewrite's own prefix, so a note never opens as a rewrite and a rewrite never as a note. The seat
+ * (`dispatch.mjs`, `armAdvisoryNotes`) reads the text from the files the actions file names — `summary_file` and/or
+ * `description_file`, keys of that file and never of the payload — each placed outside every git repository by
+ * `advisoryNoteFilePlace` before it is read; it drops a summary's surrounding whitespace and a description's leading
+ * blank lines and trailing whitespace, carries NO signature line or stamp (this is the public text), spells the
+ * fields as `advisoryRewriteText` (a JSON object, the fields in `ADVISORY_REWRITE_FIELDS` order) and judges it with
+ * `advisoryRewriteFailure`: an empty or blank field refused, a summary of more than one line or over the platform's
+ * `ADVISORY_SUMMARY_MAX_CHARS`, a control character, the whole over the note's `MAX_ADVISORY_NOTE_BYTES`.
+ *
+ * The executor (`advisoryRewriteAction`, `execute.mjs`), in the note's order, nothing sent before the PATCH:
+ *
+ *   1. the key, `advisoryNoteKeyFailure`;
+ *   2. the advisory's GET, judged by `ADVISORY_REWRITE_FENCES`: `ADVISORY_NOTE_FENCES` with `from`
+ *      `ADVISORY_REWRITE_STATES` — `triage`, `draft` or `closed`, `published` and `withdrawn` refused — and a summary
+ *      that is text or none;
+ *   3. the open, under the rewrite's associated data;
+ *   4. the text judged again (`advisoryRewriteFailure`), then `::add-mask::` for every line of each field;
+ *   5. the CONCURRENCY read: a second GET immediately before the PATCH, refused unless it passes the fences and its
+ *      summary and description are exactly the first's;
+ *   6. ONE PATCH of the fields sealed;
+ *   7. the READ-BACK (`advisoryRewriteReadBack`): the PATCH's answer, then a GET after it, each holding exactly the
+ *      fields sent and the other one as read — a mismatch FAILED, carrying `ADVISORY_REWRITE_NOT_RESENT`.
+ *
+ * The residual window is the note's: a write or a state move landing between step 5's read and the PATCH is not
+ * seen before the write (about one round trip). The read-back judges the text, not the state, so a publish inside
+ * that window lands the row and prints the state it read; a text write after the PATCH fails the read-back.
+ *
+ * Which states the platform takes the PATCH in is the platform's REST description's answer (read 2026-11-23, operation
+ * `security-advisories/update-repository-advisory`): none is excluded for `summary` or `description` (`maxLength`
+ * 1024 and 65535), and its one documented refusal is a state move, `published` → `draft`. NOT measured against a live
+ * advisory: the first live rewrite after merge, on a draft the security seat chooses, confirms it, and `triage` and
+ * `closed` stay readings until a rewrite lands in each. The fence is narrower than the platform either way.
+ *
+ * ⛔ What crosses the public run is the note's: the id, the state, the statuses, each field's byte counts before and
+ * after, and ONE notice — the note's spelling (`relayAdvisoryNoteAnnotationMessage`, op `advisory_rewrite`) carrying
+ * the sealed text's byte count and its keyed digest, taken over `advisoryRewriteText` of the fields the GET after the
+ * PATCH STORES (`advisoryRewriteStoredDigest`). The seat recomputes both from what it sealed, and a match is its
+ * read-back (`confirmRunAdvisoryNotes`). Never a byte of the summary or the description, the old or the new.
+ *
+ * The grant and the gate are the note's: `repository-advisories: write`, minted for the stroke alone; it travels
+ * `alone`; and the stroke's target-write sender gate.
  *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
@@ -1789,14 +1879,28 @@ export const ADVISORY_VERSIONS_STATES = Object.freeze(['draft']);
 
 /** One release version as the versions row spells one: MAJOR.MINOR.PATCH, no leading zero, no pre-release or build tag. */
 const RELEASE_VERSION = '(?:0|[1-9][0-9]{0,5})\\.(?:0|[1-9][0-9]{0,5})\\.(?:0|[1-9][0-9]{0,5})';
-/** A release version, whole. */
+/**
+ * One pre-release identifier as semver 2.0.0 spells one: a number with no leading zero, or letters, digits and hyphens
+ * carrying at least one non-digit — each capped, like a release version's parts.
+ */
+const PRERELEASE_IDENTIFIER = '(?:0|[1-9][0-9]{0,5}|(?=[0-9]*[A-Za-z-])[0-9A-Za-z-]{1,20})';
+/**
+ * A range bound (header): a release version, or a pre-release of one — a hyphen and one to four dot-separated
+ * identifiers, as in `17.0.0-rc.6` or `19.0.0-next.1` — and never a build tag. GitHub's own guide to an advisory's
+ * affected versions admits one ("The version must begin with a number followed by any number of numbers, letters,
+ * dots, dashes, or underscores", its example `>= 3.4.0-rc.0, <= 3.4.9`), and orders a pre-release before its release.
+ */
+const BOUND_VERSION = `${RELEASE_VERSION}(?:-${PRERELEASE_IDENTIFIER}(?:\\.${PRERELEASE_IDENTIFIER}){0,3})?`;
+/** A release version, whole — what `patched_versions` names. */
 export const ADVISORY_VERSION_SHAPE = new RegExp(`^${RELEASE_VERSION}$`);
+/** A range bound, whole: a release version or a pre-release of one. */
+export const ADVISORY_BOUND_VERSION_SHAPE = new RegExp(`^${BOUND_VERSION}$`);
 /**
  * A `vulnerable_version_range` in the spelling of GitHub's own example (`>= 1.0.0, < 1.0.1`): ONE comparator — an
- * operator, one space, a release version — or a lower bound (`>`, `>=`) then an upper bound (`<`, `<=`), a comma and
- * a space between. `advisoryVersionEntryFailure` also requires a pair's bounds to rise.
+ * operator, one space, a release version or a pre-release of one — or a lower bound (`>`, `>=`) then an upper bound
+ * (`<`, `<=`), a comma and a space between. `advisoryVersionEntryFailure` also requires a pair's bounds to rise.
  */
-export const ADVISORY_VERSION_RANGE_SHAPE = new RegExp(`^(?:(?:<|<=|>|>=|=) ${RELEASE_VERSION}|(?:>|>=) ${RELEASE_VERSION}, (?:<|<=) ${RELEASE_VERSION})$`);
+export const ADVISORY_VERSION_RANGE_SHAPE = new RegExp(`^(?:(?:<|<=|>|>=|=) ${BOUND_VERSION}|(?:>|>=) ${BOUND_VERSION}, (?:<|<=) ${BOUND_VERSION})$`);
 /** Release versions one `patched_versions` names, at most. */
 export const MAX_ADVISORY_PATCHED_VERSIONS = 5;
 /** A `patched_versions`: one release version (GitHub's example: `1.0.1`) or a few, a comma and a space between. */
@@ -1804,11 +1908,34 @@ export const ADVISORY_PATCHED_VERSIONS_SHAPE = new RegExp(`^${RELEASE_VERSION}(?
 /** The keys one `versions` entry carries — exactly these three, each required (header). */
 export const ADVISORY_VERSION_KEYS = Object.freeze(['package', 'vulnerable_version_range', 'patched_versions']);
 
-/** Two release versions compared: negative, zero or positive. Pure; each must already be in `ADVISORY_VERSION_SHAPE`. */
-export function compareReleaseVersions(a, b) {
-  const [x, y] = [a.split('.').map(Number), b.split('.').map(Number)];
+const NUMERIC_IDENTIFIER = /^[0-9]+$/;
+/** Two pre-release identifiers by semver precedence: numbers numerically, below any word; words in ASCII order. */
+const compareIdentifiers = (a, b) => {
+  const [na, nb] = [NUMERIC_IDENTIFIER.test(a), NUMERIC_IDENTIFIER.test(b)];
+  if (na && nb) return Number(a) - Number(b);
+  if (na !== nb) return na ? -1 : 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+
+/**
+ * Two versions in `ADVISORY_BOUND_VERSION_SHAPE` compared by semver precedence: negative, zero or positive. The
+ * release part by number, part by part; on a tie a pre-release sorts BELOW its release (`18.0.0-rc.1` < `18.0.0`), and
+ * two pre-releases compare identifier by identifier, the longer list above when one is a prefix of the other. Pure.
+ */
+export function compareAdvisoryVersions(a, b) {
+  const [ra, ...pa] = a.split('-');
+  const [rb, ...pb] = b.split('-');
+  const [x, y] = [ra.split('.').map(Number), rb.split('.').map(Number)];
   for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
-  return 0;
+  const [ta, tb] = [pa.join('-'), pb.join('-')];
+  if (ta === tb) return 0;
+  if (ta === '' || tb === '') return ta === '' ? 1 : -1;
+  const [ia, ib] = [ta.split('.'), tb.split('.')];
+  for (let i = 0; i < Math.min(ia.length, ib.length); i++) {
+    const d = compareIdentifiers(ia[i], ib[i]);
+    if (d !== 0) return d;
+  }
+  return ia.length - ib.length;
 }
 
 const COMPARATOR = /^(<=|>=|<|>|=) (\S+)$/;
@@ -1823,9 +1950,9 @@ export function advisoryRangeComparators(range) {
   });
 }
 
-/** Does a release version lie inside a range — every one of its comparators holding? Pure. */
+/** Does a version lie inside a range — every one of its comparators holding, by semver precedence? Pure. */
 export function inAdvisoryRange(version, comparators) {
-  return comparators.every((c) => COMPARATOR_HOLDS[c.op](compareReleaseVersions(version, c.version)));
+  return comparators.every((c) => COMPARATOR_HOLDS[c.op](compareAdvisoryVersions(version, c.version)));
 }
 
 const describedQuietly = (v) =>
@@ -1835,9 +1962,10 @@ const KEY_NAME_SHAPE = /^[a-z_]{1,40}$/;
 /**
  * Why one `versions` entry is not one the relay sends, as a sentence whose subject is `where`, or null when it is
  * one (header): exactly `ADVISORY_VERSION_KEYS`; `package` an npm name (`NPM_PACKAGE_SHAPE`, at most
- * `MAX_NPM_PACKAGE_CHARS`); `vulnerable_version_range` in `ADVISORY_VERSION_RANGE_SHAPE`, a pair's lower bound below
- * its upper; `patched_versions` in `ADVISORY_PATCHED_VERSIONS_SHAPE`, each version once and none inside the entry's
- * own range. ⛔ The sentence never carries a value — a refusal reaches the public run log, and before the publish a
+ * `MAX_NPM_PACKAGE_CHARS`); `vulnerable_version_range` in `ADVISORY_VERSION_RANGE_SHAPE`, each bound a release version
+ * or a pre-release of one, a pair's lower bound below its upper by semver precedence (`compareAdvisoryVersions`);
+ * `patched_versions` in `ADVISORY_PATCHED_VERSIONS_SHAPE`, release versions alone, each once and none inside the
+ * entry's own range. ⛔ The sentence never carries a value — a refusal reaches the public run log, and before the publish a
  * package and its versions are the unpublished advisory's; a key is named only in a key's shape. Pure; never throws.
  */
 export function advisoryVersionEntryFailure(entry, where = 'the entry') {
@@ -1850,12 +1978,12 @@ export function advisoryVersionEntryFailure(entry, where = 'the entry') {
   if (typeof name !== 'string' || Buffer.byteLength(name, 'utf8') > MAX_NPM_PACKAGE_CHARS || !NPM_PACKAGE_SHAPE.test(name)) return `${where}.package must be an npm package name, got ${describedQuietly(name)} that is not one — not echoed`;
   const range = advisoryRangeComparators(entry.vulnerable_version_range);
   if (!range) {
-    return `${where}.vulnerable_version_range must be one comparator, or a lower bound then an upper bound — an operator, one space and a release version each, as in ">= 1.0.0, < 1.0.1" — got ${describedQuietly(entry.vulnerable_version_range)} that is not one — not echoed`;
+    return `${where}.vulnerable_version_range must be one comparator, or a lower bound then an upper bound — an operator, one space and a release version each, as in ">= 1.0.0, < 1.0.1", or a pre-release of one, as in ">= 17.0.0-rc.6, < 18.6.0", never a build tag — got ${describedQuietly(entry.vulnerable_version_range)} that is not one — not echoed`;
   }
-  if (range.length === 2 && compareReleaseVersions(range[0].version, range[1].version) >= 0) return `${where}.vulnerable_version_range has a lower bound that is not below its upper bound`;
+  if (range.length === 2 && compareAdvisoryVersions(range[0].version, range[1].version) >= 0) return `${where}.vulnerable_version_range has a lower bound that is not below its upper bound`;
   const patched = entry.patched_versions;
   if (typeof patched !== 'string' || !ADVISORY_PATCHED_VERSIONS_SHAPE.test(patched)) {
-    return `${where}.patched_versions must be one to ${MAX_ADVISORY_PATCHED_VERSIONS} release versions, a comma and a space between, as in "1.0.1" — got ${describedQuietly(patched)} that is not one — not echoed`;
+    return `${where}.patched_versions must be one to ${MAX_ADVISORY_PATCHED_VERSIONS} release versions, a comma and a space between, as in "1.0.1" — a pre-release is a range bound only, never a patched version — got ${describedQuietly(patched)} that is not one — not echoed`;
   }
   const versions = patched.split(', ');
   if (new Set(versions).size !== versions.length) return `${where}.patched_versions names a version twice`;
@@ -1909,6 +2037,19 @@ export function advisoryVersionsDiff(want = [], got = []) {
   const extra = [...pool.values()].reduce((a, b) => a + b, 0);
   return { same: missing === 0 && extra === 0, missing, extra };
 }
+
+/**
+ * Where a versions row's `drop` names a package its `versions` also sets (header): the positions in `drop`, ascending —
+ * `[]` when the two never meet. A position, ⛔ never the name: before the publish a package is the unpublished
+ * advisory's, and a refusal reaches the public run log. Pure; `versions` entries that are no object name nothing.
+ */
+export function advisoryDropOverlap(drop = [], versions = []) {
+  const set = new Set(versions.map((v) => (isObject(v) ? v.package : undefined)));
+  return drop.map((name, i) => (set.has(name) ? i : null)).filter((i) => i !== null);
+}
+
+/** Positions in a versions row's `drop`, as a sentence spells them: `drop[0], drop[2]`. Pure. */
+export const dropPositionsText = (positions) => positions.map((i) => `drop[${i}]`).join(', ');
 
 const entriesText = (n) => `${n} entr${n === 1 ? 'y' : 'ies'}`;
 const packagesText = (entries) => {
@@ -1972,6 +2113,32 @@ const fromOf = (c) => (Array.isArray(c.from) ? c.from : c.to ? [] : ADVISORY_OPE
 const setsVersions = (c) => Array.isArray(c.versions);
 const orList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}` : xs.join(''));
 const publishes = (c) => c.to === ADVISORY_PUBLISHED_STATE;
+
+/** A note section's stamp line — the one spelling the seat's door writes under the signature (`advisoryNoteSection`, `dispatch.mjs`). */
+export const ADVISORY_NOTE_STAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/**
+ * A seat signature line in ANY lane — `LANE#N · ACCOUNT · SESSION`, the lane any word without a space. A superset of
+ * `SEAT_SIGNATURE_LINE` (`check-half-states.mjs`): every line that check accepts, this one does too
+ * (`validate.mjs --self-test` pins it). Looser on purpose: retiring a lane word from that list would let notes already
+ * signed under it pass a fence that read the live list, so lane words are only ever added there, and this shape does
+ * not depend on them. Public text carries no signature line (the rewrite's contract), so the extra reach refuses no
+ * legitimate publish.
+ */
+export const ADVISORY_SEAT_SIGNATURE_SHAPE = /^\S+#[1-9][0-9]* · [A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38} · session_[A-Za-z0-9]{6,}$/u;
+
+/**
+ * How many seat signature lines `description` carries (header: "The rows that write a security advisory", the
+ * `notes` fence): each line, trimmed — so a CRLF line end, a padded line or a tab does not hide one — that is
+ * `ADVISORY_SEAT_SIGNATURE_SHAPE`. Every `advisory_note` section opens with one, and a signature line has no place in
+ * an advisory's public text, so the count is taken on the signature alone: a section whose stamp, blank line or body
+ * was edited away still counts. A count and nothing else: ⛔ never a byte of the text. Pure.
+ */
+export function advisoryNoteSectionCount(description) {
+  if (typeof description !== 'string' || description === '') return 0;
+  return description.split('\n').filter((line) => ADVISORY_SEAT_SIGNATURE_SHAPE.test(line.trim())).length;
+}
+
 export const ADVISORY_FENCES = Object.freeze([
   Object.freeze({
     fence: 'read',
@@ -2004,25 +2171,46 @@ export const ADVISORY_FENCES = Object.freeze([
     fence: 'versions',
     wants: (c) =>
       setsVersions(c)
-        ? 'a list the action may replace whole — every package the advisory lists named by the action, every listed entry an npm package with a name and no vulnerable_functions, which this row does not write and the PATCH would drop'
+        ? 'a list the action may replace whole — every package the advisory lists named by the action, set by versions or removed by drop, every drop a package the advisory lists, every listed entry an npm package with a name and no vulnerable_functions, which this row does not write and the PATCH would drop'
         : "versions set first — at least one vulnerabilities entry, every one an npm package with a vulnerable_version_range and patched_versions in the versions row's spelling",
     fails: (c) => {
       if (!setsVersions(c) && !publishes(c)) return null;
       if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
       const listed = advisoryVersionsOf(c.answer.json);
       if (setsVersions(c)) {
-        const named = new Set(c.versions.map((v) => v?.package));
-        const dropped = new Set(listed.entries.map((v) => v.package).filter((name) => !named.has(name))).size;
+        // A listed package is named by the action when versions sets it or drop removes it by name (header); a drop that
+        // names no listed package is refused by its position alone, ⛔ never its name.
+        const drop = Array.isArray(c.drop) ? c.drop : [];
+        const named = new Set([...c.versions.map((v) => v?.package), ...drop]);
+        const listedNames = new Set(listed.entries.map((v) => v.package));
+        const dropped = [...listedNames].filter((name) => !named.has(name)).length;
+        const unlisted = drop.map((name, i) => (listedNames.has(name) ? null : i)).filter((i) => i !== null);
         const lacks = [
           ...(listed.foreign ? [`${entriesText(listed.foreign)} of another ecosystem or naming no package`] : []),
           ...(listed.functions ? [`${entriesText(listed.functions)} carrying vulnerable_functions`] : []),
           ...(dropped ? [`${dropped} listed package(s) the action does not name`] : []),
+          ...(unlisted.length ? [`${dropPositionsText(unlisted)} not a package it lists — a drop removes a listed package by name`] : []),
         ];
         return lacks.length ? `the advisory lists ${entriesText(listed.total)}: ${lacks.join('; ')}` : null;
       }
       if (listed.total === 0) return 'the advisory lists no vulnerabilities entry';
       const unspelled = listed.foreign + listed.entries.filter((v) => advisoryVersionEntryFailure(v) !== null).length;
       return unspelled ? `${unspelled} of the advisory's ${entriesText(listed.total)} carry no npm package, version range or patched versions in the versions row's spelling` : null;
+    },
+  }),
+  // The notes (header): judged for a publish alone, on the executor's own GET just before its PATCH. A publish makes
+  // the whole description public, so it is refused while a seat note's signature line is still in it — the rewrite replaces
+  // the working text first. A count alone, ⛔ never a byte of the description.
+  Object.freeze({
+    fence: 'notes',
+    wants: () => 'a description that is text or none and carries no seat signature line, the head of every seat note — advisory_rewrite replaces the working text before the publish',
+    fails: (c) => {
+      if (!publishes(c)) return null;
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      const d = c.answer.json.description;
+      if (d !== undefined && d !== null && typeof d !== 'string') return `the advisory's description is ${Array.isArray(d) ? 'an array' : typeof d}, so it cannot be judged free of seat notes`;
+      const n = advisoryNoteSectionCount(d ?? '');
+      return n === 0 ? null : `the advisory's description still carries ${n} seat signature line(s), the head of a seat note`;
     },
   }),
 ]);
@@ -2115,10 +2303,11 @@ export function advisoryStateLandedText({ ghsaId, from, to, entries = null }) {
 
 /**
  * What LANDED means for `advisory_versions` (the header's section): the PATCH answered 2xx with the advisory the
- * action names, still `draft`, listing exactly the entries sent — order is the platform's. Answers
- * `{ ok, why, entries }`; `why` carries the id, the state and counts alone, ⛔ never a name or a version. Pure.
+ * action names, still `draft`, listing exactly the entries sent — order is the platform's — and no package the action
+ * dropped. Answers `{ ok, why, entries }`; `why` carries the id, the state, counts and `drop` positions alone, ⛔ never
+ * a name or a version. Pure.
  */
-export function advisoryVersionsReadBack({ ghsaId, sent = [], answer } = {}) {
+export function advisoryVersionsReadBack({ ghsaId, sent = [], drop = [], answer } = {}) {
   if (!twoXX(answer)) return { ok: false, why: `HTTP ${answer?.status ?? 'none'}` };
   if (!advisoryShaped(answer.json)) return { ok: false, why: `HTTP ${answer.status}, but the answer is not an advisory, so its versions cannot be read back` };
   if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `HTTP ${answer.status}, but the answer names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
@@ -2127,15 +2316,18 @@ export function advisoryVersionsReadBack({ ghsaId, sent = [], answer } = {}) {
   }
   const listed = advisoryVersionsOf(answer.json);
   const diff = advisoryVersionsDiff(sent, listed.entries);
-  if (listed.foreign || !diff.same) {
-    return { ok: false, why: `HTTP ${answer.status}, but the answer lists ${entriesText(listed.total)} — ${diff.missing} of the ${entriesText(sent.length)} sent missing or answered in another spelling, ${diff.extra + listed.foreign} other` };
+  const kept = drop.map((name, i) => (listed.entries.some((v) => v.package === name) ? i : null)).filter((i) => i !== null);
+  if (listed.foreign || !diff.same || kept.length) {
+    const still = kept.length ? `; ${dropPositionsText(kept)} still listed — a package the action dropped` : '';
+    return { ok: false, why: `HTTP ${answer.status}, but the answer lists ${entriesText(listed.total)} — ${diff.missing} of the ${entriesText(sent.length)} sent missing or answered in another spelling, ${diff.extra + listed.foreign} other${still}` };
   }
   return { ok: true, why: '', entries: listed.total };
 }
 
 /** The row a landed `advisory_versions` prints: the id, the state and counts — never a package name or a version. Pure. */
-export function advisoryVersionsLandedText({ ghsaId, state, versions = [] }) {
-  return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · versions set: ${entriesText(versions.length)} across ${packagesText(versions)}`;
+export function advisoryVersionsLandedText({ ghsaId, state, versions = [], drop = [] }) {
+  const dropped = drop.length ? ` · dropped ${drop.length} package${drop.length === 1 ? '' : 's'}` : '';
+  return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · versions set: ${entriesText(versions.length)} across ${packagesText(versions)}${dropped}`;
 }
 
 /**
@@ -2711,6 +2903,9 @@ export function advisorySealAad({ requestId, action, op, ghsaId }) {
   if (op === 'advisory_list') return Buffer.from(`${ADVISORY_READ_INFO} request=${requestId} action=${action} op=advisory_list`, 'utf8');
   // The one INBOUND seal (header: "The one row that APPENDS"): the note's own label, the op and the advisory's id.
   if (op === 'advisory_note') return Buffer.from(`fleet-write:advisory_note:v1 request=${requestId} action=${action} op=advisory_note ghsa_id=${ghsaId}`, 'utf8');
+  // The same seal, the rewrite's (header: "The one row that REPLACES"): its own prefix and op, so a note never opens as
+  // a rewrite and a rewrite never as a note.
+  if (op === 'advisory_rewrite') return Buffer.from(`fleet-write:advisory_rewrite:v1 request=${requestId} action=${action} op=advisory_rewrite ghsa_id=${ghsaId}`, 'utf8');
   throw new Error('no sealed answer is bound for this op');
 }
 
@@ -2780,7 +2975,7 @@ export const ADVISORY_NOTE_PRIVATE_KEY_SHAPE = /^MC4CAQAwBQYDK2VuBCIEI[A-P][A-Za
 export function advisoryNoteKeyFailure(text, relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY) {
   if (relayPublicKey === null) return `the relay's note key is not committed — ADVISORY_NOTE_RELAY_PUBLIC_KEY is null; the maintainer makes the pair, sets the repository secret ${ADVISORY_NOTE_KEY_SECRET} and commits its public half`;
   if (advisoryReadKeyFailure(relayPublicKey) !== null) return 'the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY is not an X25519 public key in its one spelling';
-  if (typeof text !== 'string' || text === '') return `the execute step carries no ${ADVISORY_NOTE_KEY_ENV} — the repository secret ${ADVISORY_NOTE_KEY_SECRET} is unset, or the stroke was not marked a note's`;
+  if (typeof text !== 'string' || text === '') return `the execute step carries no ${ADVISORY_NOTE_KEY_ENV} — the repository secret ${ADVISORY_NOTE_KEY_SECRET} is unset, or the stroke was not marked as sealed to the relay's note key (a note's or a rewrite's)`;
   if (!ADVISORY_NOTE_PRIVATE_KEY_SHAPE.test(text)) return `${ADVISORY_NOTE_KEY_ENV} is not an X25519 private key in base64 PKCS#8 DER, its one spelling`;
   let key;
   try {
@@ -2946,6 +3141,165 @@ export function advisoryNoteLandedText({ ghsaId, state, existingBytes, sectionBy
   );
 }
 
+// ---------------------------------------------------------------------------
+// `advisory_rewrite` (header: "The one row that REPLACES an advisory's text") — the note's seal, key, digest and
+// fences, with the text, its judgment, the fence on the summary and the read-back of its own.
+// ---------------------------------------------------------------------------
+
+/**
+ * The states a rewrite replaces the text in — the note's three, every unpublished state the text is private in.
+ * The platform's own REST description (`github/rest-api-description`, operation
+ * `security-advisories/update-repository-advisory`, read 2026-11-23) sets NO state limit on a `summary` or
+ * `description` PATCH; its one refused move is a state one (`published` → `draft`, 422). The fence is the relay's:
+ * `published` and `withdrawn` are refused, because a rewrite there edits public text (header).
+ */
+export const ADVISORY_REWRITE_STATES = Object.freeze(['triage', 'draft', 'closed']);
+/** The fields a rewrite may replace, in the one order its text spells them. */
+export const ADVISORY_REWRITE_FIELDS = Object.freeze(['summary', 'description']);
+/** The platform's cap on an advisory's `summary`, in characters (its REST description's `maxLength`). */
+export const ADVISORY_SUMMARY_MAX_CHARS = 1024;
+/** The characters no rewritten description carries: every control character but the tab and the newline. */
+const REWRITE_DESCRIPTION_CONTROL_SHAPE = /[\u0000-\u0008\u000b-\u001f\u007f]/u;
+/** The characters no rewritten summary carries: every control character, the tab and the newline among them — one line. */
+const REWRITE_SUMMARY_CONTROL_SHAPE = /[\u0000-\u001f\u007f]/u;
+
+/**
+ * The text a rewrite seals, and the text its digest is taken over: a JSON object of the fields given, in
+ * `ADVISORY_REWRITE_FIELDS` order and nothing else. The seat seals it; the executor rebuilds it from what the advisory
+ * STORES after the PATCH, so equal digests are a read-back of the stored fields. Pure.
+ */
+export function advisoryRewriteText(fields = {}) {
+  const out = {};
+  for (const key of ADVISORY_REWRITE_FIELDS) if (fields[key] !== undefined) out[key] = fields[key];
+  return JSON.stringify(out);
+}
+
+/**
+ * Why `text` is not a rewrite's sealed text, or null when it is (header: "The one row that REPLACES"): a JSON object
+ * whose keys are `ADVISORY_REWRITE_FIELDS` alone, in that order, at least one; a `summary` that is one line, not
+ * blank, with no surrounding whitespace and at most `ADVISORY_SUMMARY_MAX_CHARS` characters and
+ * `MAX_ADVISORY_SUMMARY_BYTES` bytes; a `description` that is not blank, ends in no whitespace and carries no control
+ * character but the tab and the newline; the whole at most `MAX_ADVISORY_NOTE_BYTES`, the note's cap, so its seal is a
+ * `sealed_note` in shape. The seat judges it before the seal and the executor again after the open — so ⛔ no sentence
+ * carries a byte of it: the executor's lines reach a public log. Pure.
+ */
+export function advisoryRewriteFailure(text) {
+  if (typeof text !== 'string' || text === '') return 'the rewrite is empty';
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes > MAX_ADVISORY_NOTE_BYTES) return `the rewrite is ${bytes} bytes as sealed, over its cap of ${MAX_ADVISORY_NOTE_BYTES}`;
+  let fields;
+  try {
+    fields = JSON.parse(text);
+  } catch {
+    return 'the rewrite is not the JSON object this door seals';
+  }
+  if (!isObject(fields) || Array.isArray(fields)) return 'the rewrite is not the JSON object this door seals';
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return 'the rewrite names neither a summary nor a description';
+  if (keys.some((k) => !ADVISORY_REWRITE_FIELDS.includes(k))) return 'the rewrite carries a field other than summary and description';
+  if (advisoryRewriteText(fields) !== text) return 'the rewrite is not in the one spelling this door seals';
+  if (fields.summary !== undefined) {
+    const s = fields.summary;
+    if (typeof s !== 'string' || s.trim() === '') return 'the summary is empty';
+    if (REWRITE_SUMMARY_CONTROL_SHAPE.test(s)) return 'the summary is not one line — it carries a newline, a tab or another control character';
+    if (s !== s.trim()) return 'the summary begins or ends in whitespace';
+    if (codePoints(s) > ADVISORY_SUMMARY_MAX_CHARS) return `the summary is ${codePoints(s)} characters, over the platform's ${ADVISORY_SUMMARY_MAX_CHARS}`;
+    if (Buffer.byteLength(s, 'utf8') > MAX_ADVISORY_SUMMARY_BYTES) return `the summary is ${Buffer.byteLength(s, 'utf8')} bytes, over its cap of ${MAX_ADVISORY_SUMMARY_BYTES}`;
+  }
+  if (fields.description !== undefined) {
+    const d = fields.description;
+    if (typeof d !== 'string' || d.trim() === '') return 'the description is empty';
+    if (REWRITE_DESCRIPTION_CONTROL_SHAPE.test(d)) return 'the description carries a control character other than a tab or a newline (a carriage return among them)';
+    if (d !== d.trimEnd()) return 'the description ends in whitespace';
+    if (codePoints(d) > ADVISORY_DESCRIPTION_MAX_CHARS) return `the description is ${codePoints(d)} characters, over the platform's ${ADVISORY_DESCRIPTION_MAX_CHARS}`;
+  }
+  return null;
+}
+
+/** A judged rewrite's fields — called only after `advisoryRewriteFailure` passed `text`. Pure. */
+export function advisoryRewriteOf(text) {
+  return JSON.parse(text);
+}
+
+/** The summary as read: the text, or '' for the null an advisory with none answers. Pure. */
+export const advisorySummaryOf = (json) => (typeof json?.summary === 'string' ? json.summary : '');
+/** One field of an advisory's answer as a rewrite compares it. Pure. */
+const rewriteFieldOf = (json, key) => (key === 'summary' ? advisorySummaryOf(json) : advisoryDescriptionOf(json));
+
+/**
+ * The fences on a rewrite's advisory, judged on each of the executor's GETs — the note's (`ADVISORY_NOTE_FENCES`:
+ * `ADVISORY_FENCES` and the description), with `from` the rewrite's states, then the summary: a string, or null.
+ */
+export const ADVISORY_REWRITE_FENCES = Object.freeze([
+  ...ADVISORY_NOTE_FENCES,
+  Object.freeze({
+    fence: 'summary',
+    wants: () => 'a summary that is text, or none at all',
+    fails: (c) => {
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      const s = c.answer.json.summary;
+      return s === undefined || s === null || typeof s === 'string' ? null : `the advisory's summary is ${Array.isArray(s) ? 'an array' : typeof s}`;
+    },
+  }),
+]);
+
+/** The rewrite fences `ctx` fails: `[{ fence, wants, got }]`, `[]` when all hold — spoken through `advisoryFenceText`. Pure. */
+export function advisoryRewriteFenceFailures(ctx = {}) {
+  return ADVISORY_REWRITE_FENCES.map((f) => ({ fence: f.fence, wants: f.wants(ctx), got: f.fails(ctx) })).filter((f) => f.got !== null);
+}
+
+/**
+ * The digest a landed rewrite's notice carries: `advisoryNoteDigest` over `advisoryRewriteText` of the fields the
+ * advisory STORES, for the fields the rewrite sent — never over the text opened, so a match at the seat is a read-back
+ * of the stored bytes. Pure.
+ */
+export function advisoryRewriteStoredDigest({ digestKey, json, fields }) {
+  const stored = {};
+  for (const key of ADVISORY_REWRITE_FIELDS) if (fields.includes(key)) stored[key] = rewriteFieldOf(json, key);
+  return advisoryNoteDigest({ digestKey, section: advisoryRewriteText(stored) });
+}
+
+/**
+ * What LANDED means for a rewrite (header): the stored advisory — the PATCH's answer, then a GET after it — holds
+ * EXACTLY each field sent, byte for byte, and the field NOT sent exactly as read before the PATCH. `sent` is the
+ * rewrite's fields, `before` the advisory read just before the PATCH, `answer` one of the two reads. Answers
+ * `{ ok, why }`; `why` carries the id, a status, a field's name and byte counts alone — ⛔ never a byte of any text.
+ * Either way the PATCH was sent, so ⛔ a failed read-back is never re-sent. Pure.
+ */
+export function advisoryRewriteReadBack({ ghsaId, sent, before, answer, read = 'the PATCH answer' } = {}) {
+  if (!twoXX(answer)) return { ok: false, why: `${read} is HTTP ${answer?.status ?? 'none'}` };
+  if (!advisoryShaped(answer.json)) return { ok: false, why: `${read} is HTTP ${answer.status}, but not an advisory, so its text cannot be read back` };
+  if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `${read} is HTTP ${answer.status}, but names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
+  for (const key of ADVISORY_REWRITE_FIELDS) {
+    const want = sent[key] !== undefined ? sent[key] : rewriteFieldOf(before, key);
+    const got = rewriteFieldOf(answer.json, key);
+    if (got === want) continue;
+    return {
+      ok: false,
+      why:
+        sent[key] !== undefined
+          ? `${read} holds a ${Buffer.byteLength(got, 'utf8')}-byte ${key} that is not the ${Buffer.byteLength(want, 'utf8')}-byte ${key} sent, byte for byte`
+          : `${read} holds a ${Buffer.byteLength(got, 'utf8')}-byte ${key}, not the ${Buffer.byteLength(want, 'utf8')} bytes read before the PATCH, which this rewrite did not send — another write raced this one`,
+    };
+  }
+  return { ok: true, why: '' };
+}
+
+/** What a rewrite whose read-back failed adds: the PATCH was sent, so the new text may be there. */
+export const ADVISORY_REWRITE_NOT_RESENT = 'the PATCH was sent, so the new text may be on the advisory — read it (advisory_read) before anything else, ⛔ never re-send the rewrite';
+
+/**
+ * The row a landed rewrite prints: the id, the state, each field replaced with its byte counts before and after, and
+ * the keyed digest — ⛔ never a byte of any text. `fields` is `[{ key, beforeBytes, afterBytes }]`. Pure.
+ */
+export function advisoryRewriteLandedText({ ghsaId, state, fields, digest }) {
+  const replaced = fields.map((f) => `the ${f.key} (${f.beforeBytes} → ${f.afterBytes} bytes)`).join(' and ');
+  return (
+    `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · ` +
+    `replaced ${replaced}, read back byte for byte · keyed digest ${digest}`
+  );
+}
+
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
 export const TRANSPORTS = Object.freeze(['direct', 'dispatch', 'auto']);
@@ -3098,6 +3452,8 @@ export const FIELDS = Object.freeze({
   collaborators: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS, shape: LOGIN_SHAPE, itemWhat: 'a GitHub login', quiet: true }),
   // The versions row's entries — a package and its two version strings each, no prose; quiet like every advisory key.
   versions: Object.freeze({ kind: 'versions', max: MAX_ADVISORY_VERSION_ENTRIES, quiet: true }),
+  // The packages the versions row removes from the advisory by name — npm names alone, quiet like every advisory key.
+  drop: Object.freeze({ kind: 'list', max: MAX_ADVISORY_PACKAGES, itemMax: MAX_NPM_PACKAGE_CHARS, shape: NPM_PACKAGE_SHAPE, itemWhat: 'an npm package name', quiet: true }),
   advisory_state: Object.freeze({ kind: 'enum', values: ADVISORY_SETTABLE_STATES, quiet: true, named: ADVISORY_REFUSED_STATES }),
   // The seat's one-time public key for ONE read (header: "The one row that READS an advisory") — its own kind.
   public_key: Object.freeze({ kind: 'x25519' }),
@@ -3283,8 +3639,12 @@ export function transferRemedy(source, target) {
  *   `distinct`    (optional) two keys the action must give different values —
  *                 the hierarchy rows' `issue` and `sub_issue`: an issue is
  *                 never its own sub-issue (header above);
+ *   `disjointPackages` (optional) a list of package names and a key of
+ *                 versions entries that never name one package — the versions
+ *                 row's `drop` and `versions`: a package is dropped or set,
+ *                 never both (`advisoryDropOverlap`, header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, enqueueFront?, subIssue?, advisoryRead?, advisoryNote?, fromAnswer?, assigned?, labelled? }`
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, enqueueFront?, subIssue?, advisoryRead?, advisoryNote?, advisoryRewrite?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
@@ -3306,9 +3666,9 @@ export function transferRemedy(source, target) {
  *                 and whose answer it reads back (`advisoryPreflight` /
  *                 `confirmAdvisory`, execute.mjs) — it carries no
  *                 `body` either; an `advisoryVersions` descriptor carries the
- *                 advisory's id and the entries, whose fences the executor
- *                 reads before the PATCH and whose answer it reads back — its
- *                 `body` is the table's, the entries on the wire; an
+ *                 advisory's id, the entries and any `drop`, whose fences the
+ *                 executor reads before the PATCH and whose answer it reads
+ *                 back — its `body` is the table's, the entries on the wire; an
  *                 `advisoryState` descriptor carries the id and the state
  *                 asked for, the executor's `{ state }` its body; an
  *                 `advisoryRead` descriptor carries the
@@ -3319,7 +3679,10 @@ export function transferRemedy(source, target) {
  *                 sealed note, which the executor opens, fences, sends as the
  *                 description and reads back (`advisoryNoteAction`,
  *                 execute.mjs) — it carries no `body`, the description is the
- *                 executor's; a `fromAnswer` descriptor names the
+ *                 executor's; an `advisoryRewrite` descriptor carries the same
+ *                 two, the seal a rewrite's, which the executor opens, fences,
+ *                 sends as the summary and/or the description and reads back
+ *                 (`advisoryRewriteAction`) — no `body` either; a `fromAnswer` descriptor names the
  *                 field of its action's FIRST request's answer that fills the
  *                 `answerPlaceholder` in its path (`fillFromAnswer`,
  *                 execute.mjs); an `assigned` descriptor lists the logins its
@@ -3618,17 +3981,20 @@ export const OPS = Object.freeze({
   // and the two version strings, never a vulnerable function, a summary or a description. The executor sends it only
   // after its own GET reads a draft whose whole list the action may replace (the `versions` fence), and it lands only
   // when the answer lists exactly the entries sent.
+  // `drop` names listed packages the list leaves out on purpose: it never reaches the body — the PATCH replaces the list
+  // with the entries alone — and is the fence's and the read-back's, each name listed before and gone after.
   advisory_versions: Object.freeze({
     permission: 'repository-advisories',
     required: Object.freeze(['ghsa_id', 'versions']),
-    optional: Object.freeze([]),
+    optional: Object.freeze(['drop']),
+    disjointPackages: Object.freeze(['drop', 'versions']),
     alone: true,
     requests: (a, repo) => [
       {
         verb: 'PATCH',
         path: `/repos/${repo}/security-advisories/${a.ghsa_id}`,
         body: { vulnerabilities: advisoryVersionsOnTheWire(a.versions) },
-        advisoryVersions: { ghsaId: a.ghsa_id, versions: a.versions.map((v) => ({ ...v })) },
+        advisoryVersions: { ghsaId: a.ghsa_id, versions: a.versions.map((v) => ({ ...v })), ...(a.drop ? { drop: [...a.drop] } : {}) },
       },
     ],
   }),
@@ -3682,6 +4048,18 @@ export const OPS = Object.freeze({
     optional: Object.freeze([]),
     alone: true,
     requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryNote: { ghsaId: a.ghsa_id, sealedNote: a.sealed_note } }],
+  }),
+  // The one row that REPLACES an advisory's text — see the header. The note's field, seal, key and gate: the id and the
+  // new summary and/or description SEALED to the relay's committed key, and no plaintext. The executor opens it, reads
+  // the advisory twice (the fences, then the text just before the write), sends ONE PATCH of the fields sealed and
+  // nothing else, and lands only when a GET after it reads each of them back byte for byte. repository-advisories
+  // write, alone, the stroke's target-write gate.
+  advisory_rewrite: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['ghsa_id', 'sealed_note']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryRewrite: { ghsaId: a.ghsa_id, sealedNote: a.sealed_note } }],
   }),
 });
 

@@ -85,3 +85,56 @@ describe('RelatedCountStore', () => {
     expect(probe).toHaveBeenCalledWith('global_task', { $filter: {}, $top: 1, $count: true });
   });
 });
+
+/**
+ * objectstack#36922 — a fetch that joined a read a change overtook does not
+ * answer with that read: it settles on a count the store holds. A caller reads
+ * "resolved and nothing cached" as a failed read (`useRelatedCounts`), so an
+ * overtaken answer marked a related badge failed after a row action, and every
+ * later write left it on its old number.
+ */
+describe('RelatedCountStore.fetch across an overtaking change (objectstack#36922)', () => {
+  beforeEach(() => RelatedCountStore._reset());
+
+  function heldProbe() {
+    const releases: Array<(total: number) => void> = [];
+    const probe = vi.fn(
+      () => new Promise<{ total: number }>((resolve) => releases.push((total) => resolve({ total }))),
+    );
+    return { probe, releases };
+  }
+
+  it('an invalidation while the read is out: the fetch reads again and resolves with the installed count', async () => {
+    const { probe, releases } = heldProbe();
+    const fetched = RelatedCountStore.fetch(probe as never, 'task', 'project', 'P1');
+    await Promise.resolve();
+    RelatedCountStore.invalidate('task');
+    releases[0](9);
+    await vi.waitFor(() => expect(probe).toHaveBeenCalledTimes(2));
+    releases[1](8);
+    expect(await fetched).toBe(8);
+    expect(RelatedCountStore.get('task', 'project', 'P1')).toBe(8);
+  });
+
+  it('joins the read a newer caller already sent rather than sending a third', async () => {
+    const { probe, releases } = heldProbe();
+    const first = RelatedCountStore.fetch(probe as never, 'task', 'project', 'P1');
+    await Promise.resolve();
+    RelatedCountStore.invalidateAll();
+    const second = RelatedCountStore.fetch(probe as never, 'task', 'project', 'P1');
+    releases[0](9);
+    releases[1](8);
+    expect(await first).toBe(8);
+    expect(await second).toBe(8);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('a read that fails without being overtaken still answers 0 with nothing cached', async () => {
+    const probe = vi.fn(async () => {
+      throw new Error('refused');
+    });
+    expect(await RelatedCountStore.fetch(probe, 'task', 'project', 'P1')).toBe(0);
+    expect(RelatedCountStore.get('task', 'project', 'P1')).toBeUndefined();
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+});

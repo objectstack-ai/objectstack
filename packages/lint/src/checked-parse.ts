@@ -109,8 +109,9 @@ export interface CheckedParseOptions {
    * the reported position so it lands in the author's coordinates.
    *
    * `validate-hook-body-writes.ts` parses an L2 hook body wrapped in
-   * `async function __body(ctx) {\n…\n}` — the shape the runtime compiles it
-   * into — so its diagnostics are one line low. The reported line is clamped to
+   * `async function __body(ctx) {\n…\n}` — a parse enclosure with the
+   * function-body context the runtime's wrapper gives it — so its diagnostics
+   * are one line low. The reported line is clamped to
    * at least 1, so a diagnostic that lands on a synthesised line is attributed
    * to the nearest AUTHORED line and never to a line the author did not write.
    */

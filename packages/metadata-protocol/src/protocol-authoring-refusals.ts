@@ -13,21 +13,14 @@ import type { MetadataIssueEntry } from './protocol-metadata-issues.js';
 
 /**
  * [#7557, #24097] The ONE refusal for an object whose owning package is
- * disabled, raised by every API reader of that object: the data plane
- * ({@link ObjectStackProtocolImplementation.assertObjectRegistered}) and the
- * by-name `/meta` reads (`getMetaItem`, `getMetaItemLayered`). One constructor,
- * so the two halves of the answer cannot drift apart in code, status or text.
+ * disabled, raised by the data plane
+ * ({@link ObjectStackProtocolImplementation.assertObjectRegistered}), the
+ * by-name `/meta` reads (`getMetaItem`, `getMetaItemLayered`) and the Change
+ * Owner doors. It lives in `@objectstack/core` (`utils/object-package-disabled.ts`,
+ * moved down so core's Change Owner rules raise the same constructor); this
+ * module re-exports it under its original name.
  */
-export function objectPackageDisabledError(object: string): Error {
-    const disabled: any = new Error(
-        `Object '${object}' belongs to a disabled package and is not being served. `
-        + 'Re-enable the package to restore access.',
-    );
-    disabled.code = 'OBJECT_PACKAGE_DISABLED';
-    disabled.status = 404;
-    disabled.object = object;
-    return disabled;
-}
+export { objectPackageDisabledError } from '@objectstack/core';
 
 /**
  * [#7557, #24097] Whether `registry` says `name` is an object of a disabled
