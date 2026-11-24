@@ -391,6 +391,18 @@ const CALLERS: Record<string, Classification> = {
       'them, under the caller\'s own context; the only read of the target is the hand-over recipient\'s ban state ' +
       '(a fixed platform object), and no field of it is served',
   },
+  // [#35315] The Change Owner cascade (ruling 7000907189 point 4).
+  'packages/core/src/security/change-record-owner.ts': {
+    kind: 'not-a-served-read',
+    reason:
+      "`transferCascadeRelations` asks only whether a child's `transferBehavior: 'cascade'` field points at the object " +
+      'the Change Owner request ADDRESSES (judged by the route as that object, for `update`); it reads no record of ' +
+      "that target beyond the request's own records. The rows it reads and moves are the CHILD's, the object that " +
+      "DECLARES the field, under the caller's own context, and the child is asked its own exposure for `update` " +
+      '(`canServeApiOperation`) before it is offered or cascaded. Pinned by ' +
+      '`packages/core/src/security/change-record-owner.test.ts` (a child whose exposure does not serve update is no ' +
+      'candidate, and a request naming it is refused before any read)',
+  },
   'packages/objectql/src/integrity/dangling-reference-audit.ts': {
     kind: 'not-a-served-read',
     reason: 'an integrity audit: it probes whether a stored id resolves and reports ids, never a field of the target',

@@ -499,6 +499,76 @@ describe('PrintService — mint, render, archive, revoke', () => {
   });
 });
 
+describe('PrintService — the default file name (the record’s display name, ADR-0079)', () => {
+  const INVOICE = {
+    name: 'invoice',
+    enable: { files: true },
+    nameField: 'number',
+    fields: { number: { type: 'text' }, total: { type: 'currency' } },
+  };
+
+  /** The name a print with no `filename` archives `record` under, on an object `object`. */
+  async function defaultName(record: Record<string, unknown>, object: unknown = INVOICE): Promise<string> {
+    const h = await harness({ object, record: { id: 'inv_1', ...record } });
+    const out = await h.service.printRecordToFile(REQUEST, USER);
+    expect(h.attachFile.mock.calls[0]![0].filename).toBe(out.filename);
+    return out.filename;
+  }
+
+  it('names the PDF from the record’s display name, read once, from the row the caller’s own read answered', async () => {
+    const h = await harness({ object: INVOICE, record: { id: 'inv_1', number: 'INV-0001' } });
+    const out = await h.service.printRecordToFile(REQUEST, USER);
+    expect(out.filename).toBe('INV-0001.pdf');
+    expect(h.attachFile).toHaveBeenCalledWith(expect.objectContaining({ filename: 'INV-0001.pdf' }), USER);
+    expect(h.findOne).toHaveBeenCalledTimes(1);
+    expect(h.findOne.mock.calls[0]![2].context).toBe(USER);
+  });
+
+  it('a derived title field names it too (no nameField: the name-ish field)', async () => {
+    const object = { name: 'invoice', enable: { files: true }, fields: { total: { type: 'number' }, title: { type: 'text' } } };
+    expect(await defaultName({ title: 'March retainer' }, object)).toBe('March retainer.pdf');
+  });
+
+  it('an explicit filename wins unchanged, display name or not', async () => {
+    const h = await harness({ object: INVOICE, record: { id: 'inv_1', number: 'INV-0001' } });
+    const out = await h.service.printRecordToFile({ ...REQUEST, filename: 'a/b: raw.PDF' }, USER);
+    expect(out.filename).toBe('a/b: raw.PDF');
+  });
+
+  for (const [label, record, object] of [
+    ['the object has no title field', { id: 'inv_1' }, { name: 'invoice', enable: { files: true } }],
+    ['the display value is empty', { number: '   ' }, INVOICE],
+    ['the caller’s row carries no display value (field-level security left it out)', {}, INVOICE],
+    ['the display value is not text or a number', { number: { first: 'x' } }, INVOICE],
+    ['nothing is left once the name is made safe', { number: ' .. . ' }, INVOICE],
+  ] as const) {
+    it(`${label}: keeps <page>-<recordId>.pdf, never the Record # floor`, async () => {
+      expect(await defaultName(record, object)).toBe('invoice_print-inv_1.pdf');
+    });
+  }
+
+  it('a number display value is used as written', async () => {
+    expect(await defaultName({ number: 1042 })).toBe('1042.pdf');
+  });
+
+  it('path and reserved characters become _, control characters and whitespace runs one space', async () => {
+    expect(await defaultName({ number: 'Q/1\\2: "big"  <deal>?*|\u0007end\n' })).toBe('Q_1_2_ _big_ _deal____ end.pdf');
+  });
+
+  it('leading dots go (no hidden file, no ..), and a trailing .pdf is not doubled', async () => {
+    expect(await defaultName({ number: '../..secret' })).toBe('_..secret.pdf');
+    expect(await defaultName({ number: '...hidden' })).toBe('hidden.pdf');
+    expect(await defaultName({ number: 'Quote 7.PDF' })).toBe('Quote 7.pdf');
+  });
+
+  it('a long name is cut to 100 characters before .pdf, never inside a character', async () => {
+    const name = await defaultName({ number: `${'a'.repeat(99)}\u{1F600}tail` });
+    expect(name).toBe(`${'a'.repeat(99)}\u{1F600}.pdf`);
+    expect(await defaultName({ number: `${'b'.repeat(99)}. more` })).toBe(`${'b'.repeat(99)}.pdf`);
+    expect((await defaultName({ number: 'x'.repeat(400) })).length).toBe(104);
+  });
+});
+
 describe('principalSessionMinterOf — the one read of the auth service’s mint', () => {
   it('absent auth, or an auth service without the member, has no mint', () => {
     expect(principalSessionMinterOf(undefined)).toBeUndefined();

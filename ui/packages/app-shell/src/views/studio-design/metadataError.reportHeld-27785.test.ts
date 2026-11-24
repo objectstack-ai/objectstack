@@ -57,16 +57,16 @@ describe('the Interfaces pillar holds a report list item the spec refuses only f
     const body = summary({ order: [blank(...ORDER_INPUTS)] });
     expect(reportRefusals(body)).toEqual(['order.0.by']);
     expect(reportHeldEdit(body, 'en')).toEqual({
-      clause: listClause('Order By', 1, 'Order'),
+      clause: listClause('Sort By', 1, 'Sort Order'),
       target: null,
-      input: 'Order',
+      input: 'Sort Order',
     });
   });
 
   it('the stored `{}` the card saw is held the same way', () => {
     const body = summary({ order: [{ by: 'stage' }, {}] });
     expect(reportRefusals(body)).toEqual(['order.1.by']);
-    expect(reportHeldEdit(body, 'en')?.clause).toBe(listClause('Order By', 2, 'Order'));
+    expect(reportHeldEdit(body, 'en')?.clause).toBe(listClause('Sort By', 2, 'Sort Order'));
   });
 
   it('joined Blocks → Add item: held for the first input it needs, then for its Dataset once named', () => {
@@ -79,7 +79,7 @@ describe('the Interfaces pillar holds a report list item the spec refuses only f
     });
     const named = joined({ blocks: [{ ...blank(...BLOCK_INPUTS), name: 'won' }] });
     expect(reportRefusals(named)).toEqual(['blocks.0.dataset']);
-    expect(reportHeldEdit(named, 'en')?.clause).toBe(listClause('Dataset', 1, 'Blocks'));
+    expect(reportHeldEdit(named, 'en')?.clause).toBe(listClause('Data Source', 1, 'Blocks'));
   });
 
   // CONTROL: the hold is never stricter than the contract.
@@ -152,7 +152,7 @@ describe('the Interfaces pillar holds a report chart the spec refuses only for u
 
   it('an unfinished list item is named before the chart', () => {
     const body = summary({ order: [{}], chart: { type: 'bar' } });
-    expect(reportHeldEdit(body, 'en')?.clause).toBe(listClause('Order By', 1, 'Order'));
+    expect(reportHeldEdit(body, 'en')?.clause).toBe(listClause('Sort By', 1, 'Sort Order'));
   });
 
   it('a report with no chart, or one the spec accepts, holds nothing', () => {

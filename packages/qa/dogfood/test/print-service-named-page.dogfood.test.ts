@@ -57,6 +57,7 @@ describe('a record printed on a print page that is not its object’s default re
   let ql: IDataEngine;
   let service: PrintService;
   let project: string;
+  let projectName: string;
   const saved: Record<string, string | undefined> = {};
   const revoke = vi.fn(async () => undefined);
   const mint = vi.fn(async () => ({
@@ -85,6 +86,7 @@ describe('a record printed on a print page that is not its object’s default re
     await protocol.saveMetaItem({ type: 'page', name: PROJECT_BRIEF_PAGE.name, item: PROJECT_BRIEF_PAGE });
     const [seeded] = await ql.find('showcase_project', { limit: 1 }, { context: SYS });
     project = String(seeded!.id);
+    projectName = String(seeded!.name);
 
     service = new PrintService({
       placement: { state: 'configured', resolved: { placement: 'local', target: '/stand-in/chromium', consoleUrl: CONSOLE } },
@@ -130,7 +132,8 @@ describe('a record printed on a print page that is not its object’s default re
       expect.objectContaining({ url: `${CONSOLE}/apps/showcase/showcase_project/record/${project}/page/${PROJECT_BRIEF_PAGE.name}` }),
     );
     expect(revoke).toHaveBeenCalledTimes(1);
-    expect(out).toMatchObject({ size: PDF.byteLength, filename: `${PROJECT_BRIEF_PAGE.name}-${project}.pdf` });
+    // No filename in the request: the PDF is named from the project's display name (ADR-0079).
+    expect(out).toMatchObject({ size: PDF.byteLength, filename: `${projectName}.pdf` });
     const attachment = await ql.findOne('sys_attachment', { where: { id: out.attachmentId } }, { context: SYS });
     expect(attachment).toMatchObject({ parent_object: 'showcase_project', parent_id: project, file_id: out.fileId, uploaded_by: ctx.userId });
   });

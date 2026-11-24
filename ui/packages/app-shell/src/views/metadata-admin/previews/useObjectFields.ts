@@ -88,8 +88,13 @@ export interface ObjectFieldInfo {
  * The declared choices of a served field definition, in the spec's own
  * `SelectOption` shape and only in it — an entry that is not `{ value, label }`
  * with string members is not a choice the builder can offer.
+ *
+ * The one reading of a served field's choices: every host that builds a
+ * filter-builder field list from a raw field definition (the generic editor's
+ * `objectCatalogOf`, the runtime view panel's `mapObjectFields`) reads them
+ * here, so the option picker is offered the same choices on every surface.
  */
-function declaredFieldOptions(def: Record<string, unknown>): Array<{ value: string; label: string }> | undefined {
+export function declaredFieldOptions(def: Record<string, unknown>): Array<{ value: string; label: string }> | undefined {
   if (!Array.isArray(def.options)) return undefined;
   const options = (def.options as unknown[]).flatMap((o) => {
     if (!o || typeof o !== 'object') return [];
