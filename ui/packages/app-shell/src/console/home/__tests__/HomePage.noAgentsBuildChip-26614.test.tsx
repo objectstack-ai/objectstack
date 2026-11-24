@@ -150,6 +150,9 @@ vi.mock('../../../hooks/useInboxBell', () => ({ useInboxBell: () => ({ markRead:
 // like every other source this page reads.
 vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
+// The console's preview code loads `@objectstack/lint` lazily; paid at import,
+// not inside a test's clock.
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 import { STUDIO_NEW_PACKAGE_PATH } from '../../../views/studio-design/studioNewPackage';
 
