@@ -313,8 +313,36 @@ export const OrdersPullJob = defineJob({
     part-way keeps the position of its last finished window. The first run,
     every run of a mapping that declares `full: true`, and a run whose mapping
     now reads another source object or field, or writes another target, read
-    from `watermark.start`; a run never reads below it. The delete keys change
-    nothing yet, and `os validate` says so.
+    from `watermark.start`; a run never reads below it.
+- **A row the source deleted is marked, never deleted.** Each source block
+  carries `deletePolicy`: `'mark'` (the reading when the key is absent) or
+  `'ignore'`, which leaves every row as it is. Under `'mark'` a pull stamps
+  `_sync_deleted_at` on a row the source deleted and clears it when a later pull
+  reads the row again; the row stays an ordinary row on every read path, so
+  filter on `_sync_deleted_at` where a deleted row should not show. A pull learns
+  of a delete two ways:
+  - **`deletedField`**, on any run that declares it: a read record whose value
+    in that source field is truthy (a soft-delete flag or a deleted-at column)
+    has its copy marked, and every other read record's copy is cleared.
+  - **Absence**, on a full run whose read was complete: every row of the
+    mapping (its `_sync_source`) the run did not read is marked. A
+    `datasourceSource` run with `full: true` is complete when its windows read
+    to their end and no source row in the job's organization has a NULL
+    watermark (such a row is in no window and would read as absent); it marks
+    only rows whose copied watermark is at or above `watermark.start`, so
+    raising the start marks nothing below it. A `connectorSource` run without a
+    `watermark` is complete only when it declares
+    `paging: { style: 'none' }`, which says its one response is the whole set;
+    with no `paging`, or a paging style the pull does not follow yet, it marks
+    nothing by absence. A run that is refused or stops part-way, or one whose
+    rows the import runner refused beyond a thousand, marks nothing by absence.
+
+  An incremental source (a `connectorSource` with a `watermark`, a
+  `datasourceSource` without `full: true`) never sees an absent row, so under
+  `'mark'` it must name `deletedField`, or declare `deletePolicy: 'ignore'`:
+  `os validate` refuses it otherwise, and so does the pull of a mapping no build
+  judged. A `synced` target that declares `systemFields: false` has no column to
+  mark, so its mapping declares `deletePolicy: 'ignore'`.
 - **Every row says where it came from.** A `synced` object carries five
   hidden, read-only columns the platform adds to it, beside the tenant and audit
   columns, with an index on (`organization_id`, `_sync_source`,
@@ -323,14 +351,14 @@ export const OrdersPullJob = defineJob({
   a key of several fields, a JSON array of their values in the order `upsertKey`
   lists them, such as `["10","A-1"]`), `_sync_pulled_at` (when it was written)
   and `_sync_run_id` (the pull's `sys_sync_run` row; not written when no run
-  record is kept). `_sync_deleted_at` is there but empty on every row: delete
-  marking has not landed yet. Nothing else writes these columns: a write that
+  record is kept). `_sync_deleted_at` is the delete mark (above). Nothing else writes these columns: a write that
   names a `_sync_` column is refused with `400
   ERR_SYNC_PROVENANCE_WRITE_REFUSED`, a system-context one included, and so is
   a write whose `beforeInsert` or `beforeUpdate` hook assigns, changes or
   removes one, the pull's own write included. A mapping whose `fieldMapping`
   targets one is refused when it runs, and so is a connector pull whose target
-  object's definition cannot be read. A `synced`
+  object's definition cannot be read (the refusal says whether the object is not
+  registered or the metadata read failed). A `synced`
   target that declares `systemFields: false` has none of these columns, and its
   rows are written without them.
 - **How a run is recorded.** A pull the platform refuses — the mapping is gone,
@@ -341,11 +369,14 @@ export const OrdersPullJob = defineJob({
   would refuse the same rows. Otherwise the run is `success`, including a pull
   that found nothing new. Every pull also leaves one `sys_sync_run` row in the
   job's organization: the mapping, the job run that drove it (`job_run_id`, the
-  attempt's `sys_job_run` id, and `trigger`, `schedule` or `manual`; both empty
-  under a job service that keeps no run history, where only the trigger may be
-  kept), where it read from and from which position,
-  the rows read, created, updated and refused, the position it committed, and
-  how it ended (`completed`, `degraded` or `failed` with the refusal's reason).
+  attempt's `sys_job_run` id, empty under a job service that keeps no run
+  history; and `trigger`, `schedule` or `manual`. Both are empty for a pull no
+  job started), where it read from and from which position,
+  the rows read, created, updated, refused and marked deleted, what it did about
+  deletes (`deletes`: `judged`, `by deletedField`, `ignored`, or `unjudged, …`
+  with the reason), the source rows with a NULL watermark
+  (`skipped_null_watermark`, a datasource source only), the position it
+  committed, and how it ended (`completed`, `degraded` or `failed` with the refusal's reason).
   A pull still `running` when the server stopped is closed `failed`
   (`interrupted`) at the next start. Rows are kept 30 days, except the one
   holding each mapping's read position.
@@ -440,6 +471,8 @@ At run time the handler is invoked with a `JobHandlerContext`
 | `ql` | the live ObjectQL engine — the same handle `defineStack({ onEnable })` receives |
 | `logger` | the platform logger, so a job's diagnostics are not `console` output |
 | `executionContext` | the context the job runs as — `{ isSystem: true, tenantId }` for a job that declares an [`organization`](#the-organization-a-job-runs-as), else `{ isSystem: true }`. `ql` is the raw engine, so pass it as each call's `context` to write as that organization |
+| `trigger` | why this run started — `schedule` or `manual`; absent under a job service that sends none |
+| `runId` | the job service's run-history id for this attempt (a `sys_job_run` id under the database job adapter); absent under a job service that keeps no run history |
 
 ```typescript
 import type { JobHandlerContext } from '@objectstack/runtime';
