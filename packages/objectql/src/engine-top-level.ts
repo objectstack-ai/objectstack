@@ -3027,7 +3027,7 @@ function applyFormulaPlan(
   /**
    * [ADR-0157 D4] What the working-day functions count with: each row's
    * organization's calendars, resolved once per call by
-   * {@link ObjectQL.resolveFormulaWorkCalendars}. `undefined` when no formula
+   * `formulaWorkCalendarsFor` (`formula-work-calendars.ts`). `undefined` when no formula
    * of the plan calls one, or where no resolution runs (a synchronous
    * evaluation), where such a formula then reads `null` and says why.
    */

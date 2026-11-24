@@ -23,6 +23,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { WorkCalendarService } from './work-calendar-service.js';
+import { setFormulaWorkCalendarService } from './formula-work-calendars.js';
 import { ObjectQL } from './engine.js';
 
 type Rec = Record<string, unknown>;
@@ -186,7 +187,7 @@ async function makeRig(options: { defaultInOrgB?: boolean } = {}) {
     hasCalendarObject: () => Boolean(engine.registry.getObject('sys_work_calendar')),
     posture: () => 'isolated',
   });
-  engine.setWorkCalendarService(service);
+  setFormulaWorkCalendarService(engine, service);
   // org_a: a CN default calendar with a National Day week and a 调休 make-up
   // Saturday, and the same weekly pattern with no exceptions under another code.
   const cals = storeFor('sys_work_calendar');
@@ -265,7 +266,7 @@ describe('ADR-0157 D8 — a refused count reads null and says so once', () => {
 
   it('a kernel with no calendar service refuses the same way', async () => {
     const rig = await makeRig();
-    rig.engine.setWorkCalendarService(undefined);
+    setFormulaWorkCalendarService(rig.engine, undefined);
     rig.storeFor('wd_case').set('c1', { id: 'c1', organization_id: 'org_a', start: '2026-09-30' });
     const [row] = await rig.engine.find('wd_case', {} as never) as Rec[];
     expect(row!.due_day).toBeNull();

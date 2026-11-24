@@ -28,6 +28,13 @@
  * module keeps nothing between evaluations. A refusal is never cached there,
  * so the read after an administrator's fix counts.
  *
+ * ## Where the service is held
+ *
+ * Beside the engine, not on it: the plugin installs the kernel's service
+ * ({@link setFormulaWorkCalendarService}) and each formula path reaches it
+ * through its host's `facade` ({@link formulaWorkCalendarsFor}), so the
+ * engine facade gains no member for it.
+ *
  * ## A refusal is data
  *
  * A calendar that did not resolve is handed to the evaluation as its refusal,
@@ -137,4 +144,27 @@ export async function resolveFormulaWorkCalendars(
     bindings.set(key, defaultCalendar === undefined ? { byCode } : { default: defaultCalendar, byCode });
   }));
   return (row) => bindings.get(keyOf(orgOf(row)));
+}
+
+/** The calendar service each engine's working-day formulas count through, installed by the engine plugin. */
+const servicesByEngine = new WeakMap<object, FormulaWorkCalendarResolver>();
+
+/** Install (or, with `undefined`, remove) the calendar service `engine`'s working-day formulas resolve through. */
+export function setFormulaWorkCalendarService(engine: object, service: FormulaWorkCalendarResolver | undefined): void {
+  if (service) servicesByEngine.set(engine, service);
+  else servicesByEngine.delete(engine);
+}
+
+/**
+ * {@link resolveFormulaWorkCalendars} through the service installed for
+ * `engine` (the formula path's host `facade`); without one, every call refuses
+ * as a kernel without calendars does.
+ */
+export function formulaWorkCalendarsFor(
+  engine: object,
+  plan: ReadonlyArray<PlannedExpression>,
+  rows: ReadonlyArray<Record<string, unknown> | null | undefined>,
+  context: { tenantId?: unknown } | undefined,
+): Promise<FormulaWorkCalendars | undefined> {
+  return resolveFormulaWorkCalendars(servicesByEngine.get(engine), plan, rows, context);
 }
