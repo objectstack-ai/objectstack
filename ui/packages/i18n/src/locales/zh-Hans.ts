@@ -5622,6 +5622,8 @@ const zh = {
     saveAndContinue: '保存并继续',
     nextStep: '已保存 — 下一步',
     completed: '流程「{{flow}}」已完成',
+    alreadySubmitted: '上一步已提交成功，流程已进入当前步骤。',
+    noLongerWaiting: '这一步可能已经处理完成。请关闭对话框，确认记录后再重试。',
   },
   appManagement: {
     title: '应用',

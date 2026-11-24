@@ -5563,6 +5563,8 @@ const de = {
     saveAndContinue: 'Speichern und fortfahren',
     nextStep: 'Gespeichert — nächster Schritt',
     completed: 'Flow „{{flow}}“ abgeschlossen',
+    alreadySubmitted: 'Ihre vorherige Eingabe wurde übernommen. Der Flow ist zu diesem Schritt weitergegangen.',
+    noLongerWaiting: 'Dieser Schritt wurde möglicherweise bereits verarbeitet. Schließen Sie diesen Dialog und prüfen Sie den Datensatz, bevor Sie es erneut versuchen.',
   },
   appManagement: {
     title: "Anwendungen",

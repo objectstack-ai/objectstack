@@ -5720,6 +5720,8 @@ const pt = {
     saveAndContinue: 'Salvar e continuar',
     nextStep: 'Salvo — próxima etapa',
     completed: 'Fluxo "{{flow}}" concluído',
+    alreadySubmitted: 'Seu envio anterior foi concluído. O fluxo avançou para esta etapa.',
+    noLongerWaiting: 'Esta etapa pode já ter sido processada. Feche esta caixa de diálogo e verifique o registro antes de tentar novamente.',
   },
   appManagement: {
     title: "Aplicativos",

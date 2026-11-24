@@ -6409,6 +6409,11 @@ const en = {
     // Terminal success, used only when the flow declares no `successMessage`
     // of its own.
     completed: 'Flow "{{flow}}" completed',
+    // A resume whose answer was lost had already gone through: the dialog now
+    // shows the step the run waits on (objectstack#36831).
+    alreadySubmitted: 'Your previous submission went through. The flow has moved on to this step.',
+    // ...or the run waits on no screen any more, so Submit is withdrawn.
+    noLongerWaiting: 'This step may already have been processed. Close this dialog and check the record before trying again.',
   },
   // Console › System › Applications (objectui#4307). The page's OWN chrome —
   // headings, controls, badges and the frames of its toasts.

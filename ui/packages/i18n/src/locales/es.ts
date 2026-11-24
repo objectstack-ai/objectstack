@@ -5725,6 +5725,8 @@ const es = {
     saveAndContinue: 'Guardar y continuar',
     nextStep: 'Guardado — paso siguiente',
     completed: 'Flujo «{{flow}}» completado',
+    alreadySubmitted: 'Su envío anterior se completó. El flujo ha avanzado a este paso.',
+    noLongerWaiting: 'Es posible que este paso ya se haya procesado. Cierre este cuadro de diálogo y revise el registro antes de volver a intentarlo.',
   },
   appManagement: {
     title: "Aplicaciones",
