@@ -40,6 +40,7 @@ const REPO_ROOT = uiRoot();
 const source = (rel: string) => path.join(REPO_ROOT, rel);
 
 const DETAIL_HEADER = source('packages/app-shell/src/views/studio-detail/StudioDetailHeader.tsx');
+const COMPONENTS = source('packages/components/src/index.ts');
 const THEME_CSS = source('packages/components/src/index.css');
 
 /** `px-6` on the header: the row is this much narrower than the header. */
@@ -70,7 +71,7 @@ function entry(): Plugin {
   const code = `
 import * as React from 'react';
 import { createRoot } from 'react-dom/client';
-import { DropdownMenuItem } from '@object-ui/components';
+import { DropdownMenuItem } from ${JSON.stringify(COMPONENTS)};
 import { StudioDetailHeader } from ${JSON.stringify(DETAIL_HEADER)};
 
 const h = React.createElement;
