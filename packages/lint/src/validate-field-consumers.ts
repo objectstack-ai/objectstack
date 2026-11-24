@@ -945,7 +945,8 @@ function creditInlineGridSortField(
 /**
  * [#21091] An inline collection's form factor when it is DECLARED — `grid` or
  * `form`, the values `inlineEdit` and a detail entry's `inlineMode` both name.
- * Anything else (`true`, absent) leaves it to the renderer to resolve, which
+ * Anything else (absent; a boolean, which the spec refuses since #35926 and
+ * the renderer reads as absent) leaves it to the renderer to resolve, which
  * this rule does not reproduce: `undefined`.
  */
 function formFactorOf(v: unknown): 'grid' | 'form' | undefined {
@@ -965,8 +966,8 @@ function formFactorOf(v: unknown): 'grid' | 'form' | undefined {
  * The derived grid's columns are a subset of the derived form's fields, so
  * the condition decides nothing the columns had not already credited: a form
  * that is not offered has no field the grid does not draw. That is why an
- * `inlineMode` this rule cannot resolve (the renderer's smart default for
- * `inlineEdit: true`) is passed as `undefined` without changing the verdict.
+ * `inlineMode` this rule cannot resolve (the renderer's smart default for an
+ * absent `inlineEdit`) is passed as `undefined` without changing the verdict.
  */
 function creditDerivedRowForm(
   ledger: ConsumerLedger,

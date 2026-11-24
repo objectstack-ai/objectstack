@@ -2667,36 +2667,32 @@ const es = {
       description: "Lo que conviene configurar antes de que empiecen sus compañeros. Cada elemento se puede cambiar más tarde en Configuración.",
       progress: "{{done}} de {{total}} completados",
       dismiss: "Ocultar lista",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "Ocultar en este dispositivo",
       showDone: "Mostrar completados ({{done}})",
-      showDoneSplit: "Mostrar completados ({{required}} obligatorios · {{optional}} opcionales)",
       hideDone: "Ocultar completados",
       optional: "Opcional",
       set: "Configurar",
       change: "Cambiar",
       view: "Ver",
-      confirm: "Confirmar",
       cancel: "Cancelar",
       continue: "Continuar",
-      prefilled: "Los valores aún sin configurar se sugieren a partir de su navegador. No se guarda nada hasta que confirme.",
-      organizationName: {
-        title: "Asigne un nombre a su organización",
-        todo: "Aún tiene el nombre con el que se creó: «{{name}}».",
-        action: "Cambiar nombre",
+      showList: "Ver lista",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "Datos básicos de la organización",
+        todo: "Nombre, idioma y país predeterminados, zona horaria y moneda, guardados de una vez.",
+        name: "Nombre de la organización",
+        nameRequired: "Introduzca un nombre para su organización.",
+        prefilled: "Los valores aún sin configurar se sugieren a partir de su navegador. No se guarda nada hasta que pulse Guardar.",
+        save: "Guardar",
+        saved: "Datos básicos de la organización guardados",
       },
-      languageCountry: {
-        title: "Idioma y país predeterminados",
-        todo: "Actualmente {{language}} y {{country}}. Confírmelos o elija otros.",
-        saved: "Idioma y país predeterminados guardados",
-      },
-      timezone: {
-        title: "Zona horaria del sistema",
-        todo: "Sigue siendo la predeterminada de la plataforma, {{current}}. Determina qué significa «hoy» en las fórmulas y cómo los informes agrupan las fechas.",
-        saved: "Zona horaria del sistema establecida en {{zone}}",
-      },
-      currency: {
-        title: "Moneda predeterminada",
-        todo: "Aún sin configurar, por lo que los importes se muestran sin símbolo de moneda.",
-        saved: "Moneda predeterminada establecida en {{currency}}",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "Primeros pasos",
+        count: "{{done}}/{{total}}",
+        aria: "Primeros pasos: {{done}} de {{total}} completados",
       },
       mail: {
         title: "Envío de correo",

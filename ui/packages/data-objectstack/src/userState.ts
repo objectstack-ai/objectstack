@@ -57,7 +57,11 @@
  * Nothing is kept past that: the read closes the moment it is sent, so a later
  * `load()` (a new adapter after a language or account switch) asks the server
  * again, and a different user or data source never joins another's read.
- * `save()` does not use it: a write still finds and writes its own row.
+ * `save()` never joins it, but a save issued while the adapter's load is in
+ * flight waits for that load and writes the row id it found, instead of
+ * sending its own per-key read for the row the load is about to return
+ * (objectstack-ai/objectstack#37109). With no load in flight, or after a load
+ * that failed or found no row, a write still finds and writes its own row.
  *
  * ## A family of keys in the same read (objectui#12418)
  *
@@ -345,6 +349,41 @@ function createPreferenceRowWriter(
 }
 
 /**
+ * The load an adapter has in flight, so a write can wait for the row id that
+ * load remembers (objectstack-ai/objectstack#37109). A save debounced shortly
+ * after the page mounts can otherwise run before the shared read answers, find
+ * no remembered id, and send the per-key read for a row the shared read is
+ * already fetching.
+ */
+interface LoadGate {
+  /** Mark `load` as the one in flight; returns it unchanged. */
+  track<R>(load: Promise<R>): Promise<R>;
+  /** Resolves once the load in flight (if any) has settled; never rejects. */
+  settled(): Promise<void>;
+}
+
+function createLoadGate(): LoadGate {
+  let inFlight: Promise<void> | null = null;
+  return {
+    track(load) {
+      // Errors are the load's own to report: the gate only waits for it.
+      const settled = load.then(
+        () => undefined,
+        () => undefined,
+      );
+      inFlight = settled;
+      void settled.then(() => {
+        if (inFlight === settled) inFlight = null;
+      });
+      return load;
+    },
+    settled() {
+      return inFlight ?? Promise.resolve();
+    },
+  };
+}
+
+/**
  * Defensive: if the backend ignored our predicate and returned mixed rows,
  * only accept ones tagged for this (user, key) pair. Rows that omit those
  * metadata fields entirely are trusted (covers mocks and backends that strip
@@ -382,6 +421,7 @@ export function createObjectStackUserStateAdapter<T = unknown>(
   } = options;
 
   const writer = createPreferenceRowWriter(dataSource, resource, userId, key, onError);
+  const loadGate = createLoadGate();
 
   // Serializes overlapping save() calls. A fresh adapter is created whenever
   // the data source / user changes (see UserStateBridge), so its cached row id
@@ -427,30 +467,39 @@ export function createObjectStackUserStateAdapter<T = unknown>(
     return [];
   };
 
-  return {
-    async load(): Promise<T[]> {
-      try {
-        const row = await loadExisting();
-        if (!row) {
-          writer.remember(null);
-          return [];
-        }
-        if (row.id !== undefined && row.id !== null) writer.remember(row.id);
-        return decodeValue(row.value);
-      } catch (error) {
-        onError('load', error);
+  const loadRow = async (): Promise<T[]> => {
+    try {
+      const row = await loadExisting();
+      if (!row) {
+        writer.remember(null);
         return [];
       }
+      if (row.id !== undefined && row.id !== null) writer.remember(row.id);
+      return decodeValue(row.value);
+    } catch (error) {
+      onError('load', error);
+      return [];
+    }
+  };
+
+  return {
+    load(): Promise<T[]> {
+      return loadGate.track(loadRow());
     },
 
     async save(items: T[]): Promise<void> {
       // Chain onto any in-flight save so concurrent flushes upsert serially
       // rather than racing into two inserts (see `saveChain` above). Each link
-      // catches its own errors so one failure never poisons the chain.
-      const run = saveChain.then(() => writer.upsert(items)).catch(error => {
-        onError('save', error);
-        // Swallow — provider falls back to localStorage as source of truth.
-      });
+      // catches its own errors so one failure never poisons the chain. Before
+      // it upserts, a link waits for a load still in flight, so the row id that
+      // load remembers is the one written (see `LoadGate`).
+      const run = saveChain
+        .then(() => loadGate.settled())
+        .then(() => writer.upsert(items))
+        .catch(error => {
+          onError('save', error);
+          // Swallow — provider falls back to localStorage as source of truth.
+        });
       saveChain = run;
       return run;
     },
@@ -520,6 +569,7 @@ export function createObjectStackUserPreferenceFamily<T extends object = Record<
 
   const writers = new Map<string, PreferenceRowWriter>();
   const chains = new Map<string, Promise<void>>();
+  const loadGate = createLoadGate();
   const writerFor = (key: string): PreferenceRowWriter => {
     let writer = writers.get(key);
     if (!writer) {
@@ -543,28 +593,32 @@ export function createObjectStackUserPreferenceFamily<T extends object = Record<
       : undefined;
   };
 
+  const loadRows = async (): Promise<Record<string, T>> => {
+    try {
+      const read = joinSharedRead(dataSource, resource, userId, { prefix });
+      const { rows } = await read.answer;
+      const out: Record<string, T> = {};
+      for (const row of rows) {
+        // Only a row that names a key of this family, for this user: a row
+        // that names no key cannot be attributed to any subject.
+        if (!row || typeof row.key !== 'string' || !row.key.startsWith(prefix)) continue;
+        if (row.user_id !== undefined && row.user_id !== userId) continue;
+        if (row.id !== undefined && row.id !== null) writerFor(row.key).remember(row.id);
+        const value = decodeValue(row.value);
+        if (value !== undefined) out[row.key] = value;
+      }
+      return out;
+    } catch (error) {
+      onError('load', error);
+      return {};
+    }
+  };
+
   return {
     prefix,
 
-    async load(): Promise<Record<string, T>> {
-      try {
-        const read = joinSharedRead(dataSource, resource, userId, { prefix });
-        const { rows } = await read.answer;
-        const out: Record<string, T> = {};
-        for (const row of rows) {
-          // Only a row that names a key of this family, for this user: a row
-          // that names no key cannot be attributed to any subject.
-          if (!row || typeof row.key !== 'string' || !row.key.startsWith(prefix)) continue;
-          if (row.user_id !== undefined && row.user_id !== userId) continue;
-          if (row.id !== undefined && row.id !== null) writerFor(row.key).remember(row.id);
-          const value = decodeValue(row.value);
-          if (value !== undefined) out[row.key] = value;
-        }
-        return out;
-      } catch (error) {
-        onError('load', error);
-        return {};
-      }
+    load(): Promise<Record<string, T>> {
+      return loadGate.track(loadRows());
     },
 
     async save(key: string, value: T): Promise<void> {
@@ -572,7 +626,10 @@ export function createObjectStackUserPreferenceFamily<T extends object = Record<
         onError('save', new Error(`key "${key}" is not in the family "${prefix}"`));
         return;
       }
+      // A load still in flight may be about to remember this key's row id:
+      // wait for it, as the single-key adapter does (see `LoadGate`).
       const run = (chains.get(key) ?? Promise.resolve())
+        .then(() => loadGate.settled())
         .then(() => writerFor(key).upsert(value))
         .catch(error => {
           onError('save', error);

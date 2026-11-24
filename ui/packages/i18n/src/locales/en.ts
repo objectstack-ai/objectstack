@@ -2848,37 +2848,33 @@ const en = {
       description: 'What to set up before your colleagues start. Every item can be changed later in Setup.',
       progress: '{{done}} of {{total}} done',
       dismiss: 'Hide checklist',
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: 'Hide on this device',
       showDone: 'Show completed ({{done}})',
-      showDoneSplit: 'Show completed ({{required}} required · {{optional}} optional)',
       hideDone: 'Hide completed',
       optional: 'Optional',
       set: 'Set',
       change: 'Change',
       view: 'View',
-      confirm: 'Confirm',
       cancel: 'Cancel',
       // The folded card's way back in, on a phone (objectstack#34596).
       continue: 'Continue',
-      prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you confirm.',
-      organizationName: {
-        title: 'Name your organization',
-        todo: 'It still has the name it was created with, "{{name}}".',
-        action: 'Rename',
+      showList: 'Show list',
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: 'Organization basics',
+        todo: 'Name, default language and country, time zone and currency, saved in one go.',
+        name: 'Organization name',
+        nameRequired: 'Enter a name for your organization.',
+        prefilled: 'Values not set yet are suggested from your browser. Nothing is saved until you press Save.',
+        save: 'Save',
+        saved: 'Organization basics saved',
       },
-      languageCountry: {
-        title: 'Default language and country',
-        todo: 'Currently {{language}} and {{country}}. Confirm them or choose others.',
-        saved: 'Default language and country saved',
-      },
-      timezone: {
-        title: 'System timezone',
-        todo: 'Still the platform default, {{current}}. It decides what "today" means in formulas and how reports group dates.',
-        saved: 'System timezone set to {{zone}}',
-      },
-      currency: {
-        title: 'Default currency',
-        todo: 'Not set yet, so amounts are shown without a currency symbol.',
-        saved: 'Default currency set to {{currency}}',
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: 'Get started',
+        count: '{{done}}/{{total}}',
+        aria: 'Get started: {{done}} of {{total}} done',
       },
       mail: {
         title: 'Email delivery',

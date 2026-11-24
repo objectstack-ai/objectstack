@@ -2593,36 +2593,32 @@ const de = {
       description: "Was Sie einrichten sollten, bevor Ihre Kollegen loslegen. Jeder Punkt lässt sich später in Setup ändern.",
       progress: "{{done}} von {{total}} erledigt",
       dismiss: "Checkliste ausblenden",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "Auf diesem Gerät ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
-      showDoneSplit: "Erledigte anzeigen ({{required}} Pflicht · {{optional}} optional)",
       hideDone: "Erledigte ausblenden",
       optional: "Optional",
       set: "Festlegen",
       change: "Ändern",
       view: "Anzeigen",
-      confirm: "Bestätigen",
       cancel: "Abbrechen",
       continue: "Fortsetzen",
-      prefilled: "Noch nicht festgelegte Werte sind aus Ihrem Browser vorgeschlagen. Gespeichert wird erst, wenn Sie bestätigen.",
-      organizationName: {
-        title: "Organisation benennen",
-        todo: "Sie trägt noch den Namen, mit dem sie angelegt wurde: „{{name}}“.",
-        action: "Umbenennen",
+      showList: "Liste anzeigen",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "Grunddaten der Organisation",
+        todo: "Name, Standardsprache und -land, Zeitzone und Währung, in einem Schritt gespeichert.",
+        name: "Name der Organisation",
+        nameRequired: "Geben Sie einen Namen für Ihre Organisation ein.",
+        prefilled: "Noch nicht festgelegte Werte sind aus Ihrem Browser vorgeschlagen. Gespeichert wird erst, wenn Sie auf Speichern klicken.",
+        save: "Speichern",
+        saved: "Grunddaten der Organisation gespeichert",
       },
-      languageCountry: {
-        title: "Standardsprache und -land",
-        todo: "Derzeit {{language}} und {{country}}. Bestätigen Sie diese oder wählen Sie andere.",
-        saved: "Standardsprache und -land gespeichert",
-      },
-      timezone: {
-        title: "Systemzeitzone",
-        todo: "Noch die Standardzeitzone der Plattform, {{current}}. Sie bestimmt, was „heute“ in Formeln bedeutet und wie Berichte Daten gruppieren.",
-        saved: "Systemzeitzone auf {{zone}} festgelegt",
-      },
-      currency: {
-        title: "Standardwährung",
-        todo: "Noch nicht festgelegt, daher werden Beträge ohne Währungssymbol angezeigt.",
-        saved: "Standardwährung auf {{currency}} festgelegt",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "Erste Schritte",
+        count: "{{done}}/{{total}}",
+        aria: "Erste Schritte: {{done}} von {{total}} erledigt",
       },
       mail: {
         title: "E-Mail-Versand",

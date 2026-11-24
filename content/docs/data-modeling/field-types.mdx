@@ -564,7 +564,7 @@ Parent-child relationship (cascading delete by default).
 | `reference` | `string` | **required** | Target (master) object name. A stored-metadata table is refused — see [below](#a-relationship-never-targets-a-stored-metadata-table) |
 | `referenceFilters` | `string[]` | — | **Removed** (#2377, ADR-0049) — no longer a recognized field property. `FieldSchema` is a strict object, so an unknown key is **rejected with guidance**, not silently stripped (ADR-0078): the error echoes the offending key and prescribes the replacement. Use structured `lookupFilters` + `dependsOn` instead; see [Relationships](/docs/data-modeling/relationships) |
 | `deleteBehavior` | `'restrict' \| 'cascade'` | `'cascade'` | Behavior when parent is deleted. `restrict` refuses the parent delete while children exist; `cascade` (and omitting the key) deletes the children with the parent. An explicit `set_null` is a **parse-time rejection** on this type (#9689) — a detail row cannot outlive its master; use a `lookup` if children must survive the parent |
-| `inlineEdit` | `boolean \| 'grid' \| 'form'` | — | Form factor of the child rows on the parent create/edit form (`true` = auto-pick, `'grid'`, or `'form'`). The form inlines the child only where a field group of the parent names it; `inlineEdit` alone inlines nothing |
+| `inlineEdit` | `'grid' \| 'form'` | — (auto-pick) | Form factor of the child rows on the parent create/edit form: `'grid'` or `'form'`; left out, the form factor is picked from the child's shape. The form inlines the child only where a field group of the parent names it; `inlineEdit` alone inlines nothing. A boolean is refused at parse: `true` and `false` both read as the key left out |
 | `inlineColumns` | `array` | — | Optional explicit inline grid columns |
 | `inlineAmountField` | `string` | — | Numeric child field used for the inline running total |
 
@@ -574,7 +574,7 @@ Parent-child relationship (cascading delete by default).
   label: 'Order',
   type: 'master_detail',
   reference: 'order',
-  inlineEdit: true,
+  inlineEdit: 'grid',
   inlineAmountField: 'line_total',
 }
 ```
@@ -594,7 +594,7 @@ fieldGroups: [
 A placed table keeps its tab, and the record page's Edit saves the record and its rows in one
 save. `relatedList: 'primary'` on the FK puts the table in the overview with no group.
 
-**The inline grid in the Console.** With `inlineEdit: 'grid'` (or `true` resolving to the grid)
+**The inline grid in the Console.** With `inlineEdit: 'grid'` (or no `inlineEdit` resolving to the grid)
 the parent's form edits the children as rows of a table:
 
 - **Columns.** Without `inlineColumns` the columns are derived from the child object. An
@@ -622,7 +622,7 @@ the parent's form edits the children as rows of a table:
   added, removed, duplicated or dragged, so the order is saved with the rows.
 - **Total.** `inlineAmountField` names the numeric child field summed into the footer.
 
-`inlineEdit: true` picks the form factor itself: a child with a single file, image or avatar
+Without `inlineEdit` the form factor is picked from the child: a child with a single file, image or avatar
 field keeps the grid, while a form-only field (textarea, rich text, JSON, location) or several
 rich fields tips it to a per-row form. An explicit `'grid'` or `'form'` always wins.
 

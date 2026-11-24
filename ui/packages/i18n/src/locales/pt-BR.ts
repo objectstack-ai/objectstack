@@ -2662,36 +2662,32 @@ const pt = {
       description: "O que configurar antes de seus colegas começarem. Cada item pode ser alterado depois em Configuração.",
       progress: "{{done}} de {{total}} concluídos",
       dismiss: "Ocultar lista",
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: "Ocultar neste dispositivo",
       showDone: "Mostrar concluídos ({{done}})",
-      showDoneSplit: "Mostrar concluídos ({{required}} obrigatórios · {{optional}} opcionais)",
       hideDone: "Ocultar concluídos",
       optional: "Opcional",
       set: "Definir",
       change: "Alterar",
       view: "Ver",
-      confirm: "Confirmar",
       cancel: "Cancelar",
       continue: "Continuar",
-      prefilled: "Os valores ainda não definidos foram sugeridos com base no seu navegador. Nada é salvo até você confirmar.",
-      organizationName: {
-        title: "Dê um nome à sua organização",
-        todo: "Ela ainda tem o nome com que foi criada: \"{{name}}\".",
-        action: "Renomear",
+      showList: "Mostrar lista",
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: "Dados básicos da organização",
+        todo: "Nome, idioma e país padrão, fuso horário e moeda, salvos de uma vez.",
+        name: "Nome da organização",
+        nameRequired: "Informe um nome para a sua organização.",
+        prefilled: "Os valores ainda não definidos são sugeridos com base no seu navegador. Nada é salvo até você clicar em Salvar.",
+        save: "Salvar",
+        saved: "Dados básicos da organização salvos",
       },
-      languageCountry: {
-        title: "Idioma e país padrão",
-        todo: "Atualmente {{language}} e {{country}}. Confirme-os ou escolha outros.",
-        saved: "Idioma e país padrão salvos",
-      },
-      timezone: {
-        title: "Fuso horário do sistema",
-        todo: "Ainda é o fuso padrão da plataforma, {{current}}. Ele define o que \"hoje\" significa nas fórmulas e como os relatórios agrupam datas.",
-        saved: "Fuso horário do sistema definido como {{zone}}",
-      },
-      currency: {
-        title: "Moeda padrão",
-        todo: "Ainda não definida, então os valores são exibidos sem símbolo de moeda.",
-        saved: "Moeda padrão definida como {{currency}}",
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: "Primeiros passos",
+        count: "{{done}}/{{total}}",
+        aria: "Primeiros passos: {{done}} de {{total}} concluídos",
       },
       mail: {
         title: "Envio de e-mails",
