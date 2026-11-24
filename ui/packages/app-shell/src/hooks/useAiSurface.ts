@@ -42,6 +42,7 @@
 
 import { useRef } from 'react';
 import { useAgents } from '@object-ui/plugin-chatbot/core';
+import { catalogServesBuild } from './surfaceAgent.js';
 
 /**
  * Resolve the AI service base URL, mirroring AiChatPage / the Home CTAs:
@@ -61,6 +62,13 @@ export interface AiSurfaceState {
   enabled: boolean;
   /** True until the agent catalog has resolved; route guards wait on this. */
   isLoading: boolean;
+  /**
+   * objectstack#36969 — true when the same catalog serves the build agent
+   * (alias-aware, `catalogServesBuild`): the gate for an entry that promises
+   * building with AI. False while loading, and where building is closed
+   * (`build` persisted inactive, `ask` still served).
+   */
+  buildServed: boolean;
 }
 
 /**
@@ -81,6 +89,7 @@ export function useAiSurfaceEnabled(): AiSurfaceState {
   const enabled = agents.length > 0;
   return {
     enabled,
+    buildServed: catalogServesBuild(agents),
     // Agents present → resolved/available. Otherwise we're loading until a fetch
     // has both started and finished with an empty result.
     isLoading: enabled ? false : isLoading || !fetchStartedRef.current,

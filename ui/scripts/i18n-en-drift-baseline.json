@@ -42,11 +42,6 @@
     "已启用 for every one of them, so there was nothing for it to follow."
   ],
   "waivers": {
-    "search.placeholder": {
-      "en": "Search objects, dashboards, pages, reports…",
-      "reason": "Ellipsis convergence on U+2026 (objectstack#6015 consistency pass). Eight packs followed in this PR; zh already spelled it '搜索对象、仪表板、页面、报表…' with U+2026 and had nothing to change.",
-      "issue": "objectui#3878"
-    },
     "collaboration.replyingTo": {
       "en": "Replying to {{name}}…",
       "reason": "Ellipsis convergence on U+2026 (objectstack#6015 consistency pass). All nine packs already ended this value with U+2026; en was the sole ASCII outlier, so no translation changes.",

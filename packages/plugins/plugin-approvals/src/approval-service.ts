@@ -153,6 +153,7 @@ import {
   type SubmitterApprovalRefusal,
 } from './no-approver-note.js';
 import {
+  flowNameOfProcess,
   localizeRequestLabels,
   negotiatedReaderLocale,
   readerLabelsFor,
@@ -9659,11 +9660,19 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     return undefined;
   }
 
-  private static pickTitle(rec: any, displayField?: string): string | undefined {
-    const candidates = displayField
+  /**
+   * The fields {@link pickTitle} names a record by, in order: the declared
+   * display field, then the common title-ish names. The one list, read also by
+   * the free-text search's title arm ({@link recordsTitledWith}).
+   */
+  private static titleCandidates(displayField?: string): string[] {
+    return displayField
       ? [displayField, 'name', 'title', 'subject', 'label']
       : ['name', 'title', 'subject', 'label'];
-    for (const f of candidates) {
+  }
+
+  private static pickTitle(rec: any, displayField?: string): string | undefined {
+    for (const f of ApprovalService.titleCandidates(displayField)) {
       const v = rec?.[f];
       if (v != null && String(v).trim() && f !== 'id') return String(v);
     }
@@ -10446,7 +10455,9 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * anything is served — so for a caller whose view of the snapshot is masked,
    * row membership answers questions about contents that caller may not read.
    * The other four arms are columns of `sys_approval_request` itself, which
-   * every caller who can see the row reads whole; they are untouched.
+   * every caller who can see the row reads whole; they are untouched. The
+   * served-text arms (`servedTextArms`) are decided per object by the same
+   * seam, so a record's title is searched only where it is served.
    *
    * ## The invariant this method exists to hold
    *
@@ -10531,6 +10542,16 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     // `organizationId` is not on the envelope — see isOverrideActor().
     const tenantOrg = (context as any)?.organizationId ?? context?.tenantId ?? null;
     if (tenantOrg) f.organization_id = tenantOrg;
+    // Status pushes down whole: `$in` for arrays (all bundled drivers
+    // support it), equality for a single value. Set before the free-text arms
+    // below, whose scope read is this same filter.
+    if (Array.isArray(filter?.status)) {
+      const statuses = (filter!.status as ApprovalStatus[]).filter(Boolean);
+      if (statuses.length === 1) f.status = statuses[0];
+      else if (statuses.length > 1) f.status = { $in: statuses };
+    } else if (filter?.status) {
+      f.status = filter.status;
+    }
     // Free-text search, pushed down. `$contains` is the driver's escaped-LIKE
     // operator. These four are columns of `sys_approval_request` itself, read
     // whole by anyone who can see the row, and are always present — the `$or`
@@ -10551,18 +10572,194 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       if (await this.freeTextMayMatchSnapshot(filter?.object, context)) {
         arms.push({ payload_json: { $contains: q } });
       }
+      // The text the row SHOWS this caller — title, process label, object
+      // label, requester name — each resolved to the machine values it names
+      // first, as this caller is served it. See `servedTextArms`.
+      arms.push(...await this.servedTextArms(q, { ...f }, context));
       f.$or = arms;
     }
-    // Status pushes down whole: `$in` for arrays (all bundled drivers
-    // support it), equality for a single value.
-    if (Array.isArray(filter?.status)) {
-      const statuses = (filter!.status as ApprovalStatus[]).filter(Boolean);
-      if (statuses.length === 1) f.status = statuses[0];
-      else if (statuses.length > 1) f.status = { $in: statuses };
-    } else if (filter?.status) {
-      f.status = filter.status;
-    }
     return { where: f, tenantOrg };
+  }
+
+  /**
+   * Window of the free-text scope read ({@link servedTextArms}), newest first.
+   * A scope past it searches its newest requests' labels only, said at `warn`.
+   */
+  private static readonly SERVED_TEXT_SCOPE_CAP = 5_000;
+
+  /**
+   * The free-text arms over what an inbox row SHOWS the caller: the record's
+   * title, the process label, the object label and the requester's name. None
+   * of them is a column the predicate can test as served — each is resolved
+   * when the row is served ({@link enrichRows}, `localizeRequestLabels`) — so
+   * each is resolved here FIRST, as THIS caller is served it, to the machine
+   * values that name it, and the arm is an `$in` over those values:
+   *
+   *  - **process label** — the reader's-locale translation where
+   *    `readerLabels` picks one for the flow (`process_name $in` the flows
+   *    whose picked label holds the term), else the stored `process_label`
+   *    column, which is what such a row serves (`process_label $contains`,
+   *    narrowed to the flows nothing is picked for, so a reader served a
+   *    translation is never found by the stored text they are not shown);
+   *  - **object label** — `readerLabels`' pick, else the schema label: the pair
+   *    the row's `object_label` is set from;
+   *  - **requester name** — {@link resolveUserNames}, the row's
+   *    `submitter_name` resolver, over the scope's submitters;
+   *  - **record title** — {@link recordsTitledWith}, per subject object.
+   *
+   * ## The invariant
+   *
+   * A request is never found by text the same caller is not served for it.
+   * Every label is computed by the function the serve path computes it with,
+   * for the same caller; the title is narrowed by
+   * `resolveReadableSnapshotFields`, asked as the CALLER, the answer
+   * {@link redactPayloads} and the served `record_title` read. A label this
+   * cannot resolve for the caller adds no arm: narrowing, never widening.
+   *
+   * ## The scope read
+   *
+   * Which flows, objects, records and submitters there are to resolve comes
+   * from one read of the requests under the query's own non-text filter
+   * (`scope`: tenant, object, record, submitter, status), under the system
+   * context like the list read itself; the participant narrowing is applied
+   * to the whole predicate afterwards, as before. It returns machine values
+   * only and is never served. Past {@link SERVED_TEXT_SCOPE_CAP} it keeps the
+   * newest requests and says so at `warn`; a failed read adds no arm.
+   *
+   * Every arm carries a non-empty value set, so no arm is an empty `$in`.
+   */
+  private async servedTextArms(
+    q: string,
+    scope: Record<string, unknown>,
+    context: ExecutionContext,
+  ): Promise<any[]> {
+    let rows: any[];
+    try {
+      const found = await this.engine.find('sys_approval_request', {
+        where: scope,
+        fields: ['object_name', 'process_name', 'record_id', 'submitter_id'],
+        orderBy: [{ field: 'created_at', order: 'desc' }],
+        limit: ApprovalService.SERVED_TEXT_SCOPE_CAP,
+        context: SYSTEM_CTX,
+      });
+      rows = Array.isArray(found) ? found : [];
+    } catch (err: any) {
+      this.logger?.warn?.('[approvals] free-text search could not read its scope — matching machine columns only', {
+        error: err?.message ?? String(err),
+      });
+      return [];
+    }
+    if (rows.length >= ApprovalService.SERVED_TEXT_SCOPE_CAP) {
+      this.logger?.warn?.('[approvals] free-text search scope hit its window — labels of older requests are not searched', {
+        cap: ApprovalService.SERVED_TEXT_SCOPE_CAP,
+      });
+    }
+    const processes = new Set<string>();
+    const records = new Map<string, Set<string>>();
+    const submitters = new Set<string>();
+    for (const r of rows) {
+      if (r?.process_name) processes.add(String(r.process_name));
+      if (r?.submitter_id) submitters.add(String(r.submitter_id));
+      if (r?.object_name && r?.record_id) {
+        const object = String(r.object_name);
+        let set = records.get(object);
+        if (!set) { set = new Set(); records.set(object, set); }
+        set.add(String(r.record_id));
+      }
+    }
+    const oneOf = (values: string[]) => (values.length === 1 ? values[0] : { $in: values });
+    const arms: any[] = [];
+    const labels = this.readerLabels(context);
+
+    // Process label: the picked translation, else the stored column.
+    const pickedMatch: string[] = [];
+    const unpicked: string[] = [];
+    for (const process of processes) {
+      const flow = flowNameOfProcess(process);
+      const picked = flow && labels ? labels.flowLabel(flow) : undefined;
+      if (picked === undefined) unpicked.push(process);
+      else if (picked.includes(q)) pickedMatch.push(process);
+    }
+    if (pickedMatch.length) arms.push({ process_name: oneOf(pickedMatch) });
+    if (unpicked.length) arms.push({ process_label: { $contains: q }, process_name: oneOf(unpicked) });
+
+    // Object label: the picked translation, else the schema label.
+    const objects = Array.from(records.keys()).filter((object) =>
+      (labels?.objectLabel(object) ?? this.objectLabelOf(object))?.includes(q));
+    if (objects.length) arms.push({ object_name: oneOf(objects) });
+
+    // Requester name: the resolver `submitter_name` is served from.
+    if (submitters.size) {
+      const names = await this.resolveUserNames(Array.from(submitters));
+      const named = Array.from(submitters).filter((s) => names.get(s)?.includes(q));
+      if (named.length) arms.push({ submitter_id: oneOf(named) });
+    }
+
+    // Record title: as served to this caller, per subject object.
+    const served = new Map<string, string[] | undefined>();
+    for (const [object, ids] of records) {
+      const readable = (await this.servedFields([object], context, served)).get(object);
+      const titled = await this.recordsTitledWith(object, ids, readable, q);
+      if (titled.length) arms.push({ object_name: object, record_id: oneOf(titled) });
+    }
+    return arms;
+  }
+
+  /**
+   * The `ids` of `object` whose title AS SERVED to the reader holds `q`:
+   * {@link titleAsServed} over the reader's served fields (`readable`,
+   * `undefined` the seam's pass-through), the function the served
+   * `record_title` is picked by ({@link titlesAsServed}). So a title field the
+   * reader may not read, or reads masked, finds nothing, exactly as it names
+   * nothing on serve.
+   *
+   * With the object's schema known, the read is narrowed in the driver to the
+   * records where one of the title fields the reader is served holds `q` (a
+   * superset of the answer); the served title is still what decides. Without
+   * a schema every record is read and decided the same way. A record whose
+   * title comes only from the request's snapshot (a deleted record) is not
+   * searched here. A failed read finds nothing (at `warn`).
+   */
+  private async recordsTitledWith(
+    object: string,
+    ids: ReadonlySet<string>,
+    readable: string[] | undefined,
+    q: string,
+  ): Promise<string[]> {
+    const list = Array.from(ids);
+    if (!list.length) return [];
+    const displayField = this.resolveDisplayField(object);
+    const served = readable === undefined ? undefined : new Set(readable.map(String));
+    const candidates = ApprovalService.titleCandidates(displayField)
+      .filter((f) => f !== 'id' && (served === undefined || served.has(f)));
+    if (!candidates.length) return [];
+    const where: any = { id: list.length === 1 ? list[0] : { $in: list } };
+    let fields: Record<string, unknown> | undefined;
+    try {
+      const schema: any = this.engine.getSchema?.(object);
+      fields = schema?.fields && typeof schema.fields === 'object' ? schema.fields : undefined;
+    } catch { /* schema unavailable — decided on the records alone */ }
+    if (fields) {
+      const declared = candidates.filter((f) => Object.prototype.hasOwnProperty.call(fields, f));
+      if (!declared.length) return [];
+      where.$or = declared.map((f) => ({ [f]: { $contains: q } }));
+    }
+    let recs: any[];
+    try {
+      const found = await this.engine.find(object, { where, limit: list.length, context: SYSTEM_CTX });
+      recs = Array.isArray(found) ? found : [];
+    } catch (err: any) {
+      this.logger?.warn?.('[approvals] free-text search could not read record titles — they are not searched', {
+        object, error: err?.message ?? String(err),
+      });
+      return [];
+    }
+    const out: string[] = [];
+    for (const rec of recs) {
+      if (rec?.id == null) continue;
+      if (ApprovalService.titleAsServed(rec, displayField, readable)?.includes(q)) out.push(String(rec.id));
+    }
+    return out;
   }
 
   /** Window the approver-index probe — pending queues live far below this. */

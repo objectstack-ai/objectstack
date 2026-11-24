@@ -17,7 +17,10 @@
  *                              the form editor of an email template or a
  *                              translation (`StudioBundleItemEditor`, #28569),
  *                              and of a read-only package's dataset (#30064)
- *   <root>/:type/:name/history the item's history
+ *   <root>/:type/:name/history the item's history: its History tab
+ *                              (`?tab=history`), the old address redirected;
+ *                              the history page for a type with an editor of
+ *                              its own
  *
  * Mirroring Setup's shapes keeps every relative link the pages emit pointing
  * where it points there. What the area adds, it hands the pages through
@@ -48,7 +51,8 @@ import {
   studioMetadataAreaPath,
 } from './metadataArea.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
-import { BUNDLE_MEMBER_PARAM } from '../metadata-admin/registry.js';
+import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/registry.js';
+import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import type { StudioRefusal } from './metadataError.js';
 
@@ -178,6 +182,31 @@ function AreaItemOpen({
   return <MetadataResourceEditPage />;
 }
 
+/**
+ * `<root>/:type/:name/history`: the item's history is its page's History tab
+ * (objectstack#36901, decision 8), so the standalone address opens the item
+ * on that tab, its query kept (`?package=`, `?member=`, the list context).
+ * Cut from the path as it is spelled, so an encoded name stays encoded.
+ *
+ * A type whose item page is an editor of its own (`registerMetadataResource`'s
+ * `EditPage`: the permission set's matrix) has no tabs, and its History button
+ * opens this address: it keeps the standalone history page. So does an item
+ * whose address opens a pillar's designer, until the designer mounts the tabs.
+ */
+function AreaHistoryRedirect(): React.ReactElement {
+  const { type = '', name = '' } = useParams<{ type: string; name: string }>();
+  const { pathname, search } = useLocation();
+  const host = useMetadataAreaHost();
+  const params = new URLSearchParams(search);
+  const ownEditor = !!getMetadataResource(type)?.EditPage;
+  // An item a pillar's designer opens has no tab row yet (its tabs are the
+  // designers' cards): its history keeps the standalone page too.
+  const pillarItem = areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search: params }) !== null;
+  if (ownEditor || pillarItem) return <MetadataResourceHistoryPage />;
+  params.set(ITEM_TOOL_TAB_PARAM, 'history');
+  return <Navigate to={{ pathname: pathname.replace(/\/history\/?$/, ''), search: `?${params}` }} replace />;
+}
+
 /** `<root>/:type/new`: a read-only package takes no new item, so its create URL lands on the list. */
 function AreaCreate(): React.ReactElement {
   const { type = '' } = useParams<{ type: string }>();
@@ -251,7 +280,7 @@ export function StudioMetadataArea({
             <Route path=":type" element={<MetadataResourceListPage />} />
             <Route path=":type/new" element={<AreaCreate />} />
             <Route path=":type/:name" element={<AreaItem editor={editor} />} />
-            <Route path=":type/:name/history" element={<MetadataResourceHistoryPage />} />
+            <Route path=":type/:name/history" element={<AreaHistoryRedirect />} />
           </Routes>
         </React.Suspense>
       </div>
