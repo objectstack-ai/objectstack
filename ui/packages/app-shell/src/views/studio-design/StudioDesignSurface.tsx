@@ -324,6 +324,9 @@ import { emitMetadataRefresh, subscribeMetadataRefresh } from '../../assistant/a
 import { STUDIO_CHANGES_PARAM, STUDIO_CHANGES_REVIEW } from './studioChangesLink.js';
 import {
   publishSavedItem,
+  publishCreated,
+  publishedPinOfLayers,
+  readPublishedPin,
   STUDIO_SAVE_TOAST_ID,
   StudioSaveControls,
   StudioSaveProvider,
@@ -5713,6 +5716,8 @@ export function DataPillar({
   const [extHasDraft, setExtHasDraft] = React.useState(false);
   const [extReloadNonce, setExtReloadNonce] = React.useState(0);
   const extLoadedRef = React.useRef<string | null>(null);
+  // objectstack#36726 — the pair the open extension buffer was read at (`null`: none was listed).
+  const extReadAtRef = React.useRef<{ name: string; pair: string | null } | null>(null);
   const extOpen = extendsBase && ext !== null && ext.for === current?.name ? ext : null;
   // Adding a field asks the ensure door for the pair once per base: its
   // answer names every write, ⛔ never a `<base>.custom` spelled here.
@@ -6037,6 +6042,9 @@ export function DataPillar({
   const {
     save: saveExtDraft,
     recordRead: recordExtRead,
+    // objectstack#36726 — and the pair's published extension row, for the Save's publish.
+    recordPublished: recordExtPublished,
+    publish: publishExt,
     dialog: extConflictDialog,
   } = useDraftSaveGuard(client, reloadExt);
   // The pair a READ names is the surface's (`StudioBaseCustomization.pairId`),
@@ -6401,6 +6409,13 @@ export function DataPillar({
         let draft: ObjectExtensionBody | null = null;
         let published: ObjectExtensionBody | null = null;
         if (pair) {
+          // objectstack#36726 — the published extension's version at the pair,
+          // the address the Save's publish writes, read BEFORE the rows below
+          // (the server's own order for `/layers`): a publish landing between
+          // the reads leaves the pin older than the buffer, so the next Save
+          // is asked about, never published over it.
+          const publishedAt = await readPublishedPin(client, OBJECT_EXTENSION_TYPE, name, pair);
+          if (cancelled) return;
           const [draftRead, publishedRow] = await Promise.all([
             readDraftForSave<Record<string, unknown>>(client, OBJECT_EXTENSION_TYPE, name, pair),
             client.get<Record<string, unknown>>(OBJECT_EXTENSION_TYPE, name, { packageId: pair }),
@@ -6420,8 +6435,10 @@ export function DataPillar({
           draft = objectExtensionBodyOf(extractDraftBody(draftRead.answer), name);
           published = objectExtensionBodyOf(publishedRow, name);
           recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, draftRead.pin);
+          recordExtPublished(OBJECT_EXTENSION_TYPE, name, pair, publishedAt);
         }
         if (refreshOnly) refreshInstalledRef.current = true;
+        extReadAtRef.current = { name, pair };
         setExt({ for: name, body: draft ?? published ?? { extend: name }, published: new Set(extensionFieldNames(published)) });
         setExtHasDraft(draft !== null);
       } catch (e) {
@@ -6435,7 +6452,7 @@ export function DataPillar({
       // A load cancelled before it settled takes its claim back (see the object load above).
       if (!settled) extLoadedRef.current = null;
     };
-  }, [client, current, extendsBase, publishNonce, extReloadNonce, objRefreshNonce, recordExtRead]);
+  }, [client, current, extendsBase, publishNonce, extReloadNonce, objRefreshNonce, recordExtRead, recordExtPublished]);
 
   // objectstack#32610 — a field the pulse's re-read no longer has (a discard
   // took it away) is not left selected; one it still has stays open.
@@ -6873,6 +6890,14 @@ export function DataPillar({
     const hadDraft = extHasDraft;
     try {
       const pair = await extPairFor(customization);
+      // objectstack#36726 — a buffer read before any pair was listed read no
+      // row there: its publish asserts none, so an extension another writer
+      // published at the pair meanwhile is asked about, never replaced.
+      const readAt = extReadAtRef.current;
+      if (readAt?.name === name && readAt.pair !== pair) {
+        recordExtPublished(OBJECT_EXTENSION_TYPE, name, pair, { ifNoneMatch: '*' });
+        extReadAtRef.current = { name, pair };
+      }
       const outcome = await saveExtDraft(OBJECT_EXTENSION_TYPE, name, extensionBodyForSave(body), {
         mode: 'draft',
         packageId: pair,
@@ -6881,18 +6906,29 @@ export function DataPillar({
       if (outcome === 'reloaded') return { kind: 'declined' };
       setExtHasDraft(true);
       setSaving('publish');
-      const live = await publishSavedItem(client, { type: OBJECT_EXTENSION_TYPE, name, packageId: pair }, hadDraft);
+      // objectstack#36726 — pinned to the published extension row this buffer was loaded at.
+      const live = await publishSavedItem(
+        client,
+        { type: OBJECT_EXTENSION_TYPE, name, packageId: pair },
+        hadDraft,
+        publishExt,
+      );
+      // The published row moved and the author chose to reload: the load replaces the buffer.
+      if (!live.ok && 'reloaded' in live) return { kind: 'declined' };
       if (!live.ok) {
         if (live.draftDiscarded) {
           setExtHasDraft(false);
           recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, { ifNoneMatch: '*' });
         }
-        const refusal = publishRefusal(
-          publishFailureOf(OBJECT_EXTENSION_TYPE, name, live.error),
-          OBJECT_EXTENSION_TYPE,
-          extensionBodyForSave(body),
-          locale,
-        );
+        // The published row moved and the author kept editing: read as the draft conflict's "not saved".
+        const refusal = isPublishConflictKeptEditing(live.error)
+          ? plainRefusal(live.error)
+          : publishRefusal(
+              publishFailureOf(OBJECT_EXTENSION_TYPE, name, live.error),
+              OBJECT_EXTENSION_TYPE,
+              extensionBodyForSave(body),
+              locale,
+            );
         setError(refusal);
         return { kind: 'refused', reason: refusal.message };
       }
@@ -6907,7 +6943,7 @@ export function DataPillar({
     } finally {
       setSaving(false);
     }
-  }, [extOpen, customization, extPairFor, saveExtDraft, recordExtRead, client, extHasDraft, locale]);
+  }, [extOpen, customization, extPairFor, saveExtDraft, recordExtRead, recordExtPublished, publishExt, client, extHasDraft, locale]);
   // An edit of the folded object's fields, written into the extension: an
   // extension field whole, a base field's whitelisted change as its patch.
   const onExtFieldsPatch = React.useCallback(
@@ -8595,6 +8631,9 @@ export function AutomationsPillar({
   const {
     save: saveFlowDraft,
     recordRead: recordFlowRead,
+    // objectstack#36726 — and the published flow the buffer was loaded at, for the Save's publish.
+    recordPublished: recordFlowPublished,
+    publish: publishFlow,
     dialog: flowConflictDialog,
   } = useDraftSaveGuard(client, reloadFlowDraft);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
@@ -8910,9 +8949,16 @@ export function AutomationsPillar({
         });
         // objectstack#36511 — and published at once, switched off as it was
         // born: no draft is left for a package publish, and the switch arms it.
-        const live = await publishSavedItem(client, { type: 'flow', name, packageId: target ?? railPackageId }, false);
+        // objectstack#36726 — pinned `If-None-Match: *`: a flow another writer
+        // published under the name since the check above is refused, not replaced.
+        const live = await publishSavedItem(
+          client,
+          { type: 'flow', name, packageId: target ?? railPackageId },
+          false,
+          publishCreated,
+        );
         if (!live.ok) {
-          setError(plainRefusal(live.error));
+          if ('error' in live) setError(plainRefusal(live.error));
           return;
         }
         const item: Surface = target === null ? { type: 'flow', name, label } : { type: 'flow', name, label, addedIn: target };
@@ -8957,6 +9003,21 @@ export function AutomationsPillar({
         // read-only base's flow: its pair, when one is listed.
         const pair = flowCustomizing && !current.addedIn ? (customizationRef.current?.pairId ?? null) : null;
         const readAt = pair ?? draftPackageId;
+        // objectstack#36726 — the published flow's layers at the address the
+        // Save's publish writes, read FIRST (the server's order for the
+        // version and the body): a publish landing between this and the reads
+        // below leaves the pin older than the buffer, so the next Save is
+        // asked about, never published over it. At the drafts' own package it
+        // is also the baseline read below.
+        const baselineScope = draftPackageId ? { packageId: draftPackageId } : {};
+        const layAtReadAt = await client
+          .layered<Record<string, unknown>>('flow', current.name, readAt ? { packageId: readAt } : {})
+          .then(
+            (lay) => ({ ok: true as const, lay }),
+            (err: unknown) => ({ ok: false as const, err }),
+          );
+        if (cancelled) return;
+        const publishedAt = layAtReadAt.ok ? publishedPinOfLayers(layAtReadAt.lay) : null;
         const draftRead = await readDraftForSave<Record<string, unknown>>(client, 'flow', current.name, readAt);
         if (cancelled) return;
         // objectstack#29148 — a flow draft the server refused to read is no
@@ -8977,13 +9038,16 @@ export function AutomationsPillar({
         // ADR-0048 — at the package the flow saves write, its owner here; with
         // none, the read names none, and a name two packages hold is refused
         // with the server's own sentence, shown as the load's error.
-        const layRaw = draftBody
-          ? null
-          : await client.layered<Record<string, unknown>>(
-              'flow',
-              current.name,
-              draftPackageId ? { packageId: draftPackageId } : {},
-            );
+        let layRaw: unknown = null;
+        if (!draftBody) {
+          if (readAt === draftPackageId) {
+            // The read above, at this same address: its refusal is the load's error, as it always was.
+            if (!layAtReadAt.ok) throw layAtReadAt.err;
+            layRaw = layAtReadAt.lay;
+          } else {
+            layRaw = await client.layered<Record<string, unknown>>('flow', current.name, baselineScope);
+          }
+        }
         if (cancelled) return;
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> } | null;
         const baseline = (lay?.effective ?? lay?.code ?? {}) as Record<string, unknown>;
@@ -9001,6 +9065,8 @@ export function AutomationsPillar({
         );
         // objectui#11773 — the next save is pinned to what the draft read served.
         recordFlowRead('flow', current.name, readAt, draftRead.pin);
+        // objectstack#36726 — …and its publish to the published flow the layers served there.
+        recordFlowPublished('flow', current.name, readAt, publishedAt);
         flowReadAtRef.current = { key: `flow:${current.name}`, at: readAt };
         setHasDraft(!!draftBody);
         setFlowDraftChanges(draftBody ? readDraftChanges(draftRead.answer) : null);
@@ -9020,7 +9086,7 @@ export function AutomationsPillar({
       // `loading` it raised, as in InterfacesPillar's draft load.
       if (!settled) setLoading(false);
     };
-  }, [client, current, draftPackageId, publishNonce, flowReloadNonce, recordFlowRead, flowCustomizing]);
+  }, [client, current, draftPackageId, publishNonce, flowReloadNonce, recordFlowRead, recordFlowPublished, flowCustomizing]);
 
   // objectui#5813 — local dirty flag: auto-save arms only after a real edit.
   const [autoDirty, setAutoDirty] = React.useState(false);
@@ -9077,6 +9143,9 @@ export function AutomationsPillar({
         const key = `flow:${current.name}`;
         if (!(flowReadAtRef.current?.key === key && flowReadAtRef.current.at === pair)) {
           recordFlowRead('flow', current.name, pair, { ifNoneMatch: '*' });
+          // objectstack#36726 — and to hold no live row of it: one published
+          // there meanwhile is asked about, never replaced.
+          recordFlowPublished('flow', current.name, pair, { ifNoneMatch: '*' });
           flowReadAtRef.current = { key, at: pair };
         }
         entering = !flowInPairRef.current;
@@ -9092,17 +9161,24 @@ export function AutomationsPillar({
       // The badge reads the declaration the server now serves.
       if (entering) setServedNonce((n) => n + 1);
       setSaving('publish');
+      // objectstack#36726 — pinned to the published flow this buffer was loaded at.
       const live = await publishSavedItem(
         client,
         { type: 'flow', name: current.name, packageId: target.packageId ?? null },
         hadDraft,
+        publishFlow,
       );
+      // The published flow moved and the author chose to reload: the load replaces the buffer.
+      if (!live.ok && 'reloaded' in live) return { kind: 'declined' };
       if (!live.ok) {
         setHasDraft(!live.draftDiscarded);
         if (live.draftDiscarded) recordFlowRead('flow', current.name, target.packageId, { ifNoneMatch: '*' });
         // objectstack#26858 — what the pending draft now says, or the live flow's verdict.
         rereadFlowVerdict(current.name, target.packageId);
-        const refusal = publishRefusal(publishFailureOf('flow', current.name, live.error), 'flow', target.body, locale);
+        // The published flow moved and the author kept editing: read as the draft conflict's "not saved".
+        const refusal = isPublishConflictKeptEditing(live.error)
+          ? flowSaveRefusal(live.error, target.body, locale)
+          : publishRefusal(publishFailureOf('flow', current.name, live.error), 'flow', target.body, locale);
         setError(refusal);
         return { kind: 'refused', reason: refusal.message };
       }
@@ -9126,7 +9202,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, client, current, draft, hasDraft, draftPackageId, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead]);
+  }, [saveFlowDraft, publishFlow, client, current, draft, hasDraft, draftPackageId, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead, recordFlowPublished]);
   // objectui#11786 — an edit that leaves a step's required input out (a step
   // just added, before it is filled in) is held, not sent: the server would
   // refuse the flow with a 422 naming that input. The step's inspector hints the
@@ -9237,12 +9313,24 @@ export function AutomationsPillar({
       // objectui#11773 — a reload replaced the buffer the flip was taken on.
       if ((await saveFlowDraft('flow', flowName, stored, { mode: 'draft', packageId: draftPackageId, surface: 'studio' })) === 'reloaded') return;
       setSaving('publish');
-      const live = await publishSavedItem(client, { type: 'flow', name: flowName, packageId: draftPackageId ?? null }, hadDraft);
+      // objectstack#36726 — pinned to the published flow this buffer was loaded at, as the Save is.
+      const live = await publishSavedItem(
+        client,
+        { type: 'flow', name: flowName, packageId: draftPackageId ?? null },
+        hadDraft,
+        publishFlow,
+      );
+      // The author chose to reload: the load replaces the buffer, the switch with it.
+      if (!live.ok && 'reloaded' in live) return;
       if (!live.ok) {
         setHasDraft(!live.draftDiscarded);
         if (live.draftDiscarded) recordFlowRead('flow', flowName, draftPackageId, { ifNoneMatch: '*' });
         rollBack();
-        setError(publishRefusal(publishFailureOf('flow', flowName, live.error), 'flow', stored, locale));
+        setError(
+          isPublishConflictKeptEditing(live.error)
+            ? flowSaveRefusal(live.error, stored, locale)
+            : publishRefusal(publishFailureOf('flow', flowName, live.error), 'flow', stored, locale),
+        );
         return;
       }
       setHasDraft(false);
@@ -9257,7 +9345,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, client, current, draft, draftFor, hasDraft, draftPackageId, locale, readOnly, recordFlowRead, rereadFlowVerdict]);
+  }, [saveFlowDraft, publishFlow, client, current, draft, draftFor, hasDraft, draftPackageId, locale, readOnly, recordFlowRead, rereadFlowVerdict]);
 
   // The rail's "+" — and the empty block's button, which runs this same
   // handler (objectui#12514). objectui#11553 — no "New" in the package-less
