@@ -49,7 +49,6 @@ import {
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
-  STUDIO_ROOT_PATH,
   studioMetadataAreaPath,
   studioPackagePath,
   useHomePath,
@@ -334,7 +333,7 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  * pillar builder as a package id.
  */
 export const studioRoutes = (
-  <Route path={STUDIO_ROOT_PATH} element={<StudioRoute />}>
+  <Route path="/studio" element={<StudioRoute />}>
     <Route index element={<StudioLanding />} />
     <Route
       path={STUDIO_ORG_SCOPE_SEGMENT}

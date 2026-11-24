@@ -18,6 +18,14 @@
  *  - a path composed onto the root constant (`` `${STUDIO_ROOT_PATH}/…` ``,
  *    `STUDIO_ROOT_PATH + '/…'`), the same hand-build one step removed.
  *
+ * A route PATTERN is not an address: `<Route path="/studio">` declares what
+ * the console serves, and builds no link. It stays a plain literal, because
+ * the console's route table is read as source text
+ * (`useConsoleActionRuntime.onSuccessNavigateHost-13379.test.tsx` reads every
+ * top-level `path="/…"`), so the string initializer of a `<Route>`'s `path`
+ * attribute is spared. Every other spelling, including a `<Link to="/studio">`
+ * or a `path` on anything but a `<Route>`, is refused.
+ *
  * `studioAddress.ts` is the one file allowed to spell the root (and the
  * mapping table beside it, which spells shapes, not links). The server's
  * two review links are held by the same kind of pin in `@objectstack/types`
@@ -93,8 +101,17 @@ function handBuiltStudioAddresses(fileName: string, text: string): string[] {
     hits.push(`${line + 1}: ${node.getText(source).replace(/\s+/g, ' ').slice(0, 120)}`);
   };
   const isRoot = (node: ts.Node) => ts.isIdentifier(node) && ROOT_NAMES.has(node.text);
+  // `<Route path="/studio">`: a route pattern the console serves, not a link.
+  const isRoutePattern = (node: ts.Node) =>
+    ts.isStringLiteral(node) &&
+    ts.isJsxAttribute(node.parent) &&
+    node.parent.name.getText(source) === 'path' &&
+    ts.isJsxAttributes(node.parent.parent) &&
+    node.parent.parent.parent.tagName.getText(source) === 'Route';
   const visit = (node: ts.Node): void => {
-    if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && STUDIO_LITERAL.test(node.text)) {
+    if (isRoutePattern(node)) {
+      // Spared: see the header.
+    } else if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && STUDIO_LITERAL.test(node.text)) {
       hit(node);
     } else if (ts.isTemplateExpression(node)) {
       if (STUDIO_LITERAL.test(node.head.text) || (node.head.text === '' && isRoot(node.templateSpans[0].expression))) {
@@ -115,7 +132,9 @@ describe('no Studio address is built by hand under ui/ (objectstack#36895)', () 
     expect(scan("const a = '/studio';")).toHaveLength(1);
     expect(scan('const b = `/studio/${pkg}/data`;')).toHaveLength(1);
     expect(scan('const c = "/studio?new=package";')).toHaveLength(1);
-    expect(scan('const d = <Route path="/studio" />;')).toHaveLength(1);
+    expect(scan('const d = <Link to="/studio" />;')).toHaveLength(1);
+    expect(scan('const d2 = <Tab path="/studio" />;')).toHaveLength(1);
+    expect(scan('const d3 = <Route path={`/studio/${pkg}`} />;')).toHaveLength(1);
     expect(scan('const e = `${STUDIO_ROOT_PATH}/${pkg}`;')).toHaveLength(1);
     expect(scan("const f = STUDIO_ROOT_PATH + '/' + pkg;")).toHaveLength(1);
     // Not an address.
@@ -124,6 +143,9 @@ describe('no Studio address is built by hand under ui/ (objectstack#36895)', () 
     expect(scan("const i = 'studio:builder';")).toEqual([]);
     expect(scan('// opens /studio/crm/data\nconst j = 1;')).toEqual([]);
     expect(scan('/** `/studio/<package>/metadata` */\nconst k = 1;')).toEqual([]);
+    // A route pattern is a declaration, not a link.
+    expect(scan('const m = <Route path="/studio" element={<X />} />;')).toEqual([]);
+    expect(scan('const n = <Route path="/studio/:packageId"><Route index /></Route>;')).toEqual([]);
     // The builder's output is not a literal.
     expect(scan('const l = studioHomePath(pkg);')).toEqual([]);
   });
