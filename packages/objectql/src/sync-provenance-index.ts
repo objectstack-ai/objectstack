@@ -27,7 +27,7 @@
  * duplicated.
  */
 
-import { resolveInjectedSystemColumns, SYNC_PROVENANCE_COLUMNS } from '@objectstack/spec/data';
+import { resolveInjectedSystemColumns, SYNC_PROVENANCE_COLUMNS, SYNC_PROVENANCE_FIELD_DEFS } from '@objectstack/spec/data';
 
 type Rec = Record<string, unknown>;
 
@@ -52,6 +52,26 @@ export function syncProvenanceIndexFor(schema: unknown): { fields: string[] } | 
       ? [TENANT_COLUMN, SYNC_SOURCE, SYNC_EXTERNAL_ID]
       : [SYNC_SOURCE, SYNC_EXTERNAL_ID],
   };
+}
+
+/**
+ * The provenance columns `applySystemFields` adds to a `synced` object (the
+ * caller asks the plan's `sync` first): the mapping that wrote the row, its
+ * key in the source, when and by which run it was last written, and D3's mark
+ * (planned with the rest, written by nothing until the delete marking lands).
+ * `readonly`, `system`, `hidden`: the pull, writing as the system, is their one
+ * writer, and the engine refuses any other write that names one
+ * (`refuseSyncProvenanceWrite`). No author field can take a `_sync_` name, so
+ * skipping a column the schema already carries only ever keeps the platform's
+ * own definition coming back through a re-registration.
+ */
+export function syncProvenanceColumnAdditions(schema: unknown): Rec {
+  const present = fieldsRecord(schema) ?? {};
+  const additions: Rec = {};
+  for (const name of SYNC_PROVENANCE_COLUMNS) {
+    if (!present[name]) additions[name] = { ...SYNC_PROVENANCE_FIELD_DEFS[name] };
+  }
+  return additions;
 }
 
 function sameColumns(entry: unknown, columns: readonly string[]): boolean {

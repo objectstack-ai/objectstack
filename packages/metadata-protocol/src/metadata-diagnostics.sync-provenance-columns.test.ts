@@ -12,6 +12,9 @@
  * differs from the platform's in any key, is still judged and refused.
  */
 import { describe, expect, it } from 'vitest';
+// Pays the first load of the lint package the diagnostics import lazily during collection, not inside a
+// clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import { SYNC_PROVENANCE_COLUMNS, SYNC_PROVENANCE_FIELD_DEFS } from '@objectstack/spec/data';
 import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 
