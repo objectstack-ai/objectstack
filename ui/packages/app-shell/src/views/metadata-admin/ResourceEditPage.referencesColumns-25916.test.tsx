@@ -95,10 +95,10 @@ function editor(language: 'zh' | 'en') {
   );
 }
 
-/** Open the References sheet (the lazy load) and return its table's header cells. */
-async function headersIn(locale: 'zh-CN' | 'en-US') {
+/** Open the References tab (the lazy load; a sheet before objectstack#36901) and return its table's header cells. */
+async function headersIn(_locale: 'zh-CN' | 'en-US') {
   await waitFor(() => expect(mockClient.layered).toHaveBeenCalled());
-  fireEvent.click(await screen.findByTitle(t('engine.edit.references', locale)));
+  fireEvent.click(await screen.findByTestId('item-tab-references'));
   const name = await screen.findByText('all_accounts');
   const table = name.closest('table') as HTMLElement;
   return within(table).getAllByRole('columnheader').map((th) => th.textContent);

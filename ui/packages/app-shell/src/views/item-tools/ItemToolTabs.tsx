@@ -191,7 +191,11 @@ export interface ItemToolTabStripProps {
   /** The open one. */
   active: ItemToolTab;
   onSelect: (tab: ItemToolTab) => void;
-  /** A count beside a tab's label (References: the scan's answer, once it answered). */
+  /**
+   * A count beside a tab's label (References: the scan's answer). Pass one
+   * only once it is a real answer: a `0` over a check that never completed is
+   * a false measurement (objectui#5110).
+   */
   counts?: Partial<Record<ItemToolTab, number>>;
   /**
    * The host's tabs drop an unsaved buffer (each tab its own editor): a
@@ -220,8 +224,13 @@ export function ItemToolTabStrip({ tabs, active, onSelect, counts, confirmSwitch
             }}
           >
             {t(TAB_LABEL_KEY[tab], locale)}
-            {count !== undefined && count > 0 && (
-              <span className="ml-1.5 rounded-full border bg-muted px-1.5 text-[10px] tabular-nums text-muted-foreground">{count}</span>
+            {count !== undefined && (
+              <span
+                data-testid={`item-tab-count-${tab}`}
+                className="ml-1.5 rounded-full border bg-muted px-1.5 text-[10px] tabular-nums text-muted-foreground"
+              >
+                {count}
+              </span>
             )}
           </StudioTab>
         );

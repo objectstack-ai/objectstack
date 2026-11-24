@@ -87,6 +87,13 @@ vi.mock('./CatalogActiveSwitch', async (importOriginal) => ({
     <div data-testid="catalog-item-active-stub">{`${type}/${name}`}</div>
   ),
 }));
+// objectstack#36901 — the item header's ‹ › read the list as the area's
+// list reads it, customization marks included; marks are not this file's
+// subject, so that read answers "off" and leaves no socket.
+vi.mock('../studio-design/CustomizationMark', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  usePackageCustomizations: () => ({ status: 'off' }),
+}));
 vi.mock('./AssignedUsersSection', () => ({
   AssignedUsersSection: () => <div data-testid="assigned-users-stub" />,
 }));
@@ -147,8 +154,12 @@ describe('the generic item page under the area (objectstack#28561)', () => {
     expect(screen.queryByTestId('reset-or-delete-button')).toBeNull();
     // The type-level banner would name the wrong reason (a registry flag).
     expect(screen.queryByTestId('readonly-banner')).toBeNull();
-    // Layers, references, history and audit stay: the read tools are not writes.
-    expect(screen.getByTestId('page-shell-header-meta')).toBeInTheDocument();
+    // Layers, references, history and audit stay: the read tools are not
+    // writes. They are tabs since objectstack#36901 (layers inside Source,
+    // audit inside History).
+    for (const tab of ['references', 'history', 'source']) {
+      expect(screen.getByTestId(`item-tab-${tab}`)).toBeInTheDocument();
+    }
   });
 
   it('the header badge reads the package gate under a read-only package', async () => {

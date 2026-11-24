@@ -139,13 +139,14 @@ function editorUnderRoute() {
 }
 
 /**
- * Mount the editor and open the References sheet, which is what triggers the
- * lazy load. Returns the trigger so a case can close and reopen it.
+ * Mount the editor and open the References tab (a side sheet before
+ * objectstack#36901), which is what triggers the lazy load. Returns the tab so
+ * a case can leave and reopen it.
  */
 async function openReferencesSheet() {
   render(editorUnderRoute());
   await waitFor(() => expect(mockClient.layered).toHaveBeenCalled());
-  const trigger = await screen.findByTitle('References');
+  const trigger = await screen.findByTestId('item-tab-references');
   await userEvent.click(trigger);
   return trigger;
 }
@@ -174,7 +175,7 @@ describe('References panel — error ≠ empty ≠ loading (#5110)', () => {
     // No verdict of any kind while the question is still open.
     expect(screen.queryByText(SAFE_TO_DELETE)).toBeNull();
     expect(screen.queryByTestId('refs-error')).toBeNull();
-    expect(screen.queryByTestId('refs-count-badge')).toBeNull();
+    expect(screen.queryByTestId('item-tab-count-references')).toBeNull();
 
     // Settle it so the test does not leave a pending promise behind.
     release([]);
@@ -192,7 +193,7 @@ describe('References panel — error ≠ empty ≠ loading (#5110)', () => {
     expect(screen.getByText(SAFE_TO_DELETE)).toBeInTheDocument();
     expect(screen.queryByTestId('refs-error')).toBeNull();
     // A completed scan MAY show its count, and it is a real zero.
-    expect(screen.getByTestId('refs-count-badge')).toHaveTextContent('0');
+    expect(screen.getByTestId('item-tab-count-references')).toHaveTextContent('0');
   });
 
   it('error: the failure is shown as a failure, asserts nothing about deleting, and Retry re-runs the check', async () => {
@@ -230,7 +231,7 @@ describe('References panel — error ≠ empty ≠ loading (#5110)', () => {
 
     // 3. No count badge: a `0` over a failed check is the same false
     //    measurement in miniature.
-    expect(screen.queryByTestId('refs-count-badge')).toBeNull();
+    expect(screen.queryByTestId('item-tab-count-references')).toBeNull();
 
     // 4. Retry re-runs the SAME loader — under the old `refs != null` guard a
     //    failure left `refs = []` and this second call was unreachable.
@@ -243,10 +244,10 @@ describe('References panel — error ≠ empty ≠ loading (#5110)', () => {
     await waitFor(() => expect(mockClient.references).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('account_list')).toBeInTheDocument();
     expect(screen.queryByTestId('refs-error')).toBeNull();
-    expect(screen.getByTestId('refs-count-badge')).toHaveTextContent('1');
+    expect(screen.getByTestId('item-tab-count-references')).toHaveTextContent('1');
   });
 
-  it('the lazy-load contract survives: a completed scan is not re-requested when the sheet reopens', async () => {
+  it('the lazy-load contract survives: a completed scan is not re-requested when the tab reopens', async () => {
     // The other half of the re-entry guard. `error` falls through so Retry
     // works; `loaded` must still hold, or every reopen re-hits the server.
     referencesImpl.current = vi.fn(async () => []);
@@ -255,7 +256,8 @@ describe('References panel — error ≠ empty ≠ loading (#5110)', () => {
     await screen.findByTestId('refs-empty');
     expect(mockClient.references).toHaveBeenCalledTimes(1);
 
-    await userEvent.keyboard('{Escape}');
+    await userEvent.click(screen.getByTestId('item-tab-details'));
+    expect(screen.queryByTestId('refs-empty')).toBeNull();
     await userEvent.click(trigger);
     await screen.findByTestId('refs-empty');
 

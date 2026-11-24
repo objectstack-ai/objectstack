@@ -111,7 +111,8 @@ describe('ResourceDetailHeader — × and ‹ › on the item address (objectsta
 
   it('with unsaved edits × and › ask first, and a declined question stays on the item', async () => {
     const release = registerUnsavedEdits('Leave with unsaved edits?');
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
     try {
       mount('/studio/crm/metadata/skill/translate?package=crm');
       await waitFor(() => expect(screen.getByTestId('studio-detail-next')).not.toBeDisabled());
@@ -124,6 +125,7 @@ describe('ResourceDetailHeader — × and ‹ › on the item address (objectsta
       expect(location()).toBe('/studio/crm/metadata/skill?package=crm');
     } finally {
       release();
+      vi.unstubAllGlobals();
     }
   });
 

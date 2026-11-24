@@ -360,17 +360,17 @@ describe('the position and capability editors under a wall (objectui#12183)', ()
     expect(screen.queryByTestId('walled-catalog-readonly-banner')).toBeNull();
   });
 
-  it("the History sheet offers the walled tenant no rollback (the rollback door refuses it); CONTROL: the operator's does", async () => {
+  it("the History tab offers the walled tenant no rollback (the rollback door refuses it); CONTROL: the operator's does", async () => {
     const rollback = () => screen.queryByTitle(t('engine.edit.rollback', 'en-US'));
     await mountEditor('position');
-    fireEvent.click(screen.getByTitle(t('engine.edit.history', 'en-US')));
+    fireEvent.click(await screen.findByTestId('item-tab-history'));
     await screen.findByText('v7');
     expect(rollback()).toBeNull();
     cleanup();
 
     operator = true;
     await mountEditor('position');
-    fireEvent.click(screen.getByTitle(t('engine.edit.history', 'en-US')));
+    fireEvent.click(await screen.findByTestId('item-tab-history'));
     await screen.findByText('v7');
     expect(rollback()).not.toBeNull();
   });

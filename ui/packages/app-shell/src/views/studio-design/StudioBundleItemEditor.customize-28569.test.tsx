@@ -477,12 +477,13 @@ describe('Customize a read-only base’s email template, one locale (objectstack
     mount({ type: 'email_template', name: 'welcome', member: 'zh-CN', listedPair: PAIR });
     expect(await field('Subject')).toHaveValue('欢迎回来');
     expect(await screen.findByTestId('studio-override-chip')).toBeInTheDocument();
-    // objectstack#29692 — one door: the editor's ⋯ menu offers no Restore.
-    fireEvent.pointerDown(screen.getByTestId('studio-bundle-editor-more'), { button: 0, ctrlKey: false });
-    await screen.findByTestId('studio-bundle-editor-history');
+    // objectstack#29692 — one door: the History tab (the ⋯ menu's place
+    // since objectstack#36901) offers no Restore.
+    fireEvent.click(screen.getByTestId('item-tab-history'));
+    await screen.findByTestId('item-tab-panel-history');
     expect(screen.queryByTestId('studio-restore-original')).toBeNull();
-    fireEvent.keyDown(screen.getByTestId('studio-bundle-editor-history'), { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByTestId('studio-bundle-editor-history')).toBeNull());
+    fireEvent.click(screen.getByTestId('item-tab-details'));
+    expect(await field('Subject')).toHaveValue('欢迎回来');
 
     await restore();
     await waitFor(() => expect(srv.resets).toHaveLength(2));

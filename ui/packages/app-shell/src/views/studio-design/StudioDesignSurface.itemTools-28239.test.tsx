@@ -13,7 +13,7 @@
  *    read-only;
  *  - History and Audit follow the authoring-trail doors, as on Setup;
  *  - CONTROL: Setup's item page still opens the five from the shared
- *    directory.
+ *    directory (as its tabs since objectstack#36901).
  *
  * The REAL pillars and the REAL Setup page; the metadata client is a server
  * double, and the records grid and the object settings panel are stubbed.
@@ -167,22 +167,23 @@ describe("CONTROL — Setup's item page still opens the five from the shared dir
         <MetadataResourceEditPage type="page" name="home" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByTitle(t('engine.edit.layers', 'en'), undefined, { timeout: 8000 }));
+    // The five are the page's tabs since objectstack#36901: layers read
+    // inside Source, the audit log inside History.
+    fireEvent.click(await screen.findByTestId('item-tab-source', undefined, { timeout: 8000 }));
+    fireEvent.click(screen.getByTestId('item-tab-view-layers'));
     expect(await screen.findByRole('tab', { name: t('engine.layers.diff', 'en') })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTitle(t('engine.edit.references', 'en')));
+    fireEvent.click(screen.getByTestId('item-tab-references'));
     expect(await screen.findByText('all_accounts')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('history-button'));
+    fireEvent.click(screen.getByTestId('item-tab-history'));
     expect(await screen.findAllByTitle(ROLLBACK)).toHaveLength(2);
 
-    fireEvent.click(screen.getByTestId('audit-button'));
+    fireEvent.click(screen.getByTestId('item-tab-view-audit'));
     await waitFor(() => expect(mockClient.audit).toHaveBeenCalledWith('page', 'home', { limit: 100 }));
 
-    // Setup's source is the inspector's Source tab, beside the open sheet.
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    fireEvent.click(screen.getByRole('tab', { name: t('engine.edit.inspector.source', 'en') }));
+    fireEvent.click(screen.getByTestId('item-tab-source'));
+    fireEvent.click(screen.getByTestId('item-tab-view-editor'));
     expect(await screen.findByRole('textbox', { name: 'JSON source' }, { timeout: 8000 })).toBeInTheDocument();
   });
 });

@@ -175,7 +175,7 @@ describe('ItemToolTabPanel — the panels the sheets held, as tab bodies', () =>
 
   it('References runs its own scan when the host holds none', async () => {
     render(<Panel tab="references" />);
-    expect(await screen.findByText('All accounts')).toBeInTheDocument();
+    expect(await screen.findByText('all_accounts')).toBeInTheDocument();
     expect(mockClient.references).toHaveBeenCalledWith('hook', 'h');
   });
 
