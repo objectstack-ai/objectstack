@@ -34,13 +34,20 @@ const SKILLS: Record<string, unknown>[] = [
   { name: 'tribute', label: 'Zeal tribute', _packageId: 'crm' },
 ];
 
-const CLIENT = { list: async (type: string) => (type === 'skill' ? SKILLS : []) };
+/** More tools than one page of the table holds (objectstack#36897). */
+const TOOLS: Record<string, unknown>[] = Array.from({ length: 53 }, (_, i) => ({
+  name: `tool_${String(i + 1).padStart(2, '0')}`,
+  label: `Tool ${i + 1}`,
+}));
+
+const CLIENT = { list: async (type: string) => (type === 'skill' ? SKILLS : type === 'tool' ? TOOLS : []) };
 const SKILL_ENTRY = { type: 'skill', label: 'Skill', allowEnvironmentOverlay: false, allowRuntimeCreate: true };
+const TOOL_ENTRY = { type: 'tool', label: 'Tool', allowEnvironmentOverlay: false, allowRuntimeCreate: true };
 
 vi.mock('./useMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadataClient: () => CLIENT,
-  useMetadataTypes: () => ({ loading: false, error: null, entries: [SKILL_ENTRY] }),
+  useMetadataTypes: () => ({ loading: false, error: null, entries: [SKILL_ENTRY, TOOL_ENTRY] }),
 }));
 vi.mock('./i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -183,5 +190,44 @@ describe('the detail ‹ › order reads the list context (objectstack#36896)', 
     const ordered = await screen.findByTestId('ordered');
     await waitFor(() => expect(ordered).toHaveAttribute('data-status', 'ready'));
     expect(ordered).toHaveTextContent('');
+  });
+});
+
+/**
+ * objectstack#36897 — the list is drawn by `ObjectGrid`, fed the rows in the
+ * list's own order: what the table shows, in order, is what the detail's ‹ ›
+ * step through, a header click is the list's sort, and the table pages.
+ */
+describe("the table's order is the ‹ › order (objectstack#36897)", () => {
+  async function orderedOnDetail(linkName: string): Promise<string> {
+    fireEvent.click(screen.getByRole('link', { name: linkName }));
+    const ordered = await screen.findByTestId('ordered');
+    await waitFor(() => expect(ordered).toHaveAttribute('data-status', 'ready'));
+    return ordered.textContent ?? '';
+  }
+
+  it('the rows the table draws, in order, are the names the detail steps through', async () => {
+    mount(`${LIST}?scope=environment&q=tri&sort=-label`);
+    const shown = await rowNames();
+    expect(shown).toEqual(['tribute', 'triage']);
+    expect(await orderedOnDetail('Triage desk')).toBe(shown.join(','));
+  });
+
+  it('a click on the Label header sorts the list by label, in the address, and the detail follows', async () => {
+    mount(`${LIST}?scope=environment`);
+    await rowNames();
+    fireEvent.click(screen.getByRole('columnheader', { name: /Label/ }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`${LIST}?scope=environment&sort=label`));
+    const shown = await rowNames();
+    expect(shown).toEqual(['translate', 'billing', 'triage', 'tribute']);
+    expect(await orderedOnDetail('Billing')).toBe(shown.join(','));
+  });
+
+  it('pages by the address, and a new search starts again at the first page', async () => {
+    mount(`/apps/setup/metadata/tool?scope=environment&page=2`);
+    expect(await rowNames()).toEqual(['tool_51', 'tool_52', 'tool_53']);
+    fireEvent.change(screen.getByTestId('metadata-list-search'), { target: { value: 'Tool' } });
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/apps/setup/metadata/tool?scope=environment&q=Tool'));
+    expect(await rowNames()).toHaveLength(50);
   });
 });

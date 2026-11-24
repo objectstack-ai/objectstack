@@ -937,14 +937,16 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         ]
       : []),
   ];
+  // A header sorts by what it reads: the first column drawn label-first is
+  // headed (and sorted by) the label, otherwise by the API name.
   const sortKeyOfColumn = (c: MetadataGridColumn): ListSortKey | undefined =>
-    c.key === primaryKey ? 'name' : c.key === 'label' ? 'label' : undefined;
+    c.key === primaryKey ? (labelColumn ? 'label' : 'name') : c.key === 'label' ? 'label' : undefined;
   const typeEntryLabel = entry?.label ?? type;
   const gridSchema = React.useMemo(
     () => metadataListGridSchema(type, gridColumns, sortKeyOfColumn, LIST_PAGE_SIZE),
     // Re-keyed on the columns' content, never on the array's identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [type, JSON.stringify(gridColumns), primaryKey],
+    [type, JSON.stringify(gridColumns), primaryKey, !!labelColumn],
   );
   const gridSource = React.useMemo(
     () => new MetadataListSource(gridRowsAll, metadataListObjectSchema(type, typeEntryLabel, gridColumns)),
