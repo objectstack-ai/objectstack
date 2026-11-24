@@ -469,6 +469,18 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Changer de propriétaire",
         helpText: "L’action Changer de propriétaire, unitaire et en masse : activée, elle est proposée ; désactivée, elle est masquée. Non défini : activée, sauf désactivée sur un objet de détail controlled_by_parent. Proposée uniquement sur un objet dont les enregistrements ont un propriétaire réattribuable (ownership user ou non défini, sans managedBy, pas un objet sys_, owner_id non en lecture seule et, sur un objet externe, déclaré ou mappé) ; l’activer sur tout autre objet est refusé. Elle ne contrôle que l’action, pas une simple modification de owner_id. Un objet {enabled, visibleWhen, disabledWhen} enregistré se modifie clé par clé ; écrivez-en un dans le source pour conditionner l’action à chaque enregistrement."
       },
+      actionLayout: {
+        label: "Disposition des actions",
+        helpText: "L’ordre des actions de cet objet et celles qui sont des boutons, par portée : pinned (au plus 3 boutons, dans l’ordre) et more (l’ordre du menu Plus ; une action nommée dans aucun des deux suit dans son ordre par défaut). Non défini : chaque surface choisit ses boutons selon l’ordre des actions, comme avant."
+      },
+      "actionLayout.list": {
+        label: "Liste",
+        helpText: "La barre d’outils de la page de liste, sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans la barre de la liste ; $import / $export seulement dans pinned. Au plus 3 épinglées. Non épinglés, la page affiche toujours son propre menu Importer / Exporter. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé dans la barre de la liste ; un tel nom n’affiche rien."
+      },
+      "actionLayout.record": {
+        label: "Enregistrement",
+        helpText: "L’en-tête de l’enregistrement (page de l’enregistrement, aperçu latéral, barre du bas sur téléphone), sous la forme {\"pinned\": [...], \"more\": [...]} : noms d’actions placées dans l’en-tête de l’enregistrement ou son menu Plus. Au plus 3 épinglées. os validate refuse un nom qui n’est pas une action de cet objet ou qui n’est pas placé sur la page de l’enregistrement ; un tel nom n’affiche rien."
+      },
       editMode: {
         label: "Mode de modification",
         helpText: "Intention d’interaction de modification pour les enregistrements de cet objet. En l’absence de valeur, le moteur de rendu choisit sa propre valeur par défaut. Intention commune à tous les moteurs de rendu, et non un style."

@@ -963,10 +963,14 @@ describe('#19403 round 8 — the population, DERIVED from the form and a shape',
     // 119 since that card's L2 (S1) gave the `enable.fieldHistory` row a help
     // text saying what an unset switch means — one leaf, authored in every
     // locale. `capabilities` reads 12 → 13.
-    expect(PANEL_LEAVES.length).toBe(119);
+    // 125 since #36366 gave `advanced` the `actionLayout` composite (the
+    // action arrangement per scope) and its `list` / `record` rows — a label
+    // and a help text each, three rows and six leaves, all translated leaves
+    // authored by that card. `advanced` reads 106 → 112.
+    expect(PANEL_LEAVES.length).toBe(125);
     expect(PANEL_LEAVES.every((l) => l.prop === 'label' || l.prop === 'helpText')).toBe(true);
     expect(PANEL_LEAVES.filter((l) => l.section === 'capabilities').length).toBe(13);
-    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(106);
+    expect(PANEL_LEAVES.filter((l) => l.section === 'advanced').length).toBe(112);
   });
 
   it('⭐ DARK, OUTWARD — the open sections are excluded, and `fields.placeholder` is the one that proves it', () => {

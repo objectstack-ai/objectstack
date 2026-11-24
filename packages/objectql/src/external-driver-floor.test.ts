@@ -425,12 +425,12 @@ describe('[#27471] a read the driver refuses with a request-shaped 4xx is 400', 
 
   for (const status of [401, 403, 407, 429, 500, 502, 503, 409, 412]) {
     it(`${status} stays ERR_DATASOURCE_UNAVAILABLE / 503, its text withheld`, async () => {
-      const { engine } = refusingRead(Object.assign(new Error('token sk_live_123 rejected'), { status }));
+      const { engine } = refusingRead(Object.assign(new Error('token sk_live_FAKE_123 rejected'), { status }));
       const err = await engine.find('tree_node', {}).then(() => undefined, (e) => e);
       expect(err).toBeInstanceOf(DatasourceUnavailableError);
       expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
       expect(err.kind).toBe('remote');
-      expect(err.message).not.toContain('sk_live_123');
+      expect(err.message).not.toContain('sk_live_FAKE_123');
     });
   }
 
@@ -493,12 +493,12 @@ describe('[#27277] only a request-shaped 4xx is a refusal of the write', () => {
 
   for (const status of [401, 403, 407, 429]) {
     it(`${status} (a credential or rate-limit condition) is ERR_DATASOURCE_UNAVAILABLE / 503, its text withheld`, async () => {
-      const { engine } = refusing(status, 'token sk_live_123 expired');
+      const { engine } = refusing(status, 'token sk_live_FAKE_123 expired');
       const err = await engine.insert('tree_node', { kind: 'leaf' }).then(() => undefined, (e) => e);
       expect(err).toBeInstanceOf(DatasourceUnavailableError);
       expect(err.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
       expect(err.kind).toBe('remote');
-      expect(err.message).not.toContain('sk_live_123');
+      expect(err.message).not.toContain('sk_live_FAKE_123');
     });
   }
 });

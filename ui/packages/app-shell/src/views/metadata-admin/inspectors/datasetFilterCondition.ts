@@ -402,6 +402,14 @@ export function conditionToGroup(
   if (cond == null) return { group: empty, representable: true };
   if (typeof cond !== 'object' || Array.isArray(cond)) return { group: empty, representable: false };
   if ('$or' in cond) return { group: empty, representable: false };
+  // `$and` is the whole group only when it is the ONLY key. The spec's shape is
+  // a field record intersected with optional `$and` / `$or` / `$not`, so
+  // `{ $and: [...], amount: {...} }` and `{ $and: [...], $not: {...} }` are
+  // valid — and reading only the `$and` rows would open them as editable and
+  // let the next commit of any row drop the siblings (objectstack#36645).
+  if ('$and' in cond && (Object.keys(cond).length !== 1 || !Array.isArray((cond as Record<string, unknown>).$and))) {
+    return { group: empty, representable: false };
+  }
 
   const list: FilterCondition[] = Array.isArray((cond as any).$and) ? (cond as any).$and : [cond];
   const conditions: BuilderCondition[] = [];
@@ -412,6 +420,8 @@ export function conditionToGroup(
     const keys = Object.keys(c);
     if (keys.length !== 1) return { group: empty, representable: false };
     const field = keys[0];
+    // A logical operator in the field slot (`$not`, …) is not a row.
+    if (field.startsWith('$')) return { group: empty, representable: false };
     const v = (c as any)[field];
     let row: BuilderCondition;
     if (v && typeof v === 'object' && !Array.isArray(v)) {

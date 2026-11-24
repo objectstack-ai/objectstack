@@ -98,6 +98,7 @@ import {
   registerAttachmentRemovalRoutes,
 } from './attachment-removal-routes.js';
 import { installAttachmentFilesOptInGate } from './attachment-files-opt-in.js';
+import { createAttachmentDoorMember } from './attachment-door-member.js';
 import {
   FileAttachmentService,
   type FileAttachmentEngine,
@@ -474,6 +475,22 @@ export class StorageServicePlugin implements Plugin {
           () => this.attachmentEngine,
           this.options.basePath ?? DEFAULT_STORAGE_BASE_PATH,
         ),
+        // [#36506] The attachment's removal and rename doors for a kernel with
+        // no `http.server` (a hosted tenant kernel): the runtime dispatcher's
+        // `/attachments` domain forwards the request to this service's
+        // `handleAttachmentDoor`, which runs `mountAttachmentRemovalDoor` — the
+        // mount the `http.server` branch at `kernel:ready` runs — over this
+        // kernel, on a private table that never listens, built on the first
+        // request. The data engine is read then, the one that mount reads.
+        attachmentDoors: createAttachmentDoorMember((http) => {
+          let doorEngine: IDataEngine | null = null;
+          try {
+            doorEngine = ctx.getService<IDataEngine>('objectql') ?? null;
+          } catch {
+            doorEngine = null;
+          }
+          mountAttachmentRemovalDoor(http, toGateRegistry(ctx), doorEngine, ctx.logger);
+        }),
       }),
     );
     // [#25779] The server-side field-file verb, under `FIELD_FILE_SERVICE`.
@@ -809,6 +826,9 @@ export class StorageServicePlugin implements Plugin {
         // removes an attachment they uploaded, with no delete bit on the
         // member grant. Beside the storage family, not in it — its route is
         // fixed and its ledger its own (`attachment-removal-routes.ts`).
+        // [#36506] With no `http.server` the same doors are served by the
+        // `file-attachments` service's `handleAttachmentDoor`, reached through
+        // the runtime dispatcher's `/attachments` domain.
         if (httpServer) mountAttachmentRemovalDoor(httpServer, toGateRegistry(ctx), engine, ctx.logger);
       }
 

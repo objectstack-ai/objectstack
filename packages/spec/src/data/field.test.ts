@@ -188,6 +188,26 @@ describe('FieldSchema — field-level `currency` key guidance, naming `currencyC
   });
 });
 
+// objectstack#36615 — the `tracked` answer names the switch a field's change
+// history has today (`fieldHistory`), not `trackHistory: true`, which turns
+// nothing on for most field types since field history became on by default.
+describe('FieldSchema — field-level `tracked` key guidance, naming `fieldHistory`', () => {
+  const FIELD = { name: 'notes', label: 'Notes', type: 'textarea' } as const;
+
+  it('`tracked` stays rejected and names `fieldHistory`, whose off form really parses', () => {
+    const m = unrecognizedKeyMessage({ ...FIELD, tracked: true });
+    expect(m).toContain('`tracked` is not a field key');
+    expect(m).toContain('fieldHistory: false');
+    expect(m).not.toContain('trackHistory: true');
+    expect(FieldSchema.safeParse({ ...FIELD, fieldHistory: false }).success).toBe(true);
+  });
+
+  it('a sibling unknown key does NOT get the field-history prescription (anti-vacuity)', () => {
+    const m = unrecognizedKeyMessage({ ...FIELD, totallyBogusKey: true });
+    expect(m).not.toContain('fieldHistory');
+  });
+});
+
 describe('FieldSchema', () => {
   describe('Basic Field Properties', () => {
     it('should accept valid field with minimal properties', () => {

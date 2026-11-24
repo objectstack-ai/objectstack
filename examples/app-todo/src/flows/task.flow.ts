@@ -54,7 +54,7 @@ export const TaskReminderFlow: Flow = {
     // `objectName` into the record-change binding only), so the key would be
     // stored and never read. The sweep names its object where it reads, on the
     // `get_record` step below.
-    { id: 'start', type: 'start', label: 'Start (Daily 8 AM)', config: { schedule: '0 8 * * *' } },
+    { id: 'start', type: 'start', label: 'Start (Daily 8 AM)', config: { schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' } } },
     {
       id: 'get_upcoming_tasks', type: 'get_record', label: 'Get Tasks Due Tomorrow',
       // `limit > 1` is the declared way to make this a LIST read (`find`, not
@@ -164,7 +164,7 @@ export const OverdueEscalationFlow: Flow = {
 
   nodes: [
     // No `objectName` here either: see `todo_task_reminder`'s start node.
-    { id: 'start', type: 'start', label: 'Start (Daily 9 AM)', config: { schedule: '0 9 * * *' } },
+    { id: 'start', type: 'start', label: 'Start (Daily 9 AM)', config: { schedule: { type: 'cron', expression: '0 9 * * *', timezone: 'UTC' } } },
     {
       id: 'get_overdue_tasks', type: 'get_record', label: 'Get Severely Overdue Tasks',
       // `limit > 1` = LIST read; the undeclared `getAll` was never read (#4277).

@@ -469,6 +469,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Change Owner",
         helpText: "The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record."
       },
+      actionLayout: {
+        label: "Action Layout",
+        helpText: "The order of this object's actions and which are buttons, per scope: pinned (at most 3 buttons, in order) and more (the More menu's order; an action named in neither follows in its default order). Unset: each surface picks its buttons by the actions' order, as before."
+      },
+      "actionLayout.list": {
+        label: "List",
+        helpText: "The list page toolbar, as {\"pinned\": [...], \"more\": [...]}: action names placed on the list toolbar; $import / $export only in pinned. At most 3 pinned. Not pinned, the page still draws its own Import / Export menu. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing."
+      },
+      "actionLayout.record": {
+        label: "Record",
+        helpText: "The record header (record page, side preview, phone bar), as {\"pinned\": [...], \"more\": [...]}: action names placed in the record header or its More menu. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws nothing."
+      },
       editMode: {
         label: "Edit Mode",
         helpText: "Edit-interaction intent for records of this object. Absent, the renderer picks its own default. Cross-renderer intent, not styling."
@@ -1387,7 +1399,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.size": {
         label: "Size",
-        helpText: "Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."
+        helpText: "Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it."
       },
       "navigation.width": {
         label: "Width",

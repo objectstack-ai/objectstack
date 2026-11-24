@@ -3812,6 +3812,7 @@ function MetadataResourceEditPageImpl({
                               readOnly={formReadOnly}
                               locale={locale}
                               serverSchema={entry?.schema as Record<string, unknown> | undefined}
+                              serverForm={entry?.form}
                               issues={displayIssues}
                               revealIssues={revealIssues}
                               onInlineIssueFieldsChange={setInlineIssueFields}

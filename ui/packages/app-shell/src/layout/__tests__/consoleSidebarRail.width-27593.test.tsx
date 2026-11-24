@@ -6,7 +6,7 @@
  * record drawer, the list beside it and the expanded sidebar (1416 px); the
  * ruling on objectstack#36112 (7069868269) moved it to 1280 px and accepted
  * the cost. `CONSOLE_EXPANDED_SIDEBAR_WIDTH` restates the sidebar primitive's
- * `--sidebar-width` (fixed at 256, objectstack#36112 F2) and
+ * default `--sidebar-width` (256; the reader may drag it, objectstack#36227) and
  * `RECORD_DRAWER_WIDTH` the side preview's default width (objectstack#36149),
  * so this reads both off their owners and holds them equal, and the cost the
  * code pays is the one stated beside the threshold.

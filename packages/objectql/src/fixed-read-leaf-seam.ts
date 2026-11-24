@@ -55,9 +55,9 @@
  * a refusal at the door and one at the boundary log one line between them.
  *
  * ⛔ No boot refusal and no producer here: the class-② boot check and R2's
- * share-arm answer land with the producer (ADR-0155 plan step 6), and until
- * then nothing on main writes the leaf. `index.ts` re-exports two readers
- * from this module and nothing else (plan step 5): {@link fixedReadLeafClassOfEngine}
+ * share-arm answer live with the producer, plugin-sharing (ADR-0155 plan
+ * step 6), which is the one writer of the leaf. `index.ts` re-exports two
+ * readers from this module and nothing else (plan step 5): {@link fixedReadLeafClassOfEngine}
  * and {@link driverEvaluatesFixedReadLeaf}.
  */
 
@@ -82,8 +82,8 @@ const FIND_HOOK_EVENTS = Object.freeze(['beforeFind', 'afterFind'] as const);
 /**
  * [ADR-0155 D4, ② as ruled] Does `driver` evaluate the fixed-read leaf
  * `name`? Its `DriverCapabilities.fixedReadLeaves` lists the name; absence is
- * none. The one reader of the declaration: the seam's consult now, and the
- * producer's up-front answer (R2) when it lands (ADR-0155 plan step 6), which
+ * none. The one reader of the declaration: the seam's consult, and the
+ * producer's up-front answer (R2, ADR-0155 plan step 6), which
  * reaches the driver through `IDataEngine.getDriverForObject`.
  */
 export function driverEvaluatesFixedReadLeaf(driver: { readonly supports?: unknown } | undefined, name: FixedReadLeafName): boolean {
@@ -118,9 +118,9 @@ export type FixedReadLeafClass =
  *     (`resolveDatasourceBinding`), so no driver evaluates the subquery.
  *  2. **A registration for the table BY NAME**: an object-scoped middleware
  *     (`hasObjectMiddleware`) or a `beforeFind` / `afterFind` hook that names
- *     it (`hookNamesObject`), which today's read of the table runs and the
- *     subquery would read around. A registration that names no object, or
- *     `'*'`, is outside the class (D4's boundary).
+ *     it (`hookNamesObject`), which the retired list's read of the table ran
+ *     and the subquery would read around. A registration that names no
+ *     object, or `'*'`, is outside the class (D4's boundary).
  *
  * At this step both answer with the refusal (R1). ⛔ The seam never reads
  * around either.

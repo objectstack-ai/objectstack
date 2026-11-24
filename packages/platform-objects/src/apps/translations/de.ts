@@ -110,6 +110,7 @@ export const de: TranslationData = {
         nav_settings_knowledge: { label: 'Wissen' },
         nav_settings_lifecycle: { label: 'Datenlebenszyklus' },
         nav_recycle_bin: { label: 'Papierkorb' },
+        nav_public_forms: { label: 'Öffentliche Formulare' },
         nav_notification_preferences: { label: 'Benachrichtigungseinstellungen' },
         nav_notification_templates: { label: 'Benachrichtigungsvorlagen' },
 
