@@ -13,7 +13,7 @@
  */
 
 import * as React from 'react';
-import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Search, RefreshCw, AlertTriangle, Lock, Copy } from 'lucide-react';
 import {
   Button,
@@ -104,6 +104,19 @@ import { useAdapter, useMetadata } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { SharingRuleCloneDialog, type SharingRuleCloneDialogProps } from './SharingRuleCloneDialog.js';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
+import {
+  applyListState,
+  decodeListSort,
+  decodeListState,
+  LIST_SORT_KEYS,
+  listContextQuery,
+  scopeListRows,
+  writeListState,
+  type ListRowReader,
+  type ListSortKey,
+  type MetadataListState,
+} from './metadataListState.js';
+import { useListScrollRestore } from './useListScrollRestore.js';
 
 /**
  * objectui#12982 — the Clone dialog of a declaration-only catalog
@@ -198,9 +211,34 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const [items, setItems] = React.useState<ItemRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [query, setQuery] = React.useState('');
-  const [sourceFilter, setSourceFilter] = React.useState<string>('all');
   const [searchParams, setSearchParams] = useSearchParams();
+  // objectstack#36896 — the list's filters and sort live in its address
+  // (`metadataListState.ts`): a refresh keeps them, × / Back from a detail
+  // returns to them, and each row link carries them for the detail's ‹ ›.
+  // Every write replaces the history entry. The search box keeps its own
+  // draft, so a keystroke never waits on the router to echo the address back
+  // (the router commits a location in a transition): the draft follows the
+  // address only on a navigation this page did not write — a link to the list
+  // (PUSH) or Back / Forward (POP) — never on a REPLACE, which is this page's
+  // own write or the package repair below, both keeping the text.
+  const search = searchParams.toString();
+  const urlListState = React.useMemo(() => decodeListState(new URLSearchParams(search)), [search]);
+  const [queryDraft, setQueryDraft] = React.useState(urlListState.query);
+  const navigationType = useNavigationType();
+  const routeLocation = useLocation();
+  const urlQueryRef = React.useRef(urlListState.query);
+  urlQueryRef.current = urlListState.query;
+  React.useEffect(() => {
+    if (navigationType !== 'REPLACE') setQueryDraft(urlQueryRef.current);
+  }, [routeLocation.key, navigationType]);
+  const listState: MetadataListState = { ...urlListState, query: queryDraft };
+  const updateListState = React.useCallback(
+    (patch: Partial<MetadataListState>) => {
+      setSearchParams((prev) => writeListState(prev, { ...decodeListState(prev), ...patch }), { replace: true });
+    },
+    [setSearchParams],
+  );
+  const { query, source: sourceFilter, status: statusFilter, customizedOnly: onlyCustomized } = listState;
   const [refreshKey, setRefreshKey] = React.useState(0);
   // objectui#7611 — the ENVIRONMENT scope (`?scope=environment`): the Setup
   // catalog. The list is the registry's whole list for the type, not one
@@ -235,7 +273,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     const pair = customizationPackageId(host.packageId);
     return pair.ok ? pair.value : null;
   }, [host?.packageId]);
-  const [onlyCustomized, setOnlyCustomized] = React.useState(false);
   // objectstack#27356 — under Setup the header names the page as the sidebar
   // entry that opens it does ("Positions"); the type's label otherwise.
   const { app } = useExpressionContext();
@@ -247,7 +284,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // verdict has none, and the package door is refused the same way.
   const walled = useWalledCatalogReadOnly(type);
   const activation = envScope && hasCatalogActivation(type);
-  const [statusFilter, setStatusFilter] = React.useState<'all' | 'active' | 'inactive'>('all');
   // The activation ledger's answer for the switch column, with the names the
   // door refuses to switch (`catalog-activation.ts`). `null` while unread,
   // `'error'` when the read was refused or failed, with the server's words for
@@ -599,26 +635,16 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // a package with zero items of a type reads as "暂无…条目", not "no match
   // for an (empty) query" just because *other* packages own rows of the
   // same type (server list() is not package-scoped; we scope client-side).
+  //
+  // The per-type hide hook (e.g. `view` drops the bare aggregated container
+  // the framework keeps for runtime dual-read) applies first. objectui#7611 —
+  // the environment scope is the whole registry list, and so is the area's
+  // cross-package leg (objectstack#29566). Otherwise the project-package scope
+  // is mandatory: nothing until a concrete package is active, then only rows
+  // tagged with it — under the area, with its pair's (ADR-0146 D3).
+  // `scopeListRows` is shared with the detail's ‹ › order.
   const scopedItems = React.useMemo(
-    () =>
-      items.filter((row) => {
-        // Per-type hide hook (e.g. `view` drops the bare aggregated
-        // container the framework keeps for runtime dual-read).
-        if (config.listFilter && !config.listFilter(row.item)) return false;
-        // objectui#7611 — the environment scope is the whole registry list,
-        // and so is the area's cross-package leg (objectstack#29566).
-        if (envScope || allLeg) return true;
-        // Mandatory project-package scope: show nothing until a concrete
-        // project package is active, then only rows tagged with it. The
-        // 'sys_metadata' sentinel and untagged rows never match.
-        if (!activePackage) return false;
-        const pkg = (row.item as any)?._packageId;
-        // Only rows tagged with the active writable base match. Untagged /
-        // `sys_metadata`-provenance legacy rows have no scope of their own
-        // (ADR-0070 D5 — the package-less "Local / Custom" scope is removed).
-        // Under the area a base's list also holds its pair's items (ADR-0146 D3).
-        return pkg === activePackage || (pairId !== null && pkg === pairId);
-      }),
+    () => scopeListRows(items, { listFilter: config.listFilter, unscoped: envScope || allLeg, activePackage, pairId }),
     [items, activePackage, config, envScope, allLeg, pairId],
   );
 
@@ -673,20 +699,28 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     customizations.status === 'read' && (markedCount > 0 || customizationTotal(customizations.read) > 0);
   const filteringCustomized = onlyCustomized && showCustomizedFilter;
 
-  // User-driven filters (search query + source provenance) on top of scope.
-  const filtered = scopedItems.filter((row) => {
-    if (!matchesQuery(row.item, query, searchableFields)) return false;
-    if (sourceFilter !== 'all' && row.source !== sourceFilter) return false;
-    if (filteringCustomized && markOf(row) === null) return false;
-    if (activation && statusFilter !== 'all') {
-      // Only a KNOWN state filters: while the ledger is unread or unreadable,
-      // no item is either active or inactive to this filter.
-      if (!ledger || ledger === 'error') return false;
-      const name = String(row.item.name ?? '');
-      if ((statusFilter === 'active') !== isCatalogHolderActive(ledger, name, holdingOfRow(row))) return false;
-    }
-    return true;
-  });
+  // User-driven filters and the sort on top of scope (objectstack#36896): the
+  // one implementation the detail's ‹ › order reads too (`metadataListState.ts`).
+  const rowReader: ListRowReader<ItemRow> = {
+    name: (row) => String(row.item[config.primaryKey ?? 'name'] ?? ''),
+    label: (row) => (typeof row.item.label === 'string' ? row.item.label : undefined),
+    matches: (row, q) => matchesQuery(row.item, q, searchableFields),
+    source: (row) => row.source,
+    ...(showCustomizedFilter ? { customized: (row: ItemRow) => markOf(row) !== null } : {}),
+    // Only a KNOWN state filters: while the ledger is unread or unreadable, no
+    // item is either active or inactive to this filter.
+    ...(activation
+      ? {
+          active: (row: ItemRow) =>
+            !ledger || ledger === 'error'
+              ? null
+              : isCatalogHolderActive(ledger, String(row.item.name ?? ''), holdingOfRow(row)),
+        }
+      : {}),
+  };
+  const filtered = applyListState(scopedItems, listState, rowReader);
+  // The list context every row link carries to its detail (decision 10).
+  const listContext = listContextQuery(listState);
 
   // Compute source + invalid counts for filter / header stats.
   const sourceCounts = React.useMemo(() => {
@@ -760,6 +794,12 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   };
 
   const refresh = () => setRefreshKey((k) => k + 1);
+  // objectstack#36896 — × / Back from a detail lands where the list was: the
+  // position is kept per list address and restored once the rows are drawn.
+  const scrollAnchorRef = useListScrollRestore<HTMLDivElement>(
+    `${routeLocation.pathname}?${search}`,
+    !loading && filtered.length > 0,
+  );
   const createButton = canCreate && (
     <Button
       size="sm"
@@ -803,7 +843,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     : undefined;
 
   const body = (
-      <div className="p-6 space-y-4">
+      <div className="p-6 space-y-4" ref={scrollAnchorRef}>
         <CreatePackageDialog
           open={showCreateBase}
           onOpenChange={setShowCreateBase}
@@ -817,10 +857,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               className={cn('pl-8', inSetup && 'h-8')}
               placeholder={t('engine.list.search', locale)}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQueryDraft(e.target.value);
+                updateListState({ query: e.target.value });
+              }}
+              data-testid="metadata-list-search"
             />
           </div>
-          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+          <Select value={sourceFilter} onValueChange={(v) => updateListState({ source: v as MetadataListState['source'] })}>
             {/* Under Setup the source select is a filter chip (objectui#12606). */}
             <SelectTrigger
               className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[180px]'}
@@ -835,7 +879,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             </SelectContent>
           </Select>
           {activation && (
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+            <Select value={statusFilter} onValueChange={(v) => updateListState({ status: v as typeof statusFilter })}>
               <SelectTrigger
                 className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[150px]'}
                 data-testid="catalog-status-filter"
@@ -855,12 +899,32 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               variant={filteringCustomized ? 'default' : 'outline'}
               className={inSetup ? 'h-8 rounded-full px-3 text-xs' : undefined}
               aria-pressed={filteringCustomized}
-              onClick={() => setOnlyCustomized((v) => !v)}
+              onClick={() => updateListState({ customizedOnly: !onlyCustomized })}
               data-testid="metadata-only-customizations"
             >
               {tFormat('engine.list.customizations.only', locale, { marked: markedCount })}
             </Button>
           )}
+          {/* objectstack#36896 — the sort; by API name, A to Z, by default. */}
+          <Select
+            value={encodeSortOption(listState.sort)}
+            onValueChange={(v) => updateListState({ sort: decodeListSort(v) })}
+          >
+            <SelectTrigger
+              className={inSetup ? 'h-8 w-auto gap-1.5 rounded-full px-3 text-xs' : 'w-[180px]'}
+              aria-label={t('engine.list.sort', locale)}
+              data-testid="metadata-list-sort"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {t(`engine.list.sort.${o.key}.${o.dir}`, locale)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         {customizations.status === 'failed' && (
           <div className="text-xs text-muted-foreground" data-testid="metadata-customizations-failed">
@@ -1079,9 +1143,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                   // each opens its OWN member. A row that declares none is the
                   // canonical member, which the bare name already opens.
                   const rowMember = bundleMemberOf(row.item, config.bundleMemberField);
+                  // objectstack#36896 (decision 10) — and the list's filters and
+                  // sort, for the detail's ‹ ›.
                   const rowHref = `./${encodeURIComponent(name)}${withQueryParam(
-                    rowEditSuffix,
-                    rowMember ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(rowMember)}` : '',
+                    withQueryParam(
+                      rowEditSuffix,
+                      rowMember ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(rowMember)}` : '',
+                    ),
+                    listContext,
                   )}`;
                   // ADR-0146 D3 — the row's customization mark: under a base,
                   // from its served read; in the cross-package leg, an item of a
@@ -1407,6 +1476,16 @@ const ROW_OWN_CONTROLS =
 function withBundleMemberColumn(columns: ListColumns, field: string | undefined): ListColumns {
   if (!field || columns.some((c) => c.key === field)) return columns;
   return [...columns.slice(0, 1), { key: field, label: field }, ...columns.slice(1)];
+}
+
+/** The sort control's options: every sort key, each way (`metadataListState.ts`). */
+const SORT_OPTIONS: ReadonlyArray<{ value: string; key: ListSortKey; dir: 'asc' | 'desc' }> = LIST_SORT_KEYS.flatMap(
+  (key) => (['asc', 'desc'] as const).map((dir) => ({ value: `${dir === 'desc' ? '-' : ''}${key}`, key, dir })),
+);
+
+/** The sort control's value for a sort (`name`, `-label`). */
+function encodeSortOption(sort: MetadataListState['sort']): string {
+  return `${sort.dir === 'desc' ? '-' : ''}${sort.key}`;
 }
 
 /** `suffix` (`''` or `?a=b`) with one more `key=value` pair, when there is one. */
