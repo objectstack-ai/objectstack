@@ -2756,6 +2756,7 @@ const es = {
     },
     reportIndex: {
       title: "Informes",
+      newReport: 'Nuevo informe',
       emptyTitle: "No hay informes",
       emptyDescription: "Esta aplicación no tiene informes que puedas abrir.",
       otherApps: "Informes en tus otras aplicaciones:",
@@ -3669,6 +3670,7 @@ const es = {
     title: 'Diseñar la disposición',
     leaveUnsaved: '¿Salir del diseño de la disposición? Se perderán los cambios no guardados.',
     saveFailed: 'Algunos cambios no se guardaron: {{reason}}',
+    editorOpen: 'Guarda o descarta los cambios del panel de control o del informe antes de diseñar la disposición.',
     menu: {
       title: 'Menú',
       addItem: 'Añadir elemento de menú',
@@ -3713,13 +3715,11 @@ const es = {
       keyboardHint: 'Arrastra un elemento para moverlo, o enfócalo y pulsa Espacio y luego las flechas. Intro lo abre.',
       newDashboard: 'Nuevo panel…',
       newDashboardTitle: 'Nuevo panel',
-      newReport: 'Nuevo informe…',
       newItemSavesAll: 'Al crearlo también se guardan tus otros cambios de diseño y luego se abre para editarlo.',
       create: 'Crear',
       creating: 'Creando…',
       newItemPendingDraft: 'Ya hay un borrador pendiente con este nombre. Inténtalo de nuevo.',
       newItemLeft: 'No se pudo eliminar el nuevo panel "{{name}}"; elimínalo en Studio.',
-      newReportLeft: 'No se pudo eliminar el nuevo informe "{{name}}"; elimínalo en Studio.',
     },
     pins: {
       button: 'Botones del encabezado',
@@ -4202,9 +4202,10 @@ const es = {
       settings: "Configuración del informe",
       pendingDraft: "Este informe tiene cambios sin publicar. Publícalos o descártalos arriba y luego guarda.",
       nameTaken: "Todos los identificadores derivados de este nombre ya están en uso. Ponle otro nombre al informe y guarda.",
-      addsToMenu: "Al guardar se crea este informe y se añade al menú en el lugar que elegiste, junto con tus otros cambios de diseño.",
       adminOnlyTitle: "Solo los administradores del espacio de trabajo pueden crear informes",
       adminOnly: "Un informe se comparte con todo el espacio de trabajo, así que lo crea un administrador.",
+      designModeOnTitle: "Termina primero de diseñar la disposición",
+      designModeOn: "Los informes se crean fuera del modo de diseño. Guarda o descarta la disposición y el editor se abrirá aquí.",
       type: {
         label: "Tipo de informe",
         snapshot: "Estado actual",

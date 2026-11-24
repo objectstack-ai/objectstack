@@ -2752,6 +2752,7 @@ const fr = {
     },
     reportIndex: {
       title: "Rapports",
+      newReport: 'Nouveau rapport',
       emptyTitle: "Aucun rapport",
       emptyDescription: "Cette application n’a aucun rapport que vous pouvez ouvrir.",
       otherApps: "Rapports dans vos autres applications :",
@@ -3665,6 +3666,7 @@ const fr = {
     title: 'Concevoir la mise en page',
     leaveUnsaved: 'Quitter la conception de la mise en page ? Les modifications non enregistrées seront perdues.',
     saveFailed: 'Certaines modifications n’ont pas été enregistrées : {{reason}}',
+    editorOpen: 'Enregistrez ou abandonnez vos modifications du tableau de bord ou du rapport avant de concevoir la mise en page.',
     menu: {
       title: 'Menu',
       addItem: 'Ajouter un élément de menu',
@@ -3709,13 +3711,11 @@ const fr = {
       keyboardHint: 'Faites glisser un élément pour le déplacer, ou placez le focus dessus et appuyez sur Espace, puis sur les flèches. Entrée l’ouvre.',
       newDashboard: 'Nouveau tableau de bord…',
       newDashboardTitle: 'Nouveau tableau de bord',
-      newReport: 'Nouveau rapport…',
       newItemSavesAll: 'Le créer enregistre aussi vos autres modifications de design, puis l’ouvre en modification.',
       create: 'Créer',
       creating: 'Création…',
       newItemPendingDraft: 'Un brouillon portant ce nom est déjà en attente. Réessayez.',
       newItemLeft: 'Le nouveau tableau de bord « {{name}} » n’a pas pu être supprimé ; supprimez-le dans Studio.',
-      newReportLeft: 'Le nouveau rapport « {{name}} » n\'a pas pu être retiré ; retirez-le dans Studio.',
     },
     pins: {
       button: 'Boutons de l’en-tête',
@@ -4198,9 +4198,10 @@ const fr = {
       settings: "Paramètres du rapport",
       pendingDraft: "Ce rapport a des modifications non publiées. Publiez-les ou supprimez-les ci-dessus, puis enregistrez.",
       nameTaken: "Tous les identifiants dérivés de ce nom sont déjà pris. Donnez un autre nom au rapport, puis enregistrez.",
-      addsToMenu: "L'enregistrement crée ce rapport et l'ajoute au menu à l'emplacement choisi, avec vos autres modifications de conception.",
       adminOnlyTitle: "Seuls les administrateurs de l’espace de travail peuvent créer des rapports",
       adminOnly: "Un rapport est partagé avec tout l’espace de travail ; c’est donc un administrateur qui le crée.",
+      designModeOnTitle: "Terminez d’abord la conception de la mise en page",
+      designModeOn: "Un rapport se crée en dehors du mode conception. Enregistrez ou abandonnez la mise en page, puis l’éditeur s’ouvre ici.",
       type: {
         label: "Type de rapport",
         snapshot: "État actuel",

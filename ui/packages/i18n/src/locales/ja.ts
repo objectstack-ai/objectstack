@@ -2684,6 +2684,7 @@ const ja = {
     },
     reportIndex: {
       title: "レポート",
+      newReport: '新規レポート',
       emptyTitle: "レポートはありません",
       emptyDescription: "このアプリには開けるレポートがありません。",
       otherApps: "ほかのアプリのレポート：",
@@ -3589,6 +3590,7 @@ const ja = {
     title: 'レイアウトをデザイン',
     leaveUnsaved: 'レイアウトのデザインを終了しますか？保存されていない変更は失われます。',
     saveFailed: '一部の変更が保存されませんでした：{{reason}}',
+    editorOpen: 'レイアウトをデザインする前に、ダッシュボードまたはレポートの変更を保存するか破棄してください。',
     menu: {
       title: 'メニュー',
       addItem: 'メニュー項目を追加',
@@ -3633,13 +3635,11 @@ const ja = {
       keyboardHint: '項目をドラッグして移動するか、フォーカスしてスペースキーを押し、矢印キーで移動します。Enter キーで開きます。',
       newDashboard: '新しいダッシュボード…',
       newDashboardTitle: '新しいダッシュボード',
-      newReport: '新規レポート…',
       newItemSavesAll: '作成すると、レイアウトのデザインでの他の変更も保存され、編集用に開きます。',
       create: '作成',
       creating: '作成中…',
       newItemPendingDraft: 'この名前の未公開の下書きがすでにあります。もう一度お試しください。',
       newItemLeft: '新しいダッシュボード「{{name}}」を削除できませんでした。Studio で削除してください。',
-      newReportLeft: '新しいレポート「{{name}}」を削除できませんでした。Studio で削除してください。',
     },
     pins: {
       button: 'ヘッダーのボタン',
@@ -4114,9 +4114,10 @@ const ja = {
       settings: "レポート設定",
       pendingDraft: "このレポートには未公開の変更があります。上で公開または破棄してから保存してください。",
       nameTaken: "この名前から作れる識別子はすべて使用済みです。レポートに別の名前を付けてから保存してください。",
-      addsToMenu: "保存するとこのレポートが作成され、選んだ位置のメニューに追加されます。デザインのほかの変更も一緒に保存されます。",
       adminOnlyTitle: "レポートを作成できるのはワークスペース管理者のみです",
       adminOnly: "レポートはワークスペースの全員に共有されるため、管理者が作成します。",
+      designModeOnTitle: "先にレイアウトのデザインを終えてください",
+      designModeOn: "レポートはデザインモードの外で作成します。レイアウトを保存するか破棄すると、ここでエディターが開きます。",
       type: {
         label: "レポートの種類",
         snapshot: "現状分析",
