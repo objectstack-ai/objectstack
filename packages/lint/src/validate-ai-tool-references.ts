@@ -29,6 +29,15 @@
  * Trailing-wildcard entries (`action_*`, `foo_*`) resolve when ANY member of
  * that universe matches the prefix.
  *
+ * A name that resolves can still cost a skill its MCP prompt. The MCP door
+ * offers a skill with `instructions` only on a connection that serves every
+ * tool its binding names (`skillBindingServed`, `@objectstack/mcp`), and the
+ * `ask` product's data tools the door does not register
+ * ({@link ASK_TOOLS_THE_MCP_DOOR_LACKS}) are served by no MCP connection. A
+ * skill offered over MCP that binds one is therefore withheld from every
+ * connection's `prompts/list` without a word at runtime, so this rule says so
+ * at authoring time, by a verdict that names the tool.
+ *
  * Severity is **warning** (ADR-0078 advisory-first ratchet), not error,
  * because the universe has a known blind spot: a runtime plugin outside the
  * registry can legitimately register tools no static analysis can see, and
@@ -44,6 +53,7 @@
 import {
   MCP_DOOR_TOOL_NAMES,
   PLATFORM_PROVIDED_TOOL_NAMES,
+  PLATFORM_TOOLS_BY_PACKAGE,
   PLATFORM_TOOL_FAMILY_PREFIXES,
 } from '@objectstack/spec/system';
 
@@ -209,6 +219,29 @@ function offeredOverMcp(skill: AnyRec): boolean {
 }
 
 /**
+ * The `ask` product's data tools (`PLATFORM_TOOLS_BY_PACKAGE['service-ai']`)
+ * the MCP door does not register: in-product only. A skill offered over MCP
+ * whose binding names one is withheld from `prompts/list` on every MCP
+ * connection. The `build` product's tools are deliberately not here: a host
+ * may serve them over MCP through its authoring family, under
+ * `metadata:write`, so a binding naming one is not withheld everywhere.
+ */
+const ASK_TOOLS_THE_MCP_DOOR_LACKS: ReadonlySet<string> = new Set(
+  (PLATFORM_TOOLS_BY_PACKAGE['service-ai'] ?? []).filter((name) => !MCP_DOOR_TOOL_NAMES.includes(name)),
+);
+
+/**
+ * Would the MCP door project this skill as a prompt, given a connection that
+ * served its binding? Only an active skill offered over MCP that carries
+ * `instructions` is projected (`projectSkillPrompt`, `@objectstack/mcp`); a
+ * skill that is not projected loses nothing to a binding MCP cannot serve.
+ */
+function projectedOverMcp(skill: AnyRec): boolean {
+  if (!offeredOverMcp(skill) || skill.active === false) return false;
+  return typeof skill.instructions === 'string' && skill.instructions.trim() !== '';
+}
+
+/**
  * Validate every `skill.tools[]` reference in a stack. Returns findings
  * (empty = clean).
  */
@@ -238,10 +271,30 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
     const refs = Array.isArray(skill.tools) ? skill.tools : [];
     const overMcp = offeredOverMcp(skill);
     const universe = overMcp ? withMcpDoorTools : shared;
+    const projected = projectedOverMcp(skill);
 
     for (let ti = 0; ti < refs.length; ti++) {
       const ref = strName(refs[ti]);
-      if (!ref || resolves(ref, universe)) continue;
+      if (!ref) continue;
+      if (resolves(ref, universe)) {
+        // A name the in-product agents serve and no MCP connection does: the
+        // skill resolves, and is withheld from every MCP `prompts/list`.
+        if (projected && ASK_TOOLS_THE_MCP_DOOR_LACKS.has(ref)) {
+          findings.push({
+            severity: 'warning',
+            rule: AI_SKILL_TOOL_UNRESOLVED,
+            where: `skill "${skillName}" · tools`,
+            path: `skills[${si}].tools[${ti}]`,
+            message:
+              `Tool "${ref}" is served by the in-product agents but by no MCP connection, so MCP withholds ` +
+              'this skill from `prompts/list` and its instructions never reach an MCP client',
+            hint:
+              'Set `mcpPrompt: false` if the skill is for the in-product agents only, or bind a tool the MCP door ' +
+              `serves in place of "${ref}"`,
+          });
+        }
+        continue;
+      }
 
       const isPattern = ref.endsWith('*');
       // A name (or family) the MCP door serves, on a skill its owner keeps out

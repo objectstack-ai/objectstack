@@ -2,9 +2,10 @@
 
 /**
  * objectstack#28561 — the "All metadata" area in the builder (ADR-0146 D1):
- * the header links it beside the four pillars, and the builder's body is the
- * area on its route (`/studio/<package>/metadata/*`), which the console mounts
- * as `<StudioDesignSurface area="metadata" />`.
+ * the builder's body is the area on its route (`/studio/<package>/metadata/*`),
+ * which the console mounts as `<StudioDesignSurface area="metadata" />`. Since
+ * objectstack#36899 the left menu is the way in: each type entry links that
+ * type's list in the area, and the area's pages mark their type current.
  *
  * The surface and the area are real here, and so is the one package-list read
  * both make (`GET /api/v1/packages`). The metadata-admin pages are stubs that
@@ -41,7 +42,16 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
   return {
     ...actual,
     useMetadataClient: () => mockClient,
-    useMetadataTypes: () => ({ loading: false, error: null, entries: [] }),
+    // objectstack#36899 — the registry serves the designer types the left menu lists.
+    useMetadataTypes: () => ({
+      loading: false,
+      error: null,
+      entries: [
+        { type: 'object', domain: 'data' },
+        { type: 'flow', domain: 'automation' },
+        { type: 'permission', domain: 'security' },
+      ],
+    }),
   };
 });
 
@@ -96,7 +106,6 @@ vi.mock('./StudioBundleItemEditor.js', () => ({
 }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
-import { t } from '../metadata-admin/i18n';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
@@ -160,7 +169,8 @@ function renderAt(path: string) {
 }
 
 const where = () => screen.getByTestId('where').textContent;
-const nav = () => within(screen.getByTestId('studio-pillar-nav'));
+const menu = () => within(screen.getByTestId('studio-menu'));
+const current = () => menu().getByRole('link', { current: 'page' });
 async function areaPage() {
   const el = await screen.findByTestId('area-page');
   return { page: el.getAttribute('data-page'), host: JSON.parse(el.getAttribute('data-host') ?? 'null') };
@@ -185,13 +195,13 @@ afterEach(() => {
 });
 
 describe('Studio: the "All metadata" area in the builder (objectstack#28561)', () => {
-  it('a pillar links the area beside the four pillars, not current', async () => {
+  it('on a pillar, the menu links each type\'s list in the area; the pillar\'s own type is current', async () => {
     servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`);
-    const link = await waitFor(() => nav().getByRole('link', { name: t('engine.studio.pillar.metadata', 'en') }));
-    expect(link).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata`);
-    expect(link).not.toHaveAttribute('aria-current');
-    expect(nav().getByRole('link', { current: 'page' })).toHaveAttribute('href', `/studio/${PACKAGE_ID}/data`);
+    const flows = await waitFor(() => menu().getByTestId('studio-menu-entry-type:flow'));
+    expect(flows).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata/flow?package=${PACKAGE_ID}`);
+    expect(flows).not.toHaveAttribute('aria-current');
+    expect(current()).toHaveAttribute('data-testid', 'studio-menu-entry-type:object');
   });
 
   it('the area\'s route: the area is current, no pillar is, and its body is the package\'s directory', async () => {
@@ -202,10 +212,9 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
       host: { packageId: PACKAGE_ID, readOnly: false, basePath: `/studio/${PACKAGE_ID}/metadata` },
     });
     expect(where()).toBe(`/studio/${PACKAGE_ID}/metadata?package=${PACKAGE_ID}`);
-    const current = nav().getByRole('link', { current: 'page' });
-    expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata`);
-    // The builder's header stays: the package chip, its pillars, the area.
-    expect(nav().getAllByRole('link')).toHaveLength(4);
+    // The directory is no one entry's page; the builder's menu stays beside it.
+    expect(menu().queryByRole('link', { current: 'page' })).toBeNull();
+    expect(menu().getByTestId('studio-menu-group-data')).toBeInTheDocument();
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
     // The surface and the area share the one package-list read.
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/packages')).toHaveLength(1);
@@ -213,9 +222,9 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
 
   it('the pages below the area\'s root are the area\'s too', async () => {
     servePackages();
-    renderAt(`/studio/${PACKAGE_ID}/metadata/translation?package=${PACKAGE_ID}`);
+    renderAt(`/studio/${PACKAGE_ID}/metadata/flow?package=${PACKAGE_ID}`);
     expect((await areaPage()).page).toBe('list');
-    expect(nav().getByRole('link', { current: 'page' })).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata`);
+    expect(current()).toHaveAttribute('data-testid', 'studio-menu-entry-type:flow');
   });
 
   it('a kernel package the switcher hides opens its area read-only', async () => {
@@ -231,7 +240,7 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
     servePackages();
     renderAt(`/studio/${PHANTOM}/metadata`);
     expect(await screen.findByTestId('studio-package-not-found')).toBeInTheDocument();
-    expect(nav().queryAllByRole('link')).toHaveLength(0);
+    expect(screen.queryByTestId('studio-menu')).toBeNull();
     expect(screen.queryByTestId('studio-metadata-area')).toBeNull();
   });
 });
