@@ -44,6 +44,8 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.email_template.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.email_template.fields.variables.helpText": "27197774c2cda633",
   "metadataForms.email_template.sections.status.label": "64a420165247654b",
+  "metadataForms.field.fields.inlineEdit.helpText": "1ce60e4c6d5fc0e1",
+  "metadataForms.field.fields.inlineEdit.label": "f29ea014320f588e",
   "metadataForms.field.fields.name.label": "5274417ff1ccaf01",
   "metadataForms.field.fields.widget.label": "0dd581c951a27892",
   "metadataForms.flow.fields.name.label": "5274417ff1ccaf01",

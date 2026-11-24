@@ -56,6 +56,8 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "metadataForms.field.fields.description.label": "779a4342c8eb6707",
   "metadataForms.field.fields.dimensions.label": "d75e6dd9d87e93b4",
   "metadataForms.field.fields.expression.label": "cd1b52ad1588075e",
+  "metadataForms.field.fields.inlineEdit.helpText": "1ce60e4c6d5fc0e1",
+  "metadataForms.field.fields.inlineEdit.label": "f29ea014320f588e",
   "metadataForms.field.fields.max.label": "8081d808ef64ff91",
   "metadataForms.field.fields.min.label": "05b03a75153e31f3",
   "metadataForms.field.fields.multiple.label": "252515392646e4cd",
