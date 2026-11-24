@@ -208,7 +208,6 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 
 import { AutomationsPillar, StudioDesignSurface } from './StudioDesignSurface';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
-import { ADD_FIELD_OFFERED, addFieldFromGrid } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';

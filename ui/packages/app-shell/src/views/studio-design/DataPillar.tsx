@@ -122,7 +122,7 @@ import {
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { publishSavedItem, readPublishedPin, STUDIO_SAVE_TOAST_ID, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
+import { publishSavedItem, readPublishedPin, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
 import { irreversibleFieldChanges } from './objectSaveConfirm.js';
 import {
   destructiveFindings,

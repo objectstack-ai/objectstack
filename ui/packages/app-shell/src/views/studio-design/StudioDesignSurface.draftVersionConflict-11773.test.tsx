@@ -216,7 +216,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { StudioSaveHarness } from './__tests__/studioSaveHarness';
-import { addFieldFromFormToolbar, addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';
+import { addFieldFromGrid, type AddFieldInput } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { readFields } from '../metadata-admin/previews/object-fields-io';
 

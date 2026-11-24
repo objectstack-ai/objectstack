@@ -21,7 +21,7 @@ import '@testing-library/jest-dom/vitest';
 import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 import { ActionSchema } from '@objectstack/spec/ui';
