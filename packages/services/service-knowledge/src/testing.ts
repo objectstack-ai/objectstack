@@ -144,7 +144,7 @@ function rowsEngine(rows: Row[]): IDataEngine {
 
 /** A `KnowledgeService` over `adapter` and `rows`, with the adapter's `upsert` counted. */
 async function serviceOver(make: () => IKnowledgeAdapter | Promise<IKnowledgeAdapter>, rows: Row[], source: KnowledgeSource) {
-  const adapter = await make();
+  const adapter: IKnowledgeAdapter = await make();
   const upserted: string[][] = [];
   // Delegation, not a prototype proxy: an adapter with `#private` fields only
   // answers when its methods are called on the adapter itself.
@@ -178,14 +178,14 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
 
   describe(`IKnowledgeAdapter contract — ${opts.name}`, () => {
     it('declares exactly the optional members it implements', async () => {
-      const adapter = await make();
+      const adapter: IKnowledgeAdapter = await make();
       expect(typeof adapter.id).toBe('string');
       expect(typeof adapter.listDocuments === 'function').toBe(opts.implements.listDocuments);
     });
 
     describe('upsert / search / delete', () => {
       it('a search finds an upserted document, scoped to the searched source, best first', async () => {
-        const adapter = await make();
+        const adapter: IKnowledgeAdapter = await make();
         const a = objectSource('a');
         const b = objectSource('b');
         await adapter.upsert([doc(a, '1', 'alpine meadow flowers'), doc(a, '2', 'harbour cranes at night')], ctxOf(a));
@@ -199,7 +199,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       });
 
       it('an upsert of an existing id replaces the document', async () => {
-        const adapter = await make();
+        const adapter: IKnowledgeAdapter = await make();
         const a = objectSource('a');
         await adapter.upsert([doc(a, '1', 'volcanic basalt columns')], ctxOf(a));
         await adapter.upsert([doc(a, '1', 'glacier ice caves')], ctxOf(a));
@@ -210,7 +210,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
       });
 
       it('a deleted document is not found; deleting an absent id is a no-op', async () => {
-        const adapter = await make();
+        const adapter: IKnowledgeAdapter = await make();
         const a = objectSource('a');
         await adapter.upsert([doc(a, '1', 'copper kettle'), doc(a, '2', 'copper wire')], ctxOf(a));
         await adapter.delete([`${a.id}:1`, `${a.id}:absent`], ctxOf(a));
@@ -226,7 +226,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
           ['exactly one page', 3],
           ['one page + 1', 4],
         ])('%s: every document once, no page over its limit', async (_label, n) => {
-          const adapter = await make();
+          const adapter: IKnowledgeAdapter = await make();
           const a = objectSource('a');
           if (n > 0) {
             await adapter.upsert(
@@ -244,7 +244,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         });
 
         it('returns each docHash as stored, and none for a document stored without one', async () => {
-          const adapter = await make();
+          const adapter: IKnowledgeAdapter = await make();
           const a = objectSource('a');
           await adapter.upsert([doc(a, '1', 'granite quarry', 'v1:opaque-as-given'), doc(a, '2', 'marble quarry')], ctxOf(a));
           await adapter.upsert([doc(a, '1', 'granite quarry, revised', 'v1:replaced')], ctxOf(a));
@@ -256,7 +256,7 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         });
 
         it("lists only the source's own documents, and none that were deleted", async () => {
-          const adapter = await make();
+          const adapter: IKnowledgeAdapter = await make();
           const a = objectSource('a');
           const b = objectSource('b');
           await adapter.upsert([doc(a, '1', 'tidal pool'), doc(a, '2', 'tidal flat')], ctxOf(a));
