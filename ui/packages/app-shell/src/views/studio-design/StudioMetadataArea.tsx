@@ -85,26 +85,31 @@ const MetadataResourceHistoryPage = React.lazy(() =>
  * verdict rule is the one `parsePackages` applies. One request either way: the
  * readers of that endpoint share it (`packages-io.ts`).
  */
-function useListedPackageWritable(packageId: string | null): boolean | null | undefined {
-  const [answer, setAnswer] = React.useState<{ id: string; writable: boolean | null } | null>(null);
+function useListedPackageWritable(packageId: string | null): { writable: boolean | null | undefined; kernel: boolean } {
+  const [answer, setAnswer] = React.useState<{ id: string; writable: boolean | null; kernel: boolean } | null>(null);
   React.useEffect(() => {
     if (packageId === null) return;
     let cancelled = false;
     fetchListedPackageManifests().then(
       (manifests) => {
-        if (!cancelled) setAnswer({ id: packageId, writable: manifests.get(packageId)?.writable ?? null });
+        if (cancelled) return;
+        const listed = manifests.get(packageId);
+        // objectstack#36897 — a kernel package (manifest scope `system` or
+        // `cloud`) has no pair: the ensure door refuses it (ADR-0146 D3).
+        const scope = listed?.manifest?.scope;
+        setAnswer({ id: packageId, writable: listed?.writable ?? null, kernel: scope === 'system' || scope === 'cloud' });
       },
       () => {
         // The surface reports the failure once (its package-list toast).
-        if (!cancelled) setAnswer({ id: packageId, writable: null });
+        if (!cancelled) setAnswer({ id: packageId, writable: null, kernel: false });
       },
     );
     return () => {
       cancelled = true;
     };
   }, [packageId]);
-  if (packageId === null) return null;
-  return answer?.id === packageId ? answer.writable : undefined;
+  if (packageId === null) return { writable: null, kernel: false };
+  return answer?.id === packageId ? { writable: answer.writable, kernel: answer.kernel } : { writable: undefined, kernel: false };
 }
 
 function AreaLoading({ locale }: { locale: string }): React.ReactElement {
@@ -182,7 +187,8 @@ function AreaItemOpen({
  * `<root>/:type/new`. A read-only package takes no new item of its own:
  * objectstack#36897 — on a read-only base the create is its `.custom` pair's
  * (ADR-0146 D3), asked of the ensure door and opened there; where the door
- * refuses this caller (`customization.walled`), or there is no base to pair,
+ * refuses this caller (`customization.walled`), the package is a kernel
+ * package (which has no pair), or there is no base to pair,
  * the create URL lands on the list, as before.
  */
 function AreaCreate({ customization }: { customization: StudioBaseCustomization | null }): React.ReactElement {
@@ -190,7 +196,7 @@ function AreaCreate({ customization }: { customization: StudioBaseCustomization 
   const { search } = useLocation();
   const host = useMetadataAreaHost();
   if (host?.readOnly) {
-    if (customization && !customization.walled) {
+    if (customization && host.pairCreate) {
       return <AreaPairedCreate type={type} search={search} customization={customization} />;
     }
     return <Navigate to={`${host.basePath}/${encodeURIComponent(type)}${search}`} replace />;
@@ -277,10 +283,11 @@ export function StudioMetadataArea({
   // manifests (see the hook). Unknown stays ungated, as on the pillars: the
   // server's write gate is the authority, and a failed probe must not lock an
   // author out of a writable package.
-  const writable = useListedPackageWritable(packageId);
+  const { writable, kernel } = useListedPackageWritable(packageId);
   const readOnly = packageId !== null && writable === false;
-  // objectstack#36897 — the list offers a create exactly where `AreaCreate` opens one in the pair.
-  const pairCreate = readOnly && !!customization && !customization.walled;
+  // objectstack#36897 — the list offers a create exactly where `AreaCreate`
+  // opens one in the pair; never on a kernel package, which has none.
+  const pairCreate = readOnly && !kernel && !!customization && !customization.walled;
   const host = React.useMemo<MetadataAreaHost>(
     () => ({ packageId, readOnly, basePath, ...(pairCreate ? { pairCreate } : {}) }),
     [packageId, readOnly, basePath, pairCreate],

@@ -242,6 +242,23 @@ describe("a read-only base's create opens in its .custom pair (objectstack#36897
     expect((await page()).host).not.toHaveProperty('pairCreate');
   });
 
+  it('a kernel package has no pair: no create is offered, and its create URL lands on the list', async () => {
+    const ensurePackage = vi.fn();
+    const kernelCustomization = { ...customizationOf(false, ensurePackage), base: KERNEL };
+    render(
+      <MemoryRouter initialEntries={[`/studio/${KERNEL}/metadata/agent/new?package=${KERNEL}`]}>
+        <Where />
+        <Routes>
+          <Route path={`/studio/${KERNEL}/metadata/*`} element={<StudioMetadataArea packageId={KERNEL} customization={kernelCustomization} />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const at = await page();
+    expect(at.page).toBe('list');
+    expect(at.host).not.toHaveProperty('pairCreate');
+    expect(ensurePackage).not.toHaveBeenCalled();
+  });
+
   it('a walled door never asks, and lands on the list as before', async () => {
     const ensurePackage = vi.fn();
     mountCustomized(customizationOf(true, ensurePackage));
