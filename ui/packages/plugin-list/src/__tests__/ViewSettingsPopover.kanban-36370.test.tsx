@@ -19,8 +19,8 @@
  *     the last lane (no eye on it);
  *   - the card fields hide in place, and 「+ Add field」 adds one at the end;
  *   - each toggle writes its next value; the statistic level offers none,
- *     count and a number field's sum (no average) and writes the pick (`null`
- *     for None);
+ *     count and a number field's sum, average, minimum and maximum
+ *     (objectstack#36520) and writes the pick (`null` for None);
  *   - the zh pack names every row.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -168,8 +168,6 @@ describe('视图设置 on a board (objectstack#36370)', () => {
     fireEvent.click(screen.getByTestId('options-lane-summary-count'));
     expect(kanban.summary!.onChange).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
-    // The board computes a count or a sum (`KanbanLaneSummarySchema`): no average.
-    expect(screen.queryByTestId('options-lane-summary-avg:amount')).toBeNull();
     fireEvent.click(screen.getByTestId('options-lane-summary-sum:amount'));
     expect(kanban.summary!.onChange).toHaveBeenLastCalledWith({ type: 'sum', field: 'amount' });
     fireEvent.click(screen.getByTestId('options-row-lane-summary'));
@@ -183,5 +181,35 @@ describe('视图设置 on a board (objectstack#36370)', () => {
     for (const words of ['分列字段', '显示哪几列', '卡片上显示的字段', '添加字段', '显示字段名', '隐藏空字段', '列底统计']) {
       expect(text).toContain(words);
     }
+  });
+});
+
+describe('the lane statistic picker names and offers avg, min and max (objectstack#36520)', () => {
+  it('shows an authored average by name, with its option selected', () => {
+    openMenu({ kanban: kanbanOf({ summary: { value: { type: 'avg', field: 'amount' }, numberFields: [{ value: 'amount', label: 'Amount' }], onChange: vi.fn() } }) });
+    expect(value('options-row-lane-summary')).toBe('Average · Amount');
+    fireEvent.click(screen.getByTestId('options-row-lane-summary'));
+    expect(screen.getByTestId('options-lane-summary-avg:amount').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByTestId('options-lane-summary-avg:amount').textContent).toBe('Average · Amount');
+    expect(screen.getByTestId('options-lane-summary-sum:amount').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('offers each aggregate over the same number fields, and picking min writes it', () => {
+    const kanban = kanbanOf();
+    openMenu({ kanban });
+    fireEvent.click(screen.getByTestId('options-row-lane-summary'));
+    for (const [type, word] of [['sum', 'Sum'], ['avg', 'Average'], ['min', 'Minimum'], ['max', 'Maximum']]) {
+      expect(screen.getByTestId(`options-lane-summary-${type}:amount`).textContent).toBe(`${word} · Amount`);
+    }
+    fireEvent.click(screen.getByTestId('options-lane-summary-min:amount'));
+    expect(kanban.summary!.onChange).toHaveBeenLastCalledWith({ type: 'min', field: 'amount' });
+  });
+
+  it('names the three in the zh pack', () => {
+    openMenu({ kanban: kanbanOf({ summary: { value: { type: 'max', field: 'amount' }, numberFields: [{ value: 'amount', label: 'Amount' }], onChange: vi.fn() } }) }, 'zh');
+    expect(value('options-row-lane-summary')).toBe('最大值 · Amount');
+    fireEvent.click(screen.getByTestId('options-row-lane-summary'));
+    expect(screen.getByTestId('options-lane-summary-avg:amount').textContent).toBe('平均值 · Amount');
+    expect(screen.getByTestId('options-lane-summary-min:amount').textContent).toBe('最小值 · Amount');
   });
 });
