@@ -3135,6 +3135,9 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.customize.actionTitle': '为本部署修改此项。第一次编辑会保存为定制草稿，{package} 本身保持安装时的样子。',
   'engine.studio.customize.walled': '在此部署中，只有平台运营方可以定制已安装的软件包。',
   'engine.studio.customize.noVersion': '软件包列表没有给出已安装的 {package} 版本，因此无法在此定制它的项。',
+  // objectstack#36716 — the report builder's refusals at open.
+  'engine.studio.customize.noPackage': '此项不能在这里保存：它所在的软件包不是这个账号能保存或定制的。',
+  'engine.studio.customize.pendingDraft': '此项在 {package} 中有未发布的更改。请先在 Studio 中发布或丢弃它们，再在这里编辑。',
   'engine.studio.customize.overrides': '覆盖 {package}',
   'engine.studio.customize.overridesTitle': '此项在本部署中替换 {package} 中的同名项，取自 {package} {basedOn}。',
   'engine.studio.customize.draftFooter': '编辑会保存为本部署定制的草稿；发布后生效。',
