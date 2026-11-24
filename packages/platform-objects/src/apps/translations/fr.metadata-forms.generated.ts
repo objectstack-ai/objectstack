@@ -114,7 +114,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Réduire",
-        helpText: "Indique si la section peut être réduite, sur le formulaire de saisie et la page de détail de l’enregistrement. Non défini : non."
+        helpText: "Indique si la section peut être réduite. Le formulaire de saisie applique le réglage tel quel. Sur la page d’enregistrement par défaut, le lecteur peut réduire chaque groupe titré ; le réglage n’y fixe que l’état initial : Collapsed commence réduit, les autres ouverts. Non défini : non."
       },
       "fieldGroups.visibleWhen": {
         label: "Visible si",
@@ -2198,7 +2198,8 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Libellé"
       },
       description: {
-        label: "Description"
+        label: "Description",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Type",
@@ -2280,9 +2281,33 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Plage de dates",
         helpText: "Période par défaut et sélecteur de plage personnalisée. La dimension doit être une dimension de date du jeu de données ; laissez vide lorsque le jeu de données en a exactement une."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Options d’export",
         helpText: "Formats de téléchargement (csv, xlsx) et nom de fichier. Qui peut télécharger dépend de l’autorisation d’export sur l’objet du jeu de données."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
