@@ -4202,6 +4202,8 @@ const fr = {
       nameTaken: "Tous les identifiants dérivés de ce nom sont déjà pris. Donnez un autre nom au rapport, puis enregistrez.",
       adminOnlyTitle: "Seuls les administrateurs de l’espace de travail peuvent créer des rapports",
       adminOnly: "Un rapport est partagé avec tout l’espace de travail ; c’est donc un administrateur qui le crée.",
+      designModeOnTitle: "Terminez d’abord la conception de la mise en page",
+      designModeOn: "Un rapport se crée en dehors du mode conception. Enregistrez ou abandonnez la mise en page, puis l’éditeur s’ouvre ici.",
       type: {
         label: "Type de rapport",
         snapshot: "État actuel",

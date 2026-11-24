@@ -4116,6 +4116,8 @@ const de = {
       nameTaken: "Alle aus diesem Namen gebildeten Kennungen sind bereits vergeben. Geben Sie dem Bericht einen anderen Namen und speichern Sie dann erneut.",
       adminOnlyTitle: "Nur Workspace-Administratoren können Berichte erstellen",
       adminOnly: "Ein Bericht gilt für alle im Workspace, daher erstellt ihn ein Administrator.",
+      designModeOnTitle: "Schließen Sie zuerst die Layoutgestaltung ab",
+      designModeOn: "Berichte werden außerhalb des Designmodus erstellt. Speichern oder verwerfen Sie das Layout, dann öffnet sich der Editor hier.",
       type: {
         label: "Berichtstyp",
         snapshot: "Aktueller Stand",

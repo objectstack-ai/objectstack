@@ -1847,6 +1847,8 @@ const zh = {
       nameTaken: '由这个名称生成的标识都已被占用。请给报表换个名称再保存。',
       adminOnlyTitle: '只有系统管理员能搭建报表',
       adminOnly: '报表对工作区里所有人生效，所以由系统管理员搭建。',
+      designModeOnTitle: '请先完成布局设计',
+      designModeOn: '报表在设计布局之外搭建。保存或取消布局后，搭建器会在这里打开。',
       type: {
         label: '报表类型',
         snapshot: '现状分析',

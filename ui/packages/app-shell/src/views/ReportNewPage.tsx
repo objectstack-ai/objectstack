@@ -20,6 +20,10 @@
  * links reports that exist. The builder's Save and Close in its own header
  * are the screen's one Save/Cancel set: while the builder is open it holds
  * the design mode out (`useHoldDesignModeOut`), so entering the mode refuses.
+ * The address can still be reached with the mode already on (the browser's
+ * Back from a page of the app the mode was entered on), so while the mode is
+ * on the page draws a prompt in place of the builder, and the builder opens
+ * once the mode is saved or cancelled.
  *
  * @module
  */
@@ -35,7 +39,7 @@ import { formatMetadataError } from '@object-ui/data-objectstack';
 import type { DataSource } from '@object-ui/types';
 import type { ReportDraft } from '@object-ui/plugin-report';
 import { ReportBuilderHost } from './ReportBuilderHost.js';
-import { useHoldDesignModeOut } from '../layout/designMode.js';
+import { useDesignModeActive, useHoldDesignModeOut } from '../layout/designMode.js';
 import { saveAndPublishRuntimeMetadata } from './runtime-metadata-persistence.js';
 import { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -90,8 +94,9 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
   const metadataClient = useMetadataClient();
   const { reports, loading, refresh } = useMetadata();
   const { isAdmin, isResolved } = useWorkspaceAdminStatus();
+  const designing = useDesignModeActive();
   // The builder is open whenever this page draws it (objectstack#36692).
-  useHoldDesignModeOut(isResolved && isAdmin);
+  useHoldDesignModeOut(isResolved && isAdmin && !designing);
 
   const backToReports = React.useCallback(() => {
     if (appName) navigate(`/apps/${appName}/reports`);
@@ -157,6 +162,18 @@ export function ReportNewPage({ dataSource }: { dataSource?: DataSource }) {
         <Empty>
           <EmptyTitle>{t('report.builder.adminOnlyTitle')}</EmptyTitle>
           <EmptyDescription>{t('report.builder.adminOnly')}</EmptyDescription>
+        </Empty>
+      </div>
+    );
+  }
+
+  // Never a second Save/Cancel set under the design mode's bar (objectstack#36692).
+  if (designing) {
+    return (
+      <div className="flex h-full items-center justify-center p-8" data-testid="report-new-design-mode">
+        <Empty>
+          <EmptyTitle>{t('report.builder.designModeOnTitle')}</EmptyTitle>
+          <EmptyDescription>{t('report.builder.designModeOn')}</EmptyDescription>
         </Empty>
       </div>
     );

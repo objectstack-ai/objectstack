@@ -1847,6 +1847,8 @@ const zhHant = {
       nameTaken: '由這個名稱生成的標識都已被佔用。請給報表換個名稱再儲存。',
       adminOnlyTitle: '只有系統管理員能搭建報表',
       adminOnly: '報表對工作區裡所有人生效，所以由系統管理員搭建。',
+      designModeOnTitle: '請先完成佈局設計',
+      designModeOn: '報表在設計佈局之外搭建。儲存或取消佈局後，搭建器會在這裡開啟。',
       type: {
         label: '報表型別',
         snapshot: '現狀分析',

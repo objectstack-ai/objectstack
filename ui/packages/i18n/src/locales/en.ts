@@ -2209,6 +2209,8 @@ const en = {
       nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
+      designModeOnTitle: 'Finish designing the layout first',
+      designModeOn: 'A report is built outside the design mode. Save or cancel the layout, and the builder opens here.',
       type: {
         label: 'Report type',
         snapshot: 'Current state',

@@ -14,5 +14,6 @@ The console's design mode no longer hosts the report builder, so the screen show
 - The reports index offers 「New report」 in its header, opening the report builder. It is offered to workspace admins, as the builder is, and not while the design mode is on.
 - While the design mode is on, a dashboard's and a report's own 「Edit」 are not offered.
 - While a dashboard or report editor is open, 「Design layout」 refuses with a prompt to save or cancel those changes first, so the design mode's 「Cancel」 can no longer end the mode under an editor left open.
+- The report builder's own address reached with the design mode already on (the browser's Back) shows a prompt to finish designing the layout instead of the builder; the builder opens there once the mode is saved or cancelled.
 
-The design mode's 「New dashboard…」 is unchanged. In `@object-ui/i18n`, `designMode.menu.newReport`, `designMode.menu.newReportLeft` and `report.builder.addsToMenu` are removed from every pack, and `designMode.editorOpen` and `console.reportIndex.newReport` are added. Nothing to migrate.
+The design mode's 「New dashboard…」 is unchanged. In `@object-ui/i18n`, `designMode.menu.newReport`, `designMode.menu.newReportLeft` and `report.builder.addsToMenu` are removed from every pack, and `designMode.editorOpen`, `console.reportIndex.newReport`, `report.builder.designModeOnTitle` and `report.builder.designModeOn` are added. Nothing to migrate.

@@ -4206,6 +4206,8 @@ const es = {
       nameTaken: "Todos los identificadores derivados de este nombre ya están en uso. Ponle otro nombre al informe y guarda.",
       adminOnlyTitle: "Solo los administradores del espacio de trabajo pueden crear informes",
       adminOnly: "Un informe se comparte con todo el espacio de trabajo, así que lo crea un administrador.",
+      designModeOnTitle: "Termina primero de diseñar la disposición",
+      designModeOn: "Los informes se crean fuera del modo de diseño. Guarda o descarta la disposición y el editor se abrirá aquí.",
       type: {
         label: "Tipo de informe",
         snapshot: "Estado actual",

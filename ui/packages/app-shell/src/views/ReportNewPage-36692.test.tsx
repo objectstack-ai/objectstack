@@ -9,7 +9,10 @@
  *    page says nothing about a menu;
  *  - Close goes back to the app's reports index;
  *  - while the builder is open it holds the design mode out, so entering the
- *    mode refuses with the prompt and the screen keeps one Save/Cancel set.
+ *    mode refuses with the prompt and the screen keeps one Save/Cancel set;
+ *  - reached with the mode already on (the browser's Back), the page draws a
+ *    prompt in place of the builder, and the builder opens once the mode is
+ *    left.
  *
  * Real subjects: `ReportNewPage` and the shell's design-mode controller. The
  * builder is a stub with a Save and a Close (the real one is
@@ -21,7 +24,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 const DRAFT = vi.hoisted(() => ({
   name: '',
@@ -91,6 +94,9 @@ function Shell({ children }: { children: React.ReactNode }) {
       <button type="button" onClick={() => mode.enter()}>
         enter design mode
       </button>
+      <button type="button" onClick={() => mode.cancel()}>
+        cancel design mode
+      </button>
       {children}
     </DesignModeProvider>
   );
@@ -103,6 +109,31 @@ function mount() {
         <Routes>
           <Route path="/apps/:appName/reports/new" element={<ReportNewPage />} />
           <Route path="*" element={null} />
+        </Routes>
+        <Where />
+      </Shell>
+    </MemoryRouter>,
+  );
+}
+
+/** A link inside the app, standing in for the browser's Back to `reports/new`. */
+function GoNew() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate('/apps/crm/reports/new')}>
+      go to new report
+    </button>
+  );
+}
+
+/** Starts on the reports index, where nothing holds the mode out. */
+function mountOnIndex() {
+  render(
+    <MemoryRouter initialEntries={['/apps/crm/reports']}>
+      <Shell>
+        <Routes>
+          <Route path="/apps/:appName/reports/new" element={<ReportNewPage />} />
+          <Route path="*" element={<GoNew />} />
         </Routes>
         <Where />
       </Shell>
@@ -155,5 +186,47 @@ describe('the new-report page saves on its own (objectstack#36692)', () => {
     expect(screen.getByTestId('mode')).toHaveTextContent('off');
     expect(toastError).toHaveBeenCalledWith('Save or cancel your dashboard or report changes before designing the layout.');
     expect(screen.getByTestId('builder')).toBeInTheDocument();
+  });
+});
+
+describe('reached with the design mode already on, the page draws no builder (objectstack#36692)', () => {
+  it('mode on, then reports/new mounts: no builder and no second Save, the prompt instead', async () => {
+    mountOnIndex();
+    fireEvent.click(screen.getByText('enter design mode'));
+    await flush();
+    expect(screen.getByTestId('mode')).toHaveTextContent('on');
+    fireEvent.click(screen.getByText('go to new report'));
+    await flush();
+    expect(screen.getByTestId('where').textContent).toBe('/apps/crm/reports/new');
+    expect(screen.getByTestId('mode')).toHaveTextContent('on');
+    expect(screen.queryByTestId('builder')).toBeNull();
+    expect(screen.queryByText('save')).toBeNull();
+    expect(screen.getByTestId('report-new-design-mode')).toBeInTheDocument();
+  });
+
+  it('once the mode is left, the builder opens there and holds the mode out', async () => {
+    mountOnIndex();
+    fireEvent.click(screen.getByText('enter design mode'));
+    await flush();
+    fireEvent.click(screen.getByText('go to new report'));
+    await flush();
+    fireEvent.click(screen.getByText('cancel design mode'));
+    await flush();
+    expect(screen.getByTestId('mode')).toHaveTextContent('off');
+    expect(screen.getByTestId('builder')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('enter design mode'));
+    await flush();
+    expect(screen.getByTestId('mode')).toHaveTextContent('off');
+    expect(screen.getByTestId('builder')).toBeInTheDocument();
+  });
+
+  it('control: with the mode off, reports/new draws the builder and no prompt', async () => {
+    mountOnIndex();
+    fireEvent.click(screen.getByText('go to new report'));
+    await flush();
+    expect(screen.getByTestId('mode')).toHaveTextContent('off');
+    expect(screen.getByTestId('builder')).toBeInTheDocument();
+    expect(screen.getByText('save')).toBeInTheDocument();
+    expect(screen.queryByTestId('report-new-design-mode')).toBeNull();
   });
 });
