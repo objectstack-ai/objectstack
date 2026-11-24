@@ -6004,10 +6004,23 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
               held at the bottom of the scroll box, each figure in its
               column's cell — so it lines up with its column at any width and
               scrolls sideways with it; a frozen column's cell stays frozen. */}
-          {summaryRow && (
+          {/* objectstack#37028 — the lead (the record count) sits on the list
+              page's one left edge, 16px in like the select-all box
+              (objectstack#35663): where a leading cell is drawn, the first
+              column's cell spans it and starts at that cell's inset, so the
+              first column's figure still ends at its column's right edge.
+              Both are frozen or neither (`frozenColumns > 0` freezes the
+              leading cell and the first column), so the span keeps the
+              `left-0` the leading cell had. */}
+          {summaryRow && (() => {
+            const leadSpansLeading = leadingCellCount > 0
+              && summaryRow.lead != null
+              && columns.length > 0
+              && !isPinnedRightColumn(columns[0]);
+            return (
             <tfoot className="sticky bottom-0 z-10 bg-background" data-testid="data-table-summary-row">
               <TableRow className="border-t border-b-0 hover:bg-transparent">
-                {leadingCellCount > 0 && (
+                {leadingCellCount > 0 && !leadSpansLeading && (
                   <TableCell className={cn(LEADING_CELL_WIDTH, "h-8 py-0 bg-background", frozenColumns > 0 && "sticky left-0 z-20")} />
                 )}
                 {columns.map((col, colIndex) => {
@@ -6016,13 +6029,16 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                   const pinnedRightOffset = isPinnedRight ? measuredStickyRights?.[col.accessorKey] : undefined;
                   const figure = summaryRow.cells[col.accessorKey];
                   const lead = colIndex === 0 ? summaryRow.lead : undefined;
+                  const spansLeading = colIndex === 0 && leadSpansLeading;
                   return (
                     <TableCell
                       key={col.accessorKey}
+                      colSpan={spansLeading ? leadingCellCount + 1 : undefined}
                       data-column-key={col.accessorKey}
                       data-testid={figure != null ? `data-table-summary-${col.accessorKey}` : undefined}
                       className={cn(
                         "h-8 px-3 py-0 whitespace-nowrap text-xs font-medium text-muted-foreground tabular-nums bg-background",
+                        spansLeading && "pl-4",
                         col.align === 'right' && 'text-right',
                         col.align === 'center' && 'text-center',
                         isFrozen && 'sticky z-20',
@@ -6030,7 +6046,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         isPinnedRight && 'sticky right-0 z-20',
                       )}
                       style={{
-                        ...(isFrozen && { left: measuredStickyLefts?.[leadingCellCount + colIndex] }),
+                        ...(isFrozen && { left: spansLeading ? 0 : measuredStickyLefts?.[leadingCellCount + colIndex] }),
                         ...(pinnedRightOffset ? { right: pinnedRightOffset } : {}),
                       }}
                     >
@@ -6049,7 +6065,8 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                 {addColumnEnabled && <TableCell aria-hidden className="w-10 h-8 py-0" />}
               </TableRow>
             </tfoot>
-          )}
+            );
+          })()}
         </Table>
       </div>
       {rightShadow && (
