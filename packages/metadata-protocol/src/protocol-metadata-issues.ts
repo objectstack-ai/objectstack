@@ -225,11 +225,12 @@ function selectUnionBranches(
  *   said nowhere else in the list, so dropping the head would drop the fix.
  *
  * This reverses the "strictly additive, `issues[0]` unmoved" design #5364
- * shipped (released in 17.0.0), by the maintainer's rulings on #35400. Both
- * spec walks KEEP every head (`formatZodIssue` prints it as the parent line of
- * an indented tree, `zodIssuesToFields` emits it as `invalid_shape`); that
- * asymmetry is recorded in `union-branch-policy.cross-package-parity.test.ts`
- * §4.
+ * shipped (released in 17.0.0), by the maintainer's rulings on #35400.
+ * `zodIssuesToFields` (spec) applies the same rule to the data API's `fields[]`
+ * [#35433], pinned entry for entry in
+ * `union-branch-policy.cross-package-parity.test.ts` §4; only the terminal
+ * renderer `formatZodIssue` still KEEPS every head, as the parent line of an
+ * indented tree.
  *
  * [#8783] A {@link CONTAINER_ISSUE_CODES} issue descends the same way and for
  * the same reason, into `issue.issues` instead of `issue.errors`, with three

@@ -105,7 +105,7 @@ import { RefusalMessage } from '../../components/RefusalMessage.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { duplicatePackage, forgetPackageListReads, isSpecPackageId } from '../studio-design/packages-io.js';
 import { PackageIdInput } from '../studio-design/PackageIdInput.js';
-import { useWorkspaceAdminStatus } from '@object-ui/auth';
+import { createAuthenticatedFetch, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import {
   getMarketplacePackage,
@@ -225,6 +225,11 @@ type UncheckedPackageRow = Omit<InstalledPackageRow, 'source' | 'writable'> & {
 
 const API = '/api/v1/packages';
 
+/** The console's authenticated fetch: the stored bearer token beside the session cookie. */
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
+
 /**
  * The code `PATCH /packages/:id/disable` answers, with `409`, while a
  * validation rule of an enabled package reads a field the package adds through
@@ -239,7 +244,7 @@ async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   // list reads from before it are forgotten however it ends, the session's
   // held list the app → Studio entries read included.
   const writes = (init?.method ?? 'GET').toUpperCase() !== 'GET';
-  const res = await fetch(path, {
+  const res = await authFetch(path, {
     credentials: 'include',
     headers: { Accept: 'application/json', ...(init?.headers || {}) },
     ...init,

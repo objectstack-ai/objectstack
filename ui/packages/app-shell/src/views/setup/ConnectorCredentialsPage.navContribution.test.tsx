@@ -29,6 +29,8 @@ import {
 } from '../../services/componentRegistry.js';
 import { ComponentNavView } from '../ComponentNavView.js';
 import { CONNECTOR_CREDENTIALS_REF, connectorCredentialsPagePath } from './connectorCredentials.js';
+// Loaded at import so its first load is not paid inside a test's clocked window.
+import '@objectstack/lint';
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -36,6 +38,7 @@ beforeEach(() => {
     vi.fn(async () => ({
       ok: true,
       status: 200,
+      headers: new Headers(),
       json: async () => ({ success: true, data: { credentialRefs: [], total: 0 } }),
     }) as unknown as Response),
   );

@@ -377,6 +377,67 @@ const sidebarOffcanvasStateQualifierPatches = [
 }));
 
 /**
+ * The sidebar phone-drawer accessible-name patches (objectstack#37018).
+ *
+ * Below the mobile breakpoint `Sidebar` renders a Sheet, a dialog whose `sr-only`
+ * header upstream fills with the English literals "Sidebar" and "Displays the
+ * mobile sidebar.", so a screen reader in a zh / ja / es workspace announced
+ * English on opening a drawer whose every visible row is translated.
+ *
+ * As with the close-label family, the payload stays OUT of `src/ui/`: the
+ * translated title lives in `packages/components/src/lib/sidebar-drawer-label.tsx`
+ * (`console.nav.menuLabel`, the name the app menu inside the drawer already
+ * announces, with an English fallback), and the primitive gets three anchored
+ * edits. The description has no counterpart in the locale packs, so it is
+ * dropped and Radix is told so with `aria-describedby={undefined}`, the spelling
+ * that keeps its missing-description warning quiet. Every `find` is written from
+ * `scripts/__tests__/fixtures/shadcn-registry/sidebar.registry.txt` after
+ * `rewriteRegistryImports`.
+ *
+ * @type {LocalPatch[]}
+ */
+const sidebarDrawerLabelPatches = [
+  {
+    id: 'sidebar-drawer-label-import',
+    issue: 'objectstack#37018',
+    reason:
+      'Imports the translated drawer title and drops `SheetDescription` from the ' +
+      'sheet import, since the header below no longer renders one.',
+    find: '  SheetDescription,\n  SheetHeader,\n  SheetTitle,\n} from "./sheet"\n',
+    replace:
+      '  SheetHeader,\n  SheetTitle,\n} from "./sheet"\n' +
+      'import { SidebarDrawerTitle } from "../lib/sidebar-drawer-label"\n',
+    marker: '  SheetTitle,\n} from "./sheet"\nimport { SidebarDrawerTitle } from "../lib/sidebar-drawer-label"\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-drawer-label-no-description',
+    issue: 'objectstack#37018',
+    reason:
+      'Declares that the phone drawer has no description, so Radix does not warn ' +
+      'about a missing `Description` once the English one is dropped.',
+    find: '            data-mobile="true"\n',
+    replace: '            data-mobile="true"\n            aria-describedby={undefined}\n',
+    marker: '            data-mobile="true"\n            aria-describedby={undefined}\n',
+    occurrences: 1,
+  },
+  {
+    id: 'sidebar-drawer-label-title',
+    issue: 'objectstack#37018',
+    reason:
+      "The drawer dialog's accessible name: `console.nav.menuLabel` for the session " +
+      'locale, "App navigation" when no I18nProvider is mounted, in place of the ' +
+      'English "Sidebar" title and its English description.',
+    find:
+      '              <SheetTitle>Sidebar</SheetTitle>\n' +
+      '              <SheetDescription>Displays the mobile sidebar.</SheetDescription>\n',
+    replace: '              <SheetTitle><SidebarDrawerTitle /></SheetTitle>\n',
+    marker: '              <SheetTitle><SidebarDrawerTitle /></SheetTitle>\n',
+    occurrences: 1,
+  },
+];
+
+/**
  * Upstream's thumb class list, spelled exactly once.
  *
  * The delivery patch below has to name it twice — the single-line element it
@@ -1012,6 +1073,7 @@ export const LOCAL_PATCHES = {
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,
     ...sidebarOffcanvasStateQualifierPatches,
+    ...sidebarDrawerLabelPatches,
   ],
   slider: sliderThumbPassThroughPatches,
   calendar: calendarDisplayLocalePatches,

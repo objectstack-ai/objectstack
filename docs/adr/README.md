@@ -13,12 +13,12 @@
 
 ## Summary
 
-159 records under `docs/adr/` (154 numbers), 11 under `ui/docs/adr/` (listed separately below).
+161 records under `docs/adr/` (156 numbers), 11 under `ui/docs/adr/` (listed separately below).
 
 | Status | Records |
 |---|---|
 | Accepted | 138 |
-| Proposed | 7 |
+| Proposed | 9 |
 | Superseded | 4 |
 | Draft | 3 |
 | Deferred | 2 |
@@ -26,7 +26,7 @@
 | Amended | 1 |
 | Partially implemented | 1 |
 | Revised | 1 |
-| **Total** | **159** |
+| **Total** | **161** |
 
 ## Shared numbers
 
@@ -226,6 +226,8 @@ A bare `ADR-0006` names the decision; its current text is [0006-project-environm
 | [ADR-0156](./0156-compiled-metadata-answer-cache-every-source-counts-its-own-changes.md) | A compiled metadata answer is cached only when every source it reads counts its own changes, and a bound cove… | Accepted — 2026-11-16 — maintainer ruling on #34206, comment 6920925378, v… | 2026-11-16 | — | — |
 | [ADR-0157](./0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md) | Working calendars are organization-editable runtime data — a consumer names a calendar by code or takes the o… | Accepted — 2026-11-19 — maintainer ruling on #35340, comment `7000950747`,… | 2026-11-19 | — | — |
 | [ADR-0158](./0158-units-of-measure-standard-unit-table-org-units-quantity-unit-declaration-base-quantity.md) | Units of measure — a closed standard unit table in the spec, organization-owned units, a quantity field that… | Accepted — 2026-11-19, ruled on objectstack#35339 (ruling record `70011930… | 2026-11-19 | — | — |
+| [ADR-0159](./0159-forms-are-their-own-metadata-type-public-forms-are-form-items-view-is-lists-only.md) | Forms are their own metadata type — a `form` item is a named form with a consumer, public forms are `form` it… | Proposed — 2026-11-24, written for objectstack#36868 on the maintainer's r… | 2026-11-24 | — | — |
+| [ADR-0160](./0160-record-scoped-ai-inquiry.md) | Record-scoped AI inquiry — a context pack is its own metadata type, read as the caller and served by one tool… | Proposed — 2026-11-24, written for objectstack#36997 (epic objectstack#369… | 2026-11-24 | — | — |
 
 ## ObjectUI registry — `ui/docs/adr/` (`ui-` prefix)
 

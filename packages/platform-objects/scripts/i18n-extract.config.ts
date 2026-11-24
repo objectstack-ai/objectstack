@@ -208,6 +208,10 @@ import {
   SysWorkCalendarException,
 } from '../src/system/index.js';
 
+// The built-in tasks and notes (`work/`): business objects every environment
+// carries, registered on their own manifest by `PlatformObjectsPlugin`.
+import { SysTask, SysNote } from '../src/work/index.js';
+
 // ── Existing Setup app + dashboards + translations ────────────────────────
 import { SETUP_APP } from '../src/apps/setup.app.js';
 import { STUDIO_APP } from '../src/apps/studio.app.js';
@@ -366,6 +370,8 @@ const config: ObjectStackDefinition = defineStack({
     SysUnit,
     SysWorkCalendar,
     SysWorkCalendarException,
+    SysTask,
+    SysNote,
   ] as any,
 
   apps: [SETUP_APP, STUDIO_APP, ACCOUNT_APP] as any,
