@@ -385,36 +385,53 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
     let published: Record<string, unknown> | null = null;
     let failure: string | null = null;
     let target: InPlaceEditTarget = { kind: 'unbound' };
-    // A refusal said in its own sentence, not as a failed load.
-    let refusal: string | null = null;
+    // A refusal said in its own sentence (and, where the doors gave one, the
+    // reason under it), not as a failed load.
+    let refusal: { title: string; description?: string } | null = null;
     try {
-      const at = packageId ? { packageId } : {};
-      const [layers, servedDraft, resolved] = await Promise.all([
-        metadataClient.layered<Record<string, unknown>>('report', reportName, at),
-        metadataClient.getDraft('report', reportName, at),
-        // Where a Save would land (objectstack#36716); reads the package list only.
-        resolveInPlaceEditTarget(packageId),
-      ]);
-      target = resolved;
-      const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
-      const lay = layers as { effective?: unknown; code?: unknown } | null;
-      published = (lay?.effective ?? lay?.code ?? null) as Record<string, unknown> | null;
-      if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
-      else if (Object.keys(authored.body).length > 0) body = authored.body;
-      else failure = tStudio('engine.form.notFound', metadataLocale);
-      // The editor is not opened where its Save could not land, as Studio's
-      // Customize is refused up front: no package this account can save the
-      // report into, the ensure door walled for this caller, or no listed base
-      // version to declare the override at.
-      if (body && target.kind === 'refused') {
-        failure = target.reason;
-        body = null;
-      } else if (body && target.kind === 'customization' && customizeWalled) {
-        refusal = tStudio('engine.studio.customize.walled', metadataLocale);
-        body = null;
-      } else if (body && target.kind === 'customization' && inPlaceSaveBody(body, target) === null) {
-        refusal = tFormat('engine.studio.customize.noVersion', metadataLocale, { package: target.base });
-        body = null;
+      // Where a Save would land first (objectstack#36716; reads the package
+      // list only), as `openDashboardForEdit` asks it: the reads below depend
+      // on the answer.
+      target = await resolveInPlaceEditTarget(packageId);
+      if (target.kind === 'refused') {
+        refusal = { title: tStudio('engine.studio.customize.noPackage', metadataLocale), description: target.reason };
+      } else if (target.kind === 'customization' && customizeWalled) {
+        refusal = { title: tStudio('engine.studio.customize.walled', metadataLocale) };
+      } else {
+        const at = packageId ? { packageId } : {};
+        // A customization pair the list already names is probed for a pending
+        // draft of this report, as `openDashboardForEdit` reads the pair
+        // first: a Studio draft staged there is refused here, at open, not at
+        // Save. The buffer stays the authored read at the package the report
+        // is served from, which names the pair itself once an override of it
+        // is served (ADR-0150 D5).
+        const pairAt =
+          target.kind === 'customization' && target.pair && target.pair !== packageId
+            ? { packageId: target.pair }
+            : null;
+        const [layers, servedDraft, pairDraft] = await Promise.all([
+          metadataClient.layered<Record<string, unknown>>('report', reportName, at),
+          metadataClient.getDraft('report', reportName, at),
+          pairAt ? metadataClient.getDraft('report', reportName, pairAt) : Promise.resolve(null),
+        ]);
+        const authored = authoredBuffer('report', layers as AuthoredLayers, extractDraftBody(servedDraft));
+        const lay = layers as { effective?: unknown; code?: unknown } | null;
+        published = (lay?.effective ?? lay?.code ?? null) as Record<string, unknown> | null;
+        if (authored.kind === 'unserved') failure = tStudio('engine.studio.refusal.draftUnreadable', metadataLocale);
+        else if (Object.keys(authored.body).length > 0) body = authored.body;
+        else failure = tStudio('engine.form.notFound', metadataLocale);
+        // The editor is not opened where its Save could not land, as Studio's
+        // Customize is refused up front: a draft already pending in the pair,
+        // or no listed base version to declare the override at.
+        if (body && pairAt && extractDraftBody(pairDraft)) {
+          refusal = {
+            title: tFormat('engine.studio.customize.pendingDraft', metadataLocale, { package: pairAt.packageId }),
+          };
+          body = null;
+        } else if (body && target.kind === 'customization' && inPlaceSaveBody(body, target) === null) {
+          refusal = { title: tFormat('engine.studio.customize.noVersion', metadataLocale, { package: target.base }) };
+          body = null;
+        }
       }
     } catch (err) {
       failure = formatMetadataError(err);
@@ -422,13 +439,17 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
       setOpeningEditor(false);
     }
     if (!body) {
-      toast.error(
-        refusal ?? tFormat('engine.edit.loadFailed', metadataLocale, {
-          type: 'report',
-          name: reportName,
-          message: failure ?? tStudio('engine.form.notFound', metadataLocale),
-        }),
-      );
+      if (refusal) {
+        toast.error(refusal.title, refusal.description ? { description: refusal.description } : undefined);
+      } else {
+        toast.error(
+          tFormat('engine.edit.loadFailed', metadataLocale, {
+            type: 'report',
+            name: reportName,
+            message: failure ?? tStudio('engine.form.notFound', metadataLocale),
+          }),
+        );
+      }
       return;
     }
     editTargetRef.current = target.kind === 'refused' ? { kind: 'unbound' } : target;

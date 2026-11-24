@@ -226,7 +226,11 @@ describe('the report builder saves a package-shipped report into <base>.custom (
     mount({ ...STORED, _packageId: 'showcase' });
     fireEvent.click(await screen.findByTestId('report-edit-button'));
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
-    expect(String(vi.mocked(toast.error).mock.calls[0][0])).toContain("The package 'showcase' is not listed.");
+    // Its own sentence, the doors' reason under it, never a failed load's.
+    expect(String(vi.mocked(toast.error).mock.calls[0][0])).toContain('cannot be saved here');
+    expect(String(vi.mocked(toast.error).mock.calls[0][0])).not.toContain('could not load');
+    expect(vi.mocked(toast.error).mock.calls[0][1]).toEqual({ description: "The package 'showcase' is not listed." });
+    expect(client.value.layered).not.toHaveBeenCalled();
     expect(screen.queryByTestId('report-builder')).toBeNull();
     cleanup();
     vi.mocked(toast.error).mockClear();
@@ -252,5 +256,28 @@ describe('the report builder saves a package-shipped report into <base>.custom (
     expect(screen.queryByTestId('report-builder')).toBeNull();
     expect(client.value.save).not.toHaveBeenCalled();
     expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+  });
+
+  it('a Studio draft pending in the listed pair is refused at open, as the dashboard editor refuses it', async () => {
+    listed({ showcase: { writable: false, version: '3.2.0' }, 'showcase.custom': { writable: true, version: '0.0.0' } });
+    mount({ ...STORED, _packageId: 'showcase' });
+    client.value.getDraft.mockImplementation(async (_t: string, _n: string, o?: { packageId?: string }) =>
+      o?.packageId === 'showcase.custom' ? { item: { ...STORED, chart: { type: 'line' } } } : null,
+    );
+    fireEvent.click(await screen.findByTestId('report-edit-button'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(client.value.getDraft).toHaveBeenCalledWith('report', 'hours_by_status_chart', { packageId: 'showcase.custom' });
+    expect(String(vi.mocked(toast.error).mock.calls[0][0])).toContain('unpublished changes in showcase.custom');
+    expect(screen.queryByTestId('report-builder')).toBeNull();
+    expect(client.value.save).not.toHaveBeenCalled();
+    expect(ensureCustomizationPackage).not.toHaveBeenCalled();
+  });
+
+  it('a listed pair with no pending draft opens, and the save lands in it (control)', async () => {
+    listed({ showcase: { writable: false, version: '3.2.0' }, 'showcase.custom': { writable: true, version: '0.0.0' } });
+    mount({ ...STORED, _packageId: 'showcase' });
+    await openEditAndSave();
+    expect(client.value.getDraft).toHaveBeenCalledWith('report', 'hours_by_status_chart', { packageId: 'showcase.custom' });
+    expect(client.value.save.mock.calls[0][3]).toEqual({ mode: 'draft', ifNoneMatch: '*', packageId: 'showcase.custom' });
   });
 });
