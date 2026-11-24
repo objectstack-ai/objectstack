@@ -722,8 +722,13 @@ export function PeoplePicker({
         </Sheet>
       );
     }
+    // `modal`: the popover is its own scroll-lock layer. It is portalled out of
+    // a modal form's DOM, so a non-modal popover's list sits outside that
+    // dialog's scroll lock, which cancels every wheel and touch move on it; as
+    // the topmost lock its list scrolls. The same treatment as the lookup
+    // popover (objectstack#36825, #36852).
     return (
-      <Popover open={open} onOpenChange={onOpenChange}>
+      <Popover modal open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>{trigger}</PopoverTrigger>
         <PopoverContent
           align="start"
