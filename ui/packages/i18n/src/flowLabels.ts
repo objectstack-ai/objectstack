@@ -36,7 +36,12 @@
  * the authored label.
  */
 
-import { resolveFlowApprovalStepLabel, translateFlow, type TranslationBundle } from '@objectstack/spec/system';
+import {
+  resolveBundleLocale,
+  resolveFlowApprovalStepLabel,
+  translateFlow,
+  type TranslationBundle,
+} from '@objectstack/spec/system';
 import { useObjectTranslation } from './provider.js';
 import { activeFlowsBundle } from './flowsBundle.js';
 
@@ -68,7 +73,8 @@ export interface FlowLabelTranslations {
  * `resolveFlowApprovalStepLabel`, the server's; both are asked with the same
  * options (`{ locale: language }`, no declared fallback chain, as
  * `activeFlowsBundle` promises). Any other step label is the spec-typed
- * address of the node's name (see the module note), read by node type.
+ * address of the node's name (see the module note), read by node type out of
+ * the bundle row the same locale matching picks (`resolveBundleLocale`).
  */
 export function flowLabelTranslations(
   bundle: TranslationBundle | undefined,
@@ -78,7 +84,12 @@ export function flowLabelTranslations(
   if (!bundle || !flowName) return undefined;
   const resolveOptions = { locale: language };
   const flowLabel = translateFlow<{ name: string; label?: string }>({ name: flowName }, bundle, resolveOptions).label;
-  const flow = bundle[language]?.flows?.[flowName];
+  // The `nodes` and `screens` reads match the locale tag by the spec's one
+  // locale ladder (`resolveBundleLocale`), the one `translateFlow` and
+  // `resolveFlowApprovalStepLabel` run for `{ locale: language }`: a `zh-cn`
+  // session reads a `zh-CN` row. One locale, no fallback chain.
+  const locale = resolveBundleLocale(bundle, language);
+  const flow = locale === undefined ? undefined : bundle[locale]?.flows?.[flowName];
   const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
   return {
     flowLabel: text(flowLabel),
