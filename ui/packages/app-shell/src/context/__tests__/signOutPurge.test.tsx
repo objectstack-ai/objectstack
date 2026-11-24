@@ -164,6 +164,12 @@ beforeEach(() => {
   sessionStorage.clear();
   TokenStorage.clear();
   resetListLayoutStoreForTests();
+  // `SessionUserScope` keeps this page-load's owner in memory, and this file is
+  // one page-load: after the first case it already holds Alice, so a re-adopt
+  // of Alice writes nothing. A real browser holding Alice also holds her
+  // persisted pointer (`@object-ui/auth`'s `auth-session-user-id`), which is
+  // what a change of user is decided from; keep it in step after the clear.
+  localStorage.setItem('auth-session-user-id', ALICE.id);
 });
 
 afterEach(() => {
