@@ -22,7 +22,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
-import type { SearchFieldWithholdingRequest } from './engine.js';
+import type { SearchFieldWithholdingRequest } from './engine-top-level.js';
 
 type Row = Record<string, unknown>;
 
