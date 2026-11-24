@@ -175,6 +175,15 @@ filename? }`, and it answers `201` with the stored file,
 caller, exactly as an in-process print with their context does, and the file is
 attached once, by the service.
 
+A kernel that owns no HTTP server, such as an environment's kernel behind a
+shared host, reaches the same route through the runtime dispatcher: it forwards
+`POST /api/v1/print/records` to the `print` service's `handlePrintDoor` member,
+which runs the same handler and gives the same answers. A kernel that does not
+compose `PrintServicePlugin` answers `NOT_IMPLEMENTED` / 501 naming
+`@objectstack/service-print`. The console shows that refusal, and a
+`SERVICE_UNAVAILABLE` / 503, as one line in the user's language saying the
+action needs a service this environment does not have, never the route text.
+
 Reach it from the console with an ordinary `type: 'api'` action on the object:
 
 ```ts
