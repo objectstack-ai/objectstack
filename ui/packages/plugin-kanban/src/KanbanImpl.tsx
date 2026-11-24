@@ -789,9 +789,13 @@ function LaneTotal({
  *
  * objectstack#36520 — a `sum`, `avg`, `min` or `max` covers every record of
  * the lane: the server lane read's figure (`KanbanColumnSummary.figures`),
- * never one added up over the cards the lane has loaded. Over cards a host
- * handed in whole, a `sum` adds them. Renders nothing without the statistic,
- * or while the figure is pending or unknowable.
+ * never one added up over the cards the lane has loaded, on every board that
+ * queries its own cards. Over cards a host hands in, a `sum` adds them: that
+ * is a whole lane only if the host handed every card in. `ListView` hands a
+ * board whose lanes it does not know before the query (lanes over a lookup,
+ * a view with grouping) its fetched page, so there the `sum` covers that
+ * page alone, with no marker (a known gap). Renders nothing without the
+ * statistic, or while the figure is pending or unknowable.
  */
 function LaneFootStatistic({
   laneId,
@@ -810,7 +814,7 @@ function LaneFootStatistic({
   const value = isCount
     ? count.count
     : summary.figures !== undefined
-      ? summary.figures === null ? null : laneFigureOf(summary.figures, laneId, type)
+      ? summary.figures === null ? null : laneFigureOf(summary.figures, laneId, type, count.count > 0)
       : type === 'sum' ? sumLaneField(cards, summary.field) : null
   if (value === null) return null
   const name = isCount ? summary.typeLabel : `${summary.typeLabel} · ${summary.label}`

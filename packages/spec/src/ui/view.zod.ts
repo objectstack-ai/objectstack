@@ -2383,6 +2383,13 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
  * the lane field, under the reader's permissions — never added up over the
  * cards a lane has loaded, so a lane longer than its page still shows the
  * whole lane's figure. A field the reader may not read shows no figure.
+ *
+ * One carve-out, a known gap: a board that does not query its own cards adds
+ * up a `sum` over the cards its host hands it (the other three draw nothing
+ * there). The list view hands a board whose lanes it cannot know before the
+ * query — lanes over a lookup field, or a view with grouping — the page of
+ * records it fetched, so on that board `sum` totals that page, not every
+ * record of the lane, and says nothing to mark it.
  */
 export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
   strictObject({
@@ -2508,6 +2515,9 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
     + '`{ type: \'sum\', field: \'amount\' }` totals a number field over all of the lane records, '
     + '`avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query '
     + '(a field the reader may not read shows no figure); `{ type: \'none\' }` shows nothing. '
+    + 'Known gap: on a board given its records by its host instead of querying them (in a list view, '
+    + 'lanes over a lookup field or a view with grouping), `sum` totals the records handed in, one page, '
+    + 'unmarked, and the other three show nothing. '
     + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
   ),
   /**

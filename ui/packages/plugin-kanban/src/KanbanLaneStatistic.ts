@@ -203,7 +203,7 @@ function foldParts(parts: readonly Part[], type: KanbanLaneAggregate): LaneFigur
 
 /**
  * Each lane's figure from the lane read's answer, by lane id. A lane no group
- * answered for holds no record: see {@link laneFigureOf}.
+ * answered for is read by {@link laneFigureOf}.
  */
 export function readLaneFigures(rows: unknown, reading: LaneFigureReading): Record<string, LaneFigure> {
   const { laneField, type, field, laneIds, foldCase, uncolumnedId } = reading;
@@ -232,12 +232,21 @@ export function readLaneFigures(rows: unknown, reading: LaneFigureReading): Reco
  * One lane's figure: what the read answered for it, else the figure of a lane
  * that holds no record — `0` for a sum, none for an average, a minimum or a
  * maximum.
+ *
+ * A lane the board knows holds records (`holdsRecords`: its count is above
+ * zero) that no group answered for draws NO figure. The grouped read can be
+ * cut: under a deployment's default page size the door slices the group rows
+ * and answers `hasMore`, which `queryGroupHeaders` does not hand on. Such a
+ * lane's group was dropped, not empty, and a `0` there would be a wrong figure
+ * in place of a missing one.
  */
 export function laneFigureOf(
   figures: Readonly<Record<string, LaneFigure>>,
   laneId: string,
   type: KanbanLaneAggregate,
+  holdsRecords: boolean,
 ): LaneFigure {
   if (Object.prototype.hasOwnProperty.call(figures, laneId)) return figures[laneId];
+  if (holdsRecords) return null;
   return type === 'sum' ? 0 : null;
 }

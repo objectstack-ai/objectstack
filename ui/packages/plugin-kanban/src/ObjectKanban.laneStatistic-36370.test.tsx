@@ -356,6 +356,23 @@ describe('a lane statistic covers every record of the lane (objectstack#36520)',
     expect(document.querySelector('[data-kanban-lane-statistic]')).toBeNull();
   });
 
+  it('draws no figure on a lane that holds records when the read answered no group for it (a cut answer), and 0 on an empty lane', async () => {
+    const source = adapter(ROWS_70);
+    // The door sliced the group rows under a default page size: the won group
+    // was dropped, and `hasMore` does not reach the board.
+    const whole = source.queryGroupHeaders;
+    source.queryGroupHeaders = vi.fn(async (object: string, query: any) =>
+      ((await whole(object, query)) as Row[]).filter((row) => row.stage !== 'won'));
+    mount(source, { type: 'sum', field: 'amount' });
+    await waitFor(() => expect(foot('Open')).not.toBeNull());
+    await waitFor(() => expect(within(lane('Won')).queryAllByRole('listitem')).toHaveLength(5));
+    expect(figure('Open')).toBe('2415');
+    // Won holds five records: no "Sum 0" in place of the dropped group.
+    expect(foot('Won')).toBeNull();
+    // Lost holds none: its sum is 0.
+    expect(figure('Lost')).toBe('0');
+  });
+
   it('adds up no loaded cards over a source with no lane read', async () => {
     const source = adapter(ROWS_70, false);
     mount(source, { type: 'sum', field: 'amount' });
