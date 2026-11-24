@@ -5824,6 +5824,13 @@ const AI_SKILL_TOOL_UNRESOLVED_EXPLANATION: RuleExplanation = {
       'it. To run an app action, bind `action_<name>` (or `action_*`) rather than `run_action`: the MCP ' +
       'door serves that entry through `run_action`, and the in-product agents call the action tool itself. ' +
       'Ignore the warning only if a runtime plugin outside the platform registry provides the name.',
+    // Held to the rule by its test: the verdict fires for the ask product's tools the door lacks, on a projected skill only.
+    'A name that resolves can still cost the skill its MCP prompt. The MCP door offers a skill that has ' +
+      '`instructions` only on a connection that serves every tool its `tools` names, and the `ask` product\'s ' +
+      'data tools missing from `MCP_DOOR_TOOL_NAMES` (`aggregate_data`, `query_data`, `visualize_data`) are ' +
+      'served by no MCP connection, so a skill offered over MCP that binds one is withheld from every ' +
+      '`prompts/list`; that is its own verdict, naming the tool. Bind only tools both doors serve, or set ' +
+      '`mcpPrompt: false` when the skill is written for the in-product agents.',
     'The runtime drops an unresolved name without a word, so the skill\'s instructions promise a ' +
       'capability the agent cannot call, and the assistant improvises or fails when asked to use it. ' +
       'A warning, not an error (ADR-0078\'s advisory-first ratchet): a runtime plugin outside the ' +

@@ -19,6 +19,7 @@ import {
   collectCredentialWriteResponseFields,
   collectInternalWriteResponseFields,
 } from '@objectstack/core';
+import { createKnowledgeTools, type KnowledgeTools } from './knowledge-tools.js';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -194,6 +195,18 @@ export class KnowledgeService implements IKnowledgeService {
       discovered: records.length,
       indexed: docs.length,
     };
+  }
+
+  // ── The `search_knowledge` AI tool (ADR-0149 D2) ──────────────────
+
+  /**
+   * The `search_knowledge` tool's one definition and executor, bound to this
+   * service ({@link createKnowledgeTools}). The MCP door finds it here, by
+   * structure, on the `knowledge` service the kernel holds, and registers the
+   * tool only where a service carries it.
+   */
+  knowledgeTools(): KnowledgeTools {
+    return createKnowledgeTools(this);
   }
 
   // ── Permission-aware search ───────────────────────────────────────
