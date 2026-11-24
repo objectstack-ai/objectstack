@@ -2039,8 +2039,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.idLabel': '标识',
   'engine.studio.auto.nameLabel': '自动化名称',
   'engine.studio.auto.idLabel': '标识',
-  'engine.studio.access.nameLabel': '名称',
-  'engine.studio.access.idLabel': '标识',
   'engine.studio.data.savedDraft': '对象「{label}」已存为草稿',
   'engine.studio.draftSaved': '已保存 {item} 的草稿',
   'engine.studio.data.lastSaved': '已于 {time} 保存',
@@ -2483,9 +2481,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.kind.autolaunched': '自动启动',
   'engine.studio.auto.legend': '图例',
   // Access pillar
-  'engine.studio.access.created': '权限集「{label}」已创建',
   'engine.studio.access.title': '权限矩阵',
-  'engine.studio.access.subtitle': '对象权限 · 字段级读写',
   'engine.studio.access.bannerTitle':
     '这里只列出本应用的对象，保存时只改本应用的授权，其他应用给出的授权保持不变。改动在点击顶栏「保存」后立即生效（与数据、界面一致）。',
   'engine.studio.access.banner': '本应用对象 · 保存后生效',
@@ -2519,13 +2515,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.suggestReopen': '重新考虑',
   'engine.studio.access.suggestReopening': '重新打开中…',
   'engine.studio.access.suggestReopenedToast': '已重新打开「{set}」的建议：确认授予之前，成员不会拥有它。',
-  'engine.studio.access.heading': '权限集',
-  'engine.studio.access.search': '搜索权限…',
-  'engine.studio.access.none': '还没有权限集 — 点上方的「+」新建',
-  'engine.studio.access.labelPlaceholder': '显示名(如:销售权限)',
-  'engine.studio.access.idPlaceholder': '标识符(如:sales_perms)',
-  'engine.studio.access.new': '新建权限集',
-  'engine.studio.access.emptyMain': '这个软件包还没有权限集。',
   'engine.studio.access.tab.objects': '对象权限',
   'engine.studio.access.tab.capabilities': '系统功能',
   'engine.studio.access.tab.rls': '数据范围规则',
@@ -2639,9 +2628,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.explain.ruleKind.territory': '区域',
   'engine.studio.access.explain.ruleKind.rls_policy': 'RLS 策略',
   // Access pillar: a create over a taken identifier, and the draft discard (objectstack#26836).
-  'engine.studio.access.createTaken': '此软件包已有标识为「{name}」的权限集：{label}。请打开它，或换一个标识。',
-  'engine.studio.access.createTakenElsewhere': '此软件包之外已有标识为「{name}」的权限集：{label}。请换一个标识。',
-  'engine.studio.access.createDraftTaken': '已有标识为「{name}」的权限集草稿。请换一个标识。',
   'engine.studio.access.discardConfirm': '放弃「{item}」的待发布草稿吗？已发布的权限集保持不变，只移除未发布的修改。',
   'engine.studio.access.discardConfirmUnpublished': '放弃「{item}」吗？它从未发布过，放弃草稿会移除这个权限集。',
   'engine.studio.access.discardFailed': '无法放弃草稿',
@@ -3517,7 +3503,6 @@ const STUDIO_ZH: Record<string, string> = {
   // objectui#11788 — 新建自动化对话框里不选触发方式时的选项。
   'engine.studio.newAutoTrigger.later': '稍后在开始节点上选择',
   // ── 记录共享基线（OWD）总览 (objectui#2505) ──────────────────────────
-  'engine.studio.owd.railLabel': '谁能看到哪些记录',
   'engine.studio.owd.title': '谁能看到哪些记录',
   'engine.studio.owd.subtitle': '本包每个对象的记录可见范围',
   'engine.studio.owd.description':

@@ -2252,8 +2252,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.data.idLabel': 'Identifier',
   'engine.studio.auto.nameLabel': 'Automation name',
   'engine.studio.auto.idLabel': 'Identifier',
-  'engine.studio.access.nameLabel': 'Name',
-  'engine.studio.access.idLabel': 'Identifier',
   'engine.studio.data.savedDraft': 'Object “{label}” saved as draft',
   // objectstack#28984 — a landed draft autosave, named; the voice of `engine.edit.draftDiscarded`.
   'engine.studio.draftSaved': 'Draft saved: {item}',
@@ -2779,9 +2777,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.kind.autolaunched': 'Autolaunched',
   'engine.studio.auto.legend': 'Legend',
   // Access pillar
-  'engine.studio.access.created': 'Permission set “{label}” created',
   'engine.studio.access.title': 'Permission matrix',
-  'engine.studio.access.subtitle': 'Object permissions · field-level read/write',
   'engine.studio.access.bannerTitle':
     'Only this app’s objects are listed here, and saving changes only this app’s grants — grants from other apps stay as they are. Changes go live when you press Save in the top bar, as in Data and Interfaces.',
   'engine.studio.access.banner': 'This app’s objects · live on save',
@@ -2818,13 +2814,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.suggestReopen': 'Reconsider',
   'engine.studio.access.suggestReopening': 'Reopening…',
   'engine.studio.access.suggestReopenedToast': 'Suggestion for “{set}” reopened: members do not get it until it is granted.',
-  'engine.studio.access.heading': 'Permission sets',
-  'engine.studio.access.search': 'Search permissions…',
-  'engine.studio.access.none': 'No permission sets yet — click “+” above to create one',
-  'engine.studio.access.labelPlaceholder': 'Display name (e.g. Sales permissions)',
-  'engine.studio.access.idPlaceholder': 'Identifier (e.g. sales_perms)',
-  'engine.studio.access.new': 'New permission set',
-  'engine.studio.access.emptyMain': 'No permission sets in this package yet.',
   // objectui#12456 — the open set's item header and its five tabs.
   'engine.studio.access.tab.objects': 'Object permissions',
   'engine.studio.access.tab.capabilities': 'System features',
@@ -2940,9 +2929,6 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.explain.ruleKind.territory': 'Territory',
   'engine.studio.access.explain.ruleKind.rls_policy': 'RLS policy',
   // Access pillar: a create over a taken identifier, and the draft discard (objectstack#26836).
-  'engine.studio.access.createTaken': 'This package already has a permission set with the identifier “{name}”: {label}. Open it, or choose another identifier.',
-  'engine.studio.access.createTakenElsewhere': 'A permission set with the identifier “{name}” already exists outside this package: {label}. Choose another identifier.',
-  'engine.studio.access.createDraftTaken': 'A draft permission set with the identifier “{name}” already exists. Choose another identifier.',
   'engine.studio.access.discardConfirm': 'Discard the pending draft of “{item}”? The published set stays as it is; only its unpublished changes are removed.',
   'engine.studio.access.discardConfirmUnpublished': 'Discard “{item}”? It has never been published, so discarding its draft removes the set.',
   'engine.studio.access.discardFailed': 'Could not discard the draft',
@@ -3972,7 +3958,6 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11788 — the New automation dialog's trigger choice, left unset.
   'engine.studio.newAutoTrigger.later': 'Choose later on the Start node',
   // ── Record Sharing Baseline (OWD) overview (objectui#2505) ──────────────
-  'engine.studio.owd.railLabel': 'Who can see which records',
   'engine.studio.owd.title': 'Who can see which records',
   'engine.studio.owd.subtitle': 'Record visibility of each object in this package',
   'engine.studio.owd.description':
