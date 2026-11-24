@@ -892,6 +892,8 @@ const zh = {
       notConfirmedRecords: '操作未报告这些记录的结果，请检查它们的当前值：',
       resultRefused: ' · 被拒绝 {{count}}',
       refusedRecords: '操作拒绝了以下记录：',
+      resultPaused: ' · 等待输入 {{count}}',
+      pausedRecords: '以下记录正在等待输入，它们的界面会依次打开：',
       aggregateUnreadable: '操作已完成，但无法读取其结果，因此不知道哪些记录被修改了。关闭后列表会显示它们的当前值。',
       retry: '重试',
       downloadErrorCsv: '下载错误 CSV',

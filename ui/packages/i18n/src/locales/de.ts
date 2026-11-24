@@ -636,6 +636,8 @@ const de = {
       notConfirmedRecords: "Die Aktion hat zu diesen Datensätzen nichts gemeldet. Prüfen Sie ihre aktuellen Werte:",
       resultRefused: " · Abgelehnt {{count}}",
       refusedRecords: "Die Aktion hat diese Datensätze abgelehnt:",
+      resultPaused: " · Wartet auf Eingabe {{count}}",
+      pausedRecords: "Diese Datensätze warten auf eine Eingabe. Ihre Bildschirme öffnen sich nacheinander:",
       aggregateUnreadable: "Die Aktion wurde beendet, aber ihr Ergebnis konnte nicht gelesen werden, daher ist nicht bekannt, welche Datensätze geändert wurden. Nach dem Schließen zeigt die Liste ihre aktuellen Werte.",
       retry: "Erneut versuchen",
       downloadErrorCsv: "Fehler-CSV herunterladen",

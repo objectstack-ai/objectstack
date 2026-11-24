@@ -649,6 +649,8 @@ const pt = {
       notConfirmedRecords: "A ação não informou nada sobre estes registros. Verifique os valores atuais:",
       resultRefused: " · Recusados {{count}}",
       refusedRecords: "A ação recusou estes registros:",
+      resultPaused: " · Aguardando entrada {{count}}",
+      pausedRecords: "Estes registros aguardam entrada. Suas telas abrem uma após a outra:",
       aggregateUnreadable: "A ação terminou, mas o resultado não pôde ser lido, então não se sabe quais registros foram alterados. Ao fechar, a lista mostra os valores atuais.",
       retry: "Tentar novamente",
       downloadErrorCsv: "Baixar CSV de erros",
