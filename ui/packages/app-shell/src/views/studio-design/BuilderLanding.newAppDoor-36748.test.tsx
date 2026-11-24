@@ -156,6 +156,7 @@ function renderLanding() {
     <MemoryRouter initialEntries={['/studio']}>
       <Routes>
         <Route path="/studio" element={<BuilderLanding />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/apps/*" element={<RunningApp />} />
       </Routes>

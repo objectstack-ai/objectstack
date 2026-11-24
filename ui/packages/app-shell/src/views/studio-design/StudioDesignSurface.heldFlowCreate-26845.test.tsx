@@ -179,6 +179,7 @@ async function openFlow(): Promise<void> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -197,11 +198,10 @@ async function holdANotifyStep(): Promise<void> {
 const newFlow = () => fireEvent.click(within(screen.getByTestId('studio-rail-automations')).getByTestId('studio-rail-add'));
 const pendingRequest = () => fireEvent.click(screen.getByRole('button', { name: 'Pending object/acme_note' }));
 
-/** The Data pillar is open on the Pending changes request's object. */
+/** The object designer is open on the Pending changes request's object (objectstack#36904: on its own address). */
 async function noteIsOpen(): Promise<void> {
-  await screen.findByTestId('studio-rail-data', undefined, { timeout: 8000 });
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', 'acme_note'),
+    () => expect(within(screen.getByTestId('data-object-header')).getAllByTestId('studio-item-api-name')[0]).toHaveTextContent('acme_note'),
     { timeout: 8000 },
   );
 }

@@ -251,6 +251,7 @@ function renderWorkbench() {
   return render(
     <MemoryRouter initialEntries={[`/studio/${BASE}/interfaces`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

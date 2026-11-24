@@ -148,6 +148,7 @@ function renderAt(tab: string, props: { aiSlot?: React.ReactNode } = {}) {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${tab}`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" {...props} />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface {...props} />} />
       </Routes>
     </MemoryRouter>,

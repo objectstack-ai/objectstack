@@ -201,11 +201,19 @@ describe('DataPillar — Save is gated on the field inspector’s CEL verdict (#
   });
 });
 
-/**
- * objectstack#27485, the switch arm — shared with objectstack#27511's
- * flush-or-ask switch: an edit the CEL verdict holds cannot be sent, so a
- * switch to another object asks before its load replaces the buffer.
- */
+// objectstack#36904 — the switch arm of objectstack#27485 (a switch to another
+// object over a held formula asks) left with the object rail: another object
+// is another address, and leaving one is the shell's leave guard
+// (`StudioDesignSurface.heldDataLeave-26705.test.tsx`).
+
+/** The ways the field inspector closes (the card's step 4). */
+const CLOSERS: Array<[string, () => void]> = [
+  ['its Close button', () => fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])],
+  ['Escape', () => fireEvent.keyDown(document.body, { key: 'Escape' })],
+  ['another field card', () => fireEvent.click((screen.getByText('Est hours').closest('.cursor-grab') as HTMLElement))],
+  ['the Records tab', () => fireEvent.click(screen.getByRole('button', { name: 'Records' }))],
+];
+
 describe('DataPillar — the CEL hold belongs to the draft, not to the open inspector (objectstack#27485)', () => {
   async function breakFormula(): Promise<HTMLTextAreaElement> {
     const box = await openFormulaField();

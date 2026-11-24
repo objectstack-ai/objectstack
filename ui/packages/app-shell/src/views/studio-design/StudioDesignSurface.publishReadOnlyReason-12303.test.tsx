@@ -118,6 +118,7 @@ function renderWorkbench() {
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
         <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
       </MemoryRouter>

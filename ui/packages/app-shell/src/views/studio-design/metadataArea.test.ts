@@ -19,6 +19,7 @@ import {
   areaLocationRedirect,
   dataPillarRedirect,
   isStudioAllPackagesScope,
+  metadataAddressArtifact,
   studioMetadataAreaPath,
 } from './metadataArea';
 import { STUDIO_ORG_SCOPE_SEGMENT } from './studioScope';
@@ -195,5 +196,18 @@ describe('the object designer on its address, and the retired Data pillar (objec
     expect(dataPillarRedirect(PKG, '')).toBe(`/studio/${PKG}/metadata/object`);
     expect(dataPillarRedirect(PKG, '?changes=review')).toBe(`/studio/${PKG}/metadata/object?changes=review`);
     expect(dataPillarRedirect(PKG, '?surface=flow%3Anotify')).toBe(`/studio/${PKG}/metadata/object`);
+  });
+});
+
+describe('metadataAddressArtifact — the item an address names, for the copilot (objectstack#36904)', () => {
+  it('names the item of an item address, its history page included', () => {
+    expect(metadataAddressArtifact(`/studio/${PKG}/metadata/object/account`)).toEqual({ type: 'object', name: 'account' });
+    expect(metadataAddressArtifact(`/studio/${PKG}/metadata/object/a%2Fb/history`)).toEqual({ type: 'object', name: 'a/b' });
+  });
+
+  it('names nothing on a list, the directory, diagnostics or another page', () => {
+    for (const path of [`/studio/${PKG}/metadata/object`, `/studio/${PKG}/metadata`, `/studio/${PKG}/metadata/_diagnostics/x`, `/studio/${PKG}/automations`]) {
+      expect(metadataAddressArtifact(path), path).toBeUndefined();
+    }
   });
 });

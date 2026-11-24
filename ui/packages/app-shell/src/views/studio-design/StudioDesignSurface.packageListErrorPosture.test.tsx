@@ -116,6 +116,7 @@ function renderSurface(tab = 'data') {
   return render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${tab}`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         <Route path="/home" element={<div data-testid="home-page" />} />
       </Routes>

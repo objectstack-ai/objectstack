@@ -141,6 +141,8 @@ describe('DataPillar — a draft-only object logs no failed read (objectui#12508
     expect(reads('st_ticket', ''), 'the draft read never ran: the harness is dead').toEqual([200]);
     expect(reads('st_ticket', '/layers')).toEqual([200]);
     expect(server.requests.filter((r) => r.status >= 400)).toEqual([]);
+    // objectstack#36904 — the header reads the label the draft declares, not the name.
+    expect((await screen.findAllByTestId('studio-detail-title'))[0]).toHaveTextContent('Ticket');
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     expect(await screen.findByText('Subject')).toBeInTheDocument();
   });

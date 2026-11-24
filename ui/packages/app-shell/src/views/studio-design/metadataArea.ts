@@ -150,6 +150,22 @@ export function dataPillarRedirect(packageId: string, search: string): string {
 }
 
 /**
+ * objectstack#36904 — the item a Studio metadata address names,
+ * `/studio/<scope>/metadata/<type>/<name>` (a trailing `/history` included),
+ * or `undefined` for any other path (a list, the directory, diagnostics). The
+ * copilot reads the open item from it where no `?surface=` names one.
+ */
+export function metadataAddressArtifact(pathname: string): { type: string; name: string } | undefined {
+  const m = /^\/studio\/[^/]+\/metadata\/([^/]+)\/([^/]+)/.exec(pathname);
+  if (!m || m[1].startsWith('_')) return undefined;
+  try {
+    return { type: decodeURIComponent(m[1]), name: decodeURIComponent(m[2]) };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * objectstack#28569 (ADR-0146 Consequences) — the types whose item opens the
  * area's simplified form editor (`StudioBundleItemEditor`): the fields Setup's
  * form offers beside the type's preview, and Customize on a read-only base.

@@ -186,7 +186,7 @@ const where = () => screen.getByTestId('location-path').textContent;
 const pathname = () => (where() ?? '').split('?')[0];
 /** objectstack#36904 — the Studio home: the package's object list, `/data` redirected. */
 const HOME_PATH = `/studio/${PKG}/metadata/object`;
-const HOME = `${HOME_PATH}?package=${PKG}`;
+const STUDIO_HOME = `${HOME_PATH}?package=${PKG}`;
 
 function renderAt(path: string) {
   render(
@@ -213,7 +213,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
   it('the bare URL: Data pillar, the notice, and a link back to the app', async () => {
     renderAt(`/studio/${PKG}/interfaces`);
     await screen.findByTestId('studio-shell-header');
-    await waitFor(() => expect(where()).toBe(HOME));
+    await waitFor(() => expect(where()).toBe(STUDIO_HOME));
 
     const strip = await screen.findByTestId('studio-interfaces-retired');
     expect(strip).toHaveAttribute('role', 'status');
@@ -231,7 +231,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
   it('a `?surface=` deep link lands on the same home, its retired parameter dropped', async () => {
     renderAt(`/studio/${PKG}/interfaces?surface=${encodeURIComponent('page:home')}`);
     await screen.findByTestId('studio-shell-header');
-    await waitFor(() => expect(where()).toBe(HOME));
+    await waitFor(() => expect(where()).toBe(STUDIO_HOME));
     expect(await screen.findByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });
 
@@ -285,7 +285,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
   it('CONTROL: an ordinary arrival on the Data pillar shows no notice', async () => {
     renderAt(`/studio/${PKG}/data`);
     await screen.findByTestId('studio-shell-header');
-    await waitFor(() => expect(where()).toBe(HOME));
+    await waitFor(() => expect(where()).toBe(STUDIO_HOME));
     expect(notice()).toBeNull();
   });
 });
