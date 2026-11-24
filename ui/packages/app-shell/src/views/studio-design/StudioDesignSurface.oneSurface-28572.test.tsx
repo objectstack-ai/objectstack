@@ -80,11 +80,7 @@ vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPan
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
-vi.mock('./StudioMetadataArea', () => ({
-  StudioMetadataArea: ({ packageId }: { packageId: string | null }) => (
-    <div data-testid="metadata-area" data-package={packageId ?? ''} />
-  ),
-}));
+// objectstack#36904 — the REAL area: it mounts the object designer.
 
 // The console's preview and authoring code loads `@objectstack/lint` lazily;
 // warmed here so its first load is paid at import, not inside a test's clock.
@@ -393,8 +389,7 @@ describe('the pair’s URLs (objectstack#28572)', () => {
 
   it('the pair’s "All metadata" URL stays on the pair: it is not sent to the base, so nothing loops', async () => {
     renderAt(`/studio/${encodeURIComponent(PAIR)}/metadata`);
-    const area = await screen.findByTestId('metadata-area', undefined, { timeout: 8000 });
-    expect(area).toHaveAttribute('data-package', PAIR);
+    await screen.findByTestId('studio-metadata-area', undefined, { timeout: 8000 });
     await new Promise((r) => setTimeout(r, 300));
     expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(PAIR)}/metadata`);
   });

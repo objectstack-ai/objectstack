@@ -141,13 +141,14 @@ describe('Studio top bar — package-list fetch failure is reported, not swallow
   });
 
   it('one outage is one toast: every call site reports on the same sonner id', async () => {
-    // The `data` tab mounts both `fetchPackages()` callers at once — the
-    // writability courtesy gate and the namespace lookup.
+    // objectstack#36904 — the Studio home mounts one `fetchPackages()` caller
+    // now, the writability courtesy gate: the namespace lookup left with the
+    // object designer's own 「新建」. Every report it makes rides the one id.
     fetchPackagesMock.mockRejectedValue(new Error('Service Unavailable'));
     renderSurface('data');
 
-    await waitFor(() => expect(fetchPackagesMock.mock.calls.length).toBeGreaterThanOrEqual(2));
-    await waitFor(() => expect(toastError.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(fetchPackagesMock).toHaveBeenCalled());
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
 
     // Sonner collapses same-id toasts into one, so the rejections of one
     // endpoint surface as a single message rather than a stack.
