@@ -274,3 +274,51 @@ describe('the area\'s form editor in the builder (objectstack#28569)', () => {
     expect(await screen.findByTestId('studio-changes-count')).toHaveTextContent('1');
   });
 });
+
+/**
+ * objectstack#36900 — ⌘K on the builder's pages: the surface mounts the
+ * command palette with its own groups, on a package's pillars and area and on
+ * the cross-package leg, and a pick leaves through the surface.
+ */
+describe('⌘K on the builder (objectstack#36900)', () => {
+  const overlay = () => document.querySelector('[data-testid="overlay:command-palette"]');
+  const paletteItem = (value: string) => document.querySelector(`[cmdk-item][data-value="${value}"]`);
+
+  it("on a package's pillar, Ctrl+K opens the palette with the menu's entries, and a pick opens through the surface", async () => {
+    servePackages();
+    renderAt(`/studio/${PACKAGE_ID}/data`);
+    await waitFor(() => menu().getByTestId('studio-menu-entry-type:flow'));
+    expect(overlay()).toBeNull();
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(overlay()).not.toBeNull());
+    expect(where()).toBe(`/studio/${PACKAGE_ID}/data?palette=1`);
+    await waitFor(() => expect(paletteItem('studio-entry type:flow')).not.toBeNull());
+    expect(paletteItem('studio-entry orgFlows')).not.toBeNull();
+
+    fireEvent.click(paletteItem('studio-entry type:flow')!);
+    expect((await areaPage()).page).toBe('list');
+    expect(where()).toBe(`/studio/${PACKAGE_ID}/metadata/flow?package=${PACKAGE_ID}`);
+    expect(overlay()).toBeNull();
+    expect(current()).toHaveAttribute('data-testid', 'studio-menu-entry-type:flow');
+  });
+
+  it('on the cross-package leg, Ctrl+K opens the palette again, with the environment menu', async () => {
+    servePackages();
+    renderAt('/studio/~all/metadata');
+    await areaPage();
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true });
+    await waitFor(() => expect(overlay()).not.toBeNull());
+    await waitFor(() => expect(paletteItem('studio-entry environment')).not.toBeNull());
+    expect(paletteItem('studio-entry diagnostics')).toBeNull();
+  });
+
+  it('a package that is not there has no menu, and its palette lists the packages instead', async () => {
+    servePackages();
+    renderAt(`/studio/${PHANTOM}/data?palette=1`);
+    expect(await screen.findByTestId('studio-package-not-found')).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('[cmdk-item][data-value^="studio-package Field Ops "]')).not.toBeNull());
+    expect(document.querySelector('[cmdk-item][data-value^="studio-entry "]')).toBeNull();
+  });
+});
