@@ -12,17 +12,19 @@
  *    with no application declaring either;
  *  - a task's `completed_at` is written when its status becomes done and
  *    cleared when it leaves done, through the engine's write path;
- *  - a task is read by its creator and its assignee, a note by its creator,
- *    and by no other member who holds the same object permissions;
+ *  - the platform's member baseline (`member_default`) opens both objects
+ *    (maintainer ruling 7131539862, option A: read, create and edit, no
+ *    delete), and with that grant in place a task is still read by its
+ *    creator and its assignee only, a note by its creator only — by id and by
+ *    list. The ruling rests on that premise;
  *  - the assignee edits the task: the declared `sys_task_assignee` rule grants
  *    `edit`, and the member baseline's ownership floor (`owner_only_writes`,
  *    `created_by == current_user.id`) defers to that share.
  *
  * Real stack: an `ObjectKernel` with `ObjectQLPlugin` over a better-sqlite3
- * file, `PlatformObjectsPlugin`, `SecurityPlugin` (the platform permission sets
- * plus one application set that opens both objects to members) and
- * `SharingServicePlugin`. The application set is the test's, not the
- * platform's: the member baseline (`member_default`) opens neither object.
+ * file, `PlatformObjectsPlugin`, `SecurityPlugin` with the platform permission
+ * sets only (every member resolves `member_default` and nothing else — no
+ * application set) and `SharingServicePlugin`.
  *
  * ## Two boots over one database
  *
@@ -44,7 +46,6 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SharingServicePlugin } from '@objectstack/plugin-sharing';
 import { PlatformObjectsPlugin } from '@objectstack/platform-objects';
 import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
-import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
@@ -54,16 +55,12 @@ const ASSIGNEE = 'usr_tn_assignee';
 const STRANGER = 'usr_tn_stranger';
 const PEOPLE = [CREATOR, ASSIGNEE, STRANGER];
 
-const OPEN = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false } as const;
-/** An application's set opening both objects to its members; rows stay decided by sharing. */
-const WORK = PermissionSetSchema.parse({
-  name: 'qa_tn_work',
-  objects: { sys_task: OPEN, sys_note: OPEN },
-});
-
 const SYSTEM = { isSystem: true, tenantId: ORG } as const;
-/** A member's request context, as the auth layer builds it (the org peer set included). */
-const as = (userId: string) => ({ userId, tenantId: ORG, positions: [], permissions: [WORK.name], org_user_ids: PEOPLE });
+/**
+ * A member's request context, as the auth layer builds it (the org peer set
+ * included). No permission set of its own: the member baseline is all it holds.
+ */
+const as = (userId: string) => ({ userId, tenantId: ORG, positions: [], permissions: [], org_user_ids: PEOPLE });
 
 type Outcome = { kind: 'landed' } | { kind: 'refused'; code?: string; status?: number };
 const outcomeOf = (p: Promise<unknown>): Promise<Outcome> =>
@@ -120,7 +117,7 @@ async function boot(filename: string): Promise<ObjectKernel> {
   await kernel.use(identityPlugin());
   await kernel.use(new PlatformObjectsPlugin());
   await kernel.use(new SecurityPlugin({
-    defaultPermissionSets: [...defaultPermissionSets, WORK],
+    defaultPermissionSets,
     fallbackPermissionSet: 'member_default',
   }));
   await kernel.use(new SharingServicePlugin({ registerShareLinkRoutes: false }));
@@ -186,13 +183,28 @@ describe('sys_task and sys_note in a real runtime: registration, the completion 
     expect(await stored('sys_task', id)).toMatchObject({ status: 'in_progress', completed_at: null });
   });
 
-  it('a task is read by its creator and its assignee, and not by another member holding the same object permissions', async () => {
+  const listedAs = async (userId: string, object: string) =>
+    ((await ql.find(object, { context: as(userId) } as never)) as Array<{ id: string }>).map((row) => row.id);
+
+  it('the member baseline opens both objects: read, create and edit, no delete', () => {
+    const baseline = defaultPermissionSets.find((set) => set.name === 'member_default');
+    // No widening bit either: the rows stay the objects' own sharing's.
+    const shape = {
+      allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false,
+      allowTransfer: false, viewAllRecords: false, modifyAllRecords: false,
+    };
+    expect(baseline?.objects?.sys_task).toEqual(shape);
+    expect(baseline?.objects?.sys_note).toEqual(shape);
+  });
+
+  it('a task is read by its creator and its assignee, and not by another member holding the same baseline', async () => {
     const id = await createTask('t_read');
     expect(await readAs(CREATOR, 'sys_task', id)).toMatchObject({ id });
     expect(await readAs(ASSIGNEE, 'sys_task', id)).toMatchObject({ id });
     expect(await readAs(STRANGER, 'sys_task', id)).toBeNull();
-    const listed = (await ql.find('sys_task', { context: as(STRANGER) } as never)) as Array<{ id: string }>;
-    expect(listed.map((row) => row.id)).not.toContain(id);
+    expect(await listedAs(CREATOR, 'sys_task')).toContain(id);
+    expect(await listedAs(ASSIGNEE, 'sys_task')).toContain(id);
+    expect(await listedAs(STRANGER, 'sys_task')).not.toContain(id);
   });
 
   it('a note is read by its creator only', async () => {
@@ -201,6 +213,9 @@ describe('sys_task and sys_note in a real runtime: registration, the completion 
     expect(await readAs(CREATOR, 'sys_note', 'n_read')).toMatchObject({ id: 'n_read' });
     expect(await readAs(STRANGER, 'sys_note', 'n_read')).toBeNull();
     expect(await readAs(ASSIGNEE, 'sys_note', 'n_read')).toBeNull();
+    expect(await listedAs(CREATOR, 'sys_note')).toContain('n_read');
+    expect(await listedAs(STRANGER, 'sys_note')).not.toContain('n_read');
+    expect(await listedAs(ASSIGNEE, 'sys_note')).not.toContain('n_read');
   });
 
   it('the assignee edits the task and marks it done; another member is refused as if the task did not exist', async () => {
