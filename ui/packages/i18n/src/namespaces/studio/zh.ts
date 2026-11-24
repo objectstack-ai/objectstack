@@ -3095,8 +3095,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.menu.owd': '默认共享',
   'engine.studio.menu.diagnostics': '诊断',
   'engine.studio.menu.environment': '岗位与权限',
-  'engine.studio.menu.groupSystem': '平台',
-  'engine.studio.menu.groupSecurity': '访问',
   // objectstack#36502 — 旧「界面」链接落地时的提示。
   'engine.studio.interfacesRetired.sentence': '界面的修改已经搬到应用里',
   'engine.studio.interfacesRetired.backToApp': '回到应用',
