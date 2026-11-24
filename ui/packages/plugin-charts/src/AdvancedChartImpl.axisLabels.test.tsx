@@ -21,6 +21,7 @@ vi.mock('recharts', async () => {
 });
 
 import AdvancedChartImpl from './AdvancedChartImpl';
+import { normalizeChartSchema } from './normalizeChartSchema';
 
 afterEach(cleanup);
 
@@ -89,11 +90,11 @@ describe('AdvancedChartImpl — value-axis ticks on a small domain (objectstack#
       .map((t) => (t.textContent ?? '').trim())
       .filter((t) => !PRIORITIES.has(t));
 
-  function draw(extra: Record<string, unknown> = {}) {
+  function draw(extra: Record<string, unknown> = {}, data: Record<string, unknown>[] = RATE) {
     const { container } = render(
       <AdvancedChartImpl
         chartType="column"
-        data={RATE}
+        data={data}
         xAxisKey="priority"
         series={[{ dataKey: 'rate', label: 'Rate' }]}
         isAnimationActive={false}
@@ -112,7 +113,11 @@ describe('AdvancedChartImpl — value-axis ticks on a small domain (objectstack#
   });
 
   it('with a declared percent format, the ticks read as percents', () => {
-    const ticks = draw({ yAxes: [{ format: '0.0%' }] });
+    // The value-axis key exactly as a report hands it for a `'0.0%'` measure
+    // (`DatasetReportRenderer.chartChrome.test.tsx`), through the translation
+    // `ChartRenderer` applies.
+    const { yAxes } = normalizeChartSchema({ type: 'chart', yAxis: [{ format: '0.0%' }] }, 'en');
+    const ticks = draw({ yAxes });
     expect(ticks.length).toBeGreaterThanOrEqual(3);
     expect(new Set(ticks).size).toBe(ticks.length);
     expect(ticks.every((t) => t.endsWith('%'))).toBe(true);
@@ -120,10 +125,12 @@ describe('AdvancedChartImpl — value-axis ticks on a small domain (objectstack#
   });
 
   it('a declared format too coarse for the step still keeps the ticks apart', () => {
-    // `'0%'` declares whole percents; the 8.5-point step needs one more digit.
-    const ticks = draw({ yAxes: [{ format: '0%' }] });
+    // A tenth of the card's rate: ticks 0, 0.0085, 0.017, 0.0255, 0.034. A
+    // whole-percent `'0%'` printed the last two as `3%`; the 0.85-point step
+    // needs two more places, which the pattern's own (none) do not cut.
+    const ticks = draw({ yAxes: [{ format: '0%' }] }, RATE.map((r) => ({ ...r, rate: r.rate / 10 })));
     expect(ticks.length).toBeGreaterThanOrEqual(3);
     expect(new Set(ticks).size).toBe(ticks.length);
-    expect(ticks.every((t) => t.endsWith('%'))).toBe(true);
+    expect(ticks).toEqual(['0%', '0.85%', '1.7%', '2.55%', '3.4%']);
   });
 });

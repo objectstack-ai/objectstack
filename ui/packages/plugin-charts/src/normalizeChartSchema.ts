@@ -888,8 +888,20 @@ export function effectiveChartFamily<T extends DeclaredChartFamily | undefined>(
  * `undefined` — the MACHINE's locale, neither of the repo's two locale
  * channels (objectui#9909). A required parameter is the one shape a caller
  * cannot forget.
+ *
+ * `tickExponent` is a value axis' {@link valueTickExponent}: the decimal place
+ * its ticks must print to for no two of them to share a label
+ * (objectstack#36988). The pattern's own places are a floor, never cut: a
+ * `'0.0%'` axis whose ticks fall on whole tenths of a percent prints exactly
+ * as authored, and only a pattern too coarse for the step (`'0%'` over a
+ * 0.85-point step) prints the further digits the step needs. Omitted (the
+ * category axis, scatter's measure axis), the pattern alone decides.
  */
-export function formatterFor(format: string | undefined, locale: string): ((value: any) => string) | undefined {
+export function formatterFor(
+  format: string | undefined,
+  locale: string,
+  tickExponent?: number,
+): ((value: any) => string) | undefined {
   if (!format) return undefined;
   const isPercent = format.includes('%');
   const currencyMatch = /^([$£€¥₹])/.exec(format);
@@ -901,9 +913,12 @@ export function formatterFor(format: string | undefined, locale: string): ((valu
   // Nothing recognizable to act on — don't guess.
   if (!isPercent && !currencyMatch && !grouped && decimals === 0) return undefined;
 
+  // `style: 'percent'` prints the value × 100, so a percent axis needs two
+  // places fewer than the fraction it plots.
+  const stepPlaces = tickExponent === undefined ? 0 : Math.max(0, -tickExponent - (isPercent ? 2 : 0));
   const opts: Intl.NumberFormatOptions = {
     minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
+    maximumFractionDigits: Math.min(MAX_FRACTION_DIGITS, Math.max(decimals, stepPlaces)),
     useGrouping: grouped,
   };
   if (isPercent) opts.style = 'percent';
@@ -918,6 +933,94 @@ export function formatterFor(format: string | undefined, locale: string): ((valu
       return new Intl.NumberFormat(locale, opts).format(n);
     } catch {
       return String(n);
+    }
+  };
+}
+
+/** `Intl.NumberFormat`'s ceiling on fraction and significant digits. */
+const MAX_FRACTION_DIGITS = 20;
+const MAX_SIGNIFICANT_DIGITS = 21;
+
+/** The power of ten `n` sits at (`0.085` → -2, `1000` → 3), read exactly. */
+function decimalExponent(n: number): number {
+  return Number(Math.abs(n).toExponential().split('e')[1]);
+}
+
+/**
+ * The decimal place, as a power-of-ten exponent, a value axis prints its ticks
+ * to so that no two ticks share a label (objectstack#36988) — `-3` means
+ * thousandths. `undefined` when the axis gives nothing to measure (no finite
+ * value, an empty span) or draws a logarithmic scale, whose ticks are not
+ * evenly stepped; the caller then keeps its default digits.
+ *
+ * recharts lays `tickCount` ticks over the axis domain at a "nice" step that
+ * is never smaller than `span / (tickCount - 1)` and carries at most two
+ * significant digits (a multiple of 0.05 of its power of ten: 0.085, 0.45,
+ * 2.5). So the place one below that lower bound's leading digit resolves every
+ * nice step exactly — 0.085 prints `0.085`, not `0.09` — and, because any two
+ * ticks are at least one step apart, rounding both to that place can never
+ * land them on one label. A declared `stepSize` IS the step.
+ *
+ * The span is the one {@link ticksFor} lays a declared step over: the axis'
+ * own `min`/`max` where declared, else the plotted values with zero included
+ * (recharts' default value domain is `[0, 'auto']`). Every way the real
+ * domain differs from it — a stack summing higher, data overflowing a
+ * declared end — only widens the real step, which needs no extra digit.
+ * `tickCount` defaults to recharts' own five.
+ */
+export function valueTickExponent(
+  axis: NormalizedAxis | undefined,
+  values: readonly number[],
+  tickCount: number = RECHARTS_DEFAULT_TICK_COUNT,
+): number | undefined {
+  if (axis?.logarithmic) return undefined;
+  let step = axis?.stepSize;
+  if (step === undefined) {
+    const finite = values.filter((v) => Number.isFinite(v));
+    if (finite.length === 0) return undefined;
+    const lo = axis?.min ?? Math.min(0, ...finite);
+    const hi = axis?.max ?? Math.max(0, ...finite);
+    step = (hi - lo) / Math.max(1, tickCount - 1);
+  }
+  if (!Number.isFinite(step) || step <= 0) return undefined;
+  return decimalExponent(step) - 1;
+}
+
+/**
+ * The value axis' default tick formatter — compact notation (1,200,000 →
+ * `1.2M`) for an axis that declares no `format`, keeping large magnitudes
+ * readable — printed to the axis' {@link valueTickExponent}.
+ *
+ * Compact notation alone, capped at one fraction digit, printed the ticks of
+ * a 0–⅓ axis (0, 0.085, 0.17, 0.255, 0.34) as `0, 0.1, 0.2, 0.3, 0.3`: two
+ * ticks, one label (objectstack#36988). Each value is now rounded to the
+ * axis' tick place instead, expressed as SIGNIFICANT digits so that the
+ * compact unit — `K`/`M` in English, `万`/`亿` in Chinese — never changes which
+ * place is kept. The one-fraction-digit reading stays a floor
+ * (`roundingPriority: 'morePrecision'`), so no label prints fewer digits than
+ * before; with no exponent (nothing to measure, a log scale) it is the whole
+ * rule, as it always was.
+ */
+export function compactTickFormatter(locale: string, tickExponent?: number): (value: any) => string {
+  return (value: any): string => {
+    if (value == null || value === '') return '';
+    const num = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(num)) return String(value);
+    const significant = tickExponent === undefined || num === 0
+      ? undefined
+      : Math.min(MAX_SIGNIFICANT_DIGITS, Math.max(1, decimalExponent(num) - tickExponent + 1));
+    // `roundingPriority` is ES2023 `Intl`; this package's lib is ES2020, hence
+    // the widened type. An engine without it reads the significant digits
+    // alone, which still keep every tick apart.
+    const opts: Intl.NumberFormatOptions & { roundingPriority?: 'morePrecision' } = {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+      ...(significant !== undefined ? { maximumSignificantDigits: significant, roundingPriority: 'morePrecision' } : {}),
+    };
+    try {
+      return new Intl.NumberFormat(locale, opts).format(num);
+    } catch {
+      return String(num);
     }
   };
 }
