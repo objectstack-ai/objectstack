@@ -180,3 +180,15 @@ Maintainer ruling (2026-08-28, #12715): **option A — re-introduce the slot, th
 - **Whole-group disappearance (header included) rides the landed objectui#6236 contract unchanged** — FALSE (or a faulting predicate, fail-closed) hides the divider and every claimed member.
 - The `visibleOn` spelling stays rejected with guidance pointing at `visibleWhen` (the #8382 posture: pointed, not aliased).
 - Both directions of the ADR-0049 trichotomy are now on this key's record: removed while unenforced, re-declared when declared = enforced holds on day one.
+
+## Addendum (2026-11-22): on the synthesized record page the reader folds every titled group
+
+§4 gave `collapse` one meaning on every surface, and §5 one derivation for every surface. Once the default record page drew its fields as one long list, a group whose object declared nothing (or `'none'`) could not be folded there, and most groups in real apps declare nothing.
+
+Maintainer ruling (2026-11-22, objectstack#36269, option (b), 「都能折叠，默认展开」):
+
+- **On the synthesized (default) record page every titled field group folds** from its title row, whatever its `collapse`: the side preview, the phone details tab, the pinned left column and the full page. Folding a group there is the reader's action, not a fact about the data (§1).
+- **`collapse` still sets the first state there**: `'collapsed'` starts closed; `'none'` and `'expanded'` start open. The system-information group keeps starting closed.
+- **Every other surface keeps §4 as written**: on forms and in the designer preview `'none'` is always open with no toggle; an authored record page keeps its own faces; a print page draws every group open. The untitled ungrouped bucket has no toggle, and the fold state is not saved.
+- **§5 is unchanged**: `deriveFieldGroupLayout` still passes `collapse` through, and the synth still emits `collapsible` / `defaultCollapsed` from it. Only the record page's frameless face reads the result differently.
+- No key, value or default changes, so no ADR-0087 entry; the `collapse` description, the object form's help text and the docs say where the meanings differ.

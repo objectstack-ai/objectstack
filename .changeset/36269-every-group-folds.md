@@ -1,6 +1,7 @@
 ---
 '@objectstack/spec': minor
 '@object-ui/plugin-detail': minor
+'@objectstack/platform-objects': minor
 ---
 
 feat(plugin-detail): on the synthesized record page every titled field group folds, open by default
@@ -18,6 +19,8 @@ Unchanged:
 - An authored record page keeps its own faces.
 - The fold state lasts while the record stays open. It is not saved.
 
-`@objectstack/spec`: the `ObjectFieldGroupSchema.collapse` description, and the refusal guidance for a stray `expanded` key, now say that the default record page lets the reader fold every titled group. The enum, its default and what it accepts are unchanged.
+`@objectstack/spec`: the `ObjectFieldGroupSchema.collapse` description, the refusal guidance for a stray `expanded` key and the object form's Collapse help text now say that the default record page lets the reader fold every titled group; the form's "None" option reads "always open on the entry form, no toggle". The enum, its default and what it accepts are unchanged.
+
+`@objectstack/platform-objects`: the object form's Collapse help text in every metadata-form catalog follows the new wording (English regenerated, the ten translated catalogs re-translated).
 
 What to check in an app: an object that used `collapse: 'none'` to keep a group's heading from folding on the record page now shows a chevron there. The setting still keeps the group always open on forms.

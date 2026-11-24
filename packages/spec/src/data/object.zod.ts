@@ -1598,8 +1598,9 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   ).meta({ title: 'Requires Feature' }),
 
   /**
-   * [ADR-0085] Collapse behaviour of the group's rendered section. Forms and
-   * the designer preview honour all three states as written; the synthesized
+   * [ADR-0085] Collapse behaviour of the group's rendered section. Forms, the
+   * designer preview and authored record pages honour all three states as
+   * written, and a print page draws every group open; the synthesized
    * (default) record page lets the reader fold every titled group, so there
    * only the first state is read (`'collapsed'` closed, `'none'` and
    * `'expanded'` open). One enum, three valid states — replaces
