@@ -1,6 +1,7 @@
 ---
 '@object-ui/app-shell': patch
 '@object-ui/i18n': patch
+'@object-ui/plugin-list': patch
 ---
 
 feat(console): Change Owner's queue picker searches the server, so a queue past the first 200 can be found and picked; a non-grid list says bulk Change Owner is in the grid
