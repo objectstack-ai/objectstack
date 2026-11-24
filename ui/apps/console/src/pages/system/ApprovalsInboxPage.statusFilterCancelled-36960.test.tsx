@@ -142,17 +142,19 @@ beforeAll(() => {
     button: number;
     ctrlKey: boolean;
     pointerType: string;
-    constructor(type: string, props: any = {}) {
+    constructor(type: string, props: PointerEventInit = {}) {
       super(type, props);
       this.button = props.button ?? 0;
       this.ctrlKey = props.ctrlKey ?? false;
       this.pointerType = props.pointerType ?? 'mouse';
     }
   }
-  (window as any).PointerEvent = MockPointerEvent;
-  (HTMLElement.prototype as any).hasPointerCapture = vi.fn();
-  (HTMLElement.prototype as any).releasePointerCapture = vi.fn();
-  (HTMLElement.prototype as any).scrollIntoView = vi.fn();
+  Object.assign(window, { PointerEvent: MockPointerEvent });
+  Object.assign(HTMLElement.prototype, {
+    hasPointerCapture: vi.fn(),
+    releasePointerCapture: vi.fn(),
+    scrollIntoView: vi.fn(),
+  });
 });
 
 beforeEach(() => {
