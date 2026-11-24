@@ -92,6 +92,7 @@ import { resolveRowCrudAffordances, resolveRowRecordCrudAffordance } from './row
 import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { useRowApprovalLocks } from './hooks/useRowApprovalLocks';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
+import { rankRowActionDefs } from './rowActionArrangement';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 import { partitionBulkRows } from './bulkEligibility';
@@ -1371,11 +1372,18 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // `list_item` def stops rendering a dead twin of it). A name the object does
   // not declare draws nothing and is reported below, in development. See
   // `resolveLegacyRowActions` for the full rationale (objectui#2960).
-  const { defs: resolvedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
+  const { defs: foldedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
     rowActions: rowActionsList.filter(a => a !== 'edit' && a !== 'delete'),
     rowActionDefs: rowActionDefsList,
     objectActions: (objectSchema as any)?.actions,
   });
+  // objectstack#36494 — the row's menus list the actions the object's record
+  // scope arrangement (`actionLayout.record`, as served) names first, in its
+  // order, then the rest as before (`./rowActionArrangement`). Keyed on the
+  // arm's content so an unchanged arm hands the menus the same defs.
+  const recordArmKey = JSON.stringify((objectSchema as any)?.actionLayout?.record ?? null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the arm is keyed on content by `recordArmKey`
+  const resolvedRowActionDefs = useMemo(() => rankRowActionDefs(foldedRowActionDefs, JSON.parse(recordArmKey)), [foldedRowActionDefs, recordArmKey]);
   // Honor the object's resolved CRUD affordance: the ADR-0103 lifecycle bucket
   // (`managedBy`), the `userActions.edit`/`delete` override — explicit `false`
   // opts out of the generic row Edit/Delete (e.g. sys_environment ships a
