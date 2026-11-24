@@ -1005,20 +1005,20 @@ function pushCrossSetFieldReopen(
   const capabilityGated = new Map<string, Set<string>>();
   for (const obj of objectsAsServed(stack).objects) {
     if (typeof obj.name !== 'string') continue;
-    for (const field of recordsOf(obj.fields)) {
-      const required = field.requiredPermissions;
-      if (typeof field.name !== 'string' || !Array.isArray(required) || required.length === 0) continue;
+    for (const f of recordsOf(obj.fields)) {
+      const required = f.requiredPermissions;
+      if (typeof f.name !== 'string' || !Array.isArray(required) || required.length === 0) continue;
       const gated = capabilityGated.get(obj.name) ?? new Set<string>();
-      gated.add(field.name);
+      gated.add(f.name);
       capabilityGated.set(obj.name, gated);
     }
   }
 
   for (let i = 0; i < permissionSets.length; i++) {
-    const hiding = permissionSets[i];
-    if (!hiding || typeof hiding !== 'object') continue;
-    const hidingName = typeof hiding.name === 'string' ? hiding.name : `(permission set ${i})`;
-    const flsMap = hiding.fields && typeof hiding.fields === 'object' ? (hiding.fields as AnyRec) : {};
+    const ps = permissionSets[i];
+    if (!ps || typeof ps !== 'object') continue;
+    const hidingName = typeof ps.name === 'string' ? ps.name : `(permission set ${i})`;
+    const flsMap = ps.fields && typeof ps.fields === 'object' ? (ps.fields as AnyRec) : {};
     for (const [flsKey, flsEntry] of Object.entries(flsMap)) {
       if (!flsEntry || typeof flsEntry !== 'object') continue;
       const dot = flsKey.indexOf('.');
@@ -1029,7 +1029,7 @@ function pushCrossSetFieldReopen(
       if (!surface) continue; // not this stack's object, or no readable field map
       if (!surface.names.has(fieldName) && !surface.injected.has(fieldName)) continue; // `security-fls-unknown-field`
       if (capabilityGated.get(objectName)?.has(fieldName)) continue; // ADR-0066 D3 gates it after the merge
-      if (holdsSuperuserBypass(hiding, objectName, 'modify')) continue; // same-set: `security-superuser-field-mask-inert`
+      if (holdsSuperuserBypass(ps, objectName, 'modify')) continue; // same-set: `security-superuser-field-mask-inert`
       const mask = flsEntry as AnyRec;
       const readMasked = mask.readable === false;
       const editLocked = mask.editable !== true;
@@ -1037,14 +1037,14 @@ function pushCrossSetFieldReopen(
 
       for (let j = 0; j < permissionSets.length; j++) {
         if (j === i) continue;
-        const other = permissionSets[j];
-        if (!other || typeof other !== 'object') continue;
-        const vote = objectWideFieldVote(other, objectName, fieldName);
+        const set = permissionSets[j];
+        if (!set || typeof set !== 'object') continue;
+        const vote = objectWideFieldVote(set, objectName, fieldName);
         if (!vote) continue;
         const reopensRead = readMasked;
         const reopensEdit = editLocked && vote.editable;
         if (!reopensRead && !reopensEdit) continue;
-        const otherName = typeof other.name === 'string' ? other.name : `(permission set ${j})`;
+        const otherName = typeof set.name === 'string' ? set.name : `(permission set ${j})`;
         const bitKey = FIELD_REOPEN_BIT_KEY[vote.bit];
         const reopened = reopensRead && reopensEdit ? 'both' : reopensRead ? 'read' : 'edit';
         const votes = { both: 'readable and editable', read: 'readable', edit: 'editable' }[reopened];
