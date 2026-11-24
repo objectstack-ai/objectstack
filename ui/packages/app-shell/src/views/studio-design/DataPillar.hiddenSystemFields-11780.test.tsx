@@ -224,7 +224,7 @@ function renderPillar() {
   return render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
       <SurfaceDeepLinkProvider>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_account" packageId="com.example.showcase" />
       </SurfaceDeepLinkProvider>
     </MemoryRouter></StudioSaveHarness>,
   );

@@ -116,7 +116,7 @@ function lastSentField(name: string): Record<string, unknown> | undefined {
 async function addFieldAs(typeOption: RegExp): Promise<{ name: string; label: string }> {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
@@ -203,7 +203,7 @@ describe('Studio data page — complete bodies are sent as before (objectui#1178
   it('a complete edit is sent by Save, with no held line', async () => {
     render(
       <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
@@ -227,7 +227,7 @@ describe('Studio data page — complete bodies are sent as before (objectui#1178
     };
     render(
       <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));

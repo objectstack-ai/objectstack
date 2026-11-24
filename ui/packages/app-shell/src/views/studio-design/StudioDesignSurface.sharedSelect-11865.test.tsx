@@ -100,7 +100,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
-import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
+import { AutomationsPillar } from './StudioDesignSurface';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t } from '../metadata-admin/i18n';
 
@@ -163,14 +164,13 @@ const owdName = (descKey: string) =>
 const OBJECT_PKG = 'com.test.crmext';
 
 async function openNewObject(): Promise<HTMLElement> {
-  // An empty package: the pillar offers *New object* from its empty state.
+  // objectstack#36904 — New object is the object list's create dialog.
   server.rows = [];
   render(
-    <MemoryRouter initialEntries={[`/studio/${OBJECT_PKG}/data`]}>
-      <DataPillar packageId={OBJECT_PKG} />
+    <MemoryRouter>
+      <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId={OBJECT_PKG} inPair={false} locale="en" onCreated={() => {}} />
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByTestId('empty-state-new-object', undefined, { timeout: 8000 }));
   return await screen.findByTestId('create-object-owd');
 }
 

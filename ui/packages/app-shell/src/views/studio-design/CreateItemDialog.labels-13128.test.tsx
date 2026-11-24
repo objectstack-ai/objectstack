@@ -44,7 +44,8 @@ vi.mock('./packages-io', async (importOriginal) => {
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { DataPillar, StudioDesignSurface } from './StudioDesignSurface';
+import { StudioDesignSurface } from './StudioDesignSurface';
+import { MetadataListCreateDialog } from '../metadata-admin/MetadataListCreateDialog';
 import { t } from '../metadata-admin/i18n';
 
 window.matchMedia = ((query: string) => ({
@@ -93,12 +94,12 @@ function expectBound(dialog: HTMLElement, labelText: string): HTMLInputElement {
 
 describe('Studio create dialogs bind each label to its input (objectui#13128)', () => {
   it('New object: "Object name" and "Identifier" each find their input', async () => {
+    // objectstack#36904 — New object is the object list's create dialog.
     render(
-      <MemoryRouter initialEntries={['/studio/app.a/data']}>
-        <DataPillar packageId="app.a" />
+      <MemoryRouter>
+        <MetadataListCreateDialog type="object" open onOpenChange={() => {}} packageId="app.a" inPair={false} locale="en" onCreated={() => {}} />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByTestId('empty-state-new-object'));
     const dialog = await screen.findByRole('dialog');
 
     const nameInput = expectBound(dialog, t('engine.studio.data.nameLabel', 'en'));
@@ -112,7 +113,7 @@ describe('Studio create dialogs bind each label to its input (objectui#13128)', 
 
   it('Create app (a sibling dialog on the same component): "App name" and "Identifier" each find their input', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/app.a/interfaces']}>
+      <MemoryRouter initialEntries={['/studio/app.a/automations']}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>

@@ -127,7 +127,7 @@ afterEach(() => {
 async function renderGrid(props: { readOnly?: boolean } = {}) {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" readOnly={props.readOnly} />
+      <DataPillar objectName={OBJECT} packageId="com.example.showcase" readOnly={props.readOnly} />
     </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(document.querySelector('thead th[data-column-key="title"]')).not.toBeNull(), {

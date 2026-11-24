@@ -234,7 +234,7 @@ afterEach(() => {
 async function mountOnActions(props: { readOnly: boolean; customization?: StudioBaseCustomization | null }) {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-      <DataPillar packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
+      <DataPillar objectName={OBJECT} packageId={BASE} readOnly={props.readOnly} customization={props.customization ?? null} />
     </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).

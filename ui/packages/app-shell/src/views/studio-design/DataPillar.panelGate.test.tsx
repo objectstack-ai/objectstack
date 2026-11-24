@@ -140,7 +140,7 @@ afterEach(() => {
 async function openRuleGuard() {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   // objectui#12450 — the flat tab; the passthrough menu draws the folded

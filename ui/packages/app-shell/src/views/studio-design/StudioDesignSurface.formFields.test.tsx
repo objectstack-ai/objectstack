@@ -172,7 +172,7 @@ function Harness(): React.ReactElement {
       <button type="button" data-testid="rerender" onClick={() => force((n) => n + 1)}>
         rerender
       </button>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter>
   );
 }

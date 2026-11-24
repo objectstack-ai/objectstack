@@ -128,7 +128,7 @@ function serveDraft(draftChanges?: unknown[]) {
 async function openRail(label: string, name: string): Promise<HTMLElement> {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   fireEvent.click(await screen.findByRole('button', { name: L('engine.studio.data.tab.form') }));

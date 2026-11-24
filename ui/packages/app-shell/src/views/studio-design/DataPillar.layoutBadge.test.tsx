@@ -83,7 +83,7 @@ const CLAIM = /your unsaved changes/i;
 async function openFormTab(props: Partial<React.ComponentProps<typeof DataPillar>> = {}) {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" {...props} />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" {...props} />
     </MemoryRouter>,
   );
   // First object auto-selects; the Form tab is the second segmented control.

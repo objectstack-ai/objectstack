@@ -97,7 +97,7 @@ const rail = () => screen.queryByText(INSPECTOR);
 async function openInspectorOnForm(): Promise<HTMLElement> {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByRole('button', { name: L('engine.studio.data.tab.form') }));

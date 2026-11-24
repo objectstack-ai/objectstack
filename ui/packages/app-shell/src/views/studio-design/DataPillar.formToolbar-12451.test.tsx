@@ -90,7 +90,7 @@ afterEach(() => {
 async function openForm(props: { readOnly?: boolean } = {}) {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" readOnly={props.readOnly} />
+      <DataPillar objectName="showcase_account" packageId="com.example.showcase" readOnly={props.readOnly} />
     </MemoryRouter>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });

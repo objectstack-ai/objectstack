@@ -142,7 +142,7 @@ async function mountOnForm(): Promise<void> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE}/data`]}>
       <StudioSaveHarness>
-        <DataPillar packageId={PACKAGE} />
+        <DataPillar objectName="showcase_task" packageId={PACKAGE} />
       </StudioSaveHarness>
     </MemoryRouter>,
   );

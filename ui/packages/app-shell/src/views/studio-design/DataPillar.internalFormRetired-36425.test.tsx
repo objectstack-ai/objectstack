@@ -163,7 +163,7 @@ afterEach(() => {
 async function openForm(props: { readOnly?: boolean; customization?: StudioBaseCustomization } = {}) {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-      <DataPillar packageId={PKG} {...props} />
+      <DataPillar objectName={OBJECT} packageId={PKG} {...props} />
     </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });

@@ -125,7 +125,7 @@ async function openActionsView(): Promise<void> {
   objectDef = { name: 'showcase_task', label: 'Task', fields: [{ name: 'title', label: 'Title', type: 'text' }], actions: [SIGN] };
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
   // The first match is the flat tab (the passthrough menu draws a second).

@@ -116,7 +116,7 @@ function renderPillar(onDraftSaved = vi.fn()): { onDraftSaved: ReturnType<typeof
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE}/data`]}>
       <StudioSaveHarness locale="en-US">
-        <DataPillar packageId={PACKAGE} onDraftSaved={onDraftSaved} />
+        <DataPillar objectName="showcase_task" packageId={PACKAGE} onDraftSaved={onDraftSaved} />
       </StudioSaveHarness>
     </MemoryRouter>,
   );

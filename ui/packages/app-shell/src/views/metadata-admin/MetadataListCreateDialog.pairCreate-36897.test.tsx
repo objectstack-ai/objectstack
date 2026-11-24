@@ -11,6 +11,11 @@
  *  - The object carries the organization-wide default it was given.
  *  - A flow is created from a starting point; one that watches an object
  *    writes nothing until it has one.
+ *
+ * objectstack#36904 — the object designer has no 「新建」 of its own any more;
+ * this dialog is where an object is created, so the pins its old dialog held
+ * live here too: the default OWD is written explicitly, the stored name is
+ * previewed and saved as shown, and a taken identifier writes nothing.
  */
 
 // Paid at collection, not inside a case's clock (check:test-source-alias).
@@ -46,9 +51,10 @@ vi.mock('../studio-design/studioSaveBar.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   publishSavedItem: (...args: unknown[]) => publish(...(args as [])),
 }));
+const taken = vi.fn(async (..._args: unknown[]): Promise<{ name: string; label: string } | null> => null);
 vi.mock('../studio-design/StudioPillarKit.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  findTakenIdentifier: async () => null,
+  findTakenIdentifier: (...args: unknown[]) => taken(...args),
 }));
 const joinMenu = vi.fn(async () => ({ kind: 'joined' }));
 vi.mock('../studio-design/newObjectJoinsAppMenu.js', async (importOriginal) => ({
@@ -135,6 +141,37 @@ describe('list 「新建」 lands in the paired .custom package on a read-only b
     expect(await screen.findByText(t('engine.studio.auto.preset.needsObject', L))).toBeInTheDocument();
     expect(ensure).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+});
+
+describe('list 「新建」 for an object: the create the object designer no longer has (objectstack#36904)', () => {
+  it('writes the default record sharing explicitly when the author leaves it (objectui#5418)', async () => {
+    const onCreated = open('object', 'com.example.crm', false);
+    fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Visit', 'visit');
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    const [, , body, opts] = save.mock.calls[0] as unknown as [string, string, any, any];
+    expect(body).toHaveProperty('sharingModel', 'private');
+    expect(opts).toMatchObject({ mode: 'draft' });
+  });
+
+  it('previews `<namespace>_<identifier>` and saves exactly that name (objectui#11792)', async () => {
+    const onCreated = open('object', 'com.example.crm', false);
+    fireEvent.change(screen.getByLabelText(t('engine.studio.data.nameLabel', L)), { target: { value: 'Repair Ticket' } });
+    await waitFor(() => expect(screen.getByTestId('create-item-stored-name')).toHaveTextContent('crm_repair_ticket'));
+    fireEvent.click(screen.getByRole('button', { name: t('engine.studio.createLive', L) }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith({ name: 'crm_repair_ticket', packageId: 'com.example.crm' }));
+    expect(save.mock.calls[0]?.[1]).toBe('crm_repair_ticket');
+  });
+
+  it('a taken identifier is refused and nothing is written (objectstack#26917)', async () => {
+    taken.mockResolvedValueOnce({ name: 'crm_visit', label: 'Visit' });
+    const onCreated = open('object', 'com.example.crm', false);
+    fill('engine.studio.data.nameLabel', 'engine.studio.data.idLabel', 'Visit', 'visit');
+    await waitFor(() => expect(taken).toHaveBeenCalled());
+    expect(await screen.findByText(/crm_visit/)).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+    expect(publish).not.toHaveBeenCalled();
     expect(onCreated).not.toHaveBeenCalled();
   });
 });

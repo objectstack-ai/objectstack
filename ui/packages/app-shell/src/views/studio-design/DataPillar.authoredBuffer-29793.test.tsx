@@ -176,7 +176,7 @@ function renderZh() {
   return render(
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
       <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-        <DataPillar packageId={PKG} />
+        <DataPillar objectName="showcase_custom_ticket" packageId={PKG} />
       </MemoryRouter></StudioSaveHarness>
     </I18nProvider>,
   );

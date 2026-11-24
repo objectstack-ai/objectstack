@@ -87,7 +87,7 @@ const absent = (key: string) => t(key, 'en-US');
 async function openForm(readOnly: boolean): Promise<HTMLElement> {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" readOnly={readOnly} />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" readOnly={readOnly} />
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByRole('button', { name: row('engine.studio.data.tab.form') }));

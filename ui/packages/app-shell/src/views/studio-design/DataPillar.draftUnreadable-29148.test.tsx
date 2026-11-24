@@ -170,7 +170,7 @@ afterEach(() => {
 async function renderBase(over: Partial<StudioBaseCustomization> = {}) {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-      <DataPillar packageId={BASE} readOnly customization={customizationOf(over)} />
+      <DataPillar objectName={OBJECT} packageId={BASE} readOnly customization={customizationOf(over)} />
     </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });

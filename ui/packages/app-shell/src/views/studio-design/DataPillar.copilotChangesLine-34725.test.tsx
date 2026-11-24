@@ -98,7 +98,7 @@ function serveDraft(draftChanges?: unknown[]) {
 function renderPillar(props: Partial<React.ComponentProps<typeof DataPillar>> = {}) {
   return render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" {...props} />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" {...props} />
     </MemoryRouter>,
   );
 }

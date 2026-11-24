@@ -199,7 +199,7 @@ describe('revealColumn (objectstack#35061)', () => {
 async function renderGrid() {
   render(
     <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName={OBJECT} packageId="com.example.showcase" />
     </MemoryRouter>,
   );
   await waitFor(() => expect(document.querySelector('thead th[data-column-key="title"]')).not.toBeNull(), {

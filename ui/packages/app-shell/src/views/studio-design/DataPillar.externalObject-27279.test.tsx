@@ -102,7 +102,7 @@ async function renderPillar(object: Record<string, unknown>) {
   servedObject = object;
   render(
     <MemoryRouter initialEntries={['/studio/com.example.plan/data']}>
-      <DataPillar packageId="com.example.plan" />
+      <DataPillar packageId="com.example.plan" objectName={String(object.name)} />
     </MemoryRouter>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });

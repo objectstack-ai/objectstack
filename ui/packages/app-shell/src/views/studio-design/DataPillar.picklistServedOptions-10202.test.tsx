@@ -167,7 +167,7 @@ afterEach(() => {
 function renderData() {
   render(
     <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
-      <DataPillar packageId={PKG} />
+      <DataPillar objectName="showcase_account" packageId={PKG} />
     </MemoryRouter></StudioSaveHarness>,
   );
 }

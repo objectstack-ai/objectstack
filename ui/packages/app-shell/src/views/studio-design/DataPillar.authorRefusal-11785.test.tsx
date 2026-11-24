@@ -104,7 +104,7 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
   it('names the field by its label and shows no developer text', async () => {
     render(
       <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
@@ -138,7 +138,7 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
   it('"Show me" opens the named field\'s inspector after it was closed', async () => {
     render(
       <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
-        <DataPillar packageId="com.example.showcase" />
+        <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));

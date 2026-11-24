@@ -116,7 +116,7 @@ function renderPillar(packageId = 'com.example.showcase') {
   return render(
     <MemoryRouter initialEntries={[`/studio/${packageId}/data`]}>
       <SurfaceDeepLinkProvider>
-        <DataPillar packageId={packageId} />
+        <DataPillar objectName="showcase_book" packageId={packageId} />
       </SurfaceDeepLinkProvider>
     </MemoryRouter>,
   );

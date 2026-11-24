@@ -264,7 +264,7 @@ async function mountOnActions(): Promise<void> {
   render(
     <StudioSaveHarness>
       <MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
-        <DataPillar packageId={BASE} readOnly customization={customization()} />
+        <DataPillar objectName={OBJECT} packageId={BASE} readOnly customization={customization()} />
       </MemoryRouter>
     </StudioSaveHarness>,
   );

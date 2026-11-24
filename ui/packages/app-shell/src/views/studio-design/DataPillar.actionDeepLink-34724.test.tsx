@@ -161,7 +161,7 @@ function mountAt(search: string): void {
   render(
     <MemoryRouter initialEntries={[`/studio/com.example.showcase/data${search}`]}>
       <UrlProbe />
-      <DataPillar packageId="com.example.showcase" />
+      <DataPillar objectName="showcase_task" packageId="com.example.showcase" />
     </MemoryRouter>,
   );
 }
