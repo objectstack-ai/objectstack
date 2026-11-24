@@ -35,6 +35,7 @@
  */
 
 import { CATALOG_SCOPE_PARAM, ENVIRONMENT_SCOPE } from '../metadata-admin/catalog-scope.js';
+import { DESIGNER_SURFACE_PARAM, parseSurfaceParam } from '../metadata-admin/nav-selection.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_ITEM_PILLAR,
@@ -44,9 +45,11 @@ import {
   studioMetadataAreaAddress,
   studioMetadataAreaRoot,
   studioMetadataItemAddress,
+  studioMetadataTypePath,
   studioPillarItemAddress,
   type StudioPillarKey,
 } from './studioAddress.js';
+import { DESIGNER_SURFACE_NAV_PARAM, DESIGNER_SURFACE_VIEW_PARAM } from './useSurfaceDeepLink.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 
 // objectstack#36895 — the area's segments are Studio address vocabulary, owned
@@ -110,6 +113,40 @@ export function areaItemPillarPath(input: {
   if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return null;
   if (input.search.get(STUDIO_ITEM_REVIEW_PARAM) === STUDIO_ITEM_REVIEW_VALUE) return null;
   return studioPillarItemPath(input.packageId, pillar, { type: input.type, name: input.name });
+}
+
+/**
+ * objectstack#36904 (ADR-0146 D1 as amended) — whether an item of the area
+ * opens the object designer, full-screen on its own address: an object, on a
+ * package's leg, under the same exceptions as {@link areaItemPillarPath} (the
+ * cross-package leg and the environment scope name no package to design in,
+ * and `?review=1` opens the generic page's draft review).
+ */
+export function areaItemOpensObjectDesigner(input: { packageId: string | null; type: string; search: URLSearchParams }): boolean {
+  if (input.type !== 'object' || !input.packageId) return false;
+  if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return false;
+  return input.search.get(STUDIO_ITEM_REVIEW_PARAM) !== STUDIO_ITEM_REVIEW_VALUE;
+}
+
+/**
+ * objectstack#36904 — where the retired Data pillar's address lands
+ * (`/studio/<package>/data`, Studio's old home): the object designer of the
+ * object its `?surface=object:<name>` names, or else the package's object
+ * list. The pillar's own qualifiers go (`?surface=`, and `?view=` and `?nav=`,
+ * which opened nothing on an object); everything else is kept verbatim —
+ * `?action=` (the designer opens its Actions tab on it) and `?changes=review`
+ * (the server's draft review link, `studioChangesReviewLink`).
+ *
+ * `search` is the URL's query, with or without its `?`.
+ */
+export function dataPillarRedirect(packageId: string, search: string): string {
+  const params = new URLSearchParams(search);
+  const target = parseSurfaceParam(params.get(DESIGNER_SURFACE_PARAM));
+  for (const key of [DESIGNER_SURFACE_PARAM, DESIGNER_SURFACE_VIEW_PARAM, DESIGNER_SURFACE_NAV_PARAM]) params.delete(key);
+  if (target?.type === 'object' && target.name) return studioMetadataItemAddress(packageId, 'object', target.name, { query: params });
+  const list = studioMetadataTypePath(packageId, 'object');
+  const query = params.toString();
+  return query ? `${list}?${query}` : list;
 }
 
 /**

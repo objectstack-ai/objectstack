@@ -132,7 +132,7 @@ import {
   isStudioOrgScope,
   studioOrgScopePath,
 } from './studioScope.js';
-import { STUDIO_METADATA_AREA, isStudioAllPackagesScope } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, dataPillarRedirect, isStudioAllPackagesScope } from './metadataArea.js';
 import { StudioMenu, StudioMenuProvider, StudioMenuTrigger } from './StudioMenu.js';
 import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
@@ -170,7 +170,7 @@ import {
   type DraftPublishOptions,
 } from '../../preview/DraftChangesPanel.js';
 import { toast } from 'sonner';
-import { studioPillarItemAddress, studioPillarPath } from './studioAddress.js';
+import { studioItemPath, studioPillarItemAddress, studioPillarPath } from './studioAddress.js';
 
 /** The batch door's `backfillApplied` receipt, by reference to what the client returns (objectui#12929). */
 type PublishBackfillReceipt = NonNullable<
@@ -198,13 +198,15 @@ function formatBackfillReceipt(receipt: PublishBackfillReceipt, locale: string):
 
 // The pillar segments `/studio/<package>/<pillar>` serves. objectstack#36899
 // (ADR-0084, amended) — they are no longer a navigation: Studio's one
-// navigation is the left menu (`StudioMenu`), and these pages are where an
-// object, a flow or a permission set opens until each becomes a full-screen
-// item page. Data stays the Studio home. objectstack#36502 — the Interfaces
-// pillar is retired (`studioInterfacesRetired.tsx`). The "All metadata" area
+// navigation is the left menu (`StudioMenu`), and these pages are where a
+// flow or a permission set opens until each becomes a full-screen item page.
+// objectstack#36904 — the Data pillar is retired: an object opens its designer
+// on its metadata address, and `/data` redirects (`dataPillarRedirect`).
+// objectstack#36502 — the Interfaces pillar is retired
+// (`studioInterfacesRetired.tsx`). The "All metadata" area
 // (`/studio/<package>/metadata/…`, `metadataArea.ts`) is not a pillar, so the
 // not-found check does not hold it.
-const PILLARS: readonly string[] = [STUDIO_HOME_PILLAR, 'automations', 'access'];
+const PILLARS: readonly string[] = ['automations', 'access'];
 // objectstack#29988 — the pillar kit moved to its own module; re-exported for its pins.
 export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
 
@@ -217,7 +219,6 @@ export { StudioHeldNotice, StudioReadOnlyLink, type StudioBaseCustomization };
  * buys nothing.
  */
 const PILLAR_FOR_SURFACE_TYPE: Readonly<Record<string, string>> = {
-  object: 'data',
   flow: 'automations',
   permission: 'access',
 };
@@ -266,6 +267,13 @@ export function StudioDesignSurface(props: StudioDesignSurfaceProps): React.Reac
   if (!props.area && params.tab === RETIRED_INTERFACES_SEGMENT) {
     const scope = customizationPairBaseOf(params.packageId ?? null) ?? params.packageId ?? 'com.example.showcase';
     return <Navigate to={retiredInterfacesTarget(scope, location.search)} state={retiredInterfacesState()} replace />;
+  }
+  // objectstack#36904 — the retired Data pillar (Studio's old home, and the
+  // old object address) lands on the object list or the object's designer, a
+  // pair's in its own area (`dataPillarRedirect`).
+  const segment = params.packageId ?? '';
+  if (!props.area && params.tab === STUDIO_HOME_PILLAR && segment && !isStudioOrgScope(segment) && !isStudioAllPackagesScope(segment)) {
+    return <Navigate to={dataPillarRedirect(segment, location.search)} state={location.state} replace />;
   }
   const pairBase = props.area ? null : customizationPairBaseOf(params.packageId ?? null);
   if (pairBase !== null) {
@@ -1199,8 +1207,19 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
    *
    * Either way the sheet closes: a selection nobody can see is not navigation.
    */
+  const currentPathname = useLocation().pathname;
   const requestSurface = React.useCallback(
     (target: SurfaceTarget): boolean | void => {
+      // objectstack#36904 — an object is its designer's own address.
+      if (target.type === 'object' && packageId !== null) {
+        const to = studioItemPath(packageId, 'object', target.name);
+        if (to !== currentPathname) {
+          if (!confirmLeavePillar()) return false;
+          shellNavigate(to);
+        }
+        setChangesOpen(false);
+        return;
+      }
       const pillar = PILLAR_FOR_SURFACE_TYPE[target.type];
       // objectui#11553 — the package-less scope has one pillar; a surface
       // owned by another is not in this scope, so nothing to navigate to.
@@ -1211,7 +1230,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
       }
       setChangesOpen(false);
     },
-    [tab, allScope, packageId, scopeSegment, confirmLeavePillar, shellNavigate],
+    [tab, allScope, packageId, scopeSegment, confirmLeavePillar, shellNavigate, currentPathname],
   );
   // objectstack#36899 — a menu entry that re-enters the open pillar on another
   // `?surface=` (the default sharing overview, on the Access pillar) opens the
@@ -1223,7 +1242,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // pillar remounted before it would capture the old deep link.
   const [pillarEntry, setPillarEntry] = React.useState(0);
   const reentryPending = React.useRef(false);
-  const currentSearch = useLocation().search;
+  const { search: currentSearch } = useLocation();
   const reenterPillar = React.useCallback((): boolean => {
     if (!confirmLeavePillar()) return false;
     reentryPending.current = true;
@@ -1529,27 +1548,19 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 publishNonce={publishNonce}
                 onDraftSaved={onDraftSaved}
                 publishRefusalFor={publishRefusalFor}
-              />
-            ) : !pillarKnown ? (
-              <StudioEmptyState
-                icon={FileQuestion}
-                testId="studio-pillar-not-found"
-                sentence={tFormat('engine.studio.notFound.pillar', locale, { pillar: tab })}
-              />
-            ) : tab === 'data' ? (
-              <DataPillar
-                key={`${packageId}:${pillarEntry}`}
-                packageId={packageId}
-                publishNonce={publishNonce}
-                onDraftSaved={onDraftSaved}
-                readOnly={readOnly}
-                customization={customization}
+                // objectstack#36904 — the object designer's reports, as the pillars' are.
                 onHeldEditChange={setHeldEdit}
                 onSurfaceLabelChange={setSurfaceLabel}
                 onReviewChanges={() => {
                   setChangesPosture('review');
                   setChangesOpen(true);
                 }}
+              />
+            ) : !pillarKnown ? (
+              <StudioEmptyState
+                icon={FileQuestion}
+                testId="studio-pillar-not-found"
+                sentence={tFormat('engine.studio.notFound.pillar', locale, { pillar: tab })}
               />
             ) : tab === 'automations' ? (
               <AutomationsPillar

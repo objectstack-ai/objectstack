@@ -135,6 +135,9 @@ export interface StudioItemTypeRow {
 
 export const STUDIO_ITEM_TYPES: readonly StudioItemTypeRow[] = Object.freeze([
   {
+    // objectstack#36904 — switched: an object opens on its metadata address,
+    // and this pillar address redirects there (`dataPillarRedirect`), keeping
+    // `?action=` as the designer's query and dropping `?view=` and `?nav=`.
     type: 'object',
     pillar: 'data',
     surface: 'object:<name>',

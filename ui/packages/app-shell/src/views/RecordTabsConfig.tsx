@@ -105,7 +105,7 @@ export function objectPackageId(objectDef: RecordTabsObjectDef | null | undefine
  */
 export type RecordTabsMode = 'own' | 'pair';
 
-/** Where 「Adjust field groups」 goes: the object in Studio's Data pillar. */
+/** Where 「Adjust field groups」 goes: the object's designer in Studio. */
 export function recordTabsStudioPath(objectDef: RecordTabsObjectDef | null | undefined): string | null {
   const packageId = objectPackageId(objectDef);
   const name = objectDef?.name;

@@ -13,10 +13,11 @@
  *   <root>/_diagnostics        diagnostics
  *   <root>/:type               a type's list
  *   <root>/:type/new           create (a writable package only)
- *   <root>/:type/:name         the generic item page, the item's pillar, or
- *                              the form editor of an email template or a
- *                              translation (`StudioBundleItemEditor`, #28569),
- *                              and of a read-only package's dataset (#30064)
+ *   <root>/:type/:name         the generic item page, the item's pillar, the
+ *                              object designer (#36904), or the form editor
+ *                              of an email template or a translation
+ *                              (`StudioBundleItemEditor`, #28569), and of a
+ *                              read-only package's dataset (#30064)
  *   <root>/:type/:name/history the item's history: its History tab
  *                              (`?tab=history`), the old address redirected;
  *                              the history page for a type with an editor of
@@ -46,11 +47,14 @@ import { fetchListedPackageManifests } from './packages-io.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
   areaItemOpensFormEditor,
+  areaItemOpensObjectDesigner,
   areaItemPillarPath,
   areaLocationRedirect,
   studioMetadataAreaPath,
 } from './metadataArea.js';
 import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
+import { DataPillar } from './DataPillar.js';
+import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/registry.js';
 import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
@@ -130,10 +134,16 @@ interface AreaEditorProps {
   publishNonce: number;
   onDraftSaved?: (saved?: { type: string; name: string }) => void;
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
+  /** objectstack#36904 — the object designer's reports to the surface: its held edit and the copilot's chip. */
+  onHeldEditChange?: (clause: string | null) => void;
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
+  /** The object designer's copilot-changes line opens the surface's Changes. */
+  onReviewChanges?: () => void;
 }
 
 /**
- * `<root>/:type/:name`: a pillar type opens its pillar, an email template or a
+ * `<root>/:type/:name`: a pillar type opens its pillar, an object the object
+ * designer (`areaItemOpensObjectDesigner`), an email template or a
  * translation the form editor (`areaItemOpensFormEditor`), every other type
  * the generic item page (`areaItemPillarPath` lists when).
  *
@@ -164,10 +174,29 @@ function AreaItemOpen({
   const host = useMetadataAreaHost();
   const [opens] = React.useState(() => {
     const at = { packageId: host?.packageId ?? null, type, search };
-    if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { formEditor: true, pillarPath: null };
-    return { formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
+    if (areaItemOpensObjectDesigner(at)) return { designer: true, formEditor: false, pillarPath: null };
+    if (areaItemOpensFormEditor({ ...at, readOnly: host?.readOnly === true })) return { designer: false, formEditor: true, pillarPath: null };
+    return { designer: false, formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
   });
   if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
+  if (opens.designer && host?.packageId) {
+    // objectstack#36904 — the object designer, full-screen on the object's address.
+    return (
+      <div className="h-full min-h-0" data-testid="studio-object-designer">
+        <DataPillar
+          packageId={host.packageId}
+          objectName={name}
+          readOnly={host.readOnly}
+          customization={editor.customization}
+          publishNonce={editor.publishNonce}
+          onDraftSaved={editor.onDraftSaved}
+          onHeldEditChange={editor.onHeldEditChange}
+          onSurfaceLabelChange={editor.onSurfaceLabelChange}
+          onReviewChanges={editor.onReviewChanges}
+        />
+      </div>
+    );
+  }
   if (opens.formEditor && host?.packageId) {
     return (
       <StudioBundleItemEditor
@@ -196,7 +225,9 @@ function AreaItemOpen({
  * A type whose item page is an editor of its own (`registerMetadataResource`'s
  * `EditPage`: the permission set's matrix) has no tabs, and its History button
  * opens this address: it keeps the standalone history page. So does an item
- * whose address opens a pillar's designer, until the designer mounts the tabs.
+ * whose address opens a pillar's designer, until the designer mounts the tabs:
+ * objectstack#36904 — an object no longer does (its designer is on its
+ * address, with History as a tab); a flow still does until its designer moves.
  */
 function AreaHistoryRedirect(): React.ReactElement {
   const { type = '', name = '' } = useParams<{ type: string; name: string }>();
@@ -295,6 +326,10 @@ export interface StudioMetadataAreaProps {
    * at the item it refused.
    */
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
+  /** objectstack#36904 — handed to the object designer (`AreaEditorProps`). */
+  onHeldEditChange?: (clause: string | null) => void;
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
+  onReviewChanges?: () => void;
 }
 
 export function StudioMetadataArea({
@@ -303,6 +338,9 @@ export function StudioMetadataArea({
   publishNonce = 0,
   onDraftSaved,
   publishRefusalFor,
+  onHeldEditChange,
+  onSurfaceLabelChange,
+  onReviewChanges,
 }: StudioMetadataAreaProps): React.ReactElement {
   const { pathname, search } = useLocation();
   const locale = useMetadataLocale();
@@ -321,7 +359,15 @@ export function StudioMetadataArea({
     () => ({ packageId, readOnly, basePath, ...(pairCreate ? { pairCreate } : {}) }),
     [packageId, readOnly, basePath, pairCreate],
   );
-  const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved, publishRefusalFor };
+  const editor: AreaEditorProps = {
+    customization,
+    publishNonce,
+    onDraftSaved,
+    publishRefusalFor,
+    onHeldEditChange,
+    onSurfaceLabelChange,
+    onReviewChanges,
+  };
 
   // The query names the leg (`areaLocationRedirect`). Settled before any page
   // mounts, so no page reads a scope the URL is about to change.
