@@ -115,6 +115,8 @@ describe('[#34777] os lint --item --type', { timeout: 30_000 }, () => {
     expect(run.out).toContain('Not run without the rest of the stack');
     expect(run.out).toContain('validateStackExpressions');
     expect(run.out).toContain('naming/namespace-prefix');
+    expect(run.out).toContain('--mode draft --package <id>');
+    expect(run.out).not.toContain('publish the draft');
   });
 
   it.each([

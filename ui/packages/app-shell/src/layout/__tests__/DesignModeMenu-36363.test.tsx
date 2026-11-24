@@ -21,7 +21,7 @@ import { SidebarProvider } from '@object-ui/components';
 import { NavigationRenderer } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 
-const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en' }));
+const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en', sourceLocale: undefined as string | undefined }));
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
@@ -96,7 +96,9 @@ const storedNav = vi.hoisted(() => ({
 }));
 const client = vi.hoisted(() => ({
   list: async (type: string) => listed[type] ?? [],
-  layered: async () => {
+  layered: async (type?: string) => {
+    // objectstack#36504: no menu translation item is stored yet.
+    if (type === 'translation') return { code: null, overlay: null, overlayScope: null, effective: null };
     const gate = storedNav.gate;
     storedNav.gate = null;
     if (gate) await gate;
@@ -238,6 +240,7 @@ beforeEach(() => {
   toastError.mockReset();
   session.language = 'en';
   session.defaultLocale = 'en';
+  session.sourceLocale = undefined;
   storedNav.current = null;
   storedNav.failReads = 0;
   storedNav.missing = false;
@@ -254,7 +257,8 @@ beforeEach(() => {
     vi.fn(async (url: string) => {
       if (String(url).endsWith('/api/v1/i18n/locales')) {
         const locales = ['en', 'zh-CN'].map((code) => ({ code, label: code, isDefault: code === session.defaultLocale }));
-        return new Response(JSON.stringify({ success: true, data: { locales } }), { status: 200 });
+        const sourceLocale = session.sourceLocale ? { sourceLocale: session.sourceLocale } : {};
+        return new Response(JSON.stringify({ success: true, data: { locales, ...sourceLocale } }), { status: 200 });
       }
       throw new Error(`unexpected fetch ${url}`);
     }),
@@ -371,33 +375,65 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     expect(entry('leads')).toHaveTextContent('Prospects');
   });
 
-  // Ruling (4) on review 7081226692: a name is changed in the app's source language only.
-  it('under zh-CN, with English the default, the name is not changed: the field is closed and says why; the icon still is', async () => {
+  // objectstack#36504 relaxes ruling (4) on review 7081226692: a name is changed in any language,
+  // and lands where that language reads it.
+  it('under zh-CN over an English source, the name is changed: the rename says it is a zh-CN name, and the save writes the translation and keeps the stored label', async () => {
     session.language = 'zh-CN';
+    session.defaultLocale = 'zh-CN';
+    session.sourceLocale = 'en';
     start();
     await flush();
     await act_on('leads', 'Rename and icon');
     const dialog = await screen.findByTestId('design-menu-rename');
-    expect(within(dialog).getByLabelText('Name')).toBeDisabled();
-    expect(within(dialog).getByTestId('design-menu-rename-source-only')).toHaveTextContent(
-      "Menu names are changed in the app's source language",
-    );
+    const name = within(dialog).getByLabelText('Name');
+    expect(name).toBeEnabled();
+    expect(within(dialog).getByTestId('design-menu-rename-translation')).toHaveTextContent(/The new name is shown in .+\. The app's other languages keep their names\./);
+    fireEvent.change(name, { target: { value: '潜在客户' } });
     fireEvent.change(within(dialog).getByLabelText('Icon'), { target: { value: 'user-plus' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await flush();
+    expect(entry('leads')).toHaveTextContent('潜在客户');
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    await flush();
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save translation', 'publish translation', 'save app', 'publish app']);
+    expect(written[0][3]).toEqual({ name: 'crm_menu_zh_cn', locale: 'zh-CN', apps: { crm: { navigation: { leads: { label: '潜在客户' } } } } });
+    const leads = (written[2][3] as { navigation: Array<{ children?: Array<Record<string, unknown>> }> }).navigation[1].children![0];
+    expect(leads).toEqual({ id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads', icon: 'user-plus' });
+  });
+
+  it('in the source language, an entry shown under a label other than its stored one is renamed in that language\'s translation', async () => {
+    storedNav.current = NAVIGATION.map((e) => (e.id === 'home' ? { ...e, label: 'apps.crm.home' } : e));
+    start();
+    await flush();
+    await act_on('home', 'Rename and icon');
+    const dialog = await screen.findByTestId('design-menu-rename');
+    expect(within(dialog).getByLabelText('Name')).toBeEnabled();
+    expect(within(dialog).getByTestId('design-menu-rename-translation')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Start' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
     await flush();
     fireEvent.click(screen.getByTestId('design-mode-save'));
     await flush();
     await flush();
-    const leads = (written[0][3] as { navigation: Array<{ children?: Array<Record<string, unknown>> }> }).navigation[1].children![0];
-    expect(leads).toEqual({ id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads', icon: 'user-plus' });
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save translation', 'publish translation']);
+    expect(written[0][3]).toMatchObject({ name: 'crm_menu_en', locale: 'en', apps: { crm: { navigation: { home: { label: 'Start' } } } } });
   });
 
-  it('in the default language, an entry shown under a label other than its stored one is not renamed here', async () => {
-    storedNav.current = NAVIGATION.map((e) => (e.id === 'home' ? { ...e, label: 'apps.crm.home' } : e));
+  it('in the source language, over the stored label, the rename says nothing of a translation and writes the stored label', async () => {
     start();
     await flush();
-    await act_on('home', 'Rename and icon');
-    expect(within(await screen.findByTestId('design-menu-rename')).getByLabelText('Name')).toBeDisabled();
+    await act_on('leads', 'Rename and icon');
+    const dialog = await screen.findByTestId('design-menu-rename');
+    expect(within(dialog).queryByTestId('design-menu-rename-translation')).toBeNull();
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Prospects' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await flush();
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save app', 'publish app']);
   });
 
   it("another package's entry (served, not in the stored menu) says where it is changed, and is not moved or removed here", async () => {

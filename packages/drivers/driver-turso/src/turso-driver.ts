@@ -1192,6 +1192,13 @@ export const REMOTE_FACE_ANSWERS = {
   // `queryDateGranularity` is empty), so the engine buckets in memory, on the
   // UTC calendar whose keys this expression answers.
   dateBucketSql: 'inherited',
+  // [#36190] The JSON-column class, read off the registries this face fills
+  // itself: it is what this driver already hands the remote transport's own
+  // refusal (`setJsonColumnResolver`), so both faces word one refusal. Remote
+  // mode never moves its media columns, so a single-value file-class field
+  // reads `'single-value-media'` here on every deployment, as it does locally
+  // inside the ADR-0104 window.
+  jsonColumnFieldClass: 'inherited',
 } as const satisfies Record<keyof SqlDriver, RemoteFaceAnswer>;
 
 // ── Remote operation timeout ─────────────────────────────────────────────────

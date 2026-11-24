@@ -32,9 +32,11 @@
  * this module.
  */
 
+import { formulaWorkCalendarsFor } from './formula-work-calendars.js';
 import type { DroppedFieldsEvent, EngineUpdateOptions, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { collectComposableReadableIds } from './filter-comparand-shape.js';
+import { refuseHookSyncProvenanceWrite, refuseSyncProvenanceWrite, snapshotSyncKeys } from './sync-provenance-write.js';
 // [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
 // resolvers' host, built once per engine, which carries every member it reads.
 import { securityResolversHost } from './engine-facet-hosts.js';
@@ -188,6 +190,11 @@ export class UpdateFacet {
        ownUnit ? () => this.inAfterAbortUnit(body) : body;
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
+     // [ADR-0153 D4] The insert face's rule: a `_sync_` provenance column is the
+     // sync-in pull's alone, judged on the caller's payload before anything
+     // runs, and the pull's mark does not travel past this write.
+     const syncJudgedContext = refuseSyncProvenanceWrite(object, data, options?.context, 'update');
+     if (syncJudgedContext !== options?.context) options = { ...options, context: syncJudgedContext } as typeof options;
      // [#8844] See the insert face — an organization row that changes identity
      // invalidates the memo just as one that appears does.
      if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();
@@ -564,6 +571,7 @@ export class UpdateFacet {
          onFault: this.formulaFaultSink(object),
          relatedFor: (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
          optionLabelsFor: (plan) => declaredOptionLabels(updateSchema, plan),
+         workCalendarsFor: (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, opCtx.context),
        };
        const undeclared = undeclaredWriteFieldErrors(
          object,
@@ -718,6 +726,8 @@ export class UpdateFacet {
          opCtx.data !== null && typeof opCtx.data === 'object'
            ? recordHookPayloadWrites(opCtx.data as Record<string, unknown>)
            : undefined;
+       // [ADR-0153 D4] The payload's `_sync_` keys before the hooks, judged after the seal.
+       const syncBeforeHooks = snapshotSyncKeys(opCtx.data);
 
        const hookContext: HookContext = {
           object,
@@ -1097,6 +1107,9 @@ export class UpdateFacet {
        const sealedHookWrites = hookWrites?.seal(hookContext.input.data);
        if (sealedHookWrites) hookContext.input.data = sealedHookWrites.data as any;
        let hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+       // [ADR-0153 D4] A `_sync_` key a hook assigned, changed or removed is refused,
+       // the pull's own write included (sync-provenance-write.ts, "The hooks' own writes").
+       refuseHookSyncProvenanceWrite(object, syncBeforeHooks, hookContext.input.data, 'update');
 
        // ── [#16344] HAND BACK what was hidden from the hooks ────────────────
        //
@@ -2342,6 +2355,7 @@ export class UpdateFacet {
                this.formulaFaultSink(object),
                (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
                (plan) => this.formulaOptionLabels(updateSchema, plan, opCtx.context),
+               (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, opCtx.context),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view
@@ -2611,6 +2625,7 @@ export async function loadSummaryFoldDependents(
     related: Awaited<ReturnType<UpdateHost['resolveFormulaRelated']>>;
     storedLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
     formulaLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+    calendars: Awaited<ReturnType<typeof formulaWorkCalendarsFor>>;
   }>();
   const systemCtx = { ...(context ?? {}), isSystem: true } as typeof context;
   const systemResolution = host.permissionResolution(systemCtx);
@@ -2642,6 +2657,7 @@ export async function loadSummaryFoldDependents(
       related: await host.resolveFormulaRelated(schema, plan, storedRows, systemCtx),
       storedLabels: declaredOptionLabels(schema, storedPlan),
       formulaLabels: host.formulaOptionLabels(schema, formulaPlan, systemCtx),
+      calendars: await formulaWorkCalendarsFor(host.facade, plan, storedRows, systemCtx),
     });
   }
   type Served = NonNullable<ReturnType<typeof served.get>>;
@@ -2651,7 +2667,7 @@ export async function loadSummaryFoldDependents(
     for (const name of entry.formulaFields) delete scratch[name];
     // Twice, as the write computes them: before its hooks, then over the row with the moved values.
     for (let pass = 0; pass < 2 && entry.storedPlan.length > 0; pass += 1) {
-      applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels);
+      applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels, entry.calendars);
     }
     return scratch;
   };
@@ -2667,7 +2683,7 @@ export async function loadSummaryFoldDependents(
     const scratch = image ? { ...image, ...moved } : written(entry, stored, moved);
     // The read's row: the formulas the plan does not recompute back at their stored values.
     for (const name of entry.unplannedFormulas) if (name in stored) scratch[name] = stored[name];
-    if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels);
+    if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels, entry.calendars);
     const values: Record<string, unknown> = {};
     for (const step of [...entry.storedPlan, ...entry.formulaPlan]) values[step.name] = scratch[step.name];
     return values;

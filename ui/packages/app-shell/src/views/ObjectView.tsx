@@ -13,6 +13,14 @@ import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense, type
 import { useParams, useSearchParams, useNavigate, useLocation, useHref, createSearchParams } from 'react-router-dom';
 import { resolveAffordance, type FilterTokenScope, type SchemaLike } from '@object-ui/core';
 import { useObjectListLayout } from './listLayoutStore.js';
+/**
+ * objectstack#36395 — the list layouts that hold no selection of several
+ * records, and so offer no bulk Change Owner: every layout `ListView` draws
+ * with records as items except the grid. An unknown type is not here: the list
+ * draws it as a grid, which does select.
+ */
+const LAYOUTS_WITHOUT_BULK_SELECTION: ReadonlySet<string> = new Set(['kanban', 'calendar', 'gallery', 'timeline', 'gantt', 'map', 'tree']);
+
 const ImportWizard = lazy(() =>
   import('@object-ui/plugin-grid').then((m) => ({ default: m.ImportWizard })),
 );
@@ -20,7 +28,7 @@ import { ObjectView as PluginObjectView, ManageViewsDialog } from '@object-ui/pl
 // Plugin registration is handled by the host app (e.g. apps/console/src/main.tsx
 // uses ComponentRegistry.registerLazy so heavy plugins stay code-split).
 // Do NOT add eager `import '@object-ui/plugin-*'` side-effect imports here.
-import { CheckSquare, Plus } from 'lucide-react';
+import { CheckSquare, Info, Plus } from 'lucide-react';
 import { DropdownMenuItem, ObjectIconTile } from '@object-ui/components';
 import { requestListSelection, useListPageSelectable, useListPageSelecting } from '@object-ui/plugin-grid';
 import type { ListToolbarTrailingState } from '@object-ui/plugin-list';
@@ -773,6 +781,16 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // has not saved (`./listDraftStore.ts`). It outlives this page while a
     // record is open as a page, and goes when another view or object opens.
     const listDraft = useListDraft(listDraftScope(user?.id, objectName ?? '', activeView?.id ? String(activeView.id) : ''));
+    // objectstack#36395 — bulk Change Owner lives in the grid's selection bar.
+    // On a layout that selects no rows (the reader's unsaved layout first, as
+    // the list draws it), a reader the grid would offer it to is told so in one
+    // line: the object offers the action and the object-level transfer verdict
+    // allows it, asked only while such a layout is on screen.
+    const listLayoutType = String(listDraft.draft.viewType ?? (activeView as any)?.type ?? 'grid');
+    const bulkChangeOwnerGridOnly = useListChangeOwnerOffered(
+        objectDef as any,
+        bulkChangeOwnerReachable && LAYOUTS_WITHOUT_BULK_SELECTION.has(listLayoutType),
+    );
     /** The list on screen in the reader-state shape the view builders read (draft + kept widths and row height). */
     const draftPreferenceOf = (id: string | undefined) =>
         id ? listDraftPreference(listDraft.draft, listLayout.layout.perView?.[id]) : undefined;
@@ -1627,6 +1645,17 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
              {/* objectui#13330 — where people are invited on a managed environment. */}
              {managedUsers && <ManagedUsersInviteLine t={t} />}
+
+             {/* objectstack#36395 — where bulk Change Owner is, on a layout that selects no rows. */}
+             {bulkChangeOwnerGridOnly && (
+               <p
+                 className="flex items-center gap-2 border-b px-3 sm:px-4 py-1.5 text-xs text-muted-foreground"
+                 data-testid="object-view-bulk-change-owner-grid-only"
+               >
+                 <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                 <span className="min-w-0">{t('console.changeOwner.gridOnly')}</span>
+               </p>
+             )}
 
              {/* 2. Content — Plugin ObjectView with ViewSwitcher + Filter + Sort */}
              <div className="flex-1 overflow-hidden relative flex flex-row">

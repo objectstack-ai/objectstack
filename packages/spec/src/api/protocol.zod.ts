@@ -4806,6 +4806,17 @@ export const GetLocalesRequestSchema = lazySchema(() => z.object({}));
  * the requester's `Accept-Language`) is a caller's choice the server cannot
  * make for it. Serving real names would put CLDR data behind an endpoint for
  * something every client can already compute, and no consumer asks for it.
+ *
+ * `sourceLocale` (#36504) names the language the app's inline metadata text
+ * is authored in — the declared `i18n.sourceLocale`, else the default locale,
+ * the same collapse the document translators make (`ResolveOptions.defaultLocale`
+ * fed from `getSourceLocale?.() ?? getDefaultLocale?.()`). It differs from the
+ * `isDefault` locale on a deployment authored in one language that defaults
+ * its users to another. A client that edits labels reads it to tell an edit
+ * of the source text from a translation: the console's design mode stores a
+ * menu rename made in any other language as that language's translation.
+ * Named after its config key, as `defaultLocale`'s `isDefault` mark is the
+ * config's `defaultLocale`.
  */
 export const GetLocalesResponseSchema = lazySchema(() => z.object({
   locales: z.array(z.object({
@@ -4815,6 +4826,10 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
     ),
     isDefault: z.boolean().default(false).describe('Whether this is the default locale'),
   })).describe('Available locales'),
+  sourceLocale: z.string().optional().describe(
+    'The language the app\'s own text (a plain-string `label`) is written in: the declared `i18n.sourceLocale`, '
+    + 'else the default locale. Absent when the server knows neither. Text typed in any other locale is a translation',
+  ),
 }));
 
 /**

@@ -33,6 +33,14 @@
  * Change Owner stays off with the reason beside it; in a bulk report, a row
  * the list read with that owner already reads "already had this owner"
  * (`readChangeOwnerReport`).
+ *
+ * ## Picking a queue (objectstack#36395)
+ *
+ * The queue target is picked the way the person is: with the shared lookup
+ * widget over `sys_queue`, so the server searches and pages the queues and
+ * an organization with more than one page of them can still find and pick any
+ * one. The widget commits the queue's `name` (`idField: 'name'`), the value
+ * the endpoint's `queue` takes; it shows the queue's label.
  */
 
 import { Suspense, useEffect, useId, useMemo, useState } from 'react';
@@ -48,11 +56,6 @@ import {
   Label,
   RadioGroup,
   RadioGroupItem,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
 } from '@object-ui/components';
 import { Loader2 } from 'lucide-react';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -75,6 +78,8 @@ import {
 
 /** The `user` field widget the dialog picks its person with (lazy until drawn). */
 const UserWidget = getLazyFieldWidget('user');
+/** The `lookup` field widget the dialog picks its queue with (lazy until drawn). */
+const LookupWidget = getLazyFieldWidget('lookup');
 
 type ClientData = ReturnType<ObjectStackAdapter['getClient']>['data'];
 /** `data.changeOwnerMany`'s answer (`ChangeOwnerReport` of `@objectstack/client`). */
@@ -93,11 +98,6 @@ type RunState =
   | { phase: 'running' }
   | { phase: 'refused'; message: string }
   | { phase: 'done'; report?: ChangeOwnerBulkReport; moved: number; unchanged: number; cascade?: ChangeOwnerCascadeOutcomeView[] };
-
-type QueueState =
-  | { phase: 'loading' }
-  | { phase: 'failed'; message: string }
-  | { phase: 'ready'; queues: Array<{ name: string; label: string }> };
 
 export interface ChangeOwnerDialogProps {
   open: boolean;
@@ -130,7 +130,6 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
   const [queue, setQueue] = useState<string>('');
   const [notify, setNotify] = useState(false);
   const [run, setRun] = useState<RunState>({ phase: 'idle' });
-  const [queues, setQueues] = useState<QueueState>({ phase: 'loading' });
   const [ticks, setTicks] = useState<ReadonlySet<string>>(() => new Set());
   const formId = useId();
   const cascades = useChangeOwnerCascadeCandidates(
@@ -154,29 +153,6 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
     setRun({ phase: 'idle' });
   }, [open]);
 
-  // The queues are read when the queue target is first chosen, never on open.
-  useEffect(() => {
-    if (!open || kind !== 'queue' || queues.phase === 'ready') return;
-    let live = true;
-    setQueues({ phase: 'loading' });
-    void (async () => {
-      try {
-        if (!adapter) throw new Error(t('console.changeOwner.noClient'));
-        const result = await adapter.find('sys_queue', { $top: 200 });
-        const rows = Array.isArray(result?.data) ? result.data : [];
-        const read = rows
-          .map((r: any) => ({ name: typeof r?.name === 'string' ? r.name : '', label: typeof r?.label === 'string' && r.label ? r.label : String(r?.name ?? '') }))
-          .filter((q) => q.name !== '');
-        if (live) setQueues({ phase: 'ready', queues: read });
-      } catch (err) {
-        if (live) setQueues({ phase: 'failed', message: failureText(err) });
-      }
-    })();
-    return () => { live = false; };
-    // `queues.phase` is read to skip a second read, not to re-run on it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, kind, adapter]);
-
   const personId = ownerIdOf(person);
   const echo = !bulk && personId !== undefined && personId === currentOwner;
   const target = kind === 'queue'
@@ -192,6 +168,21 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
     // One record: its current owner is not a new owner, so it is not offered.
     ...(currentOwner ? { lookupFilters: [{ field: 'id', operator: 'ne', value: currentOwner }] } : {}),
   }), [ownerLabel, currentOwner]);
+
+  // The queue picker reads `sys_queue` only when it is opened, one page at a
+  // time, with the typed term sent to the server as its search.
+  const queueLabel = t('console.changeOwner.queue');
+  const queuePlaceholder = t('console.changeOwner.queuePlaceholder');
+  const queueField = useMemo(() => ({
+    name: 'change_owner_queue',
+    type: 'lookup',
+    label: queueLabel,
+    reference: 'sys_queue',
+    idField: 'name',
+    displayField: 'label',
+    allowCreate: false,
+    placeholder: queuePlaceholder,
+  }), [queueLabel, queuePlaceholder]);
 
   const submit = async () => {
     if (!adapter || !target || ids.length === 0) return;
@@ -333,34 +324,15 @@ export function ChangeOwnerDialog({ open, onOpenChange, objectDef, records, skip
           ) : (
             <div className="grid gap-2">
               <Label htmlFor="change_owner_queue">{t('console.changeOwner.queue')}</Label>
-              {queues.phase === 'loading' && (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                  {t('console.changeOwner.queuesLoading')}
-                </p>
-              )}
-              {queues.phase === 'failed' && (
-                <p role="alert" className="text-sm text-destructive" data-testid="change-owner-queues-failed">
-                  {t('console.changeOwner.queuesFailed', { message: queues.message })}
-                </p>
-              )}
-              {queues.phase === 'ready' && queues.queues.length === 0 && (
-                <p className="text-sm text-muted-foreground" data-testid="change-owner-no-queues">
-                  {t('console.changeOwner.noQueues')}
-                </p>
-              )}
-              {queues.phase === 'ready' && queues.queues.length > 0 && (
-                <Select value={queue} onValueChange={(v) => { setQueue(v); setRun({ phase: 'idle' }); }} disabled={done}>
-                  <SelectTrigger id="change_owner_queue" data-testid="change-owner-queue">
-                    <SelectValue placeholder={t('console.changeOwner.queuePlaceholder')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {queues.queues.map((q) => (
-                      <SelectItem key={q.name} value={q.name}>{q.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+              <Suspense fallback={<div className="h-10 animate-pulse rounded-md bg-muted" aria-hidden="true" />}>
+                <LookupWidget
+                  id="change_owner_queue"
+                  value={queue || null}
+                  onChange={(v: unknown) => { setQueue(typeof v === 'string' ? v : ''); setRun({ phase: 'idle' }); }}
+                  field={queueField}
+                  disabled={done}
+                />
+              </Suspense>
             </div>
           )}
 
