@@ -53,10 +53,15 @@ const PEOPLE = [CREATOR, ASSIGNEE, STRANGER];
 
 const SYSTEM = { isSystem: true, tenantId: ORG } as const;
 /**
- * A member's request context, as the auth layer builds it (the org peer set
- * included). No permission set of its own: the member baseline is all it holds.
+ * A member's request context, as the auth layer builds it: the positions an
+ * ordinary member of the organization holds (`user`, `org_member`, and the
+ * `everyone` audience anchor), and the org peer set. `org_member` is what
+ * brings the member baseline's ownership floor into force (`owner_only_writes`
+ * is bound to it), so the assignee's edit below is measured under that floor.
+ * No permission set of its own: the member baseline is all it holds.
  */
-const as = (userId: string) => ({ userId, tenantId: ORG, positions: [], permissions: [], org_user_ids: PEOPLE });
+const MEMBER_POSITIONS = ['user', 'org_member', 'everyone'];
+const as = (userId: string) => ({ userId, tenantId: ORG, positions: MEMBER_POSITIONS, permissions: [], org_user_ids: PEOPLE });
 
 type Outcome = { kind: 'landed' } | { kind: 'refused'; code?: string; status?: number };
 const outcomeOf = (p: Promise<unknown>): Promise<Outcome> =>

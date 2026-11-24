@@ -1,11 +1,13 @@
 ---
 '@objectstack/platform-objects': patch
 '@objectstack/spec': patch
+'@objectstack/plugin-security': patch
+'@objectstack/cli': patch
 ---
 
 feat(platform-objects): built-in tasks and notes, `sys_task` and `sys_note`, in every environment
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 `PlatformObjectsPlugin` now registers two ordinary, customizable objects on their own manifest
@@ -30,5 +32,16 @@ validation treats them as platform-provided: an app's navigation entry reaches t
 'sys_task' }`), which `defineStack` accepts and the console hides on a kernel without the object.
 Their labels ship in the platform's eleven locales (zh-CN 任务 / 备忘).
 
-Members reach both through a permission set that grants the objects: the platform's member baseline
-grants neither.
+`@objectstack/plugin-security`: the member baseline `member_default` grants `sys_task` and
+`sys_note` read, create and edit, with no delete (maintainer ruling 7131539862, option A). It opens
+the objects only: which rows a member sees stays with each object's private sharing, so a task is
+read by its creator and its assignee and a note by its creator.
+
+`@objectstack/cli`: the organization-ownership inventory (ADR-0131 D10) gives `sys_task` and
+`sys_note` the `attribution` fate, so `os migrate organization-ownership` and the `os dev` upgrade
+plan databases that hold them instead of refusing an object with no fate.
+
+Clause-② reads `yes (widening)`: `defineStack` now accepts a top-level action whose `objectName` is
+`sys_task` or `sys_note`, and the public surface grows. `Metadata-protocol: none` follows the
+`sys_unit` roster-addition precedent: no metadata key, type or schema value is added, and a
+reference that already parsed now resolves.
