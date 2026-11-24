@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -29,6 +30,11 @@ let loadCalls: any[] = [];
 
 vi.mock('@objectstack/runtime', () => ({
     SeedLoaderService: class {
+        // [#34613] The real `loadStored` parses the stored request and hands it to `load`;
+        // the stand-in keeps that funnel, so the request `load` records is the parsed one.
+        async loadStored(raw: any) {
+            return this.load(SeedLoaderRequestSchema.parse(raw));
+        }
         async load(request: any) { loadCalls.push(request); return seedResult; }
         // The purge reads the loader's dependency order; these objects
         // reference nothing, so the order is the order asked.
@@ -236,6 +242,24 @@ describe('rehydrate sample-data healing', () => {
         expect(recordSeedOutcome).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({ source: MANIFEST.id, marketplace: true, emptyInstall: true }),
+        );
+    });
+
+    // [#34405] Withheld rows (`skipped`, no error) are a settled heal, pinned on
+    // the real loader in marketplace-install-local-landed-keys.test.ts. A load
+    // that landed nothing and withheld nothing, or that errored, is still the
+    // empty install the banner escalates.
+    it.each([
+        { case: 'nothing landed, nothing withheld', skipped: 0, errors: [] },
+        { case: 'rows skipped beside an error', skipped: 2, errors: [{ message: 'database is locked' }] },
+    ])('a heal run that lands no rows reports an empty install: $case', async ({ skipped, errors }) => {
+        seedResult = { summary: { totalInserted: 0, totalUpdated: 0, totalSkipped: skipped }, errors };
+        const { ctx } = await rehydrateWith({}, { crm_x: [], crm_y: [] });
+        expect(loadCalls).toHaveLength(1);
+        expect((ctx.logger.warn as any).mock.calls.some((c: any[]) => String(c[0]).includes(`sample-data heal for ${MANIFEST.id}`))).toBe(true);
+        expect(recordSeedOutcome).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ source: MANIFEST.id, marketplace: true, inserted: 0, updated: 0, rejected: errors.length, emptyInstall: true }),
         );
     });
 

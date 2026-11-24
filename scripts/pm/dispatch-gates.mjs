@@ -468,7 +468,7 @@ import { SCANNED_ROOTS as RUNNER_ENV_SCANNED_ROOTS, findRunnerEnvReads, isProduc
 import { findViolations as findErrorCodeCasingViolations } from '../check-error-code-casing.mjs';
 // The workspace parse the README claim net (#31292) reads its population through, the one the gate itself imports.
 // Dependency-free, and it declares no path population of its own.
-import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs } from '../workspace-enumerator.mjs';
+import { WORKSPACE_FILE, parseWorkspaceGlobs, workspacePackageDirs, workspacePackages } from '../workspace-enumerator.mjs';
 // The hand-written tables — ledgers, marker grammars, the change-kind roster, the tier globs — are
 // DATA, and live beside this file; this engine loads them, matches paths against them and derives.
 // Every table is re-exported under the name it always had, so no consumer moved.
@@ -487,6 +487,7 @@ import {
   ESCAPABLE_LITERAL_LEDGER_ROWS,
   CHANGE_KIND_ROWS,
   UI_SCRIPTS_SUITE_ROOTS,
+  SPEC_MIGRATION_ENTRY_ROOTS,
   MANDATORY_TIER_GLOB_ROWS,
   SUSPECT_TIER_GLOB_ROWS,
   GENERATED_MODULE_SOURCES,
@@ -506,6 +507,7 @@ export {
   RETIRED_TIER_WORDS,
   GENERATED_MODULE_SOURCES,
   UI_SCRIPTS_SUITE_ROOTS,
+  SPEC_MIGRATION_ENTRY_ROOTS,
 };
 
 // Re-exported so this tool's self-test drives the SAME predicates the gate
@@ -8711,13 +8713,24 @@ export function trackedPrefixes(files) {
 // absolute literal — is outside the tree by construction. So the classifier has
 // THREE answers, and the third carries the honesty: a site whose base it cannot
 // resolve is UNRESOLVED, never "probably fine". For `mkdtempSync` — the shape
-// every in-tree fixture in this tree is built from — an unresolved site is a
-// FAILURE. A detector that silently skipped what it could not read would be
-// this card's own defect one level up: green over the sites nobody measured.
+// every in-tree fixture in this tree is built from — an unresolved site in a
+// test file or in repo tooling is a FAILURE. A detector that silently skipped
+// what it could not read would be this card's own defect one level up: green
+// over the sites nobody measured.
 //
-// Measured on the tree at the time of writing: 359 `mkdtempSync` sites — 4 in
-// the tree (the four `packages/cli` fixtures the convention names), the rest in
-// the system temp directory, 0 unresolved.
+// The boundary of that rule is the FILE POPULATION: an unresolved site in
+// shipped package source (a non-test file under the own `src/` of a workspace
+// member whose manifest is not `private: true`, `isShippedPackageSource`) is
+// REPORTED and not failed, because its base is chosen at run time by whoever
+// runs the published code (ruling record 7075362923).
+//
+// Measured on 2026-11-22 on the tree of d8599c2c through
+// `scratchDirSitesInSource` and `isShippedPackageSource`: 1823 `mkdtempSync`
+// sites — 1465 in `isTestFilePath` test files (47 in the tree), 344 in every
+// other source outside shipped package source (repo tooling, package scripts,
+// test helpers and tests by directory; 0 in the tree; 0 of them under a private
+// member's `src/`), 14 in shipped package source (all in the system temp
+// directory); 0 unresolved in any population.
 //
 // `mkdirSync` is swept too and deliberately NOT held to completeness: of its
 // sites, ~124 take a base this resolver cannot see (a function parameter, a
@@ -9988,6 +10001,56 @@ export function exposedScratchDirs({ cwd = ROOT, files = null } = {}) {
     });
   }
   return { ...sweep, exposed, covered };
+}
+
+/**
+ * ── Which UNRESOLVED `mkdtempSync` site fails completeness: the FILE ──────────
+ *
+ * In a test file or a repo script the base of a scratch directory is something
+ * this tree chose, so a base the scan cannot read is a gap in the reading and
+ * fails. Shipped package source is the population where that stops holding: a
+ * published command stages beside a directory its USER names at run time (a
+ * cwd-relative argument), and no reading of this tree can say whether that
+ * lands inside a checkout. Failing it forces a spelling that only hides the
+ * base, never a safer directory. So that population is reported and not
+ * failed (ruling record 7075362923, 「扫描只管仓内运行的代码」).
+ *
+ * The boundary is the site's FILE, never its resolution: "in the tree" is
+ * exactly what an unresolved site does not know. ⛔ Nor is it "not a test
+ * file" alone — repo tooling is code this checkout runs, and it stays held.
+ *
+ * Shipped package source = a non-test source under the own `src/` of a
+ * published workspace member. "Non-test" is the runner-env gate's
+ * `isProductSource` (a test by name or by directory, `.d.ts` excluded), the
+ * stricter of the tree's test predicates, so a helper under `src/__tests__/`
+ * stays held. "Published member" is a workspace member whose manifest is not
+ * `private: true`, as the enumerator's `workspacePackages` pairs them: a
+ * private member (an example app, a QA harness, the docs app) is not published
+ * code and has no such user, so its `src/` is code this checkout runs and stays
+ * held, as does a member whose manifest does not parse. Neither half is a list
+ * kept here.
+ *
+ * `members` is `workspacePackages(root)`'s shape: `{ dir, manifest }` pairs.
+ */
+export function isShippedPackageSource(rel, members) {
+  return isRunnerEnvProductSource(rel)
+    && members.some(({ dir, manifest }) => manifest?.private !== true && rel.startsWith(`${dir}/src/`));
+}
+
+/**
+ * The completeness rule's verdict over a sweep's `unresolved` sites: `failing`
+ * is what reds the live case, `reported` the shipped-source remainder it names
+ * and does not fail. A `mkdirSync` site is in neither — that half was never
+ * held to completeness (the header above).
+ */
+export function mkdtempCompleteness(unresolved, { members = workspacePackages(ROOT) } = {}) {
+  const failing = [];
+  const reported = [];
+  for (const site of unresolved) {
+    if (site.call !== 'mkdtempSync') continue;
+    (isShippedPackageSource(site.file, members) ? reported : failing).push(site);
+  }
+  return { failing, reported };
 }
 
 /** An ignore file every clone has, as opposed to one local to whoever ran this. */
@@ -12084,6 +12147,40 @@ export function readByUiScriptsSuite(path, roots = UI_SCRIPTS_SUITE_ROOTS) {
 }
 
 /**
+ * Does this input path sit under the migration-entry sources the cli guidance test reads?
+ *
+ * The same reader as `readByUiScriptsSuite`, over `SPEC_MIGRATION_ENTRY_ROOTS`: a file or the directory
+ * under `packages/spec/src/migrations/entries`, in CI's own `paths:` language, and nothing beside it — not
+ * the registry template, not the generator, not the spec manifest.
+ */
+export function readBySpecMigrationEntryConsumers(path, roots = SPEC_MIGRATION_ENTRY_ROOTS) {
+  return triggerListCovers(roots, path.replace(/^\.\//, '')) !== null;
+}
+
+/**
+ * The one shape a PACKAGE-TEST subset gate's name may take: `pnpm --filter PKG exec vitest run FILE`, FILE
+ * relative to that package, one file and no other argument. Returns the FILE, or null.
+ *
+ * A gate standing in for a job that runs every package's test TASK (Test Core's `turbo run test`) cannot
+ * narrow that runner by prefix the way the ui suite narrows its own: the runner names no package and no
+ * file, so the local subset is spelled another way. It declares `ciSubset`, the repo path of the one file it
+ * runs, and this is the spelling the binding holds its name to — so the name and the path cannot name two
+ * different files, and a respelled name refuses at load instead of resolving by accident.
+ */
+export function packageTestSubsetFile(name) {
+  const m = /^pnpm --filter\s(\S+) exec vitest run (\S+)$/.exec(name);
+  return m ? m[2] : null;
+}
+
+/**
+ * Is a package-test subset gate's binding whole? `ciSubset` is a repo path ending in the FILE its name runs.
+ */
+export function packageTestSubsetIsWhole(gate) {
+  const file = packageTestSubsetFile(gate.name);
+  return typeof gate.ciSubset === 'string' && file !== null && gate.ciSubset.endsWith(`/${file}`);
+}
+
+/**
  * Does a live workflow still run the CI job a change-kind gate is the local SUBSET of (#26318)?
  *
  * Every other gate in the change-kind roster is named by an invocation the workflows run, and it resolves
@@ -12128,6 +12225,7 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'cli-command-literal': (path) => carriesACliCommandLiteral(path),
   'adr-anchored-file': (path) => breaksAnAdrAnchor(path),
   'ui-scripts-suite-input': (path) => readByUiScriptsSuite(path),
+  'spec-migration-entry': (path) => readBySpecMigrationEntryConsumers(path),
   // One per population net (#31257), each bound to its own net.
   ...Object.fromEntries(Object.entries(POPULATION_NETS).map(([key, net]) => [key, (path) => reachesPopulationNet(path, net)])),
   'published-readme-claim': (path) => takesAReadmeClaim(path),
@@ -12144,12 +12242,16 @@ export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {
     }
     // A CI-job-subset gate (`ciJobRunsRunner`) carries both halves of its binding, and its name narrows
     // the runner it stands in for — refused at load, so a half-declared row cannot resolve by accident.
+    // A PACKAGE-TEST subset (`ciSubset`) narrows a runner that names no file, so its name is held to the
+    // one spelling `packageTestSubsetFile` reads, naming the file `ciSubset` names, instead.
     for (const gate of row.gates) {
-      const bound = gate.ciJob !== undefined || gate.ciRunner !== undefined;
-      if (bound && !(typeof gate.ciJob === 'string' && typeof gate.ciRunner === 'string' && gate.name.startsWith(`${gate.ciRunner} `))) {
+      const bound = gate.ciJob !== undefined || gate.ciRunner !== undefined || gate.ciSubset !== undefined;
+      const narrows = gate.ciSubset !== undefined ? packageTestSubsetIsWhole(gate) : gate.name.startsWith(`${gate.ciRunner} `);
+      if (bound && !(typeof gate.ciJob === 'string' && typeof gate.ciRunner === 'string' && narrows)) {
         throw new Error(
           `dispatch-gates: change-kind row '${row.kind}' gate '${gate.name}' declares a CI-job binding that is not whole — ` +
-            'a gate standing in for a CI job carries both `ciJob` and `ciRunner`, and its name begins with that runner',
+            'a gate standing in for a CI job carries both `ciJob` and `ciRunner`, and its name begins with that runner — ' +
+            'or, for a package-test subset, carries `ciSubset` and is spelled as a pnpm filter on one package, then `exec vitest run FILE`, with `ciSubset` ending in that FILE',
         );
       }
     }
@@ -12194,6 +12296,7 @@ export function changeKindGates(paths, resolveInvocation, kinds = CHANGE_KIND_GA
         why: gate.why,
         command: resolveInvocation(gate.name, gate),
         ...(gate.ciJob ? { ciJob: gate.ciJob, ciRunner: gate.ciRunner } : {}),
+        ...(gate.ciSubset ? { ciSubset: gate.ciSubset } : {}),
       })),
     });
   }
@@ -12204,10 +12307,12 @@ export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GA
   const lines = [];
   for (const { kind, hits, gates } of changeKindGates(paths, resolveInvocation, kinds)) {
     lines.push(`  ${kind}: ${hits.join(', ')}`);
-    for (const { name, why, command, ciJob, ciRunner } of gates) {
+    for (const { name, why, command, ciJob, ciRunner, ciSubset } of gates) {
       lines.push(
         command
           ? `    - ${command}   — ${why}`
+          : ciSubset
+            ? `    - ⚠ ${name}: STALE — no workflow job named '${ciJob}…' runs '${ciRunner}' any more, or ${ciSubset} is gone. The job was renamed or retired, or the test moved; fix CHANGE_KIND_GATES in this script.`
           : ciJob
             ? `    - ⚠ ${name}: STALE — no workflow job named '${ciJob}…' runs '${ciRunner}' any more. The job was renamed or retired; fix CHANGE_KIND_GATES in this script.`
             : `    - ⚠ ${name}: STALE — no workflow runs a gate under this name. It was renamed or retired; fix CHANGE_KIND_GATES in this script.`,
@@ -13226,7 +13331,7 @@ export function tierLines(result) {
   if (!mandatory) {
     return [
       `Model tier — no path-derived mandate: the surface hits none of the ${declared} declared glob(s), derived here, not recalled.`,
-      `  The tier stays the PM's per-card judgment call (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
+      `  The tier stays below the ceiling: with no mandate the PM picks floor or default per card, and a ceiling build takes a path-derived mandate or the maintainer's explicit order (floor ${TIER_FLOOR} · default ${TIER_DEFAULT} · ceiling ${TIER_CEILING}).`,
       clause2,
       ...suspicion,
     ];
@@ -13341,7 +13446,14 @@ export const CONTAINER_MODEL_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*
  * … · ceiling …`) names every tier without declaring any. A ceiling token owes
  * a citation ON THE SAME LINE: the word `MANDATORY` — which `--tier` prints,
  * and prints only for a mandated surface — or a `reason:` naming the per-card
- * ruling. The default and floor tiers owe nothing here: their exits are
+ * ruling. The citation is read inside the `model:` SLOT only — from the
+ * `model:` key up to the next `effort:` key, or to the end of the line when
+ * no `effort:` follows. The template's effort slot carries its own citations
+ * (an `xhigh` quotes its timing reading or standing order, spelled like a
+ * `reason:`), and a whole-line match let one of them satisfy the tier check
+ * by accident. The `model:` slot's reason may itself hold commas and
+ * parentheses, so the slot ends at the next key, never at a comma.
+ * The default and floor tiers owe nothing here: their exits are
  * recorded on the line by the skill's rule, and a reader that demanded them
  * would refuse every ordinary claim over a formatting preference.
  *
@@ -13359,14 +13471,18 @@ export function readContainerModelLine(body) {
   const value = String(m[1] ?? '');
   const model = /\bmodel[ \t]*:[ \t]*(?:\*\*|`|[ \t])*([A-Za-z0-9][A-Za-z0-9_.-]*)?/i.exec(value);
   const tier = model?.[1] ?? null;
+  // The `model:` slot: from its key to the next `effort:` key, or the line's end.
+  const afterModel = model ? value.slice(model.index) : '';
+  const effortKey = /\beffort[ \t]*:/i.exec(afterModel);
+  const slot = effortKey ? afterModel.slice(0, effortKey.index) : afterModel;
   const ceiling = tier !== null && ceilingTierSpellings().some((word) => word.toLowerCase() === tier.toLowerCase());
   return {
     present: true,
     line: m[0].trim(),
     tier,
     ceiling,
-    mandateCited: /\bMANDATORY\b/.test(value),
-    reasonCited: /\breason[ \t]*:/i.test(value),
+    mandateCited: /\bMANDATORY\b/.test(slot),
+    reasonCited: /\breason[ \t]*:/i.test(slot),
   };
 }
 
@@ -13389,6 +13505,81 @@ export function containerModelRefusal(body) {
       ' `--tier` printed for the card\'s paths nor a `reason:` naming the per-card ruling — a ceiling nobody derived is the' +
       ' hand-written default that ran a whole shift at the scarcest tier.',
   };
+}
+
+// ---------------------------------------------------------------------------
+// 定档 at claim WRITE time — the line itself, its size, and its `effort:` slot
+// ---------------------------------------------------------------------------
+
+/** Where 定档 lives — the refusals and the dispatch hook point a reader there, and the self-test reads the table from it. */
+export const TIER_SIZING_RULEBOOK = '.claude/skills/pm-dispatch/references/execution-duties.md';
+
+/**
+ * 定档's effort table, keyed by the size token a claim's `Container & model:`
+ * line opens with. ONE copy: the self-test re-reads the rulebook's own row
+ * (`S … medium;M、L、XL high`) and reds when this constant and that row
+ * disagree, so the values are never forked silently. `XS` is triage's size
+ * vocabulary one step under `S`; 定档 names no row for it and it reads as `S`.
+ */
+export const EFFORT_BY_SIZE = Object.freeze({ XS: 'medium', S: 'medium', M: 'high', L: 'high', XL: 'high' });
+
+/**
+ * The one value above the table's top, and the only file surface a CLAIM may
+ * carry it for: 定档's ADR-revision row. Its other use — the adversarial
+ * re-read of a high-severity security fix — is passed to that subagent and by
+ * rule never written in a claim, so no `reason:` unlocks it here.
+ */
+export const EFFORT_ABOVE_TABLE = Object.freeze({ value: 'xhigh', surface: 'docs/adr/' });
+
+const FILE_SURFACE_KEY_LINE = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?File surface`?(?:\*\*)?[ \t]*:(.*)$/m;
+
+/**
+ * The size and the effort a `Container & model:` line declares: the size is the
+ * FIRST token of the value, the effort the first token after `effort:`, and a
+ * `reason:` counts only inside the effort slot (from its key to the line's end,
+ * or to a `model:` key written after it) — the model slot's citation is its own.
+ *
+ * @returns {{ present: false } | { present: true, line: string, size: string|null, effort: string|null, reasonCited: boolean }}
+ */
+export function readClaimEffort(body) {
+  const m = CONTAINER_MODEL_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return { present: false };
+  const value = String(m[1] ?? '');
+  const size = /^(?:\*\*|`|[ \t])*(XS|XL|S|M|L)(?![A-Za-z0-9])/.exec(value)?.[1] ?? null;
+  const key = /\beffort[ \t]*:[ \t]*(?:\*\*|`|[ \t])*([A-Za-z]+)?/i.exec(value);
+  const slot = key ? value.slice(key.index).split(/\bmodel[ \t]*:/i)[0] : '';
+  return { present: true, line: m[0].trim(), size, effort: key?.[1]?.toLowerCase() ?? null, reasonCited: /\breason[ \t]*:/i.test(slot) };
+}
+
+/**
+ * The refusal a claim BEING WRITTEN earns when its `Container & model:` line
+ * does not carry 定档 — `null` when it does. The row shape is the keyed-line row
+ * `containerModelRefusal` answers with.
+ *
+ * ⛔ WRITE time only. `readContainerModelLine` above stays the tolerant READER:
+ * claims already on the board predate this line and its effort slot, and a
+ * reader that judged them would file rows nobody can repair. A claim about to
+ * be sent has an author who can — so here absence IS the refusal. Scoping to a
+ * comment that OPENS with `Claim:` is the caller's (`post-stamped.mjs`).
+ *
+ * Measured: S cards claimed at `high` and nothing refused it; claims with no
+ * effort at all, whose devs then ran on whatever the session inherited.
+ */
+export function claimTierWriteRefusal(body) {
+  const read = readClaimEffort(body);
+  const row = (why) => ({ key: 'Container & model', line: read.present ? read.line : '(this claim carries no such line)', why: `${why} 定档: ${TIER_SIZING_RULEBOOK}.` });
+  if (!read.present) return row('the claim carries no `Container & model:` line, so the tier and effort its dev runs at were derived from nothing and are whatever the session inherits.');
+  const problems = [];
+  const allowed = [...new Set(Object.values(EFFORT_BY_SIZE)), EFFORT_ABOVE_TABLE.value];
+  const expected = read.size === null ? null : EFFORT_BY_SIZE[read.size];
+  if (read.size === null) problems.push(`the line opens with no size token (${Object.keys(EFFORT_BY_SIZE).join(', ')}), so its effort compares to nothing`);
+  if (read.effort === null) problems.push('the `effort:` slot reads no value — an empty slot is the session-inherited effort');
+  else if (!allowed.includes(read.effort)) problems.push(`\`effort: ${read.effort}\` is no value 定档 gives a card (${allowed.join(', ')})`);
+  else if (read.effort === EFFORT_ABOVE_TABLE.value && !String(FILE_SURFACE_KEY_LINE.exec(String(body ?? ''))?.[1] ?? '').includes(EFFORT_ABOVE_TABLE.surface))
+    problems.push(`\`effort: ${read.effort}\` is the ADR-revision row's alone and this claim's \`File surface:\` names no \`${EFFORT_ABOVE_TABLE.surface}**\` path — the adversarial re-read's value goes to that subagent, never into a claim`);
+  else if (expected !== null && read.effort !== expected && !read.reasonCited)
+    problems.push(`size ${read.size} reads \`effort: ${expected}\` and the line says \`${read.effort}\` with no \`reason:\` inside the effort slot`);
+  return problems.length === 0 ? null : row(`${problems.join('; ')}.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -15671,7 +15862,12 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [], si
   // rows: the card this section answers is about two renderings of one
   // derivation drifting apart, so a second traversal here would reintroduce it.
   const resolveInvocation = (name, gate = null) => {
-    if (gate?.ciJob) return ciJobRunsRunner(gate, workflowEntries) ? name : null;
+    if (gate?.ciJob) {
+      // A package-test subset also owes its file: a moved or deleted test renders STALE, never a command
+      // that runs nothing (vitest exits non-zero on a filter matching no file, but only once someone runs it).
+      if (gate.ciSubset !== undefined && !existsSync(nodePath.join(ROOT, gate.ciSubset))) return null;
+      return ciJobRunsRunner(gate, workflowEntries) ? name : null;
+    }
     const entry = byCheck.get(name);
     return entry ? runnableInvocation(entry) : null;
   };

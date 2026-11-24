@@ -122,12 +122,13 @@ import { useMetadata } from '@object-ui/react';
 import { useAuth } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useObjectTranslation } from '@object-ui/i18n';
-import { Badge, Separator, cn } from '@object-ui/components';
+import { Badge, NeutralIconTile, ObjectIconTile, Separator, cn } from '@object-ui/components';
 import {
   hasVisibleNavigationItems,
   resolveActiveNavItem,
   resolveHref,
   resolveNavItemIcon,
+  resolveNavKindIcon,
   resolveNavItemLabel,
   type NavTemplateContext,
 } from '@object-ui/layout';
@@ -135,14 +136,15 @@ import type { NavigationItem } from '@object-ui/types';
 import { useNavVisibility } from '../hooks/useNavMemberGates.js';
 import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
-import { useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
+import { useNavTargetColor, useNavTargetIcon } from '../hooks/useNavTargetIcon.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { getIcon } from '../utils/getIcon.js';
 import { matchAppBySegment } from '../utils/index.js';
 import { appAddressSegment } from '../utils/appRoute.js';
-import { navigationNames } from '../console/appObjectScope.js';
+import { appRequiredObjectNames, readObjectPresence } from '../console/appObjectScope.js';
+import type { ReadNamesWithoutViews } from '../hooks/useObjectPresence.js';
 
 /** Keep the designer's own data attributes on the wrapper, drop the rest. */
 const splitDesigner = (props: Record<string, any>) => {
@@ -185,6 +187,7 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   // And the same icon resolver: an `object` entry with no `icon` draws its
   // object's icon on both surfaces.
   const targetIcon = useNavTargetIcon();
+  const targetColor = useNavTargetColor();
 
   /* ── The three guards, wired to the same providers `UnifiedSidebar` uses ── */
 
@@ -216,18 +219,17 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   const evalVis = useNavVisibility(activeApp);
 
   // The runtime-capability gate for `requiresObject` entries. objectui#12980 —
-  // it reads the objects the app's entries require, by name (beside the app's
-  // package list when the app names one, the names-only scope when it does
-  // not), never the whole registry: an object the answer holds is registered,
-  // one the server answered without a definition is not, and one not yet
-  // answered shows, as every entry did while the whole list loaded. A
-  // hand-rolled metadata context has no scope, and its `objects` is read.
-  const requiredObjects = [
-    ...navigationNames(activeApp?.navigation, (item) => item.requiresObject),
-    ...((activeApp?.areas ?? []) as Array<{ navigation?: unknown } | undefined>).flatMap((area) =>
-      navigationNames(area?.navigation, (item) => item.requiresObject),
-    ),
-  ];
+  // it reads the objects the app's entries require, never the whole registry:
+  // an object the answer holds is registered, one the server answered without
+  // a definition is not, and one not yet answered shows, as every entry did
+  // while the whole list loaded. A hand-rolled metadata context has no scope,
+  // and its `objects` is read.
+  //
+  // objectstack#34244 — never by name: a `requiresObject` is by contract a
+  // name the host may not register, and a by-name read answered it 404. The
+  // app's package list answers its own objects; the other names are asked in
+  // the presence read the route and the sidebar ask them in
+  // (`readObjectPresence`, the same names, so one request).
   const appPackageId =
     typeof activeApp?._packageId === 'string' && activeApp._packageId ? (activeApp._packageId as string) : undefined;
   // An `action` entry reads its action from the app's package (ADR-0150 D5),
@@ -236,17 +238,24 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   const capabilityScope = !metadata.readObjectScope
     ? null
     : appPackageId
-      ? metadata.readObjectScope({ packageId: appPackageId, names: requiredObjects })
-      : requiredObjects.length > 0
-        ? metadata.readObjectScope({ names: requiredObjects })
-        : NO_CAPABILITY_SCOPE;
+      ? (metadata.readObjectScope as ReadNamesWithoutViews)({ packageId: appPackageId, views: false })
+      : NO_CAPABILITY_SCOPE;
+  const presence = metadata.readObjectScope
+    ? readObjectPresence(metadata.readObjectScope, appPackageId, appRequiredObjectNames(activeApp)).presence
+    : NO_CAPABILITY_SCOPE;
   const registeredObjects = capabilityScope ? capabilityScope.objects : metadata.objects;
   const registeredObjectNames = useMemo(
-    () => new Set<string>(((registeredObjects as any[]) || []).map((o: any) => o?.name).filter(Boolean)),
-    [registeredObjects],
+    () =>
+      new Set<string>(
+        [...(((registeredObjects as any[]) || [])), ...presence.objects].map((o: any) => o?.name).filter(Boolean),
+      ),
+    [registeredObjects, presence.objects],
   );
   const missingObjects = capabilityScope ? capabilityScope.missing : NO_MISSING_OBJECTS;
-  const missingObjectNames = useMemo(() => new Set<string>(missingObjects), [missingObjects]);
+  const missingObjectNames = useMemo(
+    () => new Set<string>([...missingObjects, ...presence.missing]),
+    [missingObjects, presence.missing],
+  );
   const scoped = capabilityScope !== null;
   const checkCap = useCallback(
     (kind: 'object' | 'service', name: string): boolean => {
@@ -362,7 +371,9 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
         );
       }
 
-      const Icon = getIcon(resolveNavItemIcon(item, targetIcon));
+      const isObjectEntry = item.type === 'object' && !!item.objectName;
+      const iconName = isObjectEntry ? resolveNavItemIcon(item, targetIcon) : resolveNavKindIcon(item) ?? resolveNavItemIcon(item);
+      const Icon = getIcon(iconName);
       const text = label(item);
       const badge =
         item.badge !== undefined && item.badge !== null && item.badge !== '' ? (
@@ -372,7 +383,13 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
         ) : null;
       const body = (
         <>
-          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          {/* objectstack#35985 / #36141 — the sidebar's tiles: an object entry
+              draws its object's tile, every other entry the neutral one. */}
+          {item.type === 'object' && item.objectName ? (
+            <ObjectIconTile icon={iconName} glyph={Icon} color={targetColor({ kind: 'object', objectName: item.objectName })} size="sm" className="-mx-0.5" />
+          ) : (
+            <NeutralIconTile icon={iconName} glyph={Icon} size="sm" className="-mx-0.5" />
+          )}
           <span className="truncate">{text}</span>
           {badge}
         </>

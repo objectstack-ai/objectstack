@@ -26,14 +26,38 @@
  */
 
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { useLastApp } from '../context/LastAppProvider.js';
+import { usePhoneViewport } from './usePhoneViewport.js';
+import { useServedApps, useServedAppsSettled } from './useLauncherApps.js';
 import {
   HOME_LAUNCHER_PATH,
   resolveDeclaredHomePath,
+  resolveDesktopHomePath,
   type DeclaredHomeApp,
 } from '../utils/homePath.js';
 
-/** The path the console chrome's Home affordances navigate to. */
+/**
+ * The path the console chrome's Home affordances navigate to. From 768 px up
+ * the platform home page is retired (objectstack#36732), so Home is where `/`
+ * lands a desktop: the last-used app, the declared default, the first product
+ * app (`resolveDesktopHomePath`), among the apps the member's permission sets
+ * show — and `/home`, which resolves that order itself, until a `/me/apps`
+ * answer is held. A phone keeps the declared landing, else its app list at
+ * `/home`.
+ */
 export function useHomePath(): string {
   const { apps } = useMetadata();
-  return resolveDeclaredHomePath(apps as DeclaredHomeApp[] | undefined) ?? HOME_LAUNCHER_PATH;
+  const phone = usePhoneViewport();
+  const { lastApp } = useLastApp();
+  // objectstack#36732 — never an app the member's permission sets hide
+  // (`/me/apps`), the same narrowing the desktop landing reads.
+  const served = useServedApps((apps ?? []) as DeclaredHomeApp[]);
+  const settled = useServedAppsSettled();
+  if (phone) return resolveDeclaredHomePath(apps as DeclaredHomeApp[] | undefined) ?? HOME_LAUNCHER_PATH;
+  // Outside a `LauncherAppsProvider` (`/studio/*`, `/ai/*`) nothing narrows the
+  // list, and inside one the first read may still be out: either way this
+  // hook cannot tell which apps a set hides, so it names `/home`, whose
+  // desktop route resolves the same order once the answer is held.
+  if (!settled) return HOME_LAUNCHER_PATH;
+  return resolveDesktopHomePath(served, lastApp);
 }

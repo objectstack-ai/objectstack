@@ -366,28 +366,42 @@ describe('[#5716] the two sites this route cannot show, and why', () => {
     expect(String(res.body.detail)).toMatch(/3-hop limit/);
   });
 
-  it('an undeclared MEASURE never reaches the strategy — `ensureCube` mints one, and the #4437 gate judges it', async () => {
+  it('an undeclared MEASURE never reaches the strategy — the closed-member rule refuses it, and a stale declared one meets the #4437 gate', async () => {
     // The twelfth site (`native-sql-strategy`'s "cube declares no measure") is
     // enveloped, and its producer test drives it — but it cannot be shown from
-    // this route, and the measurement is worth writing down rather than faking:
-    // `AnalyticsService.ensureCube` AUGMENTS a registered cube with a
-    // suffix-inferred `Metric` for every measure name the query carries, so the
-    // strategy is handed a cube that declares `profit` and compiles
-    // `SUM(profit)`. Reaching the refusal means calling the strategy directly
-    // (`measure-expression-sql.test.ts` does).
+    // this route, and the measurement is worth writing down rather than faking.
+    // [ADR-0021, ADR-0149 D1] A dataset query answers only the members its
+    // dataset declares, so an undeclared `profit_sum` is refused
+    // `400 INVALID_FIELD` as an undeclared member before anything is read — no
+    // measure is minted for it, so neither the strategy nor the source-field
+    // gate is reached. Reaching the strategy's refusal means calling the
+    // strategy directly (`measure-expression-sql.test.ts` does).
     //
-    // What answers on THIS face is the #4437 source-field gate, as soon as a
-    // field probe can say the object has no such column — and it answers
+    // What a DECLARED measure over a column the object does not have (a stale
+    // declaration) meets on THIS face is the #4437 source-field gate, as soon
+    // as a field probe can say the object has no such column — and it answers
     // `400 INVALID_FIELD`, the same code this PR gives the strategy's own
     // refusal. That agreement is the point of the choice, so it is asserted
     // rather than asserted about.
     const route = buildRoute(async () =>
       nativeAnalytics({ getObjectFieldNames: () => ['stage', 'amount', 'close_date', 'created_at'] }),
     );
-    const res = await post(route, { dataset, selection: { dimensions: ['stage'], measures: ['profit_sum'] } });
+    const undeclared = await post(route, { dataset, selection: { dimensions: ['stage'], measures: ['profit_sum'] } });
+
+    expect(undeclared.statusCode).toBe(400);
+    expect(undeclared.body.code).toBe('INVALID_FIELD');
+    expect(String(undeclared.body.message)).toContain('The dataset "pipeline" does not declare the measure "profit_sum".');
+    expect(String(undeclared.body.message)).not.toMatch(/aggregates field/);
+
+    const res = await post(route, {
+      dataset: { ...dataset, measures: [...dataset.measures, { name: 'profit_total', aggregate: 'sum', field: 'profit' }] },
+      selection: { dimensions: ['stage'], measures: ['profit_total'] },
+    });
 
     expect(res.statusCode).toBe(400);
     expect(res.body.code).toBe('INVALID_FIELD');
     expect(String(res.body.message)).toMatch(/aggregates field 'profit', which object 'crm_opportunity' does not have/);
+    expect(String(res.body.message)).toContain("The dataset declares this measure over 'profit': point its `field` at one of the object's fields, or remove the measure");
+    expect(String(res.body.message)).not.toMatch(/inferred from the object's OWN fields/);
   });
 });

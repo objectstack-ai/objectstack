@@ -28,41 +28,10 @@ describe('useCollapsibleChatsList', () => {
     const { result } = renderHook(() => useCollapsibleChatsList());
     expect(result.current.collapsed).toBe(true);
   });
-
-  it('auto-tucks the list when the preview opens and restores it on close', () => {
+  // objectstack#34610 — the Live Canvas split that tucked the list away is
+  // gone, so the hook has one driver, the user's toggle.
+  it('exposes no canvas seam any more: the toggle is the only driver', () => {
     const { result } = renderHook(() => useCollapsibleChatsList());
-
-    act(() => result.current.handleCanvasOpenChange(true));
-    expect(result.current.collapsed).toBe(true);
-    // Auto-collapse is transient — not written to the persisted preference.
-    expect(localStorage.getItem(KEY)).toBeNull();
-
-    act(() => result.current.handleCanvasOpenChange(false));
-    expect(result.current.collapsed).toBe(false);
-  });
-
-  it('never overrides a list the user already collapsed (no spurious re-expand on preview close)', () => {
-    localStorage.setItem(KEY, '1');
-    const { result } = renderHook(() => useCollapsibleChatsList());
-    expect(result.current.collapsed).toBe(true);
-
-    act(() => result.current.handleCanvasOpenChange(true)); // already collapsed — unchanged
-    expect(result.current.collapsed).toBe(true);
-
-    act(() => result.current.handleCanvasOpenChange(false)); // must NOT auto-expand a manual collapse
-    expect(result.current.collapsed).toBe(true);
-  });
-
-  it('lets a manual toggle during preview take control — no auto-restore afterwards', () => {
-    const { result } = renderHook(() => useCollapsibleChatsList());
-
-    act(() => result.current.handleCanvasOpenChange(true)); // auto-collapse
-    expect(result.current.collapsed).toBe(true);
-
-    act(() => result.current.toggle()); // user expands during preview → takes control
-    expect(result.current.collapsed).toBe(false);
-
-    act(() => result.current.handleCanvasOpenChange(false)); // closing must not fight the user
-    expect(result.current.collapsed).toBe(false);
+    expect(Object.keys(result.current).sort()).toEqual(['collapsed', 'toggle']);
   });
 });

@@ -310,7 +310,7 @@ The lifecycle events are defined by the `HookEvent` enum (8 events). Reads fire 
 
 | Hook | Phase | Can Modify? | Can Abort? |
 |:---|:---|:---|:---|
-| `beforeInsert/Update/Delete` | Pre-persist | ✅ Yes (mutate `input`) | ✅ Yes (throw with `onError: 'abort'`) |
+| `beforeInsert/Update/Delete` | Pre-persist, inside the write's unit of work when the hook is declared in metadata | ✅ Yes (mutate `input`) | ✅ Yes (throw with `onError: 'abort'`): the write is refused, and every `ctx.api` write the `before*` hooks made rolls back with it, as it does on any later refusal in the same write. On an object outside the default datasource, or on a driver with no transactions, those writes stay stored — see [After hooks run inside the unit of work](/docs/automation/hooks#after-hooks-run-inside-the-unit-of-work) |
 | `afterInsert/Update/Delete` | Post-persist, before the unit of work commits | ✅ Yes (mutate `result`) | ✅ Yes (a blocking hook that throws with `onError: 'abort'`, the default): the write is refused and rolled back. On an object outside the default datasource, or on a driver with no transactions, the caller is refused but the row stays stored — see [After hooks run inside the unit of work](/docs/automation/hooks#after-hooks-run-inside-the-unit-of-work) |
 
 <Callout type="tip">

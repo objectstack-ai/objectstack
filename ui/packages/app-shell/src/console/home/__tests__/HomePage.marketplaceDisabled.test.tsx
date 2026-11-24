@@ -232,6 +232,7 @@ const permissions = (): MePermissionsAuthenticatedResponse =>
     tenantId: 'acme',
     positions: ['org_owner', 'everyone'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['organization_admin', 'member_default'],
     systemPermissions: ['manage_org_users', 'setup.access', 'setup.write', 'manage_metadata'],
     objects: {},

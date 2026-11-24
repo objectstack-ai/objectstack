@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ViewSchema } from '../ui/view.zod';
+import { FormViewSchema, MetadataListViewSchema, ViewSchema } from '../ui/view.zod';
+import { ActionSchema } from '../ui/action.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { DiscoverySchema } from './discovery.zod';
 import {
@@ -211,6 +212,7 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
   types: z.array(z.string()).describe('Available metadata type names (e.g., "object", "plugin", "view")'),
   entries: z.array(z.object({
     type: z.string().describe('Singular type identifier'),
+    schemaId: z.string().describe('Same value as `type`: the id the type\'s `schema`, `form` and `list` are bound to'),
     label: z.string().describe('Human-readable label'),
     description: z.string().optional().describe('Brief description'),
     filePatterns: z.array(z.string()).describe('Glob patterns used to discover artifacts of this type'),
@@ -223,6 +225,10 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     domain: z.enum(['data', 'ui', 'automation', 'system', 'security', 'ai']).describe('Protocol domain'),
     overrideSource: z.enum(['registry', 'env']).describe('Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable'),
     createSeed: z.unknown().optional().describe('Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively.'),
+    schema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema of the type, derived from its spec schema, for the generic metadata editor. Absent for a type with neither a spec schema nor a hand-crafted one.'),
+    form: FormViewSchema.optional().describe('Form layout of the type\'s Studio editor, labels in the request locale. Absent for a type with no declared form, which Studio edits from `schema` alone.'),
+    list: MetadataListViewSchema.optional().describe('Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description.'),
+    actions: z.array(ActionSchema).optional().describe('Type-level actions on a definition of this type (e.g. a datasource "Test connection"): the registry\'s declarative actions merged with plugin-registered ones. Absent when there are none.'),
   })).optional().describe('Enriched per-type registry entries (Phase 3a)'),
 }));
 
@@ -364,6 +370,14 @@ export const FlowRegistrationSchema = lazySchema(() => z.discriminatedUnion('sta
  * its item read serves as `disabledActions` ({@link GetMetaItemResponseSchema}
  * says why it is beside the item, why absence means no ledger answered, and
  * why `[]` is stated), keyed by the object's `name`.
+ *
+ * [#36894] `changedAt` is the same position for each listed item's change
+ * time: when the stored row whose content the list serves for the item last
+ * changed, keyed by the item's `name`. Only an item served from a stored row
+ * has one; a code-shipped or file-loaded item has no recorded change time and
+ * no entry, never a stand-in (not the read time, not the boot time). It is the
+ * instant the by-name read serves as `Last-Modified`
+ * ({@link GetMetaItemCachedResponseSchema}`.lastModified`) for the same row.
  */
 export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -383,6 +397,23 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
     + 'answered by a process whose data engine has an activation ledger attached; absent otherwise, and '
     + 'absence means no ledger answered, never that nothing is switched off. Beside the items, never '
     + 'inside one: each item\'s `actions` is served as declared.',
+  ),
+  changedAt: z.record(z.string(), z.string().datetime()).optional().describe(
+    'When each listed item last changed, keyed by the item\'s `name`: the `updated_at` of the stored '
+    + 'row whose content the list serves for that item, an ISO-8601 instant in UTC written with `Z`. '
+    + 'One entry per listed item served from a stored row; an item the list serves from code (a '
+    + 'code-shipped or file-loaded definition) has no recorded change time and no entry, never a '
+    + 'stand-in such as the read time. Where an item has several stored layers in scope (its '
+    + 'package\'s own row, the package-less row, the package\'s declared override, environment-wide or '
+    + 'scoped to one package), the time is the effective layer\'s: the row whose content is the listed '
+    + 'item. On a `?preview=draft` list an item whose pending draft is served (`_draft: true`) has the '
+    + 'draft row\'s time, since the draft is its content. Where several listed items share a name (a '
+    + 'name two or more packages ship, the members of a bundle), the latest of their times. Only the '
+    + 'names of items in this answer are keyed, and a door that leaves out some item of a name (the '
+    + 'per-caller read gate, a query filter) answers no entry for that name, since the entry may be '
+    + 'the time of the item it left out. A view a stored view container expands is not served from a '
+    + 'row of its own name and has no entry. Absent when no listed item is served from a stored row. '
+    + 'Beside the items, never inside one: an item\'s body is served as stored.',
   ),
 }));
 
@@ -441,6 +472,18 @@ export const GetMetaItemRequestSchema = lazySchema(() => z.object({
     + '≠ authorization: this member only switches which row is read, and '
     + 'ADR-0106 masking is unaffected — draft preview is admin-gated '
     + 'upstream, not by this schema.',
+  ),
+  userTextLocales: z.array(z.string()).max(2).optional().describe(
+    'The locales the user-facing sentences of a served DRAFT\'s check findings are composed in, in ladder '
+    + 'order: the locale the request names, then the workspace default — the save request\'s member of the '
+    + 'same name, read the same way (each value against the platform locale table, whole and then one '
+    + 'subtag shorter at a time; a value that names no table language is passed over; `en` is the last '
+    + 'rung). Read only by the `state: \'draft\'` read, which folds what publishing the draft would say '
+    + 'into its `_diagnostics`: an advisory finding that carries a user sentence becomes a '
+    + '`_diagnostics.warnings[]` entry in that sentence. Stated by the door that holds the request (the '
+    + 'REST door and the dispatcher state `[ExecutionContext.locale, ExecutionContext.workspaceLocale]`), '
+    + 'never read from a query string. ABSENT ⇒ the sentences are composed in `en`. It selects a language '
+    + 'only: which row is read, and what the verdict is, do not depend on it.',
   ),
 }));
 
@@ -791,9 +834,10 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ),
   disabledActions: z.array(z.string()).optional().describe(
     'The names in `item.actions` that this deployment\'s activation ledger switches off (an administrator '
-    + 'turned them off under Setup › Packaged Actions): a call to any of them is refused 409 '
-    + '`ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an '
-    + 'activation ledger attached, and then `[]` when none of this object\'s actions is switched off. '
+    + 'turned them off through the activation door, for example on the action in Studio): a call to any of '
+    + 'them is refused 409 `ACTION_DISABLED`. Present only on an `object` read answered by a process '
+    + 'whose data engine has an activation ledger attached, and then `[]` when none of this object\'s '
+    + 'actions is switched off. '
     + 'Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike '
     + 'the protection keys it is published by the cached branch too, read live and folded into the ETag, '
     + 'so a cached read revalidates to 304 only while the switched-off set is unchanged; it is absent on '
@@ -947,6 +991,19 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
   overlay: z.unknown().describe(
     'LAYER 2 — the stored customization row ALONE, not merged with `code`. '
     + '`null` when the environment has not customized the item.',
+  ),
+  overlayVersion: z.string().nullable().optional().describe(
+    'ADR-0008 version token of the stored ACTIVE row at this read\'s address '
+    + '(`?package=`, and the bundle member): the published layer a publish of '
+    + 'this item replaces. The same keyed token the plain uncached read serves '
+    + 'as `version` and a publish receipt serves as `version`. Send it back as '
+    + '`If-Match` on `POST /meta/:type/:name/publish` and a publish over a row '
+    + 'that moved since this read is refused 409 `METADATA_CONFLICT` instead of '
+    + 'replacing it. `null` when no active row is stored at that address — an '
+    + 'item served from code or a package artifact alone — so the next publish '
+    + 'creates one: pin it with `If-None-Match: *`. ABSENT from a server that '
+    + 'does not serve it: absence means "not served", never "no row". Opaque — '
+    + 'echo it verbatim, never parse it.',
   ),
   overlayScope: z.enum(['env']).nullable().describe(
     'Which scope the `overlay` row was read from: `env`, the environment layer — '
@@ -1206,7 +1263,13 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'one package the item\'s active rows are bound to, as a save naming '
     + 'that package does, is refused `409 RESOURCE_CONFLICT` when they are '
     + 'bound to two or more, and with none writes the env-local overlay (no '
-    + 'package stamp); a `draft` save writes the draft of the one package '
+    + 'package stamp). Bound to two or more, one exception: a bundled type\'s '
+    + 'member whose active rows a base package and a package declaring it '
+    + 'both hold, with no package-unbound row beside them, is the row-held '
+    + 'base\'s, as the read naming no package serves it, and the save (either '
+    + 'mode) writes the base\'s row or draft as a save naming the base does; '
+    + 'two packages neither of which declares the other are still refused '
+    + '`409`. A `draft` save writes the draft of the one package '
     + 'the item\'s active rows are bound to (a pending change stays in the '
     + 'package it edits), else its package-unbound draft, adopted into that '
     + 'package — the draft the per-item publish naming no package promotes. '
@@ -1214,8 +1277,35 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'draft, else the one package\'s draft, and with no draft at all the save '
     + 'creates the package-unbound draft. It is refused `409 RESOURCE_CONFLICT` '
     + 'when the active rows (or, with none and no package-unbound draft, the '
-    + 'drafts) are bound to two or more packages, as that publish is (see '
-    + '`PublishMetaItemRequestSchema.packageId`). The row written is also the one the parent-version '
+    + 'drafts) are bound to two or more packages, but for the row-held base '
+    + 'above, as that publish is (see '
+    + '`PublishMetaItemRequestSchema.packageId`). An `action` is keyed by the '
+    + 'object it binds (ADR-0150 D4): when one or more packages\' active rows '
+    + 'hold the name and none of those rows binds the object the body binds '
+    + '(object-less is its own key), the save writes the environment\'s own '
+    + 'package-unbound row (`active`) or draft (`draft`), never a package\'s '
+    + 'item. The environment keeps one package-unbound row and one '
+    + 'package-unbound draft per action name: such a save over the '
+    + 'environment\'s own row or draft bound to another object rewrites it '
+    + 'onto the body\'s object, and over one bound to an object a package\'s '
+    + 'active row binds (that package\'s customization) it is refused `409 '
+    + 'RESOURCE_CONFLICT`; a `draft` save is refused the same way when the '
+    + 'package-unbound row its publish would rewrite is that customization. '
+    + 'Otherwise the address above stands, judged over every holder of the '
+    + 'name (every enabled holder, for an `active` save), except that an '
+    + '`active` save is judged over '
+    + 'the holders at the body\'s object only when a disabled package is one '
+    + 'of them and another holder binds another object. The per-item publish '
+    + 'and the draft discard naming no package act on the environment\'s '
+    + 'draft so written, except that with one package holding the name, that '
+    + 'package\'s own draft, when one is stored, comes first; that publish '
+    + 'is refused `409 RESOURCE_CONFLICT` when the package-unbound row it '
+    + 'would rewrite is a package\'s customization. '
+    // The read half that keys an action by object is #33904.
+    + 'Until the read naming no package keys an action by object, '
+    + 'the version it serves is the package\'s item\'s, so a save carrying '
+    + 'it as the parent is refused as a version conflict. '
+    + 'The row written is also the one the parent-version '
     + 'resolution reads: an unpinned save takes its version as the parent '
     + '(last-write-wins), a pinned one is judged against it, and the item '
     + 'read at the same scope serves it as `version`.',
@@ -1347,6 +1437,79 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One metadata item that still shows (or, after a type change, still filters
+ * by) a field a refused `object` save would remove or retype — an entry of
+ * {@link DestructiveChangeIssueSchema}'s `stillShownBy`.
+ */
+export const FieldStillShownBySchema = lazySchema(() => z.object({
+  type: z.string().describe(
+    'The metadata type of the item: `view` (a list view or a form), `dataset`, `dashboard`, `page`, '
+    + '`flow`, `report`, or `object` (another object, or the saved object\'s own body).',
+  ),
+  name: z.string().describe(
+    'The item\'s name, as the served list names it. One item can appear in more than one entry: a '
+    + 'dashboard once directly and once per `via` dataset, a view once per unfit `operator`.',
+  ),
+  where: z.array(z.string()).describe(
+    'Each position inside the item that names the field, as a path relative to the item as the '
+    + 'served listing presents it: `config.columns[1]` or `config.sections[0].fields[2]` on a view '
+    + 'item (the served listing never presents a `{ list, form, listViews }` container, only the '
+    + 'view items it expands into), `columns[1]` on a flattened list overlay, `widgets[3]` on a '
+    + 'dashboard. The literal `(root)` when the finding sits on the item itself.',
+  ),
+  via: z.string().optional().describe(
+    'A dashboard widget shows the field through this dataset: it names a dimension or measure of '
+    + 'the dataset, and that dimension or measure names the field.',
+  ),
+  operator: z.string().optional().describe(
+    'On a `field_type_change` entry only: the filter operator, as the view rule spells it, that '
+    + 'no longer fits the new type (`filterOperatorFieldTypeFit` answers `unfit`).',
+  ),
+}));
+
+/**
+ * One finding of the `409 DESTRUCTIVE_CHANGE` refusal of an `object` save (the
+ * save door's destructive-change diff): an entry of the refusal's `issues[]`,
+ * which every door relays verbatim beside the message — the REST `PUT` doors
+ * as a top-level `issues`, the runtime dispatcher as `details.issues`, the MCP
+ * draft door as `error.issues` on its refusal.
+ */
+export const DestructiveChangeIssueSchema = lazySchema(() => z.object({
+  code: z.string().describe(
+    'What the save loses: `field_removed`, `field_type_change`, `field_required_no_default`, '
+    + '`currency_mode_to_record`, `currency_field_repointed`, `unit_code_field_declared` or `unit_mode_to_record`.',
+  ),
+  field: z.string().optional().describe('The field the finding is about.'),
+  message: z.string().describe(
+    'The finding in prose. When `stillShownBy` names items, the prose ends by naming them too.',
+  ),
+  stillShownBy: z.array(FieldStillShownBySchema).optional().describe(
+    'The metadata items that still show the field, computed from the environment\'s served '
+    + 'metadata (one served listing per type: what the code packages register, with this '
+    + 'environment\'s stored active rows folded over them; drafts are not read, and no record is read). '
+    + 'On `field_removed` and `field_type_change` findings only; absent on every other code, and '
+    + 'absent when it could not be computed: a listing could not be read, a judge threw or could not '
+    + 'be loaded, or the retyped field\'s new definition carries no readable `type` (absent is "not '
+    + 'computed", `[]` is "computed, none"). '
+    + 'On `field_removed`: the `object`, `view`, `dataset`, `dashboard`, `page`, `flow` and `report` '
+    + 'items in which the platform\'s reference-integrity suite, form-layout check and widget-binding '
+    + 'check (`@objectstack/lint`, the judges `os validate` runs) find a reference that resolves with '
+    + 'the field and dangles without it, the saved body taken as the save would write it; plus each '
+    + 'dashboard widget bound to a dataset dimension or measure that dangles (`via`). A position '
+    + 'those judges do not read is not seen, nor is an item of any other type (an app, an action, a '
+    + 'permission set), nor code outside the metadata. On `field_type_change`: each filter rule of a '
+    + 'served `view` item bound to the saved object that names the field by its bare name and whose '
+    + 'operator does not fit the new type, judged by `filterOperatorFieldTypeFit` (an operator is '
+    + 'unfit only where a declared-type door refuses it; a filter another door refuses, such as any '
+    + 'filter on a field retyped to `formula`, is not named). The rules read are a view item\'s '
+    + '`config.filter` (the canonical served shape), a flattened list overlay\'s own `filter`, and '
+    + 'the `userFilters.tabs[].filter` of either, rules inside an any-of group included. Filters '
+    + 'elsewhere (datasets, dashboards, reports, flows), dotted paths, and comparands are not judged '
+    + 'there. The save does not edit any listed item.',
+  ),
+}));
+
+/**
  * Metadata Conflict — the 409 body of the `/meta/:type/:name` write doors
  *
  * Describes the body `PUT /api/v1/meta/:type/:name` (and its sibling write
@@ -1447,7 +1610,12 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + 'a package it is the package-unbound draft, else the one package\'s '
     + 'draft. It is refused `409 RESOURCE_CONFLICT` when the active rows (or, '
     + 'with none and no package-unbound draft, the drafts) are bound to two or '
-    + 'more packages. ⚠️ `null` is '
+    + 'more packages, except a bundled type\'s member whose active rows a base '
+    + 'package and a package declaring it both hold, with no package-unbound '
+    + 'row beside them: the read naming no package serves the base\'s row, and '
+    + 'the publish promotes the base\'s draft into it, as naming the base does '
+    + '(two packages neither of which declares the other are still refused). '
+    + '⚠️ `null` is '
     + 'NOT the same as absent: the implementation branches on the KEY BEING '
     + 'PRESENT, and `null` pins the lookup to the package-UNBOUND row. Spread '
     + 'it in conditionally; a present-and-`undefined` key coerces to `null` '
@@ -1455,6 +1623,21 @@ export const PublishMetaItemRequestSchema = lazySchema(() => z.object({
     + '`no_draft`.',
   ),
   member: z.string().optional().describe(BUNDLE_MEMBER_SELECTOR_DESCRIPTION),
+  parentVersion: z.string().nullable().optional().describe(
+    'ADR-0008 optimistic-concurrency pin on the PUBLISHED layer: the version '
+    + 'token of the active row the caller loaded and means to replace (on the '
+    + 'REST door, the `If-Match` request header; the `/layers` read\'s '
+    + '`overlayVersion`, the plain read\'s `version` and a publish receipt\'s '
+    + '`version` serve it). A token that is not the current active row\'s at the '
+    + 'address the promotion writes is refused 409 `METADATA_CONFLICT`, whose '
+    + '`currentVersion` names the active row\'s current token, and nothing is '
+    + 'promoted: the draft stays pending. ⚠️ `null` is NOT the same as absent: a '
+    + 'present `null` asserts "no active row here" (on the REST door, '
+    + '`If-None-Match: *`, which takes `*` alone and never beside `If-Match`), '
+    + 'refused 409 when one exists; an ABSENT key is unpinned and promotes over '
+    + 'whatever is live, as before. It pins the active row only — which draft is '
+    + 'promoted is the address\'s, as without it.',
+  ),
   userTextLocales: userTextLocalesMember(),
 }));
 
@@ -1762,6 +1945,158 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One finding of the ADR-0038 L3 runtime probes: the element of
+ * {@link BuildProbeReportSchema}'s `issues[]`, which rides the batch publish
+ * response as `PublishPackageDraftsResponseSchema.probes`.
+ *
+ * It is the ADR-0038 `BuildIssue` verification contract at `layer: 'runtime'`,
+ * declared member for member against what its one producer emits
+ * (`runBuildProbes` in `@objectstack/metadata-protocol`, which re-exports this
+ * type as its `RuntimeBuildIssue` rather than declaring a second interface).
+ * The shape stayed undeclared while `probes` was an opaque passthrough; it is
+ * declared because a consumer reads its fields (the console's publish-health
+ * line reads `message`, and `userMessage` once it carries one), which is the
+ * trigger the staging ruling named: model it when a consumer needs a field.
+ *
+ * ## Two readers, two channels (ruling records 6819749037 and 6929121584)
+ *
+ * A build finding has two readers, and each has its own channel. `message` and
+ * `fix` are written for the AGENT that built the app (ADR-0038: agent-
+ * actionable, naming the exact artifact and member): English, machine names,
+ * instructions. `userMessage` is the sentence for the PERSON who published, in
+ * the request's language: the producer of a finding composes its user-facing
+ * text, `code` stays the stable id, and every client receives the text already
+ * in that language instead of keeping a per-code translation table. Same field
+ * name and same producer-marked meaning as
+ * {@link RuntimeAuthoringIssueSchema}'s `userMessage` and
+ * `ApiErrorSchema.userMessage` (`contract.zod.ts`), under the ladder its
+ * "Language" section declares for platform-composed text: the locale the
+ * request names, else the workspace default, else `en`.
+ *
+ * The probes name an artifact in `userMessage` by its label where they can read
+ * one from the published item, and by its machine name otherwise. An object the
+ * publishing caller was refused (or whose read access the server could not
+ * decide) is named by the machine name the refusal carries, as `fix` names it:
+ * the probe reads nothing of it, its label included. `message` keeps the machine
+ * names an agent acts on. Where the sentences live is the
+ * producer's own business: the probes keep one catalog beside themselves,
+ * covering the platform locale table (`PLATFORM_LOCALES`,
+ * `@objectstack/spec/system`).
+ */
+export const RuntimeBuildIssueSchema = lazySchema(() => z.object({
+  layer: z.literal('runtime').describe(
+    'The ADR-0038 verification plane that found it. Always `runtime` on this '
+    + 'report: these are the post-publish probes.',
+  ),
+  severity: z.enum(['error', 'warning']).describe(
+    '`error`: the published artifact is broken at runtime, or the check that '
+    + 'judges it could not run (`object_field_ref_rule_failed`). `warning`: a '
+    + 'dashboard widget was not probed, so nothing is known about it '
+    + '(`widget_not_probed`, `probes_unavailable`); what landed reads in a way '
+    + 'the person will notice although it may be the truth (`widget_empty_result`, '
+    + '`rollup_never_computed`); or what landed is wrong in a way that depends on '
+    + 'data or on what the environment serves rather than on the artifact alone: '
+    + 'a stored reference that names no row (`seed_reference_unresolved`), a '
+    + 'flow step that fails on every run that reaches it until the connector it '
+    + 'names is served (`flow_connector_action_unresolved`). Neither fails the publish.',
+  ),
+  artifact: z.object({
+    type: z.string().describe('Metadata type of the artifact (`seed`, `view`, `object`, `dashboard`, `flow`).'),
+    name: z.string().describe(
+      'Item name of the artifact. On `probes_unavailable` it is the name of '
+      + 'every dashboard whose widgets went unprobed, joined by `, `.',
+    ),
+  }).describe('The published artifact whose runtime behaviour the finding is about.'),
+  ref: z.object({
+    type: z.string().describe('Metadata type of what was exercised (`object`, `dataset`, `connector`).'),
+    name: z.string().describe('Its item name.'),
+    member: z.string().optional().describe(
+      'The part of it the finding is about: the dashboard widget, when the '
+      + 'finding is about one widget (its `id`, else its `title` as a string, '
+      + 'else `?`); the field of an object (a roll-up, a reference column); the '
+      + 'action of a connector.',
+    ),
+  }).optional().describe(
+    'What the probe exercised: the object a seed loads into or a view reads, '
+    + 'the dataset a widget is bound to, the connector a flow step dispatches, '
+    + 'or the published object itself when `member` names the field the '
+    + 'finding is about (a roll-up). Absent when the finding is about the '
+    + 'artifact as a whole.',
+  ),
+  code: z.string().describe(
+    'Stable machine id of the finding class, lowercase snake: a diagnostics '
+    + 'code carried in a 200, not an ADR-0112 error code. The probes emit '
+    + '`seed_not_applied`, `view_read_failed`, `object_field_ref_unknown`, '
+    + '`object_field_ref_rule_failed`, `empty_query`, `widget_query_failed`, '
+    + '`widget_not_probed`, `probes_unavailable`, `widget_empty_result`, '
+    + '`rollup_never_computed`, `seed_reference_unresolved` and '
+    + '`flow_connector_action_unresolved`. The list is the '
+    + 'producer\'s and may grow: a consumer treats an id it does not know as '
+    + 'any other finding.',
+  ),
+  message: z.string().describe(
+    'What is wrong, written for the AGENT that built the app (ADR-0038): '
+    + 'English, naming the exact artifact and member by machine name. Not the '
+    + 'sentence for the person who published; that is `userMessage`.',
+  ),
+  fix: z.string().optional().describe(
+    'How to repair it, written for the same agent. Absent when the probe has '
+    + 'no remedy to name.',
+  ),
+  userMessage: z.string().optional().describe(
+    'The finding\'s sentence for the PERSON who published, composed by its producer in the request\'s '
+    + 'locale (else the workspace default locale, else `en`) — the same field name and producer-marked '
+    + 'meaning as `RuntimeAuthoringIssueSchema.userMessage` and `ApiErrorSchema.userMessage`. It names an '
+    + 'artifact by its label where the probe can read one, else by its machine name; an object the '
+    + 'publishing caller was refused, or whose read access could not be decided, by the machine name '
+    + 'the refusal carries, its label unread. Present when the '
+    + 'producer authors a user sentence for this `code`, which the probes do for every code they emit; '
+    + 'absent, a consumer shows its own generic sentence. Consumers render it as received and keep no '
+    + 'per-code translation table; `code` stays the stable id and `message` / `fix` stay the agent-facing '
+    + 'text.',
+  ),
+}));
+
+/**
+ * The ADR-0038 L3 post-publish runtime probe report: what
+ * `PublishPackageDraftsResponseSchema.probes` carries.
+ *
+ * After a batch publish the build pipeline exercises what was just published,
+ * one real read per artifact, and reports what is broken AT RUNTIME: a seed
+ * whose rows never materialized, a view that cannot read its object, a
+ * dashboard widget whose dataset selection fails or returns nothing over a
+ * populated object, an object whose own field-name lists name a field it does
+ * not have. Probes are reads; they never fail the publish they verify.
+ *
+ * Declared member for member against the producer (`runBuildProbes`,
+ * `@objectstack/metadata-protocol`, which re-exports this type as its
+ * `BuildProbeReport`). `issues[]` is the findings ({@link RuntimeBuildIssueSchema})
+ * and `checked` is the receipt that tells "nothing of that kind was probed"
+ * from "everything probed was clean".
+ */
+export const BuildProbeReportSchema = lazySchema(() => z.object({
+  issues: z.array(RuntimeBuildIssueSchema).describe(
+    'The findings, in probe order (seeds, views, objects, dashboard widgets). '
+    + 'Empty when every probe passed.',
+  ),
+  checked: z.object({
+    seeds: z.number().int().describe('Published seeds whose target object was read for rows.'),
+    views: z.number().int().describe('Published views whose bound object was read.'),
+    widgets: z.number().int().describe(
+      'Dataset-bound dashboard widgets whose dataset selection was executed. '
+      + 'Stays 0 when no analytics service is mounted; `probes_unavailable` '
+      + 'then says how many went unprobed.',
+    ),
+    objects: z.number().int().describe('Published objects whose own field-name lists were judged.'),
+  }).describe(
+    'How many probes actually ran, per plane. A 0 means nothing of that kind '
+    + 'was probed, never that something was probed and passed: read it beside '
+    + '`issues`, so that "no object was inspected" and "every object was '
+    + 'clean" are different numbers.',
+  ),
+}));
+
+/**
  * Publish Package Drafts Response — the "publish whole app" door.
  *
  * Describes the FULL body `POST /api/v1/packages/:id/publish-drafts` answers
@@ -1803,8 +2138,12 @@ export const PublishPackageDraftsRequestSchema = lazySchema(() => z.object({
  * `outcome` (#10462) names which of the four exits answered, so no consumer
  * has to reverse-engineer that from `failed.length`.
  *
- * **`probes` is deliberately OPAQUE** — see its own note below. Do not model
- * it here without a consumer-driven card (#9406 ruling).
+ * **`probes` is MODELED** ({@link BuildProbeReportSchema}; ruling record
+ * 6929121584). The #9406 ruling staged it as an opaque passthrough until a
+ * consumer needed a field of it; the console's publish-health line reads
+ * `checked` and `issues[].message`, and `issues[].userMessage` once the
+ * finding carries one, so the report and its finding are declared — see the
+ * note on the member below.
  */
 export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe(
@@ -2013,21 +2352,32 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
     + 'or a side-effect failure. Best-effort, same contract as '
     + '`seedApplied`.',
   ),
-  // #9406 ruling: `probes` (`BuildProbeReport`) gets a DELIBERATELY OPAQUE
-  // passthrough declaration — the key is declared so the face is complete and
-  // nothing strips it, but its inner shape is NOT modeled here. It upgrades to
-  // a modeled Zod schema only when a consumer needs a field of it (maintainer,
-  // 2026-08-18: "Do not model it speculatively"). The TS shape lives on
-  // `packages/metadata-protocol/src/build-probes.ts` (`BuildProbeReport`:
-  // `issues[]` + per-plane `checked` counters).
-  probes: z.unknown().optional().describe(
+  // `probes` is MODELED (ruling record 6929121584). The #9406 ruling declared
+  // the key as a deliberately opaque passthrough and named its own upgrade
+  // trigger: a modeled Zod schema once a consumer needs a field of it
+  // (maintainer, 2026-08-18: "Do not model it speculatively"). The trigger
+  // fired: the console's publish-health line reads `checked` and
+  // `issues[].message`, and `issues[].userMessage` once the finding carries
+  // one. So the report is declared member for member against its producer,
+  // `runBuildProbes` in `packages/metadata-protocol/src/build-probes.ts`,
+  // whose `BuildProbeReport` / `RuntimeBuildIssue` are re-exports of the two
+  // types declared here. The producer-side conformance suite asserts nothing
+  // it emits is stripped.
+  //
+  // This NARROWS the published accept set (`Clause-②: yes (narrowing)`):
+  // `z.unknown()` parsed any `probes` value, and a value that is not the
+  // report (a string, another object, a finding missing a member) no longer
+  // parses; the inferred and input types move from `unknown` to the report.
+  // The platform's one producer emits only the report.
+  probes: BuildProbeReportSchema.optional().describe(
     'ADR-0038 L3 post-publish runtime probe report — one real read per '
     + 'published artifact (seeded objects have rows, views are readable, '
-    + 'widget dataset selections execute). DELIBERATELY OPAQUE in this '
-    + 'contract: the key is declared and carried through verbatim, '
-    + 'but its inner shape is intentionally not modeled until a consumer '
-    + 'needs a field of it. Present only when something was publishable; '
-    + 'probes never fail the publish.',
+    + 'widget dataset selections execute and return data, an object\'s own '
+    + 'field-name lists resolve). `issues[]` carries the findings, each with '
+    + 'the agent-facing `message` / `fix` and the `userMessage` sentence for '
+    + 'the person who published; `checked` counts the probes that ran per '
+    + 'plane. Present only when something was publishable; probes never fail '
+    + 'the publish.',
   ),
   commitId: z.string().optional().describe(
     'ADR-0067 — id of the commit this publish recorded. Absent when '
@@ -2154,7 +2504,16 @@ export const DeleteMetaItemRequestSchema = lazySchema(() => z.object({
     + 'package: the delete of the `active` row then removes the row of the '
     + 'one package the item\'s active rows are bound to, is refused `409 '
     + 'RESOURCE_CONFLICT` when they are bound to two or more, and with none '
-    + 'removes the env-local row (no package stamp); the discard of the '
+    + 'removes the env-local row (no package stamp). Bound to two or more, '
+    + 'one exception: a bundled type\'s member whose active rows a base '
+    + 'package and a package declaring it both hold, with no package-unbound '
+    + 'row beside them, is the row-held base\'s, as the read naming no '
+    + 'package serves it, and the delete removes the base\'s row as naming '
+    + 'the base does (two packages neither of which declares the other are '
+    + 'still refused `409`). The dependent\'s row is then the item\'s only '
+    + 'row at that address: the read naming no package serves it next, and a '
+    + 'second delete naming no package removes it too; the base\'s copy comes '
+    + 'back only by saving it again. The discard of the '
     + '`draft` removes the draft a draft save naming no package writes, the '
     + 'one the per-item publish naming none promotes, and is refused where '
     + 'that publish is (see `PublishMetaItemRequestSchema.packageId`). That '
@@ -2374,7 +2733,11 @@ const HISTORY_PACKAGE_SELECTOR_DESCRIPTION =
   + 'holds nor ships the name is refused 409 `not-held-by-qualifier` (ADR-0150 D3/D4). '
   + 'Versions attributed to no package, or to the environment, are that slot\'s only '
   + 'while it is the name\'s sole slot. Absent, a name two holders hold (in stored rows '
-  + 'or in code) is refused 409 naming every holder. Refused with 400 `VALIDATION_ERROR` '
+  + 'or in code) is refused 409 naming every holder, except where the read naming no '
+  + 'package serves the row-held base (a bundled type\'s member whose active rows a base '
+  + 'package and a package declaring it both hold, with no package-unbound row beside '
+  + 'them): there the base\'s slot is addressed, as naming the base addresses it. Two '
+  + 'packages neither of which declares the other are still refused. Refused with 400 `VALIDATION_ERROR` '
   + 'on a type not stored per (package, name).';
 
 /**
@@ -2748,6 +3111,33 @@ export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
     + '`stored-expression-fill-incomplete` (`warning`, what is left and how to '
     + 'fill it). The restore itself SUCCEEDED either way.',
   ),
+}));
+
+/**
+ * Diff Metadata Item Request
+ *
+ * Request shape for `GET /api/v1/meta/:type/:name/diff` (the `diffMetaItem`
+ * protocol method): the two bounds from the query (`from` / `to`, or their
+ * `fromVersion` / `toVersion` spellings), both read through this declaration,
+ * and `package` from the query. Mirrors the implementation's parameter type
+ * in `@objectstack/metadata-protocol` member for member — a declared-surface
+ * catch-up (#33308), as `RollbackMetaItemRequestSchema` is for the rollback
+ * door.
+ */
+export const DiffMetaItemRequestSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type name'),
+  name: z.string().describe('Item name'),
+  fromVersion: z.number().int().optional().describe(
+    'The older side\'s history version, a whole number as the history lists it. Absent, the nearest '
+    + 'earlier version whose body differs from the `to` side\'s. A version with no history row of the '
+    + 'item (or, with `packageId`, of that holder) is refused 404 `VERSION_NOT_FOUND`.',
+  ),
+  toVersion: z.number().int().optional().describe(
+    'The newer side\'s history version, a whole number as the history lists it. Absent, the active '
+    + 'row (with `packageId`, that holder\'s own active row). Refused 404 `VERSION_NOT_FOUND` as '
+    + '`fromVersion` is.',
+  ),
+  packageId: z.string().optional().describe(HISTORY_PACKAGE_SELECTOR_DESCRIPTION),
 }));
 
 /**
@@ -4178,13 +4568,24 @@ export const AiModelsResponseSchema = lazySchema(() => z.object({
   defaultModel: z.string().optional().describe('Default model id, when the service reports one'),
 }));
 
+/**
+ * One message of a persisted conversation, as the `/ai/conversations` routes
+ * return it: {@link AiMessageSchema} plus the turn it belongs to.
+ */
+export const AiConversationMessageSchema = lazySchema(() => AiMessageSchema.extend({
+  turnId: z.string().nullable().optional().describe(
+    'The turn the server stamped on the message: the `turnId` of the chat request that wrote it. '
+    + 'Absent or null on a message stored with no turn',
+  ),
+}));
+
 /** A persisted AI conversation, as the `/ai/conversations` routes return it. */
 export const AiConversationSchema = lazySchema(() => z.object({
   id: z.string().describe('Conversation id'),
   title: z.string().optional().describe('Title / summary'),
   agentId: z.string().optional().describe('Agent this conversation is bound to'),
   userId: z.string().optional().describe('Owning user'),
-  messages: z.array(AiMessageSchema).describe('Message history'),
+  messages: z.array(AiConversationMessageSchema).describe('Message history'),
   createdAt: z.string().describe('Creation timestamp (ISO 8601)'),
   updatedAt: z.string().describe('Last update timestamp (ISO 8601)'),
   metadata: z.record(z.string(), z.unknown()).optional().describe('Conversation metadata'),
@@ -4436,6 +4837,33 @@ export const GetLocalesRequestSchema = lazySchema(() => z.object({}));
  * the requester's `Accept-Language`) is a caller's choice the server cannot
  * make for it. Serving real names would put CLDR data behind an endpoint for
  * something every client can already compute, and no consumer asks for it.
+ *
+ * `sourceLocale` (#36504) names the language the app's inline metadata text
+ * is authored in — the declared `i18n.sourceLocale`, else the default locale,
+ * the same collapse the document translators make (`ResolveOptions.defaultLocale`
+ * fed from `getSourceLocale?.() ?? getDefaultLocale?.()`). It differs from the
+ * `isDefault` locale on a deployment authored in one language that defaults
+ * its users to another. A client that edits labels reads it to tell an edit
+ * of the source text from a translation: the console's design mode stores a
+ * menu rename made in any other language as that language's translation.
+ * Named after its config key, as `defaultLocale`'s `isDefault` mark is the
+ * config's `defaultLocale`.
+ *
+ * `fallbackChain` names the locales the server consults after the requested
+ * one and before the authored text, the deployment's DECLARED chain: the i18n
+ * service's `getFallbackLocale()` (the stack's `i18n.fallbackLocale`, else its
+ * `defaultLocale`, as the boot collapses them), which the server's own
+ * metadata translations already hand the spec resolvers as
+ * `ResolveOptions.fallbackChain`. It is absent when the i18n service reports
+ * no fallback (the file-backed service always reports one, collapsed from
+ * `fallbackLocale || defaultLocale || 'en'`), and a client then resolves the
+ * requested locale alone, as the server does. A client that resolves
+ * translated metadata itself (the console's flow labels) reads it beside
+ * `sourceLocale` (the resolvers' `defaultLocale`), after negotiating its
+ * request tag against `locales[].code` as the server negotiates a request's
+ * tag (`resolveLocaleAmong`), so its answer and the server's walk the same
+ * locales: a `zh-Hans` request on a deployment holding `zh-CN` is the
+ * `zh-CN` request, and walks no chain when `zh-CN` is the source locale.
  */
 export const GetLocalesResponseSchema = lazySchema(() => z.object({
   locales: z.array(z.object({
@@ -4445,6 +4873,16 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
     ),
     isDefault: z.boolean().default(false).describe('Whether this is the default locale'),
   })).describe('Available locales'),
+  sourceLocale: z.string().optional().describe(
+    'The language the app\'s own text (a plain-string `label`) is written in: the declared `i18n.sourceLocale`, '
+    + 'else the default locale. Absent when the server knows neither. Text typed in any other locale is a translation',
+  ),
+  fallbackChain: z.array(z.string()).optional().describe(
+    'The locales the server consults, in order, after the requested one and before the authored text: the deployment\'s '
+    + 'declared fallback (`i18n.fallbackLocale`, else `defaultLocale`). Absent when the i18n service reports none; the '
+    + 'requested locale alone is then consulted. A request tag is negotiated against `locales[].code` first, and the chain '
+    + 'is not walked for a request that negotiates to `sourceLocale`',
+  ),
 }));
 
 /**
@@ -4526,6 +4964,8 @@ export type GetDiscoveryRequest = z.input<typeof GetDiscoveryRequestSchema>;
 export type GetDiscoveryResponse = z.input<typeof GetDiscoveryResponseSchema>;
 export type GetMetaTypesRequest = z.input<typeof GetMetaTypesRequestSchema>;
 export type GetMetaTypesResponse = z.input<typeof GetMetaTypesResponseSchema>;
+/** Post-parse shape of {@link GetMetaTypesResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetMetaTypesResponseParsed = z.infer<typeof GetMetaTypesResponseSchema>;
 export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
 export type FlowRegistrationRefusal = z.input<typeof FlowRegistrationRefusalSchema>;
 export type FlowRegistration = z.input<typeof FlowRegistrationSchema>;
@@ -4542,6 +4982,12 @@ export type GetMetaItemLayeredResponse = z.input<typeof GetMetaItemLayeredRespon
 export type RuntimeAuthoringIssue = z.input<typeof RuntimeAuthoringIssueSchema>;
 export type SaveMetaItemRequest = z.input<typeof SaveMetaItemRequestSchema>;
 export type SaveMetaItemResponse = z.input<typeof SaveMetaItemResponseSchema>;
+export type FieldStillShownBy = z.input<typeof FieldStillShownBySchema>;
+export type DestructiveChangeIssue = z.input<typeof DestructiveChangeIssueSchema>;
+/** Post-parse shape of {@link FieldStillShownBy} (ADR-0122). */
+export type FieldStillShownByParsed = z.infer<typeof FieldStillShownBySchema>;
+/** Post-parse shape of {@link DestructiveChangeIssue} (ADR-0122). */
+export type DestructiveChangeIssueParsed = z.infer<typeof DestructiveChangeIssueSchema>;
 /** The 409 `METADATA_CONFLICT` body of the `/meta/:type/:name` write doors (#22114). */
 export type MetadataConflictError = z.input<typeof MetadataConflictErrorSchema>;
 /** Post-parse shape of {@link MetadataConflictError} — defaults applied, transforms run (ADR-0122). */
@@ -4554,9 +5000,23 @@ export type PublishMetaItemResponse = z.input<typeof PublishMetaItemResponseSche
  */
 export type PublishPackageDraftsRequest = z.input<typeof PublishPackageDraftsRequestSchema>;
 /**
+ * One ADR-0038 L3 runtime probe finding. The SINGLE declaration of the shape;
+ * `@objectstack/metadata-protocol` re-exports this as its `RuntimeBuildIssue`
+ * rather than declaring its own, so what the probes emit and what the batch
+ * publish response declares cannot drift apart.
+ */
+export type RuntimeBuildIssue = z.input<typeof RuntimeBuildIssueSchema>;
+/**
+ * The ADR-0038 L3 post-publish probe report — `probes` on the batch publish
+ * response. `@objectstack/metadata-protocol` re-exports this as its
+ * `BuildProbeReport`.
+ */
+export type BuildProbeReport = z.input<typeof BuildProbeReportSchema>;
+/**
  * The batch publish door's response — `POST /packages/:id/publish-drafts`
- * (#9406). `probes` is `unknown` by declaration, not by omission: the #9406
- * ruling stages it opaque until a consumer needs a field of it.
+ * (#9406). `probes` is the modeled {@link BuildProbeReport} (ruling record
+ * 6929121584): the #9406 ruling staged it opaque until a consumer needed a
+ * field of it, and the console's publish-health line reads its fields.
  */
 export type PublishPackageDraftsResponse = z.input<typeof PublishPackageDraftsResponseSchema>;
 export type DeleteMetaItemRequest = z.input<typeof DeleteMetaItemRequestSchema>;
@@ -4584,6 +5044,9 @@ export type RollbackMetaItemRequestParsed = z.infer<typeof RollbackMetaItemReque
 export type RollbackMetaItemResponse = z.input<typeof RollbackMetaItemResponseSchema>;
 /** Post-parse shape of {@link RollbackMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type RollbackMetaItemResponseParsed = z.infer<typeof RollbackMetaItemResponseSchema>;
+export type DiffMetaItemRequest = z.input<typeof DiffMetaItemRequestSchema>;
+/** Post-parse shape of {@link DiffMetaItemRequest} — defaults applied, transforms run (ADR-0122). */
+export type DiffMetaItemRequestParsed = z.infer<typeof DiffMetaItemRequestSchema>;
 export type DiffMetaItemResponse = z.input<typeof DiffMetaItemResponseSchema>;
 /** Post-parse shape of {@link DiffMetaItemResponse} — defaults applied, transforms run (ADR-0122). */
 export type DiffMetaItemResponseParsed = z.infer<typeof DiffMetaItemResponseSchema>;
@@ -4720,6 +5183,7 @@ export type MarkAllNotificationsReadResponse = z.input<typeof MarkAllNotificatio
 
 // AI Types
 export type AiMessage = z.input<typeof AiMessageSchema>;
+export type AiConversationMessage = z.input<typeof AiConversationMessageSchema>;
 export type AiChatRequest = z.input<typeof AiChatRequestSchema>;
 export type AiChatResponse = z.input<typeof AiChatResponseSchema>;
 export type AiStreamChunk = z.input<typeof AiStreamChunkSchema>;

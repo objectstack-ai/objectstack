@@ -10,6 +10,7 @@
 · **Amended** (2026-10-17, ruling of record 6228728551 on #23960, letter B) — D12 names three kinds of administrator, tenant-level, organization-level and delegated: an organization administrator (`organization_admin` / `organization_admin_no_bypass` for the organization, not a platform administrator) creates and removes `sys_user_position` / `sys_user_permission_set` rows for that organization's members when every set the row distributes has no `*` wildcard superuser bit, no `adminScope` and only `scope: 'org'` capabilities; `admin_full_access`, platform sets, `organization_admin` itself and every delegated set stay outside, and organization-administrator status is conferred by membership grade only. Strict containment and the `everyone` / `guest` anchors are unchanged. See the note under D12.
 · **Amended** (2026-10-31, ruling of record 6545950368 on #28367, go as shaped) — D10 gains rule 5, the **agent forward credential**: an `api` action's in-process forward carries the agent principal in a credential the server mints itself, bound to that one forward, single-use, short-lived and unreachable out of process, never the caller's token or key and never a human session. Two cells of the credential-kind × target-door table flip from "refuse by name" to "accept with a forward credential" (an OAuth-connected agent at an identity route and at a platform route), and a scope-family rule bounds every target outside MCP. See the amendment under D10.
 · **Amended** (2026-11-08, [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md), proposed, adopted by its merge) — D10 gains a second provenance for an agent principal: a registered **AI service account**, a `sys_user` row of kind `agent` that is its own authorization subject. It holds its own grants under rule 2's ceiling, enforced at evaluation, and authenticates with its own API keys; rule 1's intersection does not apply because it acts for nobody; rule 4 records it as `user_id` and leaves `performedBy` to the OAuth client. The 2026-09-16 note stands: a person's key stays that person's credential. See the note under D10.
+· **Amended** (2026-11-20, [#35731](https://github.com/objectstack-ai/objectstack/issues/35731)) — dated notes under D9 (the platform baseline contribution channel is for always-on platform services only) and under D10 (`performedBy` has a second producer, the in-product AI path). D9 and D10 are left as written.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0056](./0056-permission-model-landing-verification.md) (permission-model landing verification),
@@ -391,6 +392,25 @@ package-owned sets:
 - The D5 install-time suggestion generalizes: a package may suggest bindings to `everyone` **or**
   `guest`; the admin confirms each individually.
 
+> **Note (2026-11-20, #35731) — the platform baseline contribution channel is for always-on
+> platform services only.** D9 refuses builtin permission sets that packages write into, and a
+> package reaches `everyone` only by a suggestion the admin confirms (the bullet above). PR #32932
+> (`fd637471`, #32754) added one narrower channel, on the maintainer's ruling 6837170004 on
+> #32754 (letter B): `ISecurityService.contributePlatformBaselineSet(contributor, set)`
+> (`packages/spec/src/contracts/security-service.ts`, implemented in
+> `packages/plugins/plugin-security/src/platform-baseline-sets.ts`). Through it a platform service
+> contributes one permission set of its own, which joins the member baseline every signed-in member
+> holds through the `everyone` anchor (D5), when the deployment declares one, and which a host can
+> narrow or decline per object (`SecurityPluginOptions.platformBaselineOverrides`);
+> `member_default` is not written. Condition 2 of that ruling is this sentence: **it is a channel
+> for always-on platform services; tenant-installed packages do not use it**. A tenant-installed package still suggests a default set for an
+> administrator to accept. The seam admits a set only during boot (it closes at
+> `kernel:bootstrapped`), only on objects the contributor itself registers, and only the read and
+> create bits, one set per contributor; it refuses a wildcard, every other bit and a row policy,
+> and logs each admission and refusal. Its one contributor on `main` is the storage service's
+> attachment set (`packages/services/service-storage/src/attachment-member-grant.ts`). D9 is left
+> as written; read it with this note.
+
 ### D10 — Principal taxonomy; agents act on intersected authority
 
 > **Status (2026-07):** the P1 ctx *shape* shipped pre-launch as written below; the agent
@@ -501,6 +521,32 @@ alias tax on every API.
 > `packages/spec/src/kernel/execution-context.zod.ts#performedBy` is a one-key object precisely so
 > a sibling can be added without re-shaping a shipped field; it reserves the room, ⛔ not the name.
 > Ruling: director seat, batch #195 item 2, maintainer 「同意」 2026-09-20 — letter **C**.
+
+> **Note (2026-11-20, #35731) — `performedBy` has a second producer: the in-product AI path.**
+> Rule 4 above says a caller of any kind other than an agent principal records the principal it
+> authenticates as, with the missing `performed_by` as the record that it acted for itself, and
+> the 2026-09-20 status note calls `performedBy` a one-key object. Both matched `main` until
+> PR #34018 (`2539ad98`, #33786). Since then
+> `packages/spec/src/kernel/execution-context.zod.ts#performedBy` names two server-side
+> producers, each in its own key. The `/mcp` OAuth door sets `clientId`, as before
+> (`packages/core/src/security/assemble-execution-context.ts#entryFields`). The
+> server-constructed in-product AI path, which writes AS the signed-in person (`principalKind`
+> stays `'human'`, no `onBehalfOf`, the person's own grants), sets `agentId`, with
+> `conversationId` and, when the person confirmed the call, `confirmationId`. A present
+> `performedBy` names `clientId` or `agentId`, or is refused at parse. That producer stamps an
+> id only after the server resolved it in its own store for the person in `userId` (the agent
+> it actually ran, a conversation that person owns, a pending item that person's approval
+> decided), so the refusal of caller-controlled ids above (`traceId`, `requestId`) stays whole;
+> the room for a run id stays reserved, and `conversationId` is not that id. The engine copies
+> the three keys to hooks as `HookContext.provenance.performedByAgentId`,
+> `performedByConversationId` and `performedByConfirmationId`
+> (`packages/objectql/src/engine-execution-plumbing.ts`). No code in this repository stamps
+> `agentId` today; the OAuth agent path is still the one producer here.
+> Ruling: the account owner on objectstack-ai/cloud#3826 (「3826 照建议（征询版）」): AI acting on
+> behalf of a person, the conversation id and the confirmation id ride the write context through
+> the existing `performed_by` / `on_behalf_of` pair, with no new actor vocabulary; ADR-0011's
+> 2026-11-15 amendment note records the same ruling chain for phase 1. Rule 4 and the 2026-09-20
+> note are left as written; read them with this note.
 
 #### Amendment (2026-10-31, #28367) — the agent forward credential (rule 5) [ruled]
 

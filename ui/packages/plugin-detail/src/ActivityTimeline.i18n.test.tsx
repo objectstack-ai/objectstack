@@ -48,7 +48,7 @@ afterEach(() => cleanup());
 
 /** The pack values for `detail.noActivity`, read from the packs themselves. */
 const EN = 'No activity recorded';
-const ZH = '暂无活动记录';
+const ZH = '暂无动态';
 const AR = 'لا يوجد نشاط مسجل';
 const RAW_KEY = 'detail.noActivity';
 

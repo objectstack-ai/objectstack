@@ -41,6 +41,47 @@ contact: Field.lookup('contact', {
   structured `lookupFilters` (`{ field, operator, value }`) and `dependsOn` shown above instead.
 </Callout>
 
+#### Filter by the record being edited
+
+A `lookupFilters` value can read the record the form is editing instead of a literal:
+`{ $record: 'field' }`, or one lookup hop away, `{ $record: 'lookup_field.field' }` (at most
+one dot). The picker puts that value in its place before it queries the candidates.
+
+```typescript
+// On quote: only price books valid on the quote's date,
+// in the customer's market or in none (a generic book)
+price_book: Field.lookup('price_book', {
+  label: 'Price Book',
+  lookupFilters: [
+    { field: 'is_active', operator: 'eq', value: true },
+    { field: 'valid_from', operator: 'lte', value: { $record: 'quote_date' }, orEmpty: true },
+    { field: 'valid_to', operator: 'gte', value: { $record: 'quote_date' }, orEmpty: true },
+    { field: 'market', operator: 'eq', value: { $record: 'account.market' }, orEmpty: true },
+  ],
+})
+```
+
+- **The reference.** `{ $record }` is the whole `value`, never a member of an `in` / `notIn`
+  list, and pairs only with `eq`, `ne`, `gt`, `lt`, `gte` or `lte`. `os validate` refuses a
+  path that names no field of the object the lookup is on, or of the object its hop points at.
+- **Where it resolves.** In a record form, whatever its layout. Every other picker host leaves
+  every `{ $record }` entry out: inline edit on a record page, a record page's header or
+  related list, an action's parameter dialog, and a bulk action over selected rows.
+- **An empty value.** While the referenced value is empty (null, unset, an empty string, or a
+  hop whose lookup is unset) or cannot be read, the entry is left out of the candidate query:
+  a quote whose account has no market is offered every book the other entries admit.
+- **`orEmpty: true`** makes the entry also match a candidate whose column is null ("valid from
+  the quote date, or with no start date"). Like `{ $record }`, it pairs only with `eq`, `ne`,
+  `gt`, `lt`, `gte` or `lte`.
+- **`dependsOn` or `$record`?** `dependsOn: ['account']` scopes the candidates by equality on
+  the parent field and gates the picker until that field is set. A `$record` entry compares
+  any candidate column, with any of the six operators, and is left out while its value is
+  empty. The picker re-queries whenever a referenced field changes, so do not also list that
+  field in `dependsOn`: `dependsOn: ['quote_date']` would add `quote_date = …` to the query
+  over the referenced object.
+
+The picker narrows the choice only: a rule the save must enforce belongs on the server too.
+
 ### Self-Referencing Lookups
 
 Create hierarchies:

@@ -293,6 +293,28 @@ invitation redirect is an
 affordance, not an authorization: the server still refuses a non-invitee's
 sign-up.
 
+### Hosting the invitation pages: declare `/verify-email-prompt`
+
+While a deployment delivers mail, the server refuses to let an account whose
+address is not verified accept an invitation
+(`EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION`). Two
+surfaces of this package answer that refusal by navigating to the
+verification-mail screen at `/verify-email-prompt`, a route this package does
+not mount:
+
+- `DefaultAcceptInvitationPage` (`/accept-invitation/:invitationId`), with
+  `redirect` set to the accept page itself;
+- the console's `type: 'api'` action handlers (`useConsoleActionRuntime` and
+  `RecordDetailView`), when the invitation inbox's `accept_invitation` action
+  is refused, with `redirect` set to the accept page for that invitation.
+
+A host that mounts either one declares `/verify-email-prompt` too, or the
+person is sent to a route that does not exist. The route reads two query keys,
+each absent when unknown: `email`, the account's address, and `redirect`, the
+basename-stripped router path the verification mail's link returns to. Nothing
+has been sent when either surface arrives there, so the screen offers to send
+the link. `apps/console` mounts its own `VerifyEmailPromptPage` there.
+
 ## Unsaved edits
 
 A page that keeps edits in component state registers them while it holds them,
@@ -428,7 +450,9 @@ to draw the same header. Below `sm` it draws the icon, the title and the actions
 the secondary line is hidden there.
 
 Its props are the exported `ConsolePageHeaderProps`: `title` (required),
-`subtitle`, `icon` (a rendered element, sized by the chip), `actions`,
+`subtitle`, `icon` (a rendered element, sized by the chip), `iconTile` (an
+icon that draws its own square, such as `ObjectIconTile`, drawn as given in
+place of `icon`), `actions`,
 `foldedActions`, `accentColor`, `sticky`, `className` and `data-testid`. The
 secondary line is `subtitle`; there is no `description` prop.
 
@@ -573,18 +597,18 @@ trip is required to edit a draft.
 
 ### New dataset beside the Studio's dataset pickers (objectstack#27518)
 
-The Interfaces pillar provides `StudioDatasetAuthoringContext`
-(`src/views/studio-design/datasetCreate.tsx`): the package being edited and the
-pillar's draft-saved signal. A dataset picker that finds it (the New report
-dialog's `ReportCreateFields` and the dashboard widget inspector) reads the
-draft-overlaid dataset catalog (`useDatasetCatalog(…, { previewDrafts: true })`),
-lists the package's datasets first, and renders `DatasetCreateEntry`: a **New
-dataset** button whose dialog saves a `dataset` draft in the package through
-the draft door (the spec's create seed, the picked object, a dimension per
-group-by field and a `sum` measure per total), re-reads the catalog and binds
-the new name. While no dataset reads one of the package's objects, the entry
-says so. Outside the Studio there is no context: Setup's editors keep the
-published catalog and offer no entry.
+`StudioDatasetAuthoringContext` (`src/views/studio-design/datasetCreate.tsx`)
+carries the package being edited and a draft-saved signal. A dataset picker
+that finds it (the dashboard widget inspector) reads the draft-overlaid dataset
+catalog (`useDatasetCatalog(…, { previewDrafts: true })`), lists the package's
+datasets first, and renders `DatasetCreateEntry`: a **New dataset** button
+whose dialog saves a `dataset` draft in the package through the draft door
+(the spec's create seed, the picked object, a dimension per group-by field and
+a `sum` measure per total), re-reads the catalog and binds the new name. While
+no dataset reads one of the package's objects, the entry says so. Without the
+context there is no entry and the catalog is the published one. Its provider
+was Studio's Interfaces pillar, retired by objectstack#36502, so no surface
+provides it today.
 
 ### AI chat conversation key (ADR-0057)
 
@@ -607,16 +631,38 @@ Inside a running app, workspace admins get an "Edit app" button in the top bar
 (`AppHeader`) — and, at the end of the app switcher's dropdown, an "Edit APP in
 Studio" row to the same target — that deep-links to the app's owning package on
 the Studio design surface. When the current route names a specific interface — a
-dashboard, page, or report — it opens straight to that surface in the Interfaces
-pillar (`/studio/:packageId/interfaces?surface=<type>:<name>`); on an object
-route it opens that object in the Data pillar
+dashboard, page, or report — it opens that item's page in Studio's "All
+metadata" area (`/studio/:packageId/metadata/<type>/<name>`), where it is read
+and edited as metadata; interfaces themselves are designed in the running app,
+since objectstack#36502 retired Studio's Interfaces pillar. On an object route
+it opens that object in the Data pillar
 (`/studio/:packageId/data?surface=object:<name>`), and at the app root the
-package's Data tab (`/studio/:packageId/data`).
+package's Data tab (`/studio/:packageId/data`). An old
+`/studio/:packageId/interfaces` link lands on the Data tab with a one-line
+notice that interface editing moved into the app.
 The route-type → surface-type decision lives in `appStudioRoutePath`. It is the
 reverse of the builder's "Open app" bridge (ADR-0080): the entry only renders
 for admins and only when the app has an owning package (`_packageId`), and
 package writability stays a server-side concern — a read-only package opens in
-Studio as browse-only.
+Studio as browse-only. For a read-only package the button draws an eye with the
+words "Open {app} in Studio" (ADR-0146 D5) instead of the pencil.
+From 768 px up, where no top bar is drawn, the sidebar's app menu carries the
+same entry on the same target and posture (`useAppStudioEntry`): "Edit app"
+behind a pencil, or "View in Studio" behind an eye for a read-only package.
+Beside it, "Design layout" turns on the shell's design mode, which edits the
+app's layout (its menu, header pins and page arrangement) in place; the mode's
+bar carries the same name.
+
+The way back is the 「‹ Back to app」 link at the left end of Studio's top bar
+(`StudioBackToApp`), followed by the app's name and the "Studio" mark. Entered
+from an app, it names that app and returns to the page the author left, query
+included (`utils/appReturnPage.ts`, recorded by `ConsoleLayout`, held in module
+memory only). Opened directly (a new tab, a reload), it names the package's
+first published app and lands on its home. A package with no published app (a
+draft-only app counts as none) reads 「‹ Back to app」 with no name and goes to
+the console's declared landing (`useHomePath()`). Leaving with unsaved work in a
+pillar asks first. Studio's top bar has no package switcher: another package is
+opened from its app or from the Studio landing.
 
 The sidebar's ⋯ menu offers the same bridge per entry: the **Design** entry of an
 `object`, `dashboard` or `page` navigation entry, and of the matching favorites,
@@ -1267,48 +1313,49 @@ registers:
 ```
 
 The block takes no props — its `properties` bag accepts only `{}`. It draws
-from the request record the page binds: the server-computed decision progress
-(when the request is pending and aggregates more than one decision) above the
-request's own declared decision actions at `record_section`, each shown or
-hidden by its `visible` predicate over the request's `viewer` block. A decided
-request, or a viewer who may not decide, gets no decision buttons. After a
-decision the request record and its timeline are re-read in place. Placed on
-any other page, the block draws a short notice that it works only on approval
-request pages. `className` styles the wrapper.
+the whole request from the request record the page binds, and objectstack's
+request page (`sys_approval_request_detail`) puts it last, below the header
+and the highlights, with no tabs (objectstack#34588). Placed on any other
+page, the block draws a short notice that it works only on approval request
+pages. `className` styles the wrapper.
 
-Above the progress, the block shows what was submitted, from the request row's
-record snapshot (`payload`) and the server's display values
-(`payload_display`), against the target object's declared fields: the
-declared amount (the first non-zero field declared `type: 'currency'`, or
-declared `type: 'summary'` with a `summaryOperations` `sum` over a field the
-summarized object declares `type: 'currency'`; else the first such field),
-then the first six business fields, each under its declared label and through
-the record page's own cell. Telling a roll-up total apart reads the
-summarized object's definition from the metadata store, for one object at
-most; if that definition cannot be read, the roll-up is an ordinary row. A
-key that only looks like an amount by its name never leads. A key the object
-does not declare, a framework column, an
-unresolved reference id, a field declared `hidden: true` and a field the
-reader may not read take no row. Without the target object's definition, the
-summary is not drawn. The summary is headed "As submitted"
-(`approvalsInbox.snapshotAsSubmitted`): the snapshot is the target record as it
-was submitted, not its current state, so after a decision its values can
-differ from the request's status in the page's highlights. The record's
-current values are the Details tab's record card.
+On top: a "Flow-initiated" marker when no person submitted the request (its
+`submitter_id` absent or null), the deciding action's comment on a decided
+request, and the request's own declared decision actions at
+`record_section`, each shown or hidden by its `visible` predicate over the
+request's `viewer` block. A decided request, or a viewer who may not decide,
+gets no decision buttons. After a decision the request record and its thread
+are re-read in place.
 
-Two more parts come from the same request row. A request no person submitted
-(its `submitter_id` absent or null, as the approvals get serves a request a
-flow run opened with no user context) is marked "Flow-initiated", above the
-summary; a request a person submitted carries no marker. Below the summary,
-the block draws the vertical step line of the request's own route
-(`flow_route`, served by the approvals get) when it has more than one step,
-at any status: the steps the request's flow run passed, its own step, and,
-while it is pending, the steps ahead that the flow's graph alone decides.
-Past an undecided branch nothing is drawn. The line is the same stepper the
-record approvals panel draws, it never scrolls sideways, and it never draws
-the row's `flow_steps`, the flow graph's first branch at every decision. The
-marker and the line's accessible name are the Approval Center's
-`approvalsInbox.*` rows.
+Below, two columns (one on a narrow page):
+
+- **The record, as submitted** (`approvalsInbox.snapshotAsSubmitted`): every
+  field of the request's record snapshot (`payload`) the reader may read, in
+  the sections and order of the target object's default record page, each
+  under its declared label and through the record page's own cell, with the
+  server's display values (`payload_display`) for references. A field the
+  object does not declare, a framework column, a field declared
+  `hidden: true` and a field the reader may not read are not drawn. The block
+  also reads the target record once (`findOne`, no params): a field whose
+  current value differs from the submitted one is marked "Changed"
+  (`approvalsInbox.snapshotChanged`) with its current value beside it. If the
+  record cannot be read, nothing is marked and the card says so. Below the
+  card, the record's child tables (owned `master_detail` children and
+  `relatedList: 'primary'` tables), read-only, with their CURRENT rows and a
+  note saying so: the snapshot keeps the record's own row only. Without the
+  target object's definition, or with no snapshot, the record is not drawn.
+- **The right rail**, in this order: approval progress (the vertical step line
+  of the request's own route, `flow_route`, when it has more than one step;
+  the server-computed decision tally when the request is pending and
+  aggregates more than one decision; who it waits on), the record's
+  attachment fields, and the request's activity: its thread
+  (`sys_approval_action`), newest first, read through the page's data source,
+  only for a reader whose verdict allows reading `sys_approval_action`.
+
+The step line is the same stepper the record approvals panel draws, it never
+scrolls sideways, and it never draws the row's `flow_steps`, the flow graph's
+first branch at every decision. Past an undecided branch nothing is drawn.
+Copy is the Approval Center's `approvalsInbox.*` rows.
 
 ## User-scoped state (favorites, recent items)
 
@@ -1388,6 +1435,24 @@ with `variant="studio"` shows it there. Inside an app, on every route
 bar's middle zone, centered between the left group and the utility cluster. In
 the `home`, `orgs` and `studio` frames, and below `lg` (as an icon button), it
 sits at the utility cluster's left edge.
+
+Inside an app, while the query finds records, the palette shows the selected
+hit on the right, read-only: its title and the object's declared
+`highlightFields`, as the record pointer card draws them (a palette narrower
+than 45rem shows the results alone). Once something is typed, the end of the
+list offers "New OBJECT" for the app's objects the query names and "Create
+"words" as OBJECT" for up to three of them, the page's own object first; each
+opens the object's create page (`/apps/APP/OBJECT/new`), the second with the
+words in its title field. An object is offered exactly where its list offers
+New. A footer names what Enter does to the selected entry.
+
+With nothing typed, the palette leads with a "Current page" group: on an
+object's list, the list's favorites entry and "Add view"; on a record page, the
+record's star and "Edit". Each row runs the page's own control and is listed
+only while the page draws that control. "Add view" and "Edit" are published by
+the page beside the control (`usePublishPageCommand`, `chrome/paletteCommands.ts`)
+with the control's own handler and verdict, so an Edit the header draws off is
+listed off, with the header's reason.
 
 ```tsx
 import { useCommandPalette } from '@object-ui/app-shell';

@@ -30,7 +30,7 @@ export function resolveObjectGridActionsColumn({
   schema, data, objectSchema, persistedColumns, operations, resolvedRowActionDefs,
   wantEditAction, wantDeleteAction, mayInvokeRowAction, rowOperations, canEdit, canDelete,
   recordVerdict, predicateScope, onEdit, onDelete, editPredicates, deletePredicates, executeAction,
-  setRefreshKey, t, foldInlineRowActions = false,
+  setRefreshKey, t, foldInlineRowActions = false, drawRowControls = true,
 }: {
   schema: ObjectGridSchema;
   data: any[];
@@ -60,6 +60,13 @@ export function resolveObjectGridActionsColumn({
    * (`./objectGridInlineActionFold`).
    */
   foldInlineRowActions?: boolean;
+  /**
+   * objectstack#35554 — `false` on a list page, whose rows carry no control at
+   * all: no Actions column is drawn, and a row's actions are reached through
+   * the page bar (its selection) and the row's context menu, which read the
+   * same `rowActionMenuProps`.
+   */
+  drawRowControls?: boolean;
 }) {
   // `operations`, the row-action lists and the row CRUD affordance verdict are
   // resolved further up, next to the permission reads they AND with — this
@@ -101,7 +108,7 @@ export function resolveObjectGridActionsColumn({
     });
     return plan.inline.length > 0 || plan.menuCount > 0;
   };
-  const drawActionsColumn = (hasActions || hasRowActions) && data.some(rowOffersAction);
+  const drawActionsColumn = drawRowControls && (hasActions || hasRowActions) && data.some(rowOffersAction);
 
   /**
    * The props ONE row's "⋮" cell renders with — and, verbatim, the props its
@@ -149,6 +156,17 @@ export function resolveObjectGridActionsColumn({
       // verdict this line carried before the prop existed.
       canEdit: rowVerdicts.canEdit,
       canDelete: rowVerdicts.canDelete,
+      // [objectstack#34208] The record-grained verdicts above are asked only
+      // once a row's actions are reached for — this is the one channel both
+      // menus and the cell signal it through — and an item whose answer is
+      // still on the wire shows inert rather than clickable.
+      onActionsDemand: recordVerdict.requestVerdicts,
+      crudVerdictPending: recordVerdict.pending
+        ? {
+            edit: recordVerdict(rowRecordId(row), 'update') === undefined,
+            delete: recordVerdict(rowRecordId(row), 'delete') === undefined,
+          }
+        : undefined,
       editPredicates,
       deletePredicates,
       onEdit,

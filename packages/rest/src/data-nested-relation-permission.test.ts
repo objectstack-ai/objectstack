@@ -37,6 +37,8 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJECT = 'rest_nested_perm_ledger';
 const OWNER = 'rest_nested_perm_owner';
+/** [#33626] A note on a ledger row: two relationships from the owner. */
+const NOTE = 'rest_nested_perm_note';
 
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
 
@@ -63,6 +65,7 @@ const ROWS = [
   { id: 'd3', title: 'c', owner: 'u1' },
   { id: 'd4', title: 'd', owner: 'u3' },
 ];
+const NOTES = [{ id: 'n1', ledger: 'd1' }, { id: 'n2', ledger: 'd2' }, { id: 'n4', ledger: 'd4' }];
 
 function createMockServer() {
   const noop = () => {};
@@ -118,6 +121,12 @@ describe('[#20802] the nested-relation form reads the related object as the call
             owner: { name: 'owner', type: 'lookup', reference: OWNER },
           },
         },
+        {
+          name: NOTE,
+          label: 'Note',
+          sharingModel: 'public_read_write',
+          fields: { ledger: { name: 'ledger', type: 'lookup', reference: OBJECT } },
+        },
       ],
     } as never);
     await engine.syncSchemas();
@@ -150,6 +159,7 @@ describe('[#20802] the nested-relation form reads the related object as the call
 
     await engine.insert(OWNER, OWNERS.map((r) => ({ ...r })), { context: SYS_CTX } as never);
     await engine.insert(OBJECT, ROWS.map((r) => ({ ...r })), { context: SYS_CTX } as never);
+    await engine.insert(NOTE, NOTES.map((r) => ({ ...r })), { context: SYS_CTX } as never);
 
     const protocol = new ObjectStackProtocolImplementation(engine as any);
     const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
@@ -204,5 +214,32 @@ describe('[#20802] the nested-relation form reads the related object as the call
     // The record is there, and a system caller's condition finds it.
     const system = await engine.find(OBJECT, { where: { owner: { region: 'HIDDEN' } }, context: SYS_CTX } as never);
     expect(idsOf(system)).toEqual(['d4']);
+  });
+
+  it('an unreadable related record excludes its row under $ne too: the subquery carries the related object\'s row scope', async () => {
+    // u3 (HIDDEN) satisfies `region != 'NA'`, but the caller cannot read it,
+    // so d4 is not selected — only d2, whose owner the caller can read.
+    const res = await query({ owner: { region: { $ne: 'NA' } } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(idsOf(res.body)).toEqual(['d2']);
+    const system = await engine.find(OBJECT, { where: { owner: { region: { $ne: 'NA' } } }, context: SYS_CTX } as never);
+    expect(idsOf(system)).toEqual(['d2', 'd4']);
+    // The same holds through count and aggregate, the analytics verbs.
+    expect(await engine.count(OBJECT, { where: { owner: { region: { $ne: 'NA' } } }, context: MEMBER_CTX } as never)).toBe(1);
+  });
+
+  it('[#33626] two relationships: the second hop carries ITS object\'s row scope and field check — under $ne too', async () => {
+    // n4 → d4 → u3 (HIDDEN): u3 satisfies `region != 'NA'`, but the caller cannot read it.
+    const res = await query({ ledger: { owner: { region: { $ne: 'NA' } } } }, NOTE);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(idsOf(res.body)).toEqual(['n2']);
+    const system = await engine.find(NOTE, { where: { ledger: { owner: { region: { $ne: 'NA' } } } }, context: SYS_CTX } as never);
+    expect(idsOf(system)).toEqual(['n2', 'n4']);
+    expect(await engine.count(NOTE, { where: { ledger: { owner: { region: { $ne: 'NA' } } } }, context: MEMBER_CTX } as never)).toBe(1);
+    // The unreadable field at the second hop: the same refusal a direct read of the owner answers.
+    const secret = await query({ ledger: { owner: { secret: 's1' } } }, NOTE);
+    expect(secret.status, JSON.stringify(secret.body)).toBe(403);
+    expect(JSON.stringify(secret.body)).toContain('PERMISSION_DENIED');
+    expect(secret.body?.records).toBeUndefined();
   });
 });

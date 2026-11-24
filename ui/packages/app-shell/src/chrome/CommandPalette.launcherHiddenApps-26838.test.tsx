@@ -37,6 +37,7 @@ vi.mock('../providers/MetadataProvider', async (importOriginal) => {
 import { CommandPalette } from './CommandPalette';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider';
 import { LauncherAppsProvider } from '../hooks/useLauncherApps';
+import { autoTileColor } from '../layout/appTileColors';
 
 const SHOWCASE = { name: 'showcase_app', label: 'Showcase', navigation: [] };
 const CRM = { name: 'crm_app', label: 'CRM', navigation: [] };
@@ -99,5 +100,21 @@ describe('objectstack#26838 — the palette offers no app a permission set hides
     mount(fetcher);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(shownApps()).toEqual(['Showcase', 'CRM', 'Ops', 'Account']));
+  });
+});
+
+describe('objectstack#36157 — a "Switch app" item draws the app\'s own mark', () => {
+  it('a logo, a declared colour and an automatic colour, as the app switcher draws them', async () => {
+    state.apps = [
+      { ...SHOWCASE, branding: { primaryColor: '#7C3AED' } },
+      { ...CRM, branding: { logo: '/crm-logo.png' } },
+      OPS,
+    ];
+    mount(meApps(404));
+    await waitFor(() => expect(shownApps()).toEqual(['Showcase', 'CRM', 'Ops']));
+    const item = (name: string) => document.querySelector(`[cmdk-item][data-value^="app "][data-value$=" ${name}"]`)!;
+    expect(item('showcase_app').querySelector('[data-testid="app-mark-tile"]')!.getAttribute('data-app-tile')).toBe('declared');
+    expect(item('crm_app').querySelector('[data-testid="app-mark-logo"]')!.getAttribute('src')).toBe('/crm-logo.png');
+    expect(item('ops_app').querySelector('[data-testid="app-mark-tile"]')!.getAttribute('data-app-tile')).toBe(autoTileColor('ops_app'));
   });
 });

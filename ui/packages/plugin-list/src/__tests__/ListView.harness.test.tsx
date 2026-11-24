@@ -60,8 +60,10 @@ import {
 } from '@object-ui/core';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { ListViewSchema } from '@object-ui/types';
-import { ListView, LIST_DEFAULT_TRANSLATIONS } from '../ListView';
+import { ListView, LIST_DEFAULT_TRANSLATIONS, viewFilterRequiresOwner } from '../ListView';
+import type { ListToolbarTrailingState } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
+import { openAdvancedSort } from './conditionPanels';
 
 /**
  * Puts back, after the calling block's last test, what the block's hooks and
@@ -107,6 +109,217 @@ function restoreAfterBlock() {
     document.documentElement.removeAttribute('dir');
   });
 }
+
+// ── ListView.dataBlockNoReread-35536 ────────────────────────────────────────────
+
+/**
+ * objectstack#35536 — the read is armed by what the query reads, not by the
+ * identity of the view's `data` block. A host that hands the same view over
+ * again (a late view answer re-serving the active view) gives `ListView` a
+ * fresh `{ provider: 'object' }` block of equal content; nothing the read sends
+ * changed, so no second read. The CONTROLS: a sort or a filter change reads
+ * again with what changed, and rows handed in whole (`provider: 'value'`)
+ * still replace the shown rows when the host hands in new ones. A control
+ * asserts at least one more read carrying the change, never an exact count.
+ */
+describe('ListView.dataBlockNoReread-35536', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'task_35536';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Task',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      name: { name: 'name', type: 'text', label: 'Name' },
+      stage: { name: 'stage', type: 'text', label: 'Stage' },
+    },
+  };
+  // ONE columns array, so a re-render moves only the key a case names.
+  const COLUMNS = ['name', 'stage'];
+  const schemaWith = (extra: Record<string, unknown> = {}) =>
+    ({
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: COLUMNS,
+      data: { provider: 'object', object: OBJECT },
+      ...extra,
+    }) as unknown as ListViewSchema;
+
+  function mount(schema: ListViewSchema) {
+    const ds = {
+      find: vi.fn(async () => ({ data: [{ id: 't1', name: 'Ada', stage: 'a' }], total: 1 })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => DEFINITION),
+    };
+    const onRowsChange = vi.fn();
+    const tree = (s: ListViewSchema) => (
+      <SchemaRendererProvider dataSource={ds as any}>
+        <ListView schema={s} dataSource={ds as any} onRowsChange={onRowsChange} />
+      </SchemaRendererProvider>
+    );
+    const utils = render(tree(schema));
+    return {
+      ds,
+      onRowsChange,
+      rerender: async (s: ListViewSchema) => {
+        utils.rerender(tree(s));
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      },
+    };
+  }
+
+  const reads = (ds: { find: ReturnType<typeof vi.fn> }) => ds.find.mock.calls.filter(([object]) => object === OBJECT);
+  const settled = async (ds: { find: ReturnType<typeof vi.fn> }) => {
+    await waitFor(() => expect(reads(ds)).toHaveLength(1));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  };
+
+  it('a new data block of equal content re-reads nothing', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith());
+    await host.rerender(schemaWith());
+    expect(reads(host.ds)).toHaveLength(1);
+  });
+
+  it('CONTROL: a sort change reads again, with the sort', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith({ sort: [{ field: 'name', order: 'desc' }] }));
+    await waitFor(() => expect(reads(host.ds).length).toBeGreaterThanOrEqual(2));
+    expect(reads(host.ds).at(-1)![1].$orderby).toEqual([{ field: 'name', order: 'desc' }]);
+  });
+
+  it('CONTROL: a filter change reads again, with the filter', async () => {
+    const host = mount(schemaWith());
+    await settled(host.ds);
+    await host.rerender(schemaWith({ filter: [['stage', '=', 'b']] }));
+    await waitFor(() => expect(reads(host.ds).length).toBeGreaterThanOrEqual(2));
+    expect(JSON.stringify(reads(host.ds).at(-1)![1].$filter)).toContain('"b"');
+  });
+
+  it('CONTROL: rows handed in whole are replaced when the host hands in new ones, with no read', async () => {
+    const valueSchema = (items: Array<{ id: string; name: string }>) =>
+      schemaWith({ data: { provider: 'value', items } });
+    const host = mount(valueSchema([{ id: 'v1', name: 'Ada' }]));
+    await waitFor(() => expect(host.onRowsChange.mock.calls.at(-1)?.[0]?.map((r: { id: string }) => r.id)).toEqual(['v1']));
+    await host.rerender(valueSchema([{ id: 'v2', name: 'Grace' }]));
+    await waitFor(() => expect(host.onRowsChange.mock.calls.at(-1)?.[0]?.map((r: { id: string }) => r.id)).toEqual(['v2']));
+    expect(reads(host.ds)).toHaveLength(0);
+  });
+});
+
+// ── ListView.hostDrawnConditions-35727 ──────────────────────────────────────────
+
+/**
+ * objectstack#35727 — a list opened from a record's 「↗」 showed its one
+ * condition twice: the data page's 「Filtered by」 tag, and under the view bar
+ * a locked chip printing the lookup's raw id beside a second 「Reset」.
+ *
+ * The host now names the fields it draws itself (`hostDrawnConditionFields`):
+ * the list still filters on them and draws no locked chip for them. A locked
+ * chip the list does draw for a lookup (a saved view filtered on one) names
+ * the record, read through the list's data source. 「Reset」 is drawn only
+ * while the reader has something of their own to reset.
+ */
+describe('ListView.hostDrawnConditions-35727', () => {
+  restoreAfterBlock();
+
+  const ZH = { defaultLanguage: 'zh', detectBrowserLanguage: false };
+  const EN = { defaultLanguage: 'en', detectBrowserLanguage: false };
+  const OBJECT = 'contact_35727';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Contact',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      account: { type: 'lookup', label: 'Account', reference: 'account_35727' },
+    },
+  };
+  const ACCOUNT_DEFINITION = { name: 'account_35727', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+
+  function mount(config: typeof ZH, props: Partial<React.ComponentProps<typeof ListView>> = {}) {
+    const ds = {
+      find: vi.fn(async (object: string) =>
+        object === 'account_35727'
+          ? { data: [{ id: 'acc_1', name: 'Globex' }], total: 1 }
+          : { data: [{ id: 'c1', name: 'Ada', account: 'acc_1' }], total: 1 },
+      ),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (object: string) =>
+        structuredClone(object === 'account_35727' ? ACCOUNT_DEFINITION : DEFINITION),
+      ),
+    };
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: [{ field: 'name' }, { field: 'account' }],
+      filter: [['account', '=', 'acc_1']],
+    } as unknown as ListViewSchema;
+    render(
+      <I18nProvider config={config}>
+        <SchemaRendererProvider dataSource={ds as any}>
+          <ListView schema={schema} dataSource={ds as any} {...props} />
+        </SchemaRendererProvider>
+      </I18nProvider>,
+    );
+    return ds;
+  }
+
+  const slot = () => screen.getByTestId('list-condition-row');
+  const recordReads = (ds: { find: ReturnType<typeof vi.fn> }) => ds.find.mock.calls.filter(([object]) => object === OBJECT);
+
+  beforeEach(() => window.localStorage.clear());
+
+  it.each([
+    ['zh', ZH],
+    ['en', EN],
+  ])('%s: a condition the host draws is no locked chip and no Reset, and still filters the records', async (_lang, config) => {
+    const ds = mount(config, { hostDrawnConditionFields: ['account'] });
+    await waitFor(() => expect(recordReads(ds).length).toBeGreaterThan(0));
+    await act(async () => {});
+    expect(JSON.stringify(recordReads(ds).at(-1)![1])).toContain('acc_1');
+    expect(within(slot()).queryByTestId('view-condition-chip')).toBeNull();
+    expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
+    // The row is resident (objectstack#35878): no chip, only the dashed
+    // 「Sort」 and 「Filter」 buttons.
+    expect(within(slot()).getByTestId('condition-add-filter')).toHaveAttribute('data-empty', 'true');
+  });
+
+  it.each([
+    ['zh', ZH, '：', 'Account：= Globex'],
+    ['en', EN, ': ', 'Account: = Globex'],
+  ])('%s: a saved view filtered on a lookup locks a chip that names the record, not its id, and draws no Reset', async (_lang, config, _sep, text) => {
+    mount(config);
+    const chip = await within(slot()).findByTestId('view-condition-chip');
+    await waitFor(() => expect(chip.textContent).toBe(text));
+    expect(chip.textContent).not.toContain('acc_1');
+    expect(within(slot()).queryByTestId('condition-reset')).toBeNull();
+  });
+
+  it.each([
+    ['zh', ZH, '重置'],
+    ['en', EN, 'Reset'],
+  ])('%s: once the reader adds a condition of their own, one Reset is drawn', async (_lang, config, label) => {
+    mount(config, {
+      hostDrawnConditionFields: ['account'],
+      initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'name', operator: 'contains', value: 'A' }] },
+    });
+    const reset = await within(slot()).findByTestId('condition-reset');
+    expect(reset).toHaveTextContent(label);
+    expect(within(slot()).getAllByTestId('condition-reset')).toHaveLength(1);
+    expect(within(slot()).queryByTestId('view-condition-chip')).toBeNull();
+  });
+});
 
 // ── ListView.concurrencyTokenProjection-12292 ───────────────────────────────────
 
@@ -174,14 +387,15 @@ describe('ListView.concurrencyTokenProjection-12292', () => {
   afterEach(() => cleanup());
 
   describe('ListView — an inline-editable grid\'s rows carry their concurrency token (objectui#12292)', () => {
-    it('asks for `updated_at` when the grid opens in inline-edit mode, though no column shows it', async () => {
-      const { lastSelect } = await mount({ inlineEdit: true });
+    it('asks for `updated_at` when the grid is editable in place, though no column shows it', async () => {
+      // objectstack#35684 — a view that declares nothing is editable.
+      const { lastSelect } = await mount({});
       await waitFor(() => expect(lastSelect()).toContain('updated_at'));
       expect(lastSelect()).toEqual(expect.arrayContaining(['id', 'title', 'estimate_hours']));
     });
 
-    it('does not ask for it while the grid is not in inline-edit mode', async () => {
-      const { dataSource, lastSelect } = await mount({});
+    it('does not ask for it when the view turns in-place editing off', async () => {
+      const { dataSource, lastSelect } = await mount({ userActions: { editInline: false } });
       await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
       expect(dataSource.find.mock.calls.length).toBeGreaterThan(0);
       for (const call of dataSource.find.mock.calls) {
@@ -387,6 +601,7 @@ describe('ListView.emptyStateAccess-25898', () => {
     userId: USER,
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: ['member'],
     permissionSets: ['member'],
     objects: { [OBJECT]: bits },
@@ -1263,6 +1478,84 @@ describe('ListView.onRowsChange-26679', () => {
   });
 });
 
+// ── ListView.onFindParamsChange-36554 ───────────────────────────────────────────
+
+/**
+ * objectstack-ai/objectstack#36554 — `ListView` reports the query behind the
+ * rows it shows (`onFindParamsChange`): the exact params of the read that
+ * drew them, so a host can re-issue it past the page drawn (the dashboard
+ * drill reads its whole result's ids with it). Answered where `onRowsChange`
+ * answers with rows; a kind with no row sequence (a calendar) answers `null`.
+ */
+describe('ListView.onFindParamsChange-36554', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_lead';
+  const objectDef = {
+    name: OBJECT,
+    label: 'Lead',
+    fields: {
+      id: { name: 'id', type: 'text' },
+      name: { name: 'name', type: 'text', label: 'Name' },
+      status: {
+        name: 'status', type: 'select', label: 'Status',
+        options: [{ value: 'new', label: 'New' }, { value: 'won', label: 'Won' }],
+      },
+      created_at: { name: 'created_at', type: 'datetime', label: 'Created' },
+    },
+  };
+  const ROWS = [
+    { id: 'l_3', name: 'Mira Costa', status: 'new' },
+    { id: 'l_1', name: 'Kai Watanabe', status: 'won' },
+  ];
+
+  function mount(schemaExtra: Record<string, unknown>) {
+    const dataSource = {
+      find: vi.fn(async () => ({ data: ROWS, total: 12 })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async (name: string) => (name === OBJECT ? objectDef : null)),
+    } as any;
+    const onFindParamsChange = vi.fn();
+    render(
+      <SchemaRendererProvider dataSource={dataSource}>
+        <ListView
+          schema={{ type: 'list-view', objectName: OBJECT, columns: ['name', 'status'], ...schemaExtra } as any}
+          dataSource={dataSource}
+          onFindParamsChange={onFindParamsChange}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { dataSource, onFindParamsChange };
+  }
+
+  afterEach(() => cleanup());
+
+  it('a paged grid reports the params of the read that drew its rows', async () => {
+    const { dataSource, onFindParamsChange } = mount({
+      viewType: 'grid',
+      filter: [['status', '=', 'new']],
+      sort: [{ field: 'name', order: 'asc' }],
+    });
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+    await waitFor(() => expect(onFindParamsChange.mock.calls.at(-1)?.[0]).toBeTruthy());
+    expect(onFindParamsChange.mock.calls.at(-1)?.[0]).toEqual(dataSource.find.mock.calls.at(-1)?.[1]);
+    expect(JSON.stringify(onFindParamsChange.mock.calls.at(-1)?.[0].$filter)).toContain('new');
+  });
+
+  it('control: a calendar has no row sequence and reports no query', async () => {
+    const { dataSource, onFindParamsChange } = mount({
+      viewType: 'calendar',
+      options: { calendar: { startDateField: 'created_at' } },
+    });
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+    await waitFor(() => expect(onFindParamsChange).toHaveBeenCalled());
+    expect(onFindParamsChange.mock.calls.every(([params]) => params === null)).toBe(true);
+  });
+});
+
 // ── ListView.printButtonSemantics ────────────────────────────────────────────
 
 /**
@@ -1416,6 +1709,154 @@ describe('ListView.printButtonSemantics', () => {
       const cluster = container.querySelector('[data-print-hide]');
       expect(cluster).not.toBeNull();
       expect(cluster).toContainElement(screen.getByTestId('print-button'));
+    });
+  });
+});
+
+// ── ListView.queueToggleOwnerPin-34580 ──────────────────────────────────────
+
+/**
+ * objectstack#34580 — the "In a queue" toggle (ADR-0142 D3) is withheld on a
+ * view whose own filter requires `owner_id` to hold a value. The toggle AND-s
+ * `owner_id is_empty`, so beside `owner_id equals {current_user_id}` (HotCRM's
+ * "My Open Deals") it could only ever empty the list. A condition inside an OR
+ * group does not pin. Withheld, the toggle adds nothing to the query, and a
+ * view that offers it again shows it off.
+ *
+ * The toggle's own offer rules (the injected column, `hasAnyQueue`, `objectsUsingQueues`, storage)
+ * are pinned in `ListView.queueSittingFilter-25769.test.tsx`.
+ */
+describe('ListView.queueToggleOwnerPin-34580', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'opportunity_34580';
+  const USER = 'u_34580';
+  const OWNER_IS_ME = { field: 'owner_id', operator: 'equals', value: '{current_user_id}' };
+  const STAGE_OPEN = { field: 'stage', operator: 'not_in', value: ['closed_won', 'closed_lost'] };
+  /** HotCRM's "My Open Deals" filter, as the view stores it. */
+  const MY_OPEN_DEALS = [OWNER_IS_ME, STAGE_OPEN];
+  /** "All Opportunities": no owner condition. */
+  const ALL_OPEN = [STAGE_OPEN];
+
+  const makeDataSource = () =>
+    ({
+      find: vi.fn(async () => []),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => ({
+        name: OBJECT,
+        fields: {
+          name: { name: 'name', type: 'text' },
+          stage: { name: 'stage', type: 'select' },
+          owner_id: { name: 'owner_id', type: 'lookup' },
+          queue: { name: 'queue', type: 'text', system: true, hidden: true },
+        },
+      })),
+    }) as any;
+
+  const session: MePermissionsAuthenticatedResponse = {
+    authenticated: true,
+    userId: USER,
+    tenantId: 'org_34580',
+    hasAnyQueue: true,
+    objectsUsingQueues: [OBJECT],
+    positions: [],
+    permissionSets: ['member_default'],
+    objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+    fields: {},
+  };
+
+  const tree = (dataSource: any, filter: unknown) => {
+    const schema = { type: 'list-view', objectName: OBJECT, columns: ['name', 'stage'], filter } as unknown as ListViewSchema;
+    return (
+      <SchemaRendererProvider dataSource={dataSource}>
+        <FilterScopeProvider currentUserId={USER}>
+          <MePermissionsProvider initialPermissions={session}>
+            <ListView schema={schema} dataSource={dataSource} />
+          </MePermissionsProvider>
+        </FilterScopeProvider>
+      </SchemaRendererProvider>
+    );
+  };
+
+  const lastFilter = (dataSource: any) => JSON.stringify(dataSource.find.mock.calls.at(-1)?.[1]?.$filter ?? null);
+  const QUEUE_SITTING = '["owner_id","is_empty",true],["queue","is_not_empty",true]';
+
+  /** A mount that renders no toggle: wait for the definition and a query built after it. */
+  async function settled(dataSource: any) {
+    await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
+    await waitFor(() => expect(dataSource.find).toHaveBeenCalled());
+  }
+
+  afterEach(() => cleanup());
+
+  describe('viewFilterRequiresOwner — a top-level AND condition that needs a value', () => {
+    it('pins on equals, in and is_not_empty, in every filter shape the list lowers', () => {
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'equals', value: USER }, STAGE_OPEN])).toBe(true);
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'in', value: [USER, 'u2'] }])).toBe(true);
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'is_not_empty' }])).toBe(true);
+      expect(viewFilterRequiresOwner(['owner_id', '=', USER])).toBe(true);
+      expect(viewFilterRequiresOwner(['and', ['stage', '=', 'open'], ['and', ['owner_id', 'eq', USER]]])).toBe(true);
+      expect(viewFilterRequiresOwner([['stage', '=', 'open'], ['owner_id', 'isNotEmpty', true]])).toBe(true);
+      expect(viewFilterRequiresOwner({ owner_id: USER, stage: 'open' })).toBe(true);
+    });
+
+    it('does not pin inside an OR group, nor on a condition an unowned row can meet', () => {
+      expect(viewFilterRequiresOwner([{ or: [OWNER_IS_ME, { field: 'stage', operator: 'equals', value: 'new' }] }])).toBe(false);
+      expect(viewFilterRequiresOwner(['or', ['owner_id', '=', USER], ['stage', '=', 'new']])).toBe(false);
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'not_equals', value: USER }])).toBe(false);
+      expect(viewFilterRequiresOwner([{ field: 'owner_id', operator: 'is_empty' }])).toBe(false);
+      expect(viewFilterRequiresOwner(['owner_id', '=', null])).toBe(false);
+      expect(viewFilterRequiresOwner(['owner_id', 'in', [USER, null]])).toBe(false);
+      expect(viewFilterRequiresOwner(ALL_OPEN)).toBe(false);
+      expect(viewFilterRequiresOwner(undefined)).toBe(false);
+    });
+  });
+
+  describe('ListView — the toggle on a view that pins the owner (objectstack#34580)', () => {
+    it('"My Open Deals": no toggle, and the query carries no queue condition', async () => {
+      const dataSource = makeDataSource();
+      render(tree(dataSource, MY_OPEN_DEALS));
+      await settled(dataSource);
+      await waitFor(() => expect(lastFilter(dataSource)).toContain(USER));
+      expect(screen.queryByTestId('queue-sitting-filter')).toBeNull();
+      expect(lastFilter(dataSource)).not.toContain('is_empty');
+    });
+
+    it('"All Opportunities": the toggle, and pressing it still narrows to the rows sitting in a queue', async () => {
+      const dataSource = makeDataSource();
+      render(tree(dataSource, ALL_OPEN));
+      const toggle = await screen.findByTestId('queue-sitting-filter');
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      fireEvent.click(toggle);
+      await waitFor(() => expect(lastFilter(dataSource)).toContain(QUEUE_SITTING));
+      expect(lastFilter(dataSource)).toContain('closed_won');
+    });
+
+    it('an owner condition inside an OR group keeps the toggle', async () => {
+      const dataSource = makeDataSource();
+      render(tree(dataSource, [{ or: [OWNER_IS_ME, { field: 'stage', operator: 'equals', value: 'new' }] }]));
+      expect(await screen.findByTestId('queue-sitting-filter')).toBeTruthy();
+    });
+
+    it('switching views: a pressed toggle leaves no hidden filter on the pinned view, and comes back off', async () => {
+      const dataSource = makeDataSource();
+      const { rerender } = render(tree(dataSource, ALL_OPEN));
+      fireEvent.click(await screen.findByTestId('queue-sitting-filter'));
+      await waitFor(() => expect(lastFilter(dataSource)).toContain(QUEUE_SITTING));
+
+      rerender(tree(dataSource, MY_OPEN_DEALS));
+      await waitFor(() => expect(lastFilter(dataSource)).toContain(USER));
+      expect(screen.queryByTestId('queue-sitting-filter')).toBeNull();
+      expect(lastFilter(dataSource)).not.toContain('is_empty');
+
+      rerender(tree(dataSource, ALL_OPEN));
+      await waitFor(() => expect(lastFilter(dataSource)).not.toContain(USER));
+      const toggle = await screen.findByTestId('queue-sitting-filter');
+      expect(toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(lastFilter(dataSource)).not.toContain('is_empty');
     });
   });
 });
@@ -1702,6 +2143,234 @@ describe('ListView.refusedSortNotSent-30024', () => {
   });
 });
 
+// ── ListView.draftOnlyColumn-34807 ───────────────────────────────────────────
+
+/**
+ * objectstack#34807 (ruling 6946403206) — under the console's draft preview a
+ * list column on a field that exists only in the draft made the data door
+ * refuse the whole list query (`400 INVALID_FIELD`): it validates every
+ * `$select`, `$filter` and `$orderby` name against the PUBLISHED object.
+ *
+ * In the preview the host's data source answers `getObjectSchema` with the
+ * published document plus each draft-only field, marked with the
+ * underscore-private `_draftOnly` key (`@object-ui/app-shell`'s
+ * `preview/unpublishedObjectReads.ts` sets it; the literal is pinned here and
+ * there). `ListView` keeps such a name out of every request and out of the
+ * Filter and Sort pickers, draws the column empty under the draft label, and
+ * says in one line that a filter or sort on it was left out.
+ *
+ * The data source below answers as the data door does: any request that names
+ * `priority` is refused with `400 INVALID_FIELD`. CONTROL: the same view with
+ * `priority` published (no marker) asks for it exactly as before, with no note.
+ */
+describe('ListView.draftOnlyColumn-34807', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'tracker_task';
+  const PUBLISHED_FIELDS = {
+    title: { name: 'title', type: 'text', label: 'Title' },
+    status: { name: 'status', type: 'select', label: 'Status', options: [{ label: 'Open', value: 'open' }] },
+  };
+  /** The field the draft adds: its draft definition, marked by the preview's data source. */
+  const DRAFT_PRIORITY = {
+    name: 'priority',
+    type: 'select',
+    label: 'Priority (draft)',
+    options: [{ label: 'High', value: 'high' }],
+    _draftOnly: true,
+  };
+
+  function makeDataSource(opts: { draft: boolean; servesSignal?: boolean }) {
+    const published = opts.draft
+      ? PUBLISHED_FIELDS
+      : { ...PUBLISHED_FIELDS, priority: { name: 'priority', type: 'select', label: 'Priority', options: DRAFT_PRIORITY.options } };
+    return {
+      find: vi.fn(async (_object: string, params: Record<string, unknown>) => {
+        if (opts.draft && JSON.stringify(params ?? {}).includes('"priority')) {
+          throw Object.assign(new Error(`Unknown field 'priority' on object '${OBJECT}'`), {
+            status: 400,
+            code: 'INVALID_FIELD',
+          });
+        }
+        return { data: [{ id: 't1', title: 'Write the spec', status: 'open' }], total: 1 };
+      }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => {
+        const schema = {
+          name: OBJECT,
+          label: 'Task',
+          fields: opts.draft ? { ...published, priority: { ...DRAFT_PRIORITY } } : published,
+        };
+        // The published projection: it names no draft-only field.
+        if (opts.servesSignal) attachObjectSortability(schema, resolveObjectSortability({ name: OBJECT, fields: published } as any));
+        return schema;
+      }),
+    };
+  }
+
+  async function mountList(
+    opts: { draft: boolean; servesSignal?: boolean },
+    schemaExtra: Record<string, unknown> = {},
+    props: Record<string, unknown> = {},
+  ) {
+    const dataSource = makeDataSource(opts);
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: ['title', 'priority'],
+      compactToolbar: false,
+      // Read-only: an editable list also asks for `updated_at` (ListView.harness, concurrencyTokenProjection-12292).
+      userActions: { editInline: false },
+      ...schemaExtra,
+    } as unknown as ListViewSchema;
+    render(
+      <SchemaRendererProvider dataSource={dataSource as any}>
+        <ListView schema={schema} dataSource={dataSource as any} {...props} />
+      </SchemaRendererProvider>,
+    );
+    await screen.findByText('Write the spec');
+    await Promise.allSettled(dataSource.find.mock.results.map((r: any) => r.value));
+    const lastParams = () => (dataSource.find.mock.calls.at(-1)?.[1] ?? {}) as Record<string, any>;
+    return { dataSource, lastParams };
+  }
+
+  const notice = () => screen.queryByTestId('list-draft-only-query-notice');
+  const everyRequestOmitsPriority = (dataSource: ReturnType<typeof makeDataSource>) => {
+    expect(dataSource.find).toHaveBeenCalled();
+    for (const [, params] of dataSource.find.mock.calls) {
+      expect(JSON.stringify(params ?? {})).not.toContain('"priority');
+    }
+  };
+
+  const text = (el: Element | null | undefined) => el?.textContent?.trim() ?? '';
+  async function comboboxOptions(trigger: HTMLElement): Promise<string[]> {
+    fireEvent.click(trigger);
+    const listbox = await screen.findByRole('listbox');
+    const labels = within(listbox).getAllByRole('option').map(text);
+    fireEvent.keyDown(listbox, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
+    return labels;
+  }
+  async function popoverFirstComboboxOptions(name: RegExp): Promise<string[]> {
+    const trigger = screen.getByRole('button', { name });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'true'));
+    const content = document.getElementById(trigger.getAttribute('aria-controls') ?? '');
+    if (!content) throw new Error(`no popover content for "${text(trigger)}"`);
+    try {
+      // The trigger opens the shared field list (objectstack#35549); its
+      // advanced step is the builder, whose first picker reads the same list.
+      // Both are read, so a field either offers is caught.
+      const listed = Array.from(content.querySelectorAll('[role="option"][data-field]')).map(text);
+      // A sort in force: the one sort chip opens every level at once
+      // (objectstack#35878 on objectstack#35876), no field list before it.
+      const direct = within(content).queryByTestId('sort-chip-panel');
+      if (!direct) fireEvent.click(within(content).getByTestId(/^(filter|sort)-panel-open-advanced$/));
+      const advanced = direct ?? (await within(content).findByTestId(/^(filter|sort)-panel-advanced$/));
+      return [...listed, ...(await comboboxOptions(within(advanced).getAllByRole('combobox')[0]))];
+    } finally {
+      fireEvent.click(trigger);
+      await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'));
+    }
+  }
+
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanup());
+
+  it('draws the draft-only column empty under its draft label, and never asks for it', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    expect(screen.getAllByText('Priority (draft)').length).toBeGreaterThan(0);
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$select).toEqual(['id', 'title']);
+    expect(notice()).toBeNull();
+  });
+
+  it('leaves a viewer filter on it out of $filter, keeps the rest, and says so', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true }, {}, {
+      initialFilters: {
+        id: 'root',
+        logic: 'and',
+        conditions: [
+          { id: 'c1', field: 'priority', operator: 'equals', value: 'high' },
+          { id: 'c2', field: 'title', operator: 'contains', value: 'spec' },
+        ],
+      },
+    });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    everyRequestOmitsPriority(dataSource);
+    expect(JSON.stringify(lastParams().$filter)).toContain('"title"');
+    expect(notice()).not.toBeNull();
+    expect(text(notice())).toContain('Priority (draft)');
+  });
+
+  it('leaves a sort on it out of $orderby with no projection served, and says so', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true }, {
+      sort: [{ field: 'priority', order: 'desc' }, { field: 'title', order: 'asc' }],
+    });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$orderby).toEqual([{ field: 'title', order: 'asc' }]);
+    expect(text(notice())).toContain('Priority (draft)');
+  });
+
+  it('the served published projection refuses it too: the sort leaves it out (readObjectSortability)', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true, servesSignal: true }, {
+      sort: [{ field: 'priority', order: 'desc' }, { field: 'title', order: 'asc' }],
+    });
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$orderby).toEqual([{ field: 'title', order: 'asc' }]);
+  });
+
+  it('offers it in neither the Filter panel nor the Sort picker', async () => {
+    await mountList({ draft: true }, { sort: [{ field: 'title', order: 'asc' }] }, {
+      initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'title', operator: 'contains', value: 'a' }] },
+    });
+    const filterOptions = await popoverFirstComboboxOptions(/^(add )?filter$/i);
+    expect(filterOptions).toContain('Title');
+    expect(filterOptions).not.toContain('Priority (draft)');
+    const sortOptions = await popoverFirstComboboxOptions(/^sort/i);
+    expect(sortOptions).toContain('Title');
+    expect(sortOptions).not.toContain('Priority (draft)');
+  });
+
+  it('leaves it out of $searchFields, keeping the search and the rest of the declared fields', async () => {
+    const { dataSource, lastParams } = await mountList({ draft: true }, { searchableFields: ['title', 'priority'] }, {
+      initialSearchTerm: 'spec',
+    });
+    expect(screen.queryByTestId('list-error-state')).toBeNull();
+    everyRequestOmitsPriority(dataSource);
+    expect(lastParams().$search).toBe('spec');
+    expect(lastParams().$searchFields).toEqual(['title']);
+  });
+
+  it('CONTROL: with the field published, $searchFields carries it as declared', async () => {
+    const { lastParams } = await mountList({ draft: false }, { searchableFields: ['title', 'priority'] }, {
+      initialSearchTerm: 'spec',
+    });
+    expect(lastParams().$search).toBe('spec');
+    expect(lastParams().$searchFields).toEqual(['title', 'priority']);
+  });
+
+  it('CONTROL: the same view with the field published asks for it as before, with no note', async () => {
+    const { lastParams } = await mountList({ draft: false }, {
+      sort: [{ field: 'priority', order: 'desc' }],
+    }, {
+      initialFilters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'priority', operator: 'equals', value: 'high' }] },
+    });
+    expect(lastParams().$select).toEqual(['id', 'title', 'priority']);
+    expect(lastParams().$orderby).toEqual([{ field: 'priority', order: 'desc' }]);
+    expect(JSON.stringify(lastParams().$filter)).toContain('"priority"');
+    expect(notice()).toBeNull();
+    const filterOptions = await popoverFirstComboboxOptions(/^(add )?filter$/i);
+    expect(filterOptions).toContain('Priority');
+  });
+});
+
 // ── ListView.switcherChrome-7547 ─────────────────────────────────────────────
 
 /**
@@ -1860,13 +2529,196 @@ describe('ListView.switcherChrome-7547', () => {
   });
 });
 
+// ── ListView.exportCsvGate-35619 ────────────────────────────────────────────────
+
+/**
+ * objectstack#35619 — the object's `userActions.exportCsv: false` hides the
+ * list's Export entry, every format, in both toolbar forms: the wide form's
+ * Export button and the Display panel's export footer. The verdict is the
+ * object's, read off the definition the list fetches, so each case waits for
+ * the row read, which runs only once that definition has settled. The
+ * CONTROLS render the same view over an object that does not author the key,
+ * and over one that authors `true`, and find the entry: the probe can see it.
+ */
+describe('ListView.exportCsvGate-35619', () => {
+  restoreAfterBlock();
+
+  function makeDataSource(userActions?: Record<string, unknown>) {
+    return {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'account',
+        fields: { name: { type: 'text', label: 'Name' } },
+        ...(userActions ? { userActions } : {}),
+      }),
+    } as any;
+  }
+
+  async function renderList(compactToolbar: boolean, userActions?: Record<string, unknown>) {
+    const ds = makeDataSource(userActions);
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView
+          schema={{
+            type: 'list-view',
+            objectName: 'account',
+            viewType: 'grid',
+            fields: ['name'],
+            exportOptions: { formats: ['csv', 'json'] },
+            compactToolbar,
+          } as ListViewSchema}
+          dataSource={ds}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('account'));
+    // The row read waits for the definition, so once it runs the verdict is the settled one.
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+  }
+
+  const wideExport = () => screen.queryByRole('button', { name: /^export$/i });
+
+  function displayExportEntries() {
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const panel = screen.getByTestId('view-settings-content');
+    return within(panel).queryAllByTestId(/^display-export-(csv|xlsx|json)$/);
+  }
+
+  it('wide toolbar: exportCsv false draws no Export button', async () => {
+    await renderList(false, { exportCsv: false });
+    expect(wideExport()).toBeNull();
+  });
+
+  it('wide toolbar CONTROL: an object that does not author exportCsv keeps the Export button', async () => {
+    await renderList(false);
+    expect(wideExport()).toBeInTheDocument();
+  });
+
+  it('wide toolbar CONTROL: exportCsv true keeps the Export button', async () => {
+    await renderList(false, { exportCsv: true });
+    expect(wideExport()).toBeInTheDocument();
+  });
+
+  it('Display panel: exportCsv false draws no export entry, in any format', async () => {
+    await renderList(true, { exportCsv: false });
+    expect(displayExportEntries()).toHaveLength(0);
+  });
+
+  it('Display panel CONTROL: an object that does not author exportCsv keeps both formats', async () => {
+    await renderList(true);
+    expect(displayExportEntries().map((el) => el.getAttribute('data-testid'))).toEqual([
+      'display-export-csv',
+      'display-export-json',
+    ]);
+  });
+});
+
+// ── ListView.toolbarTrailingExportDoor-36113 ────────────────────────────────────
+
+/**
+ * objectstack#36113 — `toolbarTrailing` is handed the list's export door with
+ * its tools, so a host draws 「Import / Export」 at the view bar's end. The door
+ * is the export verdict the 视图设置 footer reads: absent where that footer
+ * offers no export, and its `run` is the footer's export. The footer keeps its
+ * entries.
+ */
+describe('ListView.toolbarTrailingExportDoor-36113', () => {
+  restoreAfterBlock();
+
+  function makeDataSource(userActions?: Record<string, unknown>) {
+    return {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      exportDownload: vi.fn().mockResolvedValue(new Blob(['name\nAcme'])),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'account',
+        fields: { name: { type: 'text', label: 'Name' } },
+        ...(userActions ? { userActions } : {}),
+      }),
+    } as any;
+  }
+
+  async function renderList(userActions?: Record<string, unknown>) {
+    const ds = makeDataSource(userActions);
+    const seen: Array<ListToolbarTrailingState> = [];
+    render(
+      <SchemaRendererProvider dataSource={ds}>
+        <ListView
+          schema={{
+            type: 'list-view',
+            objectName: 'account',
+            viewType: 'grid',
+            fields: ['name'],
+            exportOptions: { formats: ['csv', 'json'] },
+          } as ListViewSchema}
+          dataSource={ds}
+          toolbarTrailing={(tools, state) => {
+            seen.push(state);
+            return <span data-testid="host-end">{tools}{state.export ? <button type="button" data-testid="host-export" onClick={() => state.export!.run('csv')}>{state.export.formats.join(',')}</button> : null}</span>;
+          }}
+        />
+      </SchemaRendererProvider>,
+    );
+    await waitFor(() => expect(ds.getObjectSchema).toHaveBeenCalledWith('account'));
+    await waitFor(() => expect(ds.find).toHaveBeenCalled());
+    return { ds, seen };
+  }
+
+  it('the host is handed the formats the footer offers, and the footer keeps them', async () => {
+    await renderList();
+    expect(await screen.findByTestId('host-export')).toHaveTextContent('csv,json');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const panel = screen.getByTestId('view-settings-content');
+    expect(within(panel).queryAllByTestId(/^display-export-(csv|json)$/)).toHaveLength(2);
+  });
+
+  it('the door runs the list\'s export', async () => {
+    const { ds } = await renderList();
+    fireEvent.click(await screen.findByTestId('host-export'));
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'csv' })));
+  });
+
+  it('the door refuses a format it does not offer', async () => {
+    const { ds, seen } = await renderList();
+    await screen.findByTestId('host-export');
+    const door = seen.at(-1)!.export!;
+    expect(door.formats).not.toContain('xlsx');
+    await act(async () => {
+      door.run('xlsx');
+      door.run('pdf');
+    });
+    expect(ds.exportDownload).not.toHaveBeenCalled();
+    // The control: an offered format through the same handle does export.
+    await act(async () => {
+      door.run('json');
+    });
+    await waitFor(() => expect(ds.exportDownload).toHaveBeenCalledWith('account', expect.objectContaining({ format: 'json' })));
+    expect(ds.exportDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('exportCsv false: no door, as the footer draws no entry', async () => {
+    const { seen } = await renderList({ exportCsv: false });
+    await screen.findByTestId('host-end');
+    expect(screen.queryByTestId('host-export')).toBeNull();
+    expect(seen.at(-1)?.export).toBeUndefined();
+  });
+});
+
 // ── ListView.displayMenuClose-12621 ─────────────────────────────────────────────
 
 /**
  * objectui#12621 — the list toolbar's Display menu closes once a layout is
  * chosen, and on Escape, returning focus to the Display trigger. The panel's
- * toggles keep it open: the control below flips Row numbers and density and
- * finds the panel still drawn.
+ * own settings keep it open: the control below clears the row colour and
+ * picks a row height, and finds the panel still drawn. The panel is a menu whose rows open a second
+ * level; the Layout level lists every layout as a radio, at any count.
  */
 describe('ListView.displayMenuClose-12621', () => {
   restoreAfterBlock();
@@ -1942,22 +2794,27 @@ describe('ListView.displayMenuClose-12621', () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   }
 
+  /** Open the menu's Layout level and choose Kanban among its radios. */
+  async function chooseKanban(content: HTMLElement, layouts: string[]) {
+    fireEvent.click(within(content).getByTestId('options-row-layout'));
+    const list = await within(content).findByTestId('view-switcher-list');
+    expect(within(list).getAllByRole('radio').map((r) => r.textContent?.trim())).toEqual(layouts);
+    fireEvent.click(within(list).getByRole('radio', { name: 'Kanban' }));
+  }
+
   describe('the Display menu closes when its work is done (objectui#12621)', () => {
-    it('choosing Kanban in the segmented Layout row closes the menu and focuses the trigger', async () => {
+    it('choosing Kanban on the Layout level closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      const row = within(content).getByTestId('display-layout-row');
-      fireEvent.click(within(row).getByRole('tab', { name: 'Kanban' }));
+      await chooseKanban(content, ['Grid', 'Kanban']);
       await screen.findByTestId('object-kanban-stub');
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('choosing Kanban in the nested Layout dropdown closes the menu and focuses the trigger', async () => {
+    it('with five layouts the level is the same list, and choosing Kanban closes the menu and focuses the trigger', async () => {
       mount(FIVE);
       const { trigger, content } = await openDisplay();
-      const row = within(content).getByTestId('display-layout-row');
-      fireEvent.click(within(row).getByTestId('view-switcher-dropdown'));
-      fireEvent.click(await screen.findByRole('button', { name: 'Kanban' }));
+      await chooseKanban(content, ['Grid', 'Kanban', 'Gallery', 'Calendar', 'Timeline']);
       await screen.findByTestId('object-kanban-stub');
       await expectClosedWithFocusOn(trigger);
     });
@@ -1965,17 +2822,19 @@ describe('ListView.displayMenuClose-12621', () => {
     it('Escape closes the menu and focuses the trigger', async () => {
       mount(TWO);
       const { trigger, content } = await openDisplay();
-      fireEvent.keyDown(within(content).getByTestId('display-row-numbers-toggle'), { key: 'Escape' });
+      fireEvent.keyDown(within(content).getByTestId('options-row-row-height'), { key: 'Escape' });
       await expectClosedWithFocusOn(trigger);
     });
 
-    it('control: toggling Row numbers and cycling density keep the menu open', async () => {
-      mount(TWO);
+    it('control: clearing the row colour and choosing a row height keep the menu open', async () => {
+      // objectstack#35684 took the last switch (Edit inline) off the menu.
+      mount({ ...TWO, userActions: { rowColor: true }, rowColor: { field: 'stage', colors: {} } } as ListViewSchema);
       const { trigger, content } = await openDisplay();
-      const toggle = within(content).getByTestId('display-row-numbers-toggle');
-      fireEvent.click(toggle);
-      await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'));
-      fireEvent.click(within(content).getByTestId('view-settings-density-cycle'));
+      fireEvent.click(within(content).getByTestId('options-row-color'));
+      fireEvent.click(await within(content).findByTestId('options-color-clear'));
+      fireEvent.click(within(content).getByTestId('options-back'));
+      fireEvent.click(await within(content).findByTestId('options-row-row-height'));
+      fireEvent.click(await within(content).findByTestId('options-row-height-spacious'));
       await waitFor(() => expect(screen.getByTestId('toolbar-display-count')).toHaveTextContent('2'));
       expect(screen.getByTestId('view-settings-content')).toBe(content);
       expect(trigger).toHaveAttribute('aria-expanded', 'true');
@@ -2193,7 +3052,8 @@ describe('ListView.nameFieldSelect-13116', () => {
     render(
       <SchemaRendererProvider dataSource={dataSource}>
         <ListView
-          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns } as any}
+          // Read-only: an editable list also asks for `updated_at` (concurrencyTokenProjection-12292 above).
+          schema={{ type: 'list-view', objectName: def.name as string, viewType: 'grid', columns, userActions: { editInline: false } } as any}
           dataSource={dataSource}
         />
       </SchemaRendererProvider>,
@@ -2332,12 +3192,15 @@ describe('ListView.recordDrawerCount-27545', () => {
       await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
     });
 
-    it('a record open in the drawer: the column summaries are drawn beside the count', async () => {
+    // objectstack#35548 — the column summaries left this bar: the grid draws
+    // them as its table's own last row, each under its column, so the list
+    // hands it no `onColumnSummaryChange` and the bar holds the count alone.
+    it('a record open in the drawer: the bar holds the count alone; the summaries are the grid\'s own row', async () => {
       renderList('a1');
       (await screen.findByTestId('grid-probe')).click();
       const bar = await screen.findByTestId('record-count-bar');
-      await waitFor(() => expect(within(bar).getByTestId('record-count-summaries')).toHaveTextContent('Number of Employees: Avg: 10'));
-      expect(within(bar).getByText('4 records')).toBeInTheDocument();
+      await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
+      expect(within(bar).queryByTestId('record-count-summaries')).toBeNull();
     });
   });
 });
@@ -2453,7 +3316,7 @@ describe('ListView.resetSortToDefaultNoProviderFallback', () => {
     );
     await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: /^sort/i }));
-    await screen.findByText('Sort Records');
+    await openAdvancedSort();
   }
 
   describe('ListView reset-sort control — English fallback with no provider (objectui#4396)', () => {
@@ -2570,11 +3433,11 @@ describe('ListView.rowAdornment-13330', () => {
 // ── ListView.setupChrome-12606 ──────────────────────────────────────────────────
 
 /**
- * objectui#12606 — the host prop the console's Setup app sets on its record
- * lists: `defaultRowNumbers` (the grid opens without the `#` numbers). A React
- * prop a host passes, never a view key. The Display control still draws (the
- * maintainer's ruling C on the card withdrew the Display hide rule). The
- * control mounts the same schema without the prop and reads today's shape.
+ * objectui#12606 — the console's Setup app opened its record lists without the
+ * `#` numbers through a host prop, `defaultRowNumbers`. objectstack#35663 took
+ * row numbers off every list, so the prop is gone: no list hands the grid row
+ * numbers, and the Display control still draws (the maintainer's ruling C on
+ * #12606 withdrew the Display hide rule).
  */
 describe('ListView.setupChrome-12606', () => {
   restoreAfterBlock();
@@ -2619,21 +3482,135 @@ describe('ListView.setupChrome-12606', () => {
     if (previousGrid) ComponentRegistry.register('object-grid', previousGrid as any);
   });
 
-  describe('the list’s Setup chrome is one host prop (objectui#12606)', () => {
-    it('`defaultRowNumbers={false}` opens the grid without row numbers; Display still draws, and row numbers off is not a changed setting', async () => {
-      mount({ defaultRowNumbers: false });
+  describe('no list numbers its rows (objectui#12606, objectstack#35663)', () => {
+    it('the grid is handed no row numbers; Display still draws, and nothing counts as changed', async () => {
+      mount();
       await screen.findByTestId('grid-stub');
-      expect(gridProps?.showRowNumbers).toBe(false);
+      expect(gridProps).toBeDefined();
+      expect(gridProps).not.toHaveProperty('showRowNumbers');
       expect(screen.getByTestId('toolbar-display-trigger')).toBeTruthy();
       expect(screen.queryByTestId('toolbar-display-count')).toBeNull();
     });
+  });
+});
 
-    it('CONTROL — without the prop the grid numbers its rows and the bar draws Display', async () => {
-      mount();
-      await screen.findByTestId('grid-stub');
-      expect(gridProps?.showRowNumbers).toBe(true);
-      expect(screen.getByTestId('toolbar-display-trigger')).toBeTruthy();
+// ── ListView.headerMenuHide-35955 ───────────────────────────────────────────────
+
+/**
+ * objectstack#35955 — "Hide column" in the grid's column menu is the same
+ * choice as the eye in the hide-fields lists. The grid hands the column's
+ * field back (`onColumnHide`, pinned through the real grid and table in
+ * plugin-grid's `ObjectGrid.headerMenuHide-35955.test.tsx`); here: the list
+ * writes it through the eye's own writer, so its host hears it on
+ * `onHiddenFieldsChange` (the console holds it in the list's draft, which is
+ * what draws Discard and Save) and the grid is handed the columns without it.
+ * An added column leaves the reader's added fields, as unticking it does. A
+ * key naming no column the list draws reports nothing.
+ *
+ * plugin-grid is not a dependency of plugin-list, so a stub `object-grid`
+ * captures what ListView hands it.
+ */
+describe('ListView.headerMenuHide-35955', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'meeting_35955';
+  const DEFINITION = {
+    name: OBJECT,
+    label: 'Meeting',
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      meeting_date: { type: 'date', label: 'Date' },
+      location: { type: 'text', label: 'Location' },
+      room: { type: 'text', label: 'Room' },
+    },
+  };
+
+  let gridProps: any = null;
+  let previousGrid: ReturnType<typeof ComponentRegistry.get>;
+  beforeAll(() => {
+    previousGrid = ComponentRegistry.get('object-grid');
+    ComponentRegistry.register('object-grid', (props: any) => {
+      gridProps = props;
+      return <div data-testid="grid-stub" />;
     });
+  });
+  afterAll(() => {
+    if (previousGrid) ComponentRegistry.register('object-grid', previousGrid);
+  });
+  beforeEach(() => { gridProps = null; });
+
+  const drawn = () => (gridProps?.columns ?? []).map((c: any) => (typeof c === 'string' ? c : c.field));
+
+  function mount(opts: { hiddenFields?: string[]; added?: string[] } = {}) {
+    const onHiddenFieldsChange = vi.fn();
+    const onAddedFieldsChange = vi.fn();
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'A' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => structuredClone(DEFINITION)),
+    };
+    const schema = {
+      type: 'list-view',
+      objectName: OBJECT,
+      viewType: 'grid',
+      columns: ['name', 'meeting_date', 'location', ...(opts.added ?? [])],
+      ...(opts.hiddenFields ? { hiddenFields: opts.hiddenFields } : {}),
+    } as unknown as ListViewSchema;
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView
+          schema={schema}
+          dataSource={dataSource as never}
+          onHiddenFieldsChange={onHiddenFieldsChange}
+          onAddedFieldsChange={onAddedFieldsChange}
+          addedFields={opts.added ?? []}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { onHiddenFieldsChange, onAddedFieldsChange, dataSource };
+  }
+
+  async function hideFromMenu(field: string) {
+    await waitFor(() => expect(typeof gridProps?.onColumnHide).toBe('function'));
+    await act(async () => { gridProps.onColumnHide(field); });
+  }
+
+  it('hands the grid the column menu\'s hide, and reports it as the eye does: the hidden list, the column gone', async () => {
+    const { onHiddenFieldsChange } = mount();
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date', 'location']));
+    await hideFromMenu('location');
+    expect(onHiddenFieldsChange.mock.calls.at(-1)![0]).toEqual(['location']);
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date']));
+  });
+
+  it('adds to the columns already hidden, and hiding a hidden one again reports nothing', async () => {
+    const { onHiddenFieldsChange } = mount({ hiddenFields: ['meeting_date'] });
+    await waitFor(() => expect(drawn()).toEqual(['name', 'location']));
+    await hideFromMenu('location');
+    expect(onHiddenFieldsChange).toHaveBeenCalledTimes(1);
+    expect([...onHiddenFieldsChange.mock.calls[0][0]].sort()).toEqual(['location', 'meeting_date']);
+    await hideFromMenu('meeting_date');
+    expect(onHiddenFieldsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('a column the reader added leaves their added fields instead of being hidden', async () => {
+    const { onHiddenFieldsChange, onAddedFieldsChange } = mount({ added: ['room'] });
+    await waitFor(() => expect(drawn()).toContain('room'));
+    await hideFromMenu('room');
+    expect(onAddedFieldsChange.mock.calls.at(-1)![0]).toEqual([]);
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+  });
+
+  it('a key that names no column the list draws reports nothing', async () => {
+    const { onHiddenFieldsChange, onAddedFieldsChange } = mount();
+    await waitFor(() => expect(drawn()).toEqual(['name', 'meeting_date', 'location']));
+    await hideFromMenu('_row_number');
+    expect(onHiddenFieldsChange).not.toHaveBeenCalled();
+    expect(onAddedFieldsChange).not.toHaveBeenCalled();
+    expect(drawn()).toEqual(['name', 'meeting_date', 'location']);
   });
 });
 
@@ -2660,12 +3637,15 @@ describe('ListView.groupPickerUnstored-32631', () => {
   const TITLE = { field: 'display_title', order: 'asc' as const, collapsed: false };
   const STATUS = { field: 'status', order: 'asc' as const, collapsed: false };
 
-  const objectDef = (titleType: 'formula' | 'text') => ({
+  // objectstack#36204 — the Group editors offer select-like fields only, so
+  // the stored fields here are selects: the formula is what these pins are
+  // about, and a select formula (`returnType`) is still a formula.
+  const objectDef = (titleType: 'formula' | 'text' | 'select') => ({
     name: OBJECT,
     fields: {
       display_title: { type: titleType, label: 'Title', ...(titleType === 'formula' ? { expression: 'subject' } : {}) },
-      subject: { type: 'text', label: 'Subject' },
-      status: { type: 'text', label: 'Status' },
+      subject: { type: 'select', label: 'Subject' },
+      status: { type: 'select', label: 'Status' },
     },
   });
 
@@ -2673,7 +3653,7 @@ describe('ListView.groupPickerUnstored-32631', () => {
   let previousGrid: ReturnType<typeof ComponentRegistry.get>;
 
   function mount(opts: {
-    titleType?: 'formula' | 'text';
+    titleType?: 'formula' | 'text' | 'select';
     compactToolbar?: boolean;
     grouping?: { fields: Array<typeof TITLE> };
     viewGrouping?: { fields: Array<typeof TITLE> } | undefined;
@@ -2730,32 +3710,44 @@ describe('ListView.groupPickerUnstored-32631', () => {
   });
 
   describe('the Group editors do not offer a formula field (objectstack#32631)', () => {
-    it('the toolbar Group panel: "Add group field" seeds the first stored field, and the level lists stored fields only', async () => {
+    // objectstack#36204 — "Add group field" groups by nothing yet: it opens
+    // the field dropdown, and that list is the one these pins read.
+    async function addAndRead(scope: { getByTestId: (id: string) => HTMLElement }): Promise<string[]> {
+      fireEvent.click(scope.getByTestId('grouping-add'));
+      const listbox = await screen.findByRole('listbox');
+      return within(listbox).getAllByRole('option').map((o) => o.textContent ?? '');
+    }
+
+    it('the toolbar Group panel: "Add group field" lists stored fields only, and the pick is the level', async () => {
       const { onGroupingChange } = mount();
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByRole('button', { name: /group/i }));
       await screen.findByTestId('group-field-list');
-      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(await addAndRead(screen)).toEqual(['Subject', 'Status']);
+      expect(onGroupingChange).not.toHaveBeenCalled();
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Subject' }));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
     });
 
-    it('the Display popover\'s Group section offers the same', async () => {
+    it('the Display popover\'s Group level offers the same', async () => {
       const { onGroupingChange } = mount({ compactToolbar: true });
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
       const content = await screen.findByTestId('view-settings-content');
-      fireEvent.click(within(content).getByTestId('grouping-add'));
-      expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [{ field: 'subject', order: 'asc', collapsed: false }] });
-      expect(await openOptions(within(content).getByTestId('grouping-field-0'))).toEqual(['Subject', 'Status']);
+      fireEvent.click(within(content).getByTestId('options-row-group'));
+      await within(content).findByTestId('grouping-add');
+      expect(await addAndRead(within(content))).toEqual(['Subject', 'Status']);
+      expect(onGroupingChange).not.toHaveBeenCalled();
     });
 
-    it('CONTROL — the same field stored (`text`) is offered first, in both editors', async () => {
-      const { onGroupingChange } = mount({ titleType: 'text' });
+    it('CONTROL — the same field stored (a `select`) is offered first', async () => {
+      const { onGroupingChange } = mount({ titleType: 'select' });
       await screen.findByTestId('grid-stub');
       fireEvent.click(screen.getByRole('button', { name: /group/i }));
       await screen.findByTestId('group-field-list');
-      fireEvent.click(screen.getByTestId('grouping-add'));
+      expect(await addAndRead(screen)).toEqual(['Title', 'Subject', 'Status']);
+      fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'Title' }));
       expect(onGroupingChange).toHaveBeenLastCalledWith({ fields: [TITLE] });
       expect(await openOptions(screen.getByTestId('grouping-field-0'))).toEqual(['Title', 'Subject', 'Status']);
     });
@@ -2795,5 +3787,81 @@ describe('ListView.groupPickerUnstored-32631', () => {
       expect(gridProps.schema.grouping?.fields).toEqual([TITLE]);
       expect(screen.queryByTestId('list-grouping-unstored-notice')).toBeNull();
     });
+  });
+});
+
+// ── ListView.refreshOnlyDisplay-36002 ───────────────────────────────────────────
+
+/**
+ * objectstack#36002 — the default (Display) toolbar has no Refresh
+ * (objectstack#35878, 「刷新去掉」), so `userActions.refresh` is not a reason to
+ * draw the Display entry. A non-grid view whose every other Display control is
+ * off (no layout switch, Group, Row height, Hide fields, Row colour or Export)
+ * draws no Display entry at all, instead of one that opens a panel with only
+ * its footer. The grid always offers Display (its columns), so the fixture is
+ * a kanban. The CONTROLS: the key still draws the wide toolbar's Refresh, and
+ * the same fixture with one Display control on draws the entry again.
+ */
+describe('ListView.refreshOnlyDisplay-36002', () => {
+  restoreAfterBlock();
+
+  /** Every Display control off; `refresh` is left at its default, on. */
+  const REFRESH_ONLY: ListViewSchema = {
+    type: 'list-view',
+    objectName: 'opportunity',
+    viewType: 'kanban',
+    fields: ['name', 'stage'],
+    kanban: { groupByField: 'stage' },
+    userActions: { group: false, rowHeight: false, hideFields: false },
+  } as ListViewSchema;
+
+  let previousKanban: ReturnType<typeof ComponentRegistry.get>;
+
+  beforeEach(() => {
+    previousKanban = ComponentRegistry.get('object-kanban');
+    ComponentRegistry.register('object-kanban', () => <div data-testid="kanban-stub" />);
+  });
+
+  afterEach(() => {
+    cleanup();
+    if (previousKanban) ComponentRegistry.register('object-kanban', previousKanban as any);
+  });
+
+  function mount(schema: Partial<ListViewSchema> = {}) {
+    const dataSource = {
+      find: vi.fn().mockResolvedValue({ data: [{ id: '1', name: 'Acme', stage: 'won' }], total: 1 }),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn().mockResolvedValue({
+        name: 'opportunity',
+        fields: { name: { type: 'text', label: 'Name' }, stage: { type: 'text', label: 'Stage' } },
+      }),
+    };
+    render(
+      <SchemaRendererProvider dataSource={dataSource as never}>
+        <ListView schema={{ ...REFRESH_ONLY, ...schema } as ListViewSchema} dataSource={dataSource as never} />
+      </SchemaRendererProvider>,
+    );
+  }
+
+  it('the default toolbar draws no Display entry when Refresh was its only option', async () => {
+    mount();
+    await screen.findByTestId('kanban-stub');
+    expect(screen.queryByTestId('toolbar-display-trigger')).toBeNull();
+    expect(screen.queryByTestId('refresh-button')).toBeNull();
+  });
+
+  it('CONTROL — the wide toolbar (`compactToolbar: false`) still draws Refresh for the same view', async () => {
+    mount({ compactToolbar: false } as Partial<ListViewSchema>);
+    await screen.findByTestId('kanban-stub');
+    expect(screen.getByTestId('refresh-button')).toBeInTheDocument();
+  });
+
+  it('CONTROL — the same view with Row height on draws the Display entry', async () => {
+    mount({ userActions: { group: false, rowHeight: true, hideFields: false } } as Partial<ListViewSchema>);
+    await screen.findByTestId('kanban-stub');
+    expect(screen.getByTestId('toolbar-display-trigger')).toBeInTheDocument();
   });
 });

@@ -173,7 +173,8 @@ describe('MCP delete_record refuses a call without confirm: true (ACTION_CONFIRM
     // answers the coded refusal. Required there, it would be refused as a bare
     // input-validation error naming no code and no retry.
     expect(tool.inputSchema.required ?? []).not.toContain(AI_ACTION_CONFIRMATION_MEMBER);
-    // The description tells the agent the order: ask the human, then retry.
+    // The description names the member, and when the agent asks before sending
+    // it (the named-record rule is pinned in its own describe below).
     expect(tool.description).toContain('confirm: true');
     expect(tool.description).toMatch(/ask the human/i);
     expect(tool.annotations?.destructiveHint).toBe(true);
@@ -192,6 +193,14 @@ describe('MCP delete_record refuses a call without confirm: true (ACTION_CONFIRM
       confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
     });
     expect(String(error.message)).toContain('nothing was deleted');
+    // The refusal tells the agent when to retry and when to ask (maintainer
+    // ruling 「点名单条就算确认」): a request that named exactly this one record
+    // is the approval; an ambiguous name or a bulk delete asks first.
+    expect(String(error.message)).toContain(
+      "When the human's request named exactly this one record, that request is the approval: retry this call with "
+        + "'confirm': true on the request. When the name matched more than one record, or the request is a bulk "
+        + 'delete, ask the human first, then retry.',
+    );
 
     // Nothing was deleted: the engine was never asked, and the row is there.
     expect(engine.delete).not.toHaveBeenCalled();
@@ -286,5 +295,71 @@ describe('MCP delete_record refuses a call without confirm: true (ACTION_CONFIRM
     } finally {
       await client.close();
     }
+  });
+});
+
+/**
+ * When the human's request is the approval: a request naming one record, with
+ * exactly one record matching, approves that delete, so the agent sends
+ * `confirm: true` on that call; a name matching several records, or a request
+ * naming none, is a question first (maintainer ruling 「点名单条就算确认」).
+ *
+ * The wording IS the contract here: models act on the tool text, and before it
+ * said this they read a named single-record request two ways. So both
+ * sentences are pinned verbatim, on the tool description and on the `confirm`
+ * member, as `tools/list` serves them. The gate is unchanged: the refusal of a
+ * call without `confirm: true` is pinned by the describe above ("refuses a call
+ * without the member", "refuses %s as the member").
+ */
+describe('MCP delete_record text: a request naming one matching record is the approval; ambiguity asks first', () => {
+  const NAMED_RECORD_IS_APPROVAL =
+    'A request in which the human names the record to delete, with exactly one record matching, is the '
+    + 'human\'s approval of that delete: send confirm: true on that call, without asking again.';
+  const AMBIGUOUS_ASKS_FIRST =
+    'When the name matches more than one record, or the request does not identify one record, do not delete '
+    + 'yet: list the candidates, ask the human which one, and send confirm: true only after the answer.';
+
+  async function listedDeleteTools() {
+    const bridge = stdioBridge(engineDouble(new Map()));
+    const listed = await rpc(bridge, 'tools/list');
+    const tools = listed.tools as any[];
+    return {
+      one: tools.find((t) => t.name === 'delete_record'),
+      many: tools.find((t) => t.name === 'delete_records'),
+    };
+  }
+
+  it('carries both sentences on the tool description and on the confirm member', async () => {
+    const { one } = await listedDeleteTools();
+    expect(one, 'delete_record is registered').toBeDefined();
+    const member = one.inputSchema.properties[AI_ACTION_CONFIRMATION_MEMBER];
+
+    for (const text of [one.description, member?.description]) {
+      expect(text).toContain(NAMED_RECORD_IS_APPROVAL);
+      expect(text).toContain(AMBIGUOUS_ASKS_FIRST);
+    }
+    // The description still says the gate refuses an unconfirmed call, and
+    // where a deleted business record goes.
+    expect(one.description).toContain('A call is REFUSED unless it also sends confirm: true');
+    expect(one.description).toContain('recycle bin');
+  });
+
+  it('the skill the same server serves (GET /api/v1/mcp/skill) carries both sentences', () => {
+    // One server, one rule: the SKILL.md an agent installs from this server
+    // must not tell it to ask first for a delete its tool text says is approved.
+    const skill = new MCPServerRuntime({ name: 'pin', version: '0.0.0' }).renderSkill();
+    for (const text of [NAMED_RECORD_IS_APPROVAL, AMBIGUOUS_ASKS_FIRST]) expect(skill).toContain(text);
+  });
+
+  it('control: delete_records (bulk) does not take the named-record rule; it stays preview first', async () => {
+    const { many } = await listedDeleteTools();
+    expect(many, 'delete_records is registered').toBeDefined();
+    const member = many.inputSchema.properties[AI_ACTION_CONFIRMATION_MEMBER];
+
+    for (const text of [many.description, member?.description]) {
+      expect(text).not.toContain(NAMED_RECORD_IS_APPROVAL);
+      expect(text).not.toContain(AMBIGUOUS_ASKS_FIRST);
+    }
+    expect(many.description).toContain('preview');
   });
 });

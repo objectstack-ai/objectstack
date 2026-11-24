@@ -147,11 +147,27 @@ function expectTypedNull(row: Record<string, unknown> | undefined | null, where:
   for (const t of TYPED) expect(row![f(t)], `${where} · ${t}`).toBeNull();
 }
 
+/**
+ * [#34672] The UPDATE doors' answer: a `summary` column is read-only on update,
+ * so a caller's blank for it is dropped and the stored roll-up (the seeded
+ * `f_summary: 7`) stays; every other typed column stores null.
+ */
+function expectUpdatedTypedNull(row: Record<string, unknown> | undefined | null, where: string) {
+  expect(row, where).toBeTruthy();
+  for (const t of TYPED) {
+    if (t === 'summary') expect(row![f(t)], `${where} · ${t} (read-only on update)`).toBe(VALID.f_summary);
+    else expect(row![f(t)], `${where} · ${t}`).toBeNull();
+  }
+}
+
 describe('REST write doors on SQLite: a cleared typed column stores null (#20308)', () => {
   let ctx: Awaited<ReturnType<typeof boot>>;
   beforeEach(async () => { ctx = await boot(); });
 
-  const seed = (id: string) => ctx.engine.insert('blank_rest', { id, ...VALID });
+  // [#34672] A `summary` column is read-only on create for an ordinary caller,
+  // so the fixture rows are written as the system principal (a seed load):
+  // that is the writer that may still set the roll-up's `f_summary: 7`.
+  const seed = (id: string) => ctx.engine.insert('blank_rest', { id, ...VALID }, { context: { isSystem: true } } as any);
 
   it('POST create: the typed blanks store null; a text blank stores "", a lookup / select blank null (#29277)', async () => {
     const res = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rest' }, { id: 'c1', ...blankTyped(), ...STR_BLANK });
@@ -169,7 +185,7 @@ describe('REST write doors on SQLite: a cleared typed column stores null (#20308
     await seed('u1');
     const res = await ctx.call('PATCH', '/api/v1/data/:object/:id', { object: 'blank_rest', id: 'u1' }, blankTyped());
     expect(res.status).toBe(200);
-    expectTypedNull(await ctx.stored('blank_rest', 'u1'), 'stored');
+    expectUpdatedTypedNull(await ctx.stored('blank_rest', 'u1'), 'stored');
   });
 
   it('batch create and update, createMany and updateMany', async () => {
@@ -183,7 +199,7 @@ describe('REST write doors on SQLite: a cleared typed column stores null (#20308
     const bu = await ctx.call('POST', '/api/v1/data/:object/batch', { object: 'blank_rest' },
       { operation: 'update', records: [{ id: 'b2', data: blankTyped() }] });
     expect(bu.body.results.map((r: any) => r.success)).toEqual([true]);
-    expectTypedNull(await ctx.stored('blank_rest', 'b2'), 'batch update');
+    expectUpdatedTypedNull(await ctx.stored('blank_rest', 'b2'), 'batch update');
 
     const cm = await ctx.call('POST', '/api/v1/data/:object/createMany', { object: 'blank_rest' }, [{ id: 'm1', ...blankTyped() }]);
     expect(cm.status).toBe(201);
@@ -193,14 +209,21 @@ describe('REST write doors on SQLite: a cleared typed column stores null (#20308
     const um = await ctx.call('POST', '/api/v1/data/:object/updateMany', { object: 'blank_rest' },
       { records: [{ id: 'm2', data: blankTyped() }] });
     expect(um.body.results.map((r: any) => r.success)).toEqual([true]);
-    expectTypedNull(await ctx.stored('blank_rest', 'm2'), 'updateMany');
+    expectUpdatedTypedNull(await ctx.stored('blank_rest', 'm2'), 'updateMany');
   });
 
-  it('a valid value on every typed column is stored and read back unchanged', async () => {
+  it('a valid value on every typed column is stored and read back unchanged; the roll-up\'s is dropped (#34672)', async () => {
     const res = await ctx.call('POST', '/api/v1/data/:object', { object: 'blank_rest' }, { id: 'v1', ...VALID });
     expect(res.status).toBe(201);
+    // [#34672] A person's create no longer sets a `summary` column: the value
+    // is dropped and reported, and this fixture's roll-up (no
+    // `summaryOperations`, so no seed) stays null.
+    expect(res.body.droppedFields).toEqual([{ object: 'blank_rest', fields: ['f_summary'], reason: 'readonly' }]);
     const read = await ctx.engine.findOne('blank_rest', { where: { id: 'v1' } }) as Record<string, unknown>;
-    for (const [k, v] of Object.entries(VALID)) expect(read[k], k).toStrictEqual(v);
+    for (const [k, v] of Object.entries(VALID)) {
+      if (k === 'f_summary') expect(read[k] ?? null, k).toBeNull();
+      else expect(read[k], k).toStrictEqual(v);
+    }
   });
 
   it('a required field refuses a blank: 400 VALIDATION_FAILED / required, nothing stored', async () => {

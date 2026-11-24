@@ -62,9 +62,9 @@
  * ## A family of keys in the same read (objectui#12418)
  *
  * Some state is one row per subject the console cannot name at load time: the
- * list state of every object a user has opened is a row per object,
- * `ui.list.<object>`, and which objects those are is only known from the rows
- * themselves. {@link createObjectStackUserPreferenceFamily} loads such a family
+ * record-page state of every object a user has opened is a row per object,
+ * `ui.record.<object>`, and which objects those are is only known from the
+ * rows themselves. {@link createObjectStackUserPreferenceFamily} loads such a family
  * by its key PREFIX, and joins the same shared read: the read then asks for its
  * keys OR any key starting with the prefix, still one request. A prefix bounds
  * nothing the way the unique index bounds a key, so the read asks for at most
@@ -467,9 +467,9 @@ export interface ObjectStackUserPreferenceFamilyOptions {
   /** Authenticated user id. */
   userId: string;
   /**
-   * The family's key prefix, dotted and ending in a dot, e.g. `ui.list.`: the
+   * The family's key prefix, dotted and ending in a dot, e.g. `ui.record.`: the
    * family is every key that starts with it, one row per subject
-   * (`ui.list.account`, `ui.list.contact`, …).
+   * (`ui.record.account`, `ui.record.contact`, …).
    */
   prefix: string;
   /** Override the storage object name. Defaults to `"sys_user_preference"`. */

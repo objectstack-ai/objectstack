@@ -145,6 +145,7 @@ function answer(feed: { [COMMENT]?: Bits; [REACTION]?: Bits }): MePermissionsAut
     tenantId: null,
     positions: ['member'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects: { [OBJECT_NAME]: SHAPE.full, ...feed },
     fields: {},
@@ -215,7 +216,7 @@ async function mount(
           onEdit={() => {}}
           objectNameOverride={OBJECT_NAME}
           recordIdOverride={RECORD_ID}
-          embedded
+          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
         />
       </MetadataCtx.Provider>
     </MemoryRouter>
@@ -479,7 +480,7 @@ describe('the reaction store is asked of the registry only by a caller who may r
             onEdit={() => {}}
             objectNameOverride={OBJECT_NAME}
             recordIdOverride={RECORD_ID}
-            embedded
+            /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
           />
         </MetadataCtx.Provider>
       </MemoryRouter>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { celEngine } from './cel-engine';
+import { formatValue } from './template-engine';
 import { inferExpressionType } from './validate';
 import type { EvalOptionLabels } from './types';
 import type { Expression } from '@objectstack/spec';
@@ -58,7 +59,7 @@ describe('label(record.<field>) — option labels in the reader\'s locale (#2660
     }
   });
 
-  it('refuses a field that declares no options, on every row, and a list value', () => {
+  it('refuses a field that declares no options, on every row', () => {
     const plain = celEngine.evaluate(cel('label(record.title)'), { record, optionLabels: zhCN });
     expect(plain.ok).toBe(false);
     if (!plain.ok) {
@@ -69,12 +70,12 @@ describe('label(record.<field>) — option labels in the reader\'s locale (#2660
     const empty = celEngine.evaluate(cel('label(record.title)'), { record: { ...record, title: null }, optionLabels: zhCN });
     expect(empty.ok).toBe(false);
     if (!empty.ok) expect(empty.error.message).toContain('`title` declares no options');
-    const list = celEngine.evaluate(cel('label(record.tags)'), {
-      record,
-      optionLabels: { ...zhCN, tags: { a: 'A' } },
-    });
-    expect(list.ok).toBe(false);
-    if (!list.ok) expect(list.error.message).toContain('renders ONE option value');
+  });
+
+  it('refuses an object value at run time — it is no option value', () => {
+    const r = celEngine.evaluate(cel('label(record.kind)'), { record: { kind: { v: 'clean' } }, optionLabels: zhCN });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe('runtime');
   });
 
   it('compiles the one argument shape and refuses every other at the type check', () => {
@@ -98,5 +99,78 @@ describe('label(record.<field>) — option labels in the reader\'s locale (#2660
   it('types as text, so a formula built on it is a text formula', () => {
     expect(inferExpressionType(NAME)).toBe('text');
     expect(inferExpressionType('label(record.kind)')).toBe('text');
+  });
+});
+
+/**
+ * `label(record.<field>)` over a `multiple: true` select — a list of stored
+ * values — prints the label of each value, in the order the record stores
+ * them, joined with `, `: the rule the mail template's `option` hole applies
+ * to the same list (`OPTION_ARGUMENT_RULE`), through one shared helper.
+ */
+describe('label(record.<field>) over a multi-select — each selected label, joined', () => {
+  const GAPS = 'label(record.gaps)';
+  const zh: EvalOptionLabels = {
+    gaps: { no_sales_price: '无销售价', no_customer: '无客户', no_freight_region: '无运费区域' },
+    one: { no_customer: '无客户' },
+  };
+  const en: EvalOptionLabels = {
+    gaps: { no_sales_price: 'No sales price', no_customer: 'No customer', no_freight_region: 'No freight region' },
+    one: { no_customer: 'No customer' },
+  };
+  const evalIn = (labels: EvalOptionLabels, rec: Record<string, unknown>, source = GAPS) =>
+    celEngine.evaluate(cel(source), { record: rec, optionLabels: labels });
+
+  it('reads each selected value\'s label in the reader\'s language, joined with `, `', () => {
+    const rec = { gaps: ['no_sales_price', 'no_customer'] };
+    expect(evalIn(zh, rec)).toEqual({ ok: true, value: '无销售价, 无客户' });
+    expect(evalIn(en, rec)).toEqual({ ok: true, value: 'No sales price, No customer' });
+  });
+
+  it('reads a one-element list as that one label', () => {
+    expect(evalIn(zh, { gaps: ['no_freight_region'] })).toEqual({ ok: true, value: '无运费区域' });
+    expect(evalIn(en, { gaps: ['no_freight_region'] })).toEqual({ ok: true, value: 'No freight region' });
+  });
+
+  it('keeps the order the record stores, not the order the options are declared in', () => {
+    expect(evalIn(en, { gaps: ['no_freight_region', 'no_sales_price'] }))
+      .toEqual({ ok: true, value: 'No freight region, No sales price' });
+  });
+
+  it('reads an empty list and an empty field as \'\', as a single select reads empty', () => {
+    expect(evalIn(zh, { gaps: [] })).toEqual({ ok: true, value: '' });
+    expect(evalIn(zh, { gaps: null })).toEqual({ ok: true, value: '' });
+  });
+
+  it('reads a listed value no option declares as itself, as the single-value path does', () => {
+    expect(evalIn(en, { one: 'retired' }, 'label(record.one)')).toEqual({ ok: true, value: 'retired' });
+    expect(evalIn(en, { gaps: ['no_customer', 'retired'] })).toEqual({ ok: true, value: 'No customer, retired' });
+  });
+
+  it('composes into a sentence like any string', () => {
+    const r = evalIn(zh, { gaps: ['no_customer'] }, "'缺: ' + label(record.gaps)");
+    expect(r).toEqual({ ok: true, value: '缺: 无客户' });
+  });
+
+  it('a field that declares no options still faults on a list, as on every other value', () => {
+    const r = celEngine.evaluate(cel('label(record.tags)'), { record: { tags: ['a'] }, optionLabels: zh });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe('runtime');
+  });
+
+  it('a list holding an object faults — an object is no option value', () => {
+    const r = evalIn(zh, { gaps: ['no_customer', { v: 'x' }] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.kind).toBe('runtime');
+  });
+
+  it('⭐ prints what the mail template\'s `option` hole prints for the same list — one rule', () => {
+    const list = ['no_freight_region', 'retired', 'no_customer'];
+    const viaLabel = evalIn(en, { gaps: list });
+    const viaHole = formatValue('option', list, 'quote_line.gaps', {
+      optionLabels: { 'quote_line.gaps': en.gaps },
+    });
+    expect(viaLabel).toEqual({ ok: true, value: viaHole });
+    expect(viaHole).toBe('No freight region, retired, No customer');
   });
 });

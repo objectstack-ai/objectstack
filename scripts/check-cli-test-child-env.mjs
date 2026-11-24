@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the twenty-one files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the twenty-two files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#26130] Joined the population deliberately: its subject is a plain
         // `os dev` boot that compiles before it serves, measured on the BUILT
@@ -2734,6 +2734,12 @@ export function selfTest() {
         // `bin/run-dev.js` sets `NODE_ENV=development` before argv is parsed.
         // Every spawn hands its child `NODE_ENV: undefined`.
         'packages/cli/test/start-mcp-stdio-early-initialize.integration.test.ts',
+        // [#34337] Joined the population deliberately: its subject is what is
+        // left of `os start`'s process group when it exits on SIGTERM, and the
+        // source entry runs under tsx, whose own esbuild service is a child of
+        // the `start` parent and would be read as the defect. Its spawn hands
+        // the child `NODE_ENV: undefined`.
+        'packages/cli/test/start-sigterm-process-group.integration.test.ts',
         // [#24192] Joined the population deliberately, for the same reason as
         // #24002 above: its subject is the documented stdio invocation, a
         // first-run `os start` in PRODUCTION posture, and `bin/run-dev.js` sets

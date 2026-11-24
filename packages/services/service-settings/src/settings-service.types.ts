@@ -503,8 +503,9 @@ export interface SettingsLiveStatus {
    *
    * Only an option-bearing key may be named, and only with a value its option
    * table admits (the declared `options`, or a registered option source's
-   * answer), so what is served is always one of the page's own options and
-   * never free text a runtime might fill with a credential. Each entry is
+   * answer), so what is served is always one of the page's own options (or
+   * `null`, under `'none'` or `'environment'` alone) and never free text a
+   * runtime might fill with a credential. Each entry is
    * served as `{ value, source }` and nothing else. An entry that breaks this
    * is left out, so its key reads as not stated, and the server logs it once
    * per read without the value; the banner and the other entries stand.
@@ -517,13 +518,18 @@ export interface SettingsLiveStatus {
 
 /** One key's value in the running system — see {@link SettingsLiveStatus.values}. */
 export interface SettingsLiveValue {
-  /** The value in use, one of the key's options; `null` exactly when `source` is `'none'`. */
+  /**
+   * The value in use, one of the key's options; `null` when `source` is
+   * `'none'`, or when `source` is `'environment'` and no option names what is
+   * in use (a transport the host hands over). Whether something is in use is
+   * read from `source`, never from a `null` value.
+   */
   value: string | null;
   /**
    * Where the running system took it from: `'settings'` (what this namespace
-   * resolves, saved or `OS_*`-locked), `'environment'` (detected by the
-   * runtime itself from its own boot environment, outside this namespace), or
-   * `'none'` (nothing is in use).
+   * resolves, saved or `OS_*`-locked; always names an option), `'environment'`
+   * (detected by the runtime itself from its own boot environment, or handed
+   * over by its host, outside this namespace), or `'none'` (nothing is in use).
    */
   source: 'settings' | 'environment' | 'none';
 }

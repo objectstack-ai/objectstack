@@ -56,6 +56,10 @@ import { strandedDecisionFailure } from '@objectstack/types';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 // `.js` on purpose — NodeNext resolution requires the extension (#7248).
 import { RestServer } from './rest-server.js';
+// The rest server's routes load `@objectstack/objectql` lazily, inside a
+// handler; paying that load here, at collection, keeps it out of the first
+// case's `testTimeout` window (check:test-source-alias).
+import '@objectstack/objectql';
 
 const REQ = '/api/v1/approvals/requests/:id';
 
@@ -409,6 +413,37 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
             .toEqual(['code', 'decision', 'error', 'finalized', 'repairable', 'runId']);
     });
 
+    it('a decision stranded by a record hook\'s refusal carries that refusal on the same 500 (#34579)', async () => {
+        // The step after the decision was refused by a record hook. The status
+        // code still does not move (#13807 B), and the four facts are as
+        // above; what is added is WHICH refusal stranded the run: the engine's
+        // `innerRefusal` (ruling B′ on #24914) and the hook's marked
+        // `userMessage`, at the top level where a record save's refusal and
+        // every flow door's `FLOW_FAILED` already put it.
+        const userMessage = '产能已被其他订单占用，该方案无法按当前产能通过。';
+        const innerRefusal = {
+            code: 'VALIDATION_FAILED' as const,
+            message: "hook 'alloc_plan_capacity_recheck' threw: Error: over_capacity",
+        };
+        const rest = boot({
+            decide: vi.fn().mockRejectedValue(strandedDecisionFailure(
+                "RESUME_FAILED: the approve decision was recorded on request req_1, but its flow run "
+                + "'run_1' could not be resumed and is now stranded: Node 'adopt_plan' failed",
+                { finalized: true, decision: 'approve', runId: 'run_1', repairable: true, innerRefusal, userMessage },
+            )),
+        });
+        const answer = await drive(rest, 'POST', `${REQ}/approve`);
+
+        expect(answer.status).toBe(500);
+        expect(answer.body?.code).toBe('RESUME_FAILED');
+        expect(answer.body?.finalized).toBe(true);
+        expect(answer.body?.innerRefusal).toEqual(innerRefusal);
+        expect(answer.body?.userMessage).toBe(userMessage);
+        expect(Object.keys(answer.body ?? {}).sort()).toEqual(
+            ['code', 'decision', 'error', 'finalized', 'innerRefusal', 'repairable', 'runId', 'userMessage'],
+        );
+    });
+
     it('REVERSE CONTROL — a RESUME_FAILED with no carrier answers exactly the body it always did', async () => {
         // ⛔ The door never synthesises the envelope. A `RESUME_FAILED` raised
         // by something that had no decision to report must not be dressed up
@@ -466,6 +501,35 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
                 ApiErrorSchema.safeParse({ code, message: 'x' }).success,
                 `terminal code ${code} (route action '${action}') must be registered in ERROR_CODE_LEDGER`,
             ).toBe(true);
+        }
+    });
+});
+
+// [#36463] A refusal the approvals service marks for the end user (the thrown
+// error's `userMessage`, `ApiErrorSchema.userMessage`) reaches the wire at the
+// top level of this door's flat body, beside the English `error` — the member
+// `@objectstack/client` lifts from this dialect. The decide refusal of a
+// submitter's own approval is its producer, in the decider's language.
+describe('a refusal the approvals service marks for the end user carries its userMessage (#36463)', () => {
+    const ENGLISH = "'u_sub' submitted this request and holds no slot on it, so they cannot approve it through the "
+        + 'administrator override. No one else can approve this request yet.';
+    const MARKED = '此请求由您提交，且您不在其审批人之列，因此不能以管理员身份代为批准它。';
+
+    it('the decide refusal answers 403 FORBIDDEN, its English as `error` and the marked text as `userMessage`', async () => {
+        const decide = vi.fn().mockRejectedValue(Object.assign(new Error(`FORBIDDEN: ${ENGLISH}`), { userMessage: MARKED }));
+        const answer = await drive(boot({ decide }), 'POST', `${REQ}/approve`);
+        expect(answer.status).toBe(403);
+        expect(answer.body).toEqual({ code: 'FORBIDDEN', error: ENGLISH, userMessage: MARKED });
+        expect(ApiErrorSchema.safeParse({
+            code: answer.body?.code, message: answer.body?.error, userMessage: answer.body?.userMessage,
+        }).success).toBe(true);
+    });
+
+    it('CONTROL: an unmarked refusal and a blank marking carry no userMessage member', async () => {
+        for (const thrown of [new Error(`FORBIDDEN: ${ENGLISH}`), Object.assign(new Error(`FORBIDDEN: ${ENGLISH}`), { userMessage: '  ' })]) {
+            const answer = await drive(boot({ decide: vi.fn().mockRejectedValue(thrown) }), 'POST', `${REQ}/approve`);
+            expect(answer.status).toBe(403);
+            expect(answer.body).toEqual({ code: 'FORBIDDEN', error: ENGLISH });
         }
     });
 });

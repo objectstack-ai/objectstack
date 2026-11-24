@@ -21,8 +21,9 @@
  *
  * The keyframe slides a 200%-wide gradient across an element's
  * background. Pair with `bg-[length:200%_100%]` and a gradient that
- * uses the design-system muted tokens, e.g.
- *   bg-[linear-gradient(90deg,var(--muted),var(--muted-foreground)/10,var(--muted))]
+ * uses the design-system muted tokens, wrapped in hsl() because the theme
+ * stores them as bare HSL triplets, e.g.
+ *   bg-[linear-gradient(90deg,hsl(var(--muted)),hsl(var(--muted-foreground)/0.1),hsl(var(--muted)))]
  *
  * Respects `prefers-reduced-motion` automatically via the
  * `motion-safe:` Tailwind variant on the consuming site.
@@ -232,5 +233,19 @@
     color: #000 !important;
     box-shadow: none !important;
     border-color: #ccc !important;
+  }
+
+  /* 7. Paper is light whatever the theme (objectstack#34446). The theme's
+   *    `.dark { color-scheme: dark }` (`@object-ui/components` index.css)
+   *    also darkens the CANVAS, the colour the browser paints under a
+   *    transparent root, and the canvas is what fills the sheet: the `@page`
+   *    margin band, and on a screen that is not a print page the whole sheet,
+   *    since rule 6 above leaves every box transparent. With "Background
+   *    graphics" on, Chromium printed that canvas as rgb(18, 18, 18): a dark
+   *    12 mm frame around a print page, black text on a dark sheet for a list.
+   *    A light colour scheme on paper makes the canvas white. The screen keeps
+   *    its dark scheme; this rule is inside `@media print`. */
+  .dark {
+    color-scheme: light;
   }
 }

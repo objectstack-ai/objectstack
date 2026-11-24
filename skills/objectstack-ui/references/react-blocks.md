@@ -64,7 +64,7 @@ Server-connected object table with toolbar and switchable visualizations (grid/k
 | `onRowClick` | `(record) => void` | callback |  | Called with the clicked row's record — the hook for master/detail. |
 | `onNavigate` | `(recordId, action: 'view' \| 'new_window') => void` | callback |  | Called for page-level navigation. The second argument is a navigation-MODE token from a CLOSED vocabulary — 'view' opens the record page, 'new_window' opens it in a new browser tab; the reference implementation emits no other value and reads no other branch. |
 | `columns` | `string[] \| object[]` | data | ✓ | Fields to display as columns — the PROJECTION of the per-view field composition `columns` x `hiddenFields` x `fieldOrder`: this list is the candidate set AND t… |
-| `type` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree'` | data |  |  |
+| `type` | `'grid' \| 'kanban' \| 'gallery' \| 'calendar' \| 'timeline' \| 'gantt' \| 'map' \| 'chart' \| 'tree' \| 'timesheet'` | data |  |  |
 | `sort` | `object[]` | data |  |  |
 | `searchableFields` | `string[]` | data |  | Fields enabled for search |
 | `userFilters` | `object` | data |  | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |

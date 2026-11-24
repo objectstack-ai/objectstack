@@ -235,7 +235,7 @@ object through:
 
 | Sub-config | Keys `ObjectView` forwards |
 | --- | --- |
-| `table` | read by name: `columns`, `fields`, `title`, `filter`, `sort`, `pagination`, `pageSize`, `selection`, `selectable`, `operations`, `className`; handed to the grid as written: `editable`, `singleClickEdit`, `frozenColumns`, `rowHeight`, `resizable`, `reorderableColumns`, `searchableFields`, `showSearch`, `showPagination`, `showColumnTypeIcons`, `conditionalFormatting`, `rowActions`, `bulkActions`, `bulkActionDefs`, `exportOptions`, `grouping`, `aggregations`, `rowColor`, `label` |
+| `table` | read by name: `columns`, `fields`, `title`, `filter`, `sort`, `pagination`, `pageSize`, `selection`, `selectable`, `operations`, `className`; handed to the grid as written: `editable`, `frozenColumns`, `rowHeight`, `resizable`, `reorderableColumns`, `searchableFields`, `showSearch`, `showPagination`, `showColumnTypeIcons`, `conditionalFormatting`, `rowActions`, `bulkActions`, `bulkActionDefs`, `exportOptions`, `grouping`, `aggregations`, `rowColor`, `label` |
 | `form` | `fields`, `customFields`, `sections`, `groups`, `layout`, `columns`, `title`, `description`, `subforms`, `buttons`, `defaults`, `initialValues`, `readOnly`, `showSubmit`, `submitText`, `showCancel`, `cancelText`, `showReset`, `className` |
 
 `table` declares exactly these keys (objectui#10976). Any other grid key —
@@ -328,8 +328,9 @@ Whichever tier wins, its filter goes through `resolveFilterPlaceholders` from
 `@object-ui/core` before it leaves `ObjectView` (objectui#10506), on all three
 paths: the query a non-grid view issues, the grid, and a host's
 `renderListView`. So the spec's context tokens (`{current_user_id}`,
-`{current_org_id}`) and the relative-date macros (`{today}`,
-`{current_quarter_start}`, …) arrive as real values. The user and organization
+`{current_org_id}`), the relative-date macros (`{today}`,
+`{current_quarter_start}`, …) and the current ISO week's key
+(`{current_iso_week}`, `2026-W47`) arrive as real values. The user and organization
 come from the nearest `FilterScopeProvider` (`@object-ui/react`), which the
 console shell mounts; with none mounted a context token is left as written and
 the resolver warns. The filter is never widened: the ObjectStack server resolves
@@ -507,12 +508,28 @@ ignore a modifier click too.
 
 In the Console's object pages, a record that opens in the drawer opens in a
 drawer **over the list**, and the list keeps its full width. The drawer is
-720 px wide, and the reader can drag its edge from 360 px to 60% of the
-viewport. It draws no dimming overlay and is non-modal, so the list behind it
-stays readable and clickable:
+460 px wide, and the reader can drag its edge from 380 px to 900 px. The
+dragged width is remembered in the browser and applies to every object's
+drawer, except one whose `navigation` authors a `size` (other than `auto`) or a
+`width` (pixel or percent). The list's drawer reads the view's `navigation`,
+then the object's; a record page's drawer reads its root record's object's.
+Such a drawer keeps that object's own remembered width, shared with its
+calendar, gantt, kanban, tree and grid overlays and a resizable
+`RecordDetailDrawer`: it opens at the authored width until a width is dragged
+in it or in one of them. The width belongs to the drawer's root. A child level
+keeps the root's width, and in the list a record a lookup chip opens as the
+root takes the list's width and remembered width, not those of the opened
+record's object. The drawer draws no dimming overlay and is non-modal, so the
+list behind it stays readable and clickable:
 
 - the open record's row is highlighted and follows the drawer's ↑ ↓;
 - clicking another row swaps the record.
+
+The drawer's header puts the record's name first. It draws at most one
+labelled action, the page's primary, and only while the name keeps room for
+about 16 characters. There is no Edit button and no copy-id icon: Edit, Copy
+record ID and every other action are in the header's `⋯`. A child list's tab
+in the drawer lists one row per record (its title and one summary line).
 
 Readers who prefer the full page choose it in the list's Display menu (Open
 records: Drawer or Full page). That choice is the reader's own, stored in the
@@ -653,29 +670,27 @@ panel offers every field the user may read, minus the fields the object marks
 **Inline editing on that node is on by default.** Both keys below are the
 author's permission. `ListView` reads the node's `userActions.editInline` with
 the spec's default, on since the v18 ruling (objectstack#22605), so a view that
-declares neither key offers the inline-edit toggle (objectui#12086), and
-`userActions.editInline: false` is how a view withdraws it. When the node
-carries no `editInline` of its own, its `inlineEdit` stands in for it
-(objectui#5144). The named view's keys win over the host `views` entry's, as
-for every member above:
+declares neither key is editable in place, and `userActions.editInline: false`
+is how a view withdraws it. When the node carries no `editInline` of its own,
+its `inlineEdit` stands in for it (objectui#5144). The named view's keys win
+over the host `views` entry's, as for every member above:
 
-| The view declares | Inline-edit toggle | Grid opens in edit mode |
-| --- | --- | --- |
-| neither key | offered | no |
-| `inlineEdit: true` | offered | yes |
-| `inlineEdit: false` | not offered | no |
-| `userActions.editInline: true` | offered | only with `inlineEdit: true` |
-| `userActions.editInline: false` | not offered | no, whatever `inlineEdit` says |
+| The view declares | Grid editable in place |
+| --- | --- |
+| neither key | yes |
+| `inlineEdit: true` | yes |
+| `inlineEdit: false` | no |
+| `userActions.editInline: true` | yes, whatever `inlineEdit` says |
+| `userActions.editInline: false` | no, whatever `inlineEdit` says |
 
-The toggle switches the edit mode for the session and reports it through
-`ListView`'s `onInlineEditChange`. The console stores nothing for it: each load
-opens in the mode the view's `inlineEdit` declares, so a user's choice is not
-remembered across loads. A view where an earlier console stored
-`inlineEdit: false` still reads off; that data is not migrated, and declaring
-`userActions.editInline: true` brings the toggle back. A list whose records are
-read-only by nature declares `userActions.editInline: false`. Neither key opens
-editing past the object's own editability or the user's permission to update
-the object.
+There is no inline-edit mode and no toggle (objectstack#35684): a click selects
+a cell and a double-click, Enter or typing edits it (the list page's
+select-first model, see the grid's Inline Editing). A view where an earlier
+console stored `inlineEdit: false` still reads off; that data is not migrated,
+and declaring `userActions.editInline: true` turns editing back on. A list
+whose records are read-only by nature declares `userActions.editInline: false`.
+Neither key opens editing past the object's own editability or the user's
+permission to update the object.
 
 ### Update
 

@@ -1,41 +1,31 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16569] `GET /organization/list-user-invitations` — honour the DECLARED
- * `requireEmailVerificationOnInvitation`, exactly as `accept-invitation`,
- * `reject-invitation` and `get-invitation` already do.
+ * [#16569] `GET /organization/list-user-invitations` — the invitation inbox
+ * needs a verified email address, on every deployment.
  *
- * ## The defect, and where it is minted
+ * ## The rule
  *
- * Not here: it comes out of the pinned vendor. Re-measured 2026-10-21 for
- * #25096 against better-auth `1.7.12` (unchanged since the `1.7.2` reading),
- * `dist/plugins/organization/routes/crud-invites.mjs`:
- * the three id-addressed routes ask
- * `shouldRequireVerifiedEmailForInvitationIdAction({ organizationOptions, … })`,
- * whose first line is
+ * A session whose address is not verified is refused, `403
+ * EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION`, so the listing never hands an
+ * invitation's id to an identity that has not proven the invited mailbox. It
+ * is the listing's half of the rule `invitation-accept-verified-email.ts`
+ * states for accepting and declining; `get-invitation` alone stays open to the
+ * recipient, so the accept page can name the invitation.
  *
- * ```js
- * if (organizationOptions.requireEmailVerificationOnInvitation !== void 0)
- *   return organizationOptions.requireEmailVerificationOnInvitation;
- * ```
+ * ## Why the host owns it
  *
- * while `listUserInvitations` never asks — its handler reads
- *
- * ```js
- * if (session && !session.user.emailVerified)
- *   throw APIError.from("FORBIDDEN", ORGANIZATION_ERROR_CODES.EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION);
- * ```
- *
- * unconditionally. `auth-manager.ts` declares the option `false` on purpose
- * (no mailer wired ⇒ nothing can ever verify an invitee ⇒ requiring
- * verification dead-ends every invite flow), so on exactly the deployment
- * shape the option exists for an invitee can ACCEPT an invitation and can
- * never LIST it, and the SDK's `organizations.invitations.listMine()` inbox
- * is empty-by-403 for every user. `list-user-invitations-verification.test.ts`
- * measures both halves on the real pipeline — the 403, and the 200s from the
- * three siblings for the same unverified session — and pins that the vendor
- * still has the defect, so an upstream fix turns that pin red and this module
- * is what gets deleted.
+ * The platform declares `requireEmailVerificationOnInvitation: false`
+ * (`auth-manager-organization-plugin.ts`) so that `get-invitation` stays open:
+ * better-auth's option governs accept, reject and get-invitation together.
+ * better-auth 1.7.12's own `listUserInvitations`
+ * (`dist/plugins/organization/routes/crud-invites.mjs`) never reads that
+ * option and refuses an unverified session unconditionally — the rule this
+ * module wants. Rebuilding the endpoint with the refusal written here makes
+ * the rule this plugin's: no vendor release that teaches its listing to read
+ * the option can open the inbox under the declaration above.
+ * `list-user-invitations-verification.test.ts` pins the vendor's handler as
+ * it stands, so a change upstream is seen.
  *
  * ## Why this shape: the endpoint is rebuilt IN PLACE, from the vendor's own options
  *
@@ -70,26 +60,12 @@
  * consulted, and a request with neither session nor email is refused with the
  * vendor's 400 AFTER it.
  *
- * ## What actually changed vs. the vendor handler — ONE predicate
+ * ## What differs from the vendor handler — nothing a caller can see
  *
- * The verification refusal is asked through {@link listingRequiresVerifiedEmail}
- * instead of unconditionally. That predicate honours the DECLARED option only:
- *
- *  - `false` → the listing is open to an unverified session — the declared
- *    posture, and the one `accept` / `reject` / `get-invitation` already apply
- *    to the same session on this deployment;
- *  - `true` → refused, byte-identical to the vendor's answer today;
- *  - undeclared (or any non-boolean) → refused, the vendor's own list-route
- *    posture. The siblings derive an undeclared option from
- *    `hasBuiltInOpaqueInvitationIdGeneration(...)`, a vendor internal this
- *    module deliberately refuses to re-implement: honouring what is DECLARED
- *    restores `declared = enforced`; re-deriving an undeclared default would
- *    be a second definition of a security posture.
- *
- * Direction, stated: the accept set of this route GROWS only for a session the
- * deployment has explicitly declared exempt from verification, and only by the
- * rows the same session can already accept one by one. Nothing the vendor
- * refuses for any other reason is admitted.
+ * Today the rebuilt handler answers exactly as the vendor's does: the same
+ * refusal for an unverified session, at the same point (after the client-side
+ * `?email=` refusal, before the listing is read). What differs is who owns
+ * the refusal.
  *
  * ## Refusal envelope — the vendor's, on purpose
  *
@@ -125,24 +101,12 @@ export const EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION = {
 } as const;
 
 /**
- * Does the listing refuse an UNVERIFIED session? Honours the DECLARED option
- * only — see the module header for why an undeclared option is read as the
- * vendor's own list-route posture rather than re-derived.
- */
-export function listingRequiresVerifiedEmail(
-  options: Pick<OrganizationOptions, 'requireEmailVerificationOnInvitation'>,
-): boolean {
-  return options.requireEmailVerificationOnInvitation !== false;
-}
-
-/**
- * Replace `organization`'s `/organization/list-user-invitations` with the
- * declared-option-honouring endpoint, in place, on the plugin's own
- * `endpoints` record.
+ * Replace `organization`'s `/organization/list-user-invitations` with an
+ * endpoint that refuses a session whose address is not verified, in place, on
+ * the plugin's own `endpoints` record.
  *
  * `options` MUST be the very object handed to `organization(options)`: it is
- * what the vendor's own `getOrgAdapter(ctx.context, options)` reads, and the
- * declaration this module honours lives on it.
+ * what the vendor's own `getOrgAdapter(ctx.context, options)` reads.
  *
  * Returns the SAME plugin object (mutated), so the plugin's id, schema, hooks,
  * `$ERROR_CODES` and every other endpoint stay exactly as the vendor built
@@ -152,7 +116,7 @@ export function listingRequiresVerifiedEmail(
  * and reports `false` — loudly handled by the caller — rather than silently
  * adding a second endpoint nobody routes to.
  */
-export async function applyDeclaredInvitationVerificationToListing(
+export async function requireVerifiedAddressOnListing(
   plugin: OrganizationPluginLike,
   options: OrganizationOptions,
 ): Promise<boolean> {
@@ -184,8 +148,8 @@ export async function applyDeclaredInvitationVerificationToListing(
         });
       }
 
-      // ── THE changed predicate: asked, not assumed ────────────────────────
-      if (session && !session.user.emailVerified && listingRequiresVerifiedEmail(options)) {
+      // ── the rule: an unverified session lists nothing ────────────────────
+      if (session && !session.user.emailVerified) {
         throw APIError.from('FORBIDDEN', verificationRequired);
       }
 

@@ -13,10 +13,11 @@
  *   {
  *     cloudUrl: string,            // base URL of the upstream cloud ('' = same origin)
  *     upgradeUrl?: string,         // absolute URL of the control plane's upgrade / billing entry — absent unless declared (#14514)
+ *     cloudHomeUrl?: string,       // absolute URL of the control plane's console home page — absent unless declared (#34622)
  *     mapStyleUrl?: string,        // the deployment's default map style (OS_CONSOLE_MAP_STYLE_URL) — absent unless set (#26001)
  *     singleEnvironment: boolean,
  *     defaultOrgId?, defaultEnvironmentId?,   // multi-tenant, per-hostname
- *     features: { installLocal, marketplace, aiStudio, autoPublishAiBuilds, ... },
+ *     features: { installLocal, marketplace, deploymentNotice, aiStudio, autoPublishAiBuilds, ... },
  *     branding: { productName, productShortName, stage?, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor },
  *     telemetry: { errorReporting?: { dsn, sendDefaultPii, environment?, tracesSampleRate, replaysOnErrorSampleRate } }
  *   }
@@ -552,6 +553,34 @@ function someRoutePattern(rawApp: unknown, matches: (pattern: string) => boolean
     });
 }
 
+/**
+ * The kernel service the settings plugin registers its deployment-notice door
+ * under when it mounts the settings routes with one (`@objectstack/service-settings`
+ * `DEPLOYMENT_NOTICE_SERVICE`). Spelled here rather than imported, as the
+ * marketplace prefixes above are: this package does not depend on the settings
+ * one. The coupling is pinned by test, which mounts the REAL settings plugin.
+ */
+const DEPLOYMENT_NOTICE_SERVICE = 'settings.deployment-notice';
+
+/**
+ * Does this host serve the deployment notice (`GET /api/settings/deployment/notice`)?
+ *
+ * Observed, never declared, and read per request: the settings plugin
+ * registers its door when it mounts the routes at `kernel:ready`. A host that
+ * mounts the settings routes itself, with no door, answers that route `503`,
+ * and its route table is the same as a host that serves it, so the route
+ * table cannot answer this; the door's registration can. The Console asks the
+ * notice only where this is true (an older runtime that serves no key keeps
+ * asking, as it always has).
+ */
+function hasDeploymentNoticeDoor(ctx: PluginContext): boolean {
+    try {
+        return ctx.getService<unknown>(DEPLOYMENT_NOTICE_SERVICE) != null;
+    } catch {
+        return false;
+    }
+}
+
 
 /**
  * Did this deployment declare that it has no control plane? (#10805)
@@ -698,6 +727,35 @@ export interface RuntimeConfigPluginConfig {
      * whose control plane serves the page; the cloud subclass fills it.
      */
     upgradeUrl?: string;
+    /**
+     * Absolute URL of the control plane's console home page, served verbatim
+     * as the top-level `cloudHomeUrl` key beside `cloudUrl` and `upgradeUrl`
+     * (#34622).
+     *
+     * The tenant Console's marketplace offers an "Open on Cloud" exit when it
+     * cannot list the caller's cloud environments. Without this key it opens
+     * `cloudUrl` itself — the control plane's origin, whose landing may route
+     * a signed-in user straight back into the environment they came from. The
+     * page that IS the control plane's console home belongs to whoever deploys
+     * it, so it is declared here by that host, exactly as `upgradeUrl` is
+     * (maintainer ruling cloud#1850, option A's shape), and the Console opens
+     * it when the key is present.
+     *
+     * ⛔ Default **absent**: unset serves no `cloudHomeUrl` key at all, never an
+     * empty string or a guessed default. A vanilla `objectstack dev`, a
+     * self-hosted box and an air-gapped deployment have no control-plane
+     * console, and the Console reads "no key" as "keep today's link".
+     * Empty / whitespace-only reads as unset (absent, silent).
+     *
+     * ⛔ Must be ABSOLUTE (`http:` / `https:`). A relative path such as
+     * `/_console` is refused and named at mount time, never forwarded: the
+     * Console opens this URL from the TENANT origin, where a relative path
+     * would resolve against the tenant runtime instead of the control plane.
+     *
+     * Host option only — no env var. The value belongs to the distribution
+     * whose control plane serves the page; the cloud subclass fills it.
+     */
+    cloudHomeUrl?: string;
     /**
      * CEILING for the `features.installLocal` flag — no longer its source
      * (#8388).
@@ -867,6 +925,10 @@ export class RuntimeConfigPlugin implements Plugin {
     private readonly upgradeUrl: string | undefined;
     /** The refused spelling, kept so `start()` can name it once — same reason as `refusedStage`. */
     private readonly refusedUpgradeUrl: string | undefined;
+    /** The declared console home page, or `undefined` for "send no key" (unset or refused). */
+    private readonly cloudHomeUrl: string | undefined;
+    /** The refused spelling, kept so `start()` can name it once — same reason as `refusedStage`. */
+    private readonly refusedCloudHomeUrl: string | undefined;
     /**
      * The deployment's default map style (`OS_CONSOLE_MAP_STYLE_URL`), or
      * `undefined` for "send no key". Read in `start()`, which refuses a bad
@@ -937,6 +999,19 @@ export class RuntimeConfigPlugin implements Plugin {
             : undefined;
         this.refusedUpgradeUrl = requestedUpgradeUrl !== undefined && this.upgradeUrl === undefined
             ? requestedUpgradeUrl
+            : undefined;
+        // Control-plane console home page (#34622): the same contract as
+        // `upgradeUrl` above — empty reads as unset, a value that is not an
+        // absolute http(s) URL is refused and named at mount, an accepted one
+        // is kept verbatim.
+        const requestedCloudHomeUrl = typeof config.cloudHomeUrl === 'string' && config.cloudHomeUrl.trim() !== ''
+            ? config.cloudHomeUrl
+            : undefined;
+        this.cloudHomeUrl = requestedCloudHomeUrl !== undefined && isAbsoluteHttpUrl(requestedCloudHomeUrl)
+            ? requestedCloudHomeUrl
+            : undefined;
+        this.refusedCloudHomeUrl = requestedCloudHomeUrl !== undefined && this.cloudHomeUrl === undefined
+            ? requestedCloudHomeUrl
             : undefined;
         const envLogoUrl = (typeof process !== 'undefined' ? process.env?.OS_LOGO_URL : undefined)?.trim();
         const envFaviconUrl = (typeof process !== 'undefined' ? process.env?.OS_FAVICON_URL : undefined)?.trim();
@@ -1042,6 +1117,17 @@ export class RuntimeConfigPlugin implements Plugin {
                     + `(the \`upgradeUrl\` option): it must be an absolute http(s) URL — the Console opens it `
                     + `from the tenant origin, so a relative path would resolve against the wrong host. `
                     + `No upgradeUrl key is served and the Console renders no upgrade link.`,
+                );
+            }
+
+            // The same refusal for the control plane's console home page
+            // (#34622): declared, refused rather than coerced, and named once.
+            if (this.refusedCloudHomeUrl !== undefined) {
+                ctx.logger?.warn?.(
+                    `[RuntimeConfigPlugin] ignoring cloudHomeUrl ${JSON.stringify(this.refusedCloudHomeUrl)} `
+                    + `(the \`cloudHomeUrl\` option): it must be an absolute http(s) URL — the Console opens it `
+                    + `from the tenant origin, so a relative path would resolve against the wrong host. `
+                    + `No cloudHomeUrl key is served and the Console's "Open on Cloud" link keeps its default target.`,
                 );
             }
 
@@ -1176,6 +1262,9 @@ export class RuntimeConfigPlugin implements Plugin {
                     // link", so a present-and-undefined property must never
                     // reach a non-JSON consumer or a test.
                     ...(this.upgradeUrl !== undefined ? { upgradeUrl: this.upgradeUrl } : {}),
+                    // Declared by the host, never derived (#34622); spread for
+                    // the same key-presence reason.
+                    ...(this.cloudHomeUrl !== undefined ? { cloudHomeUrl: this.cloudHomeUrl } : {}),
                     // The operator's default map style (#26001); spread for
                     // the same key-presence reason.
                     ...(this.mapStyleUrl !== undefined ? { mapStyleUrl: this.mapStyleUrl } : {}),
@@ -1196,6 +1285,10 @@ export class RuntimeConfigPlugin implements Plugin {
                         marketplace: hasMarketplaceBrowseMount(rawApp),
                         // aiStudio + autoPublishAiBuilds + any distribution keys.
                         ...features,
+                        // Observed from the composition, and after the host's
+                        // keys so no policy hook can claim a notice the host
+                        // does not serve, nor withhold one it does.
+                        deploymentNotice: hasDeploymentNoticeDoor(ctx),
                     },
                     // Read per request (#24766): a Branding save shows on the
                     // next load, with no restart.

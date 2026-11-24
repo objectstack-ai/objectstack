@@ -121,23 +121,16 @@ function recorded<T extends object>(target: T, via: 'entry' | 'props'): T {
 
 /* ── every field widget, re-registered with recorded props ───────────────── */
 
-interface LazyInternals {
-  _init: (payload: unknown) => unknown;
-  _payload: unknown;
-}
 type WidgetFn = (props: Record<string, unknown>) => React.ReactNode;
 
-/** The component a `React.lazy` resolves to. Module loading, not rendering. */
+/**
+ * The component a lazily loaded field widget resolves to. Module loading, not
+ * rendering: `getLazyFieldWidget` hands back the fields package's recoverable
+ * lazy component, whose `load()` resolves to the widget itself
+ * (objectstack#36608).
+ */
 async function resolveLazy(lazy: unknown): Promise<unknown> {
-  const internals = lazy as LazyInternals;
-  for (;;) {
-    try {
-      return internals._init(internals._payload);
-    } catch (pending) {
-      if (pending && typeof (pending as PromiseLike<unknown>).then === 'function') await pending;
-      else throw pending;
-    }
-  }
+  return (lazy as { load(): Promise<unknown> }).load();
 }
 
 const MEMO = Symbol.for('react.memo');
@@ -309,6 +302,35 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
     readers: ['props@fields/src/widgets/AvatarField.tsx', 'props@fields/src/widgets/FileField.tsx', 'props@fields/src/widgets/ImageField.tsx'],
     why: 'RUNTIME SLOT — a host-supplied function; JSON has no function value (the objectui#6124 shape).',
   },
+  // objectstack#35688 — the list grid's cell editor (`ObjectGrid` through
+  // `FieldEditWidget`) sets these two; a form never does. The typed inputs,
+  // rating and record pickers read them since S3 (objectstack#36023).
+  inCell: {
+    readers: [
+      'props@fields/src/widgets/ColorField.tsx', 'props@fields/src/widgets/CurrencyField.tsx',
+      'props@fields/src/widgets/EmailField.tsx', 'props@fields/src/widgets/LookupField.tsx',
+      'props@fields/src/widgets/MultiSelectField.tsx', 'props@fields/src/widgets/NumberField.tsx',
+      'props@fields/src/widgets/PercentField.tsx', 'props@fields/src/widgets/PhoneField.tsx',
+      'props@fields/src/widgets/RatingField.tsx', 'props@fields/src/widgets/TagsField.tsx',
+      'props@fields/src/widgets/TextField.tsx', 'props@fields/src/widgets/TimeField.tsx',
+      'props@fields/src/widgets/UrlField.tsx',
+    ],
+    why: 'RUNTIME SLOT (objectstack#35688) — host plumbing: the grid cell editor asks for the in-cell face; where a '
+      + 'widget is drawn is the host\'s fact, not something a form document authors.',
+  },
+  onCommit: {
+    readers: [
+      'props@fields/src/widgets/ColorField.tsx', 'props@fields/src/widgets/CurrencyField.tsx',
+      'props@fields/src/widgets/EmailField.tsx', 'props@fields/src/widgets/LookupField.tsx',
+      'props@fields/src/widgets/MultiSelectField.tsx', 'props@fields/src/widgets/NumberField.tsx',
+      'props@fields/src/widgets/PercentField.tsx', 'props@fields/src/widgets/PhoneField.tsx',
+      'props@fields/src/widgets/RatingField.tsx', 'props@fields/src/widgets/TagsField.tsx',
+      'props@fields/src/widgets/TextField.tsx', 'props@fields/src/widgets/TimeField.tsx',
+      'props@fields/src/widgets/UrlField.tsx',
+    ],
+    why: 'RUNTIME SLOT (objectstack#35688) — a host-supplied function (the grid cell editor\'s commit); JSON has no '
+      + 'function value (the objectui#6124 shape).',
+  },
   // ── runtime-only, by an existing ruling ─────────────────────────────────
   field: {
     readers: [
@@ -330,6 +352,16 @@ const LEDGER: Readonly<Record<string, LedgerRow>> = {
     readers: [LOOKUP],
     why: 'RUNTIME-ONLY (objectstack#28245) — object-field metadata (the spec\'s `FieldSchema.lookupAutofill`) read off the '
       + 'resolved `field` stash: which fields a pick fills is a fact about the object, not about one form.',
+  },
+  recordBeingEdited: {
+    readers: ['entry@fields/src/widgets/lookupRecordReference.ts'],
+    why: 'RUNTIME-ONLY (objectstack#34197, objectstack#34344) — the record form\'s statement that one record is being '
+      + 'edited, with the object each hop points at, stamped (`withRecordBeingEdited`) on a lookup whose `lookupFilters` '
+      + 'read `{ $record }`. A host that edits no single record must not be able to claim it. Two things hold that: '
+      + 'the widget honours only a stamp `withRecordBeingEdited` issued, so the key written as data, on this face\'s '
+      + 'loose `FormFieldSchema` or anywhere else, is no stamp; and a record form stamps every field it draws, '
+      + 'generated or inline, in the one step every layout draws through (`gateFormFields`), dropping an authored '
+      + 'key first. Not declared here, deliberately: no document authors it.',
   },
   homeAmountSource: {
     readers: [CURRENCY],

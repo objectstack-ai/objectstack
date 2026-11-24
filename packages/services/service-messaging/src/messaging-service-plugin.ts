@@ -3,9 +3,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Plugin, PluginContext, RequestAuthService, TenancyPostureSource } from '@objectstack/core';
 import { resolveLocalizationContext } from '@objectstack/core';
+import { installEgressGuard, type EgressGuard, type EgressPolicy } from '@objectstack/core/egress';
 import type { IDataEngine, IHttpServer } from '@objectstack/spec/contracts';
 import { PREFERENCE_OPTIONS_ROUTE, registerPreferenceOptionsRoutes } from './preference-options-routes.js';
 import { IN_APP_MESSAGE_ROUTE, registerInAppMessageRoutes } from './in-app-message-routes.js';
+import { MY_PREFERENCES_ROUTE, registerMyPreferencesRoutes } from './my-preferences-routes.js';
 import { resolveMessagingCaller, type MessagingCallerSources } from './messaging-request-caller.js';
 import type { PreferenceOptionsEngine } from './preference-options.js';
 import { MessagingService } from './messaging-service.js';
@@ -18,6 +20,16 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
 import { createPushChannel } from './push-channel.js';
+import { mountSlackChannel } from './slack-channel.js';
+import {
+    SlackLinkStore,
+    bindSlackLinkRemovalTriggers,
+    unbindSlackLinkRemovalTriggers,
+    type SlackClientSurface,
+    type SlackTriggerEngine,
+} from './slack-links.js';
+import { SLACK_ACCOUNT_ROUTE, SLACK_LINK_ROUTE, registerSlackLinkRoutes } from './slack-link-routes.js';
+import { SLACK_SETUP_UI_BUNDLE } from './slack-setup-ui.js';
 import {
     NotificationTemplateStore,
     TEMPLATE_BUILTINS,
@@ -32,6 +44,12 @@ import {
 import { NotificationTextRenderer, type NotificationTextI18n } from './notification-text.js';
 import { installInboxReaderLocale, type InboxReaderLocaleEngine } from './inbox-reader-locale.js';
 import { convertWildcardPreferenceUsers } from './preference-user-conversion.js';
+import { convertLegacyNoneDigestsOnce } from './preference-digest-conversion.js';
+import {
+    bindPreferenceDigestUnset,
+    unbindPreferenceDigestUnset,
+    type PreferenceDigestHookEngine,
+} from './preference-digest-unset.js';
 import {
     InboxMessage,
     NotificationReceipt,
@@ -40,6 +58,8 @@ import {
     NotificationTemplate,
     HttpDelivery,
     UserDevice,
+    ChannelAccount,
+    ChannelUserLink,
 } from './objects/index.js';
 // The L2 event this service writes on every `emit()`. It is OWNED by
 // platform-objects (it is in `PLATFORM_OBJECTS_BY_PACKAGE`), and — like
@@ -153,6 +173,16 @@ export interface MessagingServicePluginOptions {
      * `prefix.` entry for a prefix match (default none).
      */
     mandatoryTopics?: readonly string[];
+    /**
+     * The outbound-request guard's policy for the HTTP outbox — every webhook
+     * delivery and durable flow `http` callout connects through it. Omitted,
+     * the open-core default applies: only public addresses, plus the targets
+     * the operator lists in `OS_EGRESS_ALLOWED_TARGETS`; link-local and cloud
+     * metadata addresses are never reachable. A multi-tenant host binds a
+     * stricter policy here (it is asked per organization and source). A
+     * malformed allowlist fails the boot.
+     */
+    egressPolicy?: EgressPolicy;
 }
 
 /**
@@ -223,13 +253,22 @@ export class MessagingServicePlugin implements Plugin {
     type = 'standard' as const;
     dependencies = ['com.objectstack.engine.objectql'];
 
-    private readonly options: Required<MessagingServicePluginOptions>;
+    private readonly options: Required<Omit<MessagingServicePluginOptions, 'egressPolicy'>>;
+    private readonly egressPolicy?: EgressPolicy;
+    /** The outbound-request guard the HTTP outbox sends through — installed at init, or the boot fails. */
+    private egress?: EgressGuard;
     private dispatcher?: NotificationDispatcher;
     private httpDispatcher?: HttpDispatcher;
     /** The engine the template placement hooks are bound to — unbound on teardown. */
     private placementEngine?: PlacementHookEngine;
+    /** The engine the unset-digest hook is bound on (#35123; temporary until #36245). */
+    private digestUnsetEngine?: PreferenceDigestHookEngine;
+    /** The engine the Slack link removal triggers are bound to — unbound on teardown. */
+    private slackTriggerEngine?: SlackTriggerEngine;
 
     constructor(options: MessagingServicePluginOptions = {}) {
+        const { egressPolicy, ...rest } = options;
+        this.egressPolicy = egressPolicy;
         this.options = {
             registerInbox: true,
             reliableDelivery: true,
@@ -238,11 +277,17 @@ export class MessagingServicePlugin implements Plugin {
             dispatchMaxIdleIntervalMs: DEFAULT_MAX_IDLE_INTERVAL_MS,
             dispatchSoleWriter: false,
             mandatoryTopics: [],
-            ...options,
+            ...rest,
         };
     }
 
     async init(ctx: PluginContext): Promise<void> {
+        // The outbound-request guard, installed before anything can send: a
+        // malformed `OS_EGRESS_ALLOWED_TARGETS`, or a runtime in which the
+        // guard cannot prove it judges every connection, fails the boot here,
+        // and there is no unguarded fallback for the HTTP outbox to take.
+        this.egress = await installEgressGuard({ policy: this.egressPolicy, logger: ctx.logger });
+
         // Shared lazy data-engine resolver — used to persist the L2
         // `sys_notification` event in `emit()`, by the inbox channel to
         // materialize rows, and (at kernel:ready) to back the outbox. Resolved
@@ -342,6 +387,26 @@ export class MessagingServicePlugin implements Plugin {
 
         ctx.registerService('messaging', service);
 
+        // [#34730 step 2] The Slack link store: the organization's install
+        // (`sys_channel_account`) and each person's link to their own Slack
+        // user (`sys_channel_user_link`). Slack is reached through
+        // connector-slack's `slack` client service, probed per call like
+        // `email` above, so a composition without ConnectorSlackPlugin has no
+        // Slack channel and its link doors answer 503.
+        const getSlack = (): SlackClientSurface | undefined => {
+            try {
+                return ctx.getService<SlackClientSurface>('slack');
+            } catch {
+                return undefined;
+            }
+        };
+        const slackLinks = new SlackLinkStore({
+            getData,
+            getSlack,
+            notify: (input) => service.emit(input),
+            logger: ctx.logger,
+        });
+
         // ADR-0030: the messaging service also backs the `notification` core
         // service slot — it owns the in-app inbox + receipts, so it answers the
         // `/api/v1/notifications` REST surface (list / mark-read / mark-all-read)
@@ -376,6 +441,10 @@ export class MessagingServicePlugin implements Plugin {
                 // The push device registry (ADR-0012 §6): the
                 // `notification` slot's device members write it.
                 UserDevice,
+                // The Slack install and the per-person links (#34730 step 2):
+                // the Slack link doors write them through the link store.
+                ChannelAccount,
+                ChannelUserLink,
             ],
             navigationContributions: [
                 {
@@ -408,6 +477,34 @@ export class MessagingServicePlugin implements Plugin {
             ctx.logger.warn(
                 '[messaging] no ObjectQL engine with a hook registry — a sys_notification_template save is NOT judged '
                 + 'for where its body places a hole',
+            );
+        }
+        // [ruling 7073270426 on #35123] An insert that leaves
+        // `sys_notification_preference.digest` unset stores it EMPTY ("not
+        // set") even where the column still carries the old physical DEFAULT
+        // 'none', which would read as the person's explicit "no digest".
+        // ⚠️ TEMPORARY, carried by #36245 (the SQL driver keeps a column
+        // default the metadata no longer declares): removed when that lands.
+        // See preference-digest-unset.ts.
+        if (bindPreferenceDigestUnset(engine)) {
+            this.digestUnsetEngine = engine;
+        } else {
+            ctx.logger.warn(
+                '[messaging] no ObjectQL engine with a hook registry: on a database created by an earlier release, a '
+                + "notification preference created without a digest stores 'none', which reads as the person's own "
+                + "choice of no digest instead of following the organization's default",
+            );
+        }
+
+        // [ruling 7024100939, rider 3] A person's Slack links go when they
+        // leave the organization or are banned (their deletion cascades by
+        // the object's own declaration). See slack-links.ts.
+        if (bindSlackLinkRemovalTriggers(engine as SlackTriggerEngine | undefined, slackLinks, ctx.logger)) {
+            this.slackTriggerEngine = engine as SlackTriggerEngine;
+        } else {
+            ctx.logger.warn(
+                '[messaging] no ObjectQL engine with a hook registry — a person who leaves an organization or is banned '
+                + 'keeps their Slack link there until an administrator removes it',
             );
         }
 
@@ -465,6 +562,17 @@ export class MessagingServicePlugin implements Plugin {
         if (typeof ctx.hook === 'function') {
             ctx.hook('kernel:ready', async () => {
                 await convertWildcardPreferenceUsers(getData(), ctx.logger);
+            });
+        }
+
+        // [ruling 7073270426 on #35123] `digest` lost its `defaultValue:
+        // 'none'`: a stored `none` is now a person's explicit choice, and the
+        // legacy `none` nobody chose becomes empty — ONCE per deployment,
+        // recorded in `sys_migration`, never on every boot (that would erase
+        // the choices made since). See preference-digest-conversion.ts.
+        if (typeof ctx.hook === 'function') {
+            ctx.hook('kernel:ready', async () => {
+                await convertLegacyNoneDigestsOnce(getData(), ctx.logger);
             });
         }
 
@@ -561,6 +669,46 @@ export class MessagingServicePlugin implements Plugin {
                     logger: ctx.logger,
                 }));
             });
+
+            // Slack channel (#34730 step 2): registered only on a composition
+            // whose connector-slack `slack` client service resolves at
+            // `kernel:ready` (ConnectorSlackPlugin registers it at init), then
+            // mounted per lookup like the others. Without it the channel is
+            // not known at all, so the `/automation` save doors and the
+            // preference doors (`getKnownChannels`) answer as they do with no
+            // Slack in the composition. It sends a DM to a recipient's
+            // confirmed link with their organization's own install token
+            // (sys_channel_account). [#34730 step 3] Setup's Slack entry
+            // (`slack-setup-ui.ts`) is registered on the same condition, so a
+            // composition without connector-slack lists no Slack page.
+            // [#36301] The DM's link is a Console page, so it goes under the
+            // Console's mount, read from the auth service's composer
+            // (`getConsoleUrl`, which reads `AuthConfig.uiBasePath`) at send
+            // time, the one source the approval e-mail reads; without an auth
+            // service the link carries no mount.
+            const getConsoleUrl = (path: string): string | undefined => {
+                let auth: { getConsoleUrl?: (path: string) => string } | undefined;
+                try {
+                    auth = ctx.getService<{ getConsoleUrl?: (path: string) => string }>('auth');
+                } catch {
+                    return undefined;
+                }
+                return typeof auth?.getConsoleUrl === 'function' ? auth.getConsoleUrl(path) : undefined;
+            };
+            ctx.hook('kernel:ready', async () => {
+                if (!getSlack()) return;
+                service.registerChannelProvider('slack', lazyChannelMount({
+                    resolveTransport: getSlack,
+                    create: () => mountSlackChannel({ store: slackLinks, getConsoleUrl }),
+                    announce: '[messaging] slack channel registered (a DM to the recipient\'s confirmed sys_channel_user_link, with their organization\'s sys_channel_account token)',
+                    logger: ctx.logger,
+                }));
+                try {
+                    ctx.getService<{ register(m: unknown): void }>('manifest').register(SLACK_SETUP_UI_BUNDLE);
+                } catch {
+                    /* no manifest service: no console to carry the entry */
+                }
+            });
         }
 
         // [#30208 row 6, ruling E on #30527] The preference options door
@@ -573,7 +721,7 @@ export class MessagingServicePlugin implements Plugin {
         // when the HTTP server is registered; everything they read is read
         // per request.
         if (typeof ctx.hook === 'function') {
-            ctx.hook('kernel:ready', async () => this.mountHttpDoors(ctx, service, getData));
+            ctx.hook('kernel:ready', async () => this.mountHttpDoors(ctx, service, getData, slackLinks));
         }
 
         // Reliable delivery (P1): wire the outbox + dispatcher once the engine
@@ -631,6 +779,7 @@ export class MessagingServicePlugin implements Plugin {
                     maxIdleIntervalMs: this.options.dispatchMaxIdleIntervalMs,
                     soleWriter: this.options.dispatchSoleWriter,
                     logger: ctx.logger,
+                    egress: this.egress,
                 });
                 this.httpDispatcher.start();
                 ctx.logger.info(
@@ -653,17 +802,19 @@ export class MessagingServicePlugin implements Plugin {
     }
 
     /**
-     * Mount the package's two HTTP doors on the kernel's HTTP server:
-     * `GET /api/v1/messaging/preference-options` and
-     * `POST /api/v1/messaging/in-app-messages`. A kernel with no HTTP server
-     * says so once and mounts neither: the preference fields stay plain text
-     * boxes, the Setup action "Send in-app message" has nothing to call, and
-     * the in-process service is unchanged.
+     * Mount the package's HTTP doors on the kernel's HTTP server:
+     * `GET /api/v1/messaging/preference-options`, the caller's own
+     * preferences, `POST /api/v1/messaging/in-app-messages` and the Slack
+     * link doors. A kernel with no HTTP server says so once and mounts none:
+     * the preference fields stay plain text boxes, the Setup action "Send
+     * in-app message" has nothing to call, nobody can connect Slack, and the
+     * in-process service is unchanged.
      */
     private mountHttpDoors(
         ctx: PluginContext,
         service: MessagingService,
         getData: () => IDataEngine | undefined,
+        slackLinks: SlackLinkStore,
     ): void {
         const optional = <T>(name: string): T | undefined => {
             try {
@@ -675,9 +826,11 @@ export class MessagingServicePlugin implements Plugin {
         const http = optional<IHttpServer>('http-server');
         if (!http) {
             ctx.logger.warn(
-                `[messaging] no HTTP server is registered, so neither the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}) ` +
-                    `nor the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) is mounted: the console draws notification topic ` +
-                    'and channel as plain text boxes, and the Setup action "Send in-app message" has nothing to call.',
+                `[messaging] no HTTP server is registered, so neither the preference options list (GET ${PREFERENCE_OPTIONS_ROUTE}), ` +
+                    `the caller's own preferences (GET ${MY_PREFERENCES_ROUTE}), the in-app message door (POST ${IN_APP_MESSAGE_ROUTE}) ` +
+                    `nor the Slack link doors (${SLACK_LINK_ROUTE}, ${SLACK_ACCOUNT_ROUTE}) is mounted: the console draws notification ` +
+                    'topic and channel as plain text boxes, the Account page Notification Settings has nothing to read, the Setup ' +
+                    'action "Send in-app message" has nothing to call, and nobody can install Slack or connect to it.',
             );
             return;
         }
@@ -691,8 +844,7 @@ export class MessagingServicePlugin implements Plugin {
                 ? () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy')
                 : undefined,
         };
-        registerPreferenceOptionsRoutes(http, {
-            ...callerSources,
+        const optionSources = {
             knownChannels: () => service.getKnownChannels(),
             getData: () => getData() as unknown as PreferenceOptionsEngine | undefined,
             readFlows: async () => {
@@ -701,14 +853,29 @@ export class MessagingServicePlugin implements Plugin {
                 const raw = await protocol.getMetaItems({ type: 'flow' });
                 return Array.isArray(raw) ? raw : ((raw as { items?: unknown[] } | null)?.items ?? []);
             },
-        });
+        };
+        registerPreferenceOptionsRoutes(http, { ...callerSources, ...optionSources });
         ctx.logger.info(`[messaging] preference options list mounted at GET ${PREFERENCE_OPTIONS_ROUTE}`);
+        // [rulings 6968686390 and 6969143776] The caller's own effective
+        // preferences, decided by the same resolver `emit` filters with.
+        registerMyPreferencesRoutes(http, {
+            ...callerSources,
+            ...optionSources,
+            effectivePreferences: (userId, organizationId, topics, channels) =>
+                service.effectivePreferencesFor(userId, organizationId, topics, channels),
+        });
+        ctx.logger.info(`[messaging] caller's own preferences mounted at GET ${MY_PREFERENCES_ROUTE}`);
         registerInAppMessageRoutes(http, {
             resolveCaller: (req) => resolveMessagingCaller(req, callerSources),
             getMessaging: () => service,
             getData,
         });
         ctx.logger.info(`[messaging] in-app message door mounted at POST ${IN_APP_MESSAGE_ROUTE}`);
+        registerSlackLinkRoutes(http, {
+            resolveCaller: (req) => resolveMessagingCaller(req, callerSources),
+            getStore: () => slackLinks,
+        });
+        ctx.logger.info(`[messaging] Slack link doors mounted at ${SLACK_LINK_ROUTE} and ${SLACK_ACCOUNT_ROUTE}`);
     }
 
     /**
@@ -739,7 +906,8 @@ export class MessagingServicePlugin implements Plugin {
      * cold-start budget) and says once, at `info`, what it did not provision and
      * why. Not `warn`: nothing is degraded, because the operator declared this.
      * `os migrate apply`, the documented path, was measured to create all eight
-     * tables (before `sys_user_device` joined them as the ninth). `syncObjectSchema` itself stays ungated, because it is also how a
+     * tables (before `sys_user_device` joined them as the ninth, and the two
+     * Slack link objects as the tenth and eleventh). `syncObjectSchema` itself stays ungated, because it is also how a
      * runtime publish gives a new object its table.
      */
     private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
@@ -757,6 +925,8 @@ export class MessagingServicePlugin implements Plugin {
             NotificationTemplate,
             HttpDelivery,
             UserDevice,
+            ChannelAccount,
+            ChannelUserLink,
         ];
         // [#22984] FIRST: see the docblock. One line, naming every skipped object.
         if (bootSchemaSyncSkipped(engine)) {
@@ -829,6 +999,10 @@ export class MessagingServicePlugin implements Plugin {
     async destroy(): Promise<void> {
         unbindTemplateHolePlacement(this.placementEngine);
         this.placementEngine = undefined;
+        unbindPreferenceDigestUnset(this.digestUnsetEngine);
+        this.digestUnsetEngine = undefined;
+        unbindSlackLinkRemovalTriggers(this.slackTriggerEngine);
+        this.slackTriggerEngine = undefined;
         await this.dispatcher?.stop();
         this.dispatcher = undefined;
         await this.httpDispatcher?.stop();

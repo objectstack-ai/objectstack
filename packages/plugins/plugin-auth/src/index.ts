@@ -35,6 +35,14 @@ export {
   authEmailLocaleFromRequest,
   AuthManager,
 } from './auth-manager.js';
+// The shape a host's `session.create.before` hook may return: better-auth's
+// `{ data }` (required, as better-auth types it) plus an ordered
+// `activeOrganizationCandidates` list. The session is scoped to the first
+// candidate the organization's own access policy admits; none admitted is
+// refused as a single choice is. The host lists only organizations the user is
+// a member of. Only the type is published: the judgement and its helpers stay
+// inside the framework.
+export type { SessionCreateBeforeResult } from './session-organization-candidates.js';
 // The IdP locale rule, for a host whose sign-in does not run through the OIDC
 // seams (the cloud's sso-exchange hand-off): `AuthManager.applyIdpLocaleClaim`
 // takes this claim. A user's language preference is written only while it is
@@ -86,6 +94,20 @@ export * from './default-org-bootstrap-once.js';
 // has to run the probe on its own schedule.
 export * from './account-identity-preflight.js';
 export * from './set-initial-password.js';
+// The operator's password reset on the server (`os user set-password`): a
+// server outside development mode refuses a development seed credential and
+// opens no session to change it in, so the CLI sets the new password against
+// the project database through this one function.
+export {
+  setOperatorPassword,
+  findAccountByEmail,
+  operatorPasswordRefusal,
+  OPERATOR_PASSWORD_MIN_LENGTH,
+  OPERATOR_PASSWORD_MAX_LENGTH,
+  type OperatorPasswordResetEngine,
+  type OperatorPasswordResetOutcome,
+  type OperatorPasswordResetRefusalReason,
+} from './operator-password-reset.js';
 export * from './admin-user-endpoints.js';
 export * from './admin-ban-endpoints.js';
 export * from './platform-admin-gate.js';
@@ -102,7 +124,7 @@ export * from './environment-user-host.js';
 export * from './pending-sso-users.js';
 
 // Direct sign-in: the `directSignIn` option's shape, for a host that sets it.
-export type { DirectSignInOptions, DirectSignInLocalPath } from './direct-sign-in.js';
+export type { DirectSignInOptions, DirectSignInLocalPath, DirectSignInAfterSignOut } from './direct-sign-in.js';
 export * from './last-local-credential.js';
 export * from './placeholder-email.js';
 export * from './admin-import-users.js';

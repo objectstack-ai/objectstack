@@ -5,6 +5,9 @@
  * the tenant console's `app` bar and the control plane's `home` / `orgs` /
  * `studio` bars are the one component — the help menu carries 「关于」 / About,
  * and the dialog it opens names the build this console was compiled from.
+ * Since objectstack#35280 it names the ObjectStack version first: the
+ * `version` the discovery document answers, read through the adapter's
+ * `getDiscovery()`, stubbed here through a mutable answer.
  *
  * The build identity is `buildIdentity.ts`'s one read, stubbed here through a
  * mutable reading: this repo's Vitest setup cannot put a `VITE_*` value on
@@ -151,8 +154,18 @@ vi.mock('../../providers/MetadataProvider', () => ({
   }),
 }));
 
+/**
+ * What the adapter's `getDiscovery()` answers; each case sets it. The adapter
+ * answers `null` when it cannot connect, and never rejects.
+ */
+let discoveryAnswer: Promise<unknown> = Promise.resolve(null);
+
 /** Stable identity: the header's readers key their effects on the adapter. */
-const fakeAdapter = { find: () => Promise.resolve({ data: [] }), getClient: () => undefined };
+const fakeAdapter = {
+  find: () => Promise.resolve({ data: [] }),
+  getClient: () => undefined,
+  getDiscovery: () => discoveryAnswer,
+};
 
 vi.mock('../../providers/AdapterProvider', () => ({
   useAdapter: () => fakeAdapter,
@@ -166,6 +179,7 @@ const MEMBER: MePermissionsAuthenticatedResponse = {
   tenantId: 'org_1',
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: [],
   systemPermissions: [],
   objects: {},
@@ -177,6 +191,7 @@ const PATHS: Record<AppHeaderVariant, string> = {
   home: '/home',
   orgs: '/organizations',
   studio: '/studio',
+  docs: '/docs',
 };
 
 function renderHeader(variant: AppHeaderVariant) {
@@ -207,6 +222,7 @@ function openAbout() {
 
 beforeEach(() => {
   consoleBuild = null;
+  discoveryAnswer = Promise.resolve({ version: '18.5.0' });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) })));
 });
 
@@ -215,7 +231,7 @@ afterEach(() => {
 });
 
 describe('AppHeader help menu: About names the console build (objectui#12970)', () => {
-  it.each<AppHeaderVariant>(['app', 'home', 'orgs', 'studio'])(
+  it.each<AppHeaderVariant>(['app', 'home', 'orgs', 'studio', 'docs'])(
     'the `%s` bar\'s help menu carries About, read from the packs',
     (variant) => {
       renderHeader(variant);
@@ -254,4 +270,48 @@ describe('AppHeader help menu: About names the console build (objectui#12970)', 
       expect(value.textContent?.trim()).not.toBe('');
     },
   );
+});
+
+describe('About names the ObjectStack version first, read from discovery (objectstack#35280)', () => {
+  it.each(['18.5.0', '18.6.0-rc.2+deploy.41'])(
+    'discovery answering `%s` fills the first row with exactly that value; the build row follows',
+    async (version) => {
+      consoleBuild = '0707b4ae';
+      discoveryAnswer = Promise.resolve({ name: 'objectstack', version, services: {} });
+      renderHeader('app');
+
+      const dialog = openAbout();
+      const value = within(dialog).getByTestId('about:runtime-version');
+      expect(await within(value).findByText(version)).toBeInTheDocument();
+      expect(value.textContent).toBe(version);
+
+      const terms = Array.from(dialog.querySelectorAll('dt')).map((dt) => dt.textContent);
+      expect(terms).toEqual(['«help.aboutVersion»', '«help.aboutBuild»']);
+      const values = Array.from(dialog.querySelectorAll('dd')).map((dd) => dd.getAttribute('data-testid'));
+      expect(values).toEqual(['about:runtime-version', 'about:console-build']);
+      expect(within(dialog).getByTestId('about:console-build')).toHaveTextContent('0707b4ae');
+    },
+  );
+
+  it.each<[string, unknown]>([
+    ['discovery cannot be read (the adapter answers null)', null],
+    ['discovery answers no version', { name: 'objectstack', services: {} }],
+    ['discovery answers an empty version', { version: '' }],
+  ])('%s: the row says so in words, never an empty field', async (_case, answer) => {
+    discoveryAnswer = Promise.resolve(answer);
+    renderHeader('home');
+
+    const value = within(openAbout()).getByTestId('about:runtime-version');
+    expect(await within(value).findByText('«help.aboutVersionUnknown»')).toBeInTheDocument();
+    expect(value.textContent?.trim()).not.toBe('');
+  });
+
+  it('while the read is in flight the row says it is loading, never an empty field', () => {
+    discoveryAnswer = new Promise(() => {});
+    renderHeader('app');
+
+    const value = within(openAbout()).getByTestId('about:runtime-version');
+    expect(value).toHaveTextContent('«common.loading»');
+    expect(within(value).queryByText('«help.aboutVersionUnknown»')).not.toBeInTheDocument();
+  });
 });

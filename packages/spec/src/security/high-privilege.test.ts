@@ -176,3 +176,16 @@ describe('describeAnchorForbiddenBits — the excusal is the `everyone` tier’s
     expect(describeAnchorForbiddenBits({ objects: { a: { allowEdit: true } } }, 'everyone', ctx)).toBeNull();
   });
 });
+
+describe('[field-axis split, ruling 6912661484] viewAllFields is high-privilege, like the super-user bits it splits from', () => {
+  it('an audience anchor refuses a set carrying it, per object and on the wildcard', () => {
+    expect(describeHighPrivilegeBits({ objects: { a: { allowRead: true, viewAllFields: true } } })).toBe("View All Fields on 'a'");
+    expect(describeHighPrivilegeBits({ objects: { '*': { allowRead: true, viewAllFields: true } } })).toBe("View All Fields on '*'");
+    expect(describeAnchorForbiddenBits({ objects: { a: { allowRead: true, viewAllFields: true } } }, 'everyone')).toBe("View All Fields on 'a'");
+  });
+
+  it('control: the same set without the bit binds, and an explicit false is not the bit', () => {
+    expect(describeHighPrivilegeBits({ objects: { a: { allowRead: true } } })).toBeNull();
+    expect(describeHighPrivilegeBits({ objects: { a: { allowRead: true, viewAllFields: false } } })).toBeNull();
+  });
+});

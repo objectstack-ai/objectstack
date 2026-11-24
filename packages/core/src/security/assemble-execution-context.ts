@@ -281,7 +281,7 @@ export interface ExecutionContextAssemblyInput {
    *    consumer reads it (`RestServer.enforceAuth` → `403 { code, message }`);
    *  - the **runtime / MCP dispatcher** passes `undefined`, because it enforces
    *    the same ADR-0069 gate at its OWN seam (`HttpDispatcher.enforceAuthGate`
-   *    re-reads the session and calls `evaluateAuthGate` there) and never reads
+   *    calls `evaluateAuthGate` there on the admission's posture) and never reads
    *    `context.authGate` — carrying it would be a second, unread copy.
    *
    * Until #7280 declared it, this posture reached the envelope through an

@@ -50,7 +50,8 @@ jobs:
           
           # Exempt labels
           # tracking: the half-state patrol's anchor issue carries only this label and stays alive solely via the patrol's own heartbeat (its periodic body rewrite) -- without this exemption a dead patrol's anchor goes stale at 60 days and closes 14 days later, silencing the one artifact whose job is to make that death visible.
-          exempt-issue-labels: 'pinned,security,roadmap,tracking'
+          # governed-merges-audit: the same reasoning holds for the governed-merges audit card (fleet-patrols.yml, `ANCHOR_IDENTITY_LABEL: governed-merges-audit`) -- the card is unruled until a GOVERNED_APPROVERS account closes it by hand, and a stale close rules nothing, so a dead patrol's card would close with the carried BREACH rows that only it holds.
+          exempt-issue-labels: 'pinned,security,roadmap,tracking,governed-merges-audit'
           exempt-pr-labels: 'pinned,security,work-in-progress'
           
           # Operations per run

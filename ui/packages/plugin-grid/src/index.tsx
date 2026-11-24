@@ -36,12 +36,18 @@ export { useRowColor } from './useRowColor';
 export { useGroupedData } from './useGroupedData';
 export { GroupRow } from './GroupRow';
 export { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
-export { BulkActionBar } from './components/BulkActionBar';
+export { BulkActionBar } from './components/SelectionBar';
+// objectstack#35678 — the list page's scope, registered by the Console's page
+// bars, and the kept scroll position a list host loads back to.
+// objectstack#35883 — the phone's 「Select」 and whether a selection is open.
+export { useListPageScope, requestListSelection, useListPageSelecting, useListPageSelectable } from './listPageScope';
+export { readListScrollState } from './objectGridInfiniteLoad';
+export type { ListScrollState } from './objectGridInfiniteLoad';
 // The bare-name fold, its development warning and the bar's own gate (the
 // capability check, the switch-off and the per-record `visible`), for the one
 // other surface that draws a selection bar of its own: plugin-list's ListView
 // over a non-grid view (objectstack#30394, objectstack#30535). One rule, one copy.
-export { useBulkActionItems } from './components/BulkActionBar';
+export { useBulkActionItems, CHANGE_OWNER_BULK_ACTION } from './components/BulkActionBar';
 export { resolveBulkActions } from './resolveBulkActions';
 export { useUndeclaredActionNamesWarning } from './undeclaredActionNames';
 export { useCellClipboard } from './useCellClipboard';
@@ -66,7 +72,8 @@ export type { ImportWizardProps, ImportResult } from './ImportWizard';
 export type { GroupEntry, UseGroupedDataResult, AggregationType, GroupAggregationConfig, AggregationResult } from './useGroupedData';
 export type { GroupRowProps } from './GroupRow';
 export type { RowActionMenuProps } from './components/RowActionMenu';
-export type { BulkActionBarProps, BulkActionItems, LegacyBulkActionItem } from './components/BulkActionBar';
+export type { BulkActionBarProps } from './components/SelectionBar';
+export type { BulkActionItems, LegacyBulkActionItem } from './components/BulkActionBar';
 export type { ActionLabelResolver, NamedActionDef } from './resolveBulkActions';
 export type {
   UndeclaredActionNameKey,
@@ -348,13 +355,14 @@ const GRID_QUERY_INPUTS: ComponentInput[] = [
   { name: 'batchActions', type: 'array', description: 'Legacy alias of `bulkActions`, and the one the renderer reads FIRST when both are set. Prefer `bulkActions` in new schemas.' },
   { name: 'bulkActionDefs', type: 'array', description: 'Full inline bulk-action definitions, for actions that are not named entries in the object’s action set. Use `bulkActions` when the action already exists.' },
   // ── behaviour ─────────────────────────────────────────────────────────────
-  { name: 'editable', type: 'boolean', description: 'Enable inline cell editing (double-click or Enter opens a cell).' },
-  { name: 'singleClickEdit', type: 'boolean', description: 'With `editable`, a single click opens the cell instead of a double-click. Has no effect on a non-editable grid.' },
+  // `singleClickEdit` is retired (objectstack#36270): a grid that renders
+  // editable selects a cell first, so no single-click entry is left to switch.
+  { name: 'editable', type: 'boolean', description: 'Enable inline cell editing where the viewer may edit. A click selects a cell; double-click, Enter, F2 or typing opens its editor, Esc cancels, and each committed cell is saved on its own. A grid that renders read-only keeps click-to-open.' },
   // `keyboardNavigation` (objectui#11068's build; the row declares it since
   // 17.6.0). The behaviour is `data-table`'s and is pinned there
   // (`data-table-keyboard-navigation-11068.test.tsx`); the default and the
   // relay are `ObjectGrid`'s (`ObjectGrid.keyboardNavigation-11068.test.tsx`).
-  { name: 'keyboardNavigation', type: 'boolean', description: 'Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Defaults to on when the grid renders editable; a read-only grid keeps every cell its own Tab stop unless this is `true`, and `false` turns it off on an editable grid.' },
+  { name: 'keyboardNavigation', type: 'boolean', description: 'Arrow-key cell navigation on the WAI-ARIA grid pattern: the grid\'s data cells take one place in the Tab order instead of one each (a link or button inside a cell keeps its own), and the arrow keys move focus between them (Home / End to the ends of the row, Ctrl+Home / Ctrl+End to the ends of the page). Enter still opens an editable cell, and an edit ended with Enter or Escape returns focus to its cell. Always on when the grid renders editable, because that grid selects a cell first and moves the selection with these keys; a read-only grid keeps every cell its own Tab stop unless this is `true`.' },
   { name: 'navigation', type: 'object', description: 'What a row click does, `{ mode: "drawer" | "page" | "new_window" | "none", … }`; a block written without `mode` opens the drawer.' },
   { name: 'operations', type: 'object', description: 'Toggles for the built-in affordances, `{ create, update, delete, export }`, e.g. `{ delete: false }`. A declared block replaces the default, so an `update` / `delete` it does not name is withheld.' },
   { name: 'exportOptions', type: 'object', description: 'Export config, `{ formats, maxRecords, includeHeaders, fileNamePrefix, streaming }`. `streaming` (default true) picks server-side streaming vs browser-side assembly for the export — a behaviour fork, not decoration; set it to `false` to force browser-side assembly. Needs `operations.export` to be reachable from the toolbar.' },

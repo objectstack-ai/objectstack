@@ -45,7 +45,7 @@
 // showcase's `onEnable` unconditionally STAFFS the position that flow's
 // second rung needs unstaffed.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack } from '@objectstack/verify';
 import { celEngine } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
@@ -86,6 +86,8 @@ interface ServedViewer {
   can_act: boolean;
   is_submitter: boolean;
   can_override: boolean;
+  /** `can_override` minus an approval of the viewer's own request — Approve's override arm. */
+  can_override_approve: boolean;
 }
 
 interface ServedAction {
@@ -143,8 +145,12 @@ describe('approval override composite (#16679)', () => {
         expect(getRow.viewer).toBeTruthy();
 
         // ── GATE B — `can_override` true on BOTH faces, and the fail-safe's
-        //    other two flags correctly false for this actor ────────────────
-        const expectedViewer: ServedViewer = { can_act: false, is_submitter: false, can_override: true };
+        //    other two flags correctly false for this actor. The admin did
+        //    not submit the request, so Approve's `can_override_approve` is
+        //    true with it ───────────────────────────────────────────────────
+        const expectedViewer: ServedViewer = {
+          can_act: false, is_submitter: false, can_override: true, can_override_approve: true,
+        };
         expect(listRow.viewer).toEqual(expectedViewer);
         expect(getRow.viewer).toEqual(expectedViewer);
 
@@ -221,4 +227,190 @@ describe('approval override composite (#16679)', () => {
     },
     60_000,
   );
+});
+
+/**
+ * [Maintainer ruling 2026-11-17, option B] The #3424 override never approves a
+ * request its actor submitted, and never hands the request's slot to its
+ * submitter. Pinned here through the real approvals routes on the same booted
+ * fixture: the dev admin (a platform administrator and the default
+ * organization's owner) submits a request whose slate names the approver who
+ * never acts, so the admin holds no slot on it and is admitted only through
+ * the override.
+ *
+ *   ⭐ the admin's approve of their own request answers 403 FORBIDDEN and
+ *      records nothing; their viewer block reads `can_override_approve: false`
+ *      and the served Approve predicate evaluates false;
+ *   ⭐ the admin's reassign of their own request to themselves, by id or by
+ *      email, answers 400 VALIDATION_FAILED and leaves the slate; so does a
+ *      reassign of a member's request to that member;
+ *   ⭐ the admin's reject and recall of their own requests succeed;
+ *   ⭐ CONTROLS: the admin still override-approves a member's request, audited
+ *      `via_override: true`, after which the slate's approver reads 404; a
+ *      slot holder still approves their own request (`via_override: false`).
+ *
+ * The service-level half is `plugin-approvals`' `approval-override-audit.test.ts`.
+ */
+describe('the override never approves its actor\'s own request, through the approvals routes', () => {
+  const ADMIN_EMAIL = 'admin@objectos.ai';
+  const MEMBER = 'override-own-request-member@example.com';
+  const SYS = { isSystem: true } as const;
+  let stack: Awaited<ReturnType<typeof bootFixture>>;
+  let ql: any;
+  let adminToken: string;
+  let memberToken: string;
+  let approverToken: string;
+  let adminId: string;
+  let memberId: string;
+
+  interface Answer { status: number; code?: string; body: Record<string, unknown> }
+
+  const call = async (token: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<Answer> => {
+    const res = await stack.apiAs(token, method, path, body);
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const error = parsed.error as { code?: string } | undefined;
+    return { status: res.status, code: (parsed.code as string | undefined) ?? error?.code, body: parsed };
+  };
+
+  /** `token`'s user files one request; the flow opens its pending step. */
+  const openRequest = async (token: string, name: string): Promise<string> => {
+    const res = await stack.apiAs(token, 'POST', '/data/override_composite_request', { name, amount: 1 });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const created = (await res.json()) as { id?: string; record?: { id?: string } };
+    const recordId = String(created.id ?? created.record?.id ?? '');
+    const [opened] = await ql.find('sys_approval_request', {
+      where: { object_name: 'override_composite_request', record_id: recordId }, context: SYS,
+    });
+    expect(opened?.status, 'the flow opened the approval step').toBe('pending');
+    return String(opened.id);
+  };
+
+  const requestRow = async (id: string) =>
+    (await ql.find('sys_approval_request', { where: { id }, context: SYS }))[0];
+  const decisionsOn = async (id: string) =>
+    ((await ql.find('sys_approval_action', { where: { request_id: id }, context: SYS })) as Array<Record<string, unknown>>)
+      .filter((a) => a.action !== 'submit');
+  const idOf = async (email: string) =>
+    String((await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id ?? '');
+
+  beforeAll(async () => {
+    stack = await bootFixture();
+    ql = await stack.kernel.getServiceAsync('objectql');
+    adminToken = await stack.signIn();
+    memberToken = await stack.signUp(MEMBER);
+    approverToken = await stack.signUp(DEPARTED_APPROVER);
+    adminId = await idOf(ADMIN_EMAIL);
+    memberId = await idOf(MEMBER);
+    expect(adminId).not.toBe('');
+    expect(memberId).not.toBe('');
+  }, 60_000);
+
+  afterAll(async () => {
+    await stack?.stop();
+  });
+
+  it('refuses the submitter-administrator\'s approve with 403, records nothing, and does not offer Approve', async () => {
+    const id = await openRequest(adminToken, 'own approve');
+    const row = await requestRow(id);
+    expect(String(row.submitter_id)).toBe(adminId);
+    expect(String(row.pending_approvers)).not.toContain(adminId);
+
+    const read = await call(adminToken, 'GET', `/approvals/requests/${id}`);
+    expect(read.status).toBe(200);
+    expect(read.body.viewer).toEqual({
+      can_act: false, is_submitter: true, can_override: true, can_override_approve: false,
+    });
+    const meta = await call(adminToken, 'GET', '/meta/object/sys_approval_request');
+    const actions = ((meta.body.item as { actions?: ServedAction[] } | undefined)?.actions ?? []);
+    const visibleFor = (name: string) => {
+      const action = actions.find((a) => a.name === name);
+      const result = celEngine.evaluate(action!.visible!, { record: read.body });
+      if (!result.ok) throw new Error(`CEL evaluation of '${name}' faulted: ${JSON.stringify(result)}`);
+      return result.value === true;
+    };
+    expect(visibleFor('approval_approve')).toBe(false);
+    expect(visibleFor('approval_reject')).toBe(true);
+    expect(visibleFor('approval_recall')).toBe(true);
+
+    const approve = await call(adminToken, 'POST', `/approvals/requests/${id}/approve`, {});
+    expect([approve.status, approve.code]).toEqual([403, 'FORBIDDEN']);
+    expect((await requestRow(id)).status).toBe('pending');
+    expect(await decisionsOn(id)).toEqual([]);
+  }, 60_000);
+
+  it('refuses an override reassign that hands the request to its submitter, leaving the slate', async () => {
+    const own = await openRequest(adminToken, 'own reassign');
+    const slate = String((await requestRow(own)).pending_approvers);
+    for (const to of [adminId, ADMIN_EMAIL]) {
+      const answer = await call(adminToken, 'POST', `/approvals/requests/${own}/reassign`, { to });
+      expect([answer.status, answer.code], `reassign to ${to}`).toEqual([400, 'VALIDATION_FAILED']);
+    }
+    expect(String((await requestRow(own)).pending_approvers)).toBe(slate);
+
+    const members = await openRequest(memberToken, 'member reassign');
+    const toSubmitter = await call(adminToken, 'POST', `/approvals/requests/${members}/reassign`, { to: memberId });
+    expect([toSubmitter.status, toSubmitter.code]).toEqual([400, 'VALIDATION_FAILED']);
+    expect(await decisionsOn(own)).toEqual([]);
+    expect(await decisionsOn(members)).toEqual([]);
+  }, 60_000);
+
+  it('leaves the submitter-administrator their reject and their recall', async () => {
+    const rejected = await openRequest(adminToken, 'own reject');
+    const reject = await call(adminToken, 'POST', `/approvals/requests/${rejected}/reject`, { comment: 'Filed in error.' });
+    expect(reject.status).toBe(200);
+    expect((await requestRow(rejected)).status).toBe('rejected');
+    expect(await decisionsOn(rejected)).toMatchObject([{ action: 'reject', via_override: true }]);
+
+    const recalled = await openRequest(adminToken, 'own recall');
+    const recall = await call(adminToken, 'POST', `/approvals/requests/${recalled}/recall`, {});
+    expect(recall.status).toBe(200);
+    expect((await requestRow(recalled)).status).toBe('recalled');
+  }, 60_000);
+
+  // [#35719] A reject carries its reason on the approvals route too, with the
+  // answer the `approval_reject` action door gives: 400 VALIDATION_ERROR naming
+  // `comment`, before anything is read or written.
+  it('refuses a reject with no reason, a blank one or one that is not a string, and leaves the request pending', async () => {
+    const id = await openRequest(memberToken, 'reasonless reject');
+    for (const body of [{}, { comment: '' }, { comment: '   ' }, { comment: null }]) {
+      const reject = await call(adminToken, 'POST', `/approvals/requests/${id}/reject`, body);
+      expect([reject.status, reject.code], JSON.stringify(body)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(JSON.stringify(reject.body)).toContain('Action param \\"comment\\" is required');
+    }
+    // A comment that is not a string is no reason either (the door's `textarea` shape).
+    for (const body of [{ comment: 0 }, { comment: false }, { comment: [] }, { comment: {} }]) {
+      const reject = await call(adminToken, 'POST', `/approvals/requests/${id}/reject`, body);
+      expect([reject.status, reject.code], JSON.stringify(body)).toEqual([400, 'VALIDATION_ERROR']);
+      expect(JSON.stringify(reject.body)).toContain('Action param \\"comment\\" (textarea): ');
+    }
+    expect((await requestRow(id)).status).toBe('pending');
+    expect(await decisionsOn(id)).toEqual([]);
+  }, 60_000);
+
+  it('CONTROL: a reject with its reason is recorded with that reason', async () => {
+    const id = await openRequest(memberToken, 'reasoned reject');
+    const reject = await call(adminToken, 'POST', `/approvals/requests/${id}/reject`, { comment: 'Over budget.' });
+    expect(reject.status).toBe(200);
+    expect((await requestRow(id)).status).toBe('rejected');
+    expect(await decisionsOn(id)).toMatchObject([{ action: 'reject', comment: 'Over budget.' }]);
+  }, 60_000);
+
+  it('CONTROL: an administrator who did not submit the request override-approves it, audited, and the slate\'s approver then reads 404', async () => {
+    const id = await openRequest(memberToken, 'member approve');
+    const approve = await call(adminToken, 'POST', `/approvals/requests/${id}/approve`, {});
+    expect(approve.status).toBe(200);
+    expect((await requestRow(id)).status).toBe('approved');
+    expect(await decisionsOn(id)).toMatchObject([{ action: 'approve', via_override: true }]);
+
+    const slateApprover = await call(approverToken, 'POST', `/approvals/requests/${id}/approve`, {});
+    expect([slateApprover.status, slateApprover.code]).toEqual([404, 'REQUEST_NOT_FOUND']);
+    expect((await call(approverToken, 'GET', `/approvals/requests/${id}`)).status).toBe(404);
+  }, 60_000);
+
+  it('CONTROL: a slot holder approving their own request is unchanged', async () => {
+    const id = await openRequest(approverToken, 'slot holder approve');
+    const approve = await call(approverToken, 'POST', `/approvals/requests/${id}/approve`, {});
+    expect(approve.status).toBe(200);
+    expect(await decisionsOn(id)).toMatchObject([{ action: 'approve', via_override: false }]);
+  }, 60_000);
 });

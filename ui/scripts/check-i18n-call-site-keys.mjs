@@ -1168,6 +1168,14 @@ export const DYNAMIC_KEY_FAMILIES = [
       "spec's chart-aggregate enum in `@objectstack/spec/ui`. No repo-local exhaustive Record " +
       'mirrors it, so there is nothing here to read.',
   },
+  {
+    head: 'report.builder.chart.',
+    vocabulary: { module: 'packages/plugin-report/src/builder/reportBuilderModel.ts', name: 'REPORT_BUILDER_CHART_TYPES', kind: 'array' },
+  },
+  {
+    head: 'report.builder.missing.',
+    vocabulary: { module: 'packages/plugin-report/src/builder/reportBuilderModel.ts', name: 'ReportBuilderMissingReason', kind: 'union' },
+  },
 ];
 
 /**
@@ -1390,6 +1398,8 @@ export const PACK_NAMESPACE_FRAMES = Object.freeze({
     'apps/console/src/pages/developer/',
     'packages/app-shell/src/console/connect/',
   ]),
+  // `timesheet.*`, read under `ObjectTimesheet`'s own namespace frame.
+  'packages/i18n/src/namespaces/timesheet/': Object.freeze(['packages/plugin-timesheet/src/']),
 });
 
 /** The pack-shaped namespace directories: the keys of {@link PACK_NAMESPACE_FRAMES}. */

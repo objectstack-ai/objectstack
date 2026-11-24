@@ -274,7 +274,8 @@ export default class Start extends Command {
         { stdio: ['ignore', 2, 'inherit'], env: process.env },
       );
       if (compileResult.status !== 0) {
-        printError('Compile failed — fix errors above before starting the server');
+        // Neutral wording, never a classification (ruling record 6998194814).
+        printError('objectstack.config did not load or compile — the reason is printed above; fix it before starting the server');
         console.error(chalk.yellow('  Hint: run `objectstack start --artifact <path>` to skip the compile step.'));
         process.exit(1);
       }

@@ -84,7 +84,7 @@ const MAPPING: SavedMapping = {
 };
 
 function mount(mapping: SavedMapping) {
-  const { container } = render(<SavedMappingSummary mapping={mapping} />);
+  const { container } = render(<SavedMappingSummary mapping={mapping} fields={[]} />);
   const summary = container.querySelector(
     '[data-testid="import-saved-mapping-summary"]',
   ) as HTMLElement;

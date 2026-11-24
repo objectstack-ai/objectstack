@@ -1,5 +1,302 @@
 # @object-ui/components
 
+## 18.6.0
+
+### Patch Changes
+
+- b019048: feat(console): surfaces that never draw a record count decline the list total
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The list door (`GET /data/:object`) runs a `count(*)` over the full predicate beside every paged read, unless the request sends `count=false`. On PostgreSQL that count is now the largest part of a paged list's database time. The ObjectStack adapter never forwarded `$count`, so no Console surface could decline the total.
+  
+  - `ObjectStackAdapter.find()` now honours `$count: false`. Such a read takes the adapter's raw GET, which sends `count=false`, and the result carries no `total`. The page length is not used in its place. An absent `$count`, or `$count: true`, still gets the total, as before.
+  - The timeline rail (`object-timeline` and the timeline view), the `element:record_picker` block and the `element:repeater` block draw rows and never a record count, so they now send `$count: false`. Surfaces that print a total keep it: the grid and list footers, related lists, the lookup picker's "showing N of M", kanban lane counts, and the calendar, map, tree and gantt row-ceiling note.
+- 39fa82b: fix(components): record page header-action predicates wait for the record instead of reporting "No such key" for fields the object has
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A record page binds its record id at once and its row only when the read answers. Until then the `page:header` actions evaluated their `visible`, `hidden`, `disabled` and `pressed` predicates against an empty record, so every `record.<field>` predicate faulted, and the console said "A conditional predicate failed to evaluate … No such key: status … Check the field names and CEL" once per action on every page load, for a field the object has. Nothing was wrong with the metadata.
+  
+  A record that is bound but not loaded is now its own state. Each predicate answers its key's safe default (hidden, not hidden, disabled, not pressed) and reports nothing; a `disabled` action does not claim it is "not available for this record" while there is no record yet. Once the record arrives the predicates run as before, and the warning still fires when a key is really missing from the loaded record. A header with no record bound at all evaluates as before.
+- 6a7403b: fix(console): a record page printed in a zh-CN organization shows dates in Chinese order, fits its line-items table to the sheet, and prints on white with plain values
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A print page (a record page that declares `print`), printed by `@objectstack/service-print` or by the console's Print button, now reads as a document:
+  
+  - **Dates in the locale's own order.** A `date` field authored `format: 'short'` drew `11月 15, '26` in `zh-CN`: only the month was translated into the English compact layout `Nov 15, '26`. That compact layout is now kept only for a locale that writes a date month first, then day, then year (`en`, `en-US`). Every other locale gets its own date with the year: `2026年11月15日` in `zh-CN` and `ja`, `15. Nov. 2026` in `de`, `15 Nov 2026` in `en-GB`. This is the face `formatDate` already drew for the default style with the year shown. It applies on screen as well as on paper, and to every reader of `formatDate(value, 'short', { locale })`.
+  - **Tables fit the printable width.** On a print page, a data table's cells drop their on-screen minimum width and single line on paper, so the columns shrink and wrap to the box. Before, a five-column `record:line_items` table on A4 portrait with 15 mm margins was 647 px wide in a 630 px box. Its last column ran past the box's border, and that border was drawn through the column. The running header and footer table is not affected.
+  - **White page, plain values.** On paper the page and everything around it are white instead of the app's background. A link, such as a lookup's referenced record, prints in the surrounding text colour with no underline. A select value drawn as a coloured badge prints as its label with no pill. The select badge carries a new inert attribute, `data-select-badge`, for this rule. Every rule sits inside `@media print` and is scoped to the print page, so the screen is unchanged.
+  
+  `avoidBreakInside` is unchanged: it still keeps each block whole on one sheet when the block fits.
+- 04e7b90: fix(components): a `page:tabs` tab holding a related list bound by `parentDataSource` shows its count badge before it is opened, on an app page too
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The tab strip counts a `record:related_list` by probing it against the record the page is about. An app page has no such record, so a tab whose related list reads its parent through `parentDataSource` (a team page listing members and invitations of the current organization, say) drew no badge: the number showed only inside the opened tab. On a record page the same list was probed against the page's record, which is not its parent.
+  
+  Such a list now says how many records it holds to its tab, the same number its own header shows, and the strip keeps that tab mounted while inactive so the badge is there before the tab is opened. A create or delete on the listed object re-reads the list and moves the badge. Lists whose parent is the page's record are counted by the strip's own probe exactly as before, and an authored `count` on a tab still wins.
+- 6c7d730: fix(ui): CSV files the Console builds in the browser start with a UTF-8 byte-order mark, so Excel shows Chinese and other non-ASCII text correctly
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Excel reads a CSV file that has no byte-order mark in the computer's own code page, so Chinese names and other non-ASCII values opened as garbled text. The server export already writes the mark. Six Console downloads build their CSV in the browser and did not:
+  
+  - the list view's export when the data source cannot export on the server;
+  - the grid's export in the same case;
+  - the data table's Export CSV button;
+  - a report's CSV export;
+  - the bulk action's Download error CSV;
+  - the temporary-password CSV after an identity import.
+  
+  All six now build their file with the new `csvBlob(text)` from `@object-ui/core`. It puts one mark (U+FEFF, the bytes EF BB BF) before the text and types the file `text/csv;charset=utf-8`. The core package also exports the mark as `UTF8_BYTE_ORDER_MARK`. The CSV import already removes one leading mark, so a downloaded file can still be imported again. The data table's file is now typed with `charset=utf-8` too.
+- 77b42a1: fix(ui): on a phone the record page keeps Edit in its bottom bar, names the current stage in full, and lays its key fields out in two columns
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three phone-width changes to the record page. Desktop layouts are unchanged.
+  
+  - **Bottom action bar.** On an editable record the bar is now Edit, the primary action, then the `⋯` menu with every other action. Before, the page's own actions took both slots first, so an object with two record actions pushed Edit into the `⋯`. The primary is the action declaring `variant: 'primary'`, else the first action. A record the reader cannot edit keeps the primary and one more. A destructive host action (Delete) still always goes in the `⋯`. `page:header`'s `mobileMaxVisible` still sets how many buttons the bar holds; a budget of one is Edit's.
+  - **Stage bar (`record:path`).** Below the `sm` breakpoint the path draws one progress segment per stage and no stage names, then one line with the step and the current stage's full name ("Step 5 of 6 · Negotiation", the existing form `stepOf` copy). The step counts the forward stages; a record on a lost stage shows that stage, marked lost, with no step. Tapping the line lists every stage by its full name, and on a path that allows stage changes each reachable stage there moves the record, behind the same permission and state-machine checks as on desktop. Nothing is authored for this: the viewport picks the mode.
+  - **Key-field strip on a hand-written page.** Below `sm` the strip is a two-column grid, as the default page's is, so six key fields read as three rows instead of six lines. A value too long for its cell ends in an ellipsis.
+- 2e29287: fix(components): an editable list's lookup column is wide enough for its record picker
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  With inline editing on, a lookup column in a list was sized from the short names its cells draw, often 80 to 121px. Its cell editor is the record picker, so the picker's trigger got a few dozen pixels and the option list it opened cut every name ("C..", "W."). In an editable table, a foreign-key column (a lookup, master-detail, tree or user field) whose cells edit is now never narrower than 168px, the width the inline line-item grid already gives its lookup columns. A wider name still widens the column as before. A width the view pins, or the user's own resize, is drawn exactly as written, and read-only tables and columns that do not edit are unchanged.
+- b1da9f5: feat(plugin-form): a sectioned form shows its sections as a navigation strip; a click scrolls to the section, and a section with errors carries the count
+  
+  Clause-②: yes (widening — one @object-ui/components export + new @object-ui/i18n locale keys; no FormSchema or spec key)
+  Metadata-protocol: none
+  
+  The new export is `FormSectionNavContext` with its `FormSectionNavItem` / `FormSectionNavSink` types; the new locale keys are `form.sectionNav` and `form.sectionNavErrors`. Nothing that worked before is refused.
+  
+  A create or edit dialog whose form is stacked in sections now shows one entry per visible section between the title and the scrolling body; a full-page sectioned form shows the same strip above its sections, sticky at the top of the page. A click scrolls to the section, unfolding it first when it is collapsed, and the entry of the section in view is highlighted while the form scrolls. When a submit is refused, each entry shows how many fields in its section need fixing, and the count drops as the fields are fixed.
+  
+  The strip appears only with two or more visible sections. A section hidden by its `visibleWhen` is not listed. A tabbed form keeps its tab strip and gets no section strip. Nothing is configured: no form, section or field key turns it on or off.
+  
+  For hosts: the `form` renderer reports the section headings it draws, with each section's error count, to a sink provided through `FormSectionNavContext`; each heading row now carries a stable `id` and a `data-form-section` attribute naming its section.
+- e47c1cb: fix(ui): a phone list card shows its amount in full, and a form's tab strip no longer widens a phone screen
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - Phone list cards: the card's amount is the first shown column whose field type is `currency`. It used to share the subtitle line with the next column and was truncated with it (`CN¥1,2…`). It now has a line of its own under the subtitle, right-aligned and never truncated, with the status chip at that line's left. The subtitle shows the next shown column in its place. A list with no currency column draws its cards as before.
+  - Form field tabs (`fieldTabs`, also used by tabbed modal and tabbed forms): below the `sm` breakpoint a horizontal tab strip is capped at its container's width, and tabs that do not fit scroll sideways with no scrollbar drawn, so the page no longer scrolls sideways. The active tab is kept in view: on a tap, on `defaultFieldTab`, and when a failed submit jumps to the tab with the first error, whose red dot stays on the trigger. Desktop strips and vertical strips are unchanged.
+- e05445e: feat(studio): the Studio AI panel matches the console's AI assistant
+  
+  Clause-②: yes (widening — new studio-namespace locale keys, and one optional `columnMarks` member on the published `GridFieldAuthoring` interface of @object-ui/components)
+  Metadata-protocol: none
+  
+  The AI panel on Studio's right side now looks and works like the console's AI assistant drawer.
+  
+  - It is called "AI Assistant" (「AI 助手」) everywhere, including the line that says which tool drafted a change.
+  - Studio's top bar shows the console's robot button in the same place. It shows or hides the right panel and always opens it on the AI assistant. `⌘.` still switches between properties and the assistant. Without an assistant, the panel icon stays.
+  - The panel has one header row: the Properties | AI Assistant switch on the left; History, widen and Close on the right. Usage and Share moved into the History view, which covers the chat and lists earlier conversations with New chat.
+  - The panel opens 420 px wide, like the console drawer. It can be dragged or keyed wider from its left edge and remembers the width under its own key. On a small screen it stays an overlay. Studio's top bar now names its pillars by its own width rather than the window's, so a wide panel never pushes the robot under it.
+  - The chip above the composer reads "Viewing: <object label> · <view>" (「正在看：会议 · 记录」), never the internal name.
+  - On the Data canvas, the fields the AI assistant changed in the pending draft carry a draft chip on their records-grid column header and on their Form card. A line above the canvas says "The AI assistant just made N changes", with Review, which opens the pending changes, and "Discard all unpublished changes", which discards the package's drafts after a confirm.
+  
+  `@object-ui/components`: `GridFieldAuthoring` takes an optional `columnMarks`, a node per accessorKey that `data-table` draws after the column's header label.
+  
+  `@object-ui/i18n`: new studio keys `engine.studio.slot.history`, `engine.studio.slot.resize` and `engine.studio.copilotChanges.*`. Changed values: `engine.studio.aiCopilot` and `engine.studio.draftMark.agent.copilot` (AI Assistant), `console.ai.discussing` (Viewing / 正在看, in every pack), and `draftedByCopilot` (AI assistant). No key was removed. Studio no longer reads `engine.studio.slot.openFullPage`.
+- 0584eb5: fix(components): a form's phone-width field-tab strip scrolls a tab activated by a failed submit into view in the same commit
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Below `sm`, a horizontal `fieldTabs` strip that does not fit scrolls sideways, and the active tab is scrolled into its visible window. That scroll ran in a passive effect. When the activation came from a non-discrete update, such as a failed submit jumping to the first tab holding an invalid field (react-hook-form validates asynchronously), the passive effect ran a task after the commit. For that window the newly active tab was painted while still scrolled out of the strip. The scroll now runs in a layout effect, so it lands in the same commit that marks the tab active, before paint. Tapping a tab and opening on an off-screen `defaultFieldTab` behave as before.
+- 94c9491: feat(studio): the Data pillar's Records tab keeps Add field on screen, a header click opens the field, the name field leads, and the field inspector puts the label first
+  
+  Clause-②: yes (widening) — an optional `columnMenuLabel` member on the exported `GridFieldAuthoring` context type of `@object-ui/components`, and new keys in the lazy `studio` namespace of the `@object-ui/i18n` packs; nothing that worked before is refused
+  Metadata-protocol: none
+  
+  Studio's Data pillar, Records tab:
+  
+  - **Add field is always on screen.** The records grid's toolbar row now starts with an Add field button that opens the same Add field popover. The trailing "+" column is kept. Both entries are offered only where a field may be added: not on a read-only package, not on an external object.
+  - **A header click opens the field.** Clicking a field's column header selects the field and opens its properties, and no longer sorts. Sort and hide are in the column menu, which a caret in every header now opens (the same menu a right-click opens). A column the object does not declare (such as the server's owner column) keeps the old click.
+  - **The name field leads.** The grid puts the object's name field first, frozen, in the shared order every list uses, and the server-injected columns (`owner_id`) after the author's fields. Only the Studio grid changes; runtime list views keep their column order.
+  - **The machine name is a tooltip.** The object's title no longer carries its machine name as a chip beside it; hovering the title shows it.
+  
+  Field inspector:
+  
+  - **The label comes first.** The display name is the first box. The API name moves into a collapsed "Developer info" section.
+  - **Delete is confirmed.** Remove moves from the inspector's footer into the header's "⋯" menu, and asks before it removes the field from the draft.
+  
+  `@object-ui/components`: `GridFieldAuthoring` gains an optional `columnMenuLabel`. When a host sets it, every column header draws a caret, named by the value, that opens the table's own column menu (sort ascending, sort descending, hide). A table with no provider, or a provider that does not set the member, draws exactly the header it drew before.
+- 7b7272f: fix(components): an authored page's region row follows the page's own width, so a narrow record drawer stacks the rail below main
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An authored page's body row (sidebar | main | aside) and its rail widths switched on the viewport `md` breakpoint. A record page with an `aside` rail in a record drawer dragged to 380 px at a 1280 px viewport therefore kept the row: the rail kept its 256 px, `main` was squeezed to a few pixels, and the rail's cards covered the tab row and the field cards.
+  
+  Each region template (`default`, `three-column`, `header-sidebar-main`, and a page that names no template) now lays its root out as a named container (`@container/regions`). The row goes side by side, and a rail takes its fixed `small`/`medium`/`large` width, from that container's `@3xl`: 768 px, the same pixel value as the viewport `md`, now measured on the page's own layout. A full page wider than 768 px draws exactly as before. A narrower layout stacks the rails below `main`, and that includes the record drawer at its default 720 px width, as the synthesized record page already does below 760 px. A phone viewport still stacks. The `dashboard` template's grid is unchanged.
+- 4443014: fix(charts): the default categorical palette has ten distinct theme colours, so a pie or donut with six to ten slices no longer repeats a colour
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The theme stylesheets (`@object-ui/components` and the Console) now define `--chart-6` to `--chart-10` beside `--chart-1` to `--chart-5`, in light and dark, with matching `--color-chart-N` aliases. The chart fallback palette (`AdvancedChartImpl`) and the dashboard relay palette (`DashboardRenderer`, `DashboardGridLayout`) read all ten. Before, they read five and cycled, so slice six took slice one's colour and the legend could not tell them apart. An authored `colors` palette still wins over the default. Apps generated by the `objectui` CLI declare the same ten tokens in their stylesheet, and the `responsiveStyles` lint (`style-unknown-token`) accepts `var(--chart-6)` to `var(--chart-10)`.
+- db1a05c: fix(components): a record header action shows that its click is in flight
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A click on a slow header action, such as a flow-backed Convert Lead whose screen dialog waits on a network launch, used to leave the button live and unchanged until the dialog or result arrived, so users clicked again. While the click's promise is pending, the button is now disabled and `aria-busy`, a spinner replaces its icon, and further clicks do nothing. It returns to normal when the promise settles, on success or failure. The same applies to the phone bottom-bar face and to `⋯` overflow items, which share the renderer. A click that returns no promise is never busy. A host `onClick` that rejects is now reported with `console.error` naming the action, where it used to surface as an unhandled rejection.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [0e2ead3]
+- Updated dependencies [b1efa37]
+- Updated dependencies [ffa6db1]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [b019048]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [a78781a]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [1078c73]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [b4eea88]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [8436f67]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [5a75579]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [6a7403b]
+- Updated dependencies [3b1307e]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [a8e794f]
+- Updated dependencies [d57d6ee]
+- Updated dependencies [22bf910]
+- Updated dependencies [2b267b7]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [6c7d730]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [b86331d]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e2d3514]
+- Updated dependencies [e95210d]
+- Updated dependencies [26cab15]
+- Updated dependencies [e9f65a3]
+- Updated dependencies [13c62a6]
+- Updated dependencies [4db3750]
+- Updated dependencies [2e29287]
+- Updated dependencies [e61af97]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [a931063]
+- Updated dependencies [14619f5]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [81ea504]
+- Updated dependencies [c81f498]
+- Updated dependencies [4bdbdac]
+- Updated dependencies [3bbda33]
+- Updated dependencies [d656d62]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [90f2b1c]
+- Updated dependencies [b633afe]
+- Updated dependencies [94c9491]
+- Updated dependencies [fff0ad0]
+- Updated dependencies [65ec3c5]
+- Updated dependencies [4aeeca5]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [421f180]
+- Updated dependencies [2fcc9cf]
+- Updated dependencies [cb7d514]
+- Updated dependencies [743308b]
+- Updated dependencies [97cd541]
+- Updated dependencies [2487242]
+- Updated dependencies [343c49c]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [59defa0]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @object-ui/i18n@18.6.0
+  - @objectstack/spec@18.6.0
+  - @object-ui/core@18.6.0
+  - @object-ui/types@18.6.0
+  - @object-ui/react@18.6.0
+  - @objectstack/sdui-parser@18.6.0
+  - @object-ui/react-runtime@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

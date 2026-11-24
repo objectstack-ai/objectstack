@@ -62,3 +62,62 @@ describe('the home-amount arithmetic exported from @objectstack/formula', () => 
     expect(documentDateOf(20260315)).toBeUndefined();
   });
 });
+
+describe('decimal text is judged against the number range before it is scaled', () => {
+  const ZERO = { digits: 0n, scale: 0 };
+
+  it('beyond the largest number it spells none, as a non-finite number does', () => {
+    for (const text of ['1e400', '-1e400', '1.8e308', '+.5E+400', `1${'0'.repeat(400)}`]) {
+      expect(toScaledDecimal(text), text).toBeUndefined();
+      expect(Number.isFinite(Number(text)), text).toBe(false);
+    }
+    expect(toScaledDecimal(Number('1e400'))).toBeUndefined();
+  });
+
+  it('below the smallest number it is zero, as that number is', () => {
+    for (const text of ['1e-400', '-1e-400', '2e-324', '+.5e-400', `0.${'0'.repeat(400)}1`]) {
+      expect(toScaledDecimal(text), text).toEqual(ZERO);
+      expect(Number(text) === 0, text).toBe(true);
+    }
+    expect(toScaledDecimal(Number('1e-400'))).toEqual(ZERO);
+    expect(formatScaledDecimal(divideToPlaces(toScaledDecimal('1e-400')!, { digits: 1n, scale: 0 }, 2))).toBe('0.00');
+  });
+
+  it('keeps every digit inside the range, at both ends', () => {
+    const largest = { digits: 17976931348623157n * 10n ** 292n, scale: 0 };
+    expect(toScaledDecimal('1.7976931348623157e308')).toEqual(largest);
+    expect(toScaledDecimal(Number.MAX_VALUE)).toEqual(largest);
+    expect(toScaledDecimal('5e-324')).toEqual({ digits: 5n, scale: 324 });
+    expect(toScaledDecimal(Number.MIN_VALUE)).toEqual({ digits: 5n, scale: 324 });
+    expect(toScaledDecimal('1e300')).toEqual({ digits: 10n ** 300n, scale: 0 });
+    expect(toScaledDecimal('-1.5e-300')).toEqual({ digits: -15n, scale: 301 });
+    // A bigint is its own digits, however many.
+    expect(toScaledDecimal(10n ** 400n)).toEqual({ digits: 10n ** 400n, scale: 0 });
+  });
+
+  it('never scales a zero by its exponent', () => {
+    expect(toScaledDecimal('0.00')).toEqual({ digits: 0n, scale: 2 });
+    expect(toScaledDecimal('0e-5')).toEqual({ digits: 0n, scale: 5 });
+    expect(toScaledDecimal('0e-324')).toEqual({ digits: 0n, scale: 324 });
+    expect(toScaledDecimal('0e-325')).toEqual(ZERO);
+    expect(toScaledDecimal('-0e5')).toEqual(ZERO);
+  });
+
+  it('reads and converts in time bounded by the text, whatever its exponent says', () => {
+    const texts = [
+      '1e30000000', '-1e30000000', '+.5E+30000000', '0e30000000',
+      '1e-30000000', '+1e-30000000', '0e-30000000',
+      `1e-${'9'.repeat(400)}`, `1e${'9'.repeat(400)}`,
+    ];
+    const heapBefore = process.memoryUsage().heapUsed;
+    const started = performance.now();
+    const read = texts.map((text) => toScaledDecimal(text));
+    const converted = read.map((value) => value && formatScaledDecimal(divideToPlaces(value, { digits: 1n, scale: 0 }, 2)));
+    const elapsed = performance.now() - started;
+    const allocated = process.memoryUsage().heapUsed - heapBefore;
+    expect(read).toEqual([undefined, undefined, undefined, ZERO, ZERO, ZERO, ZERO, ZERO, undefined]);
+    expect(converted).toEqual([undefined, undefined, undefined, '0.00', '0.00', '0.00', '0.00', '0.00', undefined]);
+    expect(elapsed).toBeLessThan(200);
+    expect(allocated).toBeLessThan(64 * 2 ** 20);
+  });
+});

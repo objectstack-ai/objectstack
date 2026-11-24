@@ -382,7 +382,7 @@
       "title": "MCP run_action requires ai.exposed (fail-closed with the prescription), filters list_actions to exposed+permitted, admits a system-object action only on its own ai.exposed, and logs the trusted-elevation audit line",
       "since": "v15.1",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -392,7 +392,7 @@
           "any showcase action WITHOUT an ai block (e.g. showcase_mark_done on showcase_task) — the undeclared side",
           "MCP reachable with an osk_ key (see ai.mcp-http-surface)",
           "acceptance[1]'s PERMITTED half has no stock producer: showcase_portfolio_snapshot gates no permission, so nothing exposed is ever held back. Stage one at runtime as the admin: PUT /api/v1/meta/action/qa_ai_gated { name: 'qa_ai_gated', label: 'QA AI gated', objectName: 'showcase_task', operation: 'update', patch: { progress: 50 }, execution: 'perRecord', ai: { exposed: true, description: 'QA probe: an AI-exposed action behind a capability gate' }, requiredPermissions: ['manage_metadata'] }. It is a DECLARATIVE update because the listing drops a script action with no registered handler before it asks the permission (listActions, packages/runtime/src/domains/mcp.ts), and it requires manage_metadata because the admin holds that capability and a member persona does not (actionPermissionError, packages/runtime/src/action-execution.ts). The member side needs an osk_ key of a member persona (Mei Phone, phone.demo@example.com), minted as ai.mcp-http-surface mints the admin's. DELETE /api/v1/meta/action/qa_ai_gated in teardown",
-          "acceptance[4]'s two system-object actions, both on sys_api_key (packages/platform-objects/src/identity/sys-api-key.object.ts): the REFUSED side is create_api_key, which declares no ai block and, as a credential-minting action, is held human-only by ruling 6513869839 (#27681, parameter 2); the EXPOSED side is revoke_api_key, declared ai: { exposed: true, requiresConfirmation: true } by ruling 6523087116 (#27900, bucket C). The exposed run needs a probe key to revoke: as the admin, POST /api/v1/keys { name: 'qa-revoke-probe' } and keep its id. It also needs the admin's SESSION token as the MCP bearer (the token field of POST /api/v1/auth/sign-in/email's answer), because under an osk_ key revoke_api_key is listed with unavailable and refused by a later gate (apiForwardCredentialRefusal, packages/runtime/src/action-execution.ts), never reaching its result. The probe key stays revoked after the run"
+          "acceptance[4]'s two system-object actions, both on sys_api_key (packages/platform-objects/src/identity/sys-api-key.object.ts): the REFUSED side is create_api_key, which declares no ai block and, as a credential-minting action, is held human-only by ruling 6513869839 (#27681, parameter 2); the EXPOSED side is revoke_api_key, declared ai: { exposed: true, requiresConfirmation: true } by ruling 6523087116 (#27900, bucket C). The exposed run needs a probe key to revoke: as the admin, POST /api/v1/keys { name: 'qa-revoke-probe' } and keep its id. It also needs the admin's SESSION token as the MCP bearer (the token field of POST /api/v1/auth/sign-in/email's answer), because under an osk_ key revoke_api_key is listed with unavailable and refused by a later gate (apiForwardCredentialRefusal, packages/runtime/src/action-execution.ts), never reaching its result. The run does not revoke the probe key (the call is refused at confirmation, see acceptance[4]), so it stays live after the run"
         ]
       },
       "steps": [
@@ -402,7 +402,7 @@
         "verify the refusal left zero side effects: read the task over REST — status unchanged",
         "call run_action on the exposed action (actionName: 'showcase_portfolio_snapshot'); capture the result payload ({ ok, scope: 'global', accounts, projects, invoices })",
         "capture the server log for the successful call",
-        "system-object actions, both halves (fixtures.requires[4]): REFUSED half: read the sys_api_key row count over REST, then with the osk_ key call run_action on the non-exposed create_api_key twice, once with objectName: 'sys_api_key' (params: { name: 'qa-must-not-exist' }) and once without objectName; capture both refusals, re-read the count, and confirm create_api_key had no entry in steps[0]'s list_actions. EXPOSED half: confirm steps[0]'s list_actions carries revoke_api_key on sys_api_key with aiExposed: true, then with the admin's session token as the MCP bearer call run_action { actionName: 'revoke_api_key', objectName: 'sys_api_key', recordId: the probe key's id, confirm: true }; capture the result and re-read the probe key over REST",
+        "system-object actions, both halves (fixtures.requires[4]): REFUSED half: read the sys_api_key row count over REST, then with the osk_ key call run_action on the non-exposed create_api_key twice, once with objectName: 'sys_api_key' (params: { name: 'qa-must-not-exist' }) and once without objectName; capture both refusals, re-read the count, and confirm create_api_key had no entry in steps[0]'s list_actions. EXPOSED half: confirm steps[0]'s list_actions carries revoke_api_key on sys_api_key with aiExposed: true, then with the admin's session token as the MCP bearer call run_action { actionName: 'revoke_api_key', objectName: 'sys_api_key', recordId: the probe key's id } with NO confirm member (run_action refuses a call that carries it: confirmation happens with the person, never the caller); capture the result and re-read the probe key over REST",
         "cross-check the exposed action's counts against direct REST counts of showcase_account / showcase_project / showcase_invoice"
       ],
       "acceptance": [
@@ -431,10 +431,10 @@
           "evidence": "the log excerpt"
         },
         {
-          "clause": "a system-object action passes the MCP system-object guard only on its OWN ai.exposed declaration, never by its object's name. REFUSED: create_api_key on sys_api_key (no ai block) is absent from list_actions, and run_action refuses it in either of the guard's two spellings — with objectName the MCP tool layer answers 'Action \"create_api_key\" on system object \"sys_api_key\" is not exposed via MCP: a system object's action is reachable only when its author exposed it to AI (ai.exposed) and list_actions lists it for you'; without it the runtime guard answers \"Action 'create_api_key' is on a system object ('sys_api_key') and is not exposed via MCP — a system object's action is reachable here only when its author declares `ai: { exposed: true, description: … }` on it\" — and no key is created. EXPOSED: revoke_api_key on sys_api_key (ai: { exposed: true, requiresConfirmation: true }) is listed with aiExposed: true and passes the guard: called with the admin's session token and confirm: true it answers ok: true and the probe key reads revoked: true",
+          "clause": "a system-object action passes the MCP system-object guard only on its OWN ai.exposed declaration, never by its object's name. REFUSED: create_api_key on sys_api_key (no ai block) is absent from list_actions, and run_action refuses it in either of the guard's two spellings — with objectName the MCP tool layer answers 'Action \"create_api_key\" on system object \"sys_api_key\" is not exposed via MCP: a system object's action is reachable only when its author exposed it to AI (ai.exposed) and list_actions lists it for you'; without it the runtime guard answers \"Action 'create_api_key' is on a system object ('sys_api_key') and is not exposed via MCP — a system object's action is reachable here only when its author declares `ai: { exposed: true, description: … }` on it\" — and no key is created. EXPOSED: revoke_api_key on sys_api_key (ai: { exposed: true, requiresConfirmation: true }) is listed with aiExposed: true and passes the guard: called member-free with the admin's session token it clears every gate up to the confirmation step, where the person confirms, never the caller. The stock showcase registers no pending-confirmation service and the HTTP door cannot elicit, so the call answers isError with the ADR-0112 envelope code ACTION_CONFIRMATION_REQUIRED, status 428, details.reason 'no_confirmation_service', and the probe key still reads not revoked (a host that registers a pending-confirmation service answers status: 'pending_confirmation' with a pending id instead, the key equally not revoked until the person approves in the app)",
           "oracle": "api",
-          "verify": "the refused half's two texts against systemObjectActionRefusal (packages/mcp/src/mcp-http-tools.ts) and systemObjectActionExposureError (packages/runtime/src/action-execution.ts), and the sys_api_key row count unchanged across both calls; create_api_key absent from and revoke_api_key present in the list_actions payload with aiExposed: true (isListableAction, packages/mcp/src/mcp-http-tools.ts; the runtime listing asks the same systemObjectActionExposureError, packages/runtime/src/domains/mcp.ts listActions); the exposed run's result and GET /api/v1/data/sys_api_key/{id} reading revoked: true. A sys_* action with no ai block that is listed or runs, or an ai.exposed sys_* action refused with either system-object text, is a FAIL. Under the osk_ key revoke_api_key is listed with unavailable and refused by its target's credential gate, never by this guard; that agreement is negative[1]'s, not this clause's. Rulings: 6513869839 (#27681, letter B) and 6523087116 / 6540309323 (#27900, the ADR-0011 identity-actions addendum)",
-          "evidence": "both refusals + the before/after sys_api_key counts + the two list_actions entries (create_api_key absent, revoke_api_key present) + the exposed run's result + the probe key re-read"
+          "verify": "the refused half's two texts against systemObjectActionRefusal (packages/mcp/src/mcp-http-tools.ts) and systemObjectActionExposureError (packages/runtime/src/action-execution.ts), and the sys_api_key row count unchanged across both calls; create_api_key absent from and revoke_api_key present in the list_actions payload with aiExposed: true (isListableAction, packages/mcp/src/mcp-http-tools.ts; the runtime listing asks the same systemObjectActionExposureError, packages/runtime/src/domains/mcp.ts listActions); the exposed run's refusal against the hand-off's no-service branch (handOffActionConfirmation, packages/runtime/src/action-execution.ts; the confirmation step runs after systemObjectActionExposureError in admitResolvedAction, packages/runtime/src/action-dispatch.ts, so this refusal proves the guard passed) and GET /api/v1/data/sys_api_key/{id} reading revoked not true. The probe key reading revoked: true after the member-free call is a FAIL: the gated call ran on the caller's word. A sys_* action with no ai block that is listed or runs, or an ai.exposed sys_* action refused with either system-object text, is a FAIL. Under the osk_ key revoke_api_key is listed with unavailable and refused by its target's credential gate, never by this guard; that agreement is negative[1]'s, not this clause's. Rulings: 6513869839 (#27681, letter B) and 6523087116 / 6540309323 (#27900, the ADR-0011 identity-actions addendum)",
+          "evidence": "both refusals + the before/after sys_api_key counts + the two list_actions entries (create_api_key absent, revoke_api_key present) + the exposed run's refusal envelope + the probe key re-read"
         }
       ],
       "negative": [
@@ -463,7 +463,8 @@
           "ref": "#25807"
         },
         { "revision": 6, "date": "2026-10-31", "change": "fixtures.requires[3], steps[1] and acceptance[1].verify stage the permitted half of the list_actions filter. Fixture gap of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad), parked on sweep anchor #27377: the permitted half scored blocked(fixture) because no stock action pairs ai.exposed with a permission some persona lacks. The recipe is a runtime declarative update action, ai-exposed, requiring manage_metadata, listed for the admin and held back from a member. Derived from source at base 488b3ed0: packages/runtime/src/domains/mcp.ts listActions (the handler check precedes the permission check, which a declarative update skips), packages/runtime/src/action-execution.ts actionPermissionError, packages/spec/src/ui/action.zod.ts (ai.exposed requires a description). Not yet run live: the first run that stages it proves the recipe. The clause is unchanged", "ref": "#27392" },
-        { "revision": 7, "date": "2026-11-03", "change": "acceptance[4] and steps[6] re-pointed from the retired wholesale sys_* refusal to the per-action gate as ruled: a sys_* action is listed and runs over MCP only when the action itself declares ai.exposed, and is refused otherwise (ruling 6513869839 on #27681, letter B; the ADR-0011 identity-actions addendum, rulings 6523087116 and 6540309323 on #27900). Stale-spec card #29892, a QA clause fail of waves 4 and 5 of the 18.3.0 sweep (QA run #29890). The clause keeps both halves: the non-exposed create_api_key refused in both live spellings with no key created, and the ai-exposed revoke_api_key listed and run under a session token. steps[6] names those two actions, since any sys_* action name can now pick an exposed one; fixtures.requires[4] stages the probe key and the session bearer. Riders from the same rulings: the title no longer says system objects are refused, and acceptance[1].verify no longer calls showcase_portfolio_snapshot the one exposed action (the listing carries the ai-exposed sys_* identity actions too, and an unavailable entry is listed by contract). Derived from source at base a04e9d76: packages/runtime/src/action-execution.ts systemObjectActionExposureError, packages/mcp/src/mcp-http-tools.ts isListableAction and systemObjectActionRefusal, packages/runtime/src/domains/mcp.ts listActions, packages/platform-objects/src/identity/sys-api-key.object.ts. Behaviour as read on a stock boot by #29892 at 589049b0, not re-run live here. negative[1] (the #28943 list/run disagreement) is unchanged", "ref": "#29892" }
+        { "revision": 7, "date": "2026-11-03", "change": "acceptance[4] and steps[6] re-pointed from the retired wholesale sys_* refusal to the per-action gate as ruled: a sys_* action is listed and runs over MCP only when the action itself declares ai.exposed, and is refused otherwise (ruling 6513869839 on #27681, letter B; the ADR-0011 identity-actions addendum, rulings 6523087116 and 6540309323 on #27900). Stale-spec card #29892, a QA clause fail of waves 4 and 5 of the 18.3.0 sweep (QA run #29890). The clause keeps both halves: the non-exposed create_api_key refused in both live spellings with no key created, and the ai-exposed revoke_api_key listed and run under a session token. steps[6] names those two actions, since any sys_* action name can now pick an exposed one; fixtures.requires[4] stages the probe key and the session bearer. Riders from the same rulings: the title no longer says system objects are refused, and acceptance[1].verify no longer calls showcase_portfolio_snapshot the one exposed action (the listing carries the ai-exposed sys_* identity actions too, and an unavailable entry is listed by contract). Derived from source at base a04e9d76: packages/runtime/src/action-execution.ts systemObjectActionExposureError, packages/mcp/src/mcp-http-tools.ts isListableAction and systemObjectActionRefusal, packages/runtime/src/domains/mcp.ts listActions, packages/platform-objects/src/identity/sys-api-key.object.ts. Behaviour as read on a stock boot by #29892 at 589049b0, not re-run live here. negative[1] (the #28943 list/run disagreement) is unchanged", "ref": "#29892" },
+        { "revision": 8, "date": "2026-11-16", "change": "steps[6] and acceptance[4] (clause, verify, evidence) plus fixtures.requires[4] re-pointed to the retired confirm member, as ruled (maintainer ruling 6909355256 on #34209, option A; landed by #34358 at 8c6ddc58): run_action and resume_run refuse a call that carries confirm, on every action and whatever its value, and an action declaring ai.requiresConfirmation: true runs only once the person confirms it, in a client that can be elicited or in the app. The EXPOSED half now calls revoke_api_key member-free and expects the confirmation step's refusal on the stock showcase (no pending-confirmation service; the HTTP door cannot elicit): ACTION_CONFIRMATION_REQUIRED, 428, details.reason no_confirmation_service, with the probe key not revoked. That refusal is reached only after systemObjectActionExposureError, so it still proves the guard passed; what the half no longer shows is the action running, which the caller can no longer cause. Derived from source at base bdd51769: packages/mcp/src/mcp-http-tools.ts RETIRED_CONFIRMATION_MEMBER and run_action, packages/runtime/src/action-dispatch.ts admitResolvedAction, packages/runtime/src/action-execution.ts handOffActionConfirmation, packages/qa/dogfood/test/mcp-system-object-action-exposure.dogfood.test.ts (the same answer for ban_user under the administrator). Not re-run live here. The REFUSED half and negative[] are unchanged", "ref": "#34387" }
       ]
     },
     {
@@ -1136,7 +1137,7 @@
       "title": "MCP serves the governed datasets: list_datasets lists each dataset this caller may query with its members and reports which terms match which member, and query_dataset answers rows with provenance, a row count and a truncation fact, never SQL",
       "since": "v18.4",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1156,13 +1157,14 @@
         "call query_dataset { datasetName: 'showcase_invoice_metrics', selection: { measures: ['invoice_count'], dimensions: ['status'] } }",
         "the same with selection.limit: 1",
         "query_dataset { datasetName: 'qa_no_such_dataset', selection: { measures: ['invoice_count'] } }",
-        "query_dataset { dataset: 'showcase_invoice_metrics', selection: { measures: ['invoice_count'] } }; then { datasetName: 'showcase_invoice_metrics', measures: ['invoice_count'] }"
+        "query_dataset { dataset: 'showcase_invoice_metrics', selection: { measures: ['invoice_count'] } }; then { datasetName: 'showcase_invoice_metrics', measures: ['invoice_count'] }",
+        "a near miss: list_datasets { terms: ['invoice'] }; then list_datasets { terms: ['invoices'] }"
       ],
       "acceptance": [
         {
           "clause": "a keyed session lists both tools, each described with the selection rule the model reads",
           "oracle": "network",
-          "verify": "tools/list names list_datasets and query_dataset; the list_datasets description says one match on a measure wins and several matches ask the user (packages/services/service-analytics/src/dataset-tools.ts#getDatasetToolDefinitions; packages/mcp/src/mcp-http-tools.ts#registerDatasetTools)",
+          "verify": "tools/list names list_datasets and query_dataset; the list_datasets description says one match on a measure wins, several matches ask the user, and a word with candidates asks the same way and is never a match (packages/services/service-analytics/src/dataset-tools.ts#getDatasetToolDefinitions; packages/mcp/src/mcp-http-tools.ts#registerDatasetTools)",
           "evidence": "the two tool entries"
         },
         {
@@ -1174,7 +1176,7 @@
         {
           "clause": "terms are matched after normalization against name, label and synonym, and each match names its member",
           "oracle": "network",
-          "verify": "the invoice entry's matches hold { term: 'invoices', member: 'measures.invoice_count', matchedOn: 'label' } and { term: 'status', member: 'dimensions.status', matchedOn: 'name' }; qa_no_word matches nothing anywhere (packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm; packages/spec/src/ai/dataset-tools.zod.ts#DatasetTermMatchSchema)",
+          "verify": "the invoice entry's matches hold { term: 'invoices', member: 'measures.invoice_count', matchedOn: 'label' } and { term: 'status', member: 'dimensions.status', matchedOn: 'name' }; qa_no_word matches nothing anywhere, and the answer carries no `candidates` key (packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm; packages/spec/src/ai/dataset-tools.zod.ts#DatasetTermMatchSchema)",
           "evidence": "the matches arrays"
         },
         {
@@ -1206,6 +1208,12 @@
           "oracle": "test",
           "verify": "run each file in automated.ref with its package's vitest and `--reporter=tree`, which prints one line per file (RUNNER.md's environment facts); each reports ≥1 test and 0 failed",
           "evidence": "the vitest summary line per file, with the subject sha"
+        },
+        {
+          "clause": "a term that matches nothing is answered with candidates: members near it that this caller may read, offered for a question and never a match; a term that matches has none",
+          "oracle": "network",
+          "verify": "terms ['invoice']: no dataset's matches holds the term, and `candidates` holds { term: 'invoice', dataset: 'showcase_invoice_metrics', member: 'measures.invoice_count' }, each entry a pointer to a member the same answer lists, at most 5 per term. terms ['invoices']: the label match of step 2 and no `candidates` key (packages/spec/src/ai/dataset-tools.zod.ts#DatasetTermCandidateSchema; packages/services/service-analytics/src/dataset-term-matcher.ts#findDatasetTermCandidates)",
+          "evidence": "both answers' matches and candidates"
         }
       ],
       "negative": [
@@ -1218,7 +1226,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/services/service-analytics/src/__tests__/dataset-tools.test.ts, packages/mcp/src/mcp-dataset-tools.test.ts, packages/runtime/src/mcp-dataset-tools-bridge.test.ts; no live spec opens a keyed MCP session against the datasets"
+        "ref": "packages/services/service-analytics/src/__tests__/dataset-tools.test.ts, packages/services/service-analytics/src/__tests__/dataset-term-matcher.test.ts, packages/mcp/src/mcp-dataset-tools.test.ts, packages/runtime/src/mcp-dataset-tools-bridge.test.ts; no live spec opens a keyed MCP session against the datasets"
       },
       "source": [
         "docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md D2 and D3",
@@ -1241,6 +1249,12 @@
           "date": "2026-11-15",
           "change": "acceptance[7].verify names `--reporter=tree`, the reporter that prints the one line per pin file this is scored on: in a runner's non-TTY shell vitest's default reporter prints the run's totals only (RUNNER.md's environment facts; QA run #33784's note 10, comment 6893243542). No clause or threshold changed. Card #33969",
           "ref": "#34068"
+        },
+        {
+          "revision": 3,
+          "date": "2026-11-17",
+          "change": "a near-miss step and its clause: list_datasets answers a term that matched nothing with `candidates` (ADR-0149 D3 amendment note), and qa_no_word carries none; the description clause names the candidates row; automated.ref names the candidate pins. Card #34763",
+          "ref": "#34763"
         }
       ]
     },

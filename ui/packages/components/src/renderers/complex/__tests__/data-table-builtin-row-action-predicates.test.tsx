@@ -37,16 +37,22 @@ import {
 const FROZEN = { id: 'r1', name: 'Check item A', frozen: true };
 const DRAFT = { id: 'r2', name: 'Check item B', frozen: false };
 
-function renderItem(props: { predicates?: any; row: any; onSelect?: (row: any) => void }) {
+function renderItem(props: {
+  predicates?: any;
+  row: any;
+  onSelect?: (row: any) => void;
+  name?: 'edit' | 'delete';
+}) {
+  const name = props.name ?? 'edit';
   return render(
     <PredicateScopeProvider scope={{}}>
       <DropdownMenu open modal={false}>
         <DropdownMenuTrigger>menu</DropdownMenuTrigger>
         <DropdownMenuContent>
           <DataTableBuiltinRowActionItem
-            name="edit"
+            name={name}
             icon={<Edit className="mr-2 h-4 w-4" />}
-            label="Edit"
+            label={name === 'edit' ? 'Edit' : 'Delete'}
             onSelect={props.onSelect ?? (() => {})}
             predicates={props.predicates}
             row={props.row}
@@ -92,5 +98,46 @@ describe('data-table built-in row action — per-record CEL predicates (#2614)',
       row: DRAFT,
     });
     expect(screen.getByTestId('row-action-builtin-edit')).toBeInTheDocument();
+  });
+});
+
+/**
+ * objectstack#35293 — a built-in row Edit / Delete greyed by its declared
+ * `disabledWhen` says why, the way the record page's Edit / Delete do: the
+ * generic `actions.notAvailableForRecord` sentence (`userActions` declares no
+ * reason key) as the item's visible second line and its accessible
+ * description, while the item's name stays its label. An item that is on —
+ * no predicate, or a predicate that does not hold — gives no reason.
+ */
+describe('data-table built-in row action — a disabledWhen-greyed item says why (objectstack#35293)', () => {
+  const REASON = 'Not available for this record';
+  const describedBy = (el: HTMLElement) => {
+    const id = el.getAttribute('aria-describedby');
+    return id ? document.getElementById(id) : null;
+  };
+
+  it.each(['edit', 'delete'] as const)('%s greyed by disabledWhen shows the reason as its second line and description', (name) => {
+    renderItem({ name, predicates: { disabledWhen: 'record.frozen == true' }, row: FROZEN });
+    const item = screen.getByTestId(`row-action-builtin-${name}`);
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    const reason = describedBy(item);
+    expect(reason).toHaveTextContent(REASON);
+    expect(reason).toBeVisible();
+    expect(screen.getByRole('menuitem', { name: name === 'edit' ? 'Edit' : 'Delete' })).toBe(item);
+  });
+
+  it('control — an item with no predicate gives no reason', () => {
+    renderItem({ row: FROZEN });
+    const item = screen.getByTestId('row-action-builtin-edit');
+    expect(item).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText(REASON)).toBeNull();
+  });
+
+  it('control — an item whose disabledWhen does not hold gives no reason', () => {
+    renderItem({ predicates: { disabledWhen: 'record.frozen == true' }, row: DRAFT });
+    const item = screen.getByTestId('row-action-builtin-edit');
+    expect(item).not.toHaveAttribute('aria-disabled', 'true');
+    expect(item).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText(REASON)).toBeNull();
   });
 });

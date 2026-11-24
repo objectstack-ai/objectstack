@@ -300,6 +300,8 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         getPackagedDatasetBase: vi.fn((name: string) => ({ kind: 'dataset', name })),
         getPackagedAppBase: vi.fn((name: string) => ({ kind: 'app', name })),
         getPackagedBookBase: vi.fn((name: string) => ({ kind: 'book', name })),
+        // An import mapping is an ADR-0146 D2 listed overridable type as well.
+        getPackagedMappingBase: vi.fn((name: string) => ({ kind: 'mapping', name })),
     });
 
     it('asks each type its own accessor, handing the served name through unchanged', () => {
@@ -319,7 +321,8 @@ describe('#20730 §1 packagedObjectBaseOf — one per-type packaged-base resolve
         expect(packagedObjectBaseOf(p, 'dataset', 'opportunity_metrics')).toEqual({ kind: 'dataset', name: 'opportunity_metrics' });
         expect(packagedObjectBaseOf(p, 'app', 'crm')).toEqual({ kind: 'app', name: 'crm' });
         expect(packagedObjectBaseOf(p, 'book', 'crm_manual')).toEqual({ kind: 'book', name: 'crm_manual' });
-        for (const accessor of ['getPackagedPageBase', 'getPackagedDatasetBase', 'getPackagedAppBase', 'getPackagedBookBase'] as const) {
+        expect(packagedObjectBaseOf(p, 'mapping', 'crm_lead_feed')).toEqual({ kind: 'mapping', name: 'crm_lead_feed' });
+        for (const accessor of ['getPackagedPageBase', 'getPackagedDatasetBase', 'getPackagedAppBase', 'getPackagedBookBase', 'getPackagedMappingBase'] as const) {
             expect(p[accessor], accessor).toHaveBeenCalledTimes(1);
         }
     });
@@ -443,7 +446,8 @@ describe('#25788 §4 report — a published overlay on a packaged report is what
  *
  *  - `packagedBase` — the BASE's item, for a page, a dataset, an app and a
  *    book too (`getPackagedPageBase`, `getPackagedDatasetBase`,
- *    `getPackagedAppBase`, `getPackagedBookBase`), as the object, dashboard,
+ *    `getPackagedAppBase`, `getPackagedBookBase`), and an import mapping
+ *    (`getPackagedMappingBase`), as the object, dashboard,
  *    view and report already had it;
  *  - `pairBundle` — the translations the pair ships itself
  *    (`servedOverrideBaseOf` + `getPairTranslationBundle`), for every served
@@ -467,7 +471,7 @@ const PAIR_PKG = `${SHOWCASE_PKG}.custom`;
 const OVERRIDE_DECLARATION = { package: SHOWCASE_PKG, basedOn: '1.0.0' };
 
 interface PrecedenceType {
-    readonly type: 'page' | 'dataset' | 'app' | 'book' | 'view';
+    readonly type: 'page' | 'dataset' | 'app' | 'book' | 'mapping' | 'view';
     readonly name: string;
     /** The base's item, as the code package ships it. */
     readonly shipped: () => Record<string, unknown>;
@@ -500,6 +504,12 @@ const PRECEDENCE_TYPES: readonly PrecedenceType[] = [
         type: 'book', name: 'crm_manual', shippedZh: '手册',
         shipped: () => ({ name: 'crm_manual', label: 'Manual', groups: [{ key: 'start', label: 'Start', pages: [] }] }),
         catalog: (label) => ({ books: { crm_manual: { label } } }),
+    },
+    // A named import mapping: the wizard's saved-mapping selector lists `GET /meta/mapping`.
+    {
+        type: 'mapping', name: 'crm_lead_feed', shippedZh: '线索导入',
+        shipped: () => ({ name: 'crm_lead_feed', label: 'Lead feed', targetObject: OBJ, sourceFormat: 'csv', mode: 'insert', fieldMapping: [{ source: 'Subject', target: 'subject' }] }),
+        catalog: (label) => ({ mappings: { crm_lead_feed: { label } } }),
     },
     // An existing type, for the pair's rank: the base was always handed over, the pair's translation never.
     {

@@ -101,6 +101,7 @@ function payload(allowDelete: boolean): MePermissionsAuthenticatedResponse {
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['account_clerk'],
     // `allowEdit` is granted in BOTH loaded states, so a verb mix-up (reading
     // edit for delete) would show the action in the denied state.

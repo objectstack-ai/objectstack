@@ -29,7 +29,7 @@ import { getLazyFieldWidget } from '@object-ui/fields';
 // Their TSDoc carries the rationale that used to be repeated in each copy.
 // See `paramNeedsDependentValues` below for why this surface ORs them;
 // ⛔ never copied into a local literal, and ⛔ never merged into one set.
-import { CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, declaredNameField, getRecordDisplayName, recordDisplayValueAt } from '@object-ui/core';
+import { CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, csvBlob, declaredNameField, getRecordDisplayName, recordDisplayValueAt } from '@object-ui/core';
 import type { BulkActionDef, BulkActionParam } from '@object-ui/types';
 import { useBulkExecutor, type BulkExecutorOptions, type BulkResult } from '../hooks/useBulkExecutor';
 import { hasMultiValueShape, type MultiValueFieldDef } from '../hooks/multiValueFields';
@@ -343,7 +343,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
     const csv = [header, ...result.errors.map(e =>
       `${e.id},"${e.error.replace(/"/g, '""')}"`,
     )].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const blob = csvBlob(csv);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -405,14 +405,20 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
   // the rows left over are exactly the ones that succeeded. A failure the
   // server answered with a count only leaves the successes unknown, and the
   // result keeps to its count rather than name a record that may have failed.
+  // Rows an aggregate handler did not confirm are neither landed nor failed.
+  const unconfirmedIds = new Set(result?.aggregateUnconfirmed ?? []);
   const succeededRows = (() => {
     if (!result || result.succeeded === 0) return [];
     const failedIds = new Set(result.errors.map(e => e.id));
-    const landed = rows.filter(r => r.id != null && !failedIds.has(String(r.id)));
+    const landed = rows.filter(r => r.id != null
+      && !failedIds.has(String(r.id)) && !unconfirmedIds.has(String(r.id)));
     return landed.length === result.succeeded ? landed : [];
   })();
   const succeededPreview = succeededRows.slice(0, 5);
   const succeededRest = succeededRows.length - succeededPreview.length;
+  const unconfirmedCount = unconfirmedIds.size;
+  const unconfirmedPreview = [...unconfirmedIds].slice(0, 5);
+  const unconfirmedRest = unconfirmedCount - unconfirmedPreview.length;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(result); }}>
@@ -562,10 +568,53 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
           </div>
         )}
 
-        {step === 'result' && result && (
+        {step === 'result' && result?.aggregateRejection && (
+          /* A rejected aggregate run (objectui#3139) is ONE outcome for the
+             whole selection (objectstack#34173): the one call cannot say which
+             rows it wrote before it stopped, so the panel reports no per-row
+             count ("Succeeded 0 / N" would be false after a partial move) and
+             no per-row list — it says the action did not complete, and shows
+             the rejection's message once. */
+          <div className="space-y-3 text-sm" data-testid="bulk-aggregate-rejection">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" />
+              <span>
+                {t('grid.bulk.aggregateNotCompleted', {
+                  defaultValue: 'The action did not complete for the selected records. Some records may already have been changed; the list shows their current values when you close this.',
+                })}
+              </span>
+            </div>
+            <p
+              className="rounded border bg-destructive/5 p-2 text-xs break-words"
+              data-testid="bulk-aggregate-rejection-message"
+            >
+              {result.aggregateRejection.message}
+            </p>
+          </div>
+        )}
+
+        {step === 'result' && result?.aggregateUnreadable && (
+          /* An aggregate run that resolved with a `succeeded` / `failed` member
+             that does not parse as a BulkActionResult is ONE outcome for the
+             selection, like a rejection: the answer cannot say which rows the
+             handler wrote, so the panel prints no per-row count and never
+             reports full success. */
+          <div className="space-y-3 text-sm" data-testid="bulk-aggregate-unreadable">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-amber-500" />
+              <span>
+                {t('grid.bulk.aggregateUnreadable', {
+                  defaultValue: 'The action finished, but its result could not be read, so it is not known which records were changed. The list shows their current values when you close this.',
+                })}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {step === 'result' && result && !result.aggregateRejection && !result.aggregateUnreadable && (
           <div className="space-y-3 text-sm">
             <div className="flex items-center gap-2">
-              {result.failed === 0 ? (
+              {result.failed === 0 && unconfirmedCount === 0 ? (
                 <CheckCircle2 className="h-5 w-5 text-emerald-500" />
               ) : (
                 <AlertTriangle className="h-5 w-5 text-amber-500" />
@@ -578,6 +627,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                   defaultValue: `Succeeded ${result.succeeded} / ${result.total}`,
                 })}
                 {result.failed > 0 && t('grid.bulk.resultFailed', { count: result.failed, defaultValue: ` · Failed ${result.failed}` })}
+                {unconfirmedCount > 0 && t('grid.bulk.resultNotConfirmed', { count: unconfirmedCount, defaultValue: ` · Not confirmed ${unconfirmedCount}` })}
               </span>
             </div>
             {succeededPreview.length > 0 && (
@@ -600,6 +650,32 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                 </ul>
               </ScrollArea>
             )}
+            {unconfirmedCount > 0 && (
+              /* Selected rows an aggregate handler's BulkActionResult named in
+                 neither list: not counted as succeeded, because nothing said
+                 they were written. */
+              <div className="space-y-1" data-testid="bulk-unconfirmed-records">
+                <p className="text-xs text-muted-foreground">
+                  {t('grid.bulk.notConfirmedRecords', {
+                    defaultValue: 'The action did not report on these records. Check their current values:',
+                  })}
+                </p>
+                <ScrollArea className="max-h-32 rounded border bg-muted/30 p-2">
+                  <ul className="text-xs space-y-1">
+                    {unconfirmedPreview.map(id => (
+                      <li key={id} className="break-words" data-testid={`bulk-unconfirmed-record-${id}`}>
+                        • {refusedRecordName(id)}
+                      </li>
+                    ))}
+                    {unconfirmedRest > 0 && (
+                      <li className="text-muted-foreground">
+                        {t('grid.bulk.andMore', { count: unconfirmedRest, defaultValue: `… and ${unconfirmedRest} more` })}
+                      </li>
+                    )}
+                  </ul>
+                </ScrollArea>
+              </div>
+            )}
             {result.errors.length > 0 && (
               <>
                 <ScrollArea className="max-h-48 rounded border bg-destructive/5 p-2" data-testid="bulk-error-inspector">
@@ -613,7 +689,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                         <XCircle className="h-3 w-3 mt-0.5 shrink-0 text-destructive" />
                         <div className="min-w-0 flex-1">
                           <div className="break-words">
-                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{refusedRecordName(e.id)}:</span> {e.error}
+                            <span className="text-muted-foreground" data-testid={`bulk-error-record-${e.id}`}>{refusedRecordName(e.id)}:</span> {e.userMessage ?? e.error}
                           </div>
                         </div>
                         {/* A plain `custom` callout has nothing to re-run, but
@@ -629,7 +705,7 @@ export const BulkActionDialog: React.FC<BulkActionDialogProps> = ({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-5 px-1.5 text-[10px] shrink-0"
+                            className="h-5 px-1.5 text-xs shrink-0"
                             onClick={() => handleRetry(e.id)}
                             disabled={retrying === e.id}
                             data-testid={`bulk-error-retry-${e.id}`}
@@ -873,7 +949,7 @@ const ParamField: React.FC<ParamFieldProps> = ({ param, multiple, value, onChang
           {...cascadeProps}
         />
       </Suspense>
-      {param.help && <p className="text-[11px] text-muted-foreground">{param.help}</p>}
+      {param.help && <p className="text-xs text-muted-foreground">{param.help}</p>}
     </div>
   );
 };

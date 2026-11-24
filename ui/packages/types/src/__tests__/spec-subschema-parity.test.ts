@@ -256,7 +256,7 @@ describe('ListColumnSchema is the spec schema (the extension collapsed)', () => 
   });
 
   it('summary accepts every spec aggregation and the renderer object form', () => {
-    for (const agg of ['none', 'count', 'count_unique', 'percent_filled', 'sum', 'avg', 'min', 'max']) {
+    for (const agg of ['none', 'count', 'count_unique', 'percent_filled', 'count_true', 'count_false', 'sum', 'avg', 'min', 'max']) {
       expect(ListColumnSchema.shape.summary.safeParse(agg).success, `summary "${agg}"`).toBe(true);
     }
     expect(ListColumnSchema.shape.summary.safeParse({ type: 'sum', field: 'amount' }).success).toBe(true);

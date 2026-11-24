@@ -18,9 +18,11 @@
  * SCOPE & SHAPE. Rows carry full wire paths at the DEFAULT unscoped base
  * (`/api/v1`), exactly as `RestServer.getRoutes()` reports them — unlike the
  * dispatcher ledger, which uses dispatcher-internal cleanPath patterns. When
- * project scoping is on, every row is additionally mirrored under
+ * project scoping is on, every row but one is additionally mirrored under
  * `/api/v1/environments/:environmentId` (rest-server.ts registerRoutes); the
- * mirror is a mechanical duplication and is deliberately not re-ledgered.
+ * mirror is a mechanical duplication and is deliberately not re-ledgered. The
+ * one row with no mirror is the restriction profile, which is mounted on the
+ * unscoped base only (#36198; its row says so).
  *
  * SOURCES. Both are enumerable through `RestServer.getRoutes()`, and since
  * #5822 that is the ONLY enumeration the conformance test runs. `route-manager`
@@ -182,6 +184,9 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/discovery', family: 'discovery', source: 'route-manager', disposition: 'sdk', client: 'connect',
     responseSchema: 'DiscoverySchema',
     note: 'duplicate mount with the dispatcher /discovery branch — REST registers first and wins. Answers BARE (res.json(discovery), no envelope), so `DiscoverySchema` names the whole body here while the dispatcher row names its envelope `data`; discovery-schema-conformance.test.ts drives THIS handler through the double assertion: the live body parses against `DiscoverySchema`, and it carries no key the protocol does not declare' },
+  // [#34774] Read by the CLI (`os validate --target <url>`, `RESTRICTION_PROFILE_ROUTE`), not by `@objectstack/client`.
+  { route: 'GET /api/v1/discovery/restriction-profile', family: 'discovery', source: 'route-manager', disposition: 'server-only',
+    note: 'the restriction profile `os validate --target <url>` reads: `{ success, data }`, `data` a `RestrictionProfileSchema` value; the open runtime restricts nothing and states the spec/skills versions it runs. Mounted on the unscoped base ONLY: project scoping does not mirror it under `/api/v1/environments/:environmentId`, where the same constant would answer for any environment id' },
 
   // ── openapi ───────────────────────────────────────────────────────────────
   // [#25104] The document's HTML viewer page (`GET /api/v1/docs`) is retired
@@ -228,6 +233,11 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // [ADR-0144, ruling 6670707546 item B] The tenant-admin twin of the CLI backfill.
   { route: 'POST /api/v1/meta/_migrate-record-currency-codes', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.migrateRecordCurrencyCodes',
     note: 'ADR-0144 record-currency code backfill, the route form of `os migrate record-currency-codes`: writes the one given code into the codeless rows of a record-mode amount in the CALLER\'S CURRENT ORGANIZATION only (no environment-wide form, no organization in the body); gated on `setup.write`, preview unless { apply: true }, behind `metadata.endpoints.maintenance`. DELIBERATELY UNBOUND for `migrateStored`\'s reason — the report\'s named type, `RecordCurrencyBackfillReport`, lives in `@objectstack/objectql`, unreachable from the spec/api namespace this field resolves against. REST-only: the dispatcher has no twin. Answered in the shared envelope, the report as `data`' },
+  // [ADR-0158 U7 R1] The tenant-admin twin of `os migrate unit-codes`. `server-only`, and NOT `gap`, for the
+  // `/layers` row's reason: the gap ratchet is pinned at zero and a new `gap` row needs its own reviewed
+  // decision; whether the SDK should express this door, as it does the currency one, is a separate product call.
+  { route: 'POST /api/v1/meta/_migrate-unit-codes', family: 'metadata', source: 'route-manager', disposition: 'server-only',
+    note: 'ADR-0158 unit code backfill, the route form of `os migrate unit-codes`: rewrites the stored free text of a unit code field into unit codes from the caller\'s mapping, in the CALLER\'S CURRENT ORGANIZATION only; gated on `setup.write`, preview unless { apply: true }, behind `metadata.endpoints.maintenance`, as `_migrate-record-currency-codes` is. Not in the SDK yet. Answered in the shared envelope, the report as `data`' },
   { route: 'GET /api/v1/meta/:type', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getItems' },
   { route: 'GET /api/v1/meta/:type/:name/references', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getReferences',
     responseSchema: 'FindReferencesToMetaResponseSchema',
@@ -375,6 +385,11 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/data/:object/:id/clone', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.clone',
     responseSchema: 'CloneDataResponseSchema',
     note: 'Answers BARE with 201 (res.status(201).json(result), no envelope), so the named schema is the whole body. Filled with its conformance coverage: search-clone-route-schema-conformance.test.ts drives this mount, and metadata-protocol\'s search-clone-schema-conformance.test.ts parses the real cloneData producer' },
+  // [#35402] The Change Owner doors (`change-owner-routes.ts`): no response schema
+  // yet — the answers are core's `ChangeOwnerResult` / `ChangeOwnerReport`, enveloped.
+  { route: 'POST /api/v1/data/:object/change-owner', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.changeOwnerMany' },
+  { route: 'POST /api/v1/data/:object/:id/change-owner', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.changeOwner' },
+  { route: 'GET /api/v1/data/:object/change-owner/cascades', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.changeOwnerCascades' },
   { route: 'GET /api/v1/data/:object/:id/field-access', family: 'data-actions', source: 'route-manager', disposition: 'sdk', client: 'data.fieldAccess',
     responseSchema: 'GetRecordFieldAccessResponseSchema',
     note: 'The field projection of ONE record, for its edit form: `editable` is the write gate\'s own verdict (SecurityPlugin computeForbiddenFieldWrites) on an update of the stored row, so a row-conditioned field permission (`when`) locks only the rows it names; `/auth/me/permissions` stays row-less. Reads the record through getData first, so an absent or unreadable row answers the record read\'s 404. Enveloped ({ success, data }); record-field-access-when.dogfood.test.ts parses `data` against the named schema on the real mount' },
@@ -471,6 +486,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'GET /api/v1/approvals/requests', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.listRequests' },
   { route: 'GET /api/v1/approvals/requests/:id', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.getRequest' },
   { route: 'GET /api/v1/approvals/records/:object/:recordId/lock', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.getRecordLock' },
+  { route: 'POST /api/v1/approvals/records/:object/locks', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.getRecordLocks' },
   { route: 'POST /api/v1/approvals/requests/:id/approve', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.approve' },
   { route: 'POST /api/v1/approvals/requests/:id/reject', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.reject' },
   { route: 'POST /api/v1/approvals/requests/:id/recall', family: 'approvals', source: 'route-manager', disposition: 'sdk', client: 'approvals.recall' },

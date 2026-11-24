@@ -323,10 +323,81 @@ function landedDespiteStaleSummary(e: unknown, atomic: boolean, object: string):
     return stale.written;
 }
 
+/**
+ * [#33795] A per-row bulk UPDATE loop, run as one roll-up batch: inside the
+ * engine's `deferSummaryRecompute` (optional on the engine contract by
+ * ruling 6922040858), every row's `summary` recompute is recorded and runs
+ * once when the loop has settled — one grouped aggregate per summary field
+ * and one write per parent, where the loop alone paid a recompute per row.
+ * Each row's hooks, validation, audit and realtime run where they ran.
+ *
+ * Probed, never assumed: an engine without the member runs the loop as it
+ * always has, recomputing after each row — the same values, more statements.
+ *
+ * How the batch ends, by arm — the per-row `.catch` above no longer meets a
+ * stale-roll-up refusal inside a scope, because the recompute is not run
+ * there; the scope throws it once, at the end, its `written` the loop's
+ * outcome:
+ *
+ * - NON-ATOMIC: the rows are stored; only the named summaries are stale. The
+ *   outcome is answered as it stands, with the stale column logged at `error`
+ *   once, as `landedDespiteStaleSummary` logs a row's.
+ * - ATOMIC: this runs inside the batch's transaction (the loop is
+ *   `runAtomicBatch`'s `runLoop`), so the recompute precedes the commit. A
+ *   refusal fails the last row that landed with the refusal's own row error —
+ *   the row a per-row recompute would have failed last — so
+ *   `runAtomicBatch`'s `failed > 0` rolls the batch back and answers the same
+ *   rolled-back envelope a per-row failure answers. A loop that already
+ *   failed a row rolls back as it is.
+ *
+ * Every other error is rethrown unchanged; the scope has already recomputed
+ * the parents of the rows that landed before it.
+ */
+async function inSummaryBatch(
+    engine: BatchDataHost['engine'],
+    object: string,
+    atomic: boolean,
+    operation: string,
+    runLoop: () => Promise<BatchDataLoopOutcome>,
+): Promise<BatchDataLoopOutcome> {
+    if (typeof engine?.deferSummaryRecompute !== 'function') return await runLoop();
+    try {
+        return await engine.deferSummaryRecompute(runLoop);
+    } catch (e: unknown) {
+        const stale = staleSummaryRefusalOrThrow(e);
+        const outcome = stale.written as BatchDataLoopOutcome;
+        if (!atomic) {
+            for (const line of staleSummaryAnswerLines(stale, object)) console.error(`[Protocol] ${line}`);
+            return outcome;
+        }
+        if (outcome.failed > 0) return outcome;
+        const results = outcome.results.slice();
+        let last = results.length - 1;
+        while (last >= 0 && !results[last]!.success) last--;
+        if (last < 0) return outcome;
+        const landed = results[last]!;
+        results[last] = { id: landed.id, success: false, index: landed.index, errors: [toRowApiError(stale, rowOperationFailureFallback(operation))] };
+        return { results, succeeded: outcome.succeeded - 1, failed: outcome.failed + 1 };
+    }
+}
+
 /** The body of `ObjectStackProtocolImplementation#runBatchDataLoop`; the method's docblock there is its contract. */
 export async function runBatchDataLoop(
     this: Pick<BatchDataHost, 'assertRecordExists' | 'engine' | 'getServicesRegistry'>,
-    args: {
+    args: BatchDataLoopArgs,
+): Promise<BatchDataLoopOutcome> {
+    // [#33795] The UPDATE arm is one roll-up batch, as `runUpdateManyLoop` is:
+    // the parents' summaries recompute once, when the loop has settled, on
+    // every way out of it (`inSummaryBatch`). The other operations keep their
+    // per-row recompute, which the ruling did not move.
+    if (args.operation === 'update') {
+        return await inSummaryBatch(this.engine, args.object, args.atomic, args.operation, () => runBatchDataRows.call(this, args));
+    }
+    return await runBatchDataRows.call(this, args);
+}
+
+/** The arguments of {@link runBatchDataLoop}, typed once for it and the loop it runs. */
+interface BatchDataLoopArgs {
     object: string;
     operation: BatchUpdateRequest['operation'];
     records: BatchUpdateRequest['records'];
@@ -334,7 +405,13 @@ export async function runBatchDataLoop(
     batchSchema: any;
     context: any;
     atomic: boolean;
-}): Promise<BatchDataLoopOutcome> {
+}
+
+/** The per-row loop of {@link runBatchDataLoop}, every operation's arm. */
+async function runBatchDataRows(
+    this: Pick<BatchDataHost, 'assertRecordExists' | 'engine' | 'getServicesRegistry'>,
+    args: BatchDataLoopArgs,
+): Promise<BatchDataLoopOutcome> {
     const { object, operation, records, options, batchSchema, context, atomic } = args;
     const results: BatchDataRowResult[] = [];
     let succeeded = 0;
@@ -388,7 +465,7 @@ export async function runBatchDataLoop(
                     // not-found gate ahead of every hook), so a refused row
                     // reads the same whether or not its id names a record —
                     // see `assertRecordExists`.
-                    if (updated == null) await this.assertRecordExists(object, record.id);
+                    if (updated == null) await this.assertRecordExists(object, record.id, context);
                     omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                     results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                     succeeded++;
@@ -512,7 +589,7 @@ export async function runBatchDataLoop(
                     // that answers with the deleted row is not turned into a
                     // spurious 404.
                     const deleted = await this.engine.delete(object, { where: { id: record.id }, ...ctxOpt } as any).catch((e: unknown) => landedDespiteStaleSummary(e, atomic, object));
-                    if (deleted === false) throw recordNotFoundError(object, record.id);
+                    if (deleted === false) throw recordNotFoundError(object, record.id, context);
                     // [#19433] The SECOND half of this site, and the THIRD and
                     // last of the by-id delete doors to learn it — the
                     // single-record face (commit f9e16d856) and `deleteManyData` (#19412)
@@ -838,65 +915,69 @@ export async function runUpdateManyLoop(
     atomic: boolean;
 }): Promise<BatchDataLoopOutcome> {
     const { object, records, options, context, atomic } = args;
-    const results: BatchDataRowResult[] = [];
-    let succeeded = 0;
-    let failed = 0;
     // [#7823] Ingress strip over each row's `data` payload — the bulk
     // update face is the same generic-data-path surface as the by-id
     // PATCH body, one row at a time. Resolved once; the loop reuses it.
     const updateManySchema = this.engine.registry?.getObject(object);
 
-    for (const [index, record] of records.entries()) {
-        try {
-            // [#3455] Two gaps the pre-#3455 loop had, both fixed per row:
-            //  1. `context` was never threaded — bulk updates ran the engine
-            //     context-less, so RLS/FLS and `readonlyWhen` evaluated without
-            //     the caller's principal. Thread it like single-write updateData.
-            //  2. `onFieldsDropped` was never wired — the same static `readonly`
-            //     (#2948) / `readonlyWhen` (#3042) strips that single-write now
-            //     surfaces (#3431) happened silently here. Collect per row.
-            //
-            // [#5100] Same guard as `runBatchDataLoop`'s update branch
-            // (#4793), same classification: an id-less row is a CALLER
-            // error — VALIDATION_FAILED/400 — not a data-state one. The
-            // REST entrance already rejects it (`UpdateManyRecordSchema`
-            // requires `id`, #3939), but that invariant lives two packages
-            // away; unguarded, an in-process caller's malformed row
-            // reached the probe and the write as `{ id: undefined }`,
-            // whose reading is up to each driver's undefined-where-key
-            // handling — at best a 404 with `undefined` interpolated into
-            // the message, at worst a where-clause with no id at all.
-            if (!record.id) throw rowRequiredIdError('update');
-            const dropped: DroppedFieldsEvent[] = [];
-            const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
-            if (context !== undefined) opts.context = context;
-            const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, opts).catch((e: unknown) => landedDespiteStaleSummary(e, atomic, object)));
-            // [#5088] Third gap, the same shape: no existence answer. A row
-            // naming no record came back `INTERNAL_ERROR` from #4775's
-            // condition abort — blaming the hook for a caller's stale id. It
-            // answers what the single-record PATCH answers now, asked where
-            // that door asks it: AFTER the engine has judged the write (its
-            // refusals, then its not-found gate ahead of every hook), so a
-            // refused row reads the same whether or not its id names a
-            // record — see `assertRecordExists`.
-            if (updated == null) await this.assertRecordExists(object, record.id);
-            omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
-            results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
-            succeeded++;
-        } catch (err: any) {
-            results.push({ id: record.id, success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('update'))] });
-            failed++;
-            if (atomic) {
-                // Abort on the first failure; the caller rolls back.
-                break;
-            }
-            if (!options?.continueOnError) {
-                break;
+    // [#33795] One roll-up batch: the parents' summaries recompute once, when
+    // the loop has settled, on every way out of it (`inSummaryBatch`).
+    return await inSummaryBatch(this.engine, object, atomic, 'update', async () => {
+        const results: BatchDataRowResult[] = [];
+        let succeeded = 0;
+        let failed = 0;
+        for (const [index, record] of records.entries()) {
+            try {
+                // [#3455] Two gaps the pre-#3455 loop had, both fixed per row:
+                //  1. `context` was never threaded — bulk updates ran the engine
+                //     context-less, so RLS/FLS and `readonlyWhen` evaluated without
+                //     the caller's principal. Thread it like single-write updateData.
+                //  2. `onFieldsDropped` was never wired — the same static `readonly`
+                //     (#2948) / `readonlyWhen` (#3042) strips that single-write now
+                //     surfaces (#3431) happened silently here. Collect per row.
+                //
+                // [#5100] Same guard as `runBatchDataLoop`'s update branch
+                // (#4793), same classification: an id-less row is a CALLER
+                // error — VALIDATION_FAILED/400 — not a data-state one. The
+                // REST entrance already rejects it (`UpdateManyRecordSchema`
+                // requires `id`, #3939), but that invariant lives two packages
+                // away; unguarded, an in-process caller's malformed row
+                // reached the probe and the write as `{ id: undefined }`,
+                // whose reading is up to each driver's undefined-where-key
+                // handling — at best a 404 with `undefined` interpolated into
+                // the message, at worst a where-clause with no id at all.
+                if (!record.id) throw rowRequiredIdError('update');
+                const dropped: DroppedFieldsEvent[] = [];
+                const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
+                if (context !== undefined) opts.context = context;
+                const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, opts).catch((e: unknown) => landedDespiteStaleSummary(e, atomic, object)));
+                // [#5088] Third gap, the same shape: no existence answer. A row
+                // naming no record came back `INTERNAL_ERROR` from #4775's
+                // condition abort — blaming the hook for a caller's stale id. It
+                // answers what the single-record PATCH answers now, asked where
+                // that door asks it: AFTER the engine has judged the write (its
+                // refusals, then its not-found gate ahead of every hook), so a
+                // refused row reads the same whether or not its id names a
+                // record — see `assertRecordExists`.
+                if (updated == null) await this.assertRecordExists(object, record.id, context);
+                omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
+                results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
+                succeeded++;
+            } catch (err: any) {
+                results.push({ id: record.id, success: false, index, errors: [toRowApiError(err, rowOperationFailureFallback('update'))] });
+                failed++;
+                if (atomic) {
+                    // Abort on the first failure; the caller rolls back.
+                    break;
+                }
+                if (!options?.continueOnError) {
+                    break;
+                }
             }
         }
-    }
 
-    return { results, succeeded, failed };
+        return { results, succeeded, failed };
+    });
 }
 
 /** The body of `ObjectStackProtocolImplementation#buildUpdateManyResponse`; the method's docblock there is its contract. */
@@ -1028,7 +1109,7 @@ export async function runDeleteManyLoop(
             const deleted = await this.engine.delete(object, { where: { id }, ...ctxOpt } as any).catch((e: unknown) => landedDespiteStaleSummary(e, atomic, object));
             // `id` is `unknown` to this helper only because the caller's
             // fail-closed `isScalarId` guard is what proves it scalar.
-            if (deleted === false) throw recordNotFoundError(object, id as string | number);
+            if (deleted === false) throw recordNotFoundError(object, id as string | number, context);
             // [#19412] The SECOND half of the same site. The paragraph above
             // fixed "no match"; this is "matched, and deliberately NOT
             // removed" — and until now `success` was still a LITERAL for

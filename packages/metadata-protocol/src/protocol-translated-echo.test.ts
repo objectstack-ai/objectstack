@@ -15,6 +15,10 @@ import { describe, it, expect } from 'vitest';
 import { translateObject, type TranslationBundle } from '@objectstack/spec/system';
 import { QUEUE_FIELD_DEF, OWNER_FIELD_DEF } from '@objectstack/spec/data';
 import { restoreTranslatedEchoes, translatedEchoLocales } from './protocol-translated-echo.js';
+import { ProtocolDiscoveryAndBasesFacet } from './protocol-discovery-and-bases.js';
+// The save door's module reaches `@objectstack/lint` through dynamic imports;
+// its first load is paid here, during collection, never inside a case's clock.
+import '@objectstack/lint';
 
 const bundle: TranslationBundle = {
     'zh-CN': {
@@ -149,5 +153,192 @@ describe('[#29673] restoreTranslatedEchoes', () => {
         const { item, restored } = restoreTranslatedEchoes(echo, { source: source(), bundle: selfBundle });
         expect((item as any).fields.renewed_from.relatedListTitle).toBe('Renewals');
         expect(restored.map((r) => r.path)).toEqual(['fields.renewed_from.relatedListTitle']);
+    });
+});
+
+describe('[#33952] restoreTranslatedEchoes with the read\'s patchBundles', () => {
+    const catalog = { 'zh-CN': { objects: { crm_account: { fields: { name: { label: '名称' }, registration_number: { label: '注册号' } } } } } } as unknown as TranslationBundle;
+    const packagedBase = {
+        name: 'crm_account',
+        fields: { name: { type: 'text', label: 'Name' }, registration_number: { type: 'text', label: 'Registration No.' } },
+    };
+    const patchedBase = { ...packagedBase, fields: { ...packagedBase.fields, registration_number: { type: 'text', label: 'Tax ID' } } };
+    const patchBundles = [{
+        patchedBase,
+        bundle: { 'zh-CN': { objects: { crm_account: { fields: { registration_number: { label: '税号' } } } } } } as unknown as TranslationBundle,
+    }];
+    const body = (name: string, reg: string) => ({ name: 'crm_account', fields: { name: { type: 'text', label: name }, registration_number: { type: 'text', label: reg } } });
+
+    it('the patching package\'s translation of a patched slot is put back to the patch text, with or without a stored row carrying it', () => {
+        for (const source of [body('Name', 'Tax ID'), packagedBase]) {
+            const { item, restored } = restoreTranslatedEchoes(body('名称', '税号'), { source, bundle: catalog, packagedBase, patchBundles }) as any;
+            expect([item.fields.name.label, item.fields.registration_number.label]).toEqual(['Name', 'Tax ID']);
+            expect(restored.map((r: any) => r.path)).toContain('fields.registration_number.label');
+        }
+    });
+
+    it('a field the patch left as packaged is no patch source: a tenant\'s rename typed as the catalog string is kept', () => {
+        // The stored row renamed `name` to `Customer`; the read serves that untranslated, so `名称` is the author's.
+        const { item } = restoreTranslatedEchoes(body('名称', 'Tax ID'), { source: body('Customer', 'Tax ID'), bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.name.label).toBe('名称');
+    });
+
+    it('without patchBundles the patched slot\'s translation is no echo (the read before #33952 never served it)', () => {
+        const { item } = restoreTranslatedEchoes(body('Name', '税号'), { source: body('Name', 'Tax ID'), bundle: catalog, packagedBase }) as any;
+        expect(item.fields.registration_number.label).toBe('税号');
+    });
+});
+
+describe('[#34836] a patch entry answers a slot its patch changed, and only where the stored row has no text of its own there', () => {
+    const catalog = {
+        'zh-CN': { objects: { crm_account: { fields: { name: { label: '名称' }, registration_number: { label: '注册号', help: '注册号说明' } } } } },
+    } as unknown as TranslationBundle;
+    const regField = { type: 'text', label: 'Registration No.', description: 'Registration number' };
+    const packagedBase = { name: 'crm_account', fields: { name: { type: 'text', label: 'Name' }, registration_number: regField } };
+    // The patch changes the label only; the description stays the packaged text.
+    const patchedBase = { ...packagedBase, fields: { ...packagedBase.fields, registration_number: { ...regField, label: 'Tax ID' } } };
+    const patchBundles = [{
+        patchedBase,
+        bundle: { 'zh-CN': { objects: { crm_account: { fields: { registration_number: { label: '税号' } } } } } } as unknown as TranslationBundle,
+    }];
+    const row = (reg: Record<string, unknown>) => ({ name: 'crm_account', fields: { name: { type: 'text', label: 'Name' }, registration_number: { type: 'text', ...reg } } });
+    const read = (doc: unknown, locale: string) =>
+        structuredClone(translateObject(doc as any, catalog, { locale, packagedBase, patchBundles } as any)) as any;
+
+    it('a stored `税号` typed over the patched slot survives a whole-body save in another locale with an unrelated edit', () => {
+        const source = row({ label: '税号', description: 'Registration number' });
+        const echo = read(source, 'en');
+        // The precondition: the read serves the tenant's text as written.
+        expect(echo.fields.registration_number.label).toBe('税号');
+        echo.fields.name.label = 'Account Name';
+        const { item, restored } = restoreTranslatedEchoes(echo, { source, bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.registration_number.label).toBe('税号');
+        expect(item.fields.name.label).toBe('Account Name');
+        expect(restored).toEqual([]);
+    });
+
+    it('the catalog\'s translation of a packaged slot the patch left alone, typed over a tenant\'s rename, is the author\'s', () => {
+        const source = row({ label: 'Tax ID', description: 'Our own note' });
+        const echo = read(source, 'zh-CN');
+        expect(echo.fields.registration_number.description).toBe('Our own note');
+        echo.fields.registration_number.description = '注册号说明';
+        const { item } = restoreTranslatedEchoes(echo, { source, bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.registration_number.description).toBe('注册号说明');
+    });
+
+    it('a stored empty string on the patched slot is no text of its own: the patch text the fold serves over it is put back', () => {
+        // The fold applies the patch over `''` (scalarOverridesPackagedBase is false for it), so the read serves `Tax ID`.
+        const source = row({ label: '', description: 'Registration number' });
+        const echo = read(row({ label: 'Tax ID', description: 'Registration number' }), 'zh-CN');
+        expect(echo.fields.registration_number.label).toBe('税号');
+        const { item } = restoreTranslatedEchoes(echo, { source, bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.registration_number.label).toBe('Tax ID');
+    });
+
+    it('a slot the patch left alone is no patch source even where the stored row does not declare the field', () => {
+        const source = { name: 'crm_account', fields: { name: { type: 'text', label: 'Name' } } };
+        const { item, restored } = restoreTranslatedEchoes(row({ label: 'Tax ID', description: '注册号说明' }), { source, bundle: catalog, packagedBase, patchBundles }) as any;
+        expect(item.fields.registration_number.description).toBe('注册号说明');
+        expect(restored).toEqual([]);
+    });
+});
+
+/**
+ * What a CODE extender brings, over a stored row saved before the extending
+ * package was installed: the fold serves the extender's added field and the
+ * entry its `place` splices into `relatedLists`, translated against the
+ * packaged base, and the stored row carries no copy of either. The packaged
+ * base is the last source for them, told from the owner's own declaration.
+ */
+describe('a code extender\'s placed title or added field, over a stored row that predates it', () => {
+    const catalog = {
+        'zh-CN': {
+            objects: {
+                crm_lead: {
+                    fields: { name: { label: '名称' }, cb_market: { label: '市场' } },
+                    _relatedLists: { crm_task: { label: '任务' }, acme_audit: { label: '审计' } },
+                },
+            },
+        },
+    } as unknown as TranslationBundle;
+    const owner = () => ({
+        name: 'crm_lead',
+        label: 'Lead',
+        fields: { name: { type: 'text', label: 'Name' } } as Record<string, unknown>,
+        relatedLists: [{ list: 'crm_task', label: 'Tasks' }, 'crm_note'] as unknown[],
+    });
+    /** The packaged base: the owner, the extender's added field and its placed tab. */
+    const packagedBase = () => ({
+        ...owner(),
+        fields: { ...owner().fields, cb_market: { type: 'text', label: 'Market' } },
+        relatedLists: [{ list: 'crm_task', label: 'Tasks' }, { list: 'acme_audit', label: 'Audit trail' }, 'crm_note'],
+    });
+    /** The stored overlay row, saved before the extender: it declares `relatedLists` without the placed entry. */
+    const storedRow = () => ({ ...owner(), label: 'Prospect' });
+    /** The `/meta` read in zh-CN: the fold over the stored row, translated against the packaged base. */
+    const zhRead = (): any => {
+        const served = { ...storedRow(), fields: packagedBase().fields, relatedLists: packagedBase().relatedLists };
+        return structuredClone(translateObject(served as any, catalog, { locale: 'zh-CN', packagedBase: packagedBase() } as any));
+    };
+    const labelOf = (body: any, list: string) => body.relatedLists.find((e: any) => typeof e === 'object' && e.list === list)?.label;
+
+    it('the read does translate both: the case is real, not a no-op', () => {
+        const echo = zhRead();
+        expect(labelOf(echo, 'acme_audit')).toBe('审计');
+        expect(echo.fields.cb_market.label).toBe('市场');
+    });
+
+    it('a zh-CN save of the folded read keeps the placed title and the added field\'s label as their source', () => {
+        const { item, restored } = restoreTranslatedEchoes(zhRead(), {
+            source: storedRow(), bundle: catalog, packagedBase: packagedBase(), packagedOwner: owner(),
+        }) as any;
+        expect(labelOf(item, 'acme_audit')).toBe('Audit trail');
+        expect(item.fields.cb_market.label).toBe('Market');
+        expect(restored.map((r: any) => r.path).sort()).toEqual([
+            'fields.cb_market.label', 'fields.name.label', 'relatedLists[acme_audit].label', 'relatedLists[crm_task].label',
+        ]);
+        // The stored row's own text is what it was: the object label diverged, so the read served it as written.
+        expect(item.label).toBe('Prospect');
+    });
+
+    it('a placed entry the stored row declares is the stored row\'s to explain: a tenant\'s rename, typed over as the catalog string, is kept', () => {
+        const source: any = storedRow();
+        source.relatedLists = [...source.relatedLists, { list: 'acme_audit', label: 'Audit log' }];
+        const body = zhRead();
+        expect(labelOf(body, 'acme_audit')).toBe('审计');
+        const { item } = restoreTranslatedEchoes(body, { source, bundle: catalog, packagedBase: packagedBase(), packagedOwner: owner() }) as any;
+        expect(labelOf(item, 'acme_audit')).toBe('审计');
+    });
+
+    it('an entry or field the OWNER declares and the stored row dropped is no extender\'s: the body\'s text is kept', () => {
+        const source: any = { ...storedRow(), fields: {}, relatedLists: ['crm_note'] };
+        const body = zhRead();
+        const { item } = restoreTranslatedEchoes(body, { source, bundle: catalog, packagedBase: packagedBase(), packagedOwner: owner() }) as any;
+        expect(labelOf(item, 'crm_task')).toBe('任务');
+        expect(item.fields.name.label).toBe('名称');
+        // …while the extender's own still come back as their source.
+        expect(labelOf(item, 'acme_audit')).toBe('Audit trail');
+        expect(item.fields.cb_market.label).toBe('Market');
+    });
+
+    it('the save door hands the restore the packaged owner: a non-source-locale save over the stored row lacking the entry keeps the source title', async () => {
+        const host = {
+            engine: { registry: { getPackagedObjectOwner: (name: string) => (name === 'crm_lead' ? { definition: owner() } : undefined) } },
+            getPackagedObjectBase: (name: string) => (name === 'crm_lead' ? packagedBase() : undefined),
+            getPackagedFieldPatchBases: () => [],
+            getPackageTranslationBundle: async () => undefined,
+            registeredTranslationBundle: () => catalog,
+        };
+        const repo = { headAt: async () => ({ head: { body: storedRow() }, packageId: null }) };
+        const { item, restored } = await ProtocolDiscoveryAndBasesFacet.restoreTranslatedObjectEchoes(
+            host as any,
+            { type: 'object', name: 'crm_lead', item: zhRead() } as any,
+            repo as any,
+            { type: 'object', name: 'crm_lead', org: 'env' } as any,
+            'publish',
+        ) as any;
+        expect(labelOf(item, 'acme_audit')).toBe('Audit trail');
+        expect(item.fields.cb_market.label).toBe('Market');
+        expect(restored.map((r: any) => r.path)).toEqual(expect.arrayContaining(['relatedLists[acme_audit].label', 'fields.cb_market.label']));
     });
 });

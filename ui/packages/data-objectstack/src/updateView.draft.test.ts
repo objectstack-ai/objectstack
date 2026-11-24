@@ -59,8 +59,19 @@ interface Harness {
  *                        draft reads.
  * @param opts.published  what `client.meta.getItem` (the published read) does:
  *                        a body to resolve, or an Error to throw.
+ * @param opts.layers     what `GET /meta/view/:name/layers` answers
+ *                        (objectstack#35054: the body `updateView` merges onto).
+ *                        Defaults to the stored copy of the two reads above,
+ *                        which here are the stored rows (no translation in
+ *                        play): `draft` the pending draft, `effective` the
+ *                        published view.
  */
-function makeDS(opts: { draft: any | null; published: any | Error; packages?: Record<string, unknown> }): Harness {
+function makeDS(opts: {
+  draft: any | null;
+  published: any | Error;
+  packages?: Record<string, unknown>;
+  layers?: Record<string, unknown>;
+}): Harness {
   const draftPuts: Array<[string, any]> = [];
   const urls: string[] = [];
 
@@ -76,6 +87,12 @@ function makeDS(opts: { draft: any | null; published: any | Error; packages?: Re
       if ((init?.method ?? 'GET') === 'PUT') {
         draftPuts.push([url, JSON.parse(String(init?.body ?? '{}'))]);
         return json({ success: true, version: 2 });
+      }
+      if (/\/layers(\?|$)/.test(url)) {
+        const effective = opts.published instanceof Error ? null : opts.published;
+        return json(
+          opts.layers ?? { code: null, overlay: effective, overlayScope: effective ? 'env' : null, effective, draft: opts.draft ?? null },
+        );
       }
       if (url.includes('state=draft')) {
         if (opts.draft == null) return json({ error: 'not found' }, 404);
@@ -435,5 +452,98 @@ describe('ObjectStackDataSource.updateView — a shipped view is written into it
 
     expect(packages.ensureCustomization).not.toHaveBeenCalled();
     expect(saveItem.mock.calls[0]).toHaveLength(3);
+  });
+});
+
+/**
+ * objectstack#35054 (route D) — `updateView` merges onto the view as its author
+ * STORED it, never the served (translated) read.
+ *
+ * Manage views' Pin, Set as Default and Rename go through this method, which
+ * writes the merged body back whole. The served reads are translated for the
+ * console's locale, and the door stores a body verbatim, so a zh-CN Pin stored
+ * the view's label in Chinese (measured live on `showcase_task.qatr_loose`).
+ * Here the served reads answer the translated view and the layered read the
+ * stored source.
+ *
+ * Direction, written before the run: with the served bodies merged (the
+ * unmodified tree) the first two cases go RED on the label and the controls
+ * (`isPinned`, `isDefault`) stay GREEN; the refusals go RED by writing.
+ */
+describe('ObjectStackDataSource.updateView — the stored view is the base (objectstack#35054)', () => {
+  const SOURCE = {
+    name: 'showcase_task.qatr_loose',
+    object: 'showcase_task',
+    viewKind: 'list',
+    label: 'QA Loose List',
+    config: { type: 'grid', columns: ['name'], data: { provider: 'object', object: 'showcase_task' } },
+  };
+  const TRANSLATED = { ...SOURCE, label: '游离测试列表' };
+
+  it('a zh-CN Pin of a published view stores the source label, and the pin lands', async () => {
+    const { ds, saveItem, draftPuts } = makeDS({
+      draft: null,
+      published: TRANSLATED,
+      layers: { code: null, overlay: SOURCE, overlayScope: 'env', effective: SOURCE, draft: null },
+    });
+
+    await ds.updateView('showcase_task', SOURCE.name, { isPinned: true });
+
+    expect(draftPuts).toHaveLength(0);
+    expect(saveItem).toHaveBeenCalledTimes(1);
+    const body = (saveItem.mock.calls[0] as unknown as [string, string, any])[2];
+    expect(body.label).toBe('QA Loose List');
+    // Control: the key this write decides.
+    expect(body.isPinned).toBe(true);
+    expect(body.config).toEqual(SOURCE.config);
+  });
+
+  it('a zh-CN Set as Default of a pending draft stores the draft as stored, and the flag lands', async () => {
+    const storedDraft = { ...SOURCE, config: { ...SOURCE.config, columns: ['name', 'status'] } };
+    const { ds, saveItem, draftPuts } = makeDS({
+      draft: { ...storedDraft, label: '游离测试列表' },
+      published: TRANSLATED,
+      layers: { code: null, overlay: SOURCE, overlayScope: 'env', effective: SOURCE, draft: storedDraft },
+    });
+
+    await ds.updateView('showcase_task', SOURCE.name, { isDefault: true });
+
+    expect(saveItem).not.toHaveBeenCalled();
+    expect(draftPuts).toHaveLength(1);
+    const [url, body] = draftPuts[0]!;
+    expect(url).toContain('mode=draft');
+    expect(body.label).toBe('QA Loose List');
+    expect(body.config.columns).toEqual(['name', 'status']);
+    // Control.
+    expect(body.isDefault).toBe(true);
+  });
+
+  it('a pending draft whose stored copy the layers do not serve is refused, and nothing is written', async () => {
+    const { ds, saveItem, draftPuts } = makeDS({
+      draft: TRANSLATED,
+      published: TRANSLATED,
+      // No `draft` key: the layered read served no stored copy of the pending draft.
+      layers: { code: null, overlay: SOURCE, overlayScope: 'env', effective: SOURCE },
+    });
+
+    await expect(ds.updateView('showcase_task', SOURCE.name, { isPinned: true })).rejects.toThrow(
+      /pending draft whose stored copy was not served.*Nothing was written/,
+    );
+    expect(saveItem).not.toHaveBeenCalled();
+    expect(draftPuts).toHaveLength(0);
+  });
+
+  it('a published view with nothing stored to read is refused, not written from the served copy', async () => {
+    const { ds, saveItem, draftPuts } = makeDS({
+      draft: null,
+      published: TRANSLATED,
+      layers: { code: null, overlay: null, overlayScope: null, effective: null, draft: null },
+    });
+
+    await expect(ds.updateView('showcase_task', SOURCE.name, { isPinned: true })).rejects.toThrow(
+      /no stored body to read.*Nothing was written/,
+    );
+    expect(saveItem).not.toHaveBeenCalled();
+    expect(draftPuts).toHaveLength(0);
   });
 });

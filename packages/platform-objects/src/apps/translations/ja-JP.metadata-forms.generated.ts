@@ -52,6 +52,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "アイコン",
         helpText: "Lucide アイコン名（例: \"building\", \"users\"）"
       },
+      color: {
+        label: "色",
+        helpText: "アイコンを描く角丸四角の色。固定パレットから選びます。未設定の場合はグレーになります。"
+      },
       description: {
         label: "説明",
         helpText: "開発者向けドキュメント"
@@ -70,11 +74,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "ハイライト項目",
-        helpText: "このオブジェクトの項目名を重要な順に並べます。1 つしか表示できない場所では先頭の項目が使われます（ADR-0085）。既定の一覧列、カード、子レコードのプレビュー、詳細画面のハイライト帯を決めます。このオブジェクトの項目でない名前は公開時に拒否されます。"
+        helpText: "このオブジェクトの項目名を重要な順に並べます。1 つしか表示できない場所では先頭の項目が使われます（ADR-0085）。既定の一覧列と関連リストの列、カード、子レコードのプレビュー、レコードのホバーカード、レコードの選択画面を決めます。このオブジェクトの項目でない名前は公開時に拒否されます。"
       },
       relatedLists: {
-        label: "関連リストの順序",
-        helpText: "レコードページに表示するこのオブジェクトの関連リストの業務上の順序を、重要な順に並べます。各項目は子オブジェクト名（例：task）で、その子オブジェクトがこのオブジェクトと複数の関係を持つ場合は object.field と書きます。指定したリストが先に並び、残りは派生順で続きます。このオブジェクトを指す関係に一致しない名前は何も配置せず、オブジェクトの保存時や検証時に拒否されます。"
+        label: "レコードページのタブ",
+        helpText: "概要の後に表示するレコードページのタブを順番に並べます。各項目は子オブジェクト名（例: task）、その子オブジェクトがこのオブジェクトと複数の関係を持つ場合は object.field、組み込みタブ（sys_attachment、sys_approval_request、sys_activity）、または Studio のオブジェクト設定で独自のタイトルと列を設定した項目です。何か一つでも列挙すると、どの項目にも挙がっていない関連リストにはタブが表示されません（他のパッケージが追加したリストも同様）。このオブジェクトがそれを列挙するまで表示されません。添付ファイルは列挙した場合にのみ表示されます。空の場合は、すべてのリストが既定の順序で表示されます。このオブジェクトを指す関係に一致しない名前は、オブジェクトの保存時に拒否されます。"
       },
       searchableFields: {
         label: "検索対象項目",
@@ -86,11 +90,15 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "キー",
-        helpText: "snake_case のマシンキーで、このオブジェクト内で一意です。それ以外はスキーマが拒否します。フィールドはこのキーを指定してグループに加わるため、キーを変更するとそれらのフィールドはどのグループにも属さなくなります。"
+        helpText: "snake_case のマシンキーで、このオブジェクト内で一意です。それ以外はスキーマが拒否します。グループの「フィールド」に挙げたフィールドは、キーを変更してもグループに残ります。自身のグループ設定でこのキーを指定して加わったフィールドは、どのグループにも属さなくなります。"
       },
       "fieldGroups.label": {
         label: "表示名",
         helpText: "グループのセクションの見出しテキスト。"
+      },
+      "fieldGroups.fields": {
+        label: "フィールド",
+        helpText: "このグループが表示するフィールドと表示順（フィールド名）。入力すると、どのフィールドも移動せずにグループ内の順序が決まります。ここに挙げたフィールドは、自身のグループ設定で別のグループを指定できません。また、1 つのフィールドを挙げられるのは 1 つのグループだけです。関連リストとは併用できません。"
       },
       "fieldGroups.icon": {
         label: "アイコン",
@@ -102,11 +110,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "関連リスト",
-        helpText: "このエントリをフィールドのセクションではなく関連リストの表にします。子オブジェクト（または object.field）を指定すると、そのリストがレコードの詳細列のこの位置に表示されます。このようなグループはフィールドを持たず、これを自身のグループに指定したフィールドは拒否されます。このオブジェクトを指す関係に一致しない名前も拒否されます。レコードページはこの配置をまだ描画しません。"
+        helpText: "このエントリをフィールドのセクションではなく関連リストの表にします。子オブジェクト（または object.field）を指定すると、そのリストがレコードの詳細列のこの位置に表示されます。このようなグループはフィールドを持たず、これを自身のグループに指定したフィールドは拒否されます。このオブジェクトを指す関係に一致しない名前も拒否されます。親レコードの作成フォームと編集フォームにもこの表がインラインで表示され、レコードページの「編集」ではレコードとその行がまとめて保存されます。"
       },
       "fieldGroups.collapse": {
         label: "折りたたみ",
-        helpText: "セクションを折りたためるかどうか。入力フォームとレコード詳細ページに適用されます。未設定の場合は none です。"
+        helpText: "セクションを折りたためるかどうか。入力フォームは設定どおりに動作します。既定のレコードページでは閲覧者がタイトル付きのグループをすべて折りたためるため、そこでは初期状態だけを決めます。collapsed は閉じた状態、それ以外は開いた状態で始まります。未設定の場合は none です。"
       },
       "fieldGroups.visibleWhen": {
         label: "表示条件",
@@ -232,6 +240,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
       },
+      "fields.transferBehavior": {
+        label: "所有者変更の連動",
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
+      },
       "fields.multiple": {
         label: "複数選択",
         helpText: "複数レコードの選択を許可"
@@ -268,9 +280,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "言語",
         helpText: "エディター言語（例: sql, javascript）"
       },
+      "fields.fieldHistory": {
+        label: "フィールド変更値",
+        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はプラットフォームに従い、ほとんどの型ではオン、メディア・JSON・資格情報のフィールドではオフです。オフでは変更は項目名だけで示され、オンではメディアや JSON の項目も値を表示します。資格情報のフィールドは常に値を表示せず、オブジェクト自体のフィールド変更値がオフなら、そちらが優先されます。"
+      },
       "fields.trackHistory": {
         label: "履歴追跡",
-        helpText: "レコードのアクティビティタイムラインでこのフィールドを要約する"
+        helpText: "メディアや JSON の項目（画像、ファイル、json など）で、アクティビティタイムラインに旧値 → 新値を表示します。他の項目はもともと表示され、オフにしても値は隠れません。隠すには「フィールド変更値」を使います。"
       },
       "fields.visibleWhen": {
         label: "表示条件",
@@ -290,6 +306,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "履歴追跡"
+      },
+      "enable.fieldHistory": {
+        label: "フィールド変更値",
+        helpText: "変更されたフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はオンです。オフにすると、フィールドの設定にかかわらずオブジェクト全体で値が表示されなくなります。"
       },
       "enable.searchable": {
         label: "検索可能"
@@ -427,7 +447,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "ユーザー操作",
-        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。"
+        helpText: "UI クライアントがこのオブジェクトのレコードで提供する汎用の入口（新規、インポート、編集、削除、エクスポート）を、managedBy の既定から 1 項目ずつ上書きします。未設定の項目は既定のままで、platform は 5 つすべて、config と system-data はインポート以外すべて、engine-owned、append-only、better-auth はエクスポートのみを提供します。一度も操作していないスイッチは何も書き込まないため、既定で提供される項目でもオフと表示されます。engine-owned または append-only のオブジェクトでは、項目をオンにすると、ユーザーはその書き込みをデータ API 経由でも行えるようになります。ユーザーには引き続き対応する権限が必要です。所有者の変更はこのマトリクスに含まれません。既定は共有モデルに従います（その項目を参照）。"
       },
       "userActions.create": {
         label: "作成",
@@ -448,6 +468,22 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "CSV エクスポート",
         helpText: "CSV エクスポートの入口。未設定の場合は表示されます。どの managedBy 区分でも既定でエクスポートが提供されるためです。"
+      },
+      "userActions.transfer": {
+        label: "所有者の変更",
+        helpText: "所有者の変更アクション（単一および一括）。オンで提供、オフで非表示。未設定の場合はオンですが、controlled_by_parent の詳細オブジェクトではオフです。レコードに再割り当て可能な所有者があるオブジェクト（ownership が user または未設定、managedBy なし、sys_ オブジェクトでない、owner_id が読み取り専用でなく、外部オブジェクトでは宣言またはマッピングされている）でのみ提供されます。それ以外のオブジェクトでオンにすると拒否されます。制御するのはアクションのみで、owner_id の通常の編集は対象外です。保存済みの {enabled, visibleWhen, disabledWhen} オブジェクトはキーごとに編集されます。各レコードでアクションを制御するにはソースに記述してください。"
+      },
+      actionLayout: {
+        label: "アクションの配置",
+        helpText: "このオブジェクトのアクションの順序と、どれをボタンにするかをスコープごとに指定します：pinned（ボタン最大 3 個、表示順）と more（「その他」メニューの順序。どちらにも書かれていないアクションは既定の順序で後ろに続きます）。未設定の場合、各画面は従来どおりアクションの order でボタンを選びます。"
+      },
+      "actionLayout.list": {
+        label: "リスト",
+        helpText: "リストページのツールバー。{\"pinned\": [...], \"more\": [...]} の形で書きます：リストのツールバーに配置されたアクション名。$import / $export は pinned にのみ書けます。固定は最大 3 個。固定しない場合も、ページは独自のインポート / エクスポートメニューを表示します。os validate は、このオブジェクトのアクションでない名前やリストのツールバーに配置されていない名前を拒否します。そのような名前は何も表示しません。"
+      },
+      "actionLayout.record": {
+        label: "レコード",
+        helpText: "レコードヘッダー（レコードページ、サイドプレビュー、スマートフォンの下部バー）。{\"pinned\": [...], \"more\": [...]} の形で書きます：レコードヘッダーまたはその「その他」メニューに配置されたアクション名。固定は最大 3 個。os validate は、このオブジェクトのアクションでない名前やレコードページに配置されていない名前を拒否します。そのような名前は何も表示しません。"
       },
       editMode: {
         label: "編集の開き方",
@@ -737,6 +773,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
       },
+      transferBehavior: {
+        label: "所有者変更の連動",
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
+      },
       relatedListFilter: {
         label: "関連リストのフィルター",
         helpText: "親レコードの詳細ページに表示される、この関係の関連リストの既定フィルター — 親レコードとの一致条件と AND で結合され、タブのバッジも同じ集合を数えます"
@@ -783,7 +823,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "インライン表の列",
-        helpText: "親レコードのフォームにあるインライン表の列で、表示順に並べます。このフィールドが inlineEdit（ソースに記述）を設定している場合にのみ使われます。未設定の場合はこのオブジェクトの編集可能なフィールドから導出され、6 列を超えた分は最初は表の列選択に収められます。フィールド名だけのエントリは、型・選択肢・ルールをそのフィールドから受け取ります。その他の列のキー（まず type）はソースに記述します。"
+        helpText: "親レコードのフォームにあるインライン表の列で、表示順に並べます。親オブジェクトのフィールドグループがこの子オブジェクトを指定している場合（fieldGroups[].relatedList）にのみ使われます。未設定の場合はこのオブジェクトの編集可能なフィールドから導出され、6 列を超えた分は最初は表の列選択に収められます。フィールド名だけのエントリは、型・選択肢・ルールをそのフィールドから受け取ります。その他の列のキー（まず type）はソースに記述します。"
       },
       "inlineColumns.name": {
         label: "名前",
@@ -853,6 +893,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "非表示",
         helpText: "既定 UI ビューからフィールドを非表示"
       },
+      showOnCreate: {
+        label: "作成時に表示",
+        helpText: "レコード作成時にこのフィールドを入力させます。オフにすると、作成ダイアログ、全画面の作成、アクションから開く作成には表示されません。編集、レコードページ、リストには引き続き表示されます。必須フィールドは作成時に必ず入力するため、オフにできません。"
+      },
       searchable: {
         label: "検索可能",
         helpText: "グローバル検索結果に含める"
@@ -885,9 +929,13 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "外部に返さない",
         helpText: "この項目の値を汎用データ経路では返しません。エンジンは find／findOne の結果と、作成・更新のレスポンスボディからこのキーを削除します。既定の射影でも、クライアントが ?select= で名指ししたときも同様です。保存・絞り込み・インデックスには影響しません。"
       },
+      fieldHistory: {
+        label: "フィールド変更値",
+        helpText: "このフィールドの旧値 → 新値をレコードのアクティビティタイムラインに表示します。既定はプラットフォームに従い、ほとんどの型ではオン、メディア・JSON・資格情報のフィールドではオフです。オフでは変更は項目名だけで示され、オンではメディアや JSON の項目も値を表示します。資格情報のフィールドは常に値を表示せず、オブジェクト自体のフィールド変更値がオフなら、そちらが優先されます。"
+      },
       trackHistory: {
         label: "変更履歴を記録",
-        helpText: "この項目の値の変更を、レコードのアクティビティタイムラインの項目として表示します（ADR-0052 §5b）。項目ごとのオプトインです。"
+        helpText: "メディアや JSON の項目（画像、ファイル、json など）で、アクティビティタイムラインに旧値 → 新値を表示します。他の項目はもともと表示され、オフにしても値は隠れません。隠すには「フィールド変更値」を使います。"
       },
       widget: {
         label: "ウィジェット指定",
@@ -988,6 +1036,18 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "refusals.params": {
         label: "パラメーター",
         helpText: "文に埋め込める名前（例: state）。本体が { code, params: { state } } をスローすると、{{ state }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
+      },
+      texts: {
+        label: "テキスト",
+        helpText: "フックがレコードに書き込む文。コードが ctx.text で要求する snake_case のキー（例: follow_up_subject）をキーとします。フックには宣言したメッセージが組織の言語に翻訳されて返り、翻訳がない場合は宣言したメッセージが返ります。JavaScript（L2）本体またはハンドラーで使用可能。expression 本体では拒否されます"
+      },
+      "texts.message": {
+        label: "メッセージ",
+        helpText: "コードがこのキーを要求したときにフックが書き込む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
+      },
+      "texts.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: lead）。コードが ctx.text(key, { lead }) を要求すると、{{ lead }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
       },
       handler: {
         label: "ハンドラー",
@@ -1331,10 +1391,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "ナビゲーション",
-        helpText: "項目をクリックしたときのナビゲーション設定（既定はドロワー。page、new_window、none も指定可）"
+        helpText: "項目をクリックしたときのナビゲーション設定：ドロワーのサイズと、行を開かないリスト用の `preventNavigation`（`mode` は非推奨——レコード名で全画面ページ、ホバー時のアイコンでサイドパネルが開きます）"
       },
       "navigation.mode": {
-        label: "モード"
+        label: "モード",
+        helpText: "[非推奨] オブジェクトのリスト（リストビュー、オブジェクトの `listViews`）では、レコードの開き方をもう決めません：コンソールでは、すべての閲覧者に対し、レコード名で全画面ページが、名前の横にホバー時に出るアイコンでサイドパネルが開きます。ここでは `drawer`、`page`、`new_window` は引き続き解析されますが何も変えないため、このキーは省略してください。`none` は引き続き行を開かないことを意味します——`preventNavigation: true` を推奨します。`navigation` を持つページブロック（リストブロック、タイムライン、埋め込みビュー）では、すべての値が引き続き有効です。"
       },
       "navigation.preventNavigation": {
         label: "ナビゲーションを無効化",
@@ -1342,7 +1403,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "新しいタブで開く",
-        helpText: "常に新しいタブで開きます（page モードに適用）"
+        helpText: "クリックしたレコードの全画面ページを新しいブラウザータブで開きます。何も開かない行はそのままで、スマートフォンでは同じページ内で開きます"
       },
       "navigation.size": {
         label: "サイズ",
@@ -1565,30 +1626,30 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "名前",
-        helpText: "snake_case の一意識別子"
+        helpText: "このダッシュボードの一意の内部名。英小文字・数字・アンダースコアを使い、先頭は英字にします（例: sales_overview）。"
       },
       label: {
         label: "表示名",
-        helpText: "表示名"
+        helpText: "利用者に表示されるダッシュボードのタイトル。"
       },
       description: {
         label: "説明"
       },
       columns: {
         label: "列",
-        helpText: "グリッド列（既定 12）"
+        helpText: "ウィジェットを並べる列数（1〜24）。空欄にすると、ウィジェットの幅に合わせて自動で決まります。"
       },
       gap: {
         label: "間隔",
-        helpText: "ウィジェット間の間隔、0.25rem 刻み（4 = 1rem）"
+        helpText: "ウィジェット同士の間隔。数値が大きいほど広がります。空欄にすると標準の間隔になります。"
       },
       refreshIntervalSeconds: {
         label: "更新間隔",
-        helpText: "自動更新（秒）"
+        helpText: "ダッシュボードがデータを再読み込みする間隔（秒）。空欄または 0 で自動再読み込みをオフにします。"
       },
       header: {
         label: "ヘッダー",
-        helpText: "ダッシュボードヘッダー設定（title, subtitle, actions）"
+        helpText: "ダッシュボード上部に表示する内容（タイトル、説明、操作ボタン）。"
       },
       "header.showTitle": {
         label: "タイトルを表示",
@@ -1616,7 +1677,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "ウィジェット",
-        helpText: "位置とサイズを持つダッシュボードウィジェット"
+        helpText: "このダッシュボードに置くグラフ・数値・表と、それぞれの配置。"
       },
       "widgets.id": {
         label: "ウィジェット ID"
@@ -1671,11 +1732,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日付範囲",
-        helpText: "既定の日付範囲セレクター"
+        helpText: "ダッシュボードを開いたときの期間と、閲覧者が日付を自分で選べるかどうか。"
       },
       globalFilters: {
         label: "グローバルフィルター",
-        helpText: "全ウィジェットに適用するフィルター"
+        helpText: "閲覧者がすべてのウィジェット、または指定したウィジェットだけをまとめて絞り込めるフィルター。"
       },
       "globalFilters.name": {
         label: "名前"
@@ -1880,6 +1941,42 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "body.memoryMb": {
         label: "メモリ（MB）",
         helpText: "呼び出しごとのメモリ上限（MB、最大 256）"
+      },
+      refusals: {
+        label: "拒否カタログ",
+        helpText: "アクションの本文がスローする SCREAMING_SNAKE のコード（例: SIGN_IN_REQUIRED）をキーとする拒否カタログ。呼び出し元には宣言したメッセージ（その言語に翻訳）と宣言したステータスが返ります。script アクションの JavaScript（L2）本文で使用可能。expression 本文では拒否されます"
+      },
+      "refusals.message": {
+        label: "メッセージ",
+        helpText: "本体がこのコードをスローしたときにユーザーが読む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
+      },
+      "refusals.status": {
+        label: "ステータス",
+        helpText: "拒否の HTTP ステータス（400–499）。未指定: 400"
+      },
+      "refusals.reasons": {
+        label: "理由",
+        helpText: "同じコードの下に置く追加の文。本体がコードと一緒にスローする snake_case の理由（{ code, reason }）をキーとします。送信されるコードとステータスはこのエントリのものです。ここで宣言されていない理由は拒否されます。未指定: スローされた理由は読まれません"
+      },
+      "refusals.reasons.message": {
+        label: "メッセージ",
+        helpText: "本体がこのコードの下でこの理由をスローしたときにユーザーが読む文。{{ }} プレースホルダーはエントリの params に従います"
+      },
+      "refusals.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: state）。本体が { code, params: { state } } をスローすると、{{ state }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
+      },
+      texts: {
+        label: "テキスト",
+        helpText: "アクションがレコードに書き込む文。本文が ctx.text で要求する snake_case のキー（例: email_subject）をキーとします。本文には宣言したメッセージが組織の言語に翻訳されて返り、翻訳がない場合は宣言したメッセージが返ります。script アクションの JavaScript（L2）本文で使用可能。expression 本文では拒否されます"
+      },
+      "texts.message": {
+        label: "メッセージ",
+        helpText: "本文がこのキーを要求したときにアクションが書き込む文。プレーンテキスト。ただしエントリが params を宣言している場合、{{ name }} プレースホルダーに宣言済みのパラメーターが入ります"
+      },
+      "texts.params": {
+        label: "パラメーター",
+        helpText: "文に埋め込める名前（例: subject）。本文が ctx.text(key, { subject }) を要求すると、{{ subject }} プレースホルダーにその値が表示されます。未指定: 文はプレーンテキストです"
       },
       params: {
         label: "パラメーター",
@@ -2101,7 +2198,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "表示名"
       },
       description: {
-        label: "説明"
+        label: "説明",
+        helpText: "このレポートで何がわかるかを一文で。名前の下に表示されます。"
       },
       type: {
         label: "型",
@@ -2183,9 +2281,33 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日付範囲",
         helpText: "既定の期間とカスタム範囲の切り替え。ディメンションはデータセットの日付ディメンションである必要があります。データセットに日付ディメンションが 1 つだけの場合は空欄のままにします。"
       },
+      "dateRange.dimension": {
+        label: "日付フィールド",
+        helpText: "期間を適用する、データソースの日付グループ。データソースに日付グループが 1 つしかない場合は空のままにします。"
+      },
+      "dateRange.defaultRange": {
+        label: "既定の期間",
+        helpText: "レポートを開いたときに表示される期間。"
+      },
+      "dateRange.allowCustomRange": {
+        label: "カスタム範囲を許可",
+        helpText: "開始日と終了日を利用者が自分で選べるようにします。"
+      },
       exportOptions: {
         label: "エクスポートオプション",
         helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データセットのオブジェクトのエクスポート権限で決まります。"
+      },
+      "exportOptions.formats": {
+        label: "形式",
+        helpText: "ダウンロードできる形式。未設定なら csv と xlsx の両方、空のリストならダウンロードはオフになります。"
+      },
+      "exportOptions.includeHeaders": {
+        label: "見出しを含める",
+        helpText: "ダウンロードしたファイルの 1 行目に列名を入れます。"
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "ファイル名",
+        helpText: "ダウンロードするファイル名の先頭部分。空欄の場合はレポートの表示名が使われ、表示名がない場合は名前が使われます。"
       }
     }
   },

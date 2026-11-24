@@ -18,7 +18,9 @@ export const jaJP: TranslationData = {
         grp_account_developer: { label: '開発者' },
         grp_account_ai_assistant: { label: 'AI アシスタント' },
         nav_account_profile: { label: 'プロフィール' },
+        nav_account_mobile_app: { label: 'モバイルアプリ' },
         nav_account_notifications: { label: '通知' },
+        nav_account_notification_settings: { label: '通知設定' },
         nav_account_approvals: { label: '承認待ち' },
         nav_account_memberships: { label: '所属組織' },
         nav_account_linked: { label: '連携アカウント' },
@@ -37,9 +39,8 @@ export const jaJP: TranslationData = {
       navigation: {
         group_overview: { label: '概要' },
         group_apps: { label: 'アプリ' },
-        nav_packaged_actions: { label: 'パッケージアクション' },
         nav_marketplace_browse: { label: 'マーケットプレイスを閲覧' },
-        nav_marketplace_installed: { label: 'インストール済みアプリ' },
+        nav_packages: { label: 'パッケージ' },
         nav_cloud_connection: { label: 'クラウド接続' },
         group_people_org: { label: 'ユーザーと組織' },
         group_access_control: { label: 'アクセス制御' },
@@ -84,6 +85,9 @@ export const jaJP: TranslationData = {
         nav_settings_hub: { label: 'すべての設定' },
         nav_settings_localization: { label: 'ローカリゼーション' },
         nav_exchange_rates: { label: '為替レート' },
+        nav_units_of_measure: { label: '計量単位' },
+        nav_work_calendars: { label: '稼働カレンダー' },
+        nav_work_calendar_exceptions: { label: 'カレンダー例外' },
         nav_settings_company: { label: '会社' },
         nav_settings_mail: { label: 'メール配信' },
         nav_settings_sms: { label: 'SMS 配信' },
@@ -95,6 +99,7 @@ export const jaJP: TranslationData = {
         nav_settings_knowledge: { label: 'ナレッジ' },
         nav_settings_lifecycle: { label: 'データライフサイクル' },
         nav_recycle_bin: { label: 'ごみ箱' },
+        nav_public_forms: { label: '公開フォーム' },
         nav_notification_preferences: { label: '通知設定' },
         nav_notification_templates: { label: '通知テンプレート' },
 
@@ -109,6 +114,7 @@ export const jaJP: TranslationData = {
         nav_datasources: { label: 'データソース' },
         nav_connector_credentials: { label: 'コネクタ認証情報' },
         nav_connector_connections: { label: 'コネクタ接続' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
       },
@@ -175,13 +181,55 @@ export const jaJP: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'ユーザー' } } },
-    sys_organization_metrics: { measures: { org_count: { label: '組織' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'セッション' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'インストール' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'ユーザー',
+          description: '登録されているユーザーアカウントの数（有効・無効を問いません）。',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: '組織',
+          description: '登録されている組織の数。各組織はそれぞれ独自のメンバー、データ、設定を持ちます。',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'セッション',
+          description: '記録されているサインインセッションの数。ブラウザーやデバイスからのサインインごとに 1 つ作成されます。',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'インストール',
+          description: '記録されているパッケージのインストール数。インストールされたパッケージごとに 1 件です。',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'アクション' }, user_id: { label: 'ユーザー' } },
-      measures: { event_count: { label: 'イベント' } },
+      dimensions: {
+        action: {
+          label: 'アクション',
+          description: '監査ログのエントリが記録する操作の種類（作成、更新、削除、ログイン、設定変更など）。',
+        },
+        user_id: {
+          label: 'ユーザー',
+          description: '監査対象の操作を行ったユーザー。プラットフォーム自身が書き込んだエントリは「システム」にまとめられます。',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'イベント',
+          description: '監査ログのエントリ数。各エントリは、ユーザーまたはプラットフォーム自身がシステムで行った 1 回の操作を記録します。',
+        },
+      },
     },
   },
 

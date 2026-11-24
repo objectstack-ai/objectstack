@@ -129,7 +129,35 @@ describe('objectstack#28434 · a host renderer decides alone', () => {
     // The host's items only — the table's own are not mixed in.
     expect(itemIds(menu)).toEqual(['host-item']);
     expect(menu).toHaveTextContent('Host item for r2');
-    expect(renderRowContextMenu).toHaveBeenCalledWith(expect.objectContaining({ id: 'r2' }), { selected: false });
+    // objectstack#36290 — the context also names the data cell's column, and
+    // objectstack#36289 what the table does with that cell (a table the reader
+    // cannot edit: Copy only).
+    expect(renderRowContextMenu).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'r2' }),
+      { selected: false, column: 'name', cell: { copy: expect.any(Function) } },
+    );
+  });
+
+  it('objectstack#36290 · names the column of the data cell it opened on, and none off a data cell', async () => {
+    const renderRowContextMenu = vi.fn(() => <DropdownMenuItem data-testid="host-item">Host item</DropdownMenuItem>);
+    renderTable({
+      ...RELATED_LIST_SCHEMA,
+      columns: [{ header: 'Name', accessorKey: 'name' }, { header: 'Code', accessorKey: 'code' }],
+      data: ROWS.map((row) => ({ ...row, code: `C-${row.id}` })),
+      renderRowContextMenu,
+    });
+    act(() => { rightClick(cellOf('C-r1')); });
+    await screen.findByTestId('row-context-menu');
+    expect(renderRowContextMenu).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'r1' }),
+      { selected: false, column: 'code', cell: { copy: expect.any(Function) } },
+    );
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(contextMenu()).toBeNull());
+    // The row's own "⋮" cell is not a data cell: no column.
+    act(() => { rightClick(within(rowOf('Open contract')).getByTestId('data-table-row-actions').closest('td') as HTMLElement); });
+    await screen.findByTestId('row-context-menu');
+    expect(renderRowContextMenu).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'r1' }), { selected: false });
   });
 
   it('a host answering null keeps the browser\'s menu', () => {
@@ -149,5 +177,35 @@ describe('objectstack#28434 · a host renderer decides alone', () => {
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(contextMenu()).toBeNull());
     expect(cell).toHaveFocus();
+  });
+});
+
+describe('objectstack#36289 · what the table does with the data cell a host menu opened on', () => {
+  const lastCell = (fn: ReturnType<typeof vi.fn>) => (fn.mock.calls.at(-1) as any[])[1].cell;
+
+  it('an editable cell offers Copy, Paste and Clear; Copy writes the value as Ctrl/Cmd+C does', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText, readText: vi.fn(async () => '') } });
+    const renderRowContextMenu = vi.fn(() => <DropdownMenuItem data-testid="host-item">Host item</DropdownMenuItem>);
+    renderTable({ editable: true, renderRowContextMenu });
+    act(() => { rightClick(cellOf('Open contract')); });
+    await screen.findByTestId('row-context-menu');
+    const cell = lastCell(renderRowContextMenu);
+    expect(Object.keys(cell).sort()).toEqual(['clear', 'copy', 'paste']);
+    cell.copy();
+    expect(writeText).toHaveBeenCalledWith('Open contract');
+  });
+
+  it('a masked cell offers no Copy; a cell the table will not edit offers no Paste or Clear', async () => {
+    const renderRowContextMenu = vi.fn(() => <DropdownMenuItem data-testid="host-item">Host item</DropdownMenuItem>);
+    renderTable({
+      editable: true,
+      columns: [{ header: 'Name', accessorKey: 'name' }, { header: 'Code', accessorKey: 'code', masked: true, editable: false }],
+      data: ROWS.map((row) => ({ ...row, code: `C-${row.id}` })),
+      renderRowContextMenu,
+    });
+    act(() => { rightClick(cellOf('Open contract').closest('tr')!.querySelector('td[data-cell-column="code"]') as HTMLElement); });
+    await screen.findByTestId('row-context-menu');
+    expect(lastCell(renderRowContextMenu)).toEqual({});
   });
 });

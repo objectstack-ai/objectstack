@@ -24,6 +24,8 @@
 // that is literally what `runtime/src/security/resolve-session-principal.ts`
 // calls.
 
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
@@ -56,8 +58,10 @@ export const createMemoryEngine = () => {
     a instanceof Date || b instanceof Date
       ? new Date(a as any).getTime() === new Date(b as any).getTime()
       : a === b;
-  const matches = (row: any, where: Record<string, any> = {}) =>
+  const matches = (row: any, where: Record<string, any> = {}): boolean =>
     Object.entries(where).every(([k, v]) => {
+      // A conjunction of conditions, as the engine's predicate path takes one.
+      if (k === '$and' && Array.isArray(v)) return v.every((w) => matches(row, w));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
       const actual = row[k];
       if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {

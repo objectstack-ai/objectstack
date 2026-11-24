@@ -267,12 +267,14 @@ describe('a stored row of a two-holder name at boot, beyond the webhook (#32692)
             expect(registry.listItems('dashboard').map((item) => (item as { label?: string }).label)).not.toContain('row:beta-custom');
         });
 
-        it(`CONTROL — permission (${first} first): a stray row keeps its reading (the first-registered holder's slot, an order-dependent pick), pending the maintainer's ruling on a stored permission fork under two holders`, async () => {
+        it(`permission (${first} first): a stray package's row is its own package's set, in its own slot, and each holder keeps its shipped set (ADR-0150 D2, #32780)`, async () => {
+            // FROM (main at #32780): the first-registered holder's slot
+            // answered the row (the CONTROL this replaces). A permission set
+            // is `(package, name)`: the stray package's stored set is its own.
             const body = (label: string) => ({ name: N, label, description: label });
             const { registry } = await boot('permission', order, (id) => body(`shipped:${id}`), [{ packageId: S, body: body('row:stray') }]);
             const label = (id: string) => (registry.getPackageScopedItem('permission', N, id) as { label?: string } | undefined)?.label;
-            expect(label(order[0])).toBe('row:stray');
-            expect(label(order[1])).toBe(`shipped:${order[1]}`);
+            expect([label(A), label(B), label(S)]).toEqual([`shipped:${A}`, `shipped:${B}`, 'row:stray']);
         });
 
         it(`CONTROL — email_template (${first} first): a shared pair's undeclared row of a locale no holder ships keeps its bare-slot registration, as before`, async () => {

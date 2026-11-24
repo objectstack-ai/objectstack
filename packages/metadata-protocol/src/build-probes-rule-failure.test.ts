@@ -48,6 +48,7 @@ import type { ProbeEngine } from './build-probes.js';
 
 const OBJECT_BODY = {
     name: 'crm_lead',
+    label: 'Leads',
     fields: { name: { type: 'text', label: 'Name' } },
     highlightFields: ['name'],
 };
@@ -74,7 +75,10 @@ afterEach(() => {
     vi.resetModules();
 });
 
-async function probeWith(validateObjectFieldRefs: (stack: Record<string, unknown>) => unknown) {
+async function probeWith(
+    validateObjectFieldRefs: (stack: Record<string, unknown>) => unknown,
+    userTextLocales?: readonly string[],
+) {
     vi.resetModules();
     vi.doMock('@objectstack/lint', () => ({ validateObjectFieldRefs }));
     const { runBuildProbes } = await import('./build-probes.js');
@@ -82,6 +86,7 @@ async function probeWith(validateObjectFieldRefs: (stack: Record<string, unknown
         engine,
         getItem,
         published: [{ type: 'object', name: 'crm_lead' }],
+        ...(userTextLocales !== undefined ? { userTextLocales } : {}),
     });
 }
 
@@ -107,6 +112,35 @@ describe('runBuildProbes — a throwing object rule is reported, never swallowed
         expect(report.issues[0].message).toContain('crm_lead');
         // ⛔ The one reading that must be impossible.
         expect(report.issues, 'a crash must not read as zero findings').not.toEqual([]);
+    });
+
+    it('carries the person\'s sentence beside the crash report: the check failed, not the object', async () => {
+        // [ruling record 6929121584] `message` and `fix` are the agent's, and
+        // carry the thrown text. `userMessage` is for the person who published:
+        // in the request's language, naming the object by its label, and with
+        // none of the thrown text in it. Every locale's wording of this code is
+        // rendered in `build-probes-user-message.test.ts`; this is its real run.
+        const thrown = "Cannot read properties of null (reading 'name')";
+        const english = await probeWith(() => {
+            throw new TypeError(thrown);
+        });
+        expect(english.issues[0].userMessage).toBe(
+            '"Leads" was published, but its field settings could not be checked. The problem is in the check itself, '
+                + 'not necessarily in "Leads"; contact your administrator if it happens again.',
+        );
+        const chinese = await probeWith(() => {
+            throw new TypeError(thrown);
+        }, ['zh-CN']);
+        expect(chinese.issues[0].userMessage).toBe(
+            '“Leads”已发布，但无法检查它的字段设置。问题出在检查本身，不一定出在“Leads”上；如果再次出现，请联系管理员。',
+        );
+        for (const report of [english, chinese]) {
+            expect(report.issues[0].userMessage).not.toContain(thrown);
+            expect(report.issues[0].userMessage).not.toContain('crm_lead');
+            // The agent's channel is the same in both: it does not read the locale.
+            expect(report.issues[0].message).toBe(english.issues[0].message);
+            expect(report.issues[0].fix).toBe(english.issues[0].fix);
+        }
     });
 
     it('reports a non-Error throw too — the message is whatever was thrown', async () => {

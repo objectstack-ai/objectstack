@@ -45,6 +45,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, waitFor, screen, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { ListViewSchema, ViewItemSchema } from '@objectstack/spec/ui';
+// Paid during collection: the source under test reaches a dynamic
+// `import('@objectstack/lint')` (celAuthoring.ts), see check:test-source-alias.
+import '@objectstack/lint';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -201,6 +204,11 @@ const PARSE_ROWS: Record<string, ParseRow> = {
     block: { chartType: 'bar', dataset: 'deal_metrics', values: ['total_amount'], dimensions: ['stage'] },
   },
   tree: { picks: [['parentField', 'Parent deal']], block: { parentField: 'parent' } },
+  // objectstack#34382 — one row field, written as the spec's list.
+  timesheet: {
+    picks: [['rowFields', 'Stage'], ['dateField', 'Start'], ['valueField', 'Amount']],
+    block: { rowFields: ['stage'], dateField: 'start_date', valueField: 'amount' },
+  },
 };
 
 /**
@@ -259,8 +267,20 @@ beforeEach(() => {
   cleanup();
   puts.length = 0;
   client = new MetadataClient({ baseUrl: 'http://localhost', fetch: wire() as any });
+  // objectstack#35624 — the create asks the package list where the app saves
+  // its views; the routed app `demo` is a writable package here. Every other
+  // page request goes on as before.
+  const pageFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input) === '/api/v1/packages'
+      ? new Response(
+          JSON.stringify({ success: true, data: { packages: [{ manifest: { id: 'demo', name: 'Demo' }, writable: true }] } }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )
+      : pageFetch(input, init)));
 });
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 

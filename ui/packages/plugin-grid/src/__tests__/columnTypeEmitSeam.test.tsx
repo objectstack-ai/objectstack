@@ -54,6 +54,7 @@ function renderTyped(type: string) {
   return render(
     <ActionProvider>
       <ObjectGrid
+        cellSelection={false}
         schema={{
           type: 'object-grid',
           // objectui#8348 — the DECLARED inline-rows spelling. `object-grid`'s published
@@ -62,7 +63,6 @@ function renderTyped(type: string) {
           // resolves to the same config this file has always exercised.
           data: { provider: 'value', items: ROWS },
           editable: true,
-          singleClickEdit: true,
           columns: [{ field: 'amount', label: 'Amount', type }],
         } as any}
       />

@@ -16,11 +16,13 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@object-ui/types';
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
+import { FormOwnerLine } from './formOwnerLine';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
+import { useReportedDirtyChange } from './formDirtyReport';
 import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
-import { useIsMobile, toast } from '@object-ui/components';
+import { useIsMobile, toast, FormSectionNavContext } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
 import { resolveSubmitRedirect, submitRedirectScope } from './submitRedirect';
 import {
@@ -48,6 +50,8 @@ import {
   sectionedGridLayout,
 } from './autoLayout';
 import { deriveFieldGroupSections, projectSectionDivider, resolveSectionCollapse, type FormFieldWithGroup } from './fieldGroups';
+import { formSlotGroup, formSlotRow, placeFormSlots, type FormSlotHandoff } from './formSlots';
+import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
 import { mergeCustomFields } from './customFieldsMerge';
 import { hasSectionGroupReference, resolveSectionGroupReferences } from './sectionGroups';
 import {
@@ -597,6 +601,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // file/image widget below me still uploading" answer, the Save label while it
   // is true, and the sentence that says why. See `uploadGate.tsx`.
   const uploadGate = useUploadGate();
+  // The section navigation above a sectioned form (objectstack#34605): the
+  // form reports its visible sections, this host draws them.
+  const sectionNav = useFormSectionNav();
   // Field-level permission gate. When the consumer hasn't mounted a
   // PermissionProvider / MePermissionsProvider, `usePermissions` returns
   // a permissive default (isLoaded:false, checkField always true) so we
@@ -814,8 +821,11 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // (objectui#10715). Dirtiness is read from the form renderer's existing
   // `onDirtyChange` channel; nothing new is declared on any schema.
   const readsRecord = !!schema.recordId && schema.mode !== 'create' && !hasInlineFields;
-  const { refetch: recordRefetch, onDirtyChange: handleDirtyChange, saved: recordSaved } =
+  const { refetch: recordRefetch, onDirtyChange: onBusDirtyChange, saved: recordSaved } =
     useRecordInvalidation(schema.objectName, schema.recordId, readsRecord);
+  // The same verdict reaches a hosting master-detail form, when one provides a
+  // reporter (`formDirtyReport.ts`): its close guard counts the header's input.
+  const handleDirtyChange = useReportedDirtyChange(onBusDirtyChange);
   // The `recordRefetch` value the fetch effect last ran for — a run that moved
   // it is a re-read IN PLACE and must not enter the loading branch.
   const appliedRecordRefetchRef = React.useRef(0);
@@ -994,7 +1004,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // server resolves it — refusing the submit would leave the user with
           // nothing sensible to type.
           required: isRequiredInForm(field, isCreateFormMode(schema)),
-          disabled: schema.readOnly || schema.mode === 'view' || field.readonly,
+          // `_draftOnly`: a field only the draft declares, under the console's
+          // draft preview — drawn, never fillable (see `fromObjectSchema`).
+          disabled: schema.readOnly || schema.mode === 'view' || field.readonly || field._draftOnly === true,
           placeholder: field.placeholder,
           // The help line under the control: the spec's `inlineHelpText`,
           // else `description`, through the one read `fromObjectSchema`
@@ -1021,6 +1033,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // A `permission-ref` field also carries the object this form edits
           // (objectstack#32795), so the widget tells the grant's name column
           // from a column of the same name on another object.
+          // (A lookup whose `lookupFilters` read `{ $record }` is stamped as
+          // a field of the record being edited by `gateFormFields`, the one
+          // step every layout draws its fields through.)
           field: withFormObject(
             withFollowedParentObject(withHomeAmountSource(field, objectSchema.fields, name), objectSchema.fields),
             schema.objectName,
@@ -1209,14 +1224,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   const isCreateForm = isCreateFormMode(schema);
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
   // field opens on in create mode.
-  const { currency: homeCurrency } = useLocalization();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   // [#5683] `currentUserId` lets the one client-resolvable token
   // (`current_user`) pre-fill with the id the server would stamp anyway;
   // null/unloaded seeds nothing and keeps the omit-and-let-the-engine-resolve
   // contract above.
   const schemaDefaults = React.useMemo(
-    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId, homeCurrency }) : {}),
-    [objectSchema, isCreateForm, perms.userId, homeCurrency],
+    () => (isCreateForm ? schemaDefaultValues(objectSchema, { currentUserId: perms.userId, homeCurrency, homeTimeZone }) : {}),
+    [objectSchema, isCreateForm, perms.userId, homeCurrency, homeTimeZone],
   );
 
   // What the form OPENS with: the seeded defaults, overlaid with the caller's
@@ -1543,6 +1558,29 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // (so a group declared `collapsed: true` starts closed without pre-seeding).
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
+  // objectstack#35889 — the host's collections a field group of this object
+  // places (`formSlots.ts`): laid out among the sections by the record page's
+  // rule, drawn as `form-slot` rows by the sectioned arm below. The claim names
+  // what the drawn layout places, `[]` for any other layout, and is never made
+  // while the form is still loading.
+  const formSlots = (schema as FormSlotHandoff).formSlots;
+  const drawsSections = !!effectiveSections?.length && (!schema.formType || schema.formType === 'simple');
+  const slotPlacement = React.useMemo(
+    () => placeFormSlots(
+      drawsSections ? effectiveSections! : [],
+      (section) => (typeof section?.name === 'string' ? section.name : undefined),
+      objectSchema?.fieldGroups,
+      formSlots?.requests,
+    ),
+    [drawsSections, effectiveSections, objectSchema, formSlots?.requests],
+  );
+  const slotClaim = loading ? null : (drawsSections && !error && !submitted ? slotPlacement.placed : []).join('\n');
+  const slotHost = formSlots?.host;
+  useEffect(() => {
+    if (slotClaim === null || !slotHost) return;
+    slotHost.claim(slotClaim ? slotClaim.split('\n') : []);
+  }, [slotClaim, slotHost]);
+
   // Render error state
   if (error instanceof RecordNotFoundError) {
     return <RecordNotFoundState testId="simple-form-record-not-found" />;
@@ -1550,7 +1588,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   if (error) {
     return (
       <div className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md">
-        <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{error.message}</p>
       </div>
     );
@@ -1654,7 +1692,22 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
       customFields: schema.customFields,
       pool: sourceFields,
     };
-    effectiveSections.forEach((section, index) => {
+    // A placed collection's row is named by its group, once per group, so the
+    // section navigation stops at it between the headings around it.
+    const namedSlotGroups = new Set<string>();
+    slotPlacement.sequence.forEach((item) => {
+      if ('slot' in item) {
+        if (!slotHost) return;
+        const group = formSlotGroup(objectSchema?.fieldGroups, item.slot);
+        const label = group && !namedSlotGroups.has(group.key)
+          ? sectionLabel(schema.objectName, group.key, group.label || group.key)
+          : '';
+        if (group) namedSlotGroups.add(group.key);
+        groupedFields.push(formSlotRow(item.slot, slotHost, label));
+        return;
+      }
+      const { section } = item;
+      const index = effectiveSections.indexOf(section);
       // ⚠️ `?? []`, not a bare `.map` — the second containment layer for
       // objectui#7051. The group-reference resolution above this component
       // means a `{ group }` section never arrives here carrying no `fields`,
@@ -1789,8 +1842,19 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
 
     return (
       <UploadGateProvider gate={uploadGate}>
+        <FormSectionNavContext.Provider value={sectionNav.sink}>
         <div className="w-full @container">
           {closedAffordanceNotice}
+          {/* objectstack#35403 — the record's owner, read-only, with the host's action beside it. */}
+          <FormOwnerLine
+            mode={schema.mode}
+            objectName={schema.objectName}
+            recordId={schema.recordId}
+            record={loading ? null : initialData}
+            objectSchema={objectSchema}
+          />
+          {/* Sticky, so the sections stay one click away down a long page. */}
+          <FormSectionNav items={sectionNav.items} className="sticky top-0 z-10 mb-4 bg-background" />
           <SchemaRenderer
             schema={{
               type: 'form',
@@ -1821,6 +1885,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           <UploadInFlightNotice gate={uploadGate} />
           {conflictDialog}
         </div>
+        </FormSectionNavContext.Provider>
       </UploadGateProvider>
     );
   }
@@ -1987,6 +2052,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
         data-mobile-form={mobileOpts ? 'true' : undefined}
       >
         {closedAffordanceNotice}
+          {/* objectstack#35403 — the record's owner, read-only, with the host's action beside it. */}
+          <FormOwnerLine
+            mode={schema.mode}
+            objectName={schema.objectName}
+            recordId={schema.recordId}
+            record={loading ? null : initialData}
+            objectSchema={objectSchema}
+          />
         <SchemaRenderer schema={formSchema} />
         <UploadInFlightNotice gate={uploadGate} />
         {conflictDialog}

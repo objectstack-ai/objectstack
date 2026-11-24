@@ -313,7 +313,7 @@ describe("the status mirror hands a runAs:'user' cascade the person's own reques
     await seedDeal('d_reject');
     const requestId = await openNode('d_reject', 'submitter', ['approver']);
     const before = mark();
-    await svc.decide(requestId, { decision: 'reject', actorId: 'approver' } as any, asPerson('approver'));
+    await svc.decide(requestId, { decision: 'reject', comment: 'Over budget.', actorId: 'approver' } as any, asPerson('approver'));
     const { hook } = await expectPersonInOrg(await cascade(before), 'approver', ORG_A);
     expect(hook.permissions).toContain(EXTRA_SET);
   });

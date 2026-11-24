@@ -66,7 +66,7 @@
  */
 
 import type { AudienceCaller, Book, ResolvedBook, ResolverDoc } from '@objectstack/spec/system';
-import { preferredLocaleFromHeader, renderOperationMessage } from '@objectstack/spec/system';
+import { preferredLocaleFromHeader, renderOperationMessage, resolveBundleLocale } from '@objectstack/spec/system';
 import { apiExposureDenialReason } from '@objectstack/spec/data';
 import { resolveObjectSortability } from '@objectstack/spec/api';
 import { canonicalMetaUrlType, pluralToSingular, unrecognisedMetaTypeRefusal } from '@objectstack/spec/shared';
@@ -3251,22 +3251,46 @@ export async function isTranslatableMetaType(type: string): Promise<boolean> {
 }
 
 /**
+ * [#34993] The sentence a translation fault is said in, on every door that
+ * says one: the i18n service resolved, but its translations could not be read.
+ */
+export function metaTranslationFaultWarning(error: unknown): string {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `The translations could not be read (${reason}), so labels and descriptions are served untranslated.`;
+}
+
+/**
  * Build a `TranslationBundle` (`Record<locale, TranslationData>`) from an
  * `II18nService` instance. `undefined` when no locales are registered, so
  * callers can avoid translation work. (`RestServer.buildTranslationBundle`
  * delegates here.)
+ *
+ * [#34993] A service whose `getLocales` or `getTranslations` throws is a
+ * translation fault, not a failed read: the answer is `undefined` (the text is
+ * served untranslated, as with no bundle), the server log says so at `warn`
+ * (a functional degradation), and `reportFault` hands the same sentence
+ * ({@link metaTranslationFaultWarning}) to a door that carries a warning on
+ * its answer. One locale failing fails the whole bundle, so an answer never
+ * mixes the locales that read with the fallback for the one that did not.
  */
-export function translationBundleOf(i18n: unknown): any | undefined {
+export function translationBundleOf(i18n: unknown, reportFault?: (warning: string) => void): any | undefined {
     const service: any = i18n;
     if (!service || typeof service.getLocales !== 'function' || typeof service.getTranslations !== 'function') {
         return undefined;
     }
-    const locales: string[] = service.getLocales();
-    if (!locales.length) return undefined;
     const bundle: Record<string, any> = {};
-    for (const locale of locales) {
-        const data = service.getTranslations(locale);
-        if (data && typeof data === 'object') bundle[locale] = data;
+    try {
+        const locales: string[] = service.getLocales();
+        if (!locales.length) return undefined;
+        for (const locale of locales) {
+            const data = service.getTranslations(locale);
+            if (data && typeof data === 'object') bundle[locale] = data;
+        }
+    } catch (error) {
+        const warning = metaTranslationFaultWarning(error);
+        logWarn(`[meta] ${warning}`);
+        reportFault?.(warning);
+        return undefined;
     }
     return Object.keys(bundle).length ? bundle : undefined;
 }
@@ -3282,6 +3306,14 @@ export function translationBundleOf(i18n: unknown): any | undefined {
  * layer threads a declaration, it never invents one.
  * `RestServer.translateOptionsFor`, whose docblock carries the history,
  * delegates here.
+ *
+ * [#36466] `locale` is the request's tag NEGOTIATED against the locales the
+ * service holds ({@link negotiatedTranslationLocale}), the tag the server-side
+ * readers hand the same translators (objectql's `negotiatedMessageLocale`,
+ * plugin-approvals' `negotiatedReaderLocale`). Handed the raw tag, an `en-US`
+ * request in a deployment authored in `en` that holds an `en` pack was not the
+ * authored language, walked the chain to the default locale and read `客户`
+ * where those readers name the same object `Account`.
  */
 export function metaTranslateOptions(
     i18n: unknown,
@@ -3293,10 +3325,43 @@ export function metaTranslateOptions(
     const def = typeof source === 'string' && source.length > 0
         ? source
         : service && typeof service.getDefaultLocale === 'function' ? service.getDefaultLocale() : undefined;
-    const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = { locale };
+    const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = {
+        locale: negotiatedTranslationLocale(service, locale),
+    };
     if (typeof fallback === 'string' && fallback.length > 0) opts.fallbackChain = [fallback];
     if (typeof def === 'string' && def.length > 0) opts.defaultLocale = def;
     return opts;
+}
+
+/**
+ * [#36466] The locale `service` can ANSWER in, for the tag the request asked
+ * for: `resolveBundleLocale` (`@objectstack/spec/system`, the platform's one
+ * locale ladder) over what `getLocales()` reports — the question objectql's
+ * `negotiatedMessageLocale` and plugin-approvals' `negotiatedReaderLocale` ask,
+ * over the same set. ⛔ No rule of its own: neither of those is reachable from
+ * this package without a new export, so only the offered-set plumbing is
+ * repeated here.
+ *
+ * The requested tag passes through untouched when there is nothing to
+ * negotiate against (no service, no `getLocales`, a throwing, empty or
+ * non-array answer, or no match), so a request for a locale the deployment
+ * holds no pack for still walks the declared chain to the default locale.
+ */
+function negotiatedTranslationLocale(service: any, requested: string): string {
+    if (!service || typeof service.getLocales !== 'function') return requested;
+    let available: unknown;
+    try {
+        available = service.getLocales();
+    } catch {
+        // `translationBundleOf` reports the same fault; the request's tag stands.
+        return requested;
+    }
+    if (!Array.isArray(available) || available.length === 0) return requested;
+    const offered: Record<string, true> = {};
+    for (const code of available) {
+        if (typeof code === 'string' && code.length > 0) offered[code] = true;
+    }
+    return resolveBundleLocale(offered, requested) ?? requested;
 }
 
 /**
@@ -3323,7 +3388,9 @@ export function metaTranslateOptions(
  *    ADR-0131 D6), but a `.custom` pair's declared override replaces the
  *    base's item on every read (ADR-0146 D2), so the served document can
  *    differ from the one the catalog translates (`getPackagedPageBase`,
- *    `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`).
+ *    `getPackagedDatasetBase`, `getPackagedAppBase`, `getPackagedBookBase`);
+ *    an import `mapping` is an ADR-0146 D2 listed overridable type as well
+ *    (`getPackagedMappingBase`).
  *    The label order the base feeds is ruling record 6631250894's: a
  *    translation in the pair ({@link pairTranslationBundleOf}), then the
  *    override's own label, then the base's translation.
@@ -3344,6 +3411,7 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
     ['dataset', 'getPackagedDatasetBase'],
     ['app', 'getPackagedAppBase'],
     ['book', 'getPackagedBookBase'],
+    ['mapping', 'getPackagedMappingBase'],
 ]);
 
 /**
@@ -3352,8 +3420,8 @@ const PACKAGED_BASE_ACCESSORS: ReadonlyMap<string, string> = new Map<string, str
  * per-type resolver over {@link PACKAGED_BASE_ACCESSORS}: an `object` answers
  * `getPackagedObjectBase(name)`, a `dashboard` `getPackagedDashboardBase(name)`,
  * a `view` `getPackagedViewBase(name)`, a `report`
- * `getPackagedReportBase(name)`, and [#30062] a `page`, `dataset`, `app` or
- * `book` its own `getPackaged<Type>Base(name)`.
+ * `getPackagedReportBase(name)`, and [#30062] a `page`, `dataset`, `app`,
+ * `book` or `mapping` its own `getPackaged<Type>Base(name)`.
  *
  * `undefined` on every uncertainty — a type with no row, an empty name, a
  * protocol without the accessor (they are server-only extensions, so
@@ -3438,6 +3506,67 @@ function pairTranslationBundleOfBase(
     return pending;
 }
 
+/**
+ * [#33952, ADR-0146 D10] The translations each CODE package that patches a
+ * served object's fields ships itself, for `translateMetadataDocument`'s
+ * `patchBundles` — or `undefined` when no such package translates anything,
+ * or the type is not `object` (only an object carries `fieldPatches`).
+ *
+ * Two protocol questions, both the protocol's to answer:
+ * `getPackagedFieldPatchBases(name)` — which code packages patch this
+ * object's fields, each with the packaged base as that package patches it,
+ * highest precedence first (read off the registry's contributors; nothing is
+ * stamped on the served document, ADR-0029 D9.2a); then, per package,
+ * `getPackageTranslationBundle(packageId)` — that package's own translations.
+ * The deployment catalog cannot answer the second: it is every package's
+ * translations deep-merged, ids dropped, so a dependent's translation of its
+ * patch and the owner's of the text it replaced share one key. The translator
+ * decides which entry, if any, wrote a served slot (ruling 6942920667: the
+ * pair's translation, then the patching package's, then the served text).
+ *
+ * `undefined` on every uncertainty, {@link pairTranslationBundleOf}'s rule: a
+ * protocol without the accessors (server-only, feature-detected), an accessor
+ * that throws or rejects. A package that ships no translation adds no entry:
+ * its entry would read nothing. `memo` is one read's cache, by package id: a
+ * list serves many objects one package patches, and its translations are read
+ * once.
+ */
+export async function patchTranslationBundlesOf(
+    protocol: unknown,
+    type: string,
+    name: unknown,
+    memo?: Map<string, Promise<unknown>>,
+): Promise<Array<{ patchedBase: unknown; bundle: unknown }> | undefined> {
+    if (type !== 'object' || typeof name !== 'string' || name === '') return undefined;
+    const p: any = protocol;
+    if (!p || typeof p.getPackagedFieldPatchBases !== 'function' || typeof p.getPackageTranslationBundle !== 'function') {
+        return undefined;
+    }
+    let entries: unknown;
+    try {
+        entries = p.getPackagedFieldPatchBases(name);
+    } catch {
+        return undefined;
+    }
+    if (!Array.isArray(entries) || entries.length === 0) return undefined;
+    const out: Array<{ patchedBase: unknown; bundle: unknown }> = [];
+    for (const entry of entries) {
+        const packageId = entry && typeof entry === 'object' ? (entry as { packageId?: unknown }).packageId : undefined;
+        if (typeof packageId !== 'string' || packageId === '') continue;
+        let pending = memo?.get(packageId);
+        if (pending === undefined) {
+            pending = Promise.resolve()
+                .then(() => p.getPackageTranslationBundle(packageId))
+                .catch(() => undefined);
+            memo?.set(packageId, pending);
+        }
+        const bundle = await pending;
+        if (bundle === undefined || bundle === null) continue;
+        out.push({ patchedBase: (entry as { base?: unknown }).base, bundle });
+    }
+    return out.length > 0 ? out : undefined;
+}
+
 /** A non-empty string, or `undefined`. */
 function nonEmptyText(value: unknown): string | undefined {
     return typeof value === 'string' && value.length > 0 ? value : undefined;
@@ -3515,6 +3644,11 @@ export interface MetaListTranslationSources {
      * last fallback; without it, only the request's own preference counts.
      */
     requestLocale(i18n?: unknown): string | undefined;
+    /**
+     * [#34993] Told the sentence of a translation fault ({@link translationBundleOf}),
+     * for a door that says it on its answer. Optional: the server log says it either way.
+     */
+    reportTranslationFault?(warning: string): void;
 }
 
 /**
@@ -3547,7 +3681,7 @@ export async function translateMetaList(
         : (raw && typeof raw === 'object' && Array.isArray(raw.items) ? raw.items : null);
     if (!arr) return items;
     const i18n = await sources.resolveI18nService();
-    const bundle = translationBundleOf(i18n);
+    const bundle = translationBundleOf(i18n, (warning) => sources.reportTranslationFault?.(warning));
     const locale = sources.requestLocale(i18n);
     if (!locale) return items;
     const { translateMetadataDocument } = await import('@objectstack/spec/system');
@@ -3559,15 +3693,19 @@ export async function translateMetaList(
     const p = PACKAGED_BASE_ACCESSORS.has(metaType) ? await sources.resolveProtocol() : undefined;
     // [#30062] A declared override's pair translations, read once per base for the page.
     const pairBundles = new Map<string, Promise<unknown>>();
+    // [#33952] A patching package's own translations, read once per package for the page.
+    const packageBundles = new Map<string, Promise<unknown>>();
     // `getMetaItems` elements are metadata documents (the list envelope is the
     // OUTER `{ type, items }`), so every element translates directly (#5563).
     const translated = await Promise.all(arr.map(async (item) => {
         const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, item, pairBundles);
+        const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, item?.name, packageBundles);
         const packagedBase = packagedObjectBaseOf(p, metaType, item?.name);
         const out = translateMetadataDocument(metaType, item, bundle, {
             ...metaTranslateOptions(i18n, locale),
             packagedBase,
             ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
+            ...(patchBundles !== undefined ? { patchBundles: patchBundles as any } : {}),
         });
         if (!item || typeof item !== 'object') return out;
         if (metaType === 'view') return withoutInventedViewLabel(item, out);
@@ -3619,7 +3757,7 @@ export async function translateMetaDocument(
     if (!document || typeof document !== 'object') return document;
     if (!(await isTranslatableMetaType(metaType))) return document;
     const i18n = await sources.resolveI18nService();
-    const bundle = translationBundleOf(i18n);
+    const bundle = translationBundleOf(i18n, (warning) => sources.reportTranslationFault?.(warning));
     const locale = sources.requestLocale(i18n);
     if (!locale) return document;
     if (metaType === 'view') {
@@ -3638,10 +3776,13 @@ export async function translateMetaDocument(
     const packagedBase = packagedObjectBaseOf(p, metaType, (document as any)?.name);
     // [#30062] A declared override's pair translations: the ruled order's first rank.
     const pairBundle = p === undefined ? undefined : await pairTranslationBundleOf(p, metaType, document);
+    // [#33952] Each patching package's own translations: a patched field slot's second rank.
+    const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, (document as any)?.name);
     const translated = translateMetadataDocument(metaType, document as any, bundle, {
         ...metaTranslateOptions(i18n, locale),
         packagedBase,
         ...(pairBundle !== undefined ? { pairBundle: pairBundle as any } : {}),
+        ...(patchBundles !== undefined ? { patchBundles: patchBundles as any } : {}),
     });
     if (metaType === 'view') return withoutInventedViewLabel(document as Record<string, unknown>, translated);
     if (metaType === 'object' && translated && typeof translated === 'object') {
@@ -4326,6 +4467,45 @@ function withItems(raw: unknown, items: any[]): unknown {
     return Array.isArray(raw) ? items : { ...(raw as any), items };
 }
 
+/** How many items of each `name` a list holds. */
+function itemCountsByName(list: readonly unknown[] | null): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const it of list ?? []) {
+        const name = it && typeof it === 'object' ? (it as { name?: unknown }).name : undefined;
+        if (typeof name === 'string') counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts;
+}
+
+/**
+ * [#36894] The list envelope `visible` with its `changedAt` (when the stored
+ * row each listed item serves last changed, keyed by name) keyed only by the
+ * names of which it still lists every item the store's answer `stored` listed,
+ * and without it when none is left. Anything else is answered as it is.
+ *
+ * The per-caller gate and the query filters leave items out. An entry for a
+ * name no item of which is listed tells the caller a name, and when it
+ * changed, that the answer does not list. And the store's entry for a name
+ * two or more items share is the latest of all of them, so once one of them
+ * is left out it may be that item's time, served under a name whose listed
+ * items have none or an older one: that entry is dropped too, never
+ * recomputed (the per-item times never leave the store).
+ */
+function withChangedAtOfListedNames(stored: unknown, visible: unknown): unknown {
+    const list = listItemsOf(visible);
+    if (!list || Array.isArray(visible)) return visible;
+    const changedAt = (visible as { changedAt?: unknown }).changedAt;
+    if (changedAt === undefined) return visible;
+    const { changedAt: _held, ...rest } = visible as Record<string, unknown>;
+    if (!changedAt || typeof changedAt !== 'object' || Array.isArray(changedAt)) return rest;
+    const before = itemCountsByName(listItemsOf(stored));
+    const after = itemCountsByName(list);
+    const kept = Object.entries(changedAt as Record<string, unknown>)
+        .filter(([name]) => (after.get(name) ?? 0) > 0 && (after.get(name) ?? 0) >= (before.get(name) ?? 0));
+    if (kept.length === Object.keys(changedAt).length) return visible;
+    return kept.length === 0 ? rest : { ...rest, changedAt: Object.fromEntries(kept) };
+}
+
 /**
  * [#25333, ADR-0131 D3/D4] The `position` list's `?include=grants` step: each
  * listed position gains, as served decorations beside `_packageId` and the
@@ -4436,6 +4616,11 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     is left out.
  *  8. `position` — `?include=grants`: each position as the resolver enforces
  *     it for a holder ({@link describeMetaPositionList}).
+ *  8a. [#36894] The store's `changedAt` (`GetMetaItemsResponseSchema`) keeps
+ *     only the names of which every item the store listed is still listed
+ *     ({@link withChangedAtOfListedNames}): the gate and the filters above
+ *     leave items out, and the store's entry for a name is the latest of all
+ *     its items, so it may be the time of one left out.
  *  9. The translation step ({@link translateMetaList}, reached through
  *     {@link MetaListAnswerSources.translateList}).
  *
@@ -4583,6 +4768,9 @@ export function createMetaListAnswer(
                 if (described !== list) visible = withItems(visible, described);
             }
         }
+
+        // 8a. [#36894] `changedAt` keys only the names no step above left an item of out.
+        visible = withChangedAtOfListedNames(raw, visible);
 
         // 9. The translation step ({@link translateMetaList}, through the transport's entry).
         const data = await sources.translateList(metaType, visible);
@@ -4753,6 +4941,93 @@ export function createMetaItemAnswer(
         // 6. [#27627] The validator of what is served — over `served`, never an earlier stage of it.
         return { kind: 'serve', envelope: served, ...metaRepresentationCaching(served, cacheControl) };
     };
+}
+
+/** [#34247] A holder a `not-held-by-qualifier` refusal names, as {@link MetaHolderItemReader} reads it. */
+export type MetaHolderCandidate = { kind: 'package'; packageId: string } | { kind: 'environment' };
+
+/**
+ * [#34247] How {@link gateHolderNamingRefusal} reads one holder's item: the
+ * transport's own by-name read of the name at that holder's address — a
+ * package holder at `?package=<packageId>`, the environment's own item at the
+ * address that names no package — answering the served `item` (or
+ * `null`/`undefined` when that address serves none). A rejection is a gate
+ * input that cannot be read: the gate fails closed (see
+ * {@link gateHolderNamingRefusal}).
+ */
+export type MetaHolderItemReader = (holder: MetaHolderCandidate) => Promise<unknown>;
+
+/**
+ * [ruling 6917064203 on #34398 · #34247] The read gate answers before the
+ * `not-held-by-qualifier` refusal names any holder. An exact `?package=X` read
+ * of a name X holds no item of, while another holder holds it, is refused by
+ * the protocol `409 RESOURCE_CONFLICT` `not-held-by-qualifier` with the
+ * holders as its candidates. For a `doc` and a `view`, that refusal is
+ * answered only to a caller the type's own read gate admits; a caller the gate
+ * refuses is answered the gate's own refusal instead, which names no holder:
+ *
+ *  - `doc`: the ADR-0046 §6.7 docs audience, `401 UNAUTHENTICATED` /
+ *    `403 PERMISSION_DENIED`. The doc arm of {@link createMetaItemReadGate}
+ *    judges a doc by its NAME (its effective audience over the books that
+ *    claim the name), so the judgment needs no holder's item.
+ *  - `view`: the list view audience ({@link filterViewForUser}), `403
+ *    PERMISSION_DENIED`. A view is judged by its body, so EVERY holder the
+ *    refusal names — each package and the environment — is read through
+ *    `readHolderItem` and judged by the view arm; the gate's refusal of any
+ *    one of them is the answer. A candidate of any other kind cannot be read
+ *    at an address of its own, so it fails closed, as a read that rejects.
+ *
+ * Any other thrown value, and any other type, is `undefined`: the transport
+ * answers the thrown value as it did. A gate input that cannot be read
+ * REJECTS, as the gate always does, and a holder read that rejects is
+ * rethrown as a fault that names no holder: the transport answers that fault,
+ * never the refusal.
+ *
+ * One function, called by both transports' plain read and `/layers` read.
+ */
+export async function gateHolderNamingRefusal(
+    sources: MetaItemReadGateSources,
+    metaType: string,
+    name: string,
+    policy: MetaReadGatePolicy,
+    thrown: unknown,
+    readHolderItem: MetaHolderItemReader,
+): Promise<Extract<MetaItemReadRefusal, { reason: 'docs-audience' | 'audience-permission' }> | undefined> {
+    if (metaType !== 'doc' && metaType !== 'view') return undefined;
+    const refusal = (thrown as { refusal?: { reason?: unknown; candidates?: unknown } } | null | undefined)?.refusal;
+    if (refusal?.reason !== 'not-held-by-qualifier') return undefined;
+    if (metaType === 'doc') {
+        const named = { name };
+        const verdict = await createMetaItemReadGate(sources, metaType, name, [named], policy)(named);
+        return verdict.kind === 'refuse' && verdict.refusal.reason === 'docs-audience' ? verdict.refusal : undefined;
+    }
+    const candidates = Array.isArray(refusal.candidates) ? refusal.candidates as unknown[] : [];
+    const items: unknown[] = [];
+    for (const candidate of candidates) {
+        const holder = holderCandidateOf(candidate);
+        if (holder === undefined) {
+            throw new Error(`A holder of the ${metaType} "${name}" cannot be read at an address of its own, so its read gate cannot be judged.`);
+        }
+        try {
+            items.push(await readHolderItem(holder));
+        } catch {
+            throw new Error(`A holder of the ${metaType} "${name}" could not be read, so its read gate cannot be judged.`);
+        }
+    }
+    const judge = createMetaItemReadGate(sources, metaType, name, items, policy);
+    for (const item of items) {
+        const verdict = await judge(item);
+        if (verdict.kind === 'refuse' && verdict.refusal.reason === 'audience-permission') return verdict.refusal;
+    }
+    return undefined;
+}
+
+/** A refusal candidate as {@link MetaHolderItemReader} reads it, or `undefined` for a kind with no address of its own. */
+function holderCandidateOf(candidate: unknown): MetaHolderCandidate | undefined {
+    const c = candidate as { kind?: unknown; packageId?: unknown } | null | undefined;
+    if (c?.kind === 'package' && typeof c.packageId === 'string' && c.packageId !== '') return { kind: 'package', packageId: c.packageId };
+    if (c?.kind === 'environment') return { kind: 'environment' };
+    return undefined;
 }
 
 // ── THE layered answer ────────────────────────────────────────────────────────

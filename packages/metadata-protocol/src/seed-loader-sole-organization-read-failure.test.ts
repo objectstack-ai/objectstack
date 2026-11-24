@@ -169,7 +169,7 @@ const CONFIG = {
     dryRun: false,
     haltOnError: false,
     multiPass: true,
-    defaultMode: 'insert',
+    defaultMode: 'ignore',
     batchSize: 1000,
     transaction: false,
 } as never;
@@ -177,7 +177,7 @@ const CONFIG = {
 const seedOf = (records: Array<Record<string, unknown>>) => [{
     object: 'my_app_widget',
     externalId: 'sku',
-    mode: 'insert',
+    mode: 'ignore',
     env: ['prod', 'dev', 'test'],
     records,
 }] as never;

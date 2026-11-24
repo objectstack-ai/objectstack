@@ -24,14 +24,18 @@ import {
   firstDateTextVerdict,
   firstTypeMismatch,
   inferCelType,
+  recordRootReadsFaultDateArith,
+  RECORD_ROOT_READ_RE,
   parseCelToAst,
   parseCelToAstWithReason,
+  printCelAst,
+  COMPREHENSION_MACRO_NAMES,
   type CelAstNode,
   type FieldCelType,
 } from './cel-engine';
 import { templateEngine } from './template-engine';
-import { findTraversalConflicts, readRootMembers, traversalsOf, type RootMemberRead } from './relationship-traversal';
-import { REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+import { findTraversalConflicts, hopMemberOf, readRootMembers, rootMemberOf, traversalsOf, type RootMemberRead } from './relationship-traversal';
+import { MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 // #13594 — the one reader of cel-js's `found no matching overload for '…'`
 // template. Both this module (which asks whether the name is ADVERTISED, to word
 // a hint) and `firstUnknownFunctionCall` (which asks whether the environment
@@ -103,6 +107,46 @@ export interface ExprSchemaHint {
    * `'flattened'` one (#29959).
    */
   fieldTypes?: Readonly<Record<string, string>>;
+  /**
+   * The fields whose stored value is a LIST: each field the caller reads
+   * through `isMultiValueField` (`@objectstack/spec/data`) and finds
+   * multi-valued — an inherently-multi option type (`multiselect`,
+   * `checkboxes`, `tags`) or a multi-capable type declared `multiple: true`
+   * (`select`, `radio`, `lookup`, `user`, `file`, `image`). Read the field's
+   * definition through that predicate, the one the record validator and the
+   * query engine shape the stored value with, so this list and the value
+   * agree.
+   *
+   * {@link fieldTypes} alone already marks the inherently-multi types; this
+   * key is what makes a `multiple: true` field a list here, since a field
+   * type does not say whether it was declared multiple. A field either names
+   * as multi-valued is a LIST SUBJECT, and a `==` / `!=` between a read of it
+   * and a non-null scalar literal is refused under `list-equality`: CEL
+   * compares the whole list with the scalar, so the expression answers the
+   * same constant on every row. A read is `record.<field>` / `previous.<field>`
+   * (`record['<field>']` too; the optional spellings are refused as
+   * `invalid-cel` first), and, at a `'flattened'` site whose
+   * {@link faultOutcome} is `'run-fails'` (a run proven to bind a row of the
+   * typed object), the bare `<field>` — not a name {@link flowVariables}
+   * holds, nor any bare name under {@link bareNamesUnproven}. At a flattened
+   * site with no proven row, nothing is judged. A name a comprehension macro
+   * binds is never the field inside that macro's body. `<field> == null` /
+   * `!= null` stays accepted. Absent ⇒ only {@link fieldTypes}' inherently
+   * multi types are list subjects: a `select` / `lookup` / `user` field
+   * declared `multiple: true` is then judged as it was before this key, not
+   * at all.
+   */
+  multiValueFields?: readonly string[];
+  /**
+   * [#36167] The site's source is COMPILED TO A QUERY FILTER
+   * (`compileCelToFilter`), not evaluated as CEL per row: a sharing rule's
+   * `condition`. Only the `list-equality` prescription reads it: there `in`
+   * lowers only with a field on its left, so the membership test prescribed
+   * is `record.<field>.contains(…)` (`$contains`, membership on a list
+   * column), not `… in record.<field>`, which the lowering refuses. Absent ⇒
+   * the CEL spelling, every other caller's behaviour.
+   */
+  filterCompiled?: boolean;
   /**
    * Evaluation scope of the authoring site — determines whether a bare top-level
    * identifier is legal (#1928):
@@ -297,6 +341,52 @@ export interface ExprSchemaHint {
    * Absent ⇒ every verdict is exactly as before this key.
    */
   timeRelativeSweep?: boolean;
+  /**
+   * [#34451] `value` role only: the expression is a flow VALUE envelope — an
+   * `assignment` node's `assignments.*`, a `create_record` / `update_record`
+   * node's `fields.*` — and {@link fieldTypes} are the field types of the
+   * object whose row the flow's run binds as `record`.
+   *
+   * The PREMISE is the caller's to establish, and both callers pass the key
+   * only where it holds: the flow is record-triggered on that object, or a
+   * time-relative sweep of it (the entrance hands the run that object's row
+   * as `record`), AND the flow rebinds neither root the typing reads — no
+   * declared variable, node id, output / iterator / index / error variable
+   * or `assignment` target named `record`, and no node id, output / iterator
+   * / index / error variable or `assignment` target named `previous` (the
+   * run's seed sets `previous` over a declared variable of that name, so a
+   * declaration does not rebind it) — since the run's variables are spread
+   * over the scope an envelope reads. On any other flow (an inbound hook, a schedule,
+   * a flow started by a parent's `subflow` / `map` or by hand) `record` is
+   * whatever the entrance handed the run, and the key is not set.
+   *
+   * Of the schema-aware passes, ONLY the date-text verdict family runs —
+   * `date-text-call*` and `date-text-arithmetic*` — and only over the
+   * `record.<field>` / `previous.<field>` reads, which under that premise hold
+   * what the entrance bound: the row under `record`, and under `previous` the
+   * row before the write (on a record-change trigger's update leg) or null
+   * (its create leg, and a sweep, have none; a read of it faults whatever the
+   * field's type). Every other pass stands down: field existence, the
+   * near-miss, the role catalog, the bare-reference refusal, `type-mismatch*`,
+   * `date-arithmetic*` and `date-duration-value` say nothing here. A bare name
+   * stands down too: in a value envelope it holds whatever the run's variable
+   * map holds under that name, which no door judging this envelope alone can
+   * prove is the field. So does an expression that reads the `input` root,
+   * which a flow does not bind to the row the types describe.
+   *
+   * The verdict is an error under the `-value-run-may-fail` arm: the envelope
+   * faults wherever the field holds the text the runtime keeps for it, and the
+   * engine's value evaluator throws on that fault, so the run fails at the step
+   * that computes the value (no condition runs there, so the sentence names the
+   * value, never a condition).
+   *
+   * Both doors set it with the same inputs — `@objectstack/lint`'s
+   * `validateStackExpressions` and `@objectstack/service-automation`'s
+   * `registerFlow` — so they refuse one set. The run-time evaluator does not
+   * set it: an envelope that registered is evaluated exactly as before.
+   * Absent ⇒ every verdict is exactly as before this key.
+   */
+  flowValueEnvelope?: boolean;
 }
 
 /**
@@ -445,7 +535,8 @@ const DATE_FAIL_CLOSED_CLAUSE =
  *    (`date − date + 1`, `today() + 30`) — always faults at runtime and never
  *    recovers, so it blocks the build. A formula reads that fault as null; a
  *    flattened (flow) condition's fault fails the run, under the
- *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016), a
+ *    `date-arithmetic-run-fails` / `-run-may-fail` codes (#30016) — its
+ *    `record.<field>` / `previous.<field>` read as its bare name (#34946) — a
  *    fail-closed site's refuses the write, under `date-arithmetic-fail-closed`
  *    (#30250), and an advisory rule's skips the rule, under
  *    `date-arithmetic-fail-open` (#30494, {@link dateArm}).
@@ -464,7 +555,9 @@ const DATE_FAIL_CLOSED_CLAUSE =
  *    the Timestamp typing passes, re-checked with a date field declared as the
  *    text the runtime holds — see {@link dateTextIssue}; in a flow condition
  *    and on a fail-closed site the fault takes the same outcome codes as
- *    `date-arith`.
+ *    `date-arith`. A flattened condition's `record.<field>` / `previous.<field>`
+ *    read takes the date-text family as its bare name does
+ *    ({@link recordRootDateTextIssue}, #34662).
  * `scope` selects `record.<field>` vs bare field binding, shaping the message.
  */
 function typeSoundnessIssue(
@@ -502,7 +595,10 @@ function typeSoundnessIssue(
     const bareCelTypes = shadowed
       ? Object.fromEntries(Object.entries(celFieldTypes).filter(([name]) => !shadowed.has(name)))
       : celFieldTypes;
-    return dateTextIssue(source, bareCelTypes, scope, role, dateArm(scope, faultOutcome, bareNamesUnproven));
+    // [#34363] The `date` fields (never `datetime`) by name: `timestamp()` faults on their text.
+    const dateOnly = new Set(Object.keys(bareCelTypes).filter((name) => fieldTypes[name] === 'date'));
+    const bare = dateTextIssue(source, bareCelTypes, scope, role, dateArm(scope, faultOutcome, bareNamesUnproven), dateOnly);
+    return bare ?? (scope === 'flattened' ? recordRootDateTextIssue(source, fieldTypes, celFieldTypes, role, faultOutcome) : null);
   }
   const reference = mismatch.field
     ? (mismatch.root !== undefined
@@ -517,7 +613,10 @@ function typeSoundnessIssue(
     const use =
       `Use \`daysBetween(a, b)\` for the span in whole days, and \`daysFromNow(n)\` / ` +
       `\`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
-    const arm = dateArm(scope, faultOutcome, bareNamesUnproven);
+    // [#34946] A `record.<field>` / `previous.<field>` read keeps the row's
+    // outcome whatever binds the bare names (#30025), as its type mismatch and
+    // its date-text verdicts do ({@link recordRootDateTextIssue}).
+    const arm = dateArm(scope, faultOutcome, mismatch.root !== undefined ? false : bareNamesUnproven);
     return {
       severity: 'error',
       issue: arm
@@ -611,7 +710,9 @@ function typeSoundnessIssue(
  * fault (ADR-0032 §1c) on every flow: a date verdict there never reads null.
  * `run-fails` where the caller declares the run proven to hold the field
  * (`faultOutcome: 'run-fails'`) and no node can rebind a bare name
- * (`bareNamesUnproven`) — the date verdicts read bare names only. Anywhere
+ * (`bareNamesUnproven`) — for a bare-name verdict; a `record.<field>` /
+ * `previous.<field>` read keeps the row's outcome whatever binds the bare
+ * names (#30025, {@link recordRootDateTextIssue} passes `false`). Anywhere
  * else in a flow the name holds what the entrance handed the run (an API body
  * whose value is a number answers `close_date + 1`), so the run fails only
  * where it holds the date: `run-may-fail`. A `record`-scoped site that fails
@@ -623,6 +724,16 @@ function typeSoundnessIssue(
  * everywhere.
  */
 type DateArm = 'run-fails' | 'run-may-fail' | 'fail-closed' | 'fail-open';
+/**
+ * The outcome arms of the date-text verdicts: a {@link DateArm}, or
+ * `value-run-may-fail`, a flow value envelope's
+ * ({@link flowValueEnvelopeDateTextIssue}). An envelope is no condition: the
+ * step computes a value, and the run fails when that value is computed, so its
+ * sentence and its codes are its own (`date-text-call-value-run-may-fail`,
+ * `date-text-arithmetic-value-run-may-fail`). The `date-arithmetic` family
+ * never reaches an envelope, so it has no such arm.
+ */
+type DateTextArm = DateArm | 'value-run-may-fail';
 function dateArm(
   scope: 'record' | 'flattened',
   faultOutcome: ExprSchemaHint['faultOutcome'],
@@ -638,11 +749,19 @@ function dateArm(
  * [#30016, #30250, #30494] The fault clause of a date verdict whose fault does
  * not read null; `held` names what a flow condition's field holds at run time.
  * An advisory rule's is the type mismatch's own `fail-open` clause, word for
- * word: one outcome, one sentence.
+ * word: one outcome, one sentence. A flow value envelope's
+ * (`value-run-may-fail`) names the value being computed and the step, never a
+ * condition: the engine's value evaluator throws on the fault, so the run
+ * fails at the step that computes it.
  */
-function dateArmFault(arm: DateArm, ref: string | null, held: 'date' | 'text'): string {
+function dateArmFault(arm: DateTextArm, ref: string | null, held: 'date' | 'text'): string {
   if (arm === 'fail-closed') return `this faults at runtime, and here ${DATE_FAIL_CLOSED_CLAUSE}`;
   if (arm === 'fail-open') return `this faults at runtime, and here ${TYPE_MISMATCH_FAULT_ARMS['fail-open'].clause}`;
+  if (arm === 'value-run-may-fail') {
+    return `this faults wherever ${ref ?? 'the field'} holds ${held === 'date' ? 'the date' : 'that text'} ` +
+      'when the value is computed, and a flow value that cannot be computed fails the run: the flow stops at ' +
+      'this step and the work the flow exists to do is not done (it does not read null).';
+  }
   const fails =
     'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the ' +
     'work the flow exists to do is not done (it does not read null).';
@@ -659,29 +778,38 @@ function dateArmFault(arm: DateArm, ref: string | null, held: 'date' | 'text'): 
  *    `record.end_date - record.start_date` (either field kind), `record.d -
  *    duration('24h')` — so the expression reads null (in a flow condition the
  *    run fails instead, on a fail-closed site the write is refused, and on an
- *    advisory rule the rule is skipped: `flowArm`, #30016, #30250, #30494).
- *    Any role.
+ *    advisory rule the rule is skipped, and in a flow value envelope the run
+ *    fails when the value is computed: `flowArm`, #30016, #30250, #30494,
+ *    #34660). Any role.
  *  - `date-duration-value`: a formula (`value` role) that computes a
  *    `google.protobuf.Duration` — `today() - record.start_date` — which a field
  *    serialises as `{}`. A predicate that COMPARES a duration
  *    (`today() - record.d > duration('72h')`) evaluates, and is not touched.
  * Runs only when there is something to find: a date field to retype, or a
  * `value` whose computed type is the question.
+ *
+ * [#34662] `recordRoots` (flattened scope only) is the record-root pass's
+ * typing of `record.<field>` / `previous.<field>` ({@link recordRootDateTextIssue}).
  */
 function dateTextIssue(
   source: string,
   celFieldTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
   role: 'predicate' | 'value',
-  flowArm: DateArm | null,
+  flowArm: DateTextArm | null,
+  dateOnlyFields: ReadonlySet<string>,
+  recordRoots?: Readonly<Record<string, FieldCelType>>,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
-  if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
-  const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
+  const anyDate = [celFieldTypes, recordRoots].some((types) => types && Object.values(types).includes('timestamp'));
+  if (role !== 'value' && !anyDate) return null;
+  const verdict = firstDateTextVerdict(source, celFieldTypes, scope, recordRoots);
   // [#32595] A call the date text cannot take faults that typing too, so it is
   // asked only where the date-text check faulted on something but arithmetic.
-  if (!verdict) return dateTextCallIssue(source, celFieldTypes, scope, flowArm);
+  if (!verdict) return dateTextCallIssue(source, celFieldTypes, scope, flowArm, dateOnlyFields, recordRoots);
   const reference = verdict.field
-    ? (scope === 'record' ? `record.${verdict.field}` : verdict.field)
+    ? (verdict.root !== undefined
+      ? `${verdict.root}.${verdict.field}`
+      : scope === 'record' ? `record.${verdict.field}` : verdict.field)
     : undefined;
   const ref = reference !== undefined ? `\`${reference}\`` : null;
   // A span under a day has no stdlib helper; the Duration of two parsed sides does it.
@@ -730,24 +858,40 @@ function dateTextIssue(
  * Timestamp typing passes it and the evaluator faults on it on every row
  * (`found no matching overload for 'isoDate(string)'`), so it takes the date
  * verdicts' grade and outcome sentence (`flowArm`): `date-text-call`, or its
- * `-fail-closed` / `-fail-open` / `-run-fails` / `-run-may-fail` arm. The
+ * `-fail-closed` / `-fail-open` / `-run-fails` / `-run-may-fail` /
+ * `-value-run-may-fail` arm. The
  * prescription is the call with the field parsed by `date(…)`, which the check
- * proved clean.
+ * proved clean. [#34363] `timestamp(<date field>)` — the string overload,
+ * which checks clean on the text and faults on a `YYYY-MM-DD` one on every
+ * row — is the same verdict: its prescription is `date(…)` in place of the
+ * call, plus the optional `shift` clause naming the whole-day shift that keeps
+ * the result a date, `isoDate(addDays(<field>, N))`.
  */
 function dateTextCallIssue(
   source: string,
   celFieldTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
-  flowArm: DateArm | null,
+  flowArm: DateTextArm | null,
+  dateOnlyFields: ReadonlySet<string>,
+  recordRoots?: Readonly<Record<string, FieldCelType>>,
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
-  const found = firstDateTextCall(source, celFieldTypes, scope);
+  const found = firstDateTextCall(source, celFieldTypes, scope, dateOnlyFields, recordRoots);
   if (!found) return null;
-  const params = { call: found.call, reference: found.reference, rewrite: found.rewrite };
+  const params = {
+    call: found.call,
+    reference: found.reference,
+    rewrite: found.rewrite,
+    ...(found.shift !== undefined ? { shift: found.shift } : {}),
+  };
   const ref = `\`${found.reference}\``;
   const head =
     `\`${found.call}\` — ${ref} is a date field, and the runtime holds a date field as its text ` +
     `(\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which this call does not accept: `;
-  const use = `Parse the text into a timestamp first: \`${found.rewrite}\`.`;
+  const use =
+    `Parse the text into a timestamp first: \`${found.rewrite}\`.` +
+    (found.shift !== undefined
+      ? ` To shift it by N whole days and keep it a date, write \`${found.shift}\`.`
+      : '');
   return {
     severity: 'error',
     issue: flowArm
@@ -759,6 +903,78 @@ function dateTextCallIssue(
         `${head}this faults at runtime, so the field silently evaluates to null. ${use}`,
       ),
   };
+}
+
+/** [#34451] The date-text verdict family: `date-text-call` / `date-text-arithmetic` and their outcome arms. */
+const DATE_TEXT_FAMILY_RE = /^date-text-(?:call|arithmetic)(?:-|$)/;
+
+/**
+ * [#34662] The record-root pass of the date-text family in a flattened (flow)
+ * condition: what {@link typeSoundnessIssue}'s bare-name pass leaves, judged
+ * over the `record.<field>` / `previous.<field>` reads.
+ *
+ * A flow run binds the record it was handed as `record` beside the flattened
+ * bare names, and the row before the write as `previous` (#29959), so
+ * `timestamp(record.borrow_date)` faults on the `YYYY-MM-DD` text exactly as
+ * `timestamp(borrow_date)` does — the bare spelling was refused while the
+ * root read, left `dyn`, checked clean. Typed here with every field's type
+ * (a flow variable shadows a bare name, never a root member), every bare name
+ * `dyn`, the same verdict, code and words come back, naming the read as
+ * written. The order is the bare name's own: there {@link firstTypeMismatch}
+ * answers `date-arith` when the Timestamp typing's first fault is date/duration
+ * arithmetic against a number, and the date-text check is asked only once it
+ * answers null. So the pass stands down exactly where the roots' first
+ * Timestamp-typing fault is that shape (`record.due_date + 1`, the
+ * `date-arithmetic` family's, {@link recordRootReadsFaultDateArith}), and on no
+ * other fault: `record.due_date - record.borrow_date > 3` (a Duration ordered
+ * against a number) and an expression that orders a date field against a text
+ * literal before it calls `timestamp()` are judged, as their bare spellings
+ * are. Only `date-text-call*` / `date-text-arithmetic*` are kept. The outcome arm is
+ * the row's: a root read keeps the declared outcome whatever binds the bare
+ * names (#30025), so `bareNamesUnproven` is not asked.
+ */
+function recordRootDateTextIssue(
+  source: string,
+  fieldTypes: Readonly<Record<string, string>>,
+  celFieldTypes: Readonly<Record<string, FieldCelType>>,
+  role: 'predicate' | 'value',
+  faultOutcome: ExprSchemaHint['faultOutcome'],
+): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
+  if (!RECORD_ROOT_READ_RE.test(source) || !Object.values(celFieldTypes).includes('timestamp')) return null;
+  if (recordRootReadsFaultDateArith(source, celFieldTypes)) return null;
+  const dateOnly = new Set(Object.keys(celFieldTypes).filter((name) => fieldTypes[name] === 'date'));
+  const found = dateTextIssue(source, {}, 'flattened', role, dateArm('flattened', faultOutcome, false), dateOnly, celFieldTypes);
+  return found && DATE_TEXT_FAMILY_RE.test(found.issue.code) ? found : null;
+}
+
+/**
+ * [#34451] The verdict a flow value envelope gets ({@link ExprSchemaHint.flowValueEnvelope}):
+ * the date-text family over the `record.<field>` / `previous.<field>` reads,
+ * or `null`.
+ *
+ * Typed at `record` scope, which types exactly those roots (and `input`, which
+ * is why a source reading `input` stands down): a bare name is then not a
+ * field at all, so it never takes a verdict. The order is
+ * {@link typeSoundnessIssue}'s: a shape the Timestamp typing already faults on
+ * (`record.due_date + 1`, `record.note * 2`) is another family's, so the
+ * date-text check is not asked about it. The outcome is `value-run-may-fail`
+ * (#34660): it names the field as the condition of the fault, as `run-may-fail`
+ * does, and says the run fails when the value is computed, since no condition
+ * runs at a value slot.
+ */
+function flowValueEnvelopeDateTextIssue(
+  source: string,
+  fieldTypes: Readonly<Record<string, string>>,
+  ast: () => CelAstNode | null,
+): ExprValidationError | null {
+  const celFieldTypes = toCelFieldTypes(fieldTypes);
+  if (!Object.values(celFieldTypes).includes('timestamp')) return null;
+  const tree = ast();
+  if (!tree || readRootMembers(tree, ['input']).length > 0) return null;
+  if (firstTypeMismatch(source, celFieldTypes, 'record')) return null;
+  const dateOnly = new Set(Object.keys(fieldTypes).filter((name) => fieldTypes[name] === 'date'));
+  const found = dateTextIssue(source, celFieldTypes, 'record', 'value', 'value-run-may-fail', dateOnly);
+  return found && DATE_TEXT_FAMILY_RE.test(found.issue.code) ? found.issue : null;
 }
 
 /** A bare `{x}` that is NOT part of a `{{x}}` mustache hole. */
@@ -1241,6 +1457,278 @@ function checkAttachedLeaf(
 }
 
 /**
+ * The fields the hint names as list-valued — {@link ExprSchemaHint.multiValueFields},
+ * plus every {@link ExprSchemaHint.fieldTypes} entry whose type is an
+ * inherently-multi option type (`MULTI_OPTION_TYPES`, the half of
+ * `isMultiValueField` a type alone answers). Empty when the hint names none.
+ */
+function listSubjectsOf(schema: ExprSchemaHint | undefined): ReadonlySet<string> {
+  const out = new Set<string>(schema?.multiValueFields ?? []);
+  for (const [name, type] of Object.entries(schema?.fieldTypes ?? {})) {
+    if (MULTI_OPTION_TYPES.has(type)) out.add(name);
+  }
+  return out;
+}
+
+/**
+ * A scalar literal operand — a string, number or boolean CEL literal, never
+ * `null` and never a list or map — printed as CEL, or `undefined` for any
+ * other operand. Only a literal is judged: its value is known before
+ * evaluation, so a list compared with it is provably the same answer on every
+ * row. Another field, a variable or a call may hold a list there, so it gets
+ * no verdict (a missed catch, never a false refusal).
+ */
+function scalarLiteralOf(node: unknown): string | undefined {
+  if (!node || typeof node !== 'object') return undefined;
+  const { op, args } = node as { op?: unknown; args?: unknown };
+  if (op !== 'value') return undefined;
+  if (typeof args !== 'string' && typeof args !== 'number' && typeof args !== 'bigint' && typeof args !== 'boolean') {
+    return undefined;
+  }
+  return printCelAst(node) ?? undefined;
+}
+
+/**
+ * [#36167] `==` / `!=` between a LIST SUBJECT ({@link listSubjectsOf}) read
+ * on `record` / `previous` and a non-null scalar literal — one `list-equality`
+ * refusal per comparison, either operand order.
+ *
+ * CEL's `==` compares the whole list with the scalar: `['frontend', 'qa'] ==
+ * 'frontend'` is `false`, and so is `null == 'frontend'`, so the expression
+ * answers `false` (for `!=`, `true`) on every row whatever the list holds — a
+ * condition that never fires, or always does, with no fault and no log line.
+ * The prescription is membership, in the null-guarded spelling the Studio
+ * condition builder writes: `'a' in null` faults, so `S != null && V in S`
+ * for `==` and `S == null || !(V in S)` for `!=`.
+ *
+ * Accepted, deliberately: `S == null` / `S != null` (either side), which test
+ * whether the list is set; a list compared with a list literal or with
+ * another list subject, which is a real whole-list comparison; and an operand
+ * that is not a literal ({@link scalarLiteralOf}).
+ *
+ * At a `'flattened'` site nothing is judged unless the caller declares the run
+ * proven to bind a row of the typed object ({@link ExprSchemaHint.faultOutcome}
+ * `'run-fails'`); elsewhere the names hold what the entrance handed the run.
+ * The prescription is spelled for the site ({@link listMembershipRewrite}).
+ *
+ * The subject is read through `rootMemberOf`, the field-existence pass's own
+ * member reader, so `record.f` and `record['f']` (and `previous.…`) are
+ * judged alike, and the refusal renders the read as `<root>.<field>`. The
+ * optional spellings `record.?f` / `record[?'f']` never reach this pass
+ * against a scalar: CEL types them as an optional, and the comparison is
+ * refused as `invalid-cel` first. At a `'flattened'` (flow) site a bare `f`
+ * is the trigger record's field too, as the type pass reads it, and is
+ * rendered bare — except a name a flow variable holds
+ * ({@link ExprSchemaHint.flowVariables}), any bare name in a flow whose nodes
+ * can bind names no reader sees ({@link ExprSchemaHint.bareNamesUnproven}),
+ * and, at any site, a name a comprehension macro binds (`list.exists(f, …)`,
+ * {@link COMPREHENSION_MACRO_NAMES}) inside that macro's body, where it holds
+ * an item of the list and not the field (nor is `record.f` the field where a
+ * macro binds `record`).
+ */
+function checkListEquality(
+  ast: () => CelAstNode | null,
+  source: string,
+  schema: ExprSchemaHint | undefined,
+  errors: ExprValidationError[],
+): void {
+  const subjects = listSubjectsOf(schema);
+  if (subjects.size === 0) return;
+  // A flattened (flow) site binds a row of the typed object only where the
+  // caller declares the run's outcome proven (`faultOutcome: 'run-fails'`: a
+  // record-triggered flow, or a time-relative sweep of the typed object).
+  // Anywhere else `record` and the bare names hold what the entrance handed
+  // the run — an API body, a parent's record, nothing — so a read is not
+  // proven to be the list field, and gets no verdict.
+  if (schema?.scope === 'flattened' && schema.faultOutcome !== 'run-fails') return;
+  // CEL has no comments: a source that spells neither operator holds no comparison.
+  if (!source.includes('==') && !source.includes('!=')) return;
+  const tree = ast();
+  if (tree == null) return;
+  // At a flattened (flow) site a bare name is the trigger record's field, as
+  // the type pass reads it — unless a flow variable holds the name
+  // (`flowVariables`), or a node can bind names no reader sees
+  // (`bareNamesUnproven`): then it is not proven to hold the list, and gets
+  // no verdict.
+  const bareSubjects = schema?.scope === 'flattened' && !schema.bareNamesUnproven
+    ? new Set([...subjects].filter((name) => !(schema.flowVariables ?? []).includes(name)))
+    : undefined;
+  // `bound`: the names the enclosing comprehension macros bind here.
+  const subjectOf = (node: unknown, bound: ReadonlySet<string>): ListSubjectRead | undefined => {
+    const read = rootMemberOf(node, FIELD_EXISTENCE_ROOTS);
+    if (read) {
+      return subjects.has(read.field) && !bound.has(read.root)
+        ? { reference: `${read.root}.${read.field}`, bare: false }
+        : undefined;
+    }
+    const { op, args } = (node ?? {}) as { op?: unknown; args?: unknown };
+    return op === 'id' && typeof args === 'string' && bareSubjects?.has(args) && !bound.has(args)
+      ? { reference: args, bare: true }
+      : undefined;
+  };
+  const filterCompiled = schema?.filterCompiled === true;
+  forEachListEquality(tree, subjectOf, (read, op, operand) => {
+    errors.push(listEqualityRefusal(source, read, op, operand, filterCompiled));
+  });
+}
+
+/**
+ * [#36237] {@link checkListEquality} one relationship hop away: `==` / `!=`
+ * between a read of a list-valued field ON A HOP TARGET
+ * (`record.account.labels`) and a non-null scalar literal, refused under the
+ * same `list-equality` code, in the root case's words and with its
+ * `has()`-guarded `in` prescription (`record.account.labels` is a
+ * `<root>.<field>` read of the related record the hop hydrates).
+ *
+ * {@link ExprSchemaHint} describes the root object's fields and no hop
+ * target's, so this is a function of its own for the caller that resolves hop
+ * targets — `@objectstack/lint`, at the two sites that serve a hop (a
+ * validation rule's hydrated predicate, a formula's `expression`).
+ * `listLeaves` maps each single-valued reference field of the root object to
+ * the list-valued fields its target declares; a read it does not name gets no
+ * verdict. Only `record` hops are judged ({@link DEFAULT_TRAVERSAL_ROOT}, the
+ * root a hop is served from), and a source that does not compile gets none —
+ * that is `validateExpression`'s `invalid-cel` verdict.
+ */
+export function findHopListEquality(
+  source: string,
+  listLeaves: ReadonlyMap<string, ReadonlySet<string>>,
+): ExprValidationError[] {
+  const errors: ExprValidationError[] = [];
+  if (listLeaves.size === 0 || (!source.includes('==') && !source.includes('!='))) return errors;
+  if (!compileCel(source).result.ok) return errors;
+  const tree = parseCelToAst(source);
+  if (tree == null) return errors;
+  const subjectOf = (node: unknown, bound: ReadonlySet<string>): ListSubjectRead | undefined => {
+    const read = hopMemberOf(node, [DEFAULT_TRAVERSAL_ROOT]);
+    return read && !bound.has(read.root) && listLeaves.get(read.field)?.has(read.leaf)
+      ? { reference: `${read.root}.${read.field}.${read.leaf}`, bare: false }
+      : undefined;
+  };
+  forEachListEquality(tree, subjectOf, (read, op, operand) => {
+    errors.push(listEqualityRefusal(source, read, op, operand, false));
+  });
+  return errors;
+}
+
+/**
+ * Every `==` / `!=` in `tree` with a list subject (`subjectOf`) on one side
+ * and a scalar literal ({@link scalarLiteralOf}) on the other, either order,
+ * handed to `onHit` once per comparison. `subjectOf` is asked with the names
+ * the enclosing comprehension macros bind ({@link COMPREHENSION_MACRO_NAMES}):
+ * the receiver is read outside the binding, the body inside it.
+ */
+function forEachListEquality(
+  tree: unknown,
+  subjectOf: (node: unknown, bound: ReadonlySet<string>) => ListSubjectRead | undefined,
+  onHit: (read: ListSubjectRead, op: '==' | '!=', operand: string) => void,
+): void {
+  const walk = (node: unknown, bound: ReadonlySet<string>): void => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child, bound);
+      return;
+    }
+    const { op, args } = node as { op?: unknown; args?: unknown };
+    // A comprehension macro (`list.exists(x, …)`): `rcall` [name, receiver,
+    // [variable, …body]]. The receiver is read outside the binding, the body
+    // inside it — the same reading the engine's date-text pass takes.
+    if (
+      op === 'rcall' && Array.isArray(args) && args.length === 3 && Array.isArray(args[2])
+      && COMPREHENSION_MACRO_NAMES.has(String(args[0]))
+    ) {
+      const [variable, ...body] = args[2] as unknown[];
+      const { op: vop, args: name } = (variable ?? {}) as { op?: unknown; args?: unknown };
+      walk(args[1], bound);
+      walk(body, vop === 'id' && typeof name === 'string' ? new Set([...bound, name]) : bound);
+      return;
+    }
+    if ((op === '==' || op === '!=') && Array.isArray(args) && args.length === 2) {
+      for (const side of [0, 1] as const) {
+        const read = subjectOf(args[side], bound);
+        const operand = read ? scalarLiteralOf(args[1 - side]) : undefined;
+        if (!read || operand === undefined) continue;
+        onHit(read, op, operand);
+        break;
+      }
+    }
+    for (const value of Object.values(node as Record<string, unknown>)) walk(value, bound);
+  };
+  walk(tree, new Set());
+}
+
+/** A read {@link checkListEquality} judges: `<root>.<field>`, or a bare field name at a flattened site. */
+interface ListSubjectRead {
+  readonly reference: string;
+  readonly bare: boolean;
+}
+
+/**
+ * The membership test that replaces `<reference> <operator> <operand>`, in
+ * the spelling that works where the source is read, parenthesised whole so it
+ * can stand where the comparison stood (`A && (…)`):
+ *
+ * - a `<root>.<field>` read evaluated as CEL: `has()`-guarded, because an
+ *   action's `visible` / `disabled` / `pressed` binds a sparse row (a key
+ *   absent from it faults on `record.f != null`) and `previous` is `null` on
+ *   a create; `has()` answers `false` there instead of faulting;
+ * - a bare name at a flattened (flow) site: the run binds every declared
+ *   field, `null` when empty, so the `!= null` guard is enough (`has()` takes
+ *   no bare name);
+ * - a site whose source compiles to a query filter (`filterCompiled`, a
+ *   sharing rule's `condition`): `in` lowers only with a field on its LEFT,
+ *   so membership is `.contains(…)`, which lowers to `$contains`, membership
+ *   on a list column; its comparand is text, so a number or boolean literal
+ *   is passed as its text (`$contains` names a stored `3` by `"3"`).
+ */
+function listMembershipRewrite(
+  read: ListSubjectRead,
+  operator: '==' | '!=',
+  operand: string,
+  filterCompiled: boolean,
+): string {
+  const r = read.reference;
+  if (filterCompiled && !read.bare) {
+    const text = operand.startsWith('"') || operand.startsWith("'") ? operand : JSON.stringify(operand);
+    return operator === '=='
+      ? `(${r} != null && ${r}.contains(${text}))`
+      : `(${r} == null || !${r}.contains(${text}))`;
+  }
+  if (read.bare) {
+    return operator === '=='
+      ? `(${r} != null && ${operand} in ${r})`
+      : `(${r} == null || !(${operand} in ${r}))`;
+  }
+  return operator === '=='
+    ? `(has(${r}) && ${r} != null && ${operand} in ${r})`
+    : `(!has(${r}) || ${r} == null || !(${operand} in ${r}))`;
+}
+
+/** The `list-equality` refusal for `<reference> <operator> <operand>`. */
+function listEqualityRefusal(
+  source: string,
+  read: ListSubjectRead,
+  operator: '==' | '!=',
+  operand: string,
+  filterCompiled: boolean,
+): ExprValidationError {
+  const { reference } = read;
+  const answer = operator === '==' ? 'false' : 'true';
+  const rewrite = listMembershipRewrite(read, operator, operand, filterCompiled);
+  const head = `list compared with a scalar — \`${reference}\` holds a list (a multi-value field), and \`${operator}\` ` +
+    `compares the whole list with \`${operand}\``;
+  const message = filterCompiled && !read.bare
+    ? `${head}: as CEL it answers \`${answer}\` on every row, and this condition compiles to a query filter, ` +
+      `where \`${operator}\` against a list column is refused, so it never tests membership. Test membership with ` +
+      `\`contains\`, which compiles to a membership filter: write \`${rewrite}\`. To test whether the list is set, ` +
+      `compare it with \`null\`.`
+    : `${head}, so the expression answers \`${answer}\` on every row whatever the list holds: the condition never ` +
+      `changes. Test membership with \`in\`: write \`${rewrite}\`. To test whether the list is set, compare it with ` +
+      `\`null\`.`;
+  return refusal('list-equality', { reference, operator, operand, answer, rewrite }, source, message);
+}
+
+/**
  * Is `name` written as a NAMESPACE in `source` — `name.x`, `name?.x`,
  * `name['x']`, `name.fn(…)` — rather than as a bare value (`name == 'x'`)?
  *
@@ -1519,8 +2007,15 @@ export function validateExpression(
         `${lead} — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`,
       ));
     }
+  } else if (schema?.flowValueEnvelope === true) {
+    // [#34451] A flow value envelope: the date-text family alone (see the key's docblock).
+    const issue = role === 'value' && schema.fieldTypes
+      ? flowValueEnvelopeDateTextIssue(source, schema.fieldTypes, ast)
+      : null;
+    if (issue) errors.push(issue);
   } else {
     checkFieldExistence(ast, source, schema, errors);
+    checkListEquality(ast, source, schema, errors);
     checkOptionLabelTargets(ast, source, schema, errors);
     checkRoleCatalog(source, schema, errors);
     if (schema?.scope === 'record') {
@@ -1615,7 +2110,10 @@ export function validateExpression(
   // engine's formula read path preloads it before computing the field. Its
   // caller opts in exactly as a validation condition's does, and the conflicts
   // are worded for a field that reads null rather than a write that is refused.
-  if (schema?.fieldTypes && schema.traversalHydration === true && (role === 'predicate' || role === 'value')) {
+  if (
+    schema?.fieldTypes && schema.traversalHydration === true && schema.flowValueEnvelope !== true
+    && (role === 'predicate' || role === 'value')
+  ) {
     const tree = ast();
     const analysis = tree ? traversalsOf(readRootMembers(tree, [DEFAULT_TRAVERSAL_ROOT])) : null;
     if (analysis) {
@@ -1730,18 +2228,18 @@ export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): 
  *
  * ## This is a CURATED SUBSET of what the environment resolves — by construction
  *
- * The evaluation `Environment` resolves **77** distinct function names. This list
- * carries 38 of them, and the 39-name gap is NOT staleness. Measured decomposition
+ * The evaluation `Environment` resolves **78** distinct function names. This list
+ * carries 39 of them, and the 39-name gap is NOT staleness. Measured decomposition
  * (`cel-stdlib-drift.test.ts` re-measures all four numbers on every run):
  *
- *   77 registered names
- *    = 42 callable BARE, as `fn(x)`            -> the only shape this list may carry
+ *   78 registered names
+ *    = 43 callable BARE, as `fn(x)`            -> the only shape this list may carry
  *    + 35 callable only on a RECEIVER, `x.fn()` -> structurally ineligible
  *                                                 (cel-js's 33, plus our `can`
  *                                                 and `hasCapability`)
  *
- *   42 bare-callable
- *    = 30 added by `registerStdLib`   -> ALL advertised (one per registration site)
+ *   43 bare-callable
+ *    = 31 added by `registerStdLib`   -> ALL advertised (one per registration site)
  *    +  8 cel-js built-ins            -> advertised: has size int string bool double
  *                                        timestamp duration
  *    +  4 cel-js built-ins WITHHELD   -> bytes dyn type uint
@@ -1773,13 +2271,15 @@ export const CEL_STDLIB_FUNCTIONS: string[] = [
   'now', 'today', 'daysFromNow', 'daysAgo', 'daysBetween', 'addDays', 'addMonths', 'date', 'datetime',
   'isoDate', 'isoDatetime',
   // Numbers (registered stdlib)
-  'abs', 'round', 'floor', 'ceil', 'min', 'max',
+  'abs', 'round', 'floor', 'ceil', 'min', 'max', 'rmbUpper',
   // Strings (registered stdlib)
   'upper', 'lower', 'trim', 'contains', 'startsWith', 'endsWith', 'matches', 'joinNonEmpty',
   // Collections / null-ish (registered stdlib)
   'isBlank', 'isEmpty', 'coalesce', 'len',
   // Options (registered stdlib) — `label(record.<field>)`, a select value's label
   'label',
+  // Working days (registered stdlib, ADR-0157 D4) — counted with the organization's working calendar
+  'addWorkingDays', 'workingDaysBetween', 'addWorkingHours',
   // cel-js built-ins (verified to resolve)
   'size', 'has', 'int', 'string', 'bool', 'double', 'timestamp', 'duration',
 ];

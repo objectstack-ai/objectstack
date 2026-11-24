@@ -29,7 +29,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
-import { I18nProvider } from '@object-ui/i18n';
+import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 import { registerAllFields } from '@object-ui/fields';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { LineItemsPanel } from './LineItemsPanel';
@@ -147,5 +147,68 @@ describe('record:line_items hydrates an untyped column from the child field (obj
     expect(await screen.findByRole('columnheader', { name: 'note' })).toBeInTheDocument();
     // As before: no type, so a plain text input over the stored value.
     expect(((await screen.findAllByLabelText('note'))[0] as HTMLInputElement).value).toBe('rush');
+  });
+});
+
+/**
+ * objectstack-ai/objectstack#34286 — an identity-only column over a `formula`
+ * child field formats the way that formula reads everywhere else. A formula
+ * declaring `returnType: 'currency'` used to hydrate as text and print the bare
+ * number (`157780`) where a plain currency field printed money; the column now
+ * takes the type the formula's value is declared as (`hydrateColumns`).
+ *
+ * The tenant currency is USD here so money and a grouped number read
+ * differently: `$157,780.00` against `157,780`.
+ */
+describe('record:line_items types a formula column by its returnType (#34286)', () => {
+  const QUOTE_LINE = {
+    name: 'quote_line',
+    fields: {
+      quote: { type: 'master_detail', label: 'Quote', reference: 'quote' },
+      quantity: { type: 'number', label: 'Quantity' },
+      unit_price: { type: 'currency', label: 'Unit price' },
+      total_price: { type: 'formula', label: 'Total price', expression: 'quantity * unit_price', returnType: 'currency' },
+      total_units: { type: 'formula', label: 'Total units', expression: 'quantity * unit_price', returnType: 'number' },
+      total_raw: { type: 'formula', label: 'Total raw', expression: 'quantity * unit_price' },
+    },
+  };
+  const LINES = [{ id: 'q1', quantity: 20, unit_price: 7889, total_price: 157780, total_units: 157780, total_raw: 157780 }];
+
+  function mountQuote(columns: unknown[]) {
+    const ds = {
+      getObjectSchema: vi.fn().mockResolvedValue(QUOTE_LINE),
+      find: vi.fn(async () => ({ data: LINES })),
+    };
+    return render(
+      <LocalizationProvider value={{ locale: 'en', currency: 'USD' }}>
+        <SchemaRendererProvider dataSource={ds as never}>
+          <LineItemsPanel
+            schema={{ childObject: 'quote_line', relationshipField: 'quote', parentObject: 'quote', parentId: 'qt1', columns } as never}
+          />
+        </SchemaRendererProvider>
+      </LocalizationProvider>,
+    );
+  }
+  const cell = async (name: string) => (await screen.findAllByText((_t, el) => el?.getAttribute('data-computed') === name))[0];
+
+  it('a name-only column over a returnType currency formula prints money, not the bare number', async () => {
+    mountQuote([{ name: 'quantity' }, { name: 'total_price' }]);
+    expect(await screen.findByRole('columnheader', { name: 'Total price' })).toBeInTheDocument();
+    expect(await cell('total_price')).toHaveTextContent('$157,780.00');
+  });
+
+  it('a name-only column over a returnType number formula prints a grouped number', async () => {
+    mountQuote([{ name: 'quantity' }, { name: 'total_units' }]);
+    expect(await cell('total_units')).toHaveTextContent(/^157,780$/);
+  });
+
+  it('CONTROL — a formula with no returnType prints as before (text)', async () => {
+    mountQuote([{ name: 'quantity' }, { name: 'total_raw' }]);
+    expect(await cell('total_raw')).toHaveTextContent(/^157780$/);
+  });
+
+  it('CONTROL — an authored type still wins', async () => {
+    mountQuote([{ name: 'quantity' }, { name: 'unit_price' }, { name: 'total_price', type: 'number', computed: true, expr: 'quantity * unit_price' }]);
+    expect(await cell('total_price')).toHaveTextContent(/^157,780$/);
   });
 });

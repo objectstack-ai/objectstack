@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { celEngine, rewriteTemporalEquality, collectCelRootIdentifiers } from './cel-engine';
 import { CEL_STDLIB_FUNCTIONS } from './validate';
+import { buildWorkCalendar } from './work-calendar';
 import type { Expression } from '@objectstack/spec';
 
 const cel = (source: string): Expression => ({ dialect: 'cel', source });
@@ -505,21 +506,31 @@ describe('celEngine', () => {
         datetime: 'datetime("2026-03-15T08:00:00Z")', isoDate: 'isoDate(today())',
         isoDatetime: 'isoDatetime(now())', abs: 'abs(-3.5)', round: 'round(2.6)',
         floor: 'floor(6.7)', ceil: 'ceil(6.1)',
-        min: 'min(1, 2)', max: 'max(1, 2)', upper: 'upper("hi")', lower: 'lower("HI")',
+        min: 'min(1, 2)', max: 'max(1, 2)', rmbUpper: 'rmbUpper(10500.5)', upper: 'upper("hi")', lower: 'lower("HI")',
         trim: 'trim(" x ")', contains: 'contains("hello", "ell")', startsWith: 'startsWith("hi", "h")',
         endsWith: 'endsWith("hi", "i")', matches: 'matches("a1", "a.")', joinNonEmpty: 'joinNonEmpty(["a", "b"], "-")',
         isBlank: 'isBlank("")', isEmpty: 'isEmpty([])', coalesce: 'coalesce(null, "x")', len: 'len("ab")',
         size: 'size([1, 2])', has: 'has(record.a)', int: 'int("3")', string: 'string(3)',
         bool: 'bool("true")', double: 'double("3.5")', timestamp: 'timestamp("2026-01-01T00:00:00Z")',
         duration: 'duration("3600s")', label: 'label(record.a)',
+        addWorkingDays: 'addWorkingDays(today(), 2)', workingDaysBetween: 'workingDaysBetween(today(), daysFromNow(7))',
+        addWorkingHours: 'addWorkingHours(now(), 4)',
       };
+      // ADR-0157 D4: the calendar the three working-day probes count with,
+      // Monday to Friday, maintained over the probe's whole window.
+      const weekday = '09:00-18:00';
+      const workCalendars = { default: buildWorkCalendar({
+        code: 'probe', timezone: 'UTC', maintained_from: '2025-01-01', maintained_through: '2027-12-31',
+        monday_periods: weekday, tuesday_periods: weekday, wednesday_periods: weekday,
+        thursday_periods: weekday, friday_periods: weekday,
+      }, []) };
       const unresolved: string[] = [];
       for (const fn of CEL_STDLIB_FUNCTIONS) {
         const src = call[fn];
         expect(src, `no probe call defined for advertised function \`${fn}\``).toBeTruthy();
         // `optionLabels` is the data `label()` answers from (#26608); the other
         // probes read nothing from it.
-        const r = celEngine.evaluate(cel(src), { now, record: { a: 1 }, optionLabels: { a: { 1: 'One' } } });
+        const r = celEngine.evaluate(cel(src), { now, record: { a: 1 }, optionLabels: { a: { 1: 'One' } }, workCalendars });
         if (!r.ok) unresolved.push(`${fn}: ${r.error.message.split('\n')[0]}`);
       }
       expect(unresolved, `advertised functions that fault at runtime:\n${unresolved.join('\n')}`).toEqual([]);

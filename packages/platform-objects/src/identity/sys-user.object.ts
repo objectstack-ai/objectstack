@@ -73,6 +73,16 @@ const SERVICE_ACCOUNT_ADMIN_VISIBLE = [
 const MANAGED_ADD_PERSON_VISIBLE =
   'current_user.isPlatformAdmin == true && has(features.cloudManaged) && features.cloudManaged == true';
 
+/**
+ * Who is offered `remove_sso_user`, and on which row: the same standing and
+ * managed flag as Add / Import, then a row that is still pending
+ * (`source == 'idp_pending'`), the one row its door removes. Any other row is
+ * answered `409` there (a person who has signed in is deactivated instead).
+ * `has()` keeps it hidden on a row the console did not project `source` for.
+ */
+const MANAGED_REMOVE_PENDING_PERSON_VISIBLE =
+  `${MANAGED_ADD_PERSON_VISIBLE} && has(record.source) && record.source == 'idp_pending'`;
+
 const TEMPORARY_PASSWORD_LABEL = 'Temporary password: copy it now, it is shown only once and never stored';
 
 /**
@@ -91,6 +101,7 @@ export const SysUser = ObjectSchema.create({
   label: 'User',
   pluralLabel: 'Users',
   icon: 'user',
+  color: 'blue',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0092 D4 — the ONE generic affordance opened on an identity table:
@@ -176,20 +187,26 @@ export const SysUser = ObjectSchema.create({
 
     // ── Platform admin operations ───────────────────────────────────────
     //
-    // `unlock_user`, `create_user` and the actions further down that carry
-    // `requiresFeature: 'admin'` (#2874) are gated on the better-auth `admin`
+    // `create_user` and `impersonate_user`, the actions here that carry
+    // `requiresFeature: 'admin'` (#2874), are gated on the better-auth `admin`
     // plugin: when `features.admin` is off the UI hides them instead of
     // rendering buttons that 404. SCIM deployments keep them: SCIM forces the
     // admin plugin (and `features.admin`) on (ADR-0134).
     //
-    // Ban / Unban carry NO `requiresFeature: 'admin'`, deliberately. Their
-    // doors, plugin-auth's `admin/ban-user` / `admin/unban-user`, are
-    // ObjectStack mounts registered whether or not the vendor plugin is on
-    // (`admin-ban-endpoints.ts`): without it the ban is written through the
-    // data engine and the session refusal answers `403 BANNED_USER`
-    // (`user-session-admission.ts`). So `features.admin == true` would hide a
-    // working Deactivate / Reactivate on every kernel that runs without the
-    // plugin, managed environments included. Pinned in
+    // Ban / Unban / Unlock / Set Password carry NO `requiresFeature: 'admin'`,
+    // deliberately. Their doors, plugin-auth's `admin/ban-user` /
+    // `admin/unban-user` / `admin/unlock-user` / `admin/set-user-password`,
+    // are ObjectStack mounts registered whether or not the vendor plugin is
+    // on. Without it the ban is written through the data engine and the
+    // session refusal answers `403 BANNED_USER` (`admin-ban-endpoints.ts`,
+    // `user-session-admission.ts`); the lockout is plugin-auth's own
+    // (ADR-0069 D2, stamped by its sign-in path), and the unlock clears it
+    // through the data engine; the password is hashed and written through
+    // better-auth's core `internalAdapter`, which every kernel carries. So
+    // `features.admin == true` would hide a working Deactivate / Reactivate /
+    // Unlock / Set Password on every kernel that runs without the plugin,
+    // managed environments included (Set Password keeps its own
+    // hide-when-cloud-managed rule). Pinned in
     // `action-state-visibility.test.ts` (the offer) and plugin-auth's
     // `pending-sso-users.test.ts` (the declared targets, driven live).
     //
@@ -218,9 +235,11 @@ export const SysUser = ObjectSchema.create({
     // list row the console projects every `record.<field>` an object action's
     // predicate reads (objectui `listViewPredicates`), so the default Users
     // view carries `banned` without showing it; the record header reads the
-    // whole row. `banned` stays true past `ban_expires` until better-auth
-    // clears it at the user's next sign-in, so Unban is offered while the row
-    // says banned. Pinned in `action-state-visibility.test.ts`.
+    // whole row. `banned` stays true past `ban_expires` until the user's next
+    // sign-in clears it (better-auth's admin plugin where it is mounted,
+    // plugin-auth's `user-session-admission.ts` where it is not), so Unban is
+    // offered while the row says banned. Pinned in
+    // `action-state-visibility.test.ts`.
     {
       name: 'ban_user',
       label: 'Ban User',
@@ -246,7 +265,7 @@ export const SysUser = ObjectSchema.create({
       // and nothing is POSTed until that one dialog's own Confirm.
       // NB: the top-level `description` (#7367), never `ai.description` — that
       // one is the LLM-facing tool contract and is shown to no user.
-      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban.',
+      description: 'Ban this user? They will be signed out, unable to sign in, and their API keys refused until unbanned, as are their OAuth access tokens and token refreshes. The keys work again after the unban. The ban also suspends the AI service accounts they are accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted; the unban restores none of these.',
       params: [
         { name: 'banReason', label: 'Ban Reason', type: 'text', required: false },
       ],
@@ -255,7 +274,7 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys, OAuth access tokens and token refreshes are refused until unbanned; the keys work again after the unban. Platform administrators only. Ask the human to confirm before calling.',
+          'Ban a user (the record; optionally banReason): they are signed out, cannot sign in, and their API keys, OAuth access tokens and token refreshes are refused until unbanned; the keys work again after the unban. The ban also suspends the AI service accounts the user is accountable for, disables the OAuth applications they registered and revokes the SCIM credentials they minted, and the unban restores none of these. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -280,14 +299,15 @@ export const SysUser = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Lift the ban on a banned user (the record), so they can sign in again. Platform administrators only. Ask the human to confirm before calling.',
+          'Lift the ban on a banned user (the record), so they can sign in again. It resumes no AI service account, enables no OAuth application and restores no SCIM credential the ban ended. Platform administrators only. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
     {
       // ADR-0069 D2 — clear a brute-force lockout early (locked_until auto-
       // expires, but an admin can release a user immediately). Hits the
-      // plugin-auth custom route, which is admin-guarded server-side.
+      // plugin-auth custom route, which is admin-guarded server-side and
+      // works without the better-auth admin plugin (block header above).
       name: 'unlock_user',
       label: 'Unlock Account',
       icon: 'lock-open',
@@ -308,7 +328,6 @@ export const SysUser = ObjectSchema.create({
       // `failed_login_count` at the threshold, so one more failure re-locks,
       // and Unlock is what resets that counter.
       visible: 'current_user.isPlatformAdmin == true && ((has(record.locked_until) && record.locked_until != null) || (has(record.two_factor_enabled) && record.two_factor_enabled == true))',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Account unlocked',
       refreshAfter: true,
@@ -501,11 +520,14 @@ export const SysUser = ObjectSchema.create({
         title: 'User Added',
         acknowledge: 'Done',
         // Each field is skipped when its path is absent from the answer:
-        // `notApplied` only on a re-add of a person still pending, `managerError`
-        // only when no manager was linked, `host.reason` only when the hosting
-        // organisation was not told.
+        // `pendingAgain` only on a re-add of a person still pending (the door
+        // answers it only then, so no `false` row is drawn on a fresh add),
+        // `notApplied` only on such a re-add that sent grants or a manager,
+        // `managerError` only when no manager was linked, `host.reason` only
+        // when the hosting organisation was not told.
         fields: [
           { path: 'email', label: 'Email', format: 'text' },
+          { path: 'pendingAgain', label: 'Already pending', format: 'json' },
           { path: 'notApplied', label: 'Already pending, so not applied (set these on the record)', format: 'json' },
           { path: 'managerError', label: 'Manager', format: 'text' },
           { path: 'host.reason', label: 'Invitation not sent', format: 'text' },
@@ -540,13 +562,61 @@ export const SysUser = ObjectSchema.create({
       resultDialog: {
         title: 'Import Finished',
         acknowledge: 'Done',
+        // `rows` is the door's per-row report (plugin-auth
+        // `ImportSsoUserRowResult`), drawn as a table: one row per CSV line, a
+        // cell per answer member. A member a row does not carry draws an empty
+        // cell: `alreadyPending` and `host` only on a row that was added,
+        // `error` only on one that was not, `notApplied` only on a re-add that
+        // sent columns, `managerError` only when no manager was linked.
+        // "Already pending" says nothing about telling anyone: a deactivated
+        // pending person is re-added without a word to the host, so whether
+        // the host was told is the `host.*` columns' answer alone.
         fields: [
           { path: 'summary.added', label: 'Added', format: 'text' },
-          { path: 'summary.alreadyPending', label: 'Already pending, told again', format: 'text' },
+          { path: 'summary.alreadyPending', label: 'Already pending', format: 'text' },
           { path: 'summary.failed', label: 'Not added', format: 'text' },
-          { path: 'rows', label: 'Result per row', format: 'json' },
+          {
+            path: 'rows',
+            label: 'Result per row',
+            format: 'table',
+            columns: [
+              { path: 'row', label: 'Row', format: 'json' },
+              { path: 'email', label: 'Email' },
+              { path: 'ok', label: 'Succeeded', format: 'json' },
+              { path: 'alreadyPending', label: 'Already pending', format: 'json' },
+              { path: 'host.notified', label: 'Hosting organization told', format: 'json' },
+              { path: 'host.reason', label: 'Why not told' },
+              { path: 'error.message', label: 'Not added because' },
+              { path: 'notApplied', label: 'Not applied (set these on the record)', format: 'code-list' },
+              { path: 'managerError', label: 'Manager' },
+            ],
+          },
         ],
       },
+    },
+    // The undo of the two above: take a pending person back out, which also
+    // cancels their invitation. The door is plugin-auth's
+    // `admin/remove-sso-user` (`{ userId }`), platform-admin gated, answering
+    // only on a managed environment and only for a row that is still pending;
+    // it asks the hosting organisation first and removes no one when that
+    // organisation cannot be reached or refuses. No params, so the question
+    // rides `confirmText`. No `ai` block, as for its siblings.
+    {
+      name: 'remove_sso_user',
+      label: 'Remove Pending User',
+      icon: 'user-minus',
+      variant: 'danger',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/admin/remove-sso-user',
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
+      visible: MANAGED_REMOVE_PENDING_PERSON_VISIBLE,
+      recordIdParam: 'userId',
+      confirmText:
+        'Remove this person, who has not signed in yet, and cancel their invitation? '
+        + 'If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.',
+      successMessage: 'Pending user removed',
+      refreshAfter: true,
     },
     {
       name: 'set_user_password',
@@ -564,11 +634,9 @@ export const SysUser = ObjectSchema.create({
       // The door's platform-admin gate, declared where both action doors read it (#30771).
       requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
       // Platform-admin standing (ADR-0068 D4) — see the block header above —
-      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on).
-      // Console only: the server keeps answering it on an `env_native` row, so
-      // the break-glass admin stays editable (ruling 6341690661, Q4 A).
+      // and hidden while cloud-managed (`features.cloudManaged`, hide-when-on):
+      // the door refuses every target there (plugin-auth `cloud-managed.ts`).
       visible: 'current_user.isPlatformAdmin == true && features.cloudManaged != true',
-      requiresFeature: 'admin',
       recordIdParam: 'userId',
       successMessage: 'Password updated',
       refreshAfter: false,
@@ -707,26 +775,27 @@ export const SysUser = ObjectSchema.create({
       description: "Set this user's manager. The reporting chain drives approval routing and the own_and_reports record scope.",
       params: [
         {
-          // INLINE, not field-backed. A field-backed `{ field: 'manager_id' }`
-          // param inherits the referenced field's metadata, and that field is
-          // `readonly: true` (ADR-0092 D4 — it must stay non-editable in the
-          // standard edit form), so inheriting it here is a picker that may
-          // render read-only. `name` is the request-body key, and it is the
-          // camelCase spelling the endpoint reads first (`readId(body,
-          // 'managerId', 'manager_id')`).
+          // FIELD-BACKED on `manager_id` and seeded from the row
+          // (`defaultFromRow`), so the dialog opens on the CURRENT manager and
+          // an admin sees what a re-point would replace. Both doors that draw
+          // this dialog pass the row: the record header stamps its record and a
+          // list row is projected with every field a `defaultFromRow` param
+          // seeds from. The field's `readonly: true` (ADR-0092 D4) is not
+          // inherited: the console's param resolver carries the field's type,
+          // target and label onto the param and never its `readonly`, so the
+          // picker stays editable while the edit form keeps the column locked.
+          // `name` is the request-body key, the camelCase spelling the endpoint
+          // reads first (`readId(body, 'managerId', 'manager_id')`).
           name: 'managerId',
+          field: 'manager_id',
+          defaultFromRow: true,
           label: 'Manager',
-          type: 'lookup',
-          reference: 'sys_user',
           // Required, because the endpoint refuses an ABSENT or empty key by
           // design — "managerId is required — send null to clear the link,
           // never omit the key" — so a dialog that could submit nothing would
           // turn a normal click into a 400 about a key the user never saw.
-          // Required means a value is collected before anything is POSTed.
-          // ⚠️ Clearing the link (`managerId: null`) is a real endpoint
-          // capability that this action therefore does not reach; it is
-          // recorded in the PR's acceptance notes rather than half-declared
-          // here.
+          // Required means a value is collected before anything is POSTed;
+          // clearing is `remove_user_manager` below.
           required: true,
           helpText: 'The user this person reports to. The server refuses a manager outside their organization, a self-assignment, and a link that would close or over-deepen the reporting chain.',
         },
@@ -739,6 +808,42 @@ export const SysUser = ObjectSchema.create({
           'Set the manager a user (the record) reports to (param: managerId, a user in the same organization). The reporting chain drives approval routing and the own_and_reports record scope. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
+    },
+    {
+      // The clear half of the same endpoint: `managerId: null` unsets the
+      // link ("send null to clear the link, never omit the key"), which the
+      // required picker above cannot send. The null rides `bodyExtra`, the
+      // action's static request body, merged last at both doors
+      // (`buildApiActionRequest`), so the action collects nothing and asks a
+      // confirm question instead. Same door, same gate, same refusals as
+      // `set_user_manager` — the SCIM-held one included, which the endpoint
+      // applies to the clear as well — and ⛔ no client-side copy of any of
+      // them (maintainer ruling record 6895645364, option A).
+      //
+      // `visible` is `set_user_manager`'s standing term, then the row's state,
+      // in the form of Ban / Unban above: it is offered only while the row
+      // HAS a manager, so it never reports success for removing nothing. The
+      // `has()` guard because a CEL read of an absent key faults; a list row
+      // carries `manager_id` because the console projects every column an
+      // action predicate reads.
+      //
+      // No `ai` block: this action postdates the ADR-0011 identity-actions
+      // assessment, and an unassessed action stays human-only.
+      name: 'remove_user_manager',
+      label: 'Remove Manager',
+      icon: 'user-minus',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      target: '/api/v1/auth/admin/set-user-manager',
+      // The door's platform-admin gate, declared where both action doors read it (#30771).
+      requiredPermissions: [...PLATFORM_ADMIN_USERS_GATE],
+      visible: 'current_user.isPlatformAdmin == true && has(record.manager_id) && record.manager_id != null',
+      recordIdParam: 'userId',
+      bodyExtra: { managerId: null },
+      confirmText: "Remove this user's manager? They will report to no one until a manager is set again; approval routing and the own_and_reports record scope follow the change.",
+      successMessage: 'Manager removed',
+      refreshAfter: true,
     },
     {
       // ADR-0095 D3 — who holds platform-admin standing. Standing is derived
@@ -1337,6 +1442,28 @@ export const SysUser = ObjectSchema.create({
         'Turned on when an administrator creates or imports the account, or resets its password; system-managed.',
     }),
 
+    // The development seed's stamp (`plugin-auth` `dev-seed-credential.ts`):
+    // written on an account `os dev`'s admin seed or a stack's `demoStaff`
+    // creates, as a one-way digest of the password hash the seed stored. A
+    // production-mode server refuses that account's sign-in and every new
+    // session while its stored hash still has this digest; `os user
+    // set-password` sets a new password and clears it. A digest of a salted
+    // hash, so `internal`: never served on the generic data path, matched by
+    // the server alone. Owned by objectql (better-auth is oblivious to this
+    // column — like `ai_access`).
+    dev_seed_credential: Field.text({
+      label: 'Development Seed Credential',
+      required: false,
+      maxLength: 64, // a SHA-256 digest in base64url is 43 characters; keyed by the index below
+      readonly: true,
+      internal: true,
+      group: 'System',
+      description:
+        'Set on an account the development seed created. While its password is still the seed password, a ' +
+        'production server refuses its sign-in and every new session; os user set-password sets a new password ' +
+        'and clears it. System-managed; never returned on reads.',
+    }),
+
     // ADR-0069 D3 — when enforced MFA first applied to this user; starts the
     // grace clock. Stamped lazily at session validation; system-managed.
     mfa_required_at: Field.datetime({
@@ -1563,6 +1690,10 @@ export const SysUser = ObjectSchema.create({
     // #2766 V1.5 — phone sign-in identifier; unique when present (null for
     // email-only accounts), also the upsert match key for identity import.
     { fields: ['phone_number'], unique: 'global' },
+    // The development seed's stamp, matched by the password verifier on a
+    // server that is not in development mode (`plugin-auth`
+    // `dev-seed-credential.ts`). Null on every account the seed never created.
+    { fields: ['dev_seed_credential'], unique: false },
   ],
 
   enable: {

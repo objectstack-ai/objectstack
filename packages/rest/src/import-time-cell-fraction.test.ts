@@ -298,7 +298,8 @@ for (const cell of CELLS) {
             expect(Object.fromEntries(rows.map((r) => [r.id, r.t]))).toEqual(Object.fromEntries(SOURCE.map((r) => [r.id, r.t])));
             body = { format, rows: rows.map((r) => ({ ...r, id: back(String(r.id)) })) };
           } else {
-            const [header, ...lines] = exported._text().split('\r\n').filter((l: string) => l.length > 0);
+            // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+            const [header, ...lines] = exported._text().replace(/^\uFEFF/, '').split('\r\n').filter((l: string) => l.length > 0);
             expect(header).toBe('ID,Clock');
             const mine = lines.filter((l: string) => ids.has(l.split(',')[0]));
             expect([...mine].sort()).toEqual(SOURCE.map((r) => `${r.id},${r.t}`).sort());

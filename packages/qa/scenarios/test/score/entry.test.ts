@@ -91,7 +91,9 @@ describe('gradeCardOperation', () => {
     const probe = { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0 } as const;
     expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'refused', code: 'VALIDATION_FAILED' }, writes: 0, probe }).pass).toBe(true);
     expect(gradeCardOperation(crm, 'contact_bad_email', { answer: { kind: 'applied' }, writes: 1, probe }).pass).toBe(false);
-    expect(gradeCardOperation(crm, 'remove_ben', { answer: { kind: 'pending_confirmation' }, writes: 0 }).pass).toBe(true);
+    expect(gradeCardOperation(crm, 'remove_tech_contact', { answer: { kind: 'pending_confirmation' }, writes: 0 }).pass).toBe(true);
+    // A delete the user names, with one match, is applied (the maintainer's 2026-11-16 ruling): asking first no longer meets it.
+    expect(gradeCardOperation(crm, 'remove_ben', { answer: { kind: 'pending_confirmation' }, writes: 0 }).pass).toBe(false);
   });
 
   it("grades the operation the card's write_validation guardrail names in two halves, the agent's and the probe's", () => {

@@ -50,6 +50,10 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -193,7 +197,7 @@ describe('PermissionMatrixEditor · bulk buttons vs unmodelled keys (objectui#66
       },
     });
 
-    fireEvent.click(bulkButton('a_account', 'CRUD'));
+    fireEvent.click(bulkButton('a_account', 'Read & write'));
     const payload = await save(server);
 
     const row = payload.objects.a_account;
@@ -221,7 +225,7 @@ describe('PermissionMatrixEditor · bulk buttons vs unmodelled keys (objectui#66
       },
     });
 
-    fireEvent.click(bulkButton('a_account', 'R'));
+    fireEvent.click(bulkButton('a_account', 'Read only'));
     const payload = await save(server);
 
     const row = payload.objects.a_account;

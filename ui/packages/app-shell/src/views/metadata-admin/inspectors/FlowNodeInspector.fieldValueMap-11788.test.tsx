@@ -20,6 +20,8 @@
  * `FlowNodeInspector.updateRecordTarget-27834.test.tsx`.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
@@ -146,7 +148,7 @@ describe('objectui#11788 — record field-value keys are picked from the target 
         fireEvent.click(within(fields).getByRole('button', { name: 'Add entry' }));
         const key = within(fields).getByPlaceholderText('Key');
         expect(keySuggestions(key)).toEqual(['status', 'owner']);
-        expect(within(fields).getByText('Fields of ticket.')).toBeInTheDocument();
+        expect(within(fields).getByText('Fields of “ticket”.')).toBeInTheDocument();
         fireEvent.change(key, { target: { value: 'status' } });
         fireEvent.blur(key);
         const val = within(fields).getByPlaceholderText('Value');
@@ -154,7 +156,7 @@ describe('objectui#11788 — record field-value keys are picked from the target 
         fireEvent.blur(val);
         expect(config().fields).toEqual({ status: 'done' });
         // The value cell keeps the slot's own dialect: the text / CEL toggle.
-        expect(within(fields).getByRole('button', { name: 'Write as a CEL expression' })).toBeInTheDocument();
+        expect(within(fields).getByRole('button', { name: 'Write as a formula' })).toBeInTheDocument();
       });
     }
 

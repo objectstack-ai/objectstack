@@ -76,13 +76,13 @@
  */
 
 import * as React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { DiscussionContextProvider } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
 import type { ComponentInput, FeedItem, RecordActivityComponentProps, RecordSubscription } from '@object-ui/types';
 import { RecordChatterRenderer } from '../record-chatter';
-import { applyFeedConfig, DEFAULT_ACTIVITY_LIMIT } from '../recordActivityFeed';
+import { applyFeedConfig, DEFAULT_ACTIVITY_LIMIT, resetWithheldCommentComposerWarnings } from '../recordActivityFeed';
 import { RecordActivityTimeline } from '../../RecordActivityTimeline';
 import '../../index';
 
@@ -352,6 +352,84 @@ describe('`showSubscriptionToggle` moves `RecordActivityTimeline`, the component
     render(<RecordActivityTimeline items={ITEMS} config={SUBSCRIPTION_ON} />);
     expect(screen.queryByRole('button', { name: SUBSCRIBE })).toBeNull();
     expect(screen.getByText('Root comment')).toBeTruthy();
+  });
+});
+
+/**
+ * objectstack#34525 — a `feed.types` allow-list that leaves out `comment`
+ * filters every comment out of the panel, the ones posted on it included. The
+ * block then offers no composer and no Comments-only filter, by the one rule
+ * `record:activity` follows (`feedTypesAdmitComments`, objectstack#34371),
+ * and says why once in development. The controls are the same feed with
+ * `comment` admitted, and with no `types` at all.
+ */
+describe.each(BLOCK_NAMES)('%s: a feed.types without comment offers no comment composer (objectstack#34525)', (blockName) => {
+  const COMMENTS_ONLY = 'Comments Only';
+
+  /** As `mountAs`, with the node's `type` stated, so diagnostics name the block mounted. */
+  const mountTyped = (feed: Record<string, unknown>) => {
+    const Renderer = rendererFor(blockName);
+    return render(
+      <DiscussionContextProvider items={ITEMS as any} loading={false} {...handlers}>
+        <Renderer schema={{ type: blockName, position: 'bottom', feed } as any} />
+      </DiscussionContextProvider>,
+    );
+  };
+
+  /** The dropdown's option labels, read by opening the Radix Select. */
+  async function filterOptionLabels(): Promise<string[]> {
+    fireEvent.keyDown(screen.getByRole('combobox', { name: FILTER_TRIGGER }), { key: 'ArrowDown' });
+    await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
+    return screen.getAllByRole('option').map((o) => o.textContent ?? '');
+  }
+
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    resetWithheldCommentComposerWarnings();
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  const withheldWarnings = () =>
+    (warn.mock.calls as unknown[][])
+      .map((c: unknown[]) => String(c[0]))
+      .filter((m: string) => m.includes('offers no comment composer'));
+
+  it('types: [task] draws no composer and no Comments-only option', async () => {
+    mountTyped({ ...AFFORDANCES, types: ['task'], showCompleted: true });
+    expect(renderedIds()).toEqual(['t-1']);
+    expect(screen.queryByPlaceholderText(COMPOSER)).toBeNull();
+    const options = await filterOptionLabels();
+    expect(options).toContain('All Activity');
+    expect(options).not.toContain(COMMENTS_ONLY);
+    const said = withheldWarnings();
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain(`${blockName} feed`);
+    expect(said[0]).toContain('["task"]');
+  });
+
+  it('CONTROL: types that admits comment keeps the composer and the option', async () => {
+    mountTyped({ ...AFFORDANCES, types: ['task', 'comment'], showCompleted: true });
+    expect(renderedIds()).toEqual(['c-1', 't-1', 'c-2']);
+    expect(screen.getByPlaceholderText(COMPOSER)).toBeTruthy();
+    expect(await filterOptionLabels()).toContain(COMMENTS_ONLY);
+    expect(withheldWarnings()).toHaveLength(0);
+  });
+
+  it('CONTROL: no types keeps the composer and the option', async () => {
+    mountTyped({ ...AFFORDANCES });
+    expect(renderedIds()).toEqual(['c-1', 'f-1', 'c-2']);
+    expect(screen.getByPlaceholderText(COMPOSER)).toBeTruthy();
+    expect(await filterOptionLabels()).toContain(COMMENTS_ONLY);
+    expect(withheldWarnings()).toHaveLength(0);
+  });
+
+  it('an author who switched the composer off is not told anything', () => {
+    mountTyped({ ...AFFORDANCES, types: ['task'], showCompleted: true, showCommentInput: false });
+    expect(renderedIds()).toEqual(['t-1']);
+    expect(withheldWarnings()).toHaveLength(0);
   });
 });
 

@@ -300,3 +300,99 @@ describe('[#27908] the action_invocation row tells an agent\'s call from a click
     expect(options).toContain(ACTION_INVOCATION_AUDIT_ACTION);
   });
 });
+
+describe('[#33694] an in-product AI call is marked on the action_invocation row by the CRUD mirror\'s rule', () => {
+  const AI_CALL: ActionInvocationAuditEvent = {
+    ...CLICK,
+    context: {
+      userId: 'usr_1',
+      tenantId: 'org_1',
+      surface: 'rest',
+      performedBy: { agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' },
+    },
+  };
+  const PERFORMER_KEYS = ['performed_by', 'on_behalf_of', 'conversation_id', 'confirmation_id'];
+  const metaOf = (row: Record<string, unknown>) => JSON.parse(String(row.metadata));
+
+  it('an AI-performed call records the agent, the person, the conversation and the confirmation', async () => {
+    const engine = await boot();
+    const writer = createActionInvocationAuditWriter({ getEngine: () => engine as any });
+
+    await writer.recordActionInvocation(AI_CALL);
+
+    const [row] = await ledgerRows(engine);
+    expect(row.user_id).toBe('usr_1');
+    expect(row.actor).toBe('usr_1');
+    expect(JSON.parse(row.metadata)).toMatchObject({
+      performed_by: 'sales_assistant',
+      on_behalf_of: 'usr_1',
+      conversation_id: 'conv_1',
+      confirmation_id: 'pend_1',
+    });
+  });
+
+  it('CONTROL: an OAuth client — alone, or beside an agent — is the performer, with no conversation or confirmation', () => {
+    for (const performedBy of [
+      { clientId: 'cli_agent', conversationId: 'conv_1', confirmationId: 'pend_1' },
+      { clientId: 'cli_agent', agentId: 'sales_assistant', conversationId: 'conv_1', confirmationId: 'pend_1' },
+    ]) {
+      const meta = metaOf(buildActionInvocationAuditRow({ ...AI_CALL, context: { ...AI_CALL.context, performedBy } }));
+      expect(meta).toMatchObject({ performed_by: 'cli_agent', on_behalf_of: 'usr_1' });
+      expect(meta).not.toHaveProperty('conversation_id');
+      expect(meta).not.toHaveProperty('confirmation_id');
+    }
+  });
+
+  it('CONTROL: a person\'s own call carries no performer key at all', () => {
+    const meta = metaOf(buildActionInvocationAuditRow(CLICK));
+    for (const key of PERFORMER_KEYS) expect(meta).not.toHaveProperty(key);
+  });
+});
+
+/**
+ * [#34292 — seat ruling 7000299515, maintainer 「B 仍记成功,加行数」] An
+ * answered aggregate bulk call keeps `outcome: 'succeeded'` and its row adds
+ * the per-row counts the door read off the handler's resolve value; a value
+ * that could not be read adds one mark and no succeeded count. Read back
+ * through a real engine.
+ */
+describe('[#34292] an aggregate bulk call\'s row records its per-row counts', () => {
+  const BULK: ActionInvocationAuditEvent = {
+    context: { userId: 'usr_1', tenantId: 'org_1', surface: 'rest' },
+    actionName: 'merge_leads', objectName: 'crm_lead', branch: 'script', outcome: 'succeeded',
+  };
+
+  it('a partial run stays succeeded and records selected / succeeded / failed / unconfirmed', async () => {
+    const engine = await boot();
+    const writer = createActionInvocationAuditWriter({ getEngine: () => engine as any });
+
+    await writer.recordActionInvocation({ ...BULK, bulk: { selected: 3, succeeded: 1, failed: 1, unconfirmed: 1 } });
+
+    const [row] = await ledgerRows(engine);
+    expect(JSON.parse(row.metadata)).toEqual({
+      surface: 'rest', action_name: 'merge_leads', branch: 'script', outcome: 'succeeded',
+      bulk_selected: 3, bulk_succeeded: 1, bulk_failed: 1, bulk_unconfirmed: 1,
+    });
+  });
+
+  it('an unreadable resolve value records one mark and no succeeded count', async () => {
+    const engine = await boot();
+    const writer = createActionInvocationAuditWriter({ getEngine: () => engine as any });
+
+    await writer.recordActionInvocation({ ...BULK, bulk: { unreadable: true } });
+
+    const [row] = await ledgerRows(engine);
+    expect(JSON.parse(row.metadata)).toEqual({
+      surface: 'rest', action_name: 'merge_leads', branch: 'script', outcome: 'succeeded', bulk_unreadable: true,
+    });
+  });
+
+  it('control: a call with no reading records no bulk key; a failed row records none either', () => {
+    const keys = (event: ActionInvocationAuditEvent) =>
+      Object.keys(JSON.parse(String(buildActionInvocationAuditRow(event).metadata))).filter((k) => k.startsWith('bulk_'));
+    expect(keys(BULK)).toEqual([]);
+    expect(keys({
+      ...BULK, outcome: 'failed', status: 409, bulk: { selected: 3, succeeded: 1, failed: 1, unconfirmed: 1 },
+    })).toEqual([]);
+  });
+});

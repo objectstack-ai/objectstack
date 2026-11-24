@@ -337,6 +337,17 @@ const LEDGER = [
       + 'engine answers 501 NOT_IMPLEMENTED rather than failing to load. Declaring it would couple '
       + '`@objectstack/rest` to the engine, the stance the row above records.',
   },
+  {
+    pkg: '@objectstack/rest',
+    dep: '@objectstack/objectql',
+    // [ADR-0158 U7 R1] Its unit code twin loads `backfillUnitCodes` the same way.
+    file: 'packages/rest/src/meta-unit-code-backfill-route.ts',
+    kind: 'optional-runtime-probe',
+    why:
+      'The unit code backfill door (`POST /meta/_migrate-unit-codes`) calls the engine package\'s '
+      + 'backfill function through the guarded probe its record-currency twin uses: a deployment '
+      + 'serving REST WITHOUT the data engine answers 501 NOT_IMPLEMENTED rather than failing to load.',
+  },
   // The objectui Console (imported as ui/ at the cutover, #25752 bill item 20). Two rows,
   // one per dependency, each covering the package's whole `src/` directory: the evidence
   // is the manifest, so it is per package, not per call site.

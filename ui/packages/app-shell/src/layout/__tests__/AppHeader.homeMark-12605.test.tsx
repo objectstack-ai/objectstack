@@ -11,8 +11,12 @@
  *     `getProductName`) and a click on it lands on `/home`;
  *   - the home chord, with ⌘ and with Ctrl, lands on `/home` as a PUSH, and
  *     Back returns to the app page; typed into a text field it does nothing;
- *   - the chord is advertised to the keyboard-shortcuts dialog while the app
- *     bar is mounted, with the chord the listener answers;
+ *   - the chord is advertised to the keyboard-shortcuts dialog while an app
+ *     page is mounted, with the chord the listener answers. Since
+ *     objectstack#36112 the app layout installs it (`useGoHomeShortcut`, as
+ *     `ConsoleLayout` calls it), not the bar, which a desktop app no longer
+ *     draws: the app route here mounts the hook beside the bar, and a CONTROL
+ *     pins that the bar alone installs nothing;
  *   - the pill is drawn at every width: no breakpoint class hides it.
  *
  * CONTROLS: the home page draws the same mark (one element, same test id),
@@ -103,6 +107,9 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
   useWorkspaceAdminStatus: () => ({ isAdmin: false, isResolved: true }),
 }));
 
+/** objectstack#36732 — the desktop's home for the one product app below. */
+const DESKTOP_HOME = '/apps/com.example.crm';
+
 vi.mock('../../providers/MetadataProvider', () => ({
   useMetadata: () => ({
     apps: [{ name: 'crm', label: 'CRM', _packageId: 'com.example.crm' }],
@@ -116,10 +123,20 @@ vi.mock('../../providers/AdapterProvider', () => ({
   useAdapter: () => ({ find: () => Promise.resolve({ data: [] }), getClient: () => undefined }),
 }));
 
+// objectstack#36732 — on `/apps/*` the console's chrome sits under
+// `LauncherAppsProvider`, whose `/me/apps` answer is held once the first read
+// lands; this host mounts none, so the held answer is stated here. Without one
+// a desktop's Home names `/home` (pinned in `useHomePath.servedAnswer-36732`).
+vi.mock('../../hooks/useLauncherApps', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  useServedAppsSettled: () => true,
+}));
+
 import { AppHeader } from '../AppHeader';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 import { GO_HOME_SHORTCUT, useAdvertisedShortcuts, type ShortcutChord } from '../../chrome/advertisedShortcuts';
 import { getProductName } from '../../runtime-config';
+import { useGoHomeShortcut } from '../../chrome/goHomeShortcut';
 
 const MEMBER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
@@ -127,6 +144,7 @@ const MEMBER: MePermissionsAuthenticatedResponse = {
   tenantId: 'org_1',
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: [],
   systemPermissions: [],
   objects: {},
@@ -157,7 +175,13 @@ function AdvertisedReading() {
   );
 }
 
-function mount(initialPath: string) {
+/** The home chord, installed as `ConsoleLayout` installs it on an app page. */
+function GoHomeShortcut() {
+  useGoHomeShortcut(true, '/home');
+  return null;
+}
+
+function mount(initialPath: string, { layoutShortcut = true }: { layoutShortcut?: boolean } = {}) {
   return render(
     <MePermissionsProvider initialPermissions={MEMBER}>
       <MemoryRouter initialEntries={[initialPath]}>
@@ -167,6 +191,7 @@ function mount(initialPath: string) {
               path="/apps/:appName/*"
               element={
                 <>
+                  {layoutShortcut && <GoHomeShortcut />}
                   <AppHeader variant="app" appName="CRM" activeAppName="crm" onAppChange={vi.fn()} objects={[]} />
                   <input data-testid="typing" />
                 </>
@@ -219,17 +244,19 @@ describe('inside an app the product mark is the way home (objectui#12605)', () =
     expect(separator.textContent).toBe('');
   });
 
-  it('the mark is named 「PRODUCT home」 and links to `/home`', () => {
+  // objectstack#36732 — from 768 px up home is where `/` lands: with no last
+  // app and nothing declared, the first product app, not the retired page.
+  it('the mark is named 「PRODUCT home」 and links home', () => {
     mount('/apps/crm/lead');
     const link = screen.getByRole('link', { name: `${getProductName()} home` });
     expect(link).toBe(mark());
-    expect(link).toHaveAttribute('href', '/home');
+    expect(link).toHaveAttribute('href', DESKTOP_HOME);
   });
 
-  it('a click on the mark lands on `/home`', () => {
+  it('a click on the mark lands home', () => {
     mount('/apps/crm/lead');
     fireEvent.click(mark());
-    expect(location()).toHaveAttribute('data-path', '/home');
+    expect(location()).toHaveAttribute('data-path', DESKTOP_HOME);
   });
 
   it('the app pill is drawn at every width — no breakpoint class hides it', () => {
@@ -240,7 +267,7 @@ describe('inside an app the product mark is the way home (objectui#12605)', () =
 });
 
 describe('`⌘⇧H` / `Ctrl+Shift+H` goes home from any app page (objectui#12605)', () => {
-  it('is advertised while the app bar is mounted, as ⌘⇧H', () => {
+  it('is advertised while an app page is mounted, as ⌘⇧H', () => {
     mount('/apps/crm/lead');
     expect(advertised()).toContainEqual({ id: 'go-home', chord: { key: 'h', mod: true, shift: true } });
   });
@@ -268,6 +295,13 @@ describe('`⌘⇧H` / `Ctrl+Shift+H` goes home from any app page (objectui#12605
     expect(location()).toHaveAttribute('data-path', '/apps/crm/lead');
   });
 
+  it('CONTROL — the app bar alone installs no chord: the layout does (objectstack#36112)', () => {
+    mount('/apps/crm/lead', { layoutShortcut: false });
+    expect(advertised().map((s) => s.id)).not.toContain('go-home');
+    fireEvent.keyDown(document.body, { key: 'H', shiftKey: true, metaKey: true });
+    expect(location()).toHaveAttribute('data-path', '/apps/crm/lead');
+  });
+
   it('CONTROL — Shift is part of the chord: ⌘H alone does nothing', () => {
     mount('/apps/crm/lead');
     fireEvent.keyDown(document.body, { key: 'h', metaKey: true });
@@ -279,7 +313,7 @@ describe('CONTROL — the home page draws the same mark and leaves the chord alo
   it('one mark, named and linked the same way; no `/` rule and no advertisement', () => {
     mount('/home');
     expect(screen.getByRole('link', { name: `${getProductName()} home` })).toBe(mark());
-    expect(mark()).toHaveAttribute('href', '/home');
+    expect(mark()).toHaveAttribute('href', DESKTOP_HOME);
     expect(mark()).toHaveAttribute('title', getProductName());
     expect(screen.queryByTestId('app-bar-home-separator')).not.toBeInTheDocument();
     expect(advertised().map((s) => s.id)).not.toContain('go-home');

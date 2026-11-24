@@ -255,7 +255,10 @@ describe('dogfood: reseed and purge refuse a package the restart refused to load
     // Control for the "unchanged" above: the same probes, on the same boot, move.
     expect(afterReseed.translationLoads - beforeReseed.translationLoads).toBe(boot1Loads);
     expect([typeof beforeReseed.seedDatasets, typeof afterReseed.seedDatasets]).toEqual(['number', 'number']);
-    expect((afterReseed.seedDatasets as number) - (beforeReseed.seedDatasets as number)).toBe(CRM_DATASETS);
+    // The reseed merges the package's datasets again under its id: they replace its
+    // entries on the shared list, so the list holds them once (#35109).
+    expect((afterReseed.seedDatasets as number) - (beforeReseed.seedDatasets as number)).toBe(0);
+    expect(beforeReseed.seedDatasets as number).toBeGreaterThanOrEqual(CRM_DATASETS);
     expect(purgeLoaded.status, JSON.stringify(purgeLoaded.body)).toBe(200);
     expect(purgeLoaded.body?.data).toMatchObject({ deleted: SEED_TOTAL, skipped: 0, errors: 0, withSampleData: false });
     expect(rowsAfterPurge).toBe(0);

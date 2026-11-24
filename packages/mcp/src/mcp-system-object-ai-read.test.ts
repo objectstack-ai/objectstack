@@ -172,19 +172,12 @@ describe('everything else about system objects stays refused (#32442)', () => {
   });
 });
 
-describe('the query tool names the "pending for me" filter shape (#32442)', () => {
-  it('query_records text carries the My Pending filter on sys_approval_request', async () => {
-    const body = { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} };
-    const runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
-    const req = new Request('http://localhost/api/v1/mcp', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-      body: JSON.stringify(body),
-    });
-    const res = await runtime.handleHttpRequest(req, { bridge: makeBridge(attestsOne), parsedBody: body });
-    const tools = ((await res.json()) as any).result.tools as Array<{ name: string; description: string }>;
-    const description = tools.find((t) => t.name === 'query_records')?.description ?? '';
-    expect(description).toContain('"sys_approval_request"');
-    expect(description).toContain('{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}');
+describe('the served skill names the "pending for me" filter shape (#32442)', () => {
+  it('SKILL.md carries the My Pending filter on sys_approval_request', () => {
+    // [#34689] Moved from query_records' tool text to the served skill: a
+    // worked example is teaching, which a client reads when it needs it.
+    const skill = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' }).renderSkill();
+    expect(skill).toContain('`sys_approval_request`');
+    expect(skill).toContain('{"status":"pending","pending_approvers":{"$contains":"{current_user_id}"}}');
   });
 });

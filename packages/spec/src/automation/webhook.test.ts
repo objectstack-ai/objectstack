@@ -97,7 +97,7 @@ describe('WebhookSchema', () => {
   });
 
   it('should accept different HTTP methods', () => {
-    const methods: Array<Webhook['method']> = ['POST', 'PUT', 'GET'];
+    const methods: Array<Webhook['method']> = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
     methods.forEach(method => {
       const webhook = WebhookSchema.parse({
@@ -117,6 +117,35 @@ describe('WebhookSchema', () => {
       url: 'https://example.com/webhook',
       method: 'TRACE',
     })).toThrow();
+  });
+
+  // GET is retired by name (ADR-0049 enforce-or-remove; ADR-0087 D3 entry
+  // `webhook-method-get-retired`): every delivery carries the event as its
+  // body, so a GET webhook never delivered. A schema refusal carries the issue
+  // `code` and `path` but no ADR-0112 `status` (that envelope belongs to the
+  // doors), so the pin is the code, the path and the prescription's first
+  // sentence; a misspelt method keeps zod's own message, never the retirement.
+  it("refuses method 'GET' by name with the prescription, and admits exactly the four body-carrying methods", () => {
+    const base = { name: 'test_webhook', object: 'account', triggers: ['create'], url: 'https://example.com/webhook' };
+
+    const refused = WebhookSchema.safeParse({ ...base, method: 'GET' });
+    expect(refused.success).toBe(false);
+    const issue = refused.error!.issues[0]!;
+    expect(issue.code).toBe('invalid_value');
+    expect(issue.path).toEqual(['method']);
+    expect(issue.message).toContain(
+      "`webhook.method: 'GET'` was removed in @objectstack/spec 18.6.0 (ADR-0049 enforce-or-remove) — every "
+      + 'delivery sends the event envelope as the request body, and a GET request carries no body, so a GET '
+      + 'webhook never delivered a single event.',
+    );
+    expect(issue.message).toContain('`POST` (the default), `PUT`, `PATCH` or `DELETE`');
+
+    const misspelt = WebhookSchema.safeParse({ ...base, method: 'TRACE' });
+    expect(misspelt.success).toBe(false);
+    expect(misspelt.error!.issues[0]!.message).not.toContain('was removed');
+
+    expect(WebhookSchema.shape.method.unwrap().options).toEqual(['POST', 'PUT', 'PATCH', 'DELETE']);
+    expect(WebhookSchema.parse(base).method).toBe('POST');
   });
 
   it('should accept multiple triggers', () => {

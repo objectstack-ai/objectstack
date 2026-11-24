@@ -540,6 +540,76 @@ describe('re-linking the references the delete cleared (ADR-0148 D2)', () => {
   });
 });
 
+describe('re-linking a READ-ONLY reference the delete cleared (ADR-0148 D2)', () => {
+  /**
+   * A stamp a system writes: a `readonly` `set_null` lookup. The delete's
+   * clear and the restore's re-link both run under the CALLER's context, so
+   * both reach the static read-only strip; both are the engine's referential
+   * write and ride its module-private channel, never `isSystem` and never the
+   * `__referentialFieldClear` context marker.
+   */
+  const stampedDeal = {
+    name: 'stamped_deal',
+    label: 'Stamped deal',
+    fields: {
+      id: text('id'),
+      stamped_account: { name: 'stamped_account', type: 'lookup' as const, reference: 'account', deleteBehavior: 'set_null', readonly: true },
+      organization_id: text('organization_id'),
+    },
+  };
+  const isDropLine = (args: unknown[]) => /DROPPED|read-only \(readonlyWhen\)/.test(String(args[0]));
+
+  async function deleteStampedAcme() {
+    const made = await makeEngine();
+    const { engine, driver } = made;
+    engine.registry.registerObject(stampedDeal as any, '__test__');
+    const warn = vi.spyOn((engine as any).logger, 'warn');
+    driver.seed('account', ACME);
+    driver.seed('stamped_deal', { id: 'sd1', stamped_account: 'acc1', organization_id: 'org_1' });
+    await engine.delete('account', { where: { id: 'acc1' }, ...ORG1_USER });
+    expect(driver.rowOf('stamped_deal', 'sd1')?.stamped_account, 'the delete cleared the read-only stamp').toBeNull();
+    return { ...made, warn, entryId: entryOf(driver, 'acc1').id as string };
+  }
+
+  it('the reference holds the restored id again, counted once, with no drop line', async () => {
+    const { engine, driver, warn, entryId } = await deleteStampedAcme();
+
+    const result = await engine.restore(entryId, ORG1_USER);
+
+    expect(result?.relinked).toBe(1);
+    expect(driver.rowOf('stamped_deal', 'sd1')?.stamped_account).toBe('acc1');
+    expect(warn.mock.calls.filter(isDropLine), 'neither the clear nor the re-link is a forged caller write').toEqual([]);
+  });
+
+  it('a re-link that does not land is not counted', async () => {
+    const { engine, driver, entryId } = await deleteStampedAcme();
+    // A holder hook that keeps the stamp empty: the re-link's update answers
+    // success, and the row does not hold the id.
+    engine.on('beforeUpdate', 'stamped_deal', async (ctx: any) => { ctx.input.data.stamped_account = null; });
+
+    const result = await engine.restore(entryId, ORG1_USER);
+
+    expect(driver.rowOf('stamped_deal', 'sd1')?.stamped_account).toBeNull();
+    expect(result?.relinked, 'relinked counts what the row holds, not what was asked').toBe(0);
+  });
+
+  it("a caller update carrying the option's shape through the normal door is still stripped", async () => {
+    const { engine, driver, warn } = await deleteStampedAcme();
+    driver.seed('account', { id: 'acc9', name: 'Other', code: 'OTHER', organization_id: 'org_1' });
+    warn.mockClear();
+    const shape = { object: 'stamped_deal', id: 'sd1', field: 'stamped_account' };
+
+    await engine.update('stamped_deal', { id: 'sd1', stamped_account: 'acc9' }, {
+      context: { ...ORG1_USER.context, __referentialFieldClear: true },
+      [Symbol('objectql.referentialClear')]: shape,
+      [Symbol.for('objectql.referentialClear')]: shape,
+    } as any);
+
+    expect(driver.rowOf('stamped_deal', 'sd1')?.stamped_account, 'no look-alike key opens the channel').toBeNull();
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes("'stamped_account'") && String(c[0]).includes('DROPPED'))).toHaveLength(1);
+  });
+});
+
 describe('the four refusals (409, ADR-0148 D2): nothing is written and the entry stays', () => {
   it('RESTORE_PACKAGE_UNINSTALLED: an object of the entry is no longer registered', async () => {
     const { engine, driver } = await makeEngine();
@@ -745,9 +815,13 @@ describe('the four refusals (409, ADR-0148 D2): nothing is written and the entry
 describe('RESTORE_UNIQUE_VALUE_TAKEN names an organization-scoped unique field and its label', () => {
   const INVOICE = { id: 'inv1', invoice_no: 'INV-0001', series: 'A', organization_id: 'org_1' };
   const ZH: Record<string, string> = { 'objects.invoice.fields.invoice_no.label': '发票号' };
+  // [#34030] The label is read off `getTranslations`, as the metadata route reads it.
   const i18n = {
     t: (key: string, locale: string) => (locale === 'zh-CN' && ZH[key]) || key,
     getLocales: () => ['en', 'zh-CN'],
+    getTranslations: (locale: string) => (locale === 'zh-CN'
+      ? { objects: { invoice: { fields: { invoice_no: { label: '发票号' } } } } }
+      : {}),
   };
 
   async function deleteInvoice(engine: ObjectQL, driver: any) {

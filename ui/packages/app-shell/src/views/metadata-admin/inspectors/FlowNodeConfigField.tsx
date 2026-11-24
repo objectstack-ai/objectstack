@@ -11,6 +11,7 @@ import { isUnsetFieldValue, unsetNoticeApplies } from './flow-node-config.js';
 import type { FlowConfigField, InactiveRetainedKind } from './flow-node-config.js';
 import { t, tFormat } from '../i18n.js';
 import { useObjectFields } from '../previews/useObjectFields.js';
+import { useObjectDisplayName } from './ObjectPicker.js';
 import { WIDGETS, OBJECTUI_SECRET_MASK } from '../widgets.js';
 import {
   InspectorNumberField,
@@ -36,7 +37,9 @@ import { FlowExprIssue } from './FlowExprIssue.js';
 import { FlowFieldHelp } from './FlowFieldHelp.js';
 import {
   isEditableValueEnvelope,
+  isRecordFieldValueSlot,
   isValueEnvelopeSlot,
+  recordFieldValueRefusal,
   valueEnvelopeRefusal,
   writeValueEnvelope,
 } from './flow-value-envelope.js';
@@ -122,6 +125,8 @@ function FieldValueMapField({
 }: FlowKeyValueFieldProps & { objectName: string; byLabel: boolean; locale?: string }) {
   // The same field source the reference picker's `object-field` kind reads.
   const { fields } = useObjectFields(objectName || undefined);
+  // The hint names the object by its label, not its machine name.
+  const objectLabel = useObjectDisplayName(objectName || undefined);
   const keyOptions = React.useMemo(
     () =>
       fields.map((f) => ({
@@ -139,7 +144,7 @@ function FieldValueMapField({
       keysByLabel={byLabel}
       keyHint={
         objectName
-          ? tFormat('engine.inspector.reference.fieldsOf', locale, { object: objectName })
+          ? tFormat('engine.inspector.reference.fieldsOf', locale, { object: objectLabel })
           : t('engine.inspector.fieldMap.chooseObject', locale)
       }
     />
@@ -212,10 +217,12 @@ function TriggeringRecordTarget({
   disabled?: boolean;
   locale?: string;
 }) {
+  // The sentence names the object by its label, not its machine name.
+  const objectLabel = useObjectDisplayName(objectName);
   if (isTriggeringRecordFilter(value)) {
     return (
       <p className="text-[11px] leading-snug text-muted-foreground" data-testid="flow-triggering-record-target">
-        {tFormat('engine.inspector.flowNode.triggeringRecord.active', locale, { object: objectName })}
+        {tFormat('engine.inspector.flowNode.triggeringRecord.active', locale, { object: objectLabel })}
       </p>
     );
   }
@@ -233,7 +240,7 @@ function TriggeringRecordTarget({
         {t('engine.inspector.flowNode.triggeringRecord.use', locale)}
       </Button>
       <p className="text-[11px] leading-snug text-muted-foreground">
-        {tFormat('engine.inspector.flowNode.triggeringRecord.hint', locale, { object: objectName })}
+        {tFormat('engine.inspector.flowNode.triggeringRecord.hint', locale, { object: objectLabel })}
       </p>
     </div>
   );
@@ -798,7 +805,13 @@ export function FlowNodeConfigField({ field, value, onCommit, disabled, locale, 
           // objectui#12101 — a map whose every value is a flow text slot (http
           // `headers`) renders `{{ }}` holes in each value cell.
           valueMode: field.refMode === 'hole' ? 'hole' : undefined,
-          valueRefusal: isFilterOperandSlot(context?.node?.type, field.path) ? filterOperandRefusal : undefined,
+          // A record write's `fields` value may also be a text envelope, so
+          // its cells are judged by the spec's record-field rule.
+          valueRefusal: isFilterOperandSlot(context?.node?.type, field.path)
+            ? filterOperandRefusal
+            : isRecordFieldValueSlot(context?.node?.type, field.path)
+              ? recordFieldValueRefusal
+              : undefined,
           // objectstack#33838 — a map the run judges against a closed key set
           // (a connector action's declared inputs): each other key is marked
           // as refused, and the declared keys no sibling field types are

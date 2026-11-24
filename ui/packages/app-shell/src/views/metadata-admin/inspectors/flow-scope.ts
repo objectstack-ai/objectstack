@@ -42,6 +42,7 @@
  * `flow-ref-check`'s messages do; an absent locale reads the en rows.
  */
 
+import { FIELD_GROUP_SYSTEM_FIELDS } from '@objectstack/spec/data';
 import { t, tFormat } from '../i18n.js';
 
 /** Which group a reference belongs to (drives the picker's section headers). */
@@ -479,27 +480,55 @@ export function resolveEdgeScope(
 }
 
 /**
+ * Is this one of the platform's own columns rather than a field the author's
+ * business declared (objectstack#34818 item 3)? The served definition's
+ * `system` flag (`useObjectFields`), or a name in the spec's injected
+ * bookkeeping set (`FIELD_GROUP_SYSTEM_FIELDS`: audit provenance, tenancy,
+ * soft delete) for a catalog that carries no flag. `id` is the platform's too.
+ */
+export function isPlatformField(field: { name: string; system?: boolean }): boolean {
+  return field.system === true || field.name === 'id' || FIELD_GROUP_SYSTEM_FIELDS.has(field.name);
+}
+
+/**
+ * The fields in the order an author looks for them: the business's own
+ * fields first, the platform's columns after, each part in catalog order
+ * (objectstack#34818 item 3). The reference picker and the edge condition's
+ * rows both list fields in this order.
+ */
+export function businessFieldsFirst<F extends { name: string; system?: boolean }>(fields: ReadonlyArray<F>): F[] {
+  return [...fields.filter((f) => !isPlatformField(f)), ...fields.filter((f) => isPlatformField(f))];
+}
+
+/**
  * Expand a trigger object's fields into per-field refs — `record.<field>`
  * downstream, bare `<field>` on the start node — given an already-fetched field
  * list. Split out from {@link resolveFlowScope} so it is unit-testable without a
  * metadata client.
+ *
+ * objectstack#34818 item 3 — business fields come first ({@link
+ * businessFieldsFirst}), and a field with a label is offered BY that label:
+ * `label` is what the picker shows as its main text, the token the muted
+ * spelling beside it. A field without a label keeps the token as its label and
+ * its type as the detail.
  */
 export function triggerFieldRefs(
   trigger: TriggerScope,
-  fields: ReadonlyArray<{ name: string; label?: string; type?: string }>,
+  fields: ReadonlyArray<{ name: string; label?: string; type?: string; system?: boolean }>,
   locale?: string,
 ): ScopeRef[] {
   const out: ScopeRef[] = [];
-  for (const f of fields) {
-    if (!f?.name) continue;
+  for (const f of businessFieldsFirst(fields.filter((x) => !!x?.name))) {
     const token = `${trigger.fieldPrefix}${f.name}`;
-    const detail = f.label && f.label !== f.name ? f.label : f.type;
-    out.push({ token, label: token, detail, group: 'trigger' });
+    const named = f.label && f.label !== f.name ? f.label : undefined;
+    out.push({ token, label: named ?? token, detail: named ? undefined : f.type, group: 'trigger' });
     if (trigger.includePrevious) {
+      const prior = `previous.${f.name}`;
+      const detail = named ?? f.type;
       out.push({
-        token: `previous.${f.name}`,
-        label: `previous.${f.name}`,
-        detail: detail ? tFormat('engine.flowScope.detail.priorOf', locale, { detail }) : t('engine.flowScope.detail.priorValue', locale),
+        token: prior,
+        label: named ? tFormat('engine.flowScope.detail.priorOf', locale, { detail: named }) : prior,
+        detail: named ? undefined : detail ? tFormat('engine.flowScope.detail.priorOf', locale, { detail }) : t('engine.flowScope.detail.priorValue', locale),
         group: 'trigger',
       });
     }

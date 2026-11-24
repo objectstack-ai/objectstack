@@ -45,7 +45,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Credential Use",
           scim_refused: "SCIM Refused",
           audit_signing_key_change: "Audit Signing Key Change",
-          dataset_query: "Dataset Query"
+          dataset_query: "Dataset Query",
+          scim_manager_unresolved: "SCIM Manager Unresolved"
         }
       },
       user_id: {
@@ -264,6 +265,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "Edited At"
+      },
+      is_resolved: {
+        label: "Resolved",
+        help: "Whether the thread this top-level comment starts is resolved; refused on a reply"
+      },
+      resolved_by: {
+        label: "Resolved By",
+        help: "Who resolved the thread — stamped by the platform, never written by authors"
+      },
+      resolved_at: {
+        label: "Resolved At",
+        help: "When the thread was resolved — stamped by the platform, never written by authors"
       },
       created_at: {
         label: "Created At"

@@ -226,7 +226,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       digest: {
         label: "Digest",
-        help: "Collect these notifications into one summary instead of sending each as it arrives: daily sends it at midnight, weekly on Monday at midnight, none sends each one right away. Critical notifications are always sent at once. Takes effect on a preference whose channel is * (all channels).",
+        help: "Collect these notifications into one summary instead of sending each as it arrives: daily sends it at midnight, weekly on Monday at midnight, none sends each one right away. Critical notifications are always sent at once. Takes effect on a preference whose channel is * (all channels). Left empty, the next preference decides: the default for all users, then none.",
         options: {
           none: "none",
           daily: "daily",
@@ -235,7 +235,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       quiet_hours: {
         label: "Quiet Hours",
-        help: "A daily window when notifications are held and delivered when it ends, for example { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Times are HH:MM in that time zone (UTC when tz is left out), and the window may run past midnight. Critical notifications are not held. Takes effect on a preference whose channel is * (all channels)."
+        help: "A daily window when notifications are held and delivered when it ends, for example { \"tz\": \"Europe/Berlin\", \"start\": \"22:00\", \"end\": \"07:00\" }. Times are HH:MM in that time zone (UTC when tz is left out), and the window may run past midnight. Critical notifications are not held. Takes effect on a preference whose channel is * (all channels). { \"off\": true } means no quiet hours; left empty, the next preference decides: the default for all users, then none."
       },
       created_at: {
         label: "Created At"
@@ -487,6 +487,64 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Created At"
+      }
+    }
+  },
+  sys_channel_account: {
+    label: "Channel Account",
+    pluralLabel: "Channel Accounts",
+    description: "An organization's install of a chat app, such as its own Slack app, with the bot token it was issued.",
+    fields: {
+      channel_id: {
+        label: "Channel"
+      },
+      display_name: {
+        label: "Workspace"
+      },
+      external_id: {
+        label: "Workspace ID"
+      },
+      bot_token: {
+        label: "Bot Token"
+      },
+      status: {
+        label: "Status",
+        options: {
+          active: "Active",
+          revoked: "Revoked"
+        }
+      }
+    }
+  },
+  sys_channel_user_link: {
+    label: "Channel User Link",
+    pluralLabel: "Channel User Links",
+    description: "A person's link to their own user in a chat workspace: proposed by email match, delivering once they confirm it.",
+    fields: {
+      account_id: {
+        label: "Account"
+      },
+      user_id: {
+        label: "User"
+      },
+      external_user_id: {
+        label: "Chat User ID"
+      },
+      external_display_name: {
+        label: "Chat User Name"
+      },
+      state: {
+        label: "State",
+        options: {
+          proposed: "Proposed",
+          confirmed: "Confirmed"
+        }
+      },
+      confirmed_at: {
+        label: "Confirmed At"
+      },
+      proposal_email_hash: {
+        label: "Proposal Email Hash"
       }
     }
   }

@@ -171,6 +171,9 @@ const RecordLink: React.FC<{
       <a
         href={href}
         data-testid={testId}
+        // The one link a single click follows in a select-first grid; every
+        // other link a cell draws only selects it (objectstack#36015).
+        data-opens-on-click=""
         className={cellClass}
         onClick={(e) => {
           // The row underneath carries its own click handler (open the record,

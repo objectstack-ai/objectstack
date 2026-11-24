@@ -1,5 +1,153 @@
 # @objectstack/service-settings
 
+## 18.6.0
+
+### Patch Changes
+
+- 64c4285: fix(plugin-email): a host's own mail transport now reads as in use on `GET /api/settings/mail` (`live.provider` is `{ value: null, source: 'environment' }`)
+  
+  Clause-②: yes (widening) — the served `live` entry of `GET /api/settings/:namespace` now also admits `{ value: null, source: 'environment' }`; every entry served before is served unchanged
+  Metadata-protocol: none
+  
+  A transport the host application hands to `@objectstack/plugin-email` that no `provider` option names (a plain `IEmailTransport`, such as a hosted platform's mail channel) used to leave `live.provider` unstated, so the first-run checklist read mail as not set up while mail was being delivered. The plugin now states it as `{ value: null, source: 'environment' }`: in use, supplied by the environment or host, named by no option.
+  
+  - `@objectstack/spec`: `SettingsNamespacePayloadSchema.live` documents the reading. A non-null `value` is still always one of the key's options. `value` is `null` when `source` is `'none'` (nothing in use) or `'environment'` (in use, named by no option). Read whether something is in use from `source`, never from `value === null`. `'settings'` always names an option. The schema's shape is unchanged.
+  - `@objectstack/service-settings`: the live-value judge serves `environment` with a `null` value. `settings` with a `null` value is still dropped, and so is any entry on a key with no option table.
+  - `@objectstack/plugin-email`: the stock transports (`smtp`, `resend`, `postmark`) read as before. A transport swapped in through `EmailService.setTransport` is still not stated.
+  
+  A reader that took `value === null` to mean "nothing is in use" should read `source` instead: `source: 'none'` is the only "nothing is in use".
+- d6d0090: fix(i18n): Setup no longer shows five audit actions, or the AI settings help for conversation titles and two provider models, in English under a translated locale
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The audit actions `package_unmanaged_import`, `credential_use`, `scim_refused`, `audit_signing_key_change` and `dataset_query` were still the English extract fill in all ten translated locales, so the audit log, its detail and the System Overview "Audit Events by Action" chart and table named them in English (for example "Credential Use" under zh-CN). They are now translated in zh-CN, zh-Hant, ja-JP, ko, es-ES, fr, de, pt-BR, ru and ar.
+  
+  On the AI settings page, the help under the conversation-title toggle ("When on, the LLM is asked to produce a short title …") had no translation in any locale, and neither had the model help of the DashScope and Cloudflare AI Gateway providers; zh-CN also lacked the OpenRouter API key hint. All of them are now translated. Only translation values change: no setting, key or audit action is added or removed.
+- 021abd4: fix(settings)!: a cloud-managed environment does not offer its file storage or AI provider settings
+  
+  Clause-②: no (narrowing) — narrowed, in a cloud-managed process (`OS_CLOUD_MANAGED=1`) only: `GET /api/settings` no longer lists `storage`, and serves `ai` without its provider, per-provider model and credential, generation-default (`temperature`, `max_tokens`, `request_timeout_ms`) and embedder keys; `GET` / `PUT /api/settings/storage` and `POST /api/settings/storage/:actionId` answer `409 RESOURCE_CONFLICT` with `details.managedBy: 'platform'`; `GET /api/settings/ai` serves the conversation-title and observability keys only; a `PUT /api/settings/ai` that names a hidden key answers the same 409 and writes nothing; `POST /api/settings/ai/test`, `ai/test_embedder` and `ai/reset` answer the same 409; the data API's reads of `sys_setting`, `sys_platform_setting` and their audit objects leave out every `storage` row and every row of a hidden `ai` key for a caller that is not the system; the Setup entry `nav_settings_storage` carries `visible: 'features.cloudManaged != true'`. A self-hosted deployment answers exactly as before.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the hosted settings doors or the storage / AI settings pages.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: the change is which settings a cloud-managed runtime's doors serve. Stored rows are untouched and the settings registry stays whole, so there is nothing for a migration to rewrite. -->
+  
+  **BREAKING** for a caller of a cloud-managed environment: its file storage and its AI provider are provided and configured by the hosting platform, so the settings doors no longer show or change them. The registry stays whole: the storage and AI services, which read these settings in process, keep reading every value. The refusal is `409 RESOURCE_CONFLICT`, as at every other cloud-managed door, with `details.managedBy: 'platform'` so a console can tell it apart from `404 UNKNOWN_NAMESPACE`.
+  
+  What to do: nothing on a self-hosted deployment. A client of a hosted environment that read or wrote `storage.*`, or the hidden `ai.*` keys, stops doing so: those values are the hosting platform's.
+- 43dd565: fix(console): the console asks the deployment notice, install-local and a page's lookup targets only of a host that serves them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A hosted environment's console asked three routes its host does not serve, and each answered an error in the network log on every load.
+  
+  - **The deployment notice.** `GET /api/v1/runtime/config` now serves `features.deploymentNotice`. It is true exactly when the deployment notice is composed on this host: `SettingsServicePlugin` registers the notice's door as the kernel service `settings.deployment-notice` when it mounts the settings routes with it, and `RuntimeConfigPlugin` reads that registration per request. A host that mounts the settings routes itself, with no door, answers `GET /api/settings/deployment/notice` with `503` and now reports `false`. The route table is the same on both hosts, so it cannot answer this. A host's `resolveFeatures` policy cannot override the key. The console's home and System Overview read the notice only when the key is true. A runtime that serves no key is older than this change and still serves the notice, so the console keeps reading it there; only an explicit `false` stops the read.
+  - **Install-local on the marketplace catalog.** The catalog's side load reads `GET /api/v1/marketplace/install-local` only when `features.installLocal` is true, the gate the package page already reads. A host without it no longer answers a `404` on every load and Refresh, and the catalog list draws as before.
+  - **A page's lookup targets.** In an app with no package, a page and an object's route asked each lookup target's definition by name, and a target the host does not register (`sys_business_unit` on the control plane's Members page) answered `404` on every open. The targets the route has not asked already are now asked first in one `GET /api/v1/meta/object?names=` read, which leaves an absent object out, and only the ones it serves are then read by name. A registered target still resolves as before. An app with a package reads its lookup targets as before.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

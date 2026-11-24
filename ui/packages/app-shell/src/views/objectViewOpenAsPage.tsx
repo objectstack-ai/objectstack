@@ -7,89 +7,66 @@
  */
 
 /**
- * The name cell's ↗ on the Console object list (objectstack#26681): open this
- * row's record as the full page, whatever the reader's drawer | split
- * preference, without changing it.
+ * The name cell's 「在侧边打开」 icon on the Console object list
+ * (objectstack#35854, maintainer 2026-11-20: 「鼠标滑到…行，右侧显示一个右侧打开
+ * 的图标，点击才从右侧打开，否则都是进全屏打开。这样就不需要任何设置」).
  *
- * A row of an object that opens its records in the drawer opens the drawer
- * (or the pane beside the list, by the reader's preference); the record page
- * itself is one ↗ away. It is drawn after the row's record link — the name the
- * row opens from — through the grid's host channel (`recordLinkAdornment`),
- * and only for a drawer-mode object: a row of a `page` object already opens
- * the page, and a `none` list opens nothing.
- *
- * **The URL is not built here.** The list page publishes its record builder on
- * `RelatedRecordActionsContext` (`listRecordActionsValue`): `recordHref` is the
- * anchor's href and `openRecord` the SPA navigation a plain left click takes —
- * the record route, with the list as the record's origin. A host that cannot
- * route to the record answers `null`, and nothing is drawn. A host that
- * passes `onOpen` takes the plain click itself: the console's object list
- * hands the page the way back to this list with the record open, which the
- * page offers as 「Collapse to drawer」 (objectstack#27545).
+ * The record's name opens the full page; this icon, drawn inside the name
+ * cell after the name through the grid's host channel (`recordLinkAdornment`),
+ * opens the record in the side drawer over the list, which stays. It takes no
+ * column of its own.
  *
  * Hidden by OPACITY until the row is hovered or holds focus, so it keeps its
- * Tab stop and its name; a coarse pointer, which has no hover, always shows
- * it. This is deliberately NOT the row ⋯ menu's treatment: that trigger
- * (`RowActionMenu`, `data-table`'s row actions) is drawn at rest in a muted
- * tone because an `Actions` header over empty-looking cells reads as "no
- * actions" (objectstack#28871, #28923). This ↗ is an extra beside the name,
- * under no header of its own, and drawn on every row it would crowd the name
- * column, so it stays hover-revealed.
+ * Tab stop and its name. A coarse pointer (touch), which has no hover, gets no
+ * icon at all: there the name opens the page and that is the one way
+ * (objectstack#35854 item 7). This is deliberately NOT the row ⋯ menu's
+ * treatment: that trigger (`RowActionMenu`, `data-table`'s row actions) is
+ * drawn at rest in a muted tone because an `Actions` header over
+ * empty-looking cells reads as "no actions" (objectstack#28871, #28923). This
+ * icon is an extra beside the name, under no header of its own, and drawn on
+ * every row it would crowd the name column, so it stays hover-revealed.
  */
 
-import { ArrowUpRight } from 'lucide-react';
-import { useRelatedRecordActions } from '@object-ui/react';
+import { PanelRight } from 'lucide-react';
 
-const OPEN_AS_PAGE_CLASS =
+const OPEN_IN_PANEL_CLASS =
     'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground '
     + 'opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 '
-    + 'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:opacity-100';
+    + 'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:hidden';
 
-export function OpenAsPageLink({
-    objectName,
+export function OpenInSidePanelButton({
     recordId,
     label,
     onOpen,
 }: {
-    objectName: string;
     recordId: string | number;
-    /** The tooltip and accessible name: 「整页打开」. */
+    /** The tooltip and accessible name: 「在侧边打开」. */
     label: string;
-    /** The plain left click, in place of the host's `openRecord`. */
-    onOpen?: (recordId: string | number) => void;
+    /** Open the record in the side drawer over the list. */
+    onOpen: (recordId: string | number) => void;
 }) {
-    const host = useRelatedRecordActions();
-    const href = host?.recordHref?.(objectName, recordId) ?? null;
-    if (href === null || !host?.openRecord) return null;
-    const hostOpenRecord = host.openRecord;
-    const openRecord = onOpen ? () => onOpen(recordId) : () => hostOpenRecord(objectName, recordId);
     return (
-        <a
-            href={href}
+        <button
+            type="button"
             aria-label={label}
             title={label}
-            className={OPEN_AS_PAGE_CLASS}
-            data-testid="record-open-as-page"
+            className={OPEN_IN_PANEL_CLASS}
+            data-testid="record-open-in-panel"
             onClick={(e) => {
-                // The row under it opens the drawer on a click: following this
-                // link must never also do that.
+                // The name beside it opens the page on a click, and the row
+                // under it selects: this click is the icon's alone.
                 e.stopPropagation();
-                // A modifier or non-primary click belongs to the browser (a new
-                // tab of the same record page), as on the name's own link.
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
                 e.preventDefault();
-                openRecord();
+                onOpen(recordId);
             }}
             onKeyDown={(e) => {
-                // Enter is the anchor's own activation (the browser turns it into
-                // the click above). The grid cell around it reads Enter as "edit
-                // this cell" in inline-edit mode and would cancel that click, so
-                // the key stops here.
-                if (e.key === 'Enter') e.stopPropagation();
+                // Enter and Space are the button's own activation. The grid
+                // cell around it reads Enter as "edit this cell" in inline-edit
+                // mode and would cancel that click, so the key stops here.
+                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
             }}
         >
-            <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-        </a>
+            <PanelRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
     );
 }
-

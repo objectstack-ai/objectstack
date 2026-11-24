@@ -7,8 +7,9 @@
  * Before this, a plain write opened no unit of work, so a throwing
  * `afterInsert` refused the caller while the row, and the `ctx.api` write an
  * earlier hook made, stayed stored. The write door now opens a unit for exactly
- * that case (`inAfterAbortUnit`); every other write opens none, which the
- * `begun` ledger below measures.
+ * that case (`inAfterAbortUnit`), and since #34412 for a metadata-bound
+ * `before*` hook too (the last describe); every other write opens none, which
+ * the `begun` ledger below measures.
  *
  * The driver rolls back for real (a snapshot per transaction): a stub whose
  * `rollback()` is a no-op cannot tell "wrapped" from "not wrapped".
@@ -120,11 +121,11 @@ describe('#22782 — an aborting after* hook rolls its write back', () => {
     expect(driver.begun).toHaveLength(0);
   });
 
-  it('CONTROL a throwing before* hook — refused, nothing stored, no unit opened', async () => {
+  it('a throwing before* hook — refused, nothing stored; the unit its chain opens rolls back (#34412)', async () => {
     const { engine, driver } = await makeEngine([hook('veto', ['beforeInsert'], boom)]);
     await expect(engine.insert('case', { name: 'c1' })).rejects.toThrow('refused by the hook');
     expect(driver.rowsOf('case')).toEqual([]);
-    expect(driver.begun).toHaveLength(0);
+    expect([driver.begun.length, driver.rolledBack.length]).toEqual([1, 1]);
   });
 
   it('CONTROL inside a caller-opened transaction() — it joins (one unit), and the caller decides', async () => {
@@ -235,5 +236,87 @@ describe('#22856 — an after* hook carrying a condition rolls its write back wh
     await engine.insert('case', { name: 'c1' }, { context: { isSystem: true, skipAutomations: true } as any });
     expect(driver.rowsOf('case')).toMatchObject([{ name: 'c1' }]);
     expect(driver.begun).toHaveLength(0);
+  });
+});
+
+/**
+ * #34412 — a `before*` hook that writes through `ctx.api` makes a write of its
+ * own before the outer row is stored. A refusal later in the same write (a
+ * declared validation, a later `before*` hook) used to leave that side write
+ * stored, because a single write opened no unit unless an aborting `after*`
+ * hook existed. A metadata-bound `before*` hook now opens the door's unit too,
+ * so the refusal rolls the side write back with the write.
+ */
+describe('#34412 — a refused write rolls back the ctx.api write its before* hook made', () => {
+  /** `case` with a declared validation that refuses `hours > 24` — the card's `crm_time_entry` rule. */
+  async function makeHoursEngine(hooks: Hook[], opts: { transactional?: boolean } = {}) {
+    const made = await makeEngine([], opts);
+    made.engine.registry.registerObject({
+      ...obj('case', { hours: { name: 'hours', type: 'number' } }),
+      validations: [{ name: 'max_hours', type: 'script', condition: 'record.hours > 24', message: 'hours must be 24 or less', severity: 'error' }],
+    } as any, '__test__');
+    bindHooksToEngine(made.engine, hooks, { packageId: 'app:t', logger: { debug() {}, info() {}, warn() {}, error() {} } as any });
+    return made;
+  }
+  /** The card's hook: it creates a row on another object through `ctx.api`. */
+  const sideWriter = (events: string[]) =>
+    hook('side_writer', events, (ctx) => ctx.api.object('note').insert({ name: `from-${ctx.event}` }), { priority: 10 });
+  const refusal = (p: Promise<unknown>) => p.then(() => null, (e) => e);
+
+  it('beforeInsert writes a note, the declared validation refuses the row: the note is absent', async () => {
+    const { engine, driver } = await makeHoursEngine([sideWriter(['beforeInsert'])]);
+    expect(await refusal(engine.insert('case', { name: 'c1', hours: 30 }))).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(driver.rowsOf('case')).toEqual([]);
+    expect(driver.rowsOf('note')).toEqual([]);
+    expect([driver.begun.length, driver.rolledBack.length]).toEqual([1, 1]);
+  });
+
+  it('beforeUpdate writes a note, the declared validation refuses the patch: the note is absent, the row unchanged', async () => {
+    const { engine, driver } = await makeHoursEngine([sideWriter(['beforeUpdate'])]);
+    const row = await engine.insert('case', { name: 'c1', hours: 3 });
+    expect(await refusal(engine.update('case', { hours: 30 }, { where: { id: row.id } } as any))).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(driver.rowsOf('case')).toMatchObject([{ id: row.id, hours: 3 }]);
+    expect(driver.rowsOf('note')).toEqual([]);
+  });
+
+  it('beforeDelete writes a note, a later beforeDelete hook refuses: the note is absent, the row kept', async () => {
+    const { engine, driver } = await makeHoursEngine([sideWriter(['beforeDelete']), hook('veto', ['beforeDelete'], boom, { priority: 20 })]);
+    const row = await engine.insert('case', { name: 'c1', hours: 3 });
+    expect(await refusal(engine.delete('case', { where: { id: row.id } } as any))).toMatchObject({ message: expect.stringContaining('refused by the hook') });
+    expect(driver.rowsOf('case')).toMatchObject([{ id: row.id }]);
+    expect(driver.rowsOf('note')).toEqual([]);
+  });
+
+  it('CONTROL the write succeeds: the row and the note are both stored, the unit commits', async () => {
+    const { engine, driver } = await makeHoursEngine([sideWriter(['beforeInsert'])]);
+    await engine.insert('case', { name: 'c1', hours: 3 });
+    expect(driver.rowsOf('case')).toMatchObject([{ name: 'c1', hours: 3 }]);
+    expect(driver.rowsOf('note')).toMatchObject([{ name: 'from-beforeInsert' }]);
+    expect([driver.begun.length, driver.rolledBack.length]).toEqual([1, 0]);
+  });
+
+  it('CONTROL inside a caller-opened transaction() — it joins (one unit), and the caller decides', async () => {
+    const { engine, driver } = await makeHoursEngine([sideWriter(['beforeInsert'])]);
+    await engine.transaction(async (trx: any) => {
+      expect(await refusal(engine.insert('case', { name: 'c1', hours: 30 }, { context: trx }))).toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+    expect([driver.begun.length, driver.rolledBack.length]).toEqual([1, 0]);
+    expect(driver.rowsOf('note')).toMatchObject([{ name: 'from-beforeInsert' }]);
+  });
+
+  it('CONTROL a driver with no transactions keeps the side write, as hookStoppedRefusal says, and warns nothing', async () => {
+    const { engine, driver, warns } = await makeHoursEngine([sideWriter(['beforeInsert'])], { transactional: false });
+    expect(await refusal(engine.insert('case', { name: 'c1', hours: 30 }))).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(driver.rowsOf('case')).toEqual([]);
+    expect(driver.rowsOf('note')).toMatchObject([{ name: 'from-beforeInsert' }]);
+    expect(warns.filter((w) => w.includes('transaction'))).toEqual([]);
+  });
+
+  it('CONTROL a code-registered beforeInsert opens no unit — the #22782 line', async () => {
+    const { engine, driver } = await makeHoursEngine([]);
+    engine.registerHook('beforeInsert', async (ctx: any) => { await ctx.api.object('note').insert({ name: 'from-code' }); }, { object: 'case' });
+    expect(await refusal(engine.insert('case', { name: 'c1', hours: 30 }))).toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(driver.begun).toHaveLength(0);
+    expect(driver.rowsOf('note')).toMatchObject([{ name: 'from-code' }]);
   });
 });

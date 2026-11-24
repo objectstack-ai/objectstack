@@ -33,6 +33,7 @@ import type { DataSource, ListViewSchema } from '@object-ui/types';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { ListView } from '../ListView';
+import { openAdvancedSort } from './conditionPanels';
 
 const OBJECT = 'fls_ticket';
 
@@ -55,6 +56,7 @@ function answer(fields: MePermissionsAuthenticatedResponse['fields']): MePermiss
     userId: 'u1',
     tenantId: null,
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     positions: [],
     permissionSets: ['fls_member'],
     objects: { [OBJECT]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false } },
@@ -138,7 +140,7 @@ async function optionsOf(trigger: HTMLElement): Promise<string[]> {
  */
 async function openSortOptions(): Promise<string[]> {
   fireEvent.click(await screen.findByRole('button', { name: /^sort/i }));
-  await screen.findByText('Sort Records');
+  await openAdvancedSort();
   let labels: string[] = [];
   await waitFor(async () => {
     labels = await optionsOf(sortRowTriggers()[0]);

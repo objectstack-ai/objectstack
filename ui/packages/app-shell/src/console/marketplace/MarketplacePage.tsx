@@ -120,9 +120,9 @@ function PackageCardHeader({
     <CardHeader className="flex flex-row items-start gap-3 pb-2">
       <PackageIcon iconUrl={iconUrl} displayName={displayName} manifestId={manifestId} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <CardTitle className="text-[13px] leading-snug line-clamp-2 break-words">{displayName}</CardTitle>
+        <CardTitle className="text-sm leading-snug line-clamp-2 break-words">{displayName}</CardTitle>
         {badge}
-        <CardDescription className="text-[11px]">
+        <CardDescription className="text-xs">
           <code className="flex font-mono" title={manifestId}>
             <span className="min-w-0 truncate">{head}</span>
             {suffix ? <span className="max-w-[calc(100%_-_4ch)] shrink-0 truncate">{suffix}</span> : null}
@@ -469,8 +469,15 @@ function MarketplacePageBody() {
           (resp) => ({ resp, failure: null }),
           (e: unknown) => ({ resp: null, failure: toLoadFailure(e) }),
         ),
+        // Install-local is asked only where the runtime mounts it, the gate the
+        // package page reads too: elsewhere it is a 404 on every load and Refresh
+        // (objectstack#34187), and the ledger it would list is empty.
         withSideLoads
-          ? Promise.all([listLocalInstalls(), listOrgPackages(), listInstalledPackages()])
+          ? Promise.all([
+            getRuntimeConfig().features.installLocal ? listLocalInstalls() : Promise.resolve([]),
+            listOrgPackages(),
+            listInstalledPackages(),
+          ])
           : null,
       ]);
       if (!current()) return;
@@ -796,7 +803,7 @@ function MarketplacePageBody() {
         <section className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <Store className="h-5 w-5 text-primary" aria-hidden="true" />
-            <h2 className="text-sm font-semibold">
+            <h2 className="text-sm font-medium">
               {t('marketplace.org.heading', { defaultValue: 'Your organization' })}
             </h2>
             <Badge variant="secondary" className="text-xs">{orgItems.length}</Badge>

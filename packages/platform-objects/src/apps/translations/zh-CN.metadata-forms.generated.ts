@@ -52,6 +52,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "图标",
         helpText: "Lucide 图标名称（如：\"building\"、\"users\"）"
       },
+      color: {
+        label: "颜色",
+        helpText: "图标所在圆角方块的颜色，从固定色板中选择。未设置时为灰色。"
+      },
       description: {
         label: "描述",
         helpText: "开发文档说明"
@@ -70,11 +74,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "重点字段",
-        helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列、卡片、子记录预览和详情页的重点信息条。不是本对象字段的名称会在发布时被拒绝。"
+        helpText: "本对象的字段名，按重要性从高到低排列——只能放下一个时取第一项（ADR-0085）。决定默认列表列和相关列表列、卡片、子记录预览、记录悬停卡片和记录选择器。不是本对象字段的名称会在发布时被拒绝。"
       },
       relatedLists: {
-        label: "相关列表顺序",
-        helpText: "本对象记录页上相关列表的业务顺序，按重要性从高到低排列。每一项是子对象名称（例如 task），当该子对象与本对象有多个关系时写 object.field。列出的列表排在前面，其余按派生顺序排在后面。不对应任何指向本对象的关系的名称不起作用，保存或校验对象时会被拒绝。"
+        label: "记录页页签",
+        helpText: "记录页在概览之后显示的页签，按顺序排列。每一项是子对象名称（例如 task）；当该子对象与本对象有多个关系时写 object.field；也可以是内置页签（sys_attachment、sys_approval_request、sys_activity），或带自己标题和列的一项（在 Studio 的对象设置里设置）。一旦列出任何一项，没有列出的相关列表就不显示页签（其他包添加的列表也一样），直到本对象列出它；附件只有列出时才显示。为空时，所有列表按默认顺序显示。不对应任何指向本对象的关系的名称，在保存对象时会被拒绝。"
       },
       searchableFields: {
         label: "可搜索字段",
@@ -86,11 +90,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "键",
-        helpText: "snake_case 格式的机器键，在本对象内唯一——其他写法会被 schema 拒绝。字段通过填写此键加入分组，因此重命名它会使这些字段变为未分组。"
+        helpText: "snake_case 格式的机器键，在本对象内唯一——其他写法会被 schema 拒绝。分组在「字段」中列出的字段，重命名此键后仍留在分组里；通过自身分组设置填写此键加入的字段会变为未分组。"
       },
       "fieldGroups.label": {
         label: "显示名称",
         helpText: "该分组所在分区的标题文字。"
+      },
+      "fieldGroups.fields": {
+        label: "字段",
+        helpText: "该分组显示的字段及其顺序（字段名）。填写后，它决定分组内的顺序，不移动任何字段。这里列出的字段，其自身的分组设置不能指向别的分组；一个字段只能被一个分组列出。不能与关联列表同时使用。"
       },
       "fieldGroups.icon": {
         label: "图标",
@@ -102,11 +110,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "相关列表",
-        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝，不对应任何指向本对象的关系的名称也会被拒绝。记录页目前还不会绘制这种位置。"
+        helpText: "让该条目代表一个相关列表的表格，而不是一组字段：填写子对象（或 object.field），其列表就显示在记录详情栏的这个位置。这样的分组不包含字段；把它填为自身分组的字段会被拒绝，不对应任何指向本对象的关系的名称也会被拒绝。父记录的新建和编辑表单也会内嵌这张表，在记录页点「编辑」时主记录和这些行一起保存。"
       },
       "fieldGroups.collapse": {
         label: "折叠",
-        helpText: "该分区能否折叠，作用于录入表单和记录详情页。未设置：none。"
+        helpText: "该分区能否折叠。录入表单按设置执行；默认记录页上读者可以折叠每个有标题的分组，因此那里只决定初始状态：collapsed 先收起，其余先展开。未设置：none。"
       },
       "fieldGroups.visibleWhen": {
         label: "可见条件",
@@ -232,6 +240,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"
       },
+      "fields.transferBehavior": {
+        label: "转移行为",
+        helpText: "更改被引用记录的负责人时，是否也可一并转移通过此字段指向它的记录"
+      },
       "fields.multiple": {
         label: "多选",
         helpText: "允许选择多条记录"
@@ -268,9 +280,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "语言",
         helpText: "编辑器语言（如 sql、javascript）"
       },
+      "fields.fieldHistory": {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
+      },
       "fields.trackHistory": {
         label: "历史跟踪",
-        helpText: "在记录的活动时间线上概述该字段的变更"
+        helpText: "让媒体或 JSON 字段（图片、文件、json 等）在活动时间线上显示旧值 → 新值。其他字段本来就会显示，关掉它也不会隐藏值：请用「字段修改值」。"
       },
       "fields.visibleWhen": {
         label: "可见条件",
@@ -290,6 +306,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "历史跟踪"
+      },
+      "enable.fieldHistory": {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示被修改字段的旧值 → 新值。默认为开。关：整个对象都不显示值，无论字段如何设置。"
       },
       "enable.searchable": {
         label: "可搜索"
@@ -427,7 +447,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "用户操作",
-        helpText: "UI 客户端在本对象的记录上提供哪些通用入口（新建、导入、编辑、删除、导出），逐项覆盖 managedBy 的默认值。未设置的入口保持该默认值：platform 提供全部五项；config 和 system-data 提供除导入外的全部；engine-owned、append-only 和 better-auth 只提供导出。未改动过的开关不写入任何值，所以即使默认提供该入口，它也显示为关闭。在 engine-owned 或 append-only 对象上，打开某个入口还会允许用户通过数据 API 执行该写入。用户仍需要相应的权限。"
+        helpText: "UI 客户端在本对象的记录上提供哪些通用入口（新建、导入、编辑、删除、导出），逐项覆盖 managedBy 的默认值。未设置的入口保持该默认值：platform 提供全部五项；config 和 system-data 提供除导入外的全部；engine-owned、append-only 和 better-auth 只提供导出。未改动过的开关不写入任何值，所以即使默认提供该入口，它也显示为关闭。在 engine-owned 或 append-only 对象上，打开某个入口还会允许用户通过数据 API 执行该写入。用户仍需要相应的权限。更改负责人不属于该矩阵：其默认值取决于共享模型（见其条目）。"
       },
       "userActions.create": {
         label: "新建",
@@ -448,6 +468,22 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "导出 CSV",
         helpText: "CSV 导出入口。未设置：显示，因为每个 managedBy 类别默认都提供导出。"
+      },
+      "userActions.transfer": {
+        label: "更改负责人",
+        helpText: "更改负责人操作（单条与批量）：开启即提供，关闭即隐藏。未设置时开启，但 controlled_by_parent 明细对象默认关闭。仅在记录有可重新分配负责人的对象上提供（ownership 为 user 或未设置、无 managedBy、不是 sys_ 对象、owner_id 未设为只读，外部对象上 owner_id 已声明或已映射）；在其他对象上开启会被拒绝。它只控制该操作，不影响直接编辑 owner_id。已存储的 {enabled, visibleWhen, disabledWhen} 对象逐键编辑；在源码中写一个即可按每条记录控制该操作。"
+      },
+      actionLayout: {
+        label: "动作布局",
+        helpText: "本对象动作的顺序及哪些显示为按钮，按作用域分：pinned（最多 3 个按钮，按顺序）和 more（「更多」菜单的顺序；两者都没写的动作按默认顺序排在后面）。未设置时，各处仍按动作的排序选按钮。"
+      },
+      "actionLayout.list": {
+        label: "列表",
+        helpText: "列表页工具栏，写作 {\"pinned\": [...], \"more\": [...]}：放在列表工具栏上的动作名称；$import / $export 只能放在 pinned。最多固定 3 个。未固定时，页面仍显示自己的导入 / 导出菜单。os validate 会拒绝不是本对象动作、或未放在列表工具栏上的名称；这样的名称什么也不显示。"
+      },
+      "actionLayout.record": {
+        label: "记录",
+        helpText: "记录页头（记录页、侧边预览、手机底栏），写作 {\"pinned\": [...], \"more\": [...]}：放在记录页头或其「更多」菜单中的动作名称。最多固定 3 个。os validate 会拒绝不是本对象动作、或未放在记录页上的名称；这样的名称什么也不显示。"
       },
       editMode: {
         label: "编辑方式",
@@ -737,6 +773,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"
       },
+      transferBehavior: {
+        label: "转移行为",
+        helpText: "更改被引用记录的负责人时，是否也可一并转移通过此字段指向它的记录"
+      },
       relatedListFilter: {
         label: "关联列表筛选",
         helpText: "该关系在父记录详情页上的关联列表的默认筛选——以 AND 方式与父记录匹配条件组合，标签页徽标统计的也是同一集合"
@@ -783,7 +823,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "内嵌表格列",
-        helpText: "父记录表单上内嵌表格的列，按显示顺序排列；仅当本字段设置了 inlineEdit（在源码中编写）时才使用。未设置：从本对象的可编辑字段推导，超过六列时其余列起初收在表格的列选择器中。只写字段名的条目会从该字段获取类型、选项和规则；其他列设置（首先是 type）在源码中编写。"
+        helpText: "父记录表单上内嵌表格的列，按显示顺序排列；仅当父对象的某个字段分组指向这张子表（fieldGroups[].relatedList）时才使用。未设置：从本对象的可编辑字段推导，超过六列时其余列起初收在表格的列选择器中。只写字段名的条目会从该字段获取类型、选项和规则；其他列设置（首先是 type）在源码中编写。"
       },
       "inlineColumns.name": {
         label: "名称",
@@ -853,6 +893,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "隐藏",
         helpText: "在默认界面视图中隐藏"
       },
+      showOnCreate: {
+        label: "新建时显示",
+        helpText: "新建记录时是否填写此字段。关闭后，新建弹窗、整页新建和动作打开的新建都不显示它；编辑、记录页和列表仍然显示。必填字段新建时总要填写，不能关闭。"
+      },
       searchable: {
         label: "可搜索",
         helpText: "纳入全局搜索结果"
@@ -885,9 +929,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "不对外返回",
         helpText: "该字段的值永远不经通用数据通道返回：引擎会从 find/findOne 结果以及创建和更新的响应体中删除这个键——默认投影如此，客户端在 ?select= 中点名它时同样如此。存储、过滤和索引都不受影响。"
       },
+      fieldHistory: {
+        label: "字段修改值",
+        helpText: "在记录的活动时间线上显示该字段的旧值 → 新值。默认跟随平台：大多数类型为开，媒体、JSON 或凭据字段为关。关：只写出字段名；开：媒体或 JSON 字段也显示值。凭据字段始终不显示值；对象自身的字段修改值设为关时，以对象为准。"
+      },
       trackHistory: {
         label: "记录变更历史",
-        helpText: "把该字段的值变更渲染为记录活动时间线上的条目（ADR-0052 §5b）。按字段逐个开启。"
+        helpText: "让媒体或 JSON 字段（图片、文件、json 等）在活动时间线上显示旧值 → 新值。其他字段本来就会显示，关掉它也不会隐藏值：请用「字段修改值」。"
       },
       widget: {
         label: "控件覆盖",
@@ -988,6 +1036,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "refusals.params": {
         label: "参数",
         helpText: "句子可填入的名称（例如 state）：正文抛出 { code, params: { state } }，{{ state }} 占位符即显示该值。不填：句子为纯文本"
+      },
+      texts: {
+        label: "文本",
+        helpText: "钩子写入记录的句子，以其代码通过 ctx.text 请求的 snake_case 键为键（例如 follow_up_subject）。钩子得到按组织语言翻译的声明句子，无翻译时回退为声明的句子。适用于 JavaScript（L2）正文或处理器；表达式正文声明会被拒绝"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "代码请求此键时钩子写入的句子。纯文本；若该条目声明了参数，则 {{ name }} 占位符填入一个已声明的参数"
+      },
+      "texts.params": {
+        label: "参数",
+        helpText: "句子可填入的名称（例如 lead）：代码请求 ctx.text(key, { lead })，{{ lead }} 占位符即显示该值。不填：句子为纯文本"
       },
       handler: {
         label: "处理器",
@@ -1331,10 +1391,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "导航",
-        helpText: "点击条目时的导航配置（默认为抽屉，也可为 page、new_window 或 none）"
+        helpText: "点击条目时的导航配置：抽屉尺寸，以及让列表行不打开任何内容的 `preventNavigation`（`mode` 已弃用——点记录名称进入整页，点悬停图标从侧边打开）"
       },
       "navigation.mode": {
-        label: "模式"
+        label: "模式",
+        helpText: "[已弃用] 在对象列表（列表视图、对象的 `listViews`）上不再决定记录如何打开：在控制台中，对所有用户而言，点记录名称进入整页，点名称旁的悬停图标从侧边面板打开。这里 `drawer`、`page`、`new_window` 仍可解析，但不再起作用，请省略此键；`none` 仍表示列表行不打开任何内容——建议改用 `preventNavigation: true`。带 `navigation` 的页面区块（列表区块、时间线、嵌入视图）仍按所有取值生效。"
       },
       "navigation.preventNavigation": {
         label: "禁止导航",
@@ -1342,11 +1403,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "在新标签页打开",
-        helpText: "强制在新标签页打开（适用于 page 模式）"
+        helpText: "点击记录时在新的浏览器标签页中打开其整页；设为不打开的行保持不打开，手机上仍在当前页打开"
       },
       "navigation.size": {
         label: "尺寸",
-        helpText: "抽屉详情的浮层尺寸档位：'auto'（默认——渲染器按字段数与视口推导，AI 无需填写），或粗粒度覆盖 sm/md/lg/xl/full。优先使用它而非像素 `width`；page 模式会忽略它。"
+        helpText: "记录抽屉的宽度档位：'auto'（默认）沿用宿主固定的默认宽度，每个对象都一样，与字段数无关（控制台的记录侧边面板以 460px 打开）；或粗粒度覆盖 sm/md/lg/xl/full（上限分别为 480/720/960/1200/1600px，始终受视口限制）。读者拖动出的宽度优先于两者。优先使用它而非像素 `width`；记录以整页打开时它不起作用（控制台在手机上一律以整页打开记录），在手机宽度的屏幕上也不起作用，那里抽屉占满屏幕。"
       },
       "navigation.width": {
         label: "宽度",
@@ -1565,30 +1626,30 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "名称",
-        helpText: "snake_case 唯一标识符"
+        helpText: "仪表盘的唯一内部名称：使用小写字母、数字和下划线，以字母开头（例如 sales_overview）。"
       },
       label: {
         label: "显示名称",
-        helpText: "显示名"
+        helpText: "使用者看到的仪表盘标题。"
       },
       description: {
         label: "描述"
       },
       columns: {
         label: "列",
-        helpText: "栅格列数（默认 12）"
+        helpText: "组件排布所用的列数，1 到 24。留空时仪表盘会按组件的宽度自动选择。"
       },
       gap: {
         label: "间距",
-        helpText: "组件之间的间距，每级 0.25rem（4 = 1rem）"
+        helpText: "组件之间留出的空间。数值越大越松散；留空则使用标准间距。"
       },
       refreshIntervalSeconds: {
         label: "刷新间隔",
-        helpText: "自动刷新间隔（秒）"
+        helpText: "仪表盘重新加载数据的频率（秒）。留空或填 0 表示不自动刷新。"
       },
       header: {
         label: "页眉",
-        helpText: "仪表盘页眉配置（title、subtitle、actions）"
+        helpText: "仪表盘顶部显示的内容：标题、描述和操作按钮。"
       },
       "header.showTitle": {
         label: "显示标题",
@@ -1616,7 +1677,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "组件",
-        helpText: "包含位置和尺寸的仪表盘组件"
+        helpText: "仪表盘上的图表、数字和表格，以及每一项所在的位置。"
       },
       "widgets.id": {
         label: "组件 ID"
@@ -1671,11 +1732,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日期范围",
-        helpText: "默认日期范围选择器"
+        helpText: "打开仪表盘时默认的时间段，以及查看者能否自选日期。"
       },
       globalFilters: {
         label: "全局筛选",
-        helpText: "应用到所有组件的筛选条件"
+        helpText: "查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。"
       },
       "globalFilters.name": {
         label: "名称"
@@ -1880,6 +1941,42 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "body.memoryMb": {
         label: "内存（MB）",
         helpText: "单次调用内存上限（MB，最大 256）"
+      },
+      refusals: {
+        label: "拒绝目录",
+        helpText: "拒绝目录，以操作正文抛出的 SCREAMING_SNAKE 错误码为键（例如 SIGN_IN_REQUIRED）。调用方读到声明的提示语（按其语言翻译）和声明的状态码。适用于 script 操作的 JavaScript（L2）正文；表达式正文声明会被拒绝"
+      },
+      "refusals.message": {
+        label: "提示语",
+        helpText: "正文抛出此错误码时用户读到的句子。纯文本；若该条目声明了参数，则 {{ name }} 占位符填入一个已声明的参数"
+      },
+      "refusals.status": {
+        label: "状态码",
+        helpText: "拒绝的 HTTP 状态码（400–499）。不填：400"
+      },
+      "refusals.reasons": {
+        label: "原因",
+        helpText: "同一错误码下的更多句子，以正文在错误码旁抛出的 snake_case 原因为键（{ code, reason }）。线上的错误码和状态码仍取本条目的；未在此声明的原因会被拒绝。不填：抛出的原因不被读取"
+      },
+      "refusals.reasons.message": {
+        label: "提示语",
+        helpText: "正文在此错误码下抛出此原因时用户读到的句子。其中的 {{ }} 占位符遵循本条目的参数"
+      },
+      "refusals.params": {
+        label: "参数",
+        helpText: "句子可填入的名称（例如 state）：正文抛出 { code, params: { state } }，{{ state }} 占位符即显示该值。不填：句子为纯文本"
+      },
+      texts: {
+        label: "文本",
+        helpText: "操作写入记录的句子，以其正文通过 ctx.text 请求的 snake_case 键为键（例如 email_subject）。正文得到按组织语言翻译的声明句子，无翻译时回退为声明的句子。适用于 script 操作的 JavaScript（L2）正文；表达式正文声明会被拒绝"
+      },
+      "texts.message": {
+        label: "句子",
+        helpText: "正文请求此键时操作写入的句子。纯文本；若该条目声明了参数，则 {{ name }} 占位符填入一个已声明的参数"
+      },
+      "texts.params": {
+        label: "参数",
+        helpText: "句子可填入的名称（例如 subject）：正文请求 ctx.text(key, { subject })，{{ subject }} 占位符即显示该值。不填：句子为纯文本"
       },
       params: {
         label: "参数",
@@ -2101,7 +2198,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "显示名称"
       },
       description: {
-        label: "描述"
+        label: "描述",
+        helpText: "一句话说明这张报表看什么，显示在名称下方"
       },
       type: {
         label: "类型",
@@ -2183,9 +2281,33 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日期范围",
         helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
       },
+      "dateRange.dimension": {
+        label: "日期字段",
+        helpText: "时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空"
+      },
+      "dateRange.defaultRange": {
+        label: "默认时间段",
+        helpText: "打开报表时显示的时间段"
+      },
+      "dateRange.allowCustomRange": {
+        label: "允许自定义范围",
+        helpText: "允许使用者自己选择开始和结束日期"
+      },
       exportOptions: {
         label: "导出选项",
         helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
+      },
+      "exportOptions.formats": {
+        label: "格式",
+        helpText: "可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载"
+      },
+      "exportOptions.includeHeaders": {
+        label: "包含表头",
+        helpText: "在下载文件的第一行写入列名"
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "文件名",
+        helpText: "下载文件名的开头。留空时以报表的显示名称命名，没有显示名称时用名称"
       }
     }
   },

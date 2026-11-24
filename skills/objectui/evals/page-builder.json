@@ -22,7 +22,7 @@
     },
     {
       "id": 2,
-      "prompt": "Convert our customer detail page (React + TypeScript) to schema-driven UI: sections Basic Info, Contacts and Recent Orders, and an 'Edit Customer' button visible only to admins.",
+      "prompt": "Convert our customer detail page (React + TypeScript) to schema-driven UI: sections Basic Info, Contacts and Recent Orders, and an 'Edit Customer' button visible only to admins. The page's source is not in this directory: write the schema in your answer.",
       "expected_output": "A detail-page schema with modular sections, expression-based visibility on the admin-only action, and app integration steps.",
       "files": [],
       "assertions": {
@@ -39,7 +39,7 @@
     },
     {
       "id": 3,
-      "prompt": "Build an analytics dashboard page in an existing ObjectUI project: KPI cards on top, a trend chart, a recent-activity list at the bottom, plus refresh and navigate-to-report actions.",
+      "prompt": "Build an analytics dashboard page in an existing ObjectUI project: KPI cards on top, a trend chart, a recent-activity list at the bottom, plus refresh and navigate-to-report actions. None of the project's files are in this directory: write the schema in your answer.",
       "expected_output": "A dashboard schema with layout composition, a plugin chart, actions as data, and responsiveness and interaction testing guidance.",
       "files": [],
       "assertions": {
@@ -54,7 +54,7 @@
     },
     {
       "id": 4,
-      "prompt": "Add a 'Delete product' button to the product detail page. It must read as destructive and ask the user to confirm before the record is removed.",
+      "prompt": "Add a 'Delete product' button to the product detail page. It must read as destructive and ask the user to confirm before the record is removed. None of the project's files are in this directory: write the schema in your answer.",
       "expected_output": "An action:button whose properties carry label, actionType, target, a confirmText question and variant 'danger': the button draws red and asks that question through the destructive confirm button. On an action block the Button primitive's spelling of that arm is refused at save; danger is the action runner's word.",
       "files": [],
       "assertions": {

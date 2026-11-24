@@ -53,6 +53,16 @@ export * from './stack-auth.js';
 // record page, so both roots that construct `AuthPlugin` (`os serve` and
 // `DevPlugin`) leave `plugin-auth`'s out alike (ruling A on objectstack#23015).
 export * from './stack-organization-record-page.js';
+// The organization's language — the one reader of the deployment-default
+// ladder (`localization.locale` when set → `i18n.defaultLocale`) for text the
+// platform writes on the organization's behalf. Here because its readers sit
+// in packages that cannot import each other (`@objectstack/service-automation`
+// and `@objectstack/runtime`'s seed load), and both already depend on this one.
+export * from './organization-locale.js';
+// The language a sentence in a tool's result is written in — one picker for
+// the dataset tools (`@objectstack/service-analytics`) and the MCP record
+// tools (`@objectstack/mcp`), which cannot import each other.
+export * from './sentence-locale.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';
@@ -199,6 +209,9 @@ export * from './utils/blank-storage-form.js';
 // above gives.
 export * from './utils/json-column-operator-refusal.js';
 export * from './utils/readable-ids-driver-refusal.js';
+// [ADR-0155 D4] …and the fixed-read leaves' refusal, on the same floor for the
+// same reason: the engine's seam answers it now, each evaluator on its own card.
+export * from './utils/fixed-read-leaf-refusal.js';
 
 // [#12350 / ADR-0126 §4] THE activation-ledger row contract, parameterized by
 // `metadata_type`. Same reason as the two entries above: its consumers —
@@ -215,10 +228,19 @@ export * from './utils/metadata-activation-store.js';
 // with. `@objectstack/metadata-protocol` re-exports it from its original home.
 export * from './utils/record-not-found.js';
 
+// [#34699] A catalog sentence in the caller's language, for the `userMessage` a
+// producer that holds no `i18n` service marks beside its developer `message`.
+export * from './utils/operation-user-message.js';
+
 // The one `OBJECT_NOT_FOUND` envelope: the data door's object-existence gate
 // and the engine's in-process verbs refuse a name the registry does not
 // resolve with it (one name space for both doors).
 export * from './utils/object-not-found.js';
+
+// The one `OBJECT_PACKAGE_DISABLED` envelope: the data door, the by-name
+// `/meta` reads and the Change Owner doors refuse an object of a disabled
+// package with it. `@objectstack/metadata-protocol` re-exports it.
+export * from './utils/object-package-disabled.js';
 
 // [#22777] The one walk that finds a filter's nested-relation conditions and
 // their target objects: the data door (`@objectstack/metadata-protocol`) and

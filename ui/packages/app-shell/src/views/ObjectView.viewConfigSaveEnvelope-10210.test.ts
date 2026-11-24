@@ -33,6 +33,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// `./ObjectView` reaches `import('@objectstack/lint')` (the preview lints);
+// pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { ViewMetadataSchema } from '@objectstack/spec/ui';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { buildViewConfigSaveBody } from './ObjectView';
@@ -95,7 +98,8 @@ const PANEL_DRAFT = {
  * The same draft when the tab it was built from had absorbed a stored row: the
  * tab spreads the served document (`config`, registry bookkeeping, read
  * decorations) and, when a toolbar overlay was merged in, its marker and
- * `columnState`. None of that is view body.
+ * `columnState` (a stored row's, retired by objectstack#36403). None of that
+ * is view body.
  */
 const TAB_LADEN_DRAFT = {
     ...PANEL_DRAFT,
@@ -188,8 +192,13 @@ describe('objectui#10210 — the view-config save persists a ViewItem envelope',
             isDefault: false,
             isPinned: true,
             sortOrder: 2,
-            columnState: { widths: { name: 180 } },
         });
+        // objectstack#36403: `columnState` left the spec's round-trip record, so
+        // the row-state keys derived from it no longer carry it, and the body
+        // `config` (read off `ListViewSchema`) never declared it: a stale value
+        // on the tab is shed, which is what the retired key's door now needs.
+        expect(body.columnState).toBeUndefined();
+        expect(body.config.columnState).toBeUndefined();
         expect(body.config.rowHeight).toBe('short');
         expect(body._isOverride).toBeUndefined();
         expect(body.config._isOverride).toBeUndefined();

@@ -101,7 +101,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { transportProjectionArray } from '../data/projection-names-a-field';
 import { refuseCatchallProtoKey, refuseRecordProtoKey } from '../shared/record-proto-key-guard';
-import { flowFilterOperands, isExpressionEnvelopeShaped } from './flow-node-expression-paths';
+import { flowFilterOperands, isExpressionEnvelopeShaped, isFlowTextEnvelopeShaped } from './flow-node-expression-paths';
 // [#19939] The retirement of the `{…}` template dialect from value slots — the
 // one judge, composed into every value slot's contract below rather than
 // re-spelled here.
@@ -369,15 +369,27 @@ export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressio
  * load, where a schema declared further down is still in its temporal dead
  * zone.
  */
-function celValueSlotSchema(description: string) {
+function celValueSlotSchema(description: string, options: { text?: true } = {}) {
   return z.unknown()
     .superRefine((value, ctx) => {
+      if (options.text && isFlowTextEnvelopeShaped(value)) {
+        for (const issue of recordFieldTextEnvelopeIssues(value)) ctx.addIssue({ code: 'custom', ...issue });
+        return;
+      }
       if (!isExpressionEnvelopeShaped(value)) {
         // [#19939] A literal: refused only where it still spells the retired
         // `{…}` dialect, at the string's own path inside the value.
         for (const refusal of valueSlotTemplateRefusals(value)) {
           ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
         }
+        return;
+      }
+      if (options.text && value.dialect !== 'cel') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dialect'],
+          message: `${VALUE_ENVELOPE_REFUSAL} \`dialect\`: ${RECORD_FIELD_ENVELOPE_DIALECTS}`,
+        });
         return;
       }
       const result = AssignmentExpressionValueSchema.safeParse(value);
@@ -392,6 +404,43 @@ function celValueSlotSchema(description: string) {
       }
     })
     .meta({ description, xExpression: 'value' });
+}
+
+/**
+ * The dialects a record field value's envelope may name, as the refusal of
+ * any other says it (a `cron` envelope, a misspelled dialect).
+ */
+const RECORD_FIELD_ENVELOPE_DIALECTS =
+  'A record field value takes a `cel` envelope, evaluated to the value written, or a `template` text envelope '
+  + "(`{ dialect: 'template', source: 'Escalated: {{ record.priority }} priority' }`), a sentence for people to read "
+  + "that is written in the organization's language; no other dialect has a meaning here.";
+
+/**
+ * The text envelope a record field value is MARKED as text with —
+ * `{ dialect: 'template', source }` (ruling 6913660232 on objectstack#34062,
+ * letter B, parameter 4). `ExpressionSchema`'s template envelope, the spelling
+ * a notify node's `title` / `message` already take, in its EVALUATED form: the
+ * executor renders `source`, so it is required and non-blank.
+ */
+const RecordFieldTextEnvelopeSchema = EvaluatedExpressionSchema.safeExtend({ dialect: z.literal('template') });
+
+/**
+ * Why a record field's text envelope is refused, each issue led by
+ * {@link VALUE_ENVELOPE_REFUSAL}: an envelope that is not a valid one, or a
+ * `source` the one text-slot judge refuses (a single-brace `{token}`, a hole
+ * over a `$` name the engine does not bind). The `{{ }}` compile is the
+ * doors' (`registerFlow`, `objectstack validate`), as for every text slot.
+ */
+function recordFieldTextEnvelopeIssues(value: unknown): { path: PropertyKey[]; message: string }[] {
+  const result = RecordFieldTextEnvelopeSchema.safeParse(value);
+  if (!result.success) {
+    return result.error.issues.map((issue) => {
+      const where = issue.path.length > 0 ? `\`${issue.path.map(String).join('.')}\`: ` : '';
+      return { path: issue.path, message: `${VALUE_ENVELOPE_REFUSAL} ${where}${issue.message}` };
+    });
+  }
+  const refusal = textSlotTemplateRefusal(result.data.source);
+  return refusal === undefined ? [] : [{ path: ['source'], message: `${VALUE_ENVELOPE_REFUSAL} \`source\`: ${refusal}` }];
 }
 
 /**
@@ -451,6 +500,47 @@ export const FlowValueSlotSchema = celValueSlotSchema(
 
 export type FlowValueSlot = z.input<typeof FlowValueSlotSchema>;
 export type FlowValueSlotParsed = z.infer<typeof FlowValueSlotSchema>;
+
+/**
+ * What a `create_record` / `update_record` `fields` value may be — the
+ * {@link FlowValueSlotSchema} rule, plus a third form (ruling 6913660232 on
+ * objectstack#34062, letter B): a **text envelope**,
+ * `{ dialect: 'template', source }`, which marks the value as a sentence the
+ * record keeps for people to read.
+ *
+ *  - a **CEL value envelope** is evaluated to the value written, as in every
+ *    value slot;
+ *  - a **text envelope** is written as text in the ORGANIZATION's language:
+ *    the executor picks the translated template at
+ *    `flows.<flow>.records.<node_id>.fields.<field>`
+ *    (`flowRecordFieldTextKey`, `system/i18n-resolver.ts`) in the
+ *    organization's language — its Localization setting when somebody set it,
+ *    else the app's declared `i18n.defaultLocale` — and only then fills its
+ *    `{{ }}` holes over the run's variables, the way a screen's text is picked.
+ *    Never the language of the person who started the run: stored text is
+ *    data the whole organization reads. With no translation, or no language
+ *    to pick, the authored `source` is written, and the run goes on. `source`
+ *    is judged as a text slot: non-blank, and a single-brace `{token}` is
+ *    refused with its `{{ }}` spelling;
+ *  - any other value is the literal it spells — a bare string included
+ *    (`status: 'escalated'` is written as it is, never translated).
+ *
+ * The forms are told apart by SHAPE, as in every value slot; a third dialect
+ * (`cron`) is refused. It carries the same `xExpression: 'value'` marker: the
+ * map is still the ledger's `value` slot, whose entries say it takes the text
+ * envelope too (`textEnvelope`).
+ */
+export const FlowRecordFieldValueSchema = celValueSlotSchema(
+  'A field value: a CEL value envelope `{ dialect: \'cel\', source }` evaluated to the value written, a text '
+  + 'envelope `{ dialect: \'template\', source }` — a sentence for people to read, written in the organization\'s '
+  + 'language (its translation picked at `flows.<flow>.records.<node_id>.fields.<field>`, then its `{{ }}` holes '
+  + 'filled; the authored text when none is held) — or a literal written as it is (a bare string is never '
+  + 'translated; a `{…}` template token in it is refused)',
+  { text: true },
+);
+
+export type FlowRecordFieldValue = z.input<typeof FlowRecordFieldValueSchema>;
+export type FlowRecordFieldValueParsed = z.infer<typeof FlowRecordFieldValueSchema>;
 
 /**
  * What a `loop`'s or a `map`'s `collection` is (#19939) — the sentence every
@@ -663,11 +753,12 @@ export const CreateRecordConfigSchema = lazySchema(() => strictObject({
   /**
    * Field values to write on the new record — a `value`-role slot of the
    * expression ledger (`create_record.fields.*`, #19938): each value is a CEL
-   * value envelope or a literal ({@link FlowValueSlotSchema}); a `{token}`
-   * template is refused there since #19939.
+   * value envelope, a text envelope or a literal
+   * ({@link FlowRecordFieldValueSchema}); a `{token}` template is refused
+   * there since #19939.
    */
-  fields: z.record(z.string(), FlowValueSlotSchema).optional()
-    .describe('Field values to write on the new record: each key is a field name, each value a CEL value envelope or a literal'),
+  fields: z.record(z.string(), FlowRecordFieldValueSchema).optional()
+    .describe('Field values to write on the new record: each key is a field name, each value a CEL value envelope, a text envelope (a sentence written in the organization\'s language) or a literal'),
   /**
    * Flow variable bound to the created record (`{var.id}` works even when the
    * driver returns a bare id) — never a `$` name: those are the engine's (#22502).
@@ -704,12 +795,12 @@ export const UpdateRecordConfigSchema = lazySchema(() => strictObject({
   filter: flowFilterSlotSchema(`Field/value pairs identifying the record(s) to update: ${FILTER_OPERAND_DESCRIPTION}`).optional(),
   /**
    * Field values to write — a `value`-role slot of the expression ledger
-   * (`update_record.fields.*`, #19938): each value is a CEL value envelope or
-   * a literal ({@link FlowValueSlotSchema}); a `{token}` template is refused
-   * there since #19939.
+   * (`update_record.fields.*`, #19938): each value is a CEL value envelope, a
+   * text envelope or a literal ({@link FlowRecordFieldValueSchema}); a
+   * `{token}` template is refused there since #19939.
    */
-  fields: z.record(z.string(), FlowValueSlotSchema).optional()
-    .describe('Field values to write: each key is a field name, each value a CEL value envelope or a literal'),
+  fields: z.record(z.string(), FlowRecordFieldValueSchema).optional()
+    .describe('Field values to write: each key is a field name, each value a CEL value envelope, a text envelope (a sentence written in the organization\'s language) or a literal'),
   /**
    * Declare BULK intent — this node may update EVERY row `filter` matches.
    *

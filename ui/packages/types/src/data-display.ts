@@ -843,6 +843,12 @@ export interface TableColumn {
    * Unlike {@link TableColumn.masked}, it withholds nothing else: copy, CSV
    * export, inline edit, search and sort are unchanged.
    *
+   * In an `editable` table, a column with no explicit `width` whose cells
+   * edit (`editable` is not `false`) is drawn at least 168px wide, the width
+   * `GridField` gives a lookup column, because its editor is the record
+   * picker: sized from the short names it draws, the picker had no room to
+   * show one. An explicit `width` is drawn as written.
+   *
    * Written by `ObjectGrid` from the column's field type, because the table
    * cannot tell a reference from text: `type` has no reference member
    * (objectui#13377).
@@ -1173,6 +1179,22 @@ export interface DataTableRowGroup {
   footer?: React.ReactNode;
   /** Nesting level, 0 for the outermost groups. Written to `data-group-depth`. @default 0 */
   depth?: number;
+}
+
+/**
+ * The host's summary row of a `data-table` (objectstack#35548), drawn as the
+ * table's own last row so each figure sits in its column's cell, whatever the
+ * column widths, the frozen columns or the horizontal scroll.
+ * {@link DataTableSchema.summaryRow}.
+ */
+export interface DataTableSummaryRow {
+  /**
+   * Drawn at the row's start, in the first column's cell — beside that
+   * column's own figure when it has one (a count, 「Count 42」).
+   */
+  lead?: React.ReactNode;
+  /** Each column's figure, keyed by the column's `accessorKey`. A column with none draws an empty cell. */
+  cells: Record<string, React.ReactNode>;
 }
 
 /**
@@ -1515,6 +1537,19 @@ export interface DataTableSchema extends BaseSchema {
    */
   onColumnsReorder?: (columns: TableColumn[]) => void;
   /**
+   * Column hide handler (objectstack#35955): called with the column's
+   * `accessorKey` when the reader picks "Hide column" in the column menu. The
+   * table hides the column in its own state either way; a host that keeps the
+   * columns shown (the list's hidden fields) hears the choice here and owns it
+   * from then on. Absent ⇒ the hide lives in the table's state alone.
+   *
+   * RUNTIME SLOT (the objectui#6124 shape) — a host-supplied function, NOT
+   * authorable metadata: JSON has no function value, so the zod twin refuses
+   * this key by name. Called by `renderers/complex/data-table.tsx`; supplied by
+   * `ObjectGrid` (`@object-ui/plugin-grid`) from its `onColumnHide` prop.
+   */
+  onColumnHide?: (columnKey: string) => void;
+  /**
    * Enable inline cell editing
    * When true, cells become editable on double-click or Enter key
    *
@@ -1651,8 +1686,30 @@ export interface DataTableSchema extends BaseSchema {
    * Answering `null` (or `undefined` / `false`) keeps the browser's menu for
    * that row. Absent, a table with its own row "⋮" menu opens those items, and
    * every other table keeps the browser's menu, exactly as before.
+   *
+   * `context.column` (objectstack#36290) is the accessor of the data cell the
+   * menu opened on, absent when it opened elsewhere on the row (the selection
+   * or "⋮" cell, or the keyboard on the row itself), so a host can add items
+   * about that cell, such as the field's change history.
+   *
+   * `context.cell` (objectstack#36289) is what the table itself does with that
+   * data cell, present exactly when `column` is: `copy` writes the cell's value
+   * to the clipboard as Ctrl/Cmd+C on the selected cell does, `paste` reads the
+   * clipboard and writes it into the cell as a paste on the selected cell does
+   * (the same conversion, the editor's checks and the same save), and `clear`
+   * empties the cell as Backspace on the selected cell does. Each is absent
+   * where the table would refuse it: `copy` on a masked cell; `paste` on a cell
+   * the reader may not edit; `clear` there too, and on a required or a
+   * two-state (yes/no) cell. A host draws them as items about that cell.
    */
-  renderRowContextMenu?: (row: any, context: { selected: boolean }) => React.ReactNode;
+  renderRowContextMenu?: (
+    row: any,
+    context: {
+      selected: boolean;
+      column?: string;
+      cell?: { copy?: () => void; paste?: () => void; clear?: () => void };
+    },
+  ) => React.ReactNode;
   /**
    * Group bands (objectui#12620): draw the table as ONE table, with one header,
    * whose body is a band row per group followed by that group's rows.
@@ -1670,6 +1727,29 @@ export interface DataTableSchema extends BaseSchema {
    * table's own pager is not drawn.
    */
   rowGroups?: DataTableRowGroup[];
+  /**
+   * The summary row (objectstack#35548): one row after the data rows, inside
+   * the table, held at the bottom of the scroll box, with each column's figure
+   * in that column's cell — so a figure's right edge is its column's.
+   *
+   * RUNTIME SLOT — host-built React content, NOT authorable metadata: JSON has
+   * no React node, so the zod twin refuses this key by name. Supplied by
+   * `ObjectGrid` (`@object-ui/plugin-grid`) from the columns' declared
+   * `summary` aggregations. Absent ⇒ no summary row.
+   */
+  summaryRow?: DataTableSummaryRow;
+  /**
+   * The selection bar (objectstack#35678): host-built content the table floats
+   * at the bottom centre of its scroll box, over the rows and above the summary
+   * row. While it is present the table keeps room after its last row, so the
+   * last row scrolls clear of it.
+   *
+   * RUNTIME SLOT — host-built React content, NOT authorable metadata: JSON has
+   * no React node, so the zod twin refuses this key by name. Supplied by
+   * `ObjectGrid` (`@object-ui/plugin-grid`) while rows are selected. Absent ⇒
+   * nothing floats and no room is kept.
+   */
+  floatingBar?: React.ReactNode;
   /**
    * Cell value change handler
    * Called when a cell value is edited

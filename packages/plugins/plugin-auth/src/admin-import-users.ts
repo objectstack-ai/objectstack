@@ -104,6 +104,72 @@
  *    refusals cannot be evaluated against rows that do not exist. A dry run
  *    reports `manager: { linked: 0, unresolved: 0, refused: 0 }` and says
  *    nothing about the links — ⛔ rather than half-answering.
+ *
+ * ## `positions` — admitted, assigned in a SECOND pass (#33113)
+ *
+ * Maintainer ruling 6920428750: the import gains one column, the position,
+ * resolved in a second pass like `manager_id` and through the same checks as
+ * assigning a position in Setup; an unresolved or refused position is a
+ * per-row error and the user is still created. No permission-set column: under
+ * ADR-0090 a position carries its sets (`PositionSchema.permissionSets`).
+ *
+ *  - **The cell.** `positions` holds position machine names, `;`-separated
+ *    (or an array on a JSON row) — the spelling `admin/import-sso-users`
+ *    already reads, through the one reader both doors import
+ *    (`name-list-cell.ts`), so one CSV shape serves both doors.
+ *  - **Same checks as Setup.** Each assignment is a `sys_user_position`
+ *    insert through the data engine under the CALLING administrator's own
+ *    execution context (`createGrant`, the seam create-user and the pending
+ *    doors use) — ⛔ never `SYSTEM_CTX`, which every one of those checks
+ *    stands down for. The position catalog refusal, the ADR-0090 D12
+ *    delegated-administration gate and the grant-holder membership refusal
+ *    judge it exactly as they judge Setup's form.
+ *  - **A host that cannot judge the grant costs the positions, never the
+ *    users.** On a host with no `createGrant` seam, or for a caller whose own
+ *    execution context does not resolve, every named position is reported
+ *    `refused` on its row — code `NOT_IMPLEMENTED` or `PERMISSION_DENIED`
+ *    respectively — and the users are created exactly as before this column
+ *    existed. ⛔ Not a whole-request refusal: before this column, the same
+ *    file answered `200` and created every user (the cell was dropped), so
+ *    refusing it whole would NARROW what this door accepts; the ruling's own
+ *    direction is "per-row error, the user is still created".
+ *  - **Per row, per position.** `rows[].positions` lists each named position
+ *    with its outcome: `assigned`, `already_assigned` (an upserted user who
+ *    already holds it — a re-run batch is idempotent), `unresolved` (the
+ *    catalog holds no position by that name: the refusal's
+ *    `fields[].field === 'position'`, `reference_not_found`) or `refused`
+ *    (any other refusal, its `code` carried). A cell that is not a list
+ *    reads `'unreadable'`. The sentence rides `rows[].error` when it is free;
+ *    ⛔ no `rows[].code`, for {@link noteManagerFailure}'s reason. The import
+ *    only ADDS assignments: ⛔ it never removes a position a user holds.
+ *  - **The pass does not run on `dryRun`**, for the manager pass's reason.
+ *
+ * ## Current organization — each row joins it, as create-user's user does
+ *
+ * Maintainer ruling on #34535 (option B): in multi-org mode every row's user
+ * joins the importing administrator's CURRENT organization under create-user's
+ * own rule (ADR-0093 D3 amendment), read through the one settlement and the one
+ * join both doors import (`settleCurrentOrganizationJoin`,
+ * `joinCurrentOrganization`) — ⛔ never a copy.
+ *
+ *  - **Settled before any row is written**, dry run included: an administrator
+ *    with no current organization is refused whole, `400
+ *    NO_ACTIVE_ORGANIZATION`, and a host that cannot run the join inside an
+ *    account's unit of work `501 NOT_IMPLEMENTED` — create-user's codes and
+ *    sentences, with nothing created.
+ *  - **One unit of work per row.** A created row's account and its membership
+ *    are written in one `runAtomically`, so a refused join (the organization's
+ *    member cap, say) rolls that row's account back: the row fails with the
+ *    vendor's code, carries no temporary password and is sent no invitation
+ *    (both are recorded only once the unit committed, and the invitations go
+ *    out after `runImport`). The other rows go on.
+ *  - **A matched existing user joins too** (upsert): its profile update and its
+ *    join are one unit of work, so a refused join fails the row and leaves the
+ *    profile as it was. A user already in the organization is not added twice.
+ *  - **Single-org mode is unchanged**: no join here, the reconciler binds the
+ *    default organization as before.
+ *  - **The join does not run on `dryRun`**: nothing is written, so the vendor's
+ *    refusals cannot be asked.
  */
 
 import type {
@@ -112,16 +178,24 @@ import type {
   ImportRowResult,
 } from '@objectstack/rest';
 import { prepareImportRequest, runImport } from '@objectstack/rest';
+import { resolveThrownHttpError, validationFailureDetails } from '@objectstack/types';
 import { generatePlaceholderEmail, isPlaceholderEmail } from './placeholder-email.js';
 import {
   generateTemporaryPassword,
   normalizePhoneNumber,
   isLikelyEmail,
   mapAuthApiError,
+  joinCurrentOrganization,
+  settleCurrentOrganizationJoin,
+  CreationRefused,
   type AdminActor,
+  type AdminCreateGrantSeam,
+  type AdminUserEndpointDeps,
   type AuthContextLike,
+  type CurrentOrganizationJoin,
   type EndpointResult,
 } from './admin-user-endpoints.js';
+import { readNameList } from './name-list-cell.js';
 import { temporaryPasswordLength } from './temporary-password-length.js';
 import { SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
 import { readJsonRequestBody } from './request-json-body.js';
@@ -148,6 +222,13 @@ export const IMPORT_USERS_MAX_ROWS = 500;
  * inherit: Prime Directive #12 refuses a new dialect on an internal contract.
  */
 const MANAGER_COLUMN = 'manager_id';
+
+/**
+ * [#33113] The column a row names its positions in: position machine names,
+ * `;`-separated — the same column, spelled the same way, that
+ * `admin/import-sso-users` reads.
+ */
+const POSITIONS_COLUMN = 'positions';
 
 /**
  * Profile fields an upsert row may modify on an EXISTING user — shared with
@@ -215,6 +296,28 @@ export interface IdentityImportDeps {
    */
   consoleResetPasswordUrl?(): string;
   noteMustChangePasswordIssued(): void;
+  /**
+   * [#33113] What the `positions` column needs: the CALLING administrator's
+   * execution context, under which each `sys_user_position` insert is judged
+   * as Setup's form is (see {@link AdminCreateGrantSeam}). Absent ⇒ every
+   * named position is reported `refused` / `NOT_IMPLEMENTED` on its row and
+   * the users are still created; a request that names none never reads it.
+   */
+  createGrant?: AdminCreateGrantSeam;
+  /**
+   * ADR-0093 D3 amendment — the tenancy service, read for its
+   * `isolationActive` (the predicate behind `features.multiOrgEnabled`): in
+   * multi-org mode each row's user joins the administrator's current
+   * organization (see "Current organization" in the header). Absent ⇒ not
+   * multi-org ⇒ no join, as for create-user.
+   */
+  getTenancy?: AdminUserEndpointDeps['getTenancy'];
+  /**
+   * The CALLING administrator's current (active) organization, read from their
+   * session, or `null` when they have none — create-user's reader. Absent ⇒ no
+   * join.
+   */
+  getCallerActiveOrganizationId?(): Promise<string | null>;
   /** `error` receives, once, a failure answered with the generic message (`mapAuthApiError`). */
   logger?: { warn(msg: string): void; error?(message: string, error?: Error): void };
 }
@@ -356,8 +459,28 @@ function identityKey(email?: string, phone?: string): string {
 export type ImportManagerOutcome = 'linked' | 'unresolved' | SetUserManagerRefusalReason;
 
 /**
+ * [#33113] One named position's outcome on a row.
+ *
+ * - `assigned` — the `sys_user_position` row was written;
+ * - `already_assigned` — the user already held it (an upserted row), so
+ *   nothing was written;
+ * - `unresolved` — the catalog holds no position by that name;
+ * - `refused` — any other refusal of the assignment; `code` is the refusal's
+ *   own error code (e.g. `PERMISSION_DENIED`, or `VALIDATION_FAILED` for a
+ *   user who is not a member of the assignment's organization). Also every
+ *   position of a request whose grants cannot be judged at all:
+ *   `NOT_IMPLEMENTED` (the host wires no grant seam) or `PERMISSION_DENIED`
+ *   (the caller's own access does not resolve).
+ */
+export interface ImportPositionOutcome {
+  position: string;
+  outcome: 'assigned' | 'already_assigned' | 'unresolved' | 'refused';
+  code?: string;
+}
+
+/**
  * One row of the endpoint's `data.rows[]` — the generic import row plus the
- * three things this identity surface adds to it. Named because callers read
+ * things this identity surface adds to it. Named because callers read
  * `manager` and `delivery` to decide what to show an operator, and an inline
  * type on one `const` is not something a Console can import.
  */
@@ -375,6 +498,12 @@ export interface IdentityImportRowResult extends ImportRowResult {
    * {@link MANAGER_COLUMN} cell was empty — ⛔ never "the link silently failed".
    */
   manager?: ImportManagerOutcome;
+  /**
+   * [#33113] Present only on rows that named a position: one entry per named
+   * position, or `'unreadable'` when the {@link POSITIONS_COLUMN} cell was not
+   * a list of names. Absent means the cell was empty.
+   */
+  positions?: ImportPositionOutcome[] | 'unreadable';
 }
 
 /**
@@ -503,6 +632,51 @@ async function resolveImportInviter(
   return { name, email };
 }
 
+/**
+ * [#33113] Assign one landed row's positions, each through the data engine
+ * under the administrator's own context, and answer one outcome per position.
+ *
+ * ⛔ The checks are NOT re-derived here: the catalog refusal, the delegated
+ * administration gate and the membership refusal run on the insert, and their
+ * answer is classified, never re-worded. Only an UPDATED row is read for an
+ * existing hold first — a row this batch just created holds nothing — so a
+ * re-run batch reports `already_assigned` rather than a duplicate refusal.
+ */
+async function assignRowPositions(
+  grant: { engine: IdentityImportEngine; context: Record<string, unknown> },
+  userId: string,
+  positions: string[],
+  existingUser: boolean,
+): Promise<ImportPositionOutcome[]> {
+  const outcomes: ImportPositionOutcome[] = [];
+  for (const position of positions) {
+    if (existingUser) {
+      const held = await grant.engine.find('sys_user_position', {
+        where: { user_id: userId, position }, fields: ['id'], limit: 1, context: SYSTEM_CTX,
+      });
+      if (Array.isArray(held) && held.length > 0) {
+        outcomes.push({ position, outcome: 'already_assigned' });
+        continue;
+      }
+    }
+    try {
+      await grant.engine.insert('sys_user_position', { user_id: userId, position }, { context: grant.context });
+      outcomes.push({ position, outcome: 'assigned' });
+    } catch (error) {
+      const fields = validationFailureDetails(error)?.fields ?? [];
+      const namesNoPosition = fields.some(
+        (f: any) => f?.field === 'position' && f?.code === 'reference_not_found',
+      );
+      outcomes.push(
+        namesNoPosition
+          ? { position, outcome: 'unresolved' }
+          : { position, outcome: 'refused', code: resolveThrownHttpError(error, 500).code },
+      );
+    }
+  }
+  return outcomes;
+}
+
 export async function runAdminImportUsers(
   deps: IdentityImportDeps,
   request: Request,
@@ -598,6 +772,9 @@ export async function runAdminImportUsers(
   // `undefined` in `managerWanted` means the row named nobody.
   const managerWanted: Array<ManagerKeyRef | 'unreadable' | undefined> = new Array(prepared.rows.length);
   const rowIdentities: Array<RowIdentity | undefined> = new Array(prepared.rows.length);
+  // [#33113] The positions each row named, by ORIGINAL row number. `undefined`
+  // means the row named none; `'unreadable'` that the cell was not a list.
+  const positionsWanted: Array<string[] | 'unreadable' | undefined> = new Array(prepared.rows.length);
   for (let i = 0; i < prepared.rows.length; i++) {
     const row = { ...prepared.rows[i] };
     // [#18028] Read the manager cell and STRIP it before anything else sees the
@@ -605,6 +782,10 @@ export async function runAdminImportUsers(
     // column an email address. The second pass owns it from here.
     const wanted = resolveManagerKey(row[MANAGER_COLUMN], phoneEnabled);
     delete row[MANAGER_COLUMN];
+    // [#33113] The positions cell likewise: it is no `sys_user` field, and the
+    // second pass owns it.
+    const positionList = readNameList(row[POSITIONS_COLUMN], POSITIONS_COLUMN);
+    delete row[POSITIONS_COLUMN];
     const identity = resolveRowIdentity(row, { policy, phoneEnabled, emailInviteOk, smsInviteOk });
     if (identity.invalid) {
       results[i] = { row: i + 1, ok: false, action: 'failed', code: identity.invalid.code, error: identity.invalid.error };
@@ -616,6 +797,8 @@ export async function runAdminImportUsers(
     if (identity.phone) row.phone_number = identity.phone; else delete row.phone_number;
     if (identity.plan) planByKey.set(identityKey(identity.email, identity.phone), identity.plan);
     if (wanted !== 'absent') managerWanted[i] = wanted;
+    if (typeof positionList === 'string') positionsWanted[i] = 'unreadable';
+    else if (positionList.length > 0) positionsWanted[i] = positionList;
     rowIdentities[i] = identity;
     validRows.push(row);
     validIndex.push(i);
@@ -635,6 +818,70 @@ export async function runAdminImportUsers(
     temporaryLength = temporaryPasswordLength((await deps.getAuthContext()).password.config);
   } catch (error) {
     return mapAuthApiError(error, 'import-users failed', deps.logger);
+  }
+
+  // ADR-0093 D3 amendment (ruling on #34535, option B) — the multi-org join of
+  // the administrator's current organization, settled before any row is
+  // written, by create-user's own settlement: no current organization ⇒ the
+  // whole import is refused, as one creation is.
+  const settled = await settleCurrentOrganizationJoin({ ...deps, getAuthApi: async () => authApi });
+  if (settled && 'status' in settled) return settled;
+  const join: CurrentOrganizationJoin | undefined = settled;
+  const joinDeps = { getDataEngine: () => engine, ...(deps.logger ? { logger: deps.logger } : {}) };
+  /**
+   * Run one row's write and, in multi-org mode, its join as ONE unit of work.
+   * A refused join throws out of the unit, which rolls the row's write back,
+   * and is rethrown as the row's error: the vendor's code, the sentence that
+   * says what did not happen.
+   */
+  const inRowUnit = async <T,>(
+    account: 'created' | 'existing',
+    write: () => Promise<T>,
+    userIdOf: (written: T) => string,
+  ): Promise<T> => {
+    if (!join) return write();
+    try {
+      return await join.seam.runAtomically(async () => {
+        const written = await write();
+        await joinCurrentOrganization(joinDeps, join.addMember, userIdOf(written), join.organizationId, account);
+        return written;
+      });
+    } catch (error) {
+      if (!(error instanceof CreationRefused)) throw error;
+      const refusal = error.result.body.error;
+      throw Object.assign(new Error(refusal?.message ?? error.message), {
+        code: refusal?.code ?? 'INTERNAL_ERROR',
+        status: error.result.status,
+      });
+    }
+  };
+
+  // [#33113] What the position assignments need, read once per request. A
+  // host that cannot judge a grant, or a caller whose own access does not
+  // resolve, does NOT refuse the import: the users land exactly as they did
+  // before this column existed, and each named position is reported refused
+  // on its row with the reason's code (see the second pass). Not read on a
+  // dry run, which assigns nothing.
+  let grant: { engine: IdentityImportEngine; context: Record<string, unknown> } | undefined;
+  let grantBlocked: { code: 'NOT_IMPLEMENTED' | 'PERMISSION_DENIED'; message: string } | undefined;
+  if (!prepared.dryRun && positionsWanted.some((w) => Array.isArray(w))) {
+    const seam = deps.createGrant;
+    const context = seam ? await seam.resolveActorContext() : undefined;
+    if (!seam) {
+      grantBlocked = {
+        code: 'NOT_IMPLEMENTED',
+        message: 'This server cannot assign positions while importing users, so this row\'s positions were not '
+          + 'assigned. The user landed; assign the positions on their record.',
+      };
+    } else if (!context) {
+      grantBlocked = {
+        code: 'PERMISSION_DENIED',
+        message: 'Your own access could not be resolved, so this row\'s positions could not be judged and were '
+          + 'not assigned. The user landed; assign the positions on their record.',
+      };
+    } else {
+      grant = { engine, context };
+    }
   }
 
   const protocol: ImportProtocolLike = {
@@ -715,18 +962,25 @@ export async function runAdminImportUsers(
       // set-initial-password / the reset flow, which creates it on demand.
       const password = plan.kind === 'temporary' ? generateTemporaryPassword(temporaryLength) : undefined;
 
-      const created = await authApi.createUser({
-        body: {
-          email,
-          name,
-          ...(password ? { password } : {}),
-          ...(role ? { role } : {}),
-          ...(phone ? { data: { phoneNumber: phone } } : {}),
-        },
-      });
-      const id = created?.user?.id != null ? String(created.user.id) : undefined;
-      if (!id) throw Object.assign(new Error('better-auth returned no user id'), { code: 'CREATE_FAILED' });
+      // The account and, in multi-org mode, its membership: one unit of work,
+      // so a refused join leaves no account behind (see "Current organization").
+      const id = await inRowUnit('created', async () => {
+        const created = await authApi.createUser({
+          body: {
+            email,
+            name,
+            ...(password ? { password } : {}),
+            ...(role ? { role } : {}),
+            ...(phone ? { data: { phoneNumber: phone } } : {}),
+          },
+        });
+        const userId = created?.user?.id != null ? String(created.user.id) : undefined;
+        if (!userId) throw Object.assign(new Error('better-auth returned no user id'), { code: 'CREATE_FAILED' });
+        return userId;
+      }, (userId) => userId);
 
+      // Recorded only once the row's unit committed: a row whose join was
+      // refused carries no temporary password and is sent no invitation.
       if (plan.kind === 'temporary') {
         temporaryPasswords.set(id, password as string);
         try {
@@ -743,14 +997,21 @@ export async function runAdminImportUsers(
     },
 
     // Upsert updates touch PROFILE fields only — never email, never anything
-    // credential- or system-managed. An empty filtered patch is a no-op.
+    // credential- or system-managed. An empty filtered patch writes nothing.
+    // In multi-org mode the matched user joins the current organization in the
+    // same unit of work as its update (see "Current organization").
     async updateData(args) {
       const patch: Record<string, any> = {};
       for (const [k, v] of Object.entries(args?.data ?? {})) {
         if (UPDATE_ALLOWED_FIELDS.has(k) && v !== undefined && v !== null && v !== '') patch[k] = v;
       }
-      if (Object.keys(patch).length === 0) return { id: args.id };
-      await engine.update('sys_user', { id: args.id, ...patch }, { context: SYSTEM_CTX } as any);
+      const id = String(args.id);
+      await inRowUnit('existing', async () => {
+        if (Object.keys(patch).length > 0) {
+          await engine.update('sys_user', { id: args.id, ...patch }, { context: SYSTEM_CTX } as any);
+        }
+        return id;
+      }, (userId) => userId);
       return { id: args.id };
     },
   };
@@ -790,6 +1051,9 @@ export async function runAdminImportUsers(
   // reports the same three keys on a dry run — where the pass does not run —
   // as it does on a real one.
   const managerLinks = { linked: 0, unresolved: 0, refused: 0 };
+  // [#33113] The position pass's split, counted per named position — reported
+  // on a dry run too, as zeros, like the manager split.
+  const positionLinks = { assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 0 };
   if (!prepared.dryRun) {
     // [#23343] Resolved once, on the first email invitation, for the whole batch.
     let inviter: AccountInvitationMarker['inviter'] | undefined | null = null;
@@ -1000,6 +1264,51 @@ export async function runAdminImportUsers(
       }
     }
 
+    // ── Second pass — the position assignments (#33113, ruling 6920428750) ──
+    // After `runImport`, beside the manager pass: every row of the batch exists,
+    // so each assignment names a real user id.
+    for (let i = 0; i < results.length; i++) {
+      const wanted = positionsWanted[i];
+      if (wanted === undefined) continue;
+      const r = results[i];
+      // A row that failed its own write has nothing to assign to; its failure
+      // is already reported.
+      if (!r || !r.id || (r.action !== 'created' && r.action !== 'updated')) continue;
+      if (wanted === 'unreadable') {
+        r.positions = 'unreadable';
+        if (r.error === undefined) {
+          r.error = `The ${POSITIONS_COLUMN} cell is not a list of position names, so no position was assigned. `
+            + 'This row landed; only its positions did not.';
+        }
+        positionLinks.unresolved++;
+        continue;
+      }
+      // Exactly one of `grant` / `grantBlocked` is set here (read above).
+      if (grantBlocked) {
+        const blocked = grantBlocked;
+        r.positions = wanted.map((position) => ({ position, outcome: 'refused' as const, code: blocked.code }));
+        positionLinks.refused += wanted.length;
+        if (r.error === undefined) r.error = blocked.message;
+        continue;
+      }
+      const outcomes = await assignRowPositions(grant!, r.id, wanted, r.action === 'updated');
+      r.positions = outcomes;
+      const failed: string[] = [];
+      for (const o of outcomes) {
+        if (o.outcome === 'assigned') positionLinks.assigned++;
+        else if (o.outcome === 'already_assigned') positionLinks.alreadyAssigned++;
+        else {
+          if (o.outcome === 'unresolved') positionLinks.unresolved++;
+          else positionLinks.refused++;
+          failed.push(o.position);
+        }
+      }
+      if (failed.length > 0 && r.error === undefined) {
+        r.error = `${failed.length === 1 ? 'Position' : 'Positions'} ${failed.join(', ')} could not be assigned `
+          + '(see rows[].positions for each reason). This row landed; only those assignments did not.';
+      }
+    }
+
     // Run-level audit. Best-effort; NO password material.
     //
     // Corrected rationale (#4940): this used to read "better-auth writes
@@ -1045,6 +1354,10 @@ export async function runAdminImportUsers(
             // that linked nobody because every key was unresolved is the shape
             // an operator most needs to find later.
             manager: managerLinks,
+            // [#33113] And the position assignments.
+            positions: positionLinks,
+            // [#34535] The organization a multi-org run joined its rows to.
+            ...(join ? { organizationId: join.organizationId } : {}),
           }),
         }, { context: SYSTEM_CTX } as any);
       } catch (e) {
@@ -1105,6 +1418,9 @@ export async function runAdminImportUsers(
           // invitation IS folded in: the invitation was the row's ask, so the
           // row is not `ok` — see `errors` above. A manager link is not.)
           manager: managerLinks,
+          // [#33113] Per named position; like `manager`, failures on rows that
+          // landed are reported here and on the row, not folded into `errors`.
+          positions: positionLinks,
           mode,
           matchBy,
         },

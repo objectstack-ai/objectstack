@@ -3,7 +3,8 @@
 import { createHash } from 'node:crypto';
 import { recordNotFoundError } from '@objectstack/core';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
-import type { EngineSchemaRegistryView, IDataEngine, IFileAttachmentService } from '@objectstack/spec/contracts';
+import { resolveDisplayField, type DisplayNameObjectMeta } from '@objectstack/spec/data';
+import type { EngineSchemaRegistryView, IDataEngine, IFileAttachmentService, IPrintDoorService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import type { ICallerFileAttachmentService } from '@objectstack/service-storage';
@@ -41,7 +42,9 @@ import type { PrincipalSessionMinter, PrintSession } from './principal-session.j
  *  4. **The record, read AS THE CALLER.** A record the caller cannot read and
  *     a record that does not exist answer the same `RECORD_NOT_FOUND` / `404`,
  *     so the answer says nothing about a record the caller may not see. A user
- *     never archives what they could not read.
+ *     never archives what they could not read. The row this read answers is
+ *     the one the default file name is built from ({@link defaultPrintFilename}),
+ *     so the name never shows a value the caller may not read.
  *  5. **The files opt-in, and the attach rule.** The record's object must
  *     declare `enable: { files: true }`, the opt-in every attachment of it
  *     needs (`FILES_DISABLED` / `403`), and the caller must be allowed to
@@ -75,7 +78,11 @@ export interface PrintRecordRequest {
   recordId: string;
   /** The print page the caller expects the record to print on. */
   page: string;
-  /** The archived file's name. Defaults to `<page>-<recordId>.pdf`. */
+  /**
+   * The archived file's name, used as given. Defaults to the record's display
+   * name (ADR-0079) as a safe file name plus `.pdf`, or to
+   * `<page>-<recordId>.pdf` when the record has no display value.
+   */
   filename?: string;
 }
 
@@ -138,6 +145,14 @@ export interface PrintServiceDeps {
   getMinter(): PrincipalSessionMinter | undefined;
   /** Where a failed revoke is reported. */
   logger?: { error(message: string): void };
+  /**
+   * [#36840] The print door for a kernel with no `http.server` (a hosted
+   * tenant kernel): the member {@link PrintService.handlePrintDoor} is, built
+   * by the plugin over the same registration its `http.server` mount runs.
+   * Absent: the service has no such member, and the dispatcher's `/print`
+   * domain answers `501`.
+   */
+  printDoor?: (request: Request) => Promise<Response>;
 }
 
 /** The whole render's time budget. */
@@ -209,13 +224,80 @@ function printPageUrl(consoleUrl: string, req: ValidRequest, page: Record<string
   return defaultRecordPageObject(page) === req.object ? record : `${record}/page/${encodeURIComponent(req.page)}`;
 }
 
+/** The most characters a default file name keeps before its `.pdf`. */
+const DEFAULT_FILENAME_MAX_CHARS = 100;
+
+/**
+ * A display name made a safe attachment name, without its extension: control
+ * characters become spaces, the path and reserved characters
+ * (`/ \ : * ? " < > |`) become `_`, whitespace runs collapse to one space,
+ * leading dots and spaces are dropped (no hidden file, no `..`), a trailing
+ * `.pdf` is dropped so it is not doubled, and the name is cut to
+ * {@link DEFAULT_FILENAME_MAX_CHARS} characters, never inside a character,
+ * with trailing dots and spaces dropped after the cut. `''` when nothing is
+ * left.
+ *
+ * The archive stores the bytes under a key built from the file's id, never its
+ * name, and the download header encodes the name, so this keeps the name
+ * readable and storable on the user's own disk: `sys_attachment.file_name`
+ * holds at most 255 characters, and a longer name would be refused only after
+ * the render.
+ */
+function safeFileBase(name: string): string {
+  const cleaned = name
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\.pdf$/i, '')
+    .replace(/^[.\s]+/, '');
+  return Array.from(cleaned).slice(0, DEFAULT_FILENAME_MAX_CHARS).join('').replace(/[.\s]+$/, '');
+}
+
+/**
+ * The name a print is archived under when the request names none: the
+ * record's display name (ADR-0079), made safe by {@link safeFileBase}, plus
+ * `.pdf` — `Q-2026-0042.pdf` rather than `quote_print-<recordId>.pdf`.
+ *
+ * The display value is read as `resolveRecordDisplayName` reads it (the
+ * object's primary title field, `resolveDisplayField`), from the row the
+ * caller's own read answered. A record with no display value — no title
+ * field, an empty value, a value the caller's field-level security left out
+ * of that row, a value that is not text or a number, or one that is empty once
+ * made safe — keeps `<page>-<recordId>.pdf`, never the `Record #<id>` floor.
+ *
+ * Two prints of one record carry the same name and are two attachments: the
+ * archive keys each file by its own id and holds no unique name per record.
+ */
+function defaultPrintFilename(
+  objectDef: DisplayNameObjectMeta | undefined,
+  row: Record<string, unknown>,
+  req: ValidRequest,
+): string {
+  const field = resolveDisplayField(objectDef);
+  const value = field ? row[field] : undefined;
+  const text = typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)) ? String(value) : '';
+  const base = safeFileBase(text);
+  return base ? `${base}.pdf` : `${req.page}-${req.recordId}.pdf`;
+}
+
 /** What the engine's last probe answered. */
 type ProbeResult = { ok: true; version: string } | { ok: false; reason: string };
 
-export class PrintService implements IPrintService {
+export class PrintService implements IPrintService, IPrintDoorService {
   private lastProbe: ProbeResult | undefined;
 
-  constructor(private readonly deps: PrintServiceDeps) {}
+  /**
+   * [#36840] `IPrintDoorService.handlePrintDoor`: the print door for a kernel
+   * with no `http.server`, reached through the runtime dispatcher's `/print`
+   * domain. Present exactly when the composition supplied
+   * {@link PrintServiceDeps.printDoor}.
+   */
+  readonly handlePrintDoor?: (request: Request) => Promise<Response>;
+
+  constructor(private readonly deps: PrintServiceDeps) {
+    if (deps.printDoor) this.handlePrintDoor = deps.printDoor;
+  }
 
   /**
    * Probe the engine: open the browser, read its version, close it. Records
@@ -304,7 +386,7 @@ export class PrintService implements IPrintService {
     const page = this.refuseUnlessPrintPage(engine, req);
 
     // ④ The record, read as the caller.
-    await this.refuseUnlessReadable(engine, req, context);
+    const row = await this.readAsCaller(engine, req, context);
 
     // ⑤ The files opt-in, and the attach rule for the caller.
     this.refuseUnlessFilesEnabled(engine, req.object);
@@ -320,7 +402,8 @@ export class PrintService implements IPrintService {
     }
 
     // Mint, render, archive — and revoke, whatever happened.
-    const filename = req.filename ?? `${req.page}-${req.recordId}.pdf`;
+    const filename =
+      req.filename ?? defaultPrintFilename(engine.registry.getObject(req.object) as DisplayNameObjectMeta | undefined, row, req);
     const url = printPageUrl(placement.resolved.consoleUrl, req, page);
     const session: PrintSession = await minter.mint(context, PRINT_SESSION_TTL_SECONDS);
     try {
@@ -400,21 +483,23 @@ export class PrintService implements IPrintService {
     return page;
   }
 
-  private async refuseUnlessReadable(
+  /** The record as the caller reads it, or the one `RECORD_NOT_FOUND` / `404` for absent and unreadable alike. */
+  private async readAsCaller(
     engine: PrintEngine,
     req: ValidRequest,
     context: ExecutionContext,
-  ): Promise<void> {
+  ): Promise<Record<string, unknown>> {
     let row: Record<string, unknown> | null;
     try {
       row = await engine.findOne(req.object, { where: { id: req.recordId } }, { context });
     } catch (err) {
       // A read the caller is refused answers exactly as a record that does not
       // exist: never a 403 that tells the two apart.
-      if ((err as { status?: unknown })?.status === 403) throw recordNotFoundError(req.object, req.recordId);
+      if ((err as { status?: unknown })?.status === 403) throw recordNotFoundError(req.object, req.recordId, context);
       throw err;
     }
-    if (!row) throw recordNotFoundError(req.object, req.recordId);
+    if (!row) throw recordNotFoundError(req.object, req.recordId, context);
+    return row;
   }
 
   private refuseUnlessFilesEnabled(engine: PrintEngine, object: string): void {

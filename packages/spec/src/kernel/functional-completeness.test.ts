@@ -118,18 +118,21 @@ describe('checkFieldCompleteness — the verified inert shapes go red', () => {
 });
 
 describe('checkViewCompleteness — layout bindings', () => {
-  // Six of the view `type` members carry a binding block, and the missing
-  // block is the same defect on all six: the surface the author asked for is
-  // not the one that renders, while authoring reports success.
+  // Seven of the view `type` members carry a binding block, and the missing
+  // block is the same defect on all seven: the surface the author asked for is
+  // not the one that renders, while authoring reports success. (`timesheet`,
+  // the seventh, #34382, is also refused at the spec door when the block is
+  // absent — `checkListViewTimesheetBinding` — so this row is what an
+  // unparsed stack meets.)
   //
   // ⛔ What it is NOT is one shared mechanism. This comment used to say the
   // renderer's fallback for every one is a literal field name; objectui has
   // been deleting those floors one view type at a time, and for `calendar`
   // (#17445), `gantt`, `timeline` and `map` (#19630) the renderer now REFUSES
-  // by name instead. The rule fires on all six either way — that is what this
+  // by name instead. The rule fires on all seven either way — that is what this
   // pin holds — and the per-type mechanism belongs to the table's docblock,
   // which states each row's own measurement.
-  it.each(['kanban', 'calendar', 'gantt', 'timeline', 'map', 'tree'])('flags a %s view missing its block as a WARNING', (type) => {
+  it.each(['kanban', 'calendar', 'gantt', 'timeline', 'map', 'tree', 'timesheet'])('flags a %s view missing its block as a WARNING', (type) => {
     const f = only(checkViewCompleteness({ type }) as never);
     expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
     expect(f.severity).toBe('warning');
@@ -156,6 +159,10 @@ describe('checkViewCompleteness — layout bindings', () => {
       map: { latitudeField: 'lat', longitudeField: 'lng' },
     })).toEqual([]);
     expect(checkViewCompleteness({ type: 'tree', tree: { parentField: 'parent' } })).toEqual([]);
+    expect(checkViewCompleteness({
+      type: 'timesheet',
+      timesheet: { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' },
+    })).toEqual([]);
   });
 
   it('the calendar body describes the REFUSAL, not a deleted literal fallback', () => {

@@ -190,7 +190,9 @@ export const CaseHandoverSkill = defineSkill({
 
 ## How the name is resolved
 
-A `skill.tools[]` entry resolves against three sources, in order:
+A `skill.tools[]` entry resolves against three sources, in order, and a skill
+MCP can offer (`mcpPrompt` not `false`) against a fourth, the MCP door's file
+tools (`MCP_FILE_TOOL_NAMES` in `@objectstack/spec/system`):
 
 1. the stack's own `tools[]` names — the refinement records on this page;
 2. the curated registry of tools the platform runtime registers at boot;

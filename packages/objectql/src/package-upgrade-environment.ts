@@ -201,9 +201,19 @@ const REFERENCE_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail',
 type Bag = Record<string, any>;
 const isBag = (value: unknown): value is Bag => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** One side as the comparison reads it: a multi-package artifact folded by the platform's one reader. */
+/**
+ * One side as the comparison reads it: a multi-package artifact folded by the
+ * platform's one reader. `objectExtensions` is read with `objects` (#34095):
+ * the comparison merges each extension's fields onto its target, so a field an
+ * extension adds, retypes or drops is planned, counted and judged like an
+ * owned one.
+ */
 function sideOf(artifact: unknown): PackageUpgradeSide {
-  return { objects: resolveStackCollection(artifact, 'objects'), data: resolveStackCollection(artifact, 'data') };
+  return {
+    objects: resolveStackCollection(artifact, 'objects'),
+    objectExtensions: resolveStackCollection(artifact, 'objectExtensions'),
+    data: resolveStackCollection(artifact, 'data'),
+  };
 }
 
 /**

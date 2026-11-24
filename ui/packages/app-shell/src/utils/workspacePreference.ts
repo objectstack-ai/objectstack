@@ -12,7 +12,7 @@ import {
   relatedArrangementFromRecord,
   relatedArrangementToRecord,
   type RelatedArrangement,
-} from '@object-ui/plugin-detail';
+} from '@object-ui/plugin-detail/core';
 
 /**
  * The console's per-reader workspace preferences — how a reader likes the
@@ -127,7 +127,7 @@ export function versionedPreferenceCodec<T>(options: {
 }
 
 /**
- * An on | off preference — the record page's right column shown or not. Stored as
+ * An on | off preference — the approvals queue's 「处理后打开下一条」. Stored as
  * `{"value":"on"|"off","v":1}`.
  */
 export type PreferenceSwitch = 'on' | 'off';
@@ -139,15 +139,29 @@ const switchCodec = versionedPreferenceCodec<PreferenceSwitch>({
 });
 
 /**
- * Whether the record page shows its right column — the 动态 panel and the
- * related panels, the reader's ⊟ (objectstack#27524, Target 4) — per object
- * (scope `object:OBJECT_NAME`). With no choice: shown. The name keeps its
- * stored spelling, so a reader's earlier choice for the related column
- * holds. (The timeline column's switch, `record.columns.timeline`, retired
- * with the column.)
+ * The width, in CSS px, the reader dragged the record page's pinned left
+ * column to — the details beside the other tabs on a wide full page
+ * (objectstack#35890) — per object (scope `object:OBJECT_NAME`). Stored as
+ * `{"width":N,"v":1}`. With no choice: the page's default, 400. (The right
+ * column's ⊟ switch, `record.columns.related`, retired with the right rail.)
  */
-export const RECORD_RELATED_COLUMN_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
-  name: 'record.columns.related',
+export const RECORD_DETAILS_WIDTH_PREFERENCE = defineWorkspacePreference<number>({
+  name: 'record.columns.details-width',
+  codec: versionedPreferenceCodec<number>({
+    version: 1,
+    toRecord: (width) => ({ width }),
+    fromRecord: (record) =>
+      typeof record.width === 'number' && Number.isFinite(record.width) && record.width > 0 ? record.width : undefined,
+  }),
+});
+
+/**
+ * Whether deciding a request on its page opens the next one of the approvals
+ * queue it was opened from (objectstack#34586) — the reader's 「处理后打开下一条」,
+ * across requests (scope `user`). With no choice: on.
+ */
+export const APPROVAL_QUEUE_OPEN_NEXT_PREFERENCE = defineWorkspacePreference<PreferenceSwitch>({
+  name: 'approvals.queue.open-next',
   codec: switchCodec,
 });
 
@@ -177,7 +191,9 @@ export const RECORD_RELATED_ARRANGEMENT_PREFERENCE = defineWorkspacePreference<R
  * when the address names none. Stored as `{"view":"VIEW_ID","v":1}`, and an
  * unpin as `{"view":null,"v":1}` (`null`: none pinned). With none pinned, or a
  * pinned view the list no longer offers, the list opens the view it declares
- * as default (`isDefault`), else its first.
+ * as default (`isDefault`), else its first. The list page keeps it per
+ * organization too (`usePinnedListView`, objectstack#36244), since the pin can
+ * name a personal view of one organization.
  */
 export const LIST_PINNED_VIEW_PREFERENCE = defineWorkspacePreference<string | null>({
   name: 'list.view.pinned',

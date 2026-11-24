@@ -116,6 +116,7 @@ describe('DetailView – recall is the submitter\'s lever (objectui#6464)', () =
       approvalPending: true,
       approvalIsSubmitter: false,
       approvalProgress: QUORUM,
+      canEdit: true,
     });
 
     expectBandRendered('In approval · editable');
@@ -134,6 +135,7 @@ describe('DetailView – recall is the submitter\'s lever (objectui#6464)', () =
       approvalPending: true,
       approvalIsSubmitter: true,
       approvalProgress: QUORUM,
+      canEdit: true,
     });
 
     expectBandRendered('In approval · editable');
@@ -151,7 +153,7 @@ describe('DetailView – recall is the submitter\'s lever (objectui#6464)', () =
    * submitter, trading a cosmetic defect for a functional loss.
    */
   it('offers recall unchanged when the host threads no submitter identity', () => {
-    renderBand({ locked: false, approvalPending: true, approvalProgress: QUORUM });
+    renderBand({ locked: false, approvalPending: true, approvalProgress: QUORUM, canEdit: true });
 
     expectBandRendered('In approval · editable');
     expect(screen.getByRole('button', { name: RECALL })).toBeInTheDocument();

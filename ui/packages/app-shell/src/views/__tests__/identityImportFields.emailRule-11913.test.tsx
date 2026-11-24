@@ -21,13 +21,14 @@
  * `React.lazy` boundary (AGENTS.md 测试纪律), so its cost lands in the import
  * phase, which no test timeout bounds.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { render, screen, act, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
 import { ImportWizard } from '@object-ui/plugin-grid';
-import { identityImportFields } from '../IdentityImportPanels';
+import { identityImportFields, IdentityImportOptions } from '../IdentityImportPanels';
+import { createIdentityImportDataSource, IDENTITY_IMPORT_OBJECT } from '../identityImport';
 
 /** Paste TSV into the upload step via the wizard's window-level handler. */
 function pasteRows(text: string) {
@@ -67,5 +68,81 @@ describe('identityImportFields: the email column is checked by the identity rule
     expect(cell(2, 0)).toHaveAttribute('aria-invalid', 'true');
     expect(cell(1, 0).closest('td')).toHaveAttribute('title', 'Invalid email');
     expect(button).toHaveTextContent('Import 1 Row');
+  });
+});
+
+describe('identityImportFields: the positions column (objectstack#33113)', () => {
+  it('offers `positions`, the column the endpoint assigns positions from', () => {
+    const positions = identityImportFields(undefined).find((f) => f.name === 'positions');
+    expect(positions).toMatchObject({ type: 'text' });
+  });
+
+  it('the options panel explains the column', () => {
+    render(<IdentityImportOptions policy="auto" onPolicyChange={() => {}} />);
+    expect(screen.getByTestId('identity-import-positions-hint')).toHaveTextContent(/position machine names.*";"/);
+  });
+});
+
+describe('identityImportFields: the manager column reaches import-users as `manager_id` (objectstack#34536)', () => {
+  beforeAll(() => {
+    if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = vi.fn(() => false);
+    if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it('offers `manager_id` as a text column labelled by the object field', () => {
+    expect(identityImportFields(undefined).find((f) => f.name === 'manager_id'))
+      .toEqual({ name: 'manager_id', label: 'Manager', type: 'text' });
+    expect(identityImportFields({ manager_id: { label: 'Reports to' } }).find((f) => f.name === 'manager_id'))
+      .toMatchObject({ label: 'Reports to', type: 'text' });
+  });
+
+  it('the options panel explains the column', () => {
+    render(<IdentityImportOptions policy="auto" onPolicyChange={() => {}} />);
+    expect(screen.getByTestId('identity-import-manager-hint')).toHaveTextContent(/email address.*reported on its row/);
+  });
+
+  it('a pasted manager column is mapped and sent on every row that names one', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const authFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { rows: unknown[] } & Record<string, unknown>;
+      bodies.push(body);
+      const rows = body.rows.map((_, i) => ({ row: i + 1, ok: true, action: 'created', id: `u-${i}` }));
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          summary: { total: rows.length, created: rows.length, updated: 0, skipped: 0, errors: 0, dryRun: body.dryRun === true },
+          rows,
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    const dataSource = createIdentityImportDataSource({
+      base: {}, authFetch, baseUrl: 'http://srv', getPasswordPolicy: () => 'auto',
+    });
+    const onComplete = vi.fn();
+    render(
+      <ImportWizard
+        objectName={IDENTITY_IMPORT_OBJECT}
+        fields={identityImportFields(undefined)}
+        dataSource={dataSource as never}
+        open
+        onOpenChange={() => {}}
+        onComplete={onComplete}
+      />,
+    );
+    pasteRows('Email\tName\tmanager_id\nada@example.com\tAda\t\nbob@example.com\tBob\tada@example.com');
+    const next = await screen.findByTestId('import-next-btn');
+    await waitFor(() => expect(next).toBeEnabled());
+    fireEvent.click(next);
+    const run = await screen.findByTestId('import-run-btn');
+    await waitFor(() => expect(run).toBeEnabled());
+    fireEvent.click(run);
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+
+    const sent = bodies.filter((b) => b.dryRun !== true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].rows).toEqual([
+      { email: 'ada@example.com', name: 'Ada', manager_id: '' },
+      { email: 'bob@example.com', name: 'Bob', manager_id: 'ada@example.com' },
+    ]);
   });
 });

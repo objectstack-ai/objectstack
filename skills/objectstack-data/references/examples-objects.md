@@ -3,14 +3,14 @@
 ## Field Groups (MVP)
 
 - Declare groups on `ObjectSchema.fieldGroups` — **array order is the display order**.
-- Assign each field to a group via `Field.group`, which references an
-  `ObjectFieldGroup.key`. In-group display order equals the traversal order
-  of `fields`.
+- A group lists its members, in display order, in its own `fields`. Absent,
+  its members are the fields whose `group` names its `key` (older, still read).
+  A field listed by two groups, or listed while its `group` names another, is refused.
 - Group keys must be `snake_case`.
 - Optional per-group: `icon`, `description`, and `collapse`
-  (`'none'` always open · `'expanded'` collapsible, starts open ·
-  `'collapsed'` collapsible, starts closed). Groups render identically on forms,
-  modals, and detail pages.
+  (`'none'` always open · `'expanded'` foldable, starts open ·
+  `'collapsed'` starts closed). Forms keep it; the default record page
+  lets readers fold any titled group.
 - Hide a whole group, header included, with `visibleWhen` (CEL over
   `record.*`; FALSE or a fault hides it) or `requiresFeature` (a deployment
   feature flag from `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`; an
@@ -31,19 +31,19 @@ export default ObjectSchema.create({
   sharingModel: 'private',
 
   fieldGroups: [
-    { key: 'contact_info', label: 'Contact Information', icon: 'user' },
-    { key: 'billing',      label: 'Billing', collapse: 'collapsed' },
-    { key: 'system',       label: 'System' },
+    { key: 'contact_info', label: 'Contact Information', icon: 'user', fields: ['name', 'email', 'phone'] },
+    { key: 'billing', label: 'Billing', collapse: 'collapsed', fields: ['vat_id', 'billing_address'] },
+    { key: 'system', label: 'System', fields: ['created_at', 'created_by'] },
   ],
 
   fields: {
-    name:       { type: 'text',  required: true, group: 'contact_info' },
-    email:      { type: 'email',                  group: 'contact_info' },
-    phone:      { type: 'phone',                  group: 'contact_info' },
-    vat_id:     { type: 'text',                   group: 'billing' },
-    billing_address: { type: 'address',           group: 'billing' },
-    created_at: { type: 'datetime', readonly: true, group: 'system' },
-    created_by: { type: 'user', readonly: true, group: 'system' },
+    name:       { type: 'text', required: true },
+    email:      { type: 'email' },
+    phone:      { type: 'phone' },
+    vat_id:     { type: 'text' },
+    billing_address: { type: 'address' },
+    created_at: { type: 'datetime', readonly: true },
+    created_by: { type: 'user', readonly: true },
   },
 });
 ```
@@ -60,6 +60,7 @@ export default ObjectSchema.create({
   pluralLabel: 'Support Cases',
   description: 'A customer-reported issue tracked to resolution.',
   icon: 'life-buoy',
+  color: 'orange',
   sharingModel: 'private',                 // required in practice
   highlightFields: ['subject', 'status', 'priority'],
   enable: {

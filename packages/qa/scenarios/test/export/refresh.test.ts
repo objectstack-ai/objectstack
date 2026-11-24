@@ -135,14 +135,18 @@ describe('galleryRefresh — the quiet skip', () => {
     expect(remoteRefs(remote)).toBe(refs);
   });
 
-  it('does not skip when one listed app is on an older version, or when the index lists no app', async () => {
-    for (const apps of [[app('crm_account_with_contacts', PINNED), app('order_to_cash', '18.2.0')], [], undefined]) {
-      const { dir } = gallery(apps);
-      const h = harness(PINNED);
-      const out = await galleryRefresh(options(dir), h.deps);
-      expect(out.kind).toBe('committed');
-      expect(h.plans).toHaveLength(1);
-    }
+  // One case per gallery shape: each runs a full refresh (git init, the crm run, a commit), so a
+  // loop over all three in one case outgrew the default per-test budget on a loaded CI shard.
+  it.each<[string, () => GalleryApp[] | undefined]>([
+    ['one listed app is on an older version', () => [app('crm_account_with_contacts', PINNED), app('order_to_cash', '18.2.0')]],
+    ['the index lists no app', () => []],
+    ['the gallery has no index', () => undefined],
+  ])('does not skip when %s', async (_shape, apps) => {
+    const { dir } = gallery(apps());
+    const h = harness(PINNED);
+    const out = await galleryRefresh(options(dir), h.deps);
+    expect(out.kind).toBe('committed');
+    expect(h.plans).toHaveLength(1);
   });
 
   it('skips when a remote-tracking export/<version> branch exists: that refresh awaits review', async () => {

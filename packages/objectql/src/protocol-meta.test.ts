@@ -1548,6 +1548,9 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // true` — so the tier keeps a live specimen.
         it('accepts brand-new mapping and seed (allowRuntimeCreate:true)', async () => {
             mockEngine.findOne.mockResolvedValue(null);
+            // [#34864] The seed's object exists: the save door refuses a seed
+            // whose object nothing resolves.
+            registry.registerObject({ name: 'case', label: 'Case', fields: { name: { type: 'text', label: 'Name' } } } as never);
 
             const mappingResult = await scoped.saveMetaItem({
                 type: 'mapping',

@@ -297,6 +297,21 @@ export interface FlowNodeExpressionPath {
    * every depth.
    */
   readonly filterOperands?: true;
+  /**
+   * The slot ALSO takes a text envelope, `{ dialect: 'template', source }` —
+   * a sentence for people to read that the executor writes as text, picking
+   * its translation in the organization's language before it fills the
+   * `{{ }}` holes (ruling 6913660232 on objectstack#34062, letter B). Today
+   * the `create_record` / `update_record` `fields` map, and only it
+   * (parameter 4: the author marks the text, and only those two maps).
+   *
+   * Changes one thing: {@link resolveFlowNodeExpressions} does not emit such
+   * an envelope ({@link isFlowTextEnvelopeShaped}), because it is no CEL value
+   * to check — its judge is the text-slot judge, which reaches it through the
+   * text-slot list (`FLOW_NODE_TEXT_SLOTS`, `flow-text-slot-template.ts`). Every
+   * other dialect is emitted as on any value slot, and refused there.
+   */
+  readonly textEnvelope?: true;
 }
 
 /**
@@ -474,6 +489,9 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     path: 'fields.*',
     role: 'value',
     label: 'create_record field value',
+    // A field value may be marked as text the record keeps for people to
+    // read (ruling 6913660232): the text-slot judge's, not this walk's.
+    textEnvelope: true,
   },
   {
     // The same map on the update node (`UpdateRecordConfigSchema`). Its
@@ -483,6 +501,7 @@ export const FLOW_NODE_EXPRESSION_PATHS: readonly FlowNodeExpressionPath[] = [
     path: 'fields.*',
     role: 'value',
     label: 'update_record field value',
+    textEnvelope: true,
   },
   {
     // [#19939] The maps a node hands to a CALLEE as its inputs (#11182
@@ -822,6 +841,17 @@ export function isExpressionEnvelopeShaped(value: unknown): value is { dialect: 
 }
 
 /**
+ * A TEXT envelope — `{ dialect: 'template', … }` — on a value slot that takes
+ * one ({@link FlowNodeExpressionPath.textEnvelope}): text for people to read,
+ * written in the organization's language, never a CEL value. Shape only, like
+ * {@link isExpressionEnvelopeShaped}; whether it is a valid one is the
+ * slot contract's and the text-slot judge's question.
+ */
+export function isFlowTextEnvelopeShaped(value: unknown): value is { dialect: 'template' } {
+  return isExpressionEnvelopeShaped(value) && value.dialect === 'template';
+}
+
+/**
  * Resolve every expression slot the ledger declares for `nodeType` against a
  * concrete `config`, filling in array indices and wildcard keys.
  *
@@ -893,6 +923,8 @@ export function resolveFlowNodeExpressions(
     const block = flowNodeExpressionBlock(entry);
     walk(root, entry.path.split('.'), '', slotEmitter(entry, (path, value) => {
       if (entry.role === 'value') {
+        // A text envelope is no CEL value: the text-slot judge reads it.
+        if (entry.textEnvelope && isFlowTextEnvelopeShaped(value)) return;
         if (isExpressionEnvelopeShaped(value)) out.push({ entry, block, path, value });
       } else if (typeof value === 'string') {
         // #17493 — every string in a `predicate` slot is emitted, a BLANK one

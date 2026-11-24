@@ -34,6 +34,9 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -191,7 +194,7 @@ const callsTo = (url: string) => fetchSpy.mock.calls.filter(([u]) => String(u).i
 
 /** The page header, once its toolbar has drawn the control action. */
 async function header(): Promise<HTMLElement> {
-  const el = await screen.findByTestId('page-header', undefined, { timeout: 5000 });
+  const el = await screen.findByTestId('list-view-bar-actions', undefined, { timeout: 5000 });
   await within(el).findByRole('button', { name: /Export Tasks/ }, { timeout: 5000 });
   return el;
 }

@@ -310,7 +310,7 @@ describe('the decision that ends an approval tells its submitter (approval.appro
 
   it('a rejection at the first step ends the process, so it tells the submitter', async () => {
     const step1 = await submit('deal_ladder', 'vetoed', 5000);
-    await svc.decide(step1.id, { decision: 'reject', actorId: 'u_mgr' }, asUser('u_mgr'));
+    await svc.decide(step1.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u_mgr' }, asUser('u_mgr'));
     expect(await pendingOn('D_vetoed')).toBeUndefined();
     expect(outcomesAbout(step1.id).map((e) => [e.topic, e.audience])).toEqual([['approval.rejected', ['u_sub']]]);
   });

@@ -7,10 +7,25 @@
  */
 
 import * as React from 'react';
-import { cn, Button, RelatedCountStore } from '@object-ui/components';
+import {
+  cn,
+  Button,
+  RelatedCountStore,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+} from '@object-ui/components';
 import {
   Paperclip,
-  Upload,
+  Plus,
   Trash2,
   Download,
   Loader2,
@@ -18,11 +33,20 @@ import {
   AlertTriangle,
   Ban,
   RefreshCw,
+  MoreVertical,
+  Pencil,
+  File as FileIcon,
+  FileText,
+  FileImage,
+  FileSpreadsheet,
+  FileArchive,
 } from 'lucide-react';
 import { createObjectStackUploadAdapter } from '@object-ui/data-objectstack';
-import { createAuthenticatedFetch } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
+import { useDisplayLocale } from '@object-ui/i18n';
 import { useObjectTranslation, isPermissionError, classifyLoadError } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
+import { FilePreviewDialog, type FilePreviewItem } from '@object-ui/fields';
 import { resolveAffordance, type ConfirmationHandler } from '@object-ui/core';
 import {
   NATIVE_FILE_MAX_BYTES,
@@ -54,6 +78,18 @@ import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './reco
  * Downloads fetch a short-lived signed URL from `/storage/files/:fileId/url`
  * with the console's Bearer token (the endpoint requires an authenticated
  * session for attachments-scope files, objectstack-ai/objectstack#2970), then open it.
+ * A row's NAME opens the file in the page (`FilePreviewDialog`, objectstack#36442),
+ * which mints its link through that same door, so a reader the download refuses
+ * is refused the same way; the download itself stays in the row's ⋮ menu.
+ *
+ * The list read expands `uploaded_by` (the record page payload's attachments
+ * part does the same), so the uploader column names whoever uploaded a row
+ * when the reader may read that user; a reader who may not gets the bare id
+ * back and the column stays blank, never showing the id. A row's Rename sends
+ * the new name to the attachment rename door, `PATCH /api/v1/attachments/:id`
+ * (service-storage), which renames by the attachment delete rule. The caller's
+ * own upload is deleted through the removal door at the same path
+ * (`DELETE /api/v1/attachments/:id`); anyone else's through the data door.
  */
 
 interface AttachmentRow {
@@ -63,15 +99,28 @@ interface AttachmentRow {
   mime_type?: string | null;
   size?: number | null;
   created_at?: string | null;
-  uploaded_by?: string | null;
+  /** The uploader's user id, or the user row where a read expanded it. */
+  uploaded_by?: string | { id?: string; name?: string | null } | null;
+}
+
+/** The uploader's user id of `row`, whether the read expanded `uploaded_by` or not. */
+function uploaderIdOf(row: AttachmentRow): string | null | undefined {
+  const by = row.uploaded_by;
+  return by && typeof by === 'object' ? by.id : by;
 }
 
 export interface RecordAttachmentsPanelProps {
   objectName: string;
   recordId: string;
-  /** ObjectUI DataSource (the list read and the delete go through the generic data path; the attach does not). */
+  /**
+   * ObjectUI DataSource (the list read and the delete of another user's upload go through the generic data
+   * path; the attach, the caller's own delete and every rename do not).
+   */
   dataSource: any;
-  /** Current user id. The server stamps `uploaded_by` from the session; the panel no longer sends it. */
+  /**
+   * Current user id. The server stamps `uploaded_by` from the session; the panel no longer sends it.
+   * It names the caller's own rows for Delete and Rename when no auth provider supplies the user.
+   */
   currentUserId?: string | null;
   className?: string;
 }
@@ -139,6 +188,20 @@ function formatSize(bytes?: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** A file row's type mark, by its MIME type. */
+function fileTypeIcon(mime?: string | null): React.ElementType {
+  const type = (mime ?? '').toLowerCase();
+  if (type.startsWith('image/')) return FileImage;
+  if (type.includes('spreadsheet') || type.includes('excel') || type === 'text/csv') return FileSpreadsheet;
+  if (type.includes('zip') || type.includes('compressed') || type.includes('tar')) return FileArchive;
+  if (type.startsWith('text/') || type === 'application/pdf' || type.includes('word') || type.includes('document')) return FileText;
+  return FileIcon;
+}
+
+/** Whether a drag carries files (a dragged text selection or link does not). */
+function dragHasFiles(e: React.DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes('Files');
+}
 
 /**
  * Inside the ObjectStack mobile shell, when it announces `openFile`: fetch the
@@ -179,6 +242,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   objectName,
   recordId,
   dataSource,
+  currentUserId,
   className,
 }) => {
   const { t } = useObjectTranslation();
@@ -208,6 +272,9 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
    */
   const refreshSeqRef = React.useRef(0);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const [dragOver, setDragOver] = React.useState(false);
+  const { user } = useAuth();
+  const displayLocale = useDisplayLocale();
 
   /**
    * objectui#12047 — the two write affordances follow the caller's grant on
@@ -224,13 +291,18 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
    * pending, and its retention reclaims it); hiding Upload spares the user
    * that round trip.
    *
-   * Delete needs `delete`, and being the uploader does not change that. The
-   * server asks the object grant first (plugin-security's CRUD check wraps the
-   * engine's `beforeDelete` hooks), and only a caller who passes it reaches
-   * service-storage's uploader-or-parent-editor rule. So `uploaded_by` cannot
-   * open a delete the grant withholds, and it cannot close one the grant
-   * allows either: the parent-editor half of that rule is not visible here.
-   * No row's `uploaded_by` enters this verdict for that reason.
+   * Delete has two doors, and the row's `uploaded_by` picks one. The caller's
+   * OWN upload goes through the storage service's removal door
+   * (`DELETE /api/v1/attachments/:id`), which reads the row as the caller and
+   * admits exactly the row whose `uploaded_by` names them, with no delete
+   * grant (the member grant carries read and create only). Anyone else's row
+   * goes through the data door, where the object grant is asked first
+   * (plugin-security's CRUD check wraps the engine's `beforeDelete` hooks) and
+   * only a caller who passes it reaches service-storage's
+   * uploader-or-parent-editor rule; the removal door refuses such a row even
+   * to a holder of the delete grant. So a row offers Delete when the caller
+   * uploaded it, or when the caller holds `delete` — the parent-editor half of
+   * the data door's rule is not visible here, and its refusal is mapped below.
    *
    * No flash while permissions load: the console's `MePermissionsProvider`
    * renders none of its children until it holds an answer, and a refetch keeps
@@ -246,6 +318,22 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
   const perms = usePermissions();
   const canUpload = resolveAffordance('attachmentUpload', { objectName: 'sys_attachment', perms }).allowed;
   const canDelete = resolveAffordance('attachmentDelete', { objectName: 'sys_attachment', perms }).allowed;
+  /**
+   * Rename follows the rename door's two limbs. The door renames the caller's
+   * OWN upload with no grant beyond read (written on their behalf, as the
+   * removal door removes), and writes anyone else's rename through the engine
+   * as the caller, which needs the edit grant on `sys_attachment`. So a row
+   * offers Rename when the caller uploaded it, or when the caller holds the
+   * edit grant; offering it elsewhere would offer a door the server refuses.
+   * The edit-grant half is the map's `attachmentRename` row; with no provider
+   * mounted it reads open, and the server remains the gate.
+   */
+  const canEditAttachments = resolveAffordance('attachmentRename', { objectName: 'sys_attachment', perms }).allowed;
+  const callerId = user?.id ?? currentUserId ?? null;
+  /** Whether the caller uploaded `row`: the comparison both storage doors make on `uploaded_by`. */
+  const isOwnUpload = (row: AttachmentRow): boolean => !!callerId && uploaderIdOf(row) === callerId;
+  const canDeleteRow = (row: AttachmentRow): boolean => isOwnUpload(row) || canDelete;
+  const canRename = (row: AttachmentRow): boolean => isOwnUpload(row) || canEditAttachments;
 
   // Same base-URL convention as RecordDetailView's raw API fetches: the
   // Vite dev console proxies same-origin `/api` unless VITE_SERVER_URL
@@ -337,6 +425,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
             $filter: { parent_object: objectName, parent_id: recordId },
             $orderby: { created_at: 'desc' },
             $top: RECORD_PAGE_ATTACHMENT_ROWS,
+            $expand: ['uploaded_by'],
           });
       const items: AttachmentRow[] = Array.isArray(res) ? res : res?.data ?? [];
       // objectui#10684 — a superseded answer is dropped on arrival.
@@ -442,6 +531,30 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
     [],
   );
 
+  /**
+   * One call to the storage service's attachment doors at
+   * `/api/v1/attachments/:id` (the removal door's `DELETE`, the rename door's
+   * `PATCH`): answers the response body's `data`, or throws the door's refusal
+   * as an error carrying its `code`, for `friendlyError` to name.
+   */
+  const callAttachmentDoor = React.useCallback(
+    async (rowId: string, init: RequestInit, failure: string): Promise<Record<string, unknown> | undefined> => {
+      const res = await authFetch(`${baseUrl}/api/v1/attachments/${encodeURIComponent(rowId)}`, init);
+      let body: { data?: Record<string, unknown>; error?: { code?: string; message?: string } } | null = null;
+      try {
+        body = await res.json();
+      } catch {
+        /* non-JSON body */
+      }
+      if (!res.ok) {
+        const code = body?.error?.code;
+        throw Object.assign(new Error(body?.error?.message ?? `${failure} (${res.status})`), { code });
+      }
+      return body?.data;
+    },
+    [authFetch, baseUrl],
+  );
+
   const handleDelete = React.useCallback(
     async (row: AttachmentRow) => {
       if (!dataSource) return;
@@ -459,7 +572,12 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
       if (!confirmed) return;
       setError(null);
       try {
-        await dataSource.delete('sys_attachment', row.id);
+        if (callerId && uploaderIdOf(row) === callerId) {
+          // The caller's own upload: the removal door, which needs no delete grant.
+          await callAttachmentDoor(row.id, { method: 'DELETE' }, 'Delete failed');
+        } else {
+          await dataSource.delete('sys_attachment', row.id);
+        }
         setRows((prev) => prev.filter((r) => r.id !== row.id));
       } catch (err: any) {
         // With the `delete` grant, the button renders for every row: the
@@ -470,59 +588,184 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         setError(friendlyError(err));
       }
     },
-    [dataSource, friendlyError, confirmDelete, t],
+    [dataSource, callerId, callAttachmentDoor, friendlyError, confirmDelete, t],
+  );
+
+  /**
+   * Rename: offered to the row's uploader, and to a reader who holds the edit
+   * grant (`canRename`), because the server renames by the attachment delete
+   * rule — the uploader, or an editor of the record — and writes an editor's
+   * rename as the caller. The dialog closes on a stored name and stays open on
+   * a refusal, which the panel's error line names.
+   */
+  const [renaming, setRenaming] = React.useState<AttachmentRow | null>(null);
+  const handleRename = React.useCallback(
+    async (row: AttachmentRow, fileName: string): Promise<boolean> => {
+      setError(null);
+      try {
+        const data = await callAttachmentDoor(
+          row.id,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_name: fileName }),
+          },
+          'Rename failed',
+        );
+        const stored = data?.file_name;
+        if (typeof stored !== 'string') throw new Error('The server renamed the attachment but did not answer its stored name');
+        setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, file_name: stored } : r)));
+        return true;
+      } catch (err: any) {
+        setError(
+          err?.code === 'RECORD_NOT_ACCESSIBLE'
+            ? t('detail.attachmentRenameDenied', {
+                defaultValue: 'Only the uploader or someone who can edit this record may rename this attachment.',
+              })
+            : friendlyError(err),
+        );
+        return false;
+      }
+    },
+    [callAttachmentDoor, friendlyError, t],
+  );
+
+  /**
+   * The signed link for a row: the one door both the download and the preview
+   * read through. Throws the server's code on a refusal.
+   */
+  const signedUrlFor = React.useCallback(
+    async (row: AttachmentRow): Promise<string> => {
+      // The stable `/files/:fileId` endpoint now requires an authenticated
+      // session for attachments-scope files (objectstack-ai/objectstack#2970) — an <a href> can't
+      // carry the Bearer token. Fetch a short-lived signed URL with auth,
+      // then open it (the signed URL itself needs no credentials).
+      const res = await authFetch(
+        `${baseUrl}/api/v1/storage/files/${encodeURIComponent(row.file_id)}/url`,
+      );
+      if (!res.ok) {
+        let code: string | undefined;
+        try {
+          // Read BOTH error dialects, the same way the success branch below
+          // reads both `url` shapes. The storage service moved its error
+          // code from a sibling of `error` into the declared
+          // `{ success: false, error: { code, message } }` envelope
+          // (objectstack#3675); a console build is deployed independently of
+          // the server it talks to, so it has to keep understanding the
+          // older top-level `code` too. Without the nested branch the 401/403
+          // downgrade silently to "Download failed (403)" and the friendly
+          // copy below never fires.
+          const body = (await res.json()) as { code?: string; error?: { code?: string } } | null;
+          code = body?.error?.code ?? body?.code;
+        } catch {
+          /* non-JSON body */
+        }
+        throw Object.assign(new Error(code ?? `Download failed (${res.status})`), { code });
+      }
+      const body = await res.json();
+      // Both URL dialects, for the same independent-deploy reason as the
+      // error branch above: the route answered a bare `{ url }` until
+      // objectstack#3689 moved it into the declared
+      // `{ success: true, data: { url } }` envelope.
+      const url: string | undefined = body?.url ?? body?.data?.url;
+      if (!url) throw new Error('Download URL missing from response');
+      return /^https?:/i.test(url) ? url : `${baseUrl}${url}`;
+    },
+    [authFetch, baseUrl],
   );
 
   const handleDownload = React.useCallback(
     async (row: AttachmentRow) => {
       setError(null);
       try {
-        // The stable `/files/:fileId` endpoint now requires an authenticated
-        // session for attachments-scope files (objectstack-ai/objectstack#2970) — an <a href> can't
-        // carry the Bearer token. Fetch a short-lived signed URL with auth,
-        // then open it (the signed URL itself needs no credentials).
-        const res = await authFetch(
-          `${baseUrl}/api/v1/storage/files/${encodeURIComponent(row.file_id)}/url`,
-        );
-        if (!res.ok) {
-          let code: string | undefined;
-          try {
-            // Read BOTH error dialects, the same way the success branch below
-            // reads both `url` shapes. The storage service moved its error
-            // code from a sibling of `error` into the declared
-            // `{ success: false, error: { code, message } }` envelope
-            // (objectstack#3675); a console build is deployed independently of
-            // the server it talks to, so it has to keep understanding the
-            // older top-level `code` too. Without the nested branch the 401/403
-            // downgrade silently to "Download failed (403)" and the friendly
-            // copy below never fires.
-            const body = (await res.json()) as { code?: string; error?: { code?: string } } | null;
-            code = body?.error?.code ?? body?.code;
-          } catch {
-            /* non-JSON body */
-          }
-          throw Object.assign(new Error(code ?? `Download failed (${res.status})`), { code });
-        }
-        const body = await res.json();
-        // Both URL dialects, for the same independent-deploy reason as the
-        // error branch above: the route answered a bare `{ url }` until
-        // objectstack#3689 moved it into the declared
-        // `{ success: true, data: { url } }` envelope.
-        const url: string | undefined = body?.url ?? body?.data?.url;
-        if (!url) throw new Error('Download URL missing from response');
-        const target = /^https?:/i.test(url) ? url : `${baseUrl}${url}`;
+        const target = await signedUrlFor(row);
         if (await openInNativeShell(target, row)) return;
         window.open(target, '_blank', 'noopener,noreferrer');
       } catch (err: any) {
         setError(friendlyError(err));
       }
     },
-    [authFetch, baseUrl, friendlyError],
+    [signedUrlFor, friendlyError],
   );
 
+  // The in-page preview (objectstack#36442): the row whose name was clicked,
+  // and the rows as the dialog's set, so previous / next walk the list.
+  const [previewIndex, setPreviewIndex] = React.useState<number | null>(null);
+  const previewFiles: FilePreviewItem[] = rows.map((row) => ({
+    id: row.file_id,
+    name: row.file_name || row.file_id,
+    mimeType: row.mime_type ?? undefined,
+    size: row.size ?? undefined,
+  }));
+  const previewSignedUrl = React.useCallback(
+    async (file: FilePreviewItem): Promise<string> => {
+      const row = rows.find((r) => r.file_id === file.id);
+      if (!row) throw new Error(t('fields.filePreview.loadFailed', { defaultValue: 'The preview could not be loaded.' }));
+      try {
+        return await signedUrlFor(row);
+      } catch (err) {
+        // The download's own copy for the download's own refusal.
+        throw Object.assign(new Error(friendlyError(err)), { cause: err });
+      }
+    },
+    [rows, signedUrlFor, friendlyError, t],
+  );
+
+  // Upload is offered (the header's 「+ 上传」, the empty line's 「选择文件」 and
+  // a drop anywhere on the panel) only to a caller holding the `create` grant
+  // and only on a list that answered or is still loading — see the comment on
+  // the header's button below.
+  const uploadOffered =
+    canUpload && status !== 'denied' && status !== 'api-unavailable' && status !== 'unavailable';
+  const pickFiles = () => inputRef.current?.click();
+  // Who uploaded a row: the name where the read expanded the user, the viewer's
+  // own name for the viewer's own upload, and nothing otherwise.
+  const uploaderOf = (row: AttachmentRow): string => {
+    const by = row.uploaded_by;
+    if (by && typeof by === 'object') return by.name ?? '';
+    return by && user?.id === by ? user?.name ?? '' : '';
+  };
+  const whenOf = (row: AttachmentRow): string => {
+    const date = row.created_at ? new Date(row.created_at) : null;
+    if (!date || Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString(displayLocale, {
+      month: 'short',
+      day: 'numeric',
+      ...(date.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' as const } : {}),
+    });
+  };
+  // A drop anywhere on the panel uploads, like 「+ 上传」.
+  const dropHandlers = uploadOffered
+    ? {
+        onDragOver: (e: React.DragEvent<HTMLDivElement>) => {
+          if (!dragHasFiles(e)) return;
+          e.preventDefault();
+          if (!dragOver) setDragOver(true);
+        },
+        onDragLeave: (e: React.DragEvent<HTMLDivElement>) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+        },
+        onDrop: (e: React.DragEvent<HTMLDivElement>) => {
+          if (!dragHasFiles(e)) return;
+          e.preventDefault();
+          setDragOver(false);
+          if (!uploading) void handleFiles(e.dataTransfer.files);
+        },
+      }
+    : {};
+
   return (
-    <div className={cn('rounded-lg border bg-card', className)} data-testid="record-attachments-panel">
-      <div className="flex items-center justify-between px-4 py-3 border-b">
+    <div
+      className={cn(
+        '@container rounded-md transition-colors',
+        dragOver && 'bg-primary/5 ring-2 ring-primary/40',
+        className,
+      )}
+      data-testid="record-attachments-panel"
+      data-attachments-drop={uploadOffered ? '' : undefined}
+      {...dropHandlers}
+    >
+      <div className="flex h-9 items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Paperclip className="h-4 w-4 text-muted-foreground" />
           <span>{t('detail.attachments', { defaultValue: 'Attachments' })}</span>
@@ -530,31 +773,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
             <span className="text-xs text-muted-foreground">({rows.length})</span>
           )}
         </div>
-        {/*
-          No Upload affordance under a denied list (#4269). The button was
-          previously unconditional — its only gate was `uploading` — so a
-          member the server had just refused was still invited to upload into
-          a record whose parent it cannot read, a click the `beforeInsert`
-          gate answers with 403 ATTACHMENT_PARENT_ACCESS.
-
-          `unavailable` withdraws it for the same reason one status over
-          (#4684): offering an upload against a list the panel could not even
-          reach is the same over-assertion as the empty state it replaces —
-          the panel is claiming an attach will work when it has no evidence
-          the server is reachable at all, and the upload's own three-step
-          presigned flow would fail on the same outage. Retry first; the
-          Upload returns with the answer.
-
-          `api-unavailable` withdraws it too (#4693), for a stronger reason
-          than either: the object's `enable` block refuses this operation for
-          every caller, so an upload attempt here is not merely unverified —
-          it is guaranteed to fail the same way the list read just did.
-
-          Shown while `loading` and while `loaded` — and only to a caller
-          holding the `create` grant on `sys_attachment` (objectui#12047; see
-          `canUpload` above).
-        */}
-        {canUpload && status !== 'denied' && status !== 'api-unavailable' && status !== 'unavailable' && (
+        {uploadOffered && (
           <div className="flex items-center gap-2">
             <input
               ref={inputRef}
@@ -564,16 +783,16 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
               onChange={(e) => void handleFiles(e.target.files)}
             />
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="h-11 sm:h-9"
+              className="h-11 sm:h-7 px-2 text-xs"
               disabled={uploading}
-              onClick={() => inputRef.current?.click()}
+              onClick={pickFiles}
             >
               {uploading ? (
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
               ) : (
-                <Upload className="h-4 w-4 mr-1" />
+                <Plus className="h-3.5 w-3.5 mr-1" />
               )}
               {t('detail.uploadAttachment', { defaultValue: 'Upload' })}
             </Button>
@@ -582,7 +801,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
       </div>
 
       {error && (
-        <div className="px-4 py-2 text-xs text-destructive border-b" role="alert">
+        <div className="py-1.5 text-xs text-destructive" role="alert">
           {error}
         </div>
       )}
@@ -601,7 +820,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         to a spinner.
       */}
       {status === 'loading' && rows.length === 0 ? (
-        <div className="px-4 py-6 text-sm text-muted-foreground flex items-center gap-2">
+        <div className="py-2 text-sm text-muted-foreground flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin" />
           {t('detail.loadingAttachments', { defaultValue: 'Loading attachments…' })}
         </div>
@@ -609,7 +828,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         // Checked BEFORE the empty state, and rendering only the i18n
         // sentence: no status code, no server message, no row (#2532).
         <div
-          className="px-4 py-6 text-sm text-muted-foreground flex items-center gap-2"
+          className="py-2 text-sm text-muted-foreground flex items-center gap-2"
           data-testid="record-attachments-denied"
         >
           <Lock className="h-4 w-4 shrink-0" />
@@ -625,7 +844,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         // (#2532), and — unlike `unavailable` below — deliberately offers NO
         // Retry: the button would re-fetch the identical refusal every time.
         <div
-          className="px-4 py-6 text-sm text-muted-foreground flex items-center gap-2"
+          className="py-2 text-sm text-muted-foreground flex items-center gap-2"
           data-testid="record-attachments-api-unavailable"
         >
           <Ban className="h-4 w-4 shrink-0" />
@@ -646,7 +865,7 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         // only handler that calls `refresh()` — unmounts for the duration of
         // the read.
         <div
-          className="px-4 py-6 text-sm text-muted-foreground flex flex-col items-start gap-3"
+          className="py-2 text-sm text-muted-foreground flex flex-col items-start gap-2"
           data-testid="record-attachments-unavailable"
         >
           <div className="flex items-center gap-2">
@@ -665,52 +884,103 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
         // answered above. This is the one branch entitled to assert that the
         // record holds nothing, because it is the only one standing on a read
         // that came back — a genuine 200-with-zero-rows.
-        <div className="px-4 py-6 text-sm text-muted-foreground">
-          {t('detail.noAttachments', { defaultValue: 'No attachments yet. Upload a file to get started.' })}
+        // An upload-capable reader gets one dashed line to drop on or pick
+        // from, never a large card; a reader who cannot upload, the sentence.
+        <div
+          className="flex min-h-10 flex-wrap items-center justify-center gap-x-1 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground"
+          data-attachments-empty=""
+        >
+          {uploadOffered ? (
+            <>
+              <span>{t('detail.attachmentsDropHint', { defaultValue: 'Drop files here, or' })}</span>
+              <button
+                type="button"
+                className="text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                onClick={pickFiles}
+                disabled={uploading}
+              >
+                {t('detail.attachmentsChooseFile', { defaultValue: 'choose a file' })}
+              </button>
+            </>
+          ) : (
+            t('detail.noAttachments', { defaultValue: 'No attachments yet. Upload a file to get started.' })
+          )}
         </div>
       ) : (
-        <ul className="divide-y">
-          {rows.map((row) => (
-            <li key={row.id} className="flex items-center gap-3 px-4 py-2.5">
-              <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm">{row.file_name || row.file_id}</div>
-                <div className="text-xs text-muted-foreground">
-                  {[formatSize(row.size), row.mime_type || undefined]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </div>
-              </div>
-              {/* objectui#12248: `data-fab-yield` on both row actions. They
-                  sit at the panel's right edge, and when the panel is the
-                  page's last content the last row lands in the bottom-right
-                  corner at full scroll — under the console assistant's
-                  button, which no further scroll can move it out from. The
-                  marker makes that button step aside while they overlap. */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                aria-label={t('detail.downloadAttachment', { defaultValue: 'Download' })}
-                onClick={() => void handleDownload(row)}
-                data-fab-yield=""
-              >
-                <Download className="h-4 w-4" />
-              </Button>
-              {canDelete && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                  aria-label={t('detail.deleteAttachment', { defaultValue: 'Delete attachment' })}
-                  onClick={() => void handleDelete(row)}
-                  data-fab-yield=""
+        <ul className="divide-y border-t">
+          {rows.map((row, index) => {
+            const TypeIcon = fileTypeIcon(row.mime_type);
+            const name = row.file_name || row.file_id;
+            const uploader = uploaderOf(row);
+            return (
+              // One 33 px row: type mark, name, size, uploader, date, ⋮. Size
+              // and uploader step aside in a narrow container (a drawer).
+              <li key={row.id} className="flex h-[33px] items-center gap-2 px-1 text-sm" data-attachment-row="">
+                <TypeIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate text-left hover:underline focus-visible:underline focus-visible:outline-none"
+                  title={name}
+                  onClick={() => setPreviewIndex(index)}
+                  data-attachment-preview=""
                 >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
-            </li>
-          ))}
+                  {name}
+                </button>
+                <span className="hidden w-16 shrink-0 text-right text-xs text-muted-foreground tabular-nums @md:inline">
+                  {formatSize(row.size)}
+                </span>
+                <span className="hidden max-w-[8rem] shrink-0 truncate text-xs text-muted-foreground @lg:inline" title={uploader || undefined}>
+                  {uploader}
+                </span>
+                <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">{whenOf(row)}</span>
+                {/* objectui#12248: `data-fab-yield` on the row's actions. It
+                    sits at the panel's right edge, and when the panel is the
+                    page's last content the last row lands in the bottom-right
+                    corner at full scroll — under the console assistant's
+                    button, which no further scroll can move it out from. The
+                    marker makes that button step aside while they overlap. */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-11 w-11 sm:h-7 sm:w-7 shrink-0 text-muted-foreground"
+                      aria-label={t('detail.attachmentActions', { defaultValue: 'More for {{name}}', name })}
+                      data-fab-yield=""
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => void handleDownload(row)}>
+                      <Download className="mr-2 h-4 w-4" />
+                      {t('detail.downloadAttachment', { defaultValue: 'Download' })}
+                    </DropdownMenuItem>
+                    {canRename(row) && (
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setError(null);
+                          setRenaming(row);
+                        }}
+                      >
+                        <Pencil className="mr-2 h-4 w-4" />
+                        {t('detail.renameAttachment', { defaultValue: 'Rename' })}
+                      </DropdownMenuItem>
+                    )}
+                    {canDeleteRow(row) && (
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onSelect={() => void handleDelete(row)}
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {t('detail.deleteAttachment', { defaultValue: 'Delete attachment' })}
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </li>
+            );
+          })}
         </ul>
       )}
       <ActionConfirmDialog
@@ -719,8 +989,115 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
           if (!open) setConfirmState((s) => ({ ...s, open: false }));
         }}
       />
+      {previewIndex !== null && previewIndex < rows.length && (
+        <FilePreviewDialog
+          files={previewFiles}
+          index={previewIndex}
+          open
+          onOpenChange={(open) => !open && setPreviewIndex(null)}
+          onIndexChange={setPreviewIndex}
+          resolveUrl={previewSignedUrl}
+          onDownload={(_file, index) => {
+            const row = rows[index];
+            if (row) void handleDownload(row);
+          }}
+        />
+      )}
+      <AttachmentRenameDialog
+        row={renaming}
+        onOpenChange={(open) => {
+          if (!open) setRenaming(null);
+        }}
+        onSubmit={(name) => (renaming ? handleRename(renaming, name) : Promise.resolve(false))}
+        error={error}
+        t={t}
+      />
     </div>
   );
 };
+
+/**
+ * The name prompt of a row's Rename. It writes nothing: it hands the trimmed
+ * name to `onSubmit` and closes only when that resolves `true`. An empty name,
+ * or the name the row already has, cannot be submitted.
+ */
+function AttachmentRenameDialog({
+  row,
+  onOpenChange,
+  onSubmit,
+  error,
+  t,
+}: {
+  row: AttachmentRow | null;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (name: string) => Promise<boolean>;
+  error: string | null;
+  t: ReturnType<typeof useObjectTranslation>['t'];
+}) {
+  const inputId = React.useId();
+  const current = row ? row.file_name || row.file_id : '';
+  const [name, setName] = React.useState(current);
+  const [submitting, setSubmitting] = React.useState(false);
+  const submittingRef = React.useRef(false);
+
+  // Each opening starts from the row's current name.
+  React.useEffect(() => {
+    if (row) setName(current);
+  }, [row, current]);
+
+  const trimmed = name.trim();
+  const submittable = trimmed !== '' && trimmed !== current && !submitting;
+  const submit = async () => {
+    if (!submittable || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      if (await onSubmit(trimmed)) onOpenChange(false);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={!!row} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[420px]" data-testid="attachment-rename-dialog" aria-describedby={undefined}>
+        <DialogHeader>
+          <DialogTitle>{t('detail.renameAttachmentTitle', { defaultValue: 'Rename attachment' })}</DialogTitle>
+        </DialogHeader>
+        <form
+          className="grid gap-2 py-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          <Label htmlFor={inputId}>{t('detail.attachmentNameLabel', { defaultValue: 'File name' })}</Label>
+          <Input
+            id={inputId}
+            autoFocus
+            value={name}
+            maxLength={255}
+            onChange={(e) => setName(e.target.value)}
+            data-testid="attachment-rename-input"
+          />
+          {error && (
+            <p className="text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </form>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            {t('common.cancel', { defaultValue: 'Cancel' })}
+          </Button>
+          <Button type="button" disabled={!submittable} onClick={() => void submit()} data-testid="attachment-rename-submit">
+            {t('common.save', { defaultValue: 'Save' })}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default RecordAttachmentsPanel;

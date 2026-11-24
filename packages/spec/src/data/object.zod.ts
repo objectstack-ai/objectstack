@@ -23,14 +23,18 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { closedObject, strictObject } from '../shared/strict-object';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { retiredKey } from '../shared/retired-key';
+import { suggestRename } from '../shared/rename-guess';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
+import { RECORD_PAGE_BUILTIN_TABS, relatedListEntryHidden, relatedListEntryName, relatedListNameCovers } from './related-list-entry';
 // [#23809] The stage-field option-kind rule, in its own module so the AI
 // blueprint object (`ai/solution-blueprint.zod.ts`) runs this same refinement.
 import { refuseStageFieldWithoutKinds } from './stage-field-kinds';
 // [#32763] The `icon` leaf, shared with the AI blueprint object.
-import { OBJECT_ICON_SCHEMA } from './object-icon';
+import { OBJECT_COLOR_SCHEMA, OBJECT_ICON_SCHEMA } from './object-icon';
+// [#36366] The action arrangement per scope (pinned, more), shared with the object extension.
+import { OBJECT_ACTION_LAYOUT_SCHEMA } from './object-action-layout';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
@@ -40,7 +44,11 @@ import { isMaskedOnReadFieldType } from './masked-field-types';
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
 // field predicate `isControlledByParentMasterField` it counts and the
 // resolver `controlledByParentMasterOf` it judges the one master with.
-import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
+import {
+  CONTROLLED_BY_PARENT_MASTER_INVALID,
+  controlledByParentMasterRefusal,
+  type ControlledByParentMasterIssueParams,
+} from './controlled-by-parent-master';
 // The ADR-0015 §4.2 binding predicate, shared with `defineStack`'s
 // cross-reference pass and the v18 stored-row listing. Internal to the spec.
 import { externalBindingDatasourceRefusal } from './external-binding-datasource';
@@ -54,6 +62,27 @@ import { aiReadExposureRefusal } from './ai-read-exposure';
 // roster object's declarative membership keys. No cycle: `security/rls.zod`
 // imports only zod, `shared/` and the resolver contract's constants.
 import { DefaultRowScopeSchema, MembershipKeysSchema } from '../security/rls.zod';
+// [ADR-0154 D10] The registry's injected-column plan, read by the
+// `lifecycle.seal.chainField` refusal. A deliberate cycle: that module imports
+// `isTenancyDisabled` from here, and each side calls the other only at parse
+// time (see `refuseUnknownSealChainField`).
+import { resolveInjectedSystemColumns } from './injected-system-columns';
+// [ADR-0154 D10] The injected columns' definitions, so a chain column the
+// registry injects is judged by its type as a declared one is. The same cycle
+// as above, one module further: nothing here is called while a module evaluates.
+import { injectedSystemColumnDefs } from './injected-system-column-provenance';
+// [ruling 7000907189 point 1] Change Owner's structural test, read by the
+// `userActions.transfer` refusal. The same cycle as above, one module further
+// (it reads `resolveInjectedSystemColumns`): called only at parse time.
+import { transferCascadeIneligibilityReason, transferIneligibilityReason } from './user-action-transfer';
+import {
+  BOOLEAN_VALUE_TYPES,
+  CALENDAR_DATE_TYPES,
+  INSTANT_TYPES,
+  NUMERIC_VALUE_TYPES,
+  STRUCTURED_JSON_TYPES,
+  isMultiValueField,
+} from './field-value.zod';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -309,13 +338,32 @@ export const ObjectCapabilities = strictObject({
    * Changes filter; that page has no separate History tab. A page an author
    * assigns is drawn as authored: a `record:history` or `record:activity`
    * block placed there shows the record's field changes from its own activity
-   * (`sys_activity`), and neither reads this flag. Pair with per-field
-   * `trackHistory: true` to select which field diffs render as human-readable
-   * timeline summaries (ADR-0052 §5b). Audit *capture* into `sys_audit_log` is
+   * (`sys_activity`), and neither reads this flag. Whether the activity
+   * stream shows a changed field's old → new values is not this flag's
+   * question: it is {@link fieldHistory}'s, and the field's own
+   * `trackHistory` (ADR-0052 §5b, #36290). Audit *capture* into `sys_audit_log` is
    * a compliance ledger and stays on regardless of this flag; retention is
    * governed by data lifecycle (ADR-0057), not by hiding the UI.
    */
-  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Pair with per-field trackHistory to pick which field diffs are summarized; audit capture itself is always on for compliance'),
+  trackHistory: z.boolean().default(false).describe('Show the record\'s field changes (audit-trail UI): on the default record page they join the record\'s one timeline stream, under its Changes filter. On an authored page, a record:history or record:activity block shows the record\'s field changes from its own activity, and neither reads this flag. Whether the activity stream shows a changed field\'s old → new values is enable.fieldHistory\'s question, not this flag\'s; audit capture itself is always on for compliance'),
+
+  /**
+   * Field-change values on the record's activity stream — on unless turned off
+   * (#36290, ruling 7076513167, reversing ADR-0052 §5b.1's opt-in default).
+   *
+   * Absent: every changed field's old → new values show on the record's
+   * activity stream (`sys_activity`); a field turns its own off with its
+   * own `fieldHistory: false`. `false`: off for the object — a change names
+   * its fields, never their values, whatever a field says. Deliberately no `.default()`: a parsed body
+   * that materialized a default would persist it into every built artifact
+   * and stored definition, where it could not be told from an authored value.
+   *
+   * Independent of {@link trackHistory}, which keeps its meaning (the ledger
+   * view on the record page and the derived `history` API verb): an object
+   * writing `trackHistory: false` alone shows values. Who reads a value is the
+   * field's read rule, per reader; a credential field never shows one.
+   */
+  fieldHistory: z.boolean().optional().describe('Field-change values on the record activity stream. Absent: each changed field\'s old → new values show (a field opts out with its own fieldHistory: false). false: off for this object, a change names its fields only, whatever a field says. Independent of trackHistory, which does not turn values off. Who reads a value is the field\'s read rule; a credential field never shows one'),
 
   /** Enable global search indexing */
   searchable: z.boolean().default(true).describe('Index records for global search'),
@@ -1114,6 +1162,15 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       'carries their values; every other declared column enters in clear. Each must name a declared field ' +
       'other than `id` and `created_at`, which order the leaves.',
     ),
+    chainField: z.string().optional().describe(
+      'The column whose value names the organization chain each sealed row joins (default `tenant_id`); a row ' +
+      'whose value is empty seals into the deployment chain. It must name a declared field or a column the ' +
+      'platform injects, such as the tenant column `organization_id`, whose value is one text on every store ' +
+      '(not a number, boolean, date, datetime, JSON or multi-value column); not `id` or `created_at`, which ' +
+      'order the leaves; and not a `valueFields` member. Absent, the default `tenant_id` is held to the same ' +
+      'rules, and the registry does not inject it: a seal that names no chain column needs a declared text or ' +
+      'lookup `tenant_id` field. Fixed once the object has checkpoints.',
+    ),
   }).optional().describe(
     'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
     "the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` " +
@@ -1239,30 +1296,131 @@ export const LifecycleSchema = lazySchema(() => strictObject({
 const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
 
 /**
+ * The object form's `list`: any entry name but a built-in tab's
+ * (`RECORD_PAGE_BUILTIN_TABS`), which is written only bare. A pattern rather
+ * than a refinement, so the published JSON Schema refuses it too.
+ */
+const RELATED_LIST_OBJECT_ENTRY_NAME_PATTERN = new RegExp(`^(?!(?:${RECORD_PAGE_BUILTIN_TABS.join('|')})$)`);
+
+const RELATED_LIST_ENTRY_NAME_MESSAGE =
+  'A relatedLists entry is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case';
+
+/**
+ * [#35899] The OBJECT form of one `ObjectSchema.relatedLists` entry: the
+ * relationship it names (`list`, spelled as the bare entry is), and that
+ * list's own title and columns, declared on the PARENT so an author arranging
+ * the account page need not edit the task object.
+ *
+ *  - `label` — the tab's title and the table's heading. Wins over the child
+ *    FK's `relatedListTitle`, which wins over the child object's plural label.
+ *  - `columns` — child FIELD NAMES, as the FK's `relatedListColumns` spells
+ *    them. Win over that key, which wins over the child object's derived
+ *    columns (`highlightFields`, then the field walk). One set of columns
+ *    serves every place this list is drawn: its tab, and the body table a
+ *    field group places (a group names no columns of its own). A name that is
+ *    no field of the child is refused where the child's fields are known
+ *    (`@objectstack/lint` `validate-related-list-refs`, the CLI and the runtime
+ *    metadata write door).
+ *
+ * The record page's three built-in tabs (`sys_attachment`,
+ * `sys_approval_request`, `sys_activity`, `RECORD_PAGE_BUILTIN_TABS`) are
+ * written only as their bare names: an object entry naming one is refused,
+ * since their renderers read no title or columns from here.
+ *
+ * No filter, width, totals or row order here: the FK's `relatedListFilter`
+ * keeps the list's scope, and rows keep the child's default list-view sort.
+ */
+export const RelatedListEntryObjectSchema = lazySchema(() => strictObject({
+  surface: 'this relatedLists entry',
+  history:
+    'An unknown key here would be dropped silently: the tab would still draw, with the title and columns ' +
+    'the child declares, so the author would believe the setting they wrote had been applied.',
+  aliases: {
+    name: 'list',
+    object: 'list',
+    objectName: 'list',
+    relationship: 'list',
+    title: 'label',
+    fields: 'columns',
+  },
+  guidance: {
+    filter:
+      '`filter` is not a relatedLists entry key: a related list\'s scope is the child FK\'s `relatedListFilter`.',
+    sort:
+      '`sort` is not a relatedLists entry key: a related list orders its rows the way the child object\'s default list view sorts.',
+    // [ADR-0146 D10] Hiding by name is the environment's word, written in the
+    // paired `.custom` package's arrangement; an object hides by leaving out.
+    hidden:
+      '`hidden` is not a relatedLists entry key on an object: an object hides a tab by leaving its list out of ' +
+      '`relatedLists`. Only the object extension of a base\'s paired `.custom` package writes ' +
+      '`{ list, hidden: true }`, in its own `relatedLists` (ADR-0146 D10).',
+  },
+}, {
+  list: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE })
+    .regex(RELATED_LIST_OBJECT_ENTRY_NAME_PATTERN, {
+      message:
+        `${RECORD_PAGE_BUILTIN_TABS.map((n) => `'${n}'`).join(', ')} are built-in record-page tabs, drawn by their own ` +
+        'renderers: write one as its bare name (e.g. \'sys_attachment\'), never as { list }. A built-in tab takes no label or columns.',
+    })
+    .describe('The relationship this entry names: a child object name (e.g. "quote_line"), or object.field when that child has more than one relationship to this object.'),
+  label: z.string().min(1).optional()
+    .describe("This list's title on the record page (its tab and its table heading). Wins over the child FK's relatedListTitle; absent = that key, else the child object's plural label."),
+  columns: z.array(z.string({
+    error: (issue) => issue.code === 'invalid_type'
+      ? "A relatedLists entry's columns are child FIELD-NAME strings (e.g. ['product', 'amount']): labels, cell types and formatting come from the child object's field definitions."
+      : undefined,
+  }).min(1)).min(1).optional()
+    .describe("This list's columns, as field names of the child object (e.g. ['product', 'quantity', 'amount']). Wins over the child FK's relatedListColumns; absent = that key, else the child object's derived columns. Used wherever this list is drawn: its tab, and the body table a field group places. A name that is no field of the child is refused where the child is known."),
+}));
+
+/**
+ * [#27069 · #35897 · #35899] One `ObjectSchema.relatedLists` entry: the bare
+ * name (`'task'`, `'event.related_to'`, or a built-in tab such as
+ * `'sys_attachment'`), or {@link RelatedListEntryObjectSchema}'s object form
+ * carrying the list's own title and columns. The two mix freely.
+ */
+export const RelatedListEntrySchema = lazySchema(() => z.union([
+  z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }),
+  RelatedListEntryObjectSchema,
+]));
+/** One `relatedLists` entry as an author writes it. */
+export type RelatedListEntry = z.input<typeof RelatedListEntrySchema>;
+/** One `relatedLists` entry after parse. */
+export type RelatedListEntryParsed = z.infer<typeof RelatedListEntrySchema>;
+
+/**
  * Object Field Group Schema — MVP (data-layer protocol)
  * 
  * Declares the set of logical field groups for an object. A group bundles
  * related fields together for presentation in forms, detail pages, and
  * editors (e.g., "Contact Info", "Billing", "System").
  * 
- * Design rules (MVP):
+ * Design rules:
  * - Group **order** is the declaration order of this array — no `order` property.
- * - Field → group mapping is derived automatically from `Field.group`
- *   matching `ObjectFieldGroup.key`; the **in-group display order** equals
- *   the traversal order of `ObjectSchema.fields`.
- * - Fields whose `group` is unset (or references an undeclared key) are
- *   considered ungrouped and must be rendered by consumers in a default
- *   bucket after the declared groups, preserving their field declaration order.
- * - Extension packages and runtime code use `Field.group` to assign fields
- *   to an existing group — no per-field order property is introduced at this
- *   layer.
- * 
- * Migration operations supported by this MVP:
+ * - A group lists its own members, in display order, in `fields`. A group that
+ *   writes no `fields` keeps the older rule: its members are the fields whose
+ *   `Field.group` names its `key`, in the traversal order of
+ *   `ObjectSchema.fields`. So an object written before `fields` existed
+ *   renders exactly as it did.
+ * - A field whose `group` names a group that lists `fields`, but that the list
+ *   does not name (a field another package added later, say), follows the
+ *   listed members in field declaration order: it is never dropped.
+ * - Fields no group lists and whose `group` is unset (or references an
+ *   undeclared key) are ungrouped and render in a default bucket after the
+ *   declared groups, preserving their field declaration order.
+ * - Two spellings of one membership must agree: the object parse refuses a
+ *   field one group lists while its own `group` names another, a field two
+ *   groups list, a name one list repeats, and `fields` on a group that places
+ *   a related list. A listed name the object does not declare is skipped (the
+ *   layout places only declared fields), so removing a field never makes the
+ *   object unparseable.
+ *
+ * Migration operations supported:
  *   - add / rename / delete / reorder groups (via the array)
- *   - assign an existing field to a group (via `Field.group`)
- * 
- * Deferred (not part of MVP):
- *   - explicit per-field in-group ordering
+ *   - assign a field to a group and order it inside the group (via `fields`;
+ *     `Field.group` is the older spelling, still read)
+ *
+ * Deferred:
  *   - nested groups / sub-groups
  *
  * Group-level visibility (`visibleWhen`) closed the ADR-0049 enforce-or-remove
@@ -1280,8 +1438,8 @@ const RELATED_LIST_ENTRY_PATTERN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
  * @example
  * ```ts
  * fieldGroups: [
- *   { key: 'contact_info', label: 'Contact Information', icon: 'user' },
- *   { key: 'billing',      label: 'Billing',             collapse: 'collapsed' },
+ *   { key: 'contact_info', label: 'Contact Information', icon: 'user', fields: ['email', 'phone'] },
+ *   { key: 'billing',      label: 'Billing',             collapse: 'collapsed', fields: ['billing_address'] },
  *   { key: 'system',       label: 'System' },
  * ]
  * ```
@@ -1300,21 +1458,13 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
     helpText: 'description',
   },
   guidance: {
-    // Membership is declared the OTHER WAY ROUND, and this is the single most
-    // likely thing an author reaches for here — a group that lists its fields
-    // is what every other layout system in this space looks like.
-    fields:
-      '`fields` does not live on a group — membership is declared on the FIELD, pointing ' +
-      "back: `fields: { email: { type: 'email', group: 'contact_info' } }`. The group " +
-      'declares only its `key`, `label` and presentation; `deriveFieldGroupLayout` ' +
-      '(ADR-0085 §5) does the assembly.',
     order:
       '`order` is not a group key — ARRAY ORDER is display order. `fieldGroups: [...]` ' +
       'renders top to bottom, so move the entry rather than numbering it.',
     expanded:
       '`expanded` is not a group key — use the `collapse` enum: ' +
       "`collapse: 'expanded'` (collapsible, starts open), `'collapsed'` (starts closed), " +
-      "or `'none'` (always open, no toggle).",
+      "or `'none'` (always open, no toggle; the default record page still lets the reader fold it).",
     visibleOn:
       '`visibleOn` is not a field-group key — the section predicate slot is `visibleWhen` ' +
       '(ADR-0089 canonical spelling; re-added with its enforcement under ADR-0085 §5). ' +
@@ -1335,6 +1485,30 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   /** Human-readable label displayed as the group header. */
   label: z.string().describe('Group display label').meta({ title: 'Label' }),
 
+  /**
+   * The group's members, in display order: field names of this object. Written,
+   * it decides which fields the group shows and in what order, on every surface
+   * that renders the group (record page, create and edit forms, drawer); the
+   * object's `fields` declaration order then no longer decides the order inside
+   * the group, so the group can be reordered without moving any field.
+   *
+   * Absent, the group keeps the older rule: its members are the fields whose
+   * `Field.group` names this group's `key`, in field declaration order. That
+   * spelling is still read; new metadata lists members here.
+   *
+   * A field whose `group` names this group but that this list does not name is
+   * appended after the listed members, in field declaration order, never
+   * dropped. The object parse refuses a field this list names while its own
+   * `group` names another group, a field two groups list, and a name this list
+   * repeats. A name the object declares no field for is skipped. A group that
+   * places a related list (`relatedList`) holds no fields, so it may not write
+   * `fields`. Derivation: `deriveFieldGroupLayout` (field-group-layout.ts,
+   * ADR-0085 §5).
+   */
+  fields: z.array(z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+    message: 'A field group\'s fields entry is a field name of this object, in snake_case (e.g. "account")',
+  })).optional().describe('The group\'s members in display order (field names of this object). Written, it decides which fields the group shows and their order on the record page and the forms, without changing the order of the object\'s fields. Absent, members are the fields whose `group` names this group, in field declaration order (the older spelling, still read). A field whose `group` names this group but that the list does not name follows the listed ones. Refused: a listed field whose own `group` names another group, a field two groups list, a repeated name, and `fields` on a group with `relatedList`. A name the object does not declare is skipped.').meta({ title: 'Fields' }),
+
   /** Optional Lucide/Material icon name for the group header. */
   icon: z.string().optional().describe('Icon name (Lucide/Material) for the group header').meta({ title: 'Icon' }),
 
@@ -1349,25 +1523,30 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
    * items can sit under its basic information with its terms after them.
    *
    * Such a group carries no fields: a field whose `group` names it is refused
-   * at parse. Its name is judged exactly as a `relatedLists` entry's is (see
+   * at parse, and so is a `fields` list on it. Its name is judged exactly as a `relatedLists` entry's is (see
    * there): a child in the stack with no inbound relationship is refused
    * everywhere; a child that exists nowhere is refused at `defineStack` (save a
    * platform-prefixed name, left to the runtime) and by a metadata write that
    * names no package, and a write into a package stores it, placing nothing.
-   * It names a BODY TABLE only (`isBodyTableRelationship`, #27478): an inbound
-   * FK declaring `relatedList: 'primary'`, or a `master_detail` FK that sets
-   * `inlineEdit` and declares no `relatedList`. Body-ness is the FK's to
-   * decide; the group only positions it. A group naming a side card, or a list
-   * its FK hides with `relatedList: false`, draws nothing at the group, so it
-   * is refused wherever the child's fields are known: at `defineStack` and at
-   * the runtime metadata write door (`related-list-group-not-body`), naming
-   * each FK and the remedy (mark it `relatedList: 'primary'`, name only the
-   * body table as `object.field`, or remove the group's `relatedList`).
+   * It names a list a group may place only (`isGroupPlaceableRelationship`,
+   * #27478, as amended by #35597 and #35889): an inbound FK declaring
+   * `relatedList: 'primary'` (the group positions that body table), or a
+   * `master_detail` FK that declares no `relatedList` (a tab by default; the
+   * group makes it a body table at this position in the record page and its
+   * edit state, and the parent's entry form inlines it at the same position;
+   * a form whose sections name no field group keeps it below its fields,
+   * #35889). A group
+   * naming a side card, or a list its FK hides with `relatedList: false`,
+   * draws nothing at the group, so it is refused wherever the child's fields
+   * are known: at `defineStack` and at the runtime metadata write door
+   * (`related-list-group-not-body`), naming each FK and the remedy (mark it
+   * `relatedList: 'primary'`, name only the body table as `object.field`, or
+   * remove the group's `relatedList`).
    * Body tables no group places keep the record page's default position.
    */
   relatedList: z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
     message: 'A field group\'s relatedList is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that sets inlineEdit and declares no relatedList): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
+  }).optional().describe('Places a related list\'s body table at this position in the record\'s details column instead of a section of fields: names one inbound relationship, as a relatedLists entry does (child object, or object.field when that child has more than one relationship to this object). A group with relatedList holds no fields: a field that names it as its group is refused, and so is a fields list on it. The name is judged as a relatedLists entry is: refused when its child is in the stack with no inbound lookup / master_detail field, or exists nowhere (by os validate / os build, which leave a sys_ / cloud_ / ai_ name to the runtime, and by a metadata write that names no package); a write into a package stores it, and the record page places nothing for it. It names a body table only (a FK declaring relatedList: \'primary\', or a master_detail FK that declares no relatedList, which is a tab unless a group places it; placed, it is drawn here, and the parent\'s entry form inlines it here too, or below its fields when the form\'s sections name no field group): a group naming a side card or a list hidden by relatedList: false draws nothing, so it is refused where the child\'s fields are known (os validate / os build and the metadata write door), naming the FK and the remedy (set relatedList: \'primary\' on it, name only the body table as object.field when a bare child name also names a side card, or remove the group\'s relatedList).').meta({ title: 'Related List' }),
 
   /**
    * [ADR-0085 §5] Section visibility predicate — CEL, the ADR-0089 canonical
@@ -1419,15 +1598,19 @@ export const ObjectFieldGroupSchema = lazySchema(() => strictObject({
   ).meta({ title: 'Requires Feature' }),
 
   /**
-   * [ADR-0085] Collapse behaviour of the group's rendered section, on every
-   * surface (form, detail, drawer). One enum, three valid states — replaces
+   * [ADR-0085] Collapse behaviour of the group's rendered section. Forms, the
+   * designer preview and authored record pages honour all three states as
+   * written, and a print page draws every group open; the synthesized
+   * (default) record page lets the reader fold every titled group, so there
+   * only the first state is read (`'collapsed'` closed, `'none'` and
+   * `'expanded'` open). One enum, three valid states — replaces
    * the old `defaultExpanded` flag AND the UI-dialect `collapsible`/`collapsed`
    * boolean pair, which could express contradictions and had drifted between
    * spec and renderer (spec declared a key no renderer read; renderers read
    * keys the spec rejected).
    */
   collapse: z.enum(['none', 'expanded', 'collapsed']).optional().default('none')
-    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed).").meta({ title: 'Collapse' }),
+    .describe("[ADR-0085] Section collapse behaviour: 'none' (always open, no toggle), 'expanded' (collapsible, starts open), 'collapsed' (collapsible, starts closed). On the synthesized (default) record page the reader can fold every titled group, so there 'none' and 'expanded' both start open and only 'collapsed' starts closed.").meta({ title: 'Collapse' }),
 
   /**
    * @deprecated [ADR-0085 → `collapse`] Accepted as a parse-time alias:
@@ -2092,6 +2275,134 @@ function refuseDishonestRecordCurrencyField(
   }
 }
 
+/**
+ * [ADR-0158 U4, L3; Open item 8, ruled A] A `record`-mode quantity's
+ * `unitConfig.unitField` names the field THIS object declares that holds each
+ * row's unit code: a `text` field. The quantity stays a bare number (ADR-0104
+ * D1); the code field is the only place its unit lives, so a pointer into
+ * nothing or into a non-text field would parse and give the quantity a unit
+ * no write ever checks.
+ *
+ * `UnitConfigSchema` (field.zod.ts) sees one config at a time and refuses the
+ * half it can see; what the pointer names is judged here, beside
+ * {@link refuseDishonestRecordCurrencyField}, for the same reason: only the
+ * object holds the field map. One located issue per offending field at
+ * `['fields', <field>, 'unitConfig', <key>]`:
+ *
+ *  - a two-segment pointer: following a parent's unit through `master_detail`
+ *    is reserved, not admitted (L3: "a child cannot follow its parent's unit
+ *    yet");
+ *  - the name is not a declared field (or is the quantity itself);
+ *  - the field is not a `text` field;
+ *  - the field declares `unitConfig` itself. L3: "That field carries no
+ *    marker … the pointer is the declaration". Open item 8's marker
+ *    (`unitMode: 'code'`) is for a code field no quantity points at, so one
+ *    field never carries two declarations of what it holds;
+ *  - the field declares a `valueDomain`: a second vocabulary for the same
+ *    column, the pairing `FieldSchema` refuses beside the `code` marker;
+ *  - two quantities sharing one unit field declare different `unitDimension`
+ *    values (L3, the check {@link refuseDishonestHomeAmount} makes for amounts
+ *    sharing a rate field): one column holds one code per row, so it cannot
+ *    satisfy two dimensions.
+ *
+ * Judged against the AUTHORED field map. Not judged on
+ * `ObjectExtensionSchema`, for the reason
+ * {@link refuseDishonestRecordCurrencyField} gives.
+ */
+function refuseDishonestRecordUnitField(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  type UnitConfigView = { unitMode?: unknown; unitField?: unknown; unitDimension?: unknown };
+  const map = fields as Record<string, { type?: unknown; unitConfig?: UnitConfigView; valueDomain?: unknown } | null>;
+  const isText = (name: string): boolean => map[name]?.type === 'text';
+  const dimensionOwner = new Map<string, { quantity: string; dimension: string }>();
+  for (const [name, field] of Object.entries(map)) {
+    const config = field?.unitConfig;
+    if (config?.unitMode !== 'record' || typeof config.unitField !== 'string') continue;
+    const target = config.unitField;
+    const path = ['fields', name, 'unitConfig', 'unitField'];
+    const at = `\`${name}.unitConfig.unitField\` names \`${target}\``;
+    const candidates = Object.keys(map).filter(
+      (k) => k !== name && isText(k) && map[k]?.unitConfig === undefined && map[k]?.valueDomain === undefined,
+    );
+    const prescription =
+      '`unitField` must name a `text` field of this object that holds each record\'s unit code — '
+      + (candidates.length > 0
+        ? `candidates: ${candidates.map((c) => `\`${c}\``).join(', ')}.`
+        : 'the object has none; declare one, conventionally `unit_code: Field.text()`.');
+    if (target.includes('.')) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a path, and a child cannot follow its parent's unit yet: \`unitField\` names one field of `
+          + 'this object. Give this object its own unit code field and point at it. The form '
+          + '`PARENT_FIELD.UNIT_FIELD` is reserved until an amendment of ADR-0158 admits it.',
+      });
+      continue;
+    }
+    if (target === name || !Object.prototype.hasOwnProperty.call(map, target)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, but object \`${objectName}\` declares no other field \`${target}\`. ${prescription}`,
+      });
+      continue;
+    }
+    if (!isText(target)) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a \`${String(map[target]?.type)}\` field on object \`${objectName}\`; a unit is stored as its `
+          + `code (for example 'KGM'), never as a record id, in a \`text\` field. ${prescription}`,
+      });
+      continue;
+    }
+    if (map[target]?.unitConfig !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a field that declares \`unitConfig\` itself. The pointer is the declaration: a field a `
+          + `quantity points at holds that quantity's unit and carries no marker of its own. Delete \`unitConfig\` `
+          + `from \`${target}\`, and declare any \`unitDimension\` on \`${name}\`.`,
+      });
+      continue;
+    }
+    // The same pairing FieldSchema refuses on a `code` marker, reached through
+    // the pointer: a unit field and a value domain are two vocabularies for
+    // one column (L3: the field a quantity points at carries no marker).
+    if (map[target]?.valueDomain !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path,
+        message: `${at}, a \`text\` field that declares \`valueDomain: '${String(map[target]?.valueDomain)}'\`, another `
+          + 'vocabulary. One column holds one kind of code: as this quantity\'s unit field it would be judged against two '
+          + 'lists, and a value would pass only where they happen to share a spelling (`MMK` is both a unit and an ISO '
+          + '4217 currency code), meaning two things at once. A field a quantity points at carries no marker of its '
+          + `own: delete \`valueDomain\` from \`${target}\`, or point \`${name}\` at another field. ${prescription}`,
+      });
+      continue;
+    }
+    if (typeof config.unitDimension !== 'string') continue;
+    const holder = dimensionOwner.get(target);
+    if (holder === undefined) {
+      dimensionOwner.set(target, { quantity: name, dimension: config.unitDimension });
+    } else if (holder.dimension !== config.unitDimension) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fields', name, 'unitConfig', 'unitDimension'],
+        message: `\`${name}.unitConfig.unitDimension\` is \`'${config.unitDimension}'\`, but \`${holder.quantity}\` shares `
+          + `its unit field \`${target}\` and declares \`'${holder.dimension}'\`. One column holds one code per record, `
+          + `so it cannot be a unit of both. Declare the same \`unitDimension\` on both, or give \`${name}\` its own `
+          + 'unit field.',
+      });
+    }
+  }
+}
+
 /** A field's machine name, the grammar each segment of a two-segment `currencyField` is held to. */
 const RECORD_CURRENCY_PATH_SEGMENT = /^[a-z_][a-z0-9_]*$/;
 
@@ -2227,14 +2538,15 @@ function summaryRollupOf(field: unknown): { function?: unknown; object?: unknown
  *    number of rows, never an amount, so a currency on it is wrong whichever
  *    reader sees it (the analytics layer relays both a `fixed` code and a
  *    `record` pointer for any field type);
- *  - `dynamic` is admitted on a `sum` / `min` / `max` / `avg` roll-up of a
- *    stored home amount only (#33659): a child field some
- *    `homeAmount.field` on the child object names. Such a field is "a
- *    `dynamic`-mode currency field" (ADR-0144 D8 rule 5), every row of it is
- *    in the organization's home currency (`localization.currency`), so its
- *    total is too, and the Console's roll-up faces draw a `dynamic` summary in
- *    that currency, as a metric tile over the same home field does. Whether the
- *    child field is a home field needs the child object, so this door lets a
+ *  - `dynamic` is admitted on a `sum` / `min` / `max` / `avg` roll-up of an
+ *    amount in the home currency only: a child `currency` field in `dynamic`
+ *    mode (#33659 admitted a stored home amount, "a `dynamic`-mode currency
+ *    field" by ADR-0144 D8 rule 5; seat ruling record 7000258793 admits every
+ *    such field). Every row of it is in the organization's home currency
+ *    (`localization.currency`), so its total is too, and the Console's roll-up
+ *    faces draw a `dynamic` summary in that currency, as a metric tile over the
+ *    same field does. Whether the child field is such an amount needs the
+ *    child object, so this door lets a
  *    `dynamic` roll-up through only when its `summaryOperations` names a child
  *    object and field, and `defineStack`'s cross-reference pass judges the
  *    rest (`collectRecordCurrencyPathErrors`, stack.zod.ts). A `dynamic`
@@ -2276,9 +2588,9 @@ function refuseUnadmittedSummaryCurrency(
       'A roll-up carries a currency in three cases only: `currencyMode: \'fixed\'` when every amount it reads is in that '
       + 'one currency; `currencyMode: \'record\'` naming this object\'s own code field when it rolls up, through a '
       + '`master_detail`, child amounts whose `currencyField` follows this record through that very field '
-      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`); and `currencyMode: \'dynamic\'` (no `defaultCurrency`) when it rolls up a '
-      + 'stored home amount, a child field that a `homeAmount.field` on the child object names, which is in the '
-      + 'organization\'s home currency.';
+      + '(`MASTER_DETAIL_FIELD.CODE_FIELD`); and `currencyMode: \'dynamic\'` (no `defaultCurrency`) when it rolls up an '
+      + 'amount in the organization\'s home currency, a child `currency` field in `dynamic` mode (a stored home amount '
+      + 'included).';
     if (ops?.function === 'count') {
       ctx.addIssue({
         code: 'custom',
@@ -2292,8 +2604,9 @@ function refuseUnadmittedSummaryCurrency(
     if (mode === 'dynamic') {
       const namesChild = ops !== undefined && typeof ops.object === 'string' && typeof ops.field === 'string';
       const named = (config as { defaultCurrency?: unknown }).defaultCurrency;
-      // [#33659] The admitted `dynamic` roll-up reads a stored home amount; the
-      // child object says whether it does, so the stack pass judges that half.
+      // [#33659] The admitted `dynamic` roll-up reads an amount in the home
+      // currency; the child object says whether it does, so the stack pass
+      // judges that half.
       if (namesChild && named === undefined) continue;
       ctx.addIssue({
         code: 'custom',
@@ -2303,8 +2616,8 @@ function refuseUnadmittedSummaryCurrency(
             ? ` with \`defaultCurrency: '${String(named)}'\`. \`dynamic\` reads no \`defaultCurrency\`, and metadata never `
               + 'names the home currency: delete `defaultCurrency`, or declare `currencyMode: \'fixed\'` if every amount '
               + 'it reads is in that one currency. '
-            : ' with no `summaryOperations` naming a child field, so it rolls up no stored home amount that would put it '
-              + 'in the organization\'s home currency: delete `currencyConfig`, or declare the roll-up. ')
+            : ' with no `summaryOperations` naming a child field, so it rolls up no amount in the organization\'s home '
+              + 'currency that would put it there: delete `currencyConfig`, or declare the roll-up. ')
           + admitted,
       });
       continue;
@@ -2856,11 +3169,14 @@ const ATTACHED_ON_READ_NAME = /^[a-z_][a-z0-9_]*$/;
  * attaches to the rows it serves, computed per caller on read and never stored.
  *
  * The worked case is plugin-approvals: `ApprovalService.attachViewers` sets
- * `viewer: { can_act, is_submitter, can_override }` on every `sys_approval_request`
- * row it reads, from the CALLER's identity, and the object's own action
- * predicates gate on `record.viewer.can_act`. Before this key nothing could
- * declare such a block in a shape the build validator reads, so those
- * predicates were refused as naming an undeclared field.
+ * `viewer: { can_act, is_submitter, can_override, can_override_approve }` on
+ * every `sys_approval_request` row it reads, from the CALLER's identity, and
+ * the object's own action predicates gate on those leaves: `can_act` for an
+ * approver's actions, `is_submitter` for the submitter's, and an override arm
+ * that reads `can_override_approve` on Approve and `can_override` on Reject,
+ * Reassign and Recall. Before this key nothing could declare such a block in
+ * a shape the build validator reads, so those predicates were refused as
+ * naming an undeclared field.
  *
  * ## Shape — a strict record of strict records
  *
@@ -2970,6 +3286,46 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
 }
 
 /**
+ * [ADR-0154 D1, D10] The columns that order each sealed leaf (`id`, then
+ * `created_at`) and so enter every leaf in clear. Neither may be committed
+ * (`valueFields`) nor name the chain (`chainField`): the one predicate both
+ * refusals read.
+ */
+function isSealLeafOrderColumn(name: unknown): boolean {
+  return name === 'id' || name === 'created_at';
+}
+
+/**
+ * [ADR-0154 D10, note on `chainField`] The value classes whose stored value is
+ * not one text on every store, from the field-value contract (ADR-0104 D1):
+ * numbers and booleans never are; a `date` or `datetime` is a `Date` on one
+ * driver and text on another; a JSON payload is parsed on one and text on
+ * another. A field declared multi-value stores a list
+ * ({@link isMultiValueField}). The sealer reads a row's chain as a non-empty
+ * string only (`chainValueOf`), so a chain column of one of these would put
+ * some or all rows into the deployment chain, with no report. Every other
+ * class reads as text — its canonical rule in the sealer is `text`.
+ */
+function isNonTextChainValueType(type: string): boolean {
+  // Read at parse time, never at module evaluation: `field-value.zod` sits in
+  // the `field.zod` evaluation cycle, so its sets are not read from here.
+  return NUMERIC_VALUE_TYPES.has(type) || BOOLEAN_VALUE_TYPES.has(type) || CALENDAR_DATE_TYPES.has(type)
+    || INSTANT_TYPES.has(type) || STRUCTURED_JSON_TYPES.has(type);
+}
+
+/** The declared type of a non-text chain column, or `null` when its value reads as text. */
+function nonTextChainColumnType(def: unknown): string | null {
+  if (def === null || typeof def !== 'object') return null;
+  const { type, multiple } = def as { type?: unknown; multiple?: unknown };
+  if (typeof type !== 'string') return null;
+  if (isNonTextChainValueType(type)) return type;
+  // An inherently multi-value type (`multiselect`, `checkboxes`, `tags`) is named as it is; a
+  // multi-capable one is named for the `multiple: true` that makes it store a list.
+  if (isMultiValueField({ type, multiple: false })) return type;
+  return isMultiValueField({ type, multiple: multiple === true }) ? `${type} (multi-value)` : null;
+}
+
+/**
  * [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a field this object
  * declares: a sealed checkpoint commits that column's value instead of carrying
  * it, and a name that matches no column would commit nothing while the author
@@ -2988,7 +3344,7 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
   if (!seal || !Array.isArray(seal.valueFields)) return;
   const declared = fields !== null && typeof fields === 'object' ? fields : {};
   seal.valueFields.forEach((name, index) => {
-    if (name === 'id' || name === 'created_at') {
+    if (isSealLeafOrderColumn(name)) {
       ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal', 'valueFields', index], message: `lifecycle.seal.valueFields cannot name '${name}': it orders each sealed leaf, so it enters in clear (ADR-0154 D10).` });
       return;
     }
@@ -3002,6 +3358,166 @@ function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ct
         + 'column the object stores; declare the field, or remove the name (ADR-0154 D10).',
     });
   });
+}
+
+/**
+ * [ADR-0154 D10, note on `chainField`] The chain column a seal that names no
+ * `chainField` reads: the sealer's default (`AUDIT_SEAL_DEFAULT_CHAIN_FIELD`
+ * in `@objectstack/plugin-audit`).
+ */
+const SEAL_DEFAULT_CHAIN_FIELD = 'tenant_id';
+
+/** Why a column cannot be a sealed object's chain column ({@link sealChainColumnFaults}). */
+type SealChainColumnFault =
+  | { kind: 'not-a-field' }
+  | { kind: 'leaf-order' }
+  | { kind: 'value-field' }
+  | { kind: 'non-text'; type: string };
+
+/**
+ * The faults that keep `name` from being this sealed object's chain column, in
+ * the order they are judged; empty when it can be. One judgement for a named
+ * `chainField` and for the default `tenant_id`
+ * ({@link refuseUnknownSealChainField}): a column the object does not have
+ * stops the judgement, and so does a leaf-order column; a `valueFields` member
+ * and a column whose value is not one text on every store are each a fault.
+ *
+ * "Has" means the AUTHORED field map plus the injected plan, as the
+ * `valueFields` check reads it. A column contributed only by an
+ * `objectExtensions` entry is not counted, so a sealed object whose chain
+ * column (named, or the default `tenant_id`) reaches it only that way is
+ * refused here, although the sealer, which reads the registry's folded field
+ * map, would seal it. That false refusal is accepted: the fix is to declare
+ * the column on the object itself.
+ */
+function sealChainColumnFaults(
+  object: { fields?: unknown },
+  seal: { valueFields?: unknown },
+  name: string,
+): SealChainColumnFault[] {
+  const declared = (object.fields !== null && typeof object.fields === 'object' ? object.fields : {}) as Record<string, unknown>;
+  const isDeclared = Object.prototype.hasOwnProperty.call(declared, name);
+  if (!isDeclared && !resolveInjectedSystemColumns(object).names.has(name)) return [{ kind: 'not-a-field' }];
+  if (isSealLeafOrderColumn(name)) return [{ kind: 'leaf-order' }];
+  const faults: SealChainColumnFault[] = [];
+  if (Array.isArray(seal.valueFields) && seal.valueFields.includes(name)) faults.push({ kind: 'value-field' });
+  const nonText = nonTextChainColumnType(isDeclared ? declared[name] : injectedSystemColumnDefs(object)[name]);
+  if (nonText !== null) faults.push({ kind: 'non-text', type: nonText });
+  return faults;
+}
+
+/** The message of a refused NAMED `chainField`. */
+function namedSealChainFieldMessage(name: string, fault: SealChainColumnFault): string {
+  switch (fault.kind) {
+    case 'not-a-field':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, which is not a field of this object. `
+        + 'The sealer chains each row by that column\'s value, one chain per organization, so it must name a '
+        + 'declared field or a column the platform injects (the tenant column is `organization_id`); declare '
+        + 'the field, name another, or remove the key to chain by `tenant_id` (ADR-0154 D10).';
+    case 'leaf-order':
+      return `\`lifecycle.seal.chainField\` cannot name \`${name}\`: it orders each sealed leaf, and it names no `
+        + 'organization. Name the column that holds the organization id of each row, such as `organization_id` '
+        + '(ADR-0154 D10).';
+    case 'value-field':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, which \`lifecycle.seal.valueFields\` also lists. `
+        + 'A value field enters each sealed leaf as a salted commitment so a checkpoint never carries it, but '
+        + 'the chain value travels in clear in every checkpoint and proof bundle of its chain; remove it from '
+        + '`valueFields`, or name another chain column (ADR-0154 D1, D9, D10).';
+    case 'non-text':
+      return `\`lifecycle.seal.chainField\` names \`${name}\`, a \`${fault.type}\` column, whose value is not one text on `
+        + 'every store. The sealer reads a row\'s chain as a non-empty text only, so the rows would seal into '
+        + 'the deployment chain with no report; name a text or lookup column that holds the organization id, '
+        + 'such as `organization_id` (ADR-0154 D10).';
+  }
+}
+
+/**
+ * The message of a refused DEFAULT chain column. `fix` names the chain column
+ * to name instead: the injected tenant column where the registry injects it,
+ * otherwise a declared column — on an object that opts out of the tenant
+ * column, `organization_id` would itself be refused.
+ */
+function defaultSealChainColumnMessage(fault: SealChainColumnFault, injectsTenantColumn: boolean): string {
+  const name = SEAL_DEFAULT_CHAIN_FIELD;
+  const lead = `\`lifecycle.seal\` names no \`chainField\`, so the sealer chains each row by the default chain column \`${name}\``;
+  const other = injectsTenantColumn
+    ? 'name the chain column with `chainField`, such as `organization_id`, the tenant column the platform injects'
+    : 'name a declared text or lookup column that holds it with `chainField`';
+  switch (fault.kind) {
+    case 'not-a-field':
+    case 'leaf-order': // never for `tenant_id`; judged alike so the switch stays total
+      return `${lead}, which is not a field of this object. The sealer cannot chain the rows per organization `
+        + 'without that column, so it would seal none of them and only report the object at run time; '
+        + `declare a \`${name}\` text or lookup field that holds each row's organization id, or ${other} `
+        + '(ADR-0154 D10).';
+    case 'value-field':
+      return `${lead}, which \`lifecycle.seal.valueFields\` also lists. A value field enters each sealed leaf as a `
+        + 'salted commitment so a checkpoint never carries it, but the chain value travels in clear in every '
+        + `checkpoint and proof bundle of its chain; remove \`${name}\` from \`valueFields\`, or ${other} `
+        + '(ADR-0154 D1, D9, D10).';
+    case 'non-text':
+      return `${lead}, a \`${fault.type}\` column, whose value is not one text on every store. The sealer reads a `
+        + 'row\'s chain as a non-empty text only, so the rows would seal into the deployment chain with no report; '
+        + `declare \`${name}\` as a text or lookup field that holds the organization id, or ${other} (ADR-0154 D10).`;
+  }
+}
+
+/**
+ * [ADR-0154 D10, note on `chainField`] A `lifecycle.seal.chainField` the
+ * author names is a field the object has: one it declares, or a column the
+ * registry injects into it ({@link resolveInjectedSystemColumns} — above all
+ * ADR-0131's tenant column `organization_id`). The sealer chains each row by
+ * that column's value, so a name the object does not have would put every
+ * row into the deployment chain, where no organization's check finds it.
+ *
+ * A column the object has is refused too when it cannot name an organization
+ * chain: a leaf-order column ({@link isSealLeafOrderColumn}, the predicate
+ * `valueFields` reads); a `valueFields` member, whose value the leaf commits
+ * while the chain carries it in clear (D1, D9); and a column whose value is not
+ * one text on every store ({@link nonTextChainColumnType}), judged by the
+ * declared field or, for an injected column, by the definition the registry
+ * injects ({@link injectedSystemColumnDefs}). Each is one located issue at
+ * `['lifecycle', 'seal', 'chainField']`.
+ *
+ * An object that names NO chain column chains by its default, `tenant_id`, and
+ * that column is held to the same rules ({@link sealChainColumnFaults}, one
+ * judgement for both): it must be a field of the object, its value one text on
+ * every store, and not a `valueFields` member. The registry injects no
+ * `tenant_id` (its tenant column is `organization_id`), so in practice the
+ * default must be declared. Each refusal of the default is one located issue at
+ * `['lifecycle', 'seal']`, the block the author wrote: there is no
+ * `chainField` to point at, and naming one is half of every fix. Before this
+ * rule such an object parsed and the sealer reported it at `error` and sealed
+ * none of its rows, which it still does for a definition that skips the parse.
+ * The injected plan is read with no deployment, as every author-time caller
+ * reads it; a deployment that declares the object platform-global withholds
+ * the tenant column, and the sealer reports that object the same way.
+ *
+ * `injected-system-columns` imports this module (for `isTenancyDisabled`), so
+ * the two form an import cycle. Each side calls the other only from inside a
+ * function — here, at parse time — never while a module evaluates, so both
+ * bindings are initialized by the time either is called.
+ */
+function refuseUnknownSealChainField(object: { lifecycle?: unknown; fields?: unknown }, ctx: z.RefinementCtx): void {
+  const lifecycle = object.lifecycle;
+  if (lifecycle === null || typeof lifecycle !== 'object') return;
+  const seal = (lifecycle as { seal?: { chainField?: unknown; valueFields?: unknown } }).seal;
+  if (!seal || typeof seal !== 'object') return;
+  if (typeof seal.chainField === 'string') {
+    const name = seal.chainField;
+    for (const fault of sealChainColumnFaults(object, seal, name)) {
+      ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal', 'chainField'], message: namedSealChainFieldMessage(name, fault) });
+    }
+    return;
+  }
+  // A `chainField` of another type is the key's own type refusal; only an absent one reads the default.
+  if (seal.chainField !== undefined) return;
+  const faults = sealChainColumnFaults(object, seal, SEAL_DEFAULT_CHAIN_FIELD);
+  if (faults.length === 0) return;
+  const injectsTenantColumn = resolveInjectedSystemColumns(object).tenant;
+  for (const fault of faults) {
+    ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal'], message: defaultSealChainColumnMessage(fault, injectsTenantColumn) });
+  }
 }
 
 /**
@@ -3037,6 +3553,92 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
         + 'group, or declare a group of fields beside the table and name that one.',
     });
   }
+}
+
+/**
+ * A field group's `fields` list and a field's own `group` are two spellings of
+ * one membership (`ObjectFieldGroupSchema.fields`), so where both speak they
+ * must agree. One located issue per disagreement:
+ *
+ * - `fields` on a group that places a related list (`relatedList`): such a
+ *   group holds no fields — at `['fieldGroups', i, 'fields']`;
+ * - a name one list repeats — at the repeat;
+ * - a field two groups list — at the second listing, naming the first group;
+ * - a listed field whose own `group` names a different DECLARED group — at
+ *   the listing AND at `['fields', <name>, 'group']`, each naming the other,
+ *   so the author sees both places to fix. A `group` naming no declared key
+ *   is not another group (it means ungrouped, and lint reports it as
+ *   `field-group-undeclared`), so the list wins and nothing is refused —
+ *   renaming a group's key never makes its listed members unparseable.
+ *
+ * A listed name the object declares no field for is NOT judged: the layout
+ * skips it, and refusing it would make the object unparseable the moment any
+ * door removes a field without editing every list. A field whose `group` names
+ * a listing group the list leaves out is not a conflict either: it is placed
+ * after the listed members (`deriveFieldGroupLayout`).
+ *
+ * Judged in the object's `superRefine` for the reason
+ * {@link refuseFieldsInRelatedListGroups} gives: only the object holds both the
+ * groups and the field map.
+ */
+function refuseFieldGroupMembershipConflicts(fieldGroups: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(fieldGroups)) return;
+  const fieldMap = fields !== null && typeof fields === 'object' ? (fields as Record<string, unknown>) : {};
+  const listedIn = new Map<string, string>();
+  // Only a `group` naming ANOTHER DECLARED group disagrees with a list: one
+  // naming no declared key means ungrouped (lint reports it as
+  // `field-group-undeclared`), so the list simply wins.
+  const declaredKeys = new Set(
+    fieldGroups
+      .map((g: unknown) => (g !== null && typeof g === 'object' ? (g as { key?: unknown }).key : undefined))
+      .filter((k): k is string => typeof k === 'string'),
+  );
+  fieldGroups.forEach((group: unknown, index: number) => {
+    if (group === null || typeof group !== 'object') return;
+    const { key, relatedList, fields: members } = group as { key?: unknown; relatedList?: unknown; fields?: unknown };
+    if (!Array.isArray(members) || typeof key !== 'string') return;
+    if (typeof relatedList === 'string') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['fieldGroups', index, 'fields'],
+        message:
+          `Field group '${key}' places the related list '${relatedList}' (its \`relatedList\`), so it holds no `
+          + 'fields and may not list any. Move these fields into a group of fields beside the table.',
+      });
+      return;
+    }
+    const seen = new Set<string>();
+    members.forEach((name: unknown, at: number) => {
+      if (typeof name !== 'string') return;
+      const path = ['fieldGroups', index, 'fields', at];
+      if (seen.has(name)) {
+        ctx.addIssue({ code: 'custom', path, message: `Field group '${key}' lists the field '${name}' twice. List each field once.` });
+        return;
+      }
+      seen.add(name);
+      const first = listedIn.get(name);
+      if (first !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path,
+          message:
+            `Field '${name}' is listed by two field groups, '${first}' and '${key}'. A field belongs to one group: `
+            + 'remove it from one of the two lists.',
+        });
+        return;
+      }
+      listedIn.set(name, key);
+      const field = fieldMap[name];
+      const own = field !== null && typeof field === 'object' ? (field as { group?: unknown }).group : undefined;
+      if (typeof own !== 'string' || own === key || !declaredKeys.has(own)) return;
+      const message =
+        `Field '${name}' is listed by the field group '${key}' (its \`fields\`), but its own \`group\` names `
+        + `'${own}'. The two say different things: keep the field in '${key}'s list and drop its \`group\` `
+        + `(the list is the current spelling), or remove it from the list.`;
+      ctx.addIssue({ code: 'custom', path, message });
+      ctx.addIssue({ code: 'custom', path: ['fields', name, 'group'], message });
+    });
+  });
 }
 
 /**
@@ -3117,6 +3719,11 @@ function refuseFieldsInRelatedListGroups(fieldGroups: unknown, fields: unknown, 
  * ({@link controlledByParentMasterRefusal}), which the v18 upgrade's stored-row
  * listing reads too: `os migrate meta --stored` lists each stored object this
  * refinement refuses, by object, with the fate of its shape (#23270).
+ *
+ * The issue carries `params: { code: CONTROLLED_BY_PARENT_MASTER_INVALID, shape }`
+ * ({@link CONTROLLED_BY_PARENT_MASTER_INVALID}), so a surface that shows the
+ * refusal in the author's language selects its wording by the shape instead of
+ * reading the English `message`.
  */
 function refuseControlledByParentWithoutOneMaster(
   objectName: unknown,
@@ -3126,7 +3733,11 @@ function refuseControlledByParentWithoutOneMaster(
 ): void {
   const refusal = controlledByParentMasterRefusal(objectName, sharingModel, fields);
   if (refusal === undefined) return;
-  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message });
+  const params: ControlledByParentMasterIssueParams = {
+    code: CONTROLLED_BY_PARENT_MASTER_INVALID,
+    shape: refusal.shape,
+  };
+  ctx.addIssue({ code: 'custom', path: [refusal.path], message: refusal.message, params });
 }
 
 /**
@@ -3292,6 +3903,92 @@ function refuseWriteLockedUserActions(
 }
 
 /**
+ * [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` may open the
+ * Change Owner action only on an object that is structurally eligible for it
+ * (`transferIneligibilityReason`, `user-action-transfer.ts`): the platform
+ * injects its reassignable `owner_id`, an owner is provable for it (an
+ * ADR-0015 `external` object declares `owner_id` or maps a remote column onto
+ * it), and the object does not declare that field read-only. One located issue
+ * at `['userActions', 'transfer']` for a bare `true`, or the object form with
+ * `enabled: true`, on any other object — the structure keeps the action off
+ * there whatever the switch says, so the entry would be a key nothing honours.
+ * The reason clause carries its own arm's prescription where one exists (drop
+ * `readonly`, set `ownership`, declare or map the external owner); the message
+ * ends with the one every arm shares, removing the entry or setting it to
+ * false. Closing it (`false`) restates the structure and is accepted, as is a
+ * predicate-only object form, which opens nothing.
+ *
+ * Refused at parse on every door, not only at `create()`: the key is new, so no
+ * stored object carries it. Kept in the existing callback beside
+ * {@link refuseWriteLockedUserActions} so it adds no check node the JSON Schema
+ * projection would have to drop.
+ */
+function refuseIneligibleUserActionTransfer(
+  object: { name?: unknown; userActions?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const userActions = object.userActions;
+  if (userActions === null || typeof userActions !== 'object') return;
+  const flag = (userActions as Record<string, unknown>).transfer;
+  const opens = flag === true
+    || (flag !== null && typeof flag === 'object' && (flag as { enabled?: unknown }).enabled === true);
+  if (!opens) return;
+  const reason = transferIneligibilityReason(object);
+  if (reason === undefined) return;
+  const name = typeof object.name === 'string' && object.name.length > 0 ? object.name : 'this object';
+  ctx.addIssue({
+    code: 'custom',
+    path: ['userActions', 'transfer'],
+    message:
+      `Object '${name}' cannot offer the Change Owner action: ${reason}. ` +
+      'userActions.transfer turns the action on or off only on an object whose records have a reassignable ' +
+      'owner (the injected owner_id, on an object with ownership user or omitted, no managedBy and not a sys_ ' +
+      'name, provable on an external object, and not declared readonly), so true here is a switch nothing ' +
+      'honours. Otherwise remove the entry, or set it to false.',
+  });
+}
+
+/**
+ * [ruling 7000907189 point 4 · ADR-0049] `transferBehavior: 'cascade'` on a
+ * reference field asks a Change Owner of the parent to move THIS object's rows
+ * too, by the same action — so this object must offer Change Owner itself
+ * (`transferCascadeIneligibilityReason`, `user-action-transfer.ts`):
+ * structurally eligible, not a `controlled_by_parent` detail (its access
+ * follows its master, so it is not cascaded for access), and its
+ * `userActions.transfer` not off. One located issue at
+ * `['fields', <name>, 'transferBehavior']` per such field anywhere else — the
+ * endpoint would never run the cascade, so the declaration would be a key
+ * nothing honours. `'none'` is accepted everywhere the field's own type
+ * admits the key (the type half is `FieldSchema`'s).
+ *
+ * Refused at parse on every door: the key is new, so no stored object carries
+ * it. Kept in the existing callback so it adds no check node the JSON Schema
+ * projection would have to drop.
+ */
+function refuseIneligibleTransferCascades(
+  object: { name?: unknown; fields?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const fields = object.fields;
+  if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) return;
+  let reason: string | undefined | null = null;
+  for (const [fieldName, field] of Object.entries(fields as Record<string, unknown>)) {
+    if ((field as { transferBehavior?: unknown } | null)?.transferBehavior !== 'cascade') continue;
+    if (reason === null) reason = transferCascadeIneligibilityReason(object);
+    if (reason === undefined) return;
+    const name = typeof object.name === 'string' && object.name.length > 0 ? object.name : 'this object';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fields', fieldName, 'transferBehavior'],
+      message:
+        `Field '${fieldName}' declares transferBehavior: 'cascade', but object '${name}' cannot take a Change ` +
+        `Owner cascade: ${reason}. A cascade moves this object's records by the Change Owner action, so it ` +
+        "acts only on an object that offers that action itself. Set transferBehavior to 'none' or remove it.",
+    });
+  }
+}
+
+/**
  * [ruling A on the read half of #32442] `enable.aiReadable` is declared only
  * where it has a reader: a `sys_*` object outside the stored-metadata family.
  * One located issue at `['enable', 'aiReadable']`; the family is judged before
@@ -3407,6 +4104,10 @@ const ObjectSchemaBase = strictObject(
   pluralLabel: z.string().optional().describe('Human readable plural label (e.g. "Accounts")'),
   description: z.string().optional().describe('Developer documentation / description'),
   icon: OBJECT_ICON_SCHEMA,
+  // [#35985] The colour of the square the icon is drawn on, from a closed palette.
+  color: OBJECT_COLOR_SCHEMA,
+  // [#36366] The order of the object's actions and which are buttons, per scope (list, record).
+  actionLayout: OBJECT_ACTION_LAYOUT_SCHEMA,
 
   /**
    * Taxonomy & Organization
@@ -3555,9 +4256,9 @@ const ObjectSchemaBase = strictObject(
    * surfaces. Each flag overrides the default derived from
    * {@link managedBy} via {@link resolveCrudAffordances}. Useful for the
    * handful of objects whose lifecycle doesn't cleanly fit a single
-   * bucket — e.g. an `append-only` table that should still expose CSV
-   * Export, or a `config` table that admins legitimately want to bulk
-   * import via CSV.
+   * bucket — e.g. a `platform` table whose records the console should not
+   * offer for download (`exportCsv: false`), or a `config` table that
+   * admins legitimately want to bulk import via CSV.
    *
    * Omitting the block (or leaving individual flags `undefined`) keeps
    * the {@link managedBy}-derived default.
@@ -3569,6 +4270,15 @@ const ObjectSchemaBase = strictObject(
    * `create`/`import` evaluate it once per toolbar against the record in
    * scope (#7692). Read that schema's docblock for what `record.*` binds to
    * in each position — they are different records.
+   *
+   * `transfer` is the Change Owner switch (ruling 7000907189 point 1), and it
+   * sits outside the {@link managedBy} matrix: it takes the same union as the
+   * four CRUD flags, but its default derives from `sharingModel` (on, except
+   * off on a `controlled_by_parent` detail), and it can open the action only
+   * on an object that is structurally eligible for it — see
+   * `user-action-transfer.ts` (`isTransferEligible`,
+   * `resolveUserActionTransfer`). The server's Change Owner endpoint reads it
+   * (card #35402); the console action is card #35403.
    */
   userActions: strictObject({
     surface: "this object's `userActions` block",
@@ -3586,6 +4296,8 @@ const ObjectSchemaBase = strictObject(
       update: 'edit',
       remove: 'delete',
       destroy: 'delete',
+      changeOwner: 'transfer',
+      reassign: 'transfer',
     },
     guidance: {
       // Wrong-LAYER, and the trap is that the key name is right somewhere else.
@@ -3599,35 +4311,35 @@ const ObjectSchemaBase = strictObject(
       sort:
         '`sort` is a VIEW `userActions` key, not an object one — the two blocks share a ' +
         'name and nothing else. The object block governs CRUD affordances ' +
-        '(create/import/edit/delete/exportCsv); toolbar controls ' +
+        '(create/import/edit/delete/exportCsv) and the Change Owner action (transfer); toolbar controls ' +
         '(sort/search/filter/refresh/rowHeight/editInline) live on the view.',
       search:
         '`search` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       filter:
         '`filter` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       editInline:
         '`editInline` is a VIEW `userActions` key. The object-level `edit` flag decides ' +
         'whether editing is offered AT ALL; how it is offered (inline vs form) is the ' +
         "view's call.",
       group:
         '`group` is a VIEW `userActions` key. This object block governs CRUD affordances ' +
-        'only — put toolbar controls on the view that renders the records.',
+        'and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       hideFields:
         '`hideFields` is a VIEW `userActions` key. This object block governs CRUD ' +
-        'affordances only — put toolbar controls on the view that renders the records.',
+        'affordances and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       rowColor:
         '`rowColor` is a VIEW `userActions` key. This object block governs CRUD ' +
-        'affordances only — put toolbar controls on the view that renders the records.',
+        'affordances and the Change Owner action (transfer) only — put toolbar controls on the view that renders the records.',
       clone:
         '`clone` is a CAPABILITY, not a user action — write `enable: { clone: false }`. ' +
         'The `enable` block (ObjectCapabilities) is where record deep-cloning is governed.',
       read:
-        '`userActions` toggles WRITE affordances only; there is no read toggle. Read ' +
+        '`userActions` toggles the write affordances and the data Export entry; there is no read toggle. Read ' +
         'access is governed by permissions (`requiredPermissions`) and `access.default`.',
       view:
-        '`userActions` toggles WRITE affordances only; there is no view toggle. ' +
+        '`userActions` toggles the write affordances and the data Export entry; there is no view toggle. ' +
         'Visibility is governed by permissions (`requiredPermissions`) and `access.default`.',
     },
   }, {
@@ -3643,8 +4355,13 @@ const ObjectSchemaBase = strictObject(
     delete: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
       'Show row-level delete + bulk delete. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates.',
     ),
-    exportCsv: z.boolean().optional().describe('Show CSV export entry.'),
-  }).optional().describe('Per-object override of the resolved CRUD affordance matrix.'),
+    exportCsv: z.boolean().optional().describe(
+      "Show the Export entry that downloads this object's data as CSV, XLSX or JSON: the grid's Export menu and its table CSV button, the list view's Export, and a dataset report's Export over this object; false hides it. A view's export of the picture it draws (the Gantt chart's PNG / PDF) is not covered. Omitted: shown, in every managedBy bucket. It hides the entry and refuses no export request: who may export is the permission set's allowExport.",
+    ),
+    transfer: z.union([z.boolean(), RowCrudActionOverrideSchema]).optional().describe(
+      'Offer the Change Owner action (single and bulk) on records of this object. Boolean, or an object adding per-record visibleWhen/disabledWhen CEL predicates. Omitted: on, except off on a controlled_by_parent detail. Offered only where the platform injects a reassignable owner_id that is provable and not declared readonly (ownership user or omitted, no managedBy, not a sys_ object; an external object declares owner_id or maps a remote column onto it); enabled: true elsewhere is refused. Gates the action, not a plain owner_id write. Resolved by resolveUserActionTransfer.',
+    ),
+  }).optional().describe('Per-object override of the resolved CRUD affordance matrix, plus the Change Owner switch (transfer).'),
 
   /**
    * System-field auto-injection control.
@@ -4069,24 +4786,66 @@ const ObjectSchemaBase = strictObject(
    * [ADR-0085] Semantic role: the object's most important fields, in priority
    * order (the first entry wins wherever only one field fits, e.g. child-record
    * previews). Cross-surface by definition — drives default list/grid columns,
-   * cards, hover/lookup previews, and the record-detail highlight strip (first
-   * 4). Renamed from `compactLayout` (the value is an ordered field list, not
-   * a layout); Salesforce compact-layout semantics.
+   * cards, hover/lookup previews, a related list's default columns and the
+   * record picker's columns. The default record page draws no key-field strip
+   * from it and leaves these fields in their groups; a page that places a
+   * `record:highlights` block draws them there. Renamed from `compactLayout`
+   * (the value is an ordered field list, not a layout); Salesforce
+   * compact-layout semantics.
    */
-  highlightFields: z.array(z.string()).optional().describe('[ADR-0085] Ordered most-important fields; first entry wins where only one fits. Drives default columns, cards, previews, detail highlight strip. Renamed from compactLayout.'),
+  highlightFields: z.array(z.string()).optional().describe('[ADR-0085] Ordered most-important fields; first entry wins where only one fits. Drives default list and related-list columns, cards, hover cards, previews and the record picker; the default record page draws no strip from it. Renamed from compactLayout.'),
   // `compactLayout` (the pre-ADR-0085 spelling of `highlightFields`) was an
   // accepted parse-time alias for one deprecation window and is now RETIRED
   // (framework#2536): authoring it is rejected by `create()` like any unknown
   // key. All first-party consumers read `highlightFields` since objectui#2168.
   /**
-   * [#27069] The business order of this object's RELATED LISTS on its record
-   * page — what `highlightFields` is to fields, for child relationships. Each
-   * entry names one inbound relationship: the child object (`'task'`), or
-   * `object.field` when that child points here through more than one FK
-   * (`'event.related_to'`); a bare child name orders all of that child's lists
-   * together. Listed relationships come first, in this order; every unlisted
-   * one follows in the derived order (owned `master_detail` children, then
-   * `lookup` children, each in declaration order).
+   * [#27069 · #35897 · #35899] This object's record-page TABS beside its
+   * overview: which related lists show, in what order, with what title and
+   * columns, and where the three built-in tabs sit — what `highlightFields`
+   * is to fields, for child relationships.
+   *
+   * Absent (or empty): every inbound relationship shows, in the derived order
+   * (owned `master_detail` children, then `lookup` children, each in
+   * declaration order), then the attachments, approvals and activity-stream
+   * tabs — exactly as before this key existed.
+   *
+   * Declared: ONLY the lists it names show, in its order; removing an entry
+   * removes that tab. Each entry names one inbound relationship — the child
+   * object (`'task'`, every list of that child), or `object.field` when that
+   * child points here through more than one FK (`'event.related_to'`) — or a
+   * built-in tab by the platform object it draws (`RECORD_PAGE_BUILTIN_TABS`):
+   *
+   *  - `'sys_attachment'` — attachments; still drawn only when the object
+   *    enables files (`enable.files`), and not drawn when unlisted;
+   *  - `'sys_approval_request'` — approvals; still drawn only when the record
+   *    has approval requests. Unlisted, it follows the listed tabs: an
+   *    approval is never hidden by leaving it out;
+   *  - `'sys_activity'` — the one activity stream (activities, discussion and
+   *    field changes, each still switched by the object's own keys). Unlisted,
+   *    it closes the strip.
+   *
+   * `sys_comment` and `sys_audit_log` are parts of that stream, not tabs;
+   * `@objectstack/lint` warns on them and prescribes `'sys_activity'`.
+   *
+   * An entry is the bare name, or the object form
+   * {@link RelatedListEntryObjectSchema} (`{ list, label?, columns? }`) giving
+   * that list its own title and columns on the parent; the two forms mix. A
+   * built-in takes only the bare name.
+   *
+   * [#35901] A child list another package brings is the exception: this
+   * list does not hide it. That package places it with its object
+   * extension's `place` (`{ list, after | before }`), which the registry merge
+   * splices into this list; an unplaced one shows after the listed tabs
+   * (before unlisted approvals and the stream). This object may also name it
+   * (`defineStack` accepts that name only when the package is in the stack),
+   * and then this object's position wins. A child of THIS object's package,
+   * or one no package owns, still shows only when an entry names it.
+   *
+   * The FK's `relatedList: false` still hides a list whatever this says. Body
+   * tables a field group places in the overview (`fieldGroups[].relatedList`)
+   * are the field groups' to place and are not hidden by this list; it orders
+   * the body tables it names, and its `label` / `columns` apply wherever the
+   * list is drawn.
    *
    * Names are judged where the children are known (the shape alone is judged
    * at parse), and each refusal names the entry and the inbound relationships
@@ -4106,30 +4865,25 @@ const ObjectSchemaBase = strictObject(
    *    package's object that points in, so the entry is stored, and the
    *    record page places nothing for it. The boundary is deliberate: the
    *    `validate-related-list-refs` rule's header in `@objectstack/lint`
-   *    carries the reasoning.
-   *
-   * It orders; it does not show or hide. `relatedList: false` on the FK still
-   * hides a listed relationship, and a FK's `relatedList: 'primary'` still
-   * decides where its list is drawn (the record's body rather than a side
-   * card): this order applies among the body tables and among the side cards.
+   *    carries the reasoning;
+   *  - the three built-in names are never judged as children.
    *
    * Reader: objectui's record page, through `deriveRelatedLists`
-   * (`ui/packages/app-shell/src/utils/deriveRelatedLists.ts`).
+   * (`ui/packages/app-shell/src/utils/deriveRelatedLists.ts`) and the
+   * synthesized page's tab list (`buildDefaultTabs`).
    */
-  relatedLists: z.array(
-    z.string().regex(RELATED_LIST_ENTRY_PATTERN, {
-      message: 'A relatedLists entry is a child object name (e.g. "task") or object.field (e.g. "event.related_to"), in snake_case',
-    }),
-  ).optional().describe('Business order of this object\'s related lists on its record page, most important first. Each entry is a child object name (e.g. "task"), or object.field when that child has more than one relationship to this object (e.g. "event.related_to"). Listed relationships come first in this order; unlisted ones follow in the derived order (owned master_detail children, then lookup children). An entry whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere. An entry whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it, since a child outside the package may be a downstream package\'s object that points here, and the record page places nothing for it. It orders only: relatedList: false on the relationship still hides a list, and relatedList: \'primary\' still places a list in the record\'s body, so the order applies among the body tables and among the side cards.'),
+  relatedLists: z.array(RelatedListEntrySchema).optional().describe('The record page\'s tabs beside the overview, in order. Absent: every related list shows (owned master_detail children, then lookup children), then attachments, approvals and the activity stream, as before. Declared: only the lists named here show, in this order; leaving one out hides its tab. A child list another package brings is not hidden by it: that package places the list with its object extension\'s place entry (an { list, after | before } entry), and an unplaced one shows at the end of the tabs, before approvals and the activity stream; this object may also name it, which a build accepts only when that package is in the stack, and then its own position wins. Each entry is a child object name (e.g. "task"), object.field when that child has more than one relationship to this object (e.g. "event.related_to"), or a built-in tab: "sys_attachment" (attachments, still only when enable.files is on; not shown when unlisted), "sys_approval_request" (approvals, still only when the record has requests; when unlisted it follows the listed tabs), "sys_activity" (the activity stream of activities, discussion and changes; when unlisted it comes last). An entry may instead be { list, label?, columns? } to give that list its own title and child-field columns (wins over the child FK\'s relatedListTitle / relatedListColumns, used wherever the list is drawn); a built-in tab is written only as its bare name. relatedList: false on the FK still hides a list; body tables placed by fieldGroups are not hidden by this list. A name whose child is in the stack but has no inbound lookup / master_detail field to this object is refused everywhere; one whose child exists nowhere is refused by os validate / os build (which leave a sys_ / cloud_ / ai_ name to the runtime) and by a metadata write that names no package; a write into a package stores it and the record page places nothing for it. A columns name that resolves to no field of the child (a dotted name is walked through the child\'s relationships, as relatedListColumns is) is refused.'),
   /**
    * [ADR-0085] Semantic role: the field that represents the record's LINEAR
    * lifecycle (an ordered pipeline / stage progression). A string names the
    * field; `false` declares the object's status-like field NON-linear (an
    * unordered state set such as active/suspended/void) and suppresses every
    * consumer's stage heuristics. Absent = consumers may heuristically detect
-   * a stage field (status/stage/state/phase). Consumed by the record-detail
-   * path/stepper today; kanban default grouping, list badges and report
-   * bucketing are natural future consumers.
+   * a stage field (status/stage/state/phase). Consumed by the record page
+   * header today, whose status tag shows the stage and moves it (the default
+   * record page draws no stage path; an authored `record:path` block still
+   * reads it); kanban default grouping, list badges and report bucketing are
+   * natural future consumers.
    *
    * [#23809] When the named field carries options, it must be a single-value
    * `select` / `radio` whose inline options EACH declare their lifecycle `kind`
@@ -4574,6 +5328,10 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0144 D2] A `record`-mode amount's `currencyField` names a declared
   // ISO 4217 `text` sibling — the same door: only the object holds the map.
   refuseDishonestRecordCurrencyField(object.name, object.fields, ctx);
+  // [ADR-0158 U4, L3] A `record`-mode quantity's `unitField` names a declared
+  // `text` sibling with no marker of its own — the same door: only the object
+  // holds the map.
+  refuseDishonestRecordUnitField(object.name, object.fields, ctx);
   // [ADR-0144 D6, amended] A `summary` carries a currency only where one is
   // admitted; the half its own object can see — same door.
   refuseUnadmittedSummaryCurrency(object.name, object.fields, ctx);
@@ -4601,6 +5359,9 @@ const ObjectSchemaBase = strictObject(
   // [#27069] A field group carrying `relatedList` is a body table: no field
   // joins it. See the helper's docblock.
   refuseFieldsInRelatedListGroups(object.fieldGroups, object.fields, ctx);
+  // A group's `fields` list and a field's own `group` agree where both speak.
+  // See the helper's docblock.
+  refuseFieldGroupMembershipConflicts(object.fieldGroups, object.fields, ctx);
   // [ADR-0055 §1 · #23100 ruling B, as amended by #30905 ruling A] Exactly one
   // master `master_detail` under `controlled_by_parent` (the required one, or
   // the only one declared `required: false`) — the one master relation the
@@ -4622,9 +5383,18 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0153 D4] `userActions` opens no write verb on a `synced` object. See
   // the helper's docblock.
   refuseWriteLockedUserActions(object.name, object.managedBy, object.userActions, ctx);
+  // [ruling 7000907189 point 1 · ADR-0049] `userActions.transfer` opens Change
+  // Owner only on a structurally eligible object. See the helper's docblock.
+  refuseIneligibleUserActionTransfer(object, ctx);
+  // [ruling 7000907189 point 4 · ADR-0049] `transferBehavior: 'cascade'` only on
+  // a field of an object that offers Change Owner itself. See the helper's docblock.
+  refuseIneligibleTransferCascades(object, ctx);
   // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
   // See the helper's docblock.
   refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);
+  // [ADR-0154 D10, note on `chainField`] A named chain column is a field the
+  // object has, injected ones included. See the helper's docblock.
+  refuseUnknownSealChainField(object, ctx);
   // [ruling A on the read half of #32442] `enable.aiReadable` only on a `sys_*`
   // object, never on the stored-metadata family — the same door: only the
   // object knows its name. See the helper's docblock.
@@ -4726,40 +5496,6 @@ function snakeCaseToLabel(name: string): string {
     .join(' ');
 }
 
-/** Levenshtein edit distance — backs the "did you mean" hint for typo'd keys. */
-function editDistance(a: string, b: string): number {
-  const dp: number[][] = Array.from({ length: a.length + 1 }, () =>
-    new Array<number>(b.length + 1).fill(0),
-  );
-  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
-  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
-    }
-  }
-  return dp[a.length][b.length];
-}
-
-/** Closest known key within a small edit distance, for typo hints (`indexs` → `indexes`). */
-function suggestKey(unknown: string, knownKeys: string[]): string | undefined {
-  let best: string | undefined;
-  let bestDist = Infinity;
-  for (const key of knownKeys) {
-    const d = editDistance(unknown.toLowerCase(), key.toLowerCase());
-    if (d < bestDist) {
-      bestDist = d;
-      best = key;
-    }
-  }
-  // Only suggest when the keys are genuinely close (guards against noise).
-  return best !== undefined && bestDist <= Math.max(2, Math.floor(unknown.length / 3))
-    ? best
-    : undefined;
-}
-
 /**
  * Builds a precise, fixable error for unknown top-level keys on
  * `ObjectSchema.create()` — the metadata-shape analogue of ADR-0032's "no
@@ -4772,7 +5508,10 @@ function unknownKeyError(objectName: unknown, unknownKeys: string[], knownKeys: 
   const lines = unknownKeys.map((key) => {
     const guidance = UNKNOWN_KEY_GUIDANCE[key];
     if (guidance) return `  • ${guidance}`;
-    const suggestion = suggestKey(key, knownKeys);
+    // The package's one rename rule (`shared/rename-guess.ts`): the same budget
+    // and short-key screen every `strictObject` refusal answers with, so a
+    // short key is never offered an unrelated one here either.
+    const suggestion = suggestRename(key, knownKeys);
     return suggestion
       ? `  • \`${key}\` is not an ObjectSchema field — did you mean \`${suggestion}\`?`
       : `  • \`${key}\` is not an ObjectSchema field.`;
@@ -5270,7 +6009,11 @@ export interface CrudAffordances {
   edit: boolean;
   /** Row-level + bulk delete. */
   delete: boolean;
-  /** CSV / clipboard export. Allowed even on append-only audit tables by default. */
+  /**
+   * The console's data Export entry: a CSV, XLSX or JSON download of the
+   * object's data (not a view's picture export). On by default in every
+   * bucket, append-only audit tables included.
+   */
   exportCsv: boolean;
   /**
    * Per-record CEL predicates for the built-in row Edit action, present only
@@ -5720,6 +6463,506 @@ function fieldPatchesDescription(): string {
   );
 }
 
+// =================================================================
+// Extension placement (#35901, epic #35896)
+// =================================================================
+
+/**
+ * [#35901] Place ONE field this extension adds (a key of its own `fields`)
+ * into a field group of the extended object, after or before another member
+ * of that group. The group may be the target's own (`basic`) or one this
+ * extension adds with a group placement.
+ */
+export const ObjectExtensionFieldPlacementSchema = lazySchema(() => strictObject({
+  surface: 'this field placement',
+  history:
+    'A placement key nobody reads would be dropped silently: the field would still arrive, at the end of ' +
+    'its group, and the author would believe the position they wrote had been applied.',
+  aliases: { name: 'field', fieldName: 'field', section: 'group', fieldGroup: 'group', below: 'after', above: 'before' },
+}, {
+  field: FieldNameKeySchema.describe('A field this extension adds: a key of its own `fields`. An extension places only what it brings.'),
+  group: z.string().regex(FIELD_GROUP_KEY_PATTERN, {
+    message: 'A field placement\'s group is a field group key of the extended object (snake_case, e.g. "basic")',
+  }).describe('The field group it joins: a group key of the extended object, or of a group this extension adds.'),
+  after: FieldNameKeySchema.optional().describe('Place it right after this member of the group (any field of the group, whoever declares it).'),
+  before: FieldNameKeySchema.optional().describe('Place it right before this member of the group. Write `after` or `before`, not both.'),
+}));
+
+/**
+ * [#35901] Add ONE field group of this extension's own to the extended
+ * object, after or before one of its groups. The group is a whole
+ * {@link ObjectFieldGroupSchema}: its `fields` may name only fields this
+ * extension adds, and its `relatedList` only a child list this extension's
+ * package brings (judged where the package's objects are known).
+ */
+export const ObjectExtensionGroupPlacementSchema = lazySchema(() => strictObject({
+  surface: 'this group placement',
+  history:
+    'A placement key nobody reads would be dropped silently: the group would still arrive, last, and the ' +
+    'author would believe the position they wrote had been applied.',
+  aliases: { fieldGroup: 'group', section: 'group', below: 'after', above: 'before' },
+}, {
+  group: ObjectFieldGroupSchema.describe('The field group this extension adds (key, label, and optionally fields or relatedList).'),
+  after: z.string().regex(FIELD_GROUP_KEY_PATTERN).optional().describe('Place it right after this group of the extended object (a group key).'),
+  before: z.string().regex(FIELD_GROUP_KEY_PATTERN).optional().describe('Place it right before this group. Write `after` or `before`, not both.'),
+}));
+
+/**
+ * [#35901] Place ONE child list this extension's package brings (a child
+ * object of the package that points at the extended object, or
+ * `object.field` for one of its relationships) among the extended object's
+ * record-page tabs, after or before one of them, with that list's own title
+ * and columns as a `relatedLists` entry carries them.
+ */
+export const ObjectExtensionListPlacementSchema = lazySchema(() => strictObject({
+  surface: 'this list placement',
+  history:
+    'A placement key nobody reads would be dropped silently: the list would still show, in the automatic ' +
+    'order, and the author would believe the position they wrote had been applied.',
+  aliases: { name: 'list', object: 'list', relationship: 'list', title: 'label', fields: 'columns', below: 'after', above: 'before' },
+}, {
+  list: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE })
+    .regex(RELATED_LIST_OBJECT_ENTRY_NAME_PATTERN, {
+      message:
+        `${RECORD_PAGE_BUILTIN_TABS.map((n) => `'${n}'`).join(', ')} are the record page's built-in tabs, placed by ` +
+        'the extended object itself: a list placement names a child list this package brings.',
+    })
+    .describe('The child list this package brings: a child object of this package that points at the extended object, or object.field.'),
+  after: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }).optional()
+    .describe('Place it right after this tab: a relatedLists entry name of the extended object (a child object, object.field, or a built-in tab).'),
+  before: z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }).optional()
+    .describe('Place it right before this tab. Write `after` or `before`, not both.'),
+  label: z.string().min(1).optional().describe("This list's title on the record page, as a relatedLists entry's label."),
+  columns: z.array(z.string().min(1)).min(1).optional()
+    .describe("This list's columns, as field names of the child object, as a relatedLists entry's columns."),
+}));
+
+/**
+ * [#35901] One `place` entry of an object extension: a field, a group or a
+ * child list this extension brings, and where it goes. Told apart by its
+ * subject key: `field`, `list`, or `group` (an object).
+ */
+export const ObjectExtensionPlacementSchema = lazySchema(() => z.union([
+  ObjectExtensionFieldPlacementSchema,
+  ObjectExtensionListPlacementSchema,
+  ObjectExtensionGroupPlacementSchema,
+]));
+/** A field placement as an author writes it. */
+export type ObjectExtensionFieldPlacement = z.input<typeof ObjectExtensionFieldPlacementSchema>;
+/** A group placement as an author writes it. */
+export type ObjectExtensionGroupPlacement = z.input<typeof ObjectExtensionGroupPlacementSchema>;
+/** A group placement after parse (its group carries `ObjectFieldGroupSchema`'s parsed shape). */
+export type ObjectExtensionGroupPlacementParsed = z.infer<typeof ObjectExtensionGroupPlacementSchema>;
+/** A list placement as an author writes it. */
+export type ObjectExtensionListPlacement = z.input<typeof ObjectExtensionListPlacementSchema>;
+/** One `place` entry as an author writes it. */
+export type ObjectExtensionPlacement = z.input<typeof ObjectExtensionPlacementSchema>;
+/** One `place` entry after parse. */
+export type ObjectExtensionPlacementParsed = z.infer<typeof ObjectExtensionPlacementSchema>;
+
+/** A plain (non-array) object, as a placement entry or a field map is read before the root refinement. */
+function isPlacementRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * [#35901] The `place` description: what each entry form says, where an item
+ * lands when its anchor is missing, how several items at one anchor order,
+ * what applies when the extended object declares no arrangement of its own,
+ * and the one rule that an extension arranges only what it brings.
+ */
+function objectExtensionPlaceDescription(): string {
+  return (
+    'Where the fields, groups and child lists this extension brings go on the extended object. Each entry ' +
+    'is one of: `{ field, group, after | before }` — a field of this extension\'s own `fields`, into a field ' +
+    'group (the extended object\'s, or one this extension adds), right after or before a member of that group; ' +
+    '`{ group: { key, label, … }, after | before }` — a field group of this extension\'s own (its `fields` may ' +
+    'name only fields this extension adds, its `relatedList` only a child list of this package), right after ' +
+    'or before a group of the extended object; `{ list, after | before, label?, columns? }` — a child list of ' +
+    'this package (a child object of the same package that points at the extended object, or object.field), ' +
+    'right after or before a tab of the extended object (a relatedLists entry name, a built-in tab included), ' +
+    'with that tab\'s own title and columns (each column a field of the child, judged as a relatedLists ' +
+    'entry\'s columns are). Write `after` or `before`, or neither for the end. An anchor may be an item another ' +
+    'placement brings, whatever order the two are written or registered in. An anchor nobody has puts the ' +
+    'item at the end of its group, of the groups, or of the tabs (before the approvals ' +
+    'and activity-stream tabs); a group that does not exist puts the field among the ungrouped fields. Nothing ' +
+    'is dropped. Several items at one anchor follow ascending `priority`, then package name, so every build ' +
+    'gives the same order. Placement arranges what the extended object declares: list placements apply when it ' +
+    'declares `relatedLists`, group and field placements when it declares `fieldGroups`. Where it declares ' +
+    'none, its automatic arrangement stays as it is and the item still shows there: the list in the automatic ' +
+    'tab order, with this entry\'s `label` and `columns` not applied either (write them on the child\'s own ' +
+    'lookup field as `relatedListTitle` / `relatedListColumns`, which apply on every parent), and the field ' +
+    'among the fields in declaration order, its `after` / `before` not applied. The boot log names each ' +
+    'placement that did not apply, with the object and the package; `os validate` names it too when the ' +
+    'extended object is in the same stack. A child list another package brings shows even when the extended object\'s `relatedLists` ' +
+    'does not name it: placed, at its place; unplaced, at the end of the tabs. An extension places only its own ' +
+    'items: a field outside its own `fields` is refused here; a field the extended object declares (an owner ' +
+    'field this extension redeclares for its display is still the owner\'s), a group key the extended object ' +
+    'declares, and a list (or a group\'s `relatedList`) that is not a child object of its package are refused ' +
+    'at `defineStack` where the objects are known; the merge skips each of them too, with a warning naming ' +
+    'whose item it is. A ' +
+    'group key another package\'s extension already adds is not refused: the merge adds it once and names the ' +
+    'second. Applied ' +
+    'once, by the registry merge, so the record page, the forms and Studio show one arrangement; uninstalling ' +
+    'the package removes its items and leaves the extended object\'s own order as it was. Example: ' +
+    '`place: [{ field: \'tax_id\', group: \'basic\', after: \'industry\' }, { list: \'contract\', after: ' +
+    '\'opportunity\', columns: [\'name\', \'amount\'] }]`.'
+  );
+}
+
+/**
+ * [#35901] Refuse a placement this extension may not write, located at the
+ * entry: one naming a field outside the extension's own `fields` (an
+ * extension places only what it brings; a field of the extended object or of
+ * another package's extension is its owner's to arrange), a group whose
+ * `fields` names such a field, an entry writing both `after` and `before`, an
+ * item placed twice (a field by two entries, or by an entry and its group's
+ * `fields`), an item anchored at itself, and a field whose own `group` names
+ * another group than its placement (two answers to one question, the rule the
+ * object parse holds for a group's `fields`).
+ *
+ * Shape only: whether a group key is already the extended object's, and
+ * whether a list is a child of this package, are judged where the other
+ * objects are known (`defineStack`; the registry merge for every door).
+ * Judged on the extension's root refinement, where `ObjectExtensionSchema`
+ * already carries one, so the published JSON Schema gains no
+ * dropped-refinement site.
+ */
+function refuseForeignPlacements(fields: unknown, place: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(place)) return;
+  const own = isPlacementRecord(fields) ? fields : {};
+  const isOwn = (name: string): boolean => Object.prototype.hasOwnProperty.call(own, name);
+  const placedField = new Set<string>();
+  const placedGroup = new Set<string>();
+  const placedList = new Set<string>();
+  const foreignField = (name: string): string =>
+    `\`${name}\` is not a field this extension adds, so it cannot place it: an extension places only what it ` +
+    'brings (a key of its own `fields`). A field of the extended object, or of another package\'s extension, is ' +
+    'arranged by its owner. Add the field to this extension\'s `fields`, or remove the placement.';
+  const twice = (what: string): string =>
+    `${what} is placed twice: place each item this extension brings once.`;
+  place.forEach((entry: unknown, i: number) => {
+    if (!isPlacementRecord(entry)) return;
+    if (entry.after !== undefined && entry.before !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['place', i, 'before'],
+        message: 'A placement writes `after` or `before`, not both: name the one item it sits next to.',
+      });
+    }
+    const anchoredAtItself = (name: string): boolean => entry.after === name || entry.before === name;
+    if (typeof entry.field === 'string') {
+      const name = entry.field;
+      if (!isOwn(name)) {
+        ctx.addIssue({ code: 'custom', path: ['place', i, 'field'], message: foreignField(name) });
+        return;
+      }
+      if (placedField.has(name)) {
+        ctx.addIssue({ code: 'custom', path: ['place', i, 'field'], message: twice(`Field \`${name}\``) });
+      }
+      placedField.add(name);
+      if (anchoredAtItself(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['place', i, entry.after === name ? 'after' : 'before'],
+          message: `Field \`${name}\` is placed next to itself: name another member of the group, or leave the anchor out for the end.`,
+        });
+      }
+      const declared = own[name];
+      const ownGroup = isPlacementRecord(declared) && typeof declared.group === 'string' ? declared.group : undefined;
+      if (ownGroup !== undefined && typeof entry.group === 'string' && ownGroup !== entry.group) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['place', i, 'group'],
+          message:
+            `Field \`${name}\` declares \`group: '${ownGroup}'\` and this placement puts it in \`${entry.group}\`: ` +
+            'write its group once, in the placement, and drop the field\'s own `group`.',
+        });
+      }
+      return;
+    }
+    if (typeof entry.list === 'string') {
+      const name = entry.list;
+      if (placedList.has(name)) {
+        ctx.addIssue({ code: 'custom', path: ['place', i, 'list'], message: twice(`List \`${name}\``) });
+      }
+      placedList.add(name);
+      if (anchoredAtItself(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['place', i, entry.after === name ? 'after' : 'before'],
+          message: `List \`${name}\` is placed next to itself: name another tab, or leave the anchor out for the end.`,
+        });
+      }
+      return;
+    }
+    if (isPlacementRecord(entry.group)) {
+      const key = typeof entry.group.key === 'string' ? entry.group.key : undefined;
+      if (key !== undefined) {
+        if (placedGroup.has(key)) {
+          ctx.addIssue({ code: 'custom', path: ['place', i, 'group', 'key'], message: twice(`Group \`${key}\``) });
+        }
+        placedGroup.add(key);
+        if (anchoredAtItself(key)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['place', i, entry.after === key ? 'after' : 'before'],
+            message: `Group \`${key}\` is placed next to itself: name another group, or leave the anchor out for the end.`,
+          });
+        }
+      }
+      const members = Array.isArray(entry.group.fields) ? entry.group.fields : [];
+      members.forEach((member: unknown, j: number) => {
+        if (typeof member !== 'string') return;
+        if (!isOwn(member)) {
+          ctx.addIssue({ code: 'custom', path: ['place', i, 'group', 'fields', j], message: foreignField(member) });
+          return;
+        }
+        if (placedField.has(member)) {
+          ctx.addIssue({ code: 'custom', path: ['place', i, 'group', 'fields', j], message: twice(`Field \`${member}\``) });
+        }
+        placedField.add(member);
+      });
+    }
+  });
+}
+
+// =================================================================
+// The paired `.custom` package's arrangement (ADR-0146 D10)
+// =================================================================
+
+/**
+ * [ADR-0146 D10] The OBJECT form of one entry of the paired `.custom`
+ * package's `ObjectExtensionSchema.relatedLists`: an object's own entry
+ * ({@link RelatedListEntryObjectSchema}: `list`, `label`, `columns`) plus
+ * `hidden`. The environment's tab list shows a tab it does not name (after
+ * the listed ones), so hiding one is written: `{ list: 'task', hidden: true }`.
+ * `hidden` is accepted here and nowhere else: an object's own `relatedLists`
+ * refuses it by name.
+ */
+export const ObjectExtensionRelatedListEntryObjectSchema = lazySchema(() => strictObject({
+  surface: 'this relatedLists entry of an object extension',
+  history:
+    'An unknown key here would be dropped silently: the tab would still draw, as the arrangement before this ' +
+    'one had it, so the author would believe the setting they wrote had been applied.',
+  aliases: {
+    name: 'list',
+    object: 'list',
+    objectName: 'list',
+    relationship: 'list',
+    title: 'label',
+    fields: 'columns',
+    hide: 'hidden',
+  },
+  guidance: {
+    filter:
+      '`filter` is not a relatedLists entry key: a related list\'s scope is the child FK\'s `relatedListFilter`.',
+    sort:
+      '`sort` is not a relatedLists entry key: a related list orders its rows the way the child object\'s default list view sorts.',
+    visible:
+      '`visible` is not a relatedLists entry key: a listed tab is shown. Write `hidden: true` to hide it.',
+  },
+}, {
+  ...RelatedListEntryObjectSchema.shape,
+  hidden: z.boolean().optional()
+    .describe("true = this list's tab is not shown on the record page (and a reader's own arrangement cannot bring it back); absent or false = shown at this entry's position. The one way the paired `.custom` arrangement hides a tab: a tab it does not name still shows, after the listed ones. A built-in tab is written only as its bare name and is not hidden here."),
+}));
+
+/**
+ * [ADR-0146 D10] One entry of the paired `.custom` package's
+ * `ObjectExtensionSchema.relatedLists`: the bare name (a child object,
+ * `object.field`, or a built-in tab), or
+ * {@link ObjectExtensionRelatedListEntryObjectSchema}'s object form.
+ */
+export const ObjectExtensionRelatedListEntrySchema = lazySchema(() => z.union([
+  z.string().regex(RELATED_LIST_ENTRY_PATTERN, { message: RELATED_LIST_ENTRY_NAME_MESSAGE }),
+  ObjectExtensionRelatedListEntryObjectSchema,
+]));
+/** One entry of the paired `.custom` package's `relatedLists`, as an author writes it. */
+export type ObjectExtensionRelatedListEntry = z.input<typeof ObjectExtensionRelatedListEntrySchema>;
+/** One entry of the paired `.custom` package's `relatedLists`, after parse. */
+export type ObjectExtensionRelatedListEntryParsed = z.infer<typeof ObjectExtensionRelatedListEntrySchema>;
+
+/**
+ * [ADR-0146 D10] A `.custom` arrangement's group keys are unique, as an
+ * object's are. Judged here, in the extension's own refinement, and not as a
+ * `.refine()` on the `fieldGroups` array: that would be a new position at
+ * which a rule reaches the runtime and not the published JSON Schema
+ * (`dropped-refinements.baseline.json`), where this refinement is already
+ * one recorded position for the whole extension.
+ */
+function refuseDuplicateExtensionFieldGroupKeys(fieldGroups: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(fieldGroups)) return;
+  const keys = fieldGroups.map((group) => (group as { key?: unknown } | null | undefined)?.key);
+  if (new Set(keys).size === keys.length) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['fieldGroups'],
+    message: 'fieldGroups[].key must be unique within an object extension',
+  });
+}
+
+/**
+ * [ADR-0146 D10] Refuse a `.custom` tab list that says two things about one
+ * list: an entry that shows a list another entry hides. The hiding entry
+ * hides every list it names (a bare child name, all of that child's lists),
+ * so a shown entry naming the same list, or one relationship of a child the
+ * list hides whole, would draw nothing. Located at the later of the two.
+ * `'task'` shown beside `{ list: 'task.account', hidden: true }` is not a
+ * contradiction: every list of the child shows but the one hidden.
+ *
+ * Judged on the extension's root refinement, where `ObjectExtensionSchema`
+ * already carries one, so the published JSON Schema gains no
+ * dropped-refinement site.
+ */
+function refuseContradictoryRelatedListEntries(relatedLists: unknown, ctx: z.RefinementCtx): void {
+  if (!Array.isArray(relatedLists)) return;
+  const entries = relatedLists.map((entry: unknown, index: number) => ({
+    index,
+    name: relatedListEntryName(entry),
+    hidden: relatedListEntryHidden(entry),
+  })).filter((entry): entry is { index: number; name: string; hidden: boolean } => entry.name !== undefined);
+  for (const shown of entries) {
+    if (shown.hidden) continue;
+    const hiding = entries.find((entry) => entry.hidden && relatedListNameCovers(entry.name, shown.name));
+    if (hiding === undefined) continue;
+    const at = Math.max(shown.index, hiding.index);
+    ctx.addIssue({
+      code: 'custom',
+      path: at === shown.index ? ['relatedLists', at] : ['relatedLists', at, 'hidden'],
+      message:
+        `List '${shown.name}' is listed (relatedLists[${shown.index}]) and hidden ` +
+        `(relatedLists[${hiding.index}]${hiding.name === shown.name ? '' : `, which hides every list of '${hiding.name}'`}): ` +
+        'a hidden list is not shown wherever it is listed. Keep one of the two entries.',
+    });
+  }
+}
+
+/**
+ * [ADR-0146 D10] Refuse a `place` entry beside the arrangement key that
+ * replaces it, in one extension: `fieldGroups` is the whole field
+ * arrangement, so a `{ field }` or `{ group }` placement written beside it
+ * would be applied and then replaced; `relatedLists` is the whole tab list,
+ * so a `{ list }` placement beside it would be. Located at the entry, naming
+ * where the item is written instead. An extension that writes only one of
+ * the two keys keeps the placements of the other kind.
+ */
+function refusePlacementsTheArrangementReplaces(
+  extension: { place?: unknown; fieldGroups?: unknown; relatedLists?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (!Array.isArray(extension.place)) return;
+  const groupsWritten = Array.isArray(extension.fieldGroups);
+  const tabsWritten = Array.isArray(extension.relatedLists);
+  if (!groupsWritten && !tabsWritten) return;
+  extension.place.forEach((entry: unknown, index: number) => {
+    if (entry === null || typeof entry !== 'object') return;
+    const { field, group, list } = entry as { field?: unknown; group?: unknown; list?: unknown };
+    if (groupsWritten && typeof field === 'string') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['place', index],
+        message:
+          `This extension writes \`fieldGroups\`, the whole field arrangement, so the placement of the field ` +
+          `'${field}' would be replaced by it. List '${field}' in a group's \`fields\` there and remove this entry.`,
+      });
+    } else if (groupsWritten && group !== null && typeof group === 'object') {
+      const key = (group as { key?: unknown }).key;
+      ctx.addIssue({
+        code: 'custom',
+        path: ['place', index],
+        message:
+          `This extension writes \`fieldGroups\`, the whole field arrangement, so the placement of the group ` +
+          `${typeof key === 'string' ? `'${key}' ` : ''}would be replaced by it. Declare the group in \`fieldGroups\`, ` +
+          'at its position, and remove this entry.',
+      });
+    } else if (tabsWritten && typeof list === 'string') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['place', index],
+        message:
+          `This extension writes \`relatedLists\`, the whole tab list, so the placement of the list '${list}' ` +
+          `would be replaced by it. Name '${list}' in \`relatedLists\`, at its position, and remove this entry.`,
+      });
+    }
+  });
+}
+
+/** [ADR-0146 D10] The words every key of the paired `.custom` arrangement shares: who may write it, and what refuses anyone else. */
+const CUSTOM_ARRANGEMENT_WRITER =
+  'Written only by the object extension of the paired `.custom` package of the App the object belongs to ' +
+  '(ADR-0146 D10). An extension in a package that is not a `.custom` package is refused at publish, by ' +
+  '`os validate` / `os build` and at install, with the prescription to place what it brings with `place`, and ' +
+  'the registry merge skips it with a warning. A `.custom` package that is not this object\'s pair is not ' +
+  'refused at those doors: the registry merge does not apply what it writes here, alone or beside the pair, ' +
+  'and the boot log names it.';
+
+/** [#36366, ADR-0146 D10] The extension's `actionLayout` description. */
+function objectExtensionActionLayoutDescription(): string {
+  return (
+    'The arrangement of the extended object\'s actions, per scope (`list`, `record`), in the object\'s own shape. ' +
+    'Written only by the object extension of the paired `.custom` package of the App the object belongs to ' +
+    '(ADR-0146 D10). An extension in a package that is not a `.custom` package is refused at publish, by ' +
+    '`os validate` / `os build` and at install, and the registry merge skips it with a warning; an action that ' +
+    'package brings is placed by its own `locations` and `order`. A `.custom` package that is not this object\'s ' +
+    'pair is not applied. Each arm written replaces the arm the object serves for that scope, whole, after ' +
+    'every other layer; an arm not written stays as the object gives it, and removing the key, or uninstalling ' +
+    'or disabling the package, restores it.'
+  );
+}
+
+/** [ADR-0146 D10] The extension's `fieldGroups` description. */
+function objectExtensionFieldGroupsDescription(): string {
+  return (
+    'The whole field arrangement of the extended object on the record page, the forms and the preview: an ' +
+    'object\'s `fieldGroups`, in the same shape. ' + CUSTOM_ARRANGEMENT_WRITER + ' A group may list any field the ' +
+    'object has, whoever declares it (its owner, another package\'s extension, or this extension\'s own `__c` ' +
+    'fields), and a group\'s `relatedList` may place any body table. Written, it replaces the groups the owner ' +
+    'declares and the other extensions\' `place` entries add, whole: no group, member or order of that ' +
+    'arrangement is kept unless written here, and nothing is merged entry by entry. A group that lists `fields` ' +
+    'shows exactly its list. A field no group here lists is never dropped: it shows after the last group, ' +
+    'whatever group its owner or another extension had put it in. That covers a field a later version of the ' +
+    'base adds and a field another package\'s extension brings. A group that lists no `fields` keeps the ' +
+    'object\'s older rule (the fields whose `group` names it), and a field this extension adds keeps the ' +
+    '`group` it declares. Not written, the arrangement stays as ' +
+    'the owner and the `place` entries give it, and removing this key, or uninstalling or disabling the package, ' +
+    'restores that. To keep a field off the record page and the forms, list it in a group whose `visibleWhen` ' +
+    'is false: `hidden` is not a display property a `fieldPatches` entry may set, because it also changes what ' +
+    'search indexes and what a form requires. Such a group is presentation only, not access control: the field ' +
+    'stays readable and writable through the API. Do not use it for a `required` field that has no default: ' +
+    'the create form no longer shows the field while the save still requires it, so the form cannot be ' +
+    'submitted. Example: `fieldGroups: [{ key: \'contact\', label: \'Contact\', ' +
+    'fields: [\'email\', \'phone\', \'region__c\'] }, { key: \'basic\', label: \'Basics\', fields: [\'name\', ' +
+    '\'company\'] }]`.'
+  );
+}
+
+/** [ADR-0146 D10] The extension's `relatedLists` description. */
+function objectExtensionRelatedListsDescription(): string {
+  return (
+    'The whole tab list of the extended object\'s record page, in order: an object\'s `relatedLists`, in the same ' +
+    'shape, whose object form also takes `hidden`. ' + CUSTOM_ARRANGEMENT_WRITER + ' An entry may name any list ' +
+    'the object has, whoever brings it (a child object, object.field, or a built-in tab; `{ list, label?, ' +
+    'columns?, hidden? }` gives the list its own title and columns, or hides it). Written, it replaces the tab ' +
+    'list the owner declares and the other extensions\' `place` entries add to, whole, and nothing is merged ' +
+    'entry by entry. A tab this list does not name is not hidden, the reverse of an object\'s own `relatedLists`: ' +
+    'where the object had a declared tab list, each of its tabs not named here follows the listed ones (before ' +
+    'a trailing approvals / activity-stream run), with the title and columns it had; where the object declared ' +
+    'none (every list shows), every list not named here follows the listed ones, and so does the attachments ' +
+    'tab. That covers a tab a later version of the base adds and a child list a package installed later brings. ' +
+    'Hiding is written: `{ list: \'task\', hidden: true }` hides that list\'s tab, whoever brings the list, and ' +
+    'a bare child name hides every list of that child. A list the object\'s own `relatedLists` hides by leaving ' +
+    'it out stays hidden until this list names it. A built-in tab is written only as its bare name, keeps its ' +
+    'own rule (approvals and the activity stream follow the listed tabs when unlisted) and cannot be hidden ' +
+    'here. `relatedList: false` on the child\'s field still hides a list whatever this says, and body tables a ' +
+    'field group places are the groups\' to place. A reader\'s own tab order and hidden tabs (kept per user) ' +
+    'are laid over this list, as over an object\'s. Not written, the tabs stay as the owner and the `place` ' +
+    'entries give them, and removing this key, or uninstalling or disabling the package, restores that. ' +
+    'Example: `relatedLists: [\'opportunity\', { list: \'contact\', label: \'People\' }, { list: \'task\', ' +
+    'hidden: true }]`.'
+  );
+}
+
 /**
  * Object Extension Entry — used in `objectExtensions` array.
  * Declares fields/config to merge into an existing object owned by another package.
@@ -5755,12 +6998,16 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   guidance: {
     // The merge in `objectql/src/engine.ts` copies EXACTLY the declared keys
     // (extend / fields / fieldPatches / label / pluralLabel / description /
-    // validations / indexes / priority) onto the extension def. Anything else
-    // is not "unsupported yet" — there is no slot for it to arrive through.
+    // validations / indexes / priority, and the paired `.custom` package's
+    // fieldGroups / relatedLists / actionLayout) onto the extension def.
+    // Anything else is not "unsupported yet" — there is no slot for it to
+    // arrive through.
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
       '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes`, and ' +
-      'applies `fieldPatches`, and nothing else. ' +
+      'applies `fieldPatches`; only the base\'s paired `.custom` package also writes ' +
+      '`fieldGroups`, `relatedLists` and `actionLayout` (the order of the object\'s actions, ' +
+      'never a new one); nothing else. ' +
       "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
       '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
       'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
@@ -5782,10 +7029,11 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
       'carry them. Declare the views as a top-level `view` in the stack that defines the ' +
       'target object. `defineStack()` refuses a top-level `view` whose `list` or `form` data ' +
       'source is an object the stack does not define, an extended one included.',
-    fieldGroups:
-      '`fieldGroups` cannot be contributed through an object extension — the merge does ' +
-      'not carry them. Add the fields here and declare the groups on the owning object, ' +
-      'or assign a Page for the layout.',
+    // [#35901, #36366, ADR-0146 D10] `fieldGroups`, `relatedLists` and
+    // `actionLayout` are KEYS of this schema, not guidance: the paired
+    // `.custom` package's extension writes them, and which package an extension belongs to is not in its body, so
+    // the refusal of any other writer is the server's (`CUSTOM_ARRANGEMENT_KEYS`
+    // and its judge, at publish, `os validate` / `os build` and install).
     // A membership key belongs to the package that owns the roster object, so a
     // key cannot reach into another package's object (the ruled refusal 10).
     membershipKeys:
@@ -5868,6 +7116,17 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   
   /** Override description */
   description: z.string().optional().describe('Override description for the extended object'),
+
+  /**
+   * [#36366, ADR-0146 D10] The arrangement of the extended object's actions,
+   * as on the object itself (`ObjectSchema.actionLayout`), written by the
+   * object extension of the base's paired `.custom` package and by no other
+   * (`CUSTOM_ARRANGEMENT_KEYS`). Applied by role, last, arm by arm: each arm
+   * it writes replaces the arm the object serves for that scope, whole; an
+   * arm it leaves out stays. Refused for any other writer where `fieldGroups`
+   * is. See {@link objectExtensionActionLayoutDescription}.
+   */
+  actionLayout: OBJECT_ACTION_LAYOUT_SCHEMA.describe(objectExtensionActionLayoutDescription()),
   
   /** Additional validation rules to add */
   validations: z.array(ValidationRuleSchema).optional().describe('Additional validation rules to merge into the target object'),
@@ -5875,6 +7134,46 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   /** Additional indexes to add */
   indexes: z.array(IndexSchema).optional().describe('Additional indexes to merge into the target object'),
   
+  /**
+   * [#35901] Where the fields, groups and child lists this extension brings go
+   * on the extended object's record page and forms: each entry names ONE item
+   * of this extension's own and an anchor (`after` or `before`). An extension
+   * places only what it brings — a field of its own `fields`, a group it adds,
+   * a child list of its own package — and never moves or hides the extended
+   * object's items or another package's (refused here, at `defineStack`, and
+   * skipped with a warning by the registry merge). Applied once, by the
+   * registry merge (`foldExtendersOntoDefinition` in `@objectstack/objectql`),
+   * so every reader of the object gets one arrangement. See
+   * {@link objectExtensionPlaceDescription} for the rules.
+   */
+  place: z.array(ObjectExtensionPlacementSchema).optional().describe(objectExtensionPlaceDescription()),
+
+  /**
+   * [ADR-0146 D10] The whole field arrangement of the extended object, written
+   * by the object extension of the base's paired `.custom` package and by no
+   * other: an object's `fieldGroups` ({@link ObjectFieldGroupSchema}), in the
+   * same shape. Written, it replaces the arrangement the owner declares and
+   * the other extensions' `place` entries add to, whole; the registry fold
+   * applies it last (`applyCustomArrangement` in `@objectstack/objectql`).
+   * Pure shape: which package the extension belongs to is not in its body, so
+   * any other writer is refused by the server (`judgeExtensionArrangement` in
+   * `@objectstack/metadata-protocol`, at publish, `os validate` / `os build`
+   * and install). See {@link objectExtensionFieldGroupsDescription}.
+   */
+  fieldGroups: z.array(ObjectFieldGroupSchema).optional().describe(objectExtensionFieldGroupsDescription()),
+
+  /**
+   * [ADR-0146 D10] The whole tab list of the extended object's record page,
+   * written by the object extension of the base's paired `.custom` package
+   * and by no other: an object's `relatedLists`, whose object form also takes
+   * `hidden` ({@link ObjectExtensionRelatedListEntrySchema}). Written, it
+   * replaces the tab list the owner declares and the other extensions'
+   * `place` entries add to, whole; a tab it does not name still shows, after
+   * the listed ones. Applied and refused where `fieldGroups` is. See
+   * {@link objectExtensionRelatedListsDescription}.
+   */
+  relatedLists: z.array(ObjectExtensionRelatedListEntrySchema).optional().describe(objectExtensionRelatedListsDescription()),
+
   /** Merge priority. Higher number applied later (wins on conflict). Default: 200 */
   priority: z.number().int().min(0).max(999).default(200).describe('Merge priority (higher = applied later)'),
 }).superRefine((extension, ctx) => {
@@ -5885,6 +7184,18 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   refuseExtensionFieldPatchKeys(extension.fieldPatches, ctx);
   // …and a field the extension takes over in `fields` is not one either.
   refuseFieldPatchOfReplacedField(extension.fields, extension.fieldPatches, ctx);
+  // [#35901] An extension places only what it brings, each item once, with one anchor.
+  refuseForeignPlacements(extension.fields, extension.place, ctx);
+  // [ADR-0146 D10] The `.custom` arrangement: the object's own two membership
+  // rules, over the fields this extension adds (a base field's `group` is
+  // not in this body; the registry fold lets the list win over it)…
+  refuseDuplicateExtensionFieldGroupKeys(extension.fieldGroups, ctx);
+  refuseFieldsInRelatedListGroups(extension.fieldGroups, extension.fields, ctx);
+  refuseFieldGroupMembershipConflicts(extension.fieldGroups, extension.fields, ctx);
+  // …one statement per list…
+  refuseContradictoryRelatedListEntries(extension.relatedLists, ctx);
+  // …and no `place` entry the extension's own arrangement replaces.
+  refusePlacementsTheArrangementReplaces(extension, ctx);
 }).overwrite((extension) => {
   // [#23065] …and the object a referenceless `tree` field references. See
   // {@link materializeTreeSelfReferences}.

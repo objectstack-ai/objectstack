@@ -21,7 +21,7 @@
  * by `apps/console/src/components/landingHomeParity-7256.test.ts`.
  */
 import { describe, it, expect } from 'vitest';
-import { HOME_LAUNCHER_PATH, resolveDeclaredHomePath } from '../homePath';
+import { HOME_LAUNCHER_PATH, resolveDeclaredHomePath, resolveDesktopHomePath } from '../homePath';
 
 describe('resolveDeclaredHomePath', () => {
   it('answers the declared app root — cloud control plane, the card shape', () => {
@@ -95,5 +95,31 @@ describe('resolveDeclaredHomePath', () => {
 
   it('keeps the launcher path spelled once', () => {
     expect(HOME_LAUNCHER_PATH).toBe('/home');
+  });
+});
+
+// objectstack#36732 — the desktop's Home, now the platform home page is retired.
+describe('resolveDesktopHomePath', () => {
+  const SETUP = { name: 'setup', _packageId: 'com.objectstack.setup' };
+  const STUDIO = { name: 'studio', _packageId: 'com.objectstack.studio' };
+
+  it('the last-used app first, then the declaration, then the first product app', () => {
+    const apps = [SETUP, { name: 'crm', _packageId: 'com.acme.crm' }, { name: 'ops', isDefault: true }];
+    expect(resolveDesktopHomePath(apps, 'crm')).toBe('/apps/com.acme.crm');
+    expect(resolveDesktopHomePath(apps, null)).toBe('/apps/ops');
+    expect(resolveDesktopHomePath([SETUP, STUDIO, { name: 'sales' }], null)).toBe('/apps/sales');
+  });
+
+  it('a removed, hidden or switched-off last app is no answer', () => {
+    const apps = [{ name: 'a' }, { name: 'h', hidden: true }, { name: 'off', active: false }];
+    expect(resolveDesktopHomePath(apps, 'gone')).toBe('/apps/a');
+    expect(resolveDesktopHomePath(apps, 'h')).toBe('/apps/a');
+    expect(resolveDesktopHomePath(apps, 'off')).toBe('/apps/a');
+  });
+
+  it('no product app: the no-apps page at the launcher path', () => {
+    expect(resolveDesktopHomePath([SETUP, STUDIO], null)).toBe(HOME_LAUNCHER_PATH);
+    expect(resolveDesktopHomePath([], null)).toBe(HOME_LAUNCHER_PATH);
+    expect(resolveDesktopHomePath(undefined, undefined)).toBe(HOME_LAUNCHER_PATH);
   });
 });

@@ -8,8 +8,8 @@
  * `executeWithMiddleware`, `buildReferentialFieldClear`,
  * `claimReferentialCascadeDelete`, `probeInstallOrganizations`,
  * `invalidateOrganizationProbe`, `resolveSystemInsertOrganization`,
- * `transactionCoversDriverFor` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `transactionCoversDriverFor` moved out of `engine.ts` whole (split
+ * by #30012).
  *
  * A MOVE, not a redesign. {@link MiddlewareAndContextFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -38,12 +38,15 @@ import type { IPubSub } from '@objectstack/spec/contracts';
 import { redactPropagatedDriverFault } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isWriteEpochOperation } from './write-epoch.js';
+import { trioTransactionScopeOf } from './engine-execute-transactions.js';
 import { READABLE_IDS_WRITE_IN_FLIGHT } from './engine-readable-ids-permission-formula.js';
+import { isDetachedUnitHandle, trioCommitQueueOf } from './unit-detach.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
 import { isFederatedObject } from './federated-object.js';
-import type { EngineMiddleware, OperationContext } from './engine-top-level.js';
+import { cascadeBatchIdsOf } from './engine-top-level.js';
+import type { EngineMiddleware, EngineMiddlewareOptions, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -103,8 +106,9 @@ export class MiddlewareAndContextFacet {
   }
 
   /** The body of `ObjectQL#registerMiddleware`; the method's docblock there is its contract. */
-  static registerMiddleware(this: Pick<MiddlewareAndContextHost, 'logger' | 'middlewares'>, fn: EngineMiddleware, options?: { object?: string }): void {
-    this.middlewares.push({ fn, object: options?.object });
+  static registerMiddleware(this: Pick<MiddlewareAndContextHost, 'logger' | 'middlewares'>, fn: EngineMiddleware, options?: EngineMiddlewareOptions): void {
+    const withholdSearchFields = options?.withholdSearchFields;
+    this.middlewares.push({ fn, object: options?.object, ...(withholdSearchFields ? { withholdSearchFields } : {}) });
     this.logger.debug('Registered middleware', { object: options?.object, total: this.middlewares.length });
   }
 
@@ -116,7 +120,7 @@ export class MiddlewareAndContextFacet {
   /**
    * Execute an operation through the middleware chain
    */
-  static async executeWithMiddleware(this: Pick<MiddlewareAndContextHost, 'middlewares' | 'writeEpoch'>, ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
+  static async executeWithMiddleware(this: Pick<MiddlewareAndContextHost, 'middlewares' | 'txStore' | 'writeEpoch'>, ctx: OperationContext, executor: () => Promise<any>): Promise<any> {
     // [#11968] Advance the write epoch FIRST — ahead of every middleware, and
     // so ahead of any `isSystem` bypass one of them applies. The writes most
     // likely to change what a caller may see are system ones: the platform
@@ -162,8 +166,10 @@ export class MiddlewareAndContextFacet {
     };
 
     // [#33696] A write's chain runs inside the write scope: its reads keep the chain.
-    if (isWriteEpochOperation(ctx.operation)) await READABLE_IDS_WRITE_IN_FLIGHT.run(true, next);
-    else await next();
+    const chain = isWriteEpochOperation(ctx.operation)
+      ? () => READABLE_IDS_WRITE_IN_FLIGHT.run(true, next)
+      : next;
+    await publishTrioHandleFor(this.txStore, ctx.context?.transaction, chain);
     return ctx.result;
   }
 
@@ -201,16 +207,26 @@ export class MiddlewareAndContextFacet {
    * contract, so a handler reads `ctx.referentialCascadeDelete === true`.
    *
    * Reads {@link cascadeIssuedDeletes}, not the envelope (that field says why),
-   * and CLAIMS the token it matches. Called once per `delete()`, below the
-   * `afterDelete` unit re-entry (`opensAfterAbortUnit`): a call that re-enters
-   * itself returns before reaching here, so the claim is made by the inner
-   * call, the one that dispatches the hooks, and nothing later inside it can
-   * match the same token again.
+   * and CLAIMS the token it matches. Called once per `delete()`, before the
+   * middleware chain; no `delete()` re-enters itself (its `afterDelete` unit
+   * opens around the executor, `opensAfterAbortUnit`), so the claim is made by
+   * the call that dispatches the hooks, and nothing later inside it can match
+   * the same token again.
    */
   static claimReferentialCascadeDelete(this: Pick<MiddlewareAndContextHost, 'cascadeIssuedDeletes'>, object: string, id: unknown): true | undefined {
     const issued = this.cascadeIssuedDeletes.getStore();
     if (!issued || issued.claimed || id == null) return undefined;
-    if (issued.object !== object || issued.id !== String(id)) return undefined;
+    if (issued.object !== object) return undefined;
+    if (issued.ids) {
+      // [ruling 6893661036, F1 · surface amendment 6893212568] A cascade batch:
+      // `delete()` hands its predicate here in place of an id, and the token
+      // matches only the predicate naming EXACTLY its id set, so every per-row
+      // context of that one delete carries the marker and no other delete does.
+      const named = cascadeBatchIdsOf(id);
+      if (!named || named.length !== issued.ids.size || !named.every((v) => issued.ids!.has(v))) return undefined;
+    } else if (typeof id === 'object' || issued.id !== String(id)) {
+      return undefined;
+    }
     issued.claimed = true;
     return true;
   }
@@ -404,16 +420,17 @@ export class MiddlewareAndContextFacet {
    * `TransactionScope` (#5724) records the owner for every transaction the
    * engine opens, and `transaction()` also threads that same handle down as
    * `execCtx.transaction`, so the dominant explicit-threading path is covered
-   * by identity-matching the handle back to the store entry. What is NOT
-   * covered:
+   * by identity-matching the handle back to the store entry.
+   * `ScopedContext`'s discrete `beginTransaction`/`commit`/`rollback` trio
+   * threads its handle across `setImmediate` boundaries where
+   * AsyncLocalStorage does not survive, and so never populates txStore; but
+   * the trio knows the owning driver at `beginTransaction`, and records it
+   * until the handle closes (`trioTransactionScopeOf`, #35028), so its
+   * handles are attributed by that record instead. What is NOT covered is
+   * any handle an outside caller obtained elsewhere and passed in as
+   * `execCtx.transaction`.
    *
-   * - `ScopedContext`'s discrete `beginTransaction`/`commit`/`rollback` trio,
-   *   which threads the handle across `setImmediate` boundaries where
-   *   AsyncLocalStorage does not survive, and so never populates txStore;
-   * - any handle an outside caller obtained elsewhere and passed in as
-   *   `execCtx.transaction`.
-   *
-   * For those the engine holds an opaque driver object with no back-reference
+   * For that one the engine holds an opaque driver object with no back-reference
    * to its driver, so there is no honest comparison to make. Guessing — say,
    * assuming an unattributed handle belongs to the default driver — would
    * refuse legitimate single-datasource work on one side and carve out writes
@@ -426,8 +443,50 @@ export class MiddlewareAndContextFacet {
     const store = this.txStore.getStore();
     // The scope describes the handle in the store. An explicitly-threaded
     // handle is covered by it only when it IS that handle.
-    const scope = store !== undefined && tx === store.transaction ? store.scope : undefined;
+    // [#35028] Any other handle is attributed by the record `ScopedContext`'s
+    // discrete trio keeps for the handles it opened (its owner is known at
+    // `beginTransaction`); a handle it never opened stays unattributed.
+    const scope = store !== undefined && tx === store.transaction ? store.scope : trioTransactionScopeOf(tx);
     if (!scope) return true;
     return this.getDriver(object) === scope.driver;
   }
+}
+
+/**
+ * ADR-0034 D1 for the handle `ScopedContext`'s discrete trio opened: run one
+ * operation's chain with that handle PUBLISHED in the engine's ambient store,
+ * so every internal read and write the operation issues without a handle of
+ * its own (an automation run's settings read, a grants read, a nested
+ * `transaction()`) rides the transaction's connection instead of asking the
+ * pool for another one.
+ *
+ * The trio cannot publish its unit as a whole: no closure spans its begin to
+ * its commit (the sandbox runner threads the handle across host event-loop
+ * turns). But every operation made through the trio's context IS a closure,
+ * and the handle arrives on it explicitly, so this publishes it per
+ * operation. Without it, a single-connection pool (SQLite) waited for the
+ * connection the open transaction held, and the sandbox body stalled until
+ * its wall clock: a script action's first call answered `500` and its
+ * transaction rolled back, while a retry, finding the read cached, succeeded.
+ *
+ * Published only for an OPEN trio handle (`trioTransactionScopeOf` drops it
+ * at commit and rollback), never for a run detached from it (an `async`
+ * hook's), and never over a store that already carries a transaction. The
+ * entry has `runOpenedUnit`'s shape: the trio's scope, so the same-origin
+ * gate still attributes the handle, and its commit queue, so an `async`
+ * after-hook dispatched inside waits for the trio's commit. Emptied when the
+ * operation settles, as `runOpenedUnit` empties its entry, so work the
+ * operation started and did not await keeps no hold on the handle.
+ */
+function publishTrioHandleFor(
+  txStore: MiddlewareAndContextHost['txStore'],
+  explicit: unknown,
+  chain: () => Promise<void>,
+): Promise<void> {
+  const scope = explicit !== undefined ? trioTransactionScopeOf(explicit) : undefined;
+  if (!scope || isDetachedUnitHandle(explicit) || txStore.getStore()?.transaction !== undefined) return chain();
+  const commitQueue = trioCommitQueueOf(explicit);
+  const entry: { transaction: unknown; scope?: typeof scope; commitQueue?: typeof commitQueue } =
+    { transaction: explicit, scope, ...(commitQueue ? { commitQueue } : {}) };
+  return txStore.run(entry, chain).finally(() => { entry.transaction = undefined; entry.scope = undefined; });
 }

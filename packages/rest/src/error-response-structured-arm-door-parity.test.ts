@@ -196,6 +196,7 @@ const CASES: readonly Case[] = [
             status: 409,
             body: {
                 error: 'A record with this Email already exists',
+                userMessage: 'A record with this Email already exists',
                 code: 'UNIQUE_VIOLATION',
                 developerMessage: "Duplicate record refused on 'duly_note': a unique constraint on "
                     + "'Email' already holds this value. No record was written.",

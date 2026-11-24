@@ -8,6 +8,7 @@ import type {
   SettingsListResponse,
   SettingsNamespacePayload,
 } from './types';
+import { isPlatformManagedRefusal } from './platformManaged';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 const BASE = `${SERVER_URL}/api/settings`;
@@ -86,15 +87,20 @@ function assertShape<T>(value: unknown, keys: Array<keyof T & string>, what: str
   return value as T;
 }
 
+/** A failed call as the view reads it: the server's sentence, `status`, and the raw body on `payload`. */
+function failureOf(res: Response, detail: any): Error & { status?: number; payload?: any } {
+  const err = new Error(detail?.error?.message ?? res.statusText) as Error & { status?: number; payload?: any };
+  err.status = res.status;
+  // The raw body, NOT unwrapped: `err.payload.error` is what the view reads
+  // for the locked key and the per-field rejections (objectstack#4224).
+  err.payload = detail;
+  return err;
+}
+
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const detail = await res.json().catch(() => ({ error: { message: res.statusText } }));
-    const err = new Error(detail?.error?.message ?? res.statusText) as Error & { status?: number; payload?: any };
-    err.status = res.status;
-    // The raw body, NOT unwrapped: `err.payload.error` is what the view reads
-    // for the locked key and the per-field rejections (objectstack#4224).
-    err.payload = detail;
-    throw err;
+    throw failureOf(res, detail);
   }
   return unwrapEnvelope(await res.json()) as T;
 }
@@ -227,6 +233,11 @@ export async function runSettingsAction(
   // and rendered "Bad Request" where the action had said why.
   const apiError = (body as { error?: { message?: unknown; details?: unknown } } | null)?.error;
   if (isActionResult(apiError?.details)) return apiError.details;
+
+  // The hosting platform manages what the action exercises (a page loaded
+  // before the environment became hosted): thrown like a failed read, so the
+  // view reads it by its shape and draws the managed text, not the sentence.
+  if (isPlatformManagedRefusal(res.status, body)) throw failureOf(res, body);
 
   // Neither: a crash (`INTERNAL_ERROR`), a 403, or a non-JSON body. Keep the
   // server's sentence when there is one.

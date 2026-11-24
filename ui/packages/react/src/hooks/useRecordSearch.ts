@@ -60,6 +60,8 @@ export interface RecordSearchHit {
   subtitle?: string;
   /** Pass-through icon hint from the object def. */
   icon?: string;
+  /** Pass-through palette colour from the object def (`ObjectSchema.color`), for its icon tile. */
+  color?: string;
   /**
    * Relevance score (higher = better) used to interleave hits across
    * objects. Stable across runs for the same (query, display) pair.
@@ -356,6 +358,7 @@ export function useRecordSearch(opts: UseRecordSearchOptions): UseRecordSearchRe
                 // Only surface a snippet when it adds information beyond the title.
                 subtitle: snippet && snippet !== display ? snippet : undefined,
                 icon: objDef?.icon,
+                color: typeof objDef?.color === 'string' ? objDef.color : undefined,
                 score: scoreHit(trimmed, display, String(recordId)),
                 raw: h?.record ?? h,
               });
@@ -433,6 +436,7 @@ export function useRecordSearch(opts: UseRecordSearchOptions): UseRecordSearchRe
               recordId: String(recordId),
               display,
               icon: obj?.icon,
+              color: typeof obj?.color === 'string' ? obj.color : undefined,
               score: scoreHit(trimmed, display, String(recordId)),
               raw: record,
             });

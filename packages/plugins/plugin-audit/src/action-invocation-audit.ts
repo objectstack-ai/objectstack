@@ -49,7 +49,9 @@
  *  - `metadata`: `surface`, `action_name`, `branch`, `outcome`, and on a
  *    failure the HTTP `status` and the error's machine code; `run_id` for a
  *    `resume_run`; and `performed_by` / `on_behalf_of` when an agent performed
- *    the call (ADR-0090 D10 rule 4, the same pair the CRUD mirror writes);
+ *    the call (ADR-0090 D10 rule 4, the same pair the CRUD mirror writes),
+ *    with `conversation_id` / `confirmation_id` beside an in-product AI agent,
+ *    by the CRUD mirror's rule (`auditPerformerMetadata`);
  *  - [#28281] the two rows of an `api` forward to another action route name
  *    each other: the outer row's `target` is the action's declared target
  *    (the declaration, not the interpolated path, which can carry a param
@@ -57,6 +59,12 @@
  *    arrived carrying (`<object>/<action>` of the outer action). The mark is
  *    a HINT, not a surface: a caller can forge it, so it mislabels this key
  *    and nothing else, and the inner row's `surface` stays its own door's.
+ *  - [#34292] an answered aggregate bulk call (it carried `_selectedIds`)
+ *    keeps `outcome: 'succeeded'` and adds what its resolve value read as
+ *    under `BulkActionResultSchema` (`event.bulk`, read by the door):
+ *    `bulk_selected`, `bulk_succeeded`, `bulk_failed` and `bulk_unconfirmed`
+ *    (`selected = succeeded + failed + unconfirmed`), or, for a value that
+ *    could not be read, `bulk_unreadable: true` alone and no succeeded count.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -65,6 +73,7 @@ import { isMissingTableError } from '@objectstack/types';
 import {
   auditFailureCauseKey,
   auditFailureCauseSummary,
+  auditPerformerMetadata,
   createFieldPresenceProbe,
 } from './audit-writers.js';
 import type { AuthEventAuditLogger } from './auth-event-audit.js';
@@ -114,6 +123,29 @@ export interface ActionInvocationAuditEvent {
   target?: string;
   /** The forward mark the call arrived carrying (the inner row of a forward) — a hint only. */
   forwardedFrom?: string;
+  /**
+   * [#34292] An answered aggregate bulk call's per-row counts, or the mark of
+   * a resolve value that could not be read. Recorded on a `succeeded` row only.
+   */
+  bulk?: ActionInvocationBulkReading;
+}
+
+/** What an aggregate bulk call's resolve value read as — the door reads it, this writer records it. */
+export type ActionInvocationBulkReading =
+  | { selected: number; succeeded: number; failed: number; unconfirmed: number }
+  | { unreadable: true };
+
+function isCount(v: unknown): v is number {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0;
+}
+
+/** The row's bulk keys for one reading — none for a reading this writer cannot record whole. */
+function bulkMetadata(bulk: ActionInvocationBulkReading | undefined): Record<string, unknown> {
+  if (!bulk || typeof bulk !== 'object') return {};
+  if ('unreadable' in bulk) return bulk.unreadable === true ? { bulk_unreadable: true } : {};
+  const { selected, succeeded, failed, unconfirmed } = bulk;
+  if (![selected, succeeded, failed, unconfirmed].every(isCount)) return {};
+  return { bulk_selected: selected, bulk_succeeded: succeeded, bulk_failed: failed, bulk_unconfirmed: unconfirmed };
 }
 
 /** What {@link createActionInvocationAuditWriter} adds to the `audit` slot. */
@@ -156,7 +188,6 @@ export function buildActionInvocationAuditRow(
 ): Record<string, unknown> {
   const ctx = event.context ?? {};
   const userId = nonEmpty(ctx.userId);
-  const performedBy = nonEmpty(ctx.performedBy?.clientId);
   const surface = ctx.surface === 'rest' || ctx.surface === 'mcp' ? ctx.surface : null;
 
   const metadata: Record<string, unknown> = {
@@ -169,6 +200,8 @@ export function buildActionInvocationAuditRow(
     if (typeof event.status === 'number') metadata.status = event.status;
     const errorCode = nonEmpty(event.errorCode);
     if (errorCode) metadata.error_code = errorCode;
+  } else {
+    Object.assign(metadata, bulkMetadata(event.bulk));
   }
   const runId = nonEmpty(event.runId);
   if (runId) metadata.run_id = runId;
@@ -178,11 +211,11 @@ export function buildActionInvocationAuditRow(
   if (forwardedFrom) metadata.forwarded_from = forwardedFrom;
   // [ADR-0090 D10 rule 4] The same pair, under the same names, the CRUD mirror
   // writes for a delegated write — present only when an agent performed the
-  // call, so the two shapes stay distinguishable by absence.
-  if (performedBy) {
-    metadata.performed_by = performedBy;
-    metadata.on_behalf_of = userId ?? null;
-  }
+  // call, so the two shapes stay distinguishable by absence. [#33694] Read by
+  // the CRUD mirror's own rule (`auditPerformerMetadata`): an OAuth client or
+  // the in-product AI agent, and beside the agent only, the conversation it
+  // ran in and the confirmation the person gave.
+  Object.assign(metadata, auditPerformerMetadata(ctx.performedBy, userId));
   // The impersonating administrator, under the key the CRUD mirror writes,
   // present only when an impersonation session made the call.
   const impersonatedBy = impersonatorOf(ctx);

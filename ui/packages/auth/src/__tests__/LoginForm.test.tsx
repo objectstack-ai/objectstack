@@ -8,8 +8,8 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, waitFor, fireEvent, cleanup, act } from '@testing-library/react';
 import { AuthProvider } from '../AuthProvider';
 import { LoginForm, type LoginFormProps } from '../LoginForm';
 import type { AuthClient, AuthPublicConfig } from '../types';
@@ -497,6 +497,23 @@ describe('LoginForm — "Sign in with SSO" with no email (objectstack#32087)', (
       fetchSpy.mockRestore();
     }
   });
+
+  it('objectstack#36732 — the SSO round trip comes back to the console root, never the retired /home', async () => {
+    const fetchSpy = ssoFetchSpy();
+    try {
+      renderLogin(createMockClient({ features: { sso: true } }));
+      const button = await screen.findByRole('button', SSO_BUTTON);
+      fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@corp.example' } });
+      fireEvent.click(button);
+
+      await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      const body = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body));
+      expect(body.callbackURL.endsWith('/')).toBe(true);
+      expect(body.callbackURL).not.toContain('/home');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });
 
 // objectstack#32432 — a refusal is mapped by `code` and `details.cause`, never by
@@ -549,5 +566,68 @@ describe('LoginForm — a refusal with a cause is mapped by CODE:cause (objectst
       'BANNED_USER:scim_deactivated': DEACTIVATED,
     });
     expect(text).toBe(BAN_MESSAGE);
+  });
+});
+
+// objectstack#34861 — the "Sign in with SSO" request runs under the same 20 s
+// watchdog as the provider buttons: a request that never answers is aborted,
+// and the button and the email field come back with an error.
+describe('LoginForm — a hung "Sign in with SSO" request is aborted after 20 s (objectstack#34861)', () => {
+  const originalLocation = window.location;
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    Object.defineProperty(window, 'location', { writable: true, value: originalLocation });
+  });
+
+  async function pressSso(answer: (signal: AbortSignal) => Promise<Response>) {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((_url, init) => answer(init!.signal!));
+    renderLogin(createMockClient({ features: { sso: true, ssoEnforced: true } }));
+    const button = await screen.findByRole('button', SSO_BUTTON);
+    const emailField = screen.getByLabelText('Email');
+    fireEvent.change(emailField, { target: { value: 'a@corp.example' } });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    fireEvent.click(button);
+    const signal = fetchSpy.mock.calls[0][1]!.signal!;
+    return { button, emailField, signal };
+  }
+
+  it('keeps the request pending for 20 s, then aborts it and gives the button and email field back', async () => {
+    const { button, emailField, signal } = await pressSso(
+      (sig) => new Promise<Response>((_resolve, reject) => {
+        sig.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+      }),
+    );
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(19_999); });
+    expect(button).toBeDisabled();
+    expect(emailField).toBeDisabled();
+    expect(signal.aborted).toBe(false);
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(signal.aborted).toBe(true);
+    expect(screen.getByRole('alert').textContent).toMatch(/timed out/i);
+    expect(button).not.toBeDisabled();
+    expect(emailField).not.toBeDisabled();
+  });
+
+  it('CONTROL: an answering request still navigates to the IdP, and the watchdog never aborts it', async () => {
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...originalLocation, pathname: '/_console/login', href: 'http://localhost/_console/login' },
+    });
+    const { button, signal } = await pressSso(async () => new Response(
+      JSON.stringify({ url: 'https://idp.example.com/authorize' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(window.location.href).toBe('https://idp.example.com/authorize');
+    expect(signal.aborted).toBe(false);
+    expect(button).toBeDisabled();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

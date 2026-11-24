@@ -8,6 +8,7 @@ import {
   type DriverOptions,
   driverSupportsTransactions,
 } from './driver.zod';
+import { FIXED_READ_LEAF_NAMES } from './fixed-read-leaf';
 
 /**
  * The 31 capability bits retired in 17.0.0 (#4634, ADR-0049 enforce-or-remove).
@@ -61,6 +62,22 @@ const RETIRED_BITS = [
  *
  * `aggregationFilter` is the fifth, under the same rule: `engine.aggregate`
  * reads it (with method presence) to send a per-measure filter to the driver.
+ *
+ * `lockRows` is the sixth: a predicate delete's cascade arm reads it (with an
+ * open transaction) to send its matched-row read with `DriverOptions.lockRows`.
+ * [#33697] `zonedDateBucketing` is the seventh, under the same rule:
+ * `engine.aggregate` reads it (with method presence) to send a date bucket in
+ * a non-UTC reference zone to the driver (ADR-0053 Phase 2 D2 as amended).
+ *
+ * [#33876] `readableIdsLeaf` is the eighth, under the same rule: no method
+ * says whether a driver's filter compiler understands a composed `ReadableIds`
+ * leaf (every driver has `find()`), and the engine's nested-relation lowering
+ * reads it to plan the semi-join or refuse the condition up front.
+ *
+ * [ADR-0155 D4] `fixedReadLeaves` is the ninth, and a list rather than a bit:
+ * the names of the fixed-read leaves the filter compiler evaluates. No method
+ * says that either, and the engine's executor seam reads it to hand such a
+ * leaf to the driver or refuse the operation before calling it.
  */
 const LIVE_BITS = [
   'queryDateGranularity',
@@ -68,6 +85,10 @@ const LIVE_BITS = [
   'batchSchemaSync',
   'transactionsUnsupported',
   'aggregationFilter',
+  'lockRows',
+  'zonedDateBucketing',
+  'readableIdsLeaf',
+  'fixedReadLeaves',
 ] as const;
 
 describe('DriverCapabilitiesSchema', () => {
@@ -78,6 +99,10 @@ describe('DriverCapabilitiesSchema', () => {
       batchSchemaSync: true,
       transactionsUnsupported: true,
       aggregationFilter: true,
+      lockRows: true,
+      zonedDateBucketing: true,
+      readableIdsLeaf: true,
+      fixedReadLeaves: ['SharedRecordIds'],
     };
 
     expect(() => DriverCapabilitiesSchema.parse(capabilities)).not.toThrow();
@@ -95,13 +120,49 @@ describe('DriverCapabilitiesSchema', () => {
     expect(parsed).not.toHaveProperty('transactionsUnsupported');
     // Absent = the engine aggregates a filtered measure in memory, as before the bit.
     expect(parsed).not.toHaveProperty('aggregationFilter');
+    // Absent = the engine sends no lock request with a predicate delete's read.
+    expect(parsed).not.toHaveProperty('lockRows');
+    // [#33697] Absent = the engine buckets a non-UTC zone in memory, as before the bit.
+    expect(parsed).not.toHaveProperty('zonedDateBucketing');
+    // [#33876] Absent = no semi-join leaf: the engine refuses a nested-relation
+    // condition on a read verb up front.
+    expect(parsed).not.toHaveProperty('readableIdsLeaf');
+    // [ADR-0155 D4] Absent = no fixed-read leaf: the engine's seam refuses an
+    // operation carrying one before calling the driver.
+    expect(parsed).not.toHaveProperty('fixedReadLeaves');
   });
 
   it('refuses a non-boolean aggregationFilter', () => {
     expect(DriverCapabilitiesSchema.safeParse({ aggregationFilter: 'yes' }).success).toBe(false);
   });
 
-  it('declares exactly the audited shape: 5 live bits + 31 tombstones', () => {
+  it('refuses a non-boolean lockRows', () => {
+    expect(DriverCapabilitiesSchema.safeParse({ lockRows: 'yes' }).success).toBe(false);
+  });
+
+  it('refuses a non-boolean zonedDateBucketing', () => {
+    expect(DriverCapabilitiesSchema.safeParse({ zonedDateBucketing: 'postgres' }).success).toBe(false);
+  });
+
+  it('refuses a non-boolean readableIdsLeaf', () => {
+    expect(DriverCapabilitiesSchema.safeParse({ readableIdsLeaf: 'yes' }).success).toBe(false);
+  });
+
+  it('accepts every fixed-read leaf name and an empty list, and keeps the names it was given', () => {
+    expect(DriverCapabilitiesSchema.parse({ fixedReadLeaves: [...FIXED_READ_LEAF_NAMES] }).fixedReadLeaves)
+      .toEqual([...FIXED_READ_LEAF_NAMES]);
+    expect(DriverCapabilitiesSchema.parse({ fixedReadLeaves: [] }).fixedReadLeaves).toEqual([]);
+  });
+
+  it('refuses a fixedReadLeaves that is not a list of fixed-read leaf names', () => {
+    // A bit is not the declaration: the key names the leaves it covers.
+    expect(DriverCapabilitiesSchema.safeParse({ fixedReadLeaves: true }).success).toBe(false);
+    // `ReadableIds` is not a fixed-read leaf, and a brand's symbol key is not its name.
+    expect(DriverCapabilitiesSchema.safeParse({ fixedReadLeaves: ['ReadableIds'] }).success).toBe(false);
+    expect(DriverCapabilitiesSchema.safeParse({ fixedReadLeaves: ['objectstack.filter.sharedRecordIds'] }).success).toBe(false);
+  });
+
+  it('declares exactly the audited shape: 9 live bits + 31 tombstones', () => {
     const shape = (DriverCapabilitiesSchema as unknown as { shape: Record<string, unknown> }).shape;
     const keys = Object.keys(shape).sort();
     expect(keys).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
@@ -202,7 +263,7 @@ describe('tsc channel: the retired bits are unwritable in DriverCapabilities', (
     const props = new Map(capsType.getProperties().map((p) => [p.getName(), p]));
 
     // Anti-vacuity: the walked shape is the audited key set — 31 tombstones
-    // plus the live bits (5 since `aggregationFilter`).
+    // plus the live bits (9 since `fixedReadLeaves`).
     expect([...props.keys()].sort()).toEqual([...RETIRED_BITS, ...LIVE_BITS].slice().sort());
 
     const decl = capsAlias!.declarations?.[0];
@@ -463,5 +524,18 @@ describe('driverSupportsTransactions — a driver that cannot honour transaction
 
   it('only the literal `true` denies — an absent or undefined bit is not a denial', () => {
     expect(driverSupportsTransactions({ ...withMethod, supports: { transactionsUnsupported: undefined } })).toBe(true);
+  });
+});
+
+// `DriverOptions.lockRows` — the lock request a predicate delete's matched-row
+// read carries to a driver declaring `supports.lockRows`. A declared key, so the
+// engine's closed driver-option hop (`pickDeclaredDriverOptions`) passes it.
+describe('DriverOptions.lockRows', () => {
+  it('keeps a boolean lockRows', () => {
+    expect(DriverOptionsSchema.parse({ lockRows: true }).lockRows).toBe(true);
+  });
+
+  it('refuses a non-boolean lockRows', () => {
+    expect(DriverOptionsSchema.safeParse({ lockRows: 'yes' }).success).toBe(false);
   });
 });

@@ -69,11 +69,12 @@ const BINDINGS: Array<[string, Record<string, unknown>]> = [
   ['a row with no viewer block at all', { status: 'pending' }],
   ['a row whose viewer projected as null', { status: 'pending', viewer: null }],
   ['a viewer block carrying none of the flags', { status: 'pending', viewer: {} }],
-  ['a viewer block whose flags are null', { status: 'pending', viewer: { can_act: null, can_override: null, is_submitter: null } }],
+  ['a viewer block whose flags are null', { status: 'pending', viewer: { can_act: null, can_override: null, can_override_approve: null, is_submitter: null } }],
   ['no status projected', { viewer: { can_act: true } }],
   ['status projected as null', { status: null, viewer: { can_act: true } }],
-  ['a fully populated approver row', { status: 'pending', viewer: { can_act: true, can_override: false, is_submitter: false } }],
-  ['a fully populated submitter row', { status: 'pending', viewer: { can_act: false, can_override: false, is_submitter: true } }],
+  ['a fully populated approver row', { status: 'pending', viewer: { can_act: true, can_override: false, can_override_approve: false, is_submitter: false } }],
+  ['a fully populated submitter row', { status: 'pending', viewer: { can_act: false, can_override: false, can_override_approve: false, is_submitter: true } }],
+  ['a fully populated submitter-administrator row', { status: 'pending', viewer: { can_act: false, can_override: true, can_override_approve: false, is_submitter: true } }],
 ];
 
 describe('#8990 — sys_approval_request decision actions never fault on a sparse binding', () => {
@@ -113,7 +114,7 @@ describe('#8990 — the fail-closed intent survives as a real false, and the lev
   });
 
   it('a current pending approver still gets approve / reject / reassign / send back / request info, and the reply', () => {
-    const approver = { status: 'pending', viewer: { can_act: true, can_override: false, is_submitter: false } };
+    const approver = { status: 'pending', viewer: { can_act: true, can_override: false, can_override_approve: false, is_submitter: false } };
     for (const name of ['approval_approve', 'approval_reject', 'approval_reassign', 'approval_send_back', 'approval_request_info', 'approval_comment']) {
       expect([name, evaluate(visibleOf(name), approver)]).toEqual([name, true]);
     }
@@ -128,7 +129,7 @@ describe('#8990 — the fail-closed intent survives as a real false, and the lev
     // never asserted anything about recall), but its TITLE became false the
     // moment recall joined the set, so it is restated rather than left to read
     // as a claim the code no longer honours.
-    const admin = { status: 'pending', viewer: { can_act: false, can_override: true, is_submitter: false } };
+    const admin = { status: 'pending', viewer: { can_act: false, can_override: true, can_override_approve: true, is_submitter: false } };
     expect(evaluate(visibleOf('approval_approve'), admin)).toBe(true);
     expect(evaluate(visibleOf('approval_reject'), admin)).toBe(true);
     expect(evaluate(visibleOf('approval_reassign'), admin)).toBe(true);
@@ -149,6 +150,21 @@ describe('#8990 — the fail-closed intent survives as a real false, and the lev
     expect(evaluate(visibleOf('approval_comment'), admin)).toBe(false);
   });
 
+  it('a submitter who is also an override actor is offered reject, reassign and recall, never the override approve', () => {
+    // [Maintainer ruling 2026-11-17, option B] The override never approves a
+    // request its actor submitted, so Approve's override arm reads
+    // `can_override_approve`, which `attachViewers` serves false here, while
+    // the other three levers keep reading `can_override`.
+    const own = { status: 'pending', viewer: { can_act: false, can_override: true, can_override_approve: false, is_submitter: true } };
+    expect(evaluate(visibleOf('approval_approve'), own)).toBe(false);
+    expect(evaluate(visibleOf('approval_reject'), own)).toBe(true);
+    expect(evaluate(visibleOf('approval_reassign'), own)).toBe(true);
+    expect(evaluate(visibleOf('approval_recall'), own)).toBe(true);
+    // A slot on the slate is `can_act`, which Approve still ORs in: a slot
+    // holder's own request is `excludeSubmitter`'s question, not this arm's.
+    expect(evaluate(visibleOf('approval_approve'), { ...own, viewer: { ...own.viewer, can_act: true } })).toBe(true);
+  });
+
   it('the recall override arm is pending-only in effect, because `can_override` is itself pending-scoped (#12716)', () => {
     // The negative direction, and the reason the arm needs no status test of its
     // own. `attachViewers` computes
@@ -163,19 +179,19 @@ describe('#8990 — the fail-closed intent survives as a real false, and the lev
     // The flag's own scoping is pinned against the REAL service — an override
     // admin reading a genuinely `returned` request — in `approval-revise.test.ts`;
     // this pair is the predicate half of the same claim.
-    const onPending = { status: 'pending', viewer: { can_act: false, can_override: true, is_submitter: false } };
-    const onReturned = { status: 'returned', viewer: { can_act: false, can_override: false, is_submitter: false } };
+    const onPending = { status: 'pending', viewer: { can_act: false, can_override: true, can_override_approve: true, is_submitter: false } };
+    const onReturned = { status: 'returned', viewer: { can_act: false, can_override: false, can_override_approve: false, is_submitter: false } };
     expect(evaluate(visibleOf('approval_recall'), onPending)).toBe(true);
     expect(evaluate(visibleOf('approval_recall'), onReturned)).toBe(false);
     // And the submitter's own `returned` arm is untouched by the new OR — the
     // revise-window withdraw stays exactly as available as it was.
     expect(evaluate(visibleOf('approval_recall'), {
-      status: 'returned', viewer: { can_act: false, can_override: false, is_submitter: true },
+      status: 'returned', viewer: { can_act: false, can_override: false, can_override_approve: false, is_submitter: true },
     })).toBe(true);
   });
 
   it('the submitter still gets remind / recall on pending and resubmit / recall on returned', () => {
-    const submitter = { can_act: false, can_override: false, is_submitter: true };
+    const submitter = { can_act: false, can_override: false, can_override_approve: false, is_submitter: true };
     expect(evaluate(visibleOf('approval_remind'), { status: 'pending', viewer: submitter })).toBe(true);
     expect(evaluate(visibleOf('approval_recall'), { status: 'pending', viewer: submitter })).toBe(true);
     expect(evaluate(visibleOf('approval_recall'), { status: 'returned', viewer: submitter })).toBe(true);
@@ -189,7 +205,7 @@ describe('#8990 — the fail-closed intent survives as a real false, and the lev
   it('the submitter gets the reply while the request is pending, and only then', () => {
     // `is_submitter` carries no status test where it is computed, so the
     // reply's submitter arm states the `pending` the comment route requires.
-    const submitter = { can_act: false, can_override: false, is_submitter: true };
+    const submitter = { can_act: false, can_override: false, can_override_approve: false, is_submitter: true };
     expect(evaluate(visibleOf('approval_comment'), { status: 'pending', viewer: submitter })).toBe(true);
     for (const status of ['returned', 'approved', 'rejected', 'recalled', 'cancelled']) {
       expect([status, evaluate(visibleOf('approval_comment'), { status, viewer: submitter })]).toEqual([status, false]);

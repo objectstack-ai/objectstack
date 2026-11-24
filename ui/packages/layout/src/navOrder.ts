@@ -25,11 +25,12 @@ import type { NavigationItem } from '@object-ui/types';
  * "Sort order within the same level (lower = first)".
  *
  * The three sites that order a level import this one comparator, so the
- * sidebar and the mobile tab bar cannot disagree about which entry comes first:
+ * sidebar and the tab bars cannot disagree about which entry comes first:
  * `NavigationRenderer`'s top level, each group's children in
- * `NavigationItemRenderer`, and the tab bar's flattening in
- * `AppSchemaRenderer`, which sorts each level before it flattens. ⛔ Do not
- * write the sort out again at a fourth site; import this.
+ * `NavigationItemRenderer`, and `drawnNavigationEntries`, the flattening walk
+ * every tab bar calls (`AppSchemaRenderer`'s bottom nav, the console's phone
+ * menu bar), which sorts each level before it flattens. ⛔ Do not write the
+ * sort out again at a fourth site; import this, or call that walk.
  *
  * An entry with no `order` sorts as `0`, and entries that compare equal keep
  * their authored order (`Array.prototype.sort` is stable). Both are the

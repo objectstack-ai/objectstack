@@ -18,7 +18,9 @@ export const ru: TranslationData = {
         grp_account_developer: { label: 'Разработчик' },
         grp_account_ai_assistant: { label: 'ИИ-ассистент' },
         nav_account_profile: { label: 'Профиль' },
+        nav_account_mobile_app: { label: 'Мобильное приложение' },
         nav_account_notifications: { label: 'Уведомления' },
+        nav_account_notification_settings: { label: 'Настройки уведомлений' },
         nav_account_approvals: { label: 'Ждут моего решения' },
         nav_account_memberships: { label: 'Мои организации' },
         nav_account_linked: { label: 'Связанные учётные записи' },
@@ -37,9 +39,8 @@ export const ru: TranslationData = {
       navigation: {
         group_overview: { label: 'Обзор' },
         group_apps: { label: 'Приложения' },
-        nav_packaged_actions: { label: 'Действия из пакетов' },
         nav_marketplace_browse: { label: 'Обзор Marketplace' },
-        nav_marketplace_installed: { label: 'Установленные приложения' },
+        nav_packages: { label: 'Пакеты' },
         nav_cloud_connection: { label: 'Подключение к облаку' },
         group_people_org: { label: 'Люди и организация' },
         group_access_control: { label: 'Управление доступом' },
@@ -95,6 +96,9 @@ export const ru: TranslationData = {
         nav_settings_hub: { label: 'Все настройки' },
         nav_settings_localization: { label: 'Локализация' },
         nav_exchange_rates: { label: 'Курсы валют' },
+        nav_units_of_measure: { label: 'Единицы измерения' },
+        nav_work_calendars: { label: 'Рабочие календари' },
+        nav_work_calendar_exceptions: { label: 'Исключения календаря' },
         nav_settings_company: { label: 'Компания' },
         nav_settings_mail: { label: 'Доставка почты' },
         nav_settings_sms: { label: 'Доставка SMS' },
@@ -106,6 +110,7 @@ export const ru: TranslationData = {
         nav_settings_knowledge: { label: 'Знания' },
         nav_settings_lifecycle: { label: 'Жизненный цикл данных' },
         nav_recycle_bin: { label: 'Корзина' },
+        nav_public_forms: { label: 'Публичные формы' },
         nav_notification_preferences: { label: 'Настройки уведомлений' },
         nav_notification_templates: { label: 'Шаблоны уведомлений' },
 
@@ -123,6 +128,7 @@ export const ru: TranslationData = {
         nav_datasources: { label: 'Источники данных' },
         nav_connector_credentials: { label: 'Учётные данные коннекторов' },
         nav_connector_connections: { label: 'Подключения коннекторов' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'Приложения OAuth' },
       },
@@ -189,13 +195,55 @@ export const ru: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Число пользователей' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Число организаций' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Число сеансов' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Число установок' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'Число пользователей',
+          description: 'Число учётных записей пользователей, как активных, так и неактивных.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'Число организаций',
+          description: 'Число организаций; у каждой свои участники, данные и настройки.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'Число сеансов',
+          description: 'Число сеансов входа: по одному на каждый вход из браузера или с устройства.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'Число установок',
+          description: 'Число установок пакетов: по одной на каждый установленный пакет.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Тип действия' }, user_id: { label: 'Пользователь' } },
-      measures: { event_count: { label: 'Число событий' } },
+      dimensions: {
+        action: {
+          label: 'Тип действия',
+          description: 'Тип действия, которое фиксирует запись журнала аудита: создание, изменение, удаление, вход или изменение конфигурации.',
+        },
+        user_id: {
+          label: 'Пользователь',
+          description: 'Пользователь, выполнивший действие; записи, которые платформа создаёт сама, объединены под «Система».',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'Число событий',
+          description: 'Число записей журнала аудита; каждая фиксирует одно действие в системе, выполненное пользователем или самой платформой.',
+        },
+      },
     },
   },
 

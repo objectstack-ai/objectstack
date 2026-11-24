@@ -33,11 +33,17 @@ import {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
+  RecordTopBarButton,
   toast,
+  FormSectionNavContext,
+  Switch,
+  resolveIcon,
 } from '@object-ui/components';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Maximize2, Minimize2 } from 'lucide-react';
 import { MasterDetailForm } from './MasterDetailForm';
+import { MasterDetailFrameContext, type MasterDetailFrame } from './masterDetailFrame';
 import { SchemaRenderer, useSafeFieldLabel, usePreviewMode } from '@object-ui/react';
+import { FormOwnerLine } from './formOwnerLine';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { buildSectionFields as buildSectionFieldsShared } from './sectionFields';
 import { buildFlatFields } from './flatFields';
@@ -49,6 +55,8 @@ import {
   filterSystemFields,
   inferColumns,
   inferModalSize,
+  dialogUndeclaredColumns,
+  dialogDrawsSingleColumn,
   sectionedFormColumns,
   sectionedGridLayout,
   CONTAINER_GRID_COLS,
@@ -83,7 +91,11 @@ import {
 import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
 import { useUploadGate, UploadGateProvider, UploadInFlightNotice } from './uploadGate';
-import { useInitialFieldFocus } from './initialFieldFocus';
+import { focusFirstEditableField, useInitialFieldFocus } from './initialFieldFocus';
+import { FormSectionNav, useFormSectionNav } from './FormSectionNav';
+import { FormDirtyReportContext } from './formDirtyReport';
+import { useModalFormMaximized } from './modalMaximize';
+import { isSubmitShortcut, submitShortcutLabel, useModalFormCreateMore } from './createMore';
 
 // Localized strings for the unsaved-changes guard and, since objectui#11039,
 // the form's own chrome (the default submit and cancel labels and the
@@ -114,6 +126,12 @@ const useDiscardTranslation = createSafeTranslation(
     // The heading of the fields no declared field group claims
     // (`deriveFieldGroupSections`' trailing bucket).
     'common.ungroupedSection': 'Other',
+    // The header's maximize / restore switch: the record drawer's own pair of
+    // keys and labels (objectstack-ai/objectstack#34604).
+    'detail.maximize': 'Maximize',
+    'detail.restoreSize': 'Restore size',
+    // The create dialog's 「Create more」 switch (objectstack-ai/objectstack#35980).
+    'form.createMore': 'Create more',
   },
   'form.discardTitle',
 );
@@ -255,9 +273,27 @@ export interface ModalFormSchema {
    */
   submitHandler?: ObjectFormSchema['submitHandler'];
 
-  onSuccess?: (data: any) => void | Promise<void>;
+  /**
+   * Called with the saved record. `outcome.createMore` is `true` when the
+   * dialog stays open for the next record (the 「Create more」 switch,
+   * {@link ModalFormSchema.createMore}): the host refreshes what lists the
+   * record and stays where it is, instead of closing or leaving for the new
+   * record.
+   */
+  onSuccess?: (data: any, outcome?: { createMore?: boolean }) => void | Promise<void>;
   onError?: (error: Error) => void;
   onCancel?: () => void;
+  /**
+   * Offer the 「Create more」 switch in a `create` dialog's footer
+   * (objectstack-ai/objectstack#35980). On, a successful save keeps the dialog
+   * open: the form is drawn again from its opening values, focus returns to
+   * the first field, and `onSuccess` is told so. The switch is remembered per
+   * object in this browser. Off by default: a host offers it where creating
+   * several records in a row makes sense (a list's 「New」), and not where the
+   * create returns a record to its caller (a lookup's inline 「+ New」).
+   * Ignored by the master-detail arm, whose form owns its own Save bar.
+   */
+  createMore?: boolean;
   className?: string;
   /** Inline child collections — renders the modal as an atomic master-detail
    *  form. Each entry needs only `childObject` (FK + columns derived). */
@@ -310,25 +346,32 @@ const modalSizeClasses: Record<string, string> = {
 };
 
 /**
- * How many fields per row the dialog draws where the author declared no
- * `columns` (objectui#12521): two from the container's `@md` tier up, one
- * below it, so the phone sheet keeps its single column. It rides the spec's
- * own `columns` / `colSpan` path, so every field takes one cell — fields of
- * one kind share one width — while a wide kind (`isWideFieldType`: textarea,
- * rich text, markdown, html, an inline `grid`) and a `span: 'full'` field take
- * the whole row. Line items never reach this grid: they arrive as `subforms`,
- * which the master-detail arm below lays out across the dialog.
+ * The least grid the dialog draws where the author declared no `columns`
+ * (objectui#12521): two from the container's `@md` tier up, one below it, so
+ * the phone sheet keeps its single column — except in a short dialog that
+ * declares nothing, which draws one column in the narrow `lg` size
+ * (`dialogDrawsSingleColumn`, objectstack-ai/objectstack#35980). A field-heavy form draws more —
+ * three in a bounded dialog, four in a `full` one — by
+ * `dialogUndeclaredColumns` (objectstack-ai/objectstack#34607), whose
+ * docblock carries the rule and the measured tier.
  *
- * It applies to a flat form with no `columns`. A SECTION that declares no
- * `columns` — the object's `fieldGroups` among them — gets the same count
- * through the one sectioned-form rule, `sectionedGridLayout`
- * (`UNDECLARED_SECTION_COLUMNS`), which every page host shares
- * (objectui#12592): an undeclared section density is the renderer's choice,
- * and a declared one — `1` included — is drawn as written (the
- * section-`columns` fork on objectui#12521, ruled 6204264665).
+ * Every undeclared count rides the spec's own `columns` / `colSpan` path, so
+ * every field takes one cell — fields of one kind share one width — while a
+ * wide kind (`isWideFieldType`: textarea, rich text, markdown, html, an inline
+ * `grid`) and a `span: 'full'` field take the whole row. Line items never
+ * reach this grid: they arrive as `subforms`, which the master-detail arm
+ * below lays out across the dialog.
  *
- * The flat default is dialog-only on purpose: a flat page form, a drawer and
- * the detail view keep `inferColumns`, which they mirror between them.
+ * It applies to a flat form with no `columns`, and to a SECTION that declares
+ * no `columns` — the object's `fieldGroups` among them — through the one
+ * sectioned-form rule, `sectionedGridLayout`, handed the dialog's count: an
+ * undeclared section density is the renderer's choice, and a declared one —
+ * `1` included — is drawn as written (the section-`columns` fork on
+ * objectui#12521, ruled 6204264665).
+ *
+ * The count is dialog-only on purpose: a sectioned page form keeps
+ * `UNDECLARED_SECTION_COLUMNS`, and a flat page form, a drawer and the detail
+ * view keep `inferColumns`, which they mirror between them.
  */
 const DIALOG_DEFAULT_COLUMNS = UNDECLARED_SECTION_COLUMNS;
 
@@ -359,11 +402,18 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   // Upload-in-flight gate (objectui#10166): Save is refused, disabled and
   // EXPLAINED while a file/image widget below is still uploading.
   const uploadGate = useUploadGate();
+  // The section navigation between the header and the scrolling body
+  // (objectstack#34605): the form reports its visible sections, the dialog
+  // draws them where they stay in view while the body scrolls.
+  // Drawn or not is the navigation's own decision: two or more sections that
+  // do not all fit the body (objectstack#35472).
+  const sectionNav = useFormSectionNav();
+  const [drawsSectionNav, setDrawsSectionNav] = useState(false);
   const previewMode = usePreviewMode();
   const perms = usePermissions();
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
   // field opens on in create mode.
-  const { currency: homeCurrency } = useLocalization();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   const [objectSchema, setObjectSchema] = useState<any>(null);
   const [formData, setFormData] = useState<Record<string, any>>({});
   // The ONE field-gate step every layout draws through (`gateFormFields`,
@@ -461,57 +511,108 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     [schema.sections, schema.objectName, schema.formType, objectSchema, dataSource],
   );
 
+  // The fields a flat or field-group layout draws: system fields dropped, and
+  // in create mode the server-computed ones too — what `applyAutoLayout`
+  // filters (it filters again; the filters are idempotent). `customFields` is
+  // already merged into `formFields` (objectui#10073).
+  const layoutPool = useMemo(() => {
+    const fs = filterSystemFields(formFields, objectSchema);
+    return schema.mode === 'create' ? filterAutoGeneratedFields(fs, objectSchema) : fs;
+  }, [formFields, objectSchema, schema.mode]);
+
   // Field-group fallback (object-designer metadata): when the caller passes no
   // explicit sections, honor the object's declared `fieldGroups` the same way
   // ObjectForm's simple path does — one section per group, with flat-path
   // auto-layout parity (system/auto-generated fields filtered, the dialog's
-  // default columns, wide fields spanning the row). An explicit curated
-  // `sections` list from a form view always wins over this fallback.
+  // undeclared count, wide fields spanning the row). An explicit curated
+  // `sections` list from a form view always wins over this fallback. The
+  // groups carry no `columns` of their own: the arm that draws them reads the
+  // form's declared count, else the dialog's (objectstack-ai/objectstack#34607).
   const derivedSections = useMemo(() => {
     // `customFields` does NOT switch the fallback off (objectui#10073): the
     // members are merged into `formFields` above, and ObjectForm derives its
     // groups over that same merged pool.
     if (schema.sections?.length) return null;
-    let fs = filterSystemFields(formFields, objectSchema);
-    if (schema.mode === 'create') fs = filterAutoGeneratedFields(fs, objectSchema);
-    const sections = deriveFieldGroupSections(fs, (objectSchema as any)?.fieldGroups, ungroupedLabel);
-    if (!sections) return null;
-    const columns = (clampColumns(schema.columns) ?? DIALOG_DEFAULT_COLUMNS) as 1 | 2 | 3 | 4;
+    const sections = deriveFieldGroupSections(layoutPool, (objectSchema as any)?.fieldGroups, ungroupedLabel);
     // A member's definition reaches a group's body through `buildSectionFields`,
     // the route an explicit section's takes (objectui#10254).
-    return sections.map((s) => ({ ...s, columns })) as ModalFormSectionConfig[];
-  }, [schema.sections, schema.columns, schema.mode, formFields, objectSchema, ungroupedLabel]);
+    return sections ? (sections as ModalFormSectionConfig[]) : null;
+  }, [schema.sections, layoutPool, objectSchema, ungroupedLabel]);
 
   const effectiveSections = resolvedSections?.length ? resolvedSections : (derivedSections ?? undefined);
 
-  // Compute auto-layout for flat fields (no sections) to determine inferred columns
-  // (`customFields` does not switch it off: the members are merged into
-  // `formFields`, and ObjectForm auto-lays-out that merged list — objectui#10073.)
-  // A form that declares no `columns` lays out at the dialog's default
-  // (objectui#12521) through the same explicit-columns route an authored
-  // `columns` takes, so `applyAutoLayout` never infers 3–4 columns here.
-  const flatColumns = schema.columns ?? DIALOG_DEFAULT_COLUMNS;
+  // How many fields the dialog lays out — the input to its size and to its
+  // undeclared column count.
+  const layoutFieldCount = effectiveSections?.length
+    ? effectiveSections.reduce((n, s) => n + (Array.isArray(s.fields) ? s.fields.length : 0), 0)
+    : layoutPool.length;
+
+  // The header's maximize switch (objectstack-ai/objectstack#34604):
+  // maximized, the dialog is `full` whatever its authored or inferred size,
+  // and every reader of the size below — the width class and the undeclared
+  // column count — reads that effective size.
+  const { maximized, toggleMaximized } = useModalFormMaximized(schema.objectName);
+
+  // The 「Create more」 switch (objectstack-ai/objectstack#35980): offered on
+  // a create dialog whose host asked for it, remembered per object. A save
+  // with it on draws the form again (`formResetKey`) instead of closing.
+  const createMoreOffered = schema.createMore === true && schema.mode === 'create';
+  const { createMore, setCreateMore } = useModalFormCreateMore(schema.objectName);
+  const createMoreOn = createMoreOffered && createMore;
+  const [formResetKey, setFormResetKey] = useState(0);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  // The dialog's size when the author declared none (objectui#12521): bounded
+  // — `lg` or `xl`, never `full` — and chosen from the declared grid and the
+  // field count, so a short form is not stretched across a wide dialog. An
+  // authored `modalSize` (including `'full'`) is used as written. An
+  // undeclared grid is at least `DIALOG_DEFAULT_COLUMNS` wide whatever the
+  // size, so the size reads that floor and never the count it then bounds
+  // (objectstack-ai/objectstack#34607).
+  // objectstack-ai/objectstack#35980 — at most six fields (ruling 7061696632) and no declared
+  // `columns` anywhere: one per row, in the narrow `lg` dialog. Maximized,
+  // the user asked for the room, and the form spreads as it did before.
+  const singleColumn = !maximized && dialogDrawsSingleColumn(
+    layoutFieldCount,
+    schema.columns,
+    (effectiveSections ?? []).map((s) => s.columns),
+  );
+  const effectiveModalSize = useMemo(() => {
+    if (maximized) return 'full';
+    if (schema.modalSize) return schema.modalSize;
+    // A short dialog that declares no columns anywhere is one column in the
+    // narrow `lg` size (objectstack-ai/objectstack#35980).
+    if (singleColumn) return inferModalSize(1);
+    const columns = effectiveSections?.length
+      ? sectionedFormColumns(schema.columns, effectiveSections.map((s) => s.columns), DIALOG_DEFAULT_COLUMNS)
+      : (clampColumns(schema.columns) ?? DIALOG_DEFAULT_COLUMNS);
+    return inferModalSize(Math.min(columns, inferColumns(layoutFieldCount)));
+  }, [maximized, schema.modalSize, schema.columns, effectiveSections, layoutFieldCount, singleColumn]);
+
+  // The count an undeclared form or section draws in THIS dialog
+  // (objectstack-ai/objectstack#34607): from the field count, bounded by the
+  // dialog's size — `dialogUndeclaredColumns` — and one in a short dialog
+  // that declares nothing (`dialogDrawsSingleColumn`, #35980).
+  const undeclaredColumns = singleColumn ? 1 : dialogUndeclaredColumns(layoutFieldCount, effectiveModalSize);
+
+  // Compute auto-layout for flat fields (no sections). A form that declares no
+  // `columns` lays out at the dialog's undeclared count through the same
+  // explicit-columns route an authored `columns` takes, so `applyAutoLayout`
+  // never runs the page's inference here.
+  const flatColumns = schema.columns ?? undeclaredColumns;
   const autoLayoutResult = useMemo(() => {
     if (effectiveSections?.length) return null;
     return applyAutoLayout(formFields, objectSchema, flatColumns, schema.mode);
   }, [formFields, objectSchema, flatColumns, schema.mode, effectiveSections]);
 
-  // The dialog's size when the author declared none (objectui#12521): bounded
-  // — `lg` or `xl`, never `full` — and chosen from the grid that renders and
-  // the field count, so a short form is not stretched across a wide dialog.
-  // An authored `modalSize` (including `'full'`) is used as written.
-  const effectiveModalSize = useMemo(() => {
-    if (schema.modalSize) return schema.modalSize;
-    const columns = effectiveSections?.length
-      ? sectionedFormColumns(schema.columns, effectiveSections.map((s) => s.columns))
-      : (autoLayoutResult?.columns ?? DIALOG_DEFAULT_COLUMNS);
-    const fieldCount = effectiveSections?.length
-      ? effectiveSections.reduce((n, s) => n + (Array.isArray(s.fields) ? s.fields.length : 0), 0)
-      : (autoLayoutResult?.fields.length ?? 0);
-    return inferModalSize(Math.min(columns, inferColumns(fieldCount)));
-  }, [schema.modalSize, schema.columns, autoLayoutResult, effectiveSections]);
-
   const sizeClass = modalSizeClasses[effectiveModalSize] || modalSizeClasses.default;
+  // The content's height: a phone sheet is always the whole screen; from `sm`
+  // up the dialog grows with its body to a `90vh` cap, and maximized it fills
+  // `95dvh` — the height counterpart of the `full` size's `95vw` — so its body
+  // scroller, not the page, scrolls a long form.
+  const heightClass = maximized
+    ? 'h-[100dvh] sm:h-[95dvh] sm:max-h-[95dvh]'
+    : 'h-[100dvh] sm:h-auto sm:max-h-[90vh]';
 
   // Fetch object schema
   useEffect(() => {
@@ -589,7 +690,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
         // supplied initial values still win. See `schemaDefaults` for why
         // runtime defaults (`NOW()`, `current_user`, CEL envelopes) are left
         // to the server and why option-level `default` is not read here.
-        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId: perms.userId, homeCurrency }));
+        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId: perms.userId, homeCurrency, homeTimeZone }));
         // Not a read, so no earlier record read's failure describes the form.
         run.commit();
         setLoading(false);
@@ -717,6 +818,29 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     endLoading();
   }, [objectSchema, schema.fields, schema.customFields, schema.sections, schema.readOnly, schema.mode, dataSource]);
 
+  // 「Create more」 (objectstack-ai/objectstack#35980): after a save that keeps
+  // the dialog open, draw the form again from its opening values — a new
+  // `formResetKey` remounts the form renderer, so every typed value and the
+  // dirty state go with it — and put focus back on the first field.
+  const startNextRecord = useCallback(() => {
+    setIsDirty(false);
+    setFormResetKey((k) => k + 1);
+  }, []);
+  useEffect(() => {
+    if (formResetKey === 0) return;
+    // The remounted form draws its fields on a later frame (lazy widgets), so
+    // keep trying for a short while until the first field takes focus.
+    let tries = 0;
+    let frame = 0;
+    const attempt = () => {
+      const content = contentRef.current;
+      if (content && focusFirstEditableField(content)) return;
+      if (++tries < 30) frame = window.requestAnimationFrame(attempt);
+    };
+    frame = window.requestAnimationFrame(attempt);
+    return () => window.cancelAnimationFrame(frame);
+  }, [formResetKey]);
+
   // Handle form submission
   const handleSubmit = useCallback(async (data: Record<string, any>) => {
     // An upload is still in flight (objectui#10166). Saving now writes the
@@ -737,6 +861,11 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       // adapter-less submit, bypassing a declared host seam and persisting
       // nothing (objectui#6300). See `submitTarget.ts` for the whole rule.
       if (!dataSource && !schema.submitHandler && hasInlineFieldSource(schema)) {
+        if (createMoreOn) {
+          await schema.onSuccess?.(data, { createMore: true });
+          startNextRecord();
+          return data;
+        }
         if (schema.onSuccess) {
           await schema.onSuccess(data);
         }
@@ -811,6 +940,13 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       // bus change held while it was dirty (its own write's echo included) is
       // replayed now rather than behind input that is no longer unsaved.
       recordSaved();
+      // 「Create more」 (objectstack-ai/objectstack#35980): the record is
+      // made, and the dialog stays for the next one.
+      if (createMoreOn) {
+        await schema.onSuccess?.(result, { createMore: true });
+        startNextRecord();
+        return result;
+      }
       if (schema.onSuccess) {
         await schema.onSuccess(result);
       }
@@ -825,7 +961,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     } finally {
       setIsSubmitting(false);
     }
-  }, [schema, dataSource, objectSchema, perms, saveWithOcc, formData, uploadGate.uploading, uploadGate.reason, recordSaved]);
+  }, [schema, dataSource, objectSchema, perms, saveWithOcc, formData, uploadGate.uploading, uploadGate.reason, recordSaved, createMoreOn, startNextRecord]);
 
   // Actually close the modal, firing onCancel only when the close originated
   // from the explicit Cancel button.
@@ -927,7 +1063,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     if (error) {
       return (
         <div className="p-4 border border-red-300 bg-red-50 rounded-md">
-          <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+          <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
           <p className="text-red-600 text-sm mt-1">{error.message}</p>
         </div>
       );
@@ -964,13 +1100,18 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
         sec.name ? sectionLabel(schema.objectName, sec.name, sec.label || sec.name) : sec.label;
 
       // The form is ONE grid. Its width is the explicit form `columns`, else the
-      // widest section's count, an undeclared section counting two
-      // (objectui#12521, #12592); each section then lays ITS fields out at its
+      // widest section's count, an undeclared section counting the dialog's
+      // undeclared count (objectui#12521, #12592; objectstack-ai/objectstack#34607);
+      // each section then lays ITS fields out at its
       // own count within that grid via colSpan (objectstack-ai/objectstack#2578), exactly like the
       // full-page sectioned form — by the one sectioned-form rule, which
       // switches to a 12-track grid when the sections' counts do not all fit
       // the widest one (objectui#12548). It is handed the AUTHORED counts.
-      const sectionGrid = sectionedGridLayout(schema.columns, sections.map((sec) => sec.columns));
+      const sectionGrid = sectionedGridLayout(
+        schema.columns,
+        sections.map((sec) => sec.columns),
+        undeclaredColumns,
+      );
       const formColumns = sectionGrid.columns;
       const containerFieldClass = sectionGrid.fieldContainerClass;
 
@@ -1083,7 +1224,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     // DrawerForm), so every group's fields share a single react-hook-form
     // instance and the footer submit collects them all.
     if (derivedSections?.length) {
-      const columns = (Number(derivedSections[0]?.columns) || 1) as 1 | 2 | 3 | 4;
+      const columns = (clampColumns(schema.columns) ?? undeclaredColumns) as 1 | 2 | 3 | 4;
       const allFields: FormField[] = [];
       derivedSections.forEach((section, index) => {
         // FLS first, so a group whose every field is non-readable drops its
@@ -1173,7 +1314,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       <div className="@container rounded-md border bg-card p-4">
         {(schema.title || schema.description) && (
           <div className="mb-3 space-y-0.5">
-            {schema.title && <div className="text-sm font-semibold">{schema.title}</div>}
+            {schema.title && <div className="text-sm font-medium">{schema.title}</div>}
             {schema.description && <p className="text-xs text-muted-foreground">{schema.description}</p>}
           </div>
         )}
@@ -1183,18 +1324,122 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
     );
   }
 
+  // Radix routes backdrop click, Escape, and the X button all through here, in
+  // both arms. Closes are intercepted so unsaved input isn't silently
+  // discarded.
+  const handleDialogOpenChange = (open: boolean) => {
+    if (open) { schema.onOpenChange?.(true); return; }
+    attemptClose(false);
+  };
+
+  // The header's maximize / restore switch (objectstack-ai/objectstack#34604):
+  // the record drawer's control — its `RecordTopBarButton`, its lucide pair at
+  // its size, its labels — drawn just before the dialog's close (X), in both
+  // arms. The last child of the content, so it sits after the form in the tab
+  // order and right before the X, as the drawer orders them. From `sm` up
+  // only: the phone sheet already fills the screen. Toggling changes the
+  // content's classes and nothing else, so the form below stays mounted.
+  const maximizeButton = (
+    <RecordTopBarButton
+      label={maximized ? t('detail.restoreSize') : t('detail.maximize')}
+      onClick={toggleMaximized}
+      data-testid="modal-form-maximize"
+      className={cn('absolute top-2.5 hidden sm:inline-flex', showCloseButton ? 'right-9' : 'right-3')}
+    >
+      {maximized ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+    </RecordTopBarButton>
+  );
+  // The header keeps its title clear of the switch and the X from `sm` up.
+  // Its bottom rule is each arm's: the flat arm hands it to the section nav
+  // strip when one is drawn.
+  const headerClass = 'shrink-0 px-4 pt-4 sm:px-5 sm:pr-20 pb-3';
+
+  // The title (objectstack-ai/objectstack#35980): 16px, after the object's
+  // own icon when it declares one, in both arms.
+  // `resolveIcon` caches one component per name, so this is no hook.
+  const ObjectIconGlyph = resolveIcon((objectSchema as any)?.icon);
+  const dialogTitle = schema.title ? (
+    <DialogTitle className="flex items-center gap-2 text-base">
+      {ObjectIconGlyph && (
+        // `resolveIcon` returns a STABLE component out of lucide's static
+        // record; it does not create one during render (the annotation the
+        // other seam call sites carry).
+        // eslint-disable-next-line react-hooks/static-components
+        <ObjectIconGlyph
+          className="h-4 w-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+          data-testid="modal-form-title-icon"
+        />
+      )}
+      {schema.title}
+    </DialogTitle>
+  ) : null;
+
+  // ⌘↵ / Ctrl+Enter saves (objectstack-ai/objectstack#35980), the shortcut the
+  // Save button shows. Only a keydown inside this dialog's own DOM: the
+  // discard and conflict alerts are React children, so their keydowns bubble
+  // here through React, but they are portalled outside the content.
+  const handleContentKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isSubmitShortcut({ ...event, isComposing: event.nativeEvent.isComposing })) return;
+    if (!event.currentTarget.contains(event.target as Node)) return;
+    if (!showSubmit || isSubmitting || uploadGate.uploading) return;
+    const form = event.currentTarget.ownerDocument.getElementById(formId);
+    if (!(form instanceof HTMLFormElement)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    form.requestSubmit();
+  };
+
+  // Unsaved-changes guard — rendered INSIDE DialogContent so its portal
+  // inherits the Dialog's Radix layer context (focus scope + dismissable
+  // layer) through React. As a sibling of <Dialog> it had no such context, so
+  // the still-open modal swallowed its button clicks and "Keep editing" did
+  // nothing. Nesting lets Radix stack the two modals correctly: the alert
+  // becomes the topmost layer and its buttons work.
+  const discardDialog = (
+    <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('form.discardTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t('form.discardMessage')}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => { cancelIntentRef.current = false; }}>
+            {t('form.keepEditing')}
+          </AlertDialogCancel>
+          <AlertDialogAction onClick={finalizeClose}>
+            {t('form.discard')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   if (subforms?.length && schema.mode !== 'view') {
+    // The master-detail form owns its Save bar (objectstack#34599, ADR-0035
+    // Decision §6). This dialog hands it a frame of fixed height — the region
+    // between the header and the dialog's bottom — through
+    // `MasterDetailFrameContext`, so the form scrolls its body in a box of its
+    // own and draws the bar below it, at the dialog's bottom at every scroll
+    // position, with the gutters the flat arm's body and footer use
+    // (objectstack#34819). It reports its unsaved
+    // input — header, lines, row editor — into this dialog's close guard, so
+    // the close paths prompt here exactly as they do in the flat arm. Its
+    // batch save carries no OCC token, so this arm has no conflict dialog.
     return (
-      <Dialog open={isOpen} onOpenChange={schema.onOpenChange}>
+      <Dialog open={isOpen} onOpenChange={handleDialogOpenChange}>
         <MobileDialogContent
           showCloseButton={showCloseButton}
           onOpenAutoFocus={initialFieldFocus.onOpenAutoFocus}
           onCloseAutoFocus={initialFieldFocus.onCloseAutoFocus}
-          className={cn(sizeClass, 'flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden p-0', className, schema.className)}
+          className={cn(sizeClass, 'flex flex-col overflow-hidden p-0 sm:p-0', heightClass, className, schema.className)}
+          data-maximized={maximized ? '' : undefined}
         >
           {(schema.title || schema.description) && (
-            <DialogHeader className="shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 pb-2 border-b">
-              {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
+            <DialogHeader className={cn(headerClass, 'border-b')}>
+              {dialogTitle}
               {schema.description ? (
                 <DialogDescription>{schema.description}</DialogDescription>
               ) : (
@@ -1202,8 +1447,10 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
               )}
             </DialogHeader>
           )}
-          <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
-            <Suspense fallback={<ModalFormBodyPending />}>
+          <div className="flex min-h-0 flex-1 flex-col" data-testid="modal-form-md-frame">
+            <Suspense fallback={<div className="px-4 sm:px-6 py-4"><ModalFormBodyPending /></div>}>
+            <MasterDetailFrameContext.Provider value={MODAL_MASTER_DETAIL_FRAME}>
+            <FormDirtyReportContext.Provider value={setIsDirty}>
             <MasterDetailForm
               schema={{
                 type: 'object-master-detail-form',
@@ -1239,8 +1486,12 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
               }}
               dataSource={dataSource}
             />
+            </FormDirtyReportContext.Provider>
+            </MasterDetailFrameContext.Provider>
             </Suspense>
           </div>
+          {discardDialog}
+          {maximizeButton}
         </MobileDialogContent>
       </Dialog>
     );
@@ -1249,24 +1500,19 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   const hasFooter = !loading && !error && (showSubmit || showCancel || showReset);
 
   return (
-    <Dialog
-      open={isOpen}
-      onOpenChange={(open) => {
-        // Radix routes backdrop click, Escape, and the X button all through
-        // here. Intercept closes so unsaved input isn't silently discarded.
-        if (open) { schema.onOpenChange?.(true); return; }
-        attemptClose(false);
-      }}
-    >
+    <Dialog open={isOpen} onOpenChange={handleDialogOpenChange}>
       <MobileDialogContent
+        ref={contentRef}
         showCloseButton={showCloseButton}
         onOpenAutoFocus={initialFieldFocus.onOpenAutoFocus}
         onCloseAutoFocus={initialFieldFocus.onCloseAutoFocus}
-        className={cn(sizeClass, 'flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh] overflow-hidden p-0', className, schema.className)}
+        onKeyDown={handleContentKeyDown}
+        className={cn(sizeClass, 'flex flex-col overflow-hidden p-0 sm:p-0', heightClass, className, schema.className)}
+        data-maximized={maximized ? '' : undefined}
       >
         {(schema.title || schema.description) && (
-          <DialogHeader className="shrink-0 px-4 pt-4 sm:px-6 sm:pt-6 pb-2 border-b">
-            {schema.title && <DialogTitle>{schema.title}</DialogTitle>}
+          <DialogHeader className={cn(headerClass, !drawsSectionNav && 'border-b')}>
+            {dialogTitle}
             {schema.description ? (
               <DialogDescription>{schema.description}</DialogDescription>
             ) : (
@@ -1277,27 +1523,59 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
           </DialogHeader>
         )}
 
-        <div className="@container flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+        <FormSectionNavContext.Provider value={sectionNav.sink}>
+        <FormSectionNav items={sectionNav.items} onDrawnChange={setDrawsSectionNav} className="shrink-0 px-2 sm:px-4" />
+        {/* `relative`: the absolutely positioned hidden inputs in the form (a
+            Radix checkbox's or select's native stand-in) take this scroller as
+            their containing block, so it clips them and they scroll with it,
+            instead of overflowing the `overflow-hidden` dialog box, which a
+            scroll could then move off its title and footer (objectstack#35092). */}
+        <div className="@container relative flex-1 overflow-y-auto px-4 sm:px-5 py-4">
           {/* Every upload widget below reports into this scope, however deep —
               a section, a tab, a subform row (objectui#10166). */}
           <UploadGateProvider gate={uploadGate}>
             {closedAffordanceNotice}
+            {/* objectstack#35403 — the record's owner, read-only, with the
+                host's Change Owner action beside it. */}
+            <FormOwnerLine
+              mode={schema.mode}
+              objectName={schema.objectName}
+              recordId={schema.recordId}
+              record={loading ? null : formData}
+              objectSchema={objectSchema}
+            />
             {/* The dialog owns its body's wait (objectui#12559) — see
                 `ModalFormBodyPending`. */}
             <Suspense fallback={<ModalFormBodyPending />}>
-              {renderContent()}
+              {/* A new key after a 「Create more」 save draws the form again
+                  from its opening values (objectstack-ai/objectstack#35980). */}
+              <React.Fragment key={formResetKey}>{renderContent()}</React.Fragment>
             </Suspense>
           </UploadGateProvider>
         </div>
+        </FormSectionNavContext.Provider>
 
         {/* Sticky footer — always visible action buttons */}
         {hasFooter && (
-          <div className="shrink-0 border-t px-4 sm:px-6 py-3 bg-background" data-testid="modal-form-footer">
+          <div className="shrink-0 border-t px-4 sm:px-5 py-3" data-testid="modal-form-footer">
             {/* The REASON the Save below is disabled (objectui#10166). Above the
                 row rather than inside it so it reads before the dead control,
                 and so a long sentence never squeezes the buttons. */}
             <UploadInFlightNotice gate={uploadGate} />
-            <div className="flex flex-col sm:flex-row gap-2 sm:justify-end">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+              {/* 「Create more」 (objectstack-ai/objectstack#35980): at the
+                  footer's start, away from the buttons. */}
+              {createMoreOffered && showSubmit && (
+                <label className="flex min-h-[44px] items-center gap-2 text-sm text-muted-foreground sm:mr-auto sm:min-h-0">
+                  <Switch
+                    checked={createMore}
+                    onCheckedChange={setCreateMore}
+                    disabled={isSubmitting}
+                    data-testid="modal-form-create-more"
+                  />
+                  {t('form.createMore')}
+                </label>
+              )}
               {showCancel && (
                 <Button
                   type="button"
@@ -1328,47 +1606,47 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
                   type="submit"
                   form={formId}
                   disabled={isSubmitting || uploadGate.uploading}
+                  aria-keyshortcuts="Meta+Enter Control+Enter"
                   className="w-full sm:w-auto min-h-[44px] sm:min-h-0"
                 >
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {uploadGate.uploading ? uploadGate.busyLabel : submitLabel}
+                  {/* The save shortcut's keycaps (objectstack-ai/objectstack#35980);
+                      the phone sheet has no keyboard to show them for. */}
+                  <kbd
+                    aria-hidden="true"
+                    data-testid="modal-form-submit-shortcut"
+                    className="ml-2 hidden rounded border border-current/25 px-1 font-sans text-xs leading-4 opacity-75 sm:inline"
+                  >
+                    {submitShortcutLabel()}
+                  </kbd>
                 </Button>
               )}
             </div>
           </div>
         )}
 
-        {/* Unsaved-changes guard — rendered INSIDE DialogContent so its portal
-            inherits the Dialog's Radix layer context (focus scope + dismissable
-            layer) through React. As a sibling of <Dialog> it had no such
-            context, so the still-open modal swallowed its button clicks and
-            "Keep editing" did nothing. Nesting lets Radix stack the two modals
-            correctly: the alert becomes the topmost layer and its buttons work. */}
-        <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('form.discardTitle')}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t('form.discardMessage')}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => { cancelIntentRef.current = false; }}>
-                {t('form.keepEditing')}
-              </AlertDialogCancel>
-              <AlertDialogAction onClick={finalizeClose}>
-                {t('form.discard')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {discardDialog}
         {/* Same nesting rationale as the discard guard above: as a child of
             the Dialog content the conflict alert stacks as the topmost Radix
             layer, so its buttons receive clicks while the modal stays open. */}
         {conflictDialog}
+        {maximizeButton}
       </MobileDialogContent>
     </Dialog>
   );
+};
+
+/**
+ * The frame the master-detail arm hands its form (objectstack#34819): the
+ * body scroller takes the flat arm's body gutters and container query, the
+ * action bar the flat arm's footer padding.
+ */
+const MODAL_MASTER_DETAIL_FRAME: MasterDetailFrame = {
+  bodyClassName: '@container px-4 sm:px-5 py-4',
+  // The card's own colour (objectstack-ai/objectstack#35980): the bar's
+  // `bg-background` is the page's grey, a strip on the dialog's white card.
+  actionsClassName: 'bg-card px-4 sm:px-5 py-3',
 };
 
 /**

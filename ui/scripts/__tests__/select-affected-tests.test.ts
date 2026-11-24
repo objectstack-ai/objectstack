@@ -29,7 +29,7 @@ import {
 import { shardTotal } from '../../../scripts/ci-shard-matrix.mjs';
 import { parse as parseYaml } from 'yaml';
 
-import { jobBlock, rootCi, triggerBlock, UI_JOBS, uiRun, withoutComments } from './helpers/root-ci';
+import { jobBlock, rootCi, rootWorkflowsDir, triggerBlock, UI_JOBS, uiRun, withoutComments } from './helpers/root-ci';
 
 /**
  * objectui#12214 — the affected-test selector behind the two-speed `Test` lane.
@@ -41,6 +41,9 @@ import { jobBlock, rootCi, triggerBlock, UI_JOBS, uiRun, withoutComments } from 
  * the `dom-heavy` project still parses, and the CLI reaches a verdict.
  */
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+/** The body of ci.yml's "Fetch this commit's history and the base branch" steps (objectstack#34561). */
+const fetchHistoryScript = (): string =>
+  fs.readFileSync(path.join(rootWorkflowsDir, '..', '..', 'scripts', 'ci', 'fetch-history.sh'), 'utf8');
 
 const tmpRoots: string[] = [];
 afterAll(() => {
@@ -765,10 +768,15 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
     expect(fetch).toBeGreaterThan(checkout);
     expect(select).toBeGreaterThan(fetch);
     const step = job.slice(fetch, select);
-    expect(step).toContain('deepen=(--unshallow)');
-    expect(step).toContain('git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"');
-    expect(step).toContain("refspecs=('+refs/heads/main:refs/remotes/origin/main')");
-    expect(step).toContain('refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")');
+    // objectstack#34561: the five jobs' step bodies are one script, whose
+    // attempts are bounded by silence so a stalled fetch is retried.
+    expect(step).toContain('PR_BASE_REF: ${{ github.event.pull_request.base.ref }}');
+    expect(step).toContain('run: bash scripts/ci/fetch-history.sh');
+    const body = fetchHistoryScript();
+    expect(body).toContain('deepen=(--unshallow)');
+    expect(body).toContain('fetch_once fetch --progress --no-tags ${deepen[@]+"${deepen[@]}"} origin "$head" "${refspecs[@]}"');
+    expect(body).toContain("refspecs=('+refs/heads/main:refs/remotes/origin/main')");
+    expect(body).toContain('refspecs+=("+refs/heads/$PR_BASE_REF:refs/remotes/origin/$PR_BASE_REF")');
   });
 
   it('keeps the matrix width and the full-suite command for the full battery', () => {
@@ -830,6 +838,8 @@ describe("the root ci.yml's history readers check out at depth 1, then fetch (ob
     });
     expect(copies[0]).toHaveProperty('run');
     for (const copy of copies) expect(copy).toEqual(copies[0]);
-    expect(copies[0]?.run).toContain('git fetch --no-tags "${deepen[@]}" origin "$head" "${refspecs[@]}"');
+    // objectstack#34561: one body, in scripts/ci/fetch-history.sh.
+    expect(copies[0]?.run).toBe('bash scripts/ci/fetch-history.sh');
+    expect(fetchHistoryScript()).toContain('git "$@" < /dev/null > "$log" 2>&1 &');
   });
 });

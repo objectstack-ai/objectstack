@@ -1,5 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { ErrorCode, type FlowInnerRefusal } from '@objectstack/spec/api';
+import { declaredUserMessage } from './thrown-http-error.js';
+
 /**
  * The machine-readable half of a `RESUME_FAILED` — a decision that is durably
  * recorded whose flow run could not be resumed (#13807).
@@ -59,7 +62,8 @@
 
 /**
  * The four facts a stranded decision publishes alongside its `code` and
- * `error`. Every field is present or the whole envelope is absent — a partial
+ * `error`, plus — since #34579 — the refusal that stranded the run, when it
+ * met one. Each of the four facts is present or the whole envelope is absent — a partial
  * one would let a consumer branch on `finalized === undefined` and read it as
  * "the decision did not stand", which is the exact misreading this exists to
  * end.
@@ -91,6 +95,32 @@ export interface StrandedDecisionDetails {
    * repair verb that will refuse is worse than promising nothing.
    */
   repairable: boolean;
+  /**
+   * [#34579] The refusal the node after the decision met, when it met one —
+   * the engine's own `AutomationResult.innerRefusal` (ruling B′ on #24914),
+   * copied verbatim: `code` in its wire spelling, `message` the refusal's own
+   * text without the node and operation prefixes. The flow doors already serve
+   * this member in their `FLOW_FAILED` details; this is the same value at the
+   * approvals door, so an approver whose decision stranded on a record hook's
+   * refusal can be told which refusal it was.
+   *
+   * Optional, and never part of the all-or-nothing rule above: the four facts
+   * describe the decision and the run, this describes WHY the run stopped,
+   * and a run can strand on a fault that met no refusal at all (a crash, an
+   * unreachable store). ⛔ Absent there, never synthesised from `error`.
+   */
+  innerRefusal?: FlowInnerRefusal;
+  /**
+   * [#34579] The producer-marked end-user text of that refusal — the engine's
+   * `AutomationResult.userMessage`, verbatim. For a record hook that declares
+   * a `refusals` catalogue this is the declared sentence in the caller's
+   * locale, while {@link innerRefusal}'s `message` keeps the diagnostic text.
+   * It reaches the wire at the top level of the error body, the channel a
+   * record save's refusal and every flow door's `FLOW_FAILED` already use, and
+   * with the same semantics: presence IS the marking. Absent when the run met
+   * no marked refusal.
+   */
+  userMessage?: string;
 }
 
 /** Property under which {@link StrandedDecisionDetails} rides a thrown error. */
@@ -114,7 +144,31 @@ export function strandedDecisionDetails(err: unknown): StrandedDecisionDetails |
   if (typeof d.decision !== 'string' || d.decision === '') return undefined;
   if (typeof d.runId !== 'string' || d.runId === '') return undefined;
   if (typeof d.repairable !== 'boolean') return undefined;
-  return { finalized: true, decision: d.decision, runId: d.runId, repairable: d.repairable };
+  const innerRefusal = carriedInnerRefusal(d.innerRefusal);
+  const userMessage = declaredUserMessage(d);
+  return {
+    finalized: true,
+    decision: d.decision,
+    runId: d.runId,
+    repairable: d.repairable,
+    ...(innerRefusal !== undefined ? { innerRefusal } : {}),
+    ...(userMessage !== undefined ? { userMessage } : {}),
+  };
+}
+
+/**
+ * [#34579] The optional refusal member, or `undefined` when the carrier holds
+ * none or holds one that is not a refusal in the declared shape — a `code`
+ * outside the closed ADR-0112 set, or a `message` that is not a string. The
+ * member is dropped, the four facts stand: a malformed WHY must not take the
+ * truthful WHAT down with it, and it must not reach the wire either.
+ */
+function carriedInnerRefusal(value: unknown): FlowInnerRefusal | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const { code, message } = value as { code?: unknown; message?: unknown };
+  if (typeof message !== 'string') return undefined;
+  const parsed = ErrorCode.safeParse(code);
+  return parsed.success ? { code: parsed.data, message } : undefined;
 }
 
 /**

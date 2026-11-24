@@ -64,7 +64,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
@@ -81,6 +81,18 @@ const metadata = vi.hoisted(() => ({
     refresh: vi.fn(async () => {}),
   },
 }));
+
+/** objectstack#35881 — the width and the person's last app, varied by the phone cases. */
+const phone = vi.hoisted(() => ({
+  value: { isPhone: false, lastApp: null as string | null, settled: true },
+}));
+
+/**
+ * objectstack#36732 — the member's `/me/apps` answer, as the launcher hooks
+ * serve it: the names a permission set hides, and whether the first read is
+ * still out. The real narrowing is pinned beside `useLauncherApps`.
+ */
+const served = vi.hoisted(() => ({ value: { hidden: [] as string[], pending: false } }));
 
 /** The auth verdict each case varies. */
 const auth = vi.hoisted(() => ({
@@ -101,12 +113,19 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   // pinned where the real component lives —
   // `packages/app-shell/src/chrome/RedirectWithSplash.test.tsx` — and
   // end-to-end by `e2e/console-boot-indicator.spec.ts`.
-  RedirectWithSplash: ({ to, replace }: { to: string; replace?: boolean }) => (
+  RedirectWithSplash: ({ to, replace, state }: { to: string; replace?: boolean; state?: unknown }) => (
     <>
       <div data-testid="redirect-splash" />
-      <Navigate to={to} replace={replace} />
+      <Navigate to={to} replace={replace} state={state} />
     </>
   ),
+  usePhoneViewport: () => phone.value.isPhone,
+  useServedApps: (apps: any[]) => (apps ?? []).filter((app) => !served.value.hidden.includes(app?.name)),
+  useLauncherApps: (apps: any[] | undefined) => ({
+    apps: (apps ?? []).filter((app) => !served.value.hidden.includes(app?.name)),
+    pending: served.value.pending,
+  }),
+  useLastApp: () => ({ lastApp: phone.value.lastApp, settled: phone.value.settled, rememberApp: () => {} }),
   SETUP_APP_PACKAGE_ID: 'com.objectstack.setup',
   SETUP_APP_NAME: 'setup',
   useMetadata: () => ({
@@ -139,6 +158,7 @@ function LocationProbe() {
     <>
       <div data-testid="location">{location.pathname + location.search}</div>
       <div data-testid="location-hash">{location.hash}</div>
+      <div data-testid="location-state">{JSON.stringify(location.state ?? null)}</div>
     </>
   );
 }
@@ -162,7 +182,19 @@ function renderAt(entry: string) {
           }
         />
         {/* The destinations. Each is a sink: reaching it IS the assertion. */}
-        <Route path="/home" element={<div data-testid="home-launcher" />} />
+        {/* `/home` as App.tsx's HomeRoute mounts it: the page on a phone, and
+            from 768 px up the desktop resolver, which `/` hands off to
+            (objectstack#36732). The page is a sink either way. */}
+        <Route
+          path="/home"
+          element={
+            phone.value.isPhone ? (
+              <div data-testid="home-launcher" />
+            ) : (
+              <RootLandingRedirect home={<div data-testid="home-launcher" />} />
+            )
+          }
+        />
         <Route path="/apps/*" element={<div data-testid="app-surface" />} />
         <Route path="/login" element={<div data-testid="login-page" />} />
         {/* A protected deep link, so redirect CAPTURE can be measured too. */}
@@ -187,6 +219,8 @@ const OTHER_APP = { name: 'showcase_app' };
 beforeEach(() => {
   metadata.value = { apps: [], loading: false, status: 'ready', refresh: vi.fn(async () => {}) };
   auth.value = { isAuthenticated: false, isLoading: false, user: null };
+  phone.value = { isPhone: false, lastApp: null, settled: true };
+  served.value = { hidden: [], pending: false };
 });
 
 // ── (b) The control QA used to isolate the defect ────────────────────────
@@ -252,13 +286,23 @@ describe('a genuinely empty app list still falls through to /home', () => {
     expect(screen.getByTestId('home-launcher')).toBeTruthy();
   });
 
-  it('lands on the launcher for a multi-app deployment with no isDefault', () => {
+  it('a phone lands on its app list for a multi-app deployment with no isDefault', () => {
     auth.value.isAuthenticated = true;
+    phone.value = { isPhone: true, lastApp: null, settled: true };
     metadata.value.apps = [OTHER_APP, { name: 'ops_app' }];
 
     renderAt('/');
 
     expect(location()).toBe('/home');
+  });
+
+  it('objectstack#36732 — a desktop lands in the first app of a multi-app deployment with no isDefault', () => {
+    auth.value.isAuthenticated = true;
+    metadata.value.apps = [OTHER_APP, { name: 'ops_app' }];
+
+    renderAt('/');
+
+    expect(location()).toBe('/apps/showcase_app');
   });
 });
 
@@ -274,7 +318,9 @@ describe('app fetch failed — the resolver produces no conclusion', () => {
 
     renderAt('/');
 
-    expect(location()).toBe('/');
+    // objectstack#36732 — from 768 px up `/` hands off to `/home`, the desktop
+    // resolver, which is the address a reload re-resolves; it draws no page.
+    expect(location()).toBe('/home');
     expect(screen.queryByTestId('home-launcher')).toBeNull();
     expect(screen.getByTestId('loading-fallback')).toBeTruthy();
   });
@@ -283,6 +329,8 @@ describe('app fetch failed — the resolver produces no conclusion', () => {
     // `Navigate … replace` is what made the wrong answer permanent: it rewrites
     // `/` to `/home`, and every later entry (reload, Back, a captured
     // `?redirect=`) starts from the wrong path instead of re-running the policy.
+    // On a phone, where `/home` is a page and not a resolver (objectstack#36732).
+    phone.value.isPhone = true;
     auth.value.isAuthenticated = true;
     metadata.value.apps = [];
     metadata.value.status = 'error';
@@ -323,7 +371,9 @@ describe('app fetch failed — the resolver produces no conclusion', () => {
 
     renderAt('/');
 
-    expect(location()).toBe('/');
+    // From 768 px up the wait is `/home`'s, which `/` hands off to (objectstack#36732).
+    expect(location()).toBe('/home');
+    expect(screen.queryByTestId('home-launcher')).toBeNull();
     expect(screen.getByTestId('loading-fallback')).toBeTruthy();
   });
 
@@ -373,7 +423,7 @@ describe('the landing carries the query and hash `/` arrived with', () => {
 
   it('lands on the launcher with the query kept too', () => {
     auth.value.isAuthenticated = true;
-    metadata.value.apps = [OTHER_APP, { name: 'ops_app' }];
+    metadata.value.apps = [{ name: 'setup', _packageId: 'com.objectstack.setup' }];
 
     renderAt('/?palette=1');
 
@@ -388,5 +438,161 @@ describe('the landing carries the query and hash `/` arrived with', () => {
 
     expect(location()).toBe('/apps/crm_app');
     expect(screen.getByTestId('location-hash').textContent).toBe('');
+  });
+});
+
+// ── objectstack#35881, ruling 7045309332 (「上次用的优先」) ────────────────────
+describe('a phone lands in the app the person used last (objectstack#35881)', () => {
+  beforeEach(() => {
+    auth.value.isAuthenticated = true;
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+  });
+
+  it('the last-used app wins over the declared default', () => {
+    phone.value = { isPhone: true, lastApp: 'showcase_app', settled: true };
+    renderAt('/');
+    expect(location()).toBe('/apps/showcase_app');
+  });
+
+  it('with no record yet it takes the declared default', () => {
+    phone.value = { isPhone: true, lastApp: null, settled: true };
+    renderAt('/');
+    expect(location()).toBe('/apps/crm_app');
+  });
+
+  it('waits while the record is still being read, then resolves without it after the wait', () => {
+    vi.useFakeTimers();
+    try {
+      phone.value = { isPhone: true, lastApp: null, settled: false };
+      renderAt('/');
+      expect(location()).toBe('/');
+      expect(screen.getByTestId('loading-fallback')).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(location()).toBe('/apps/crm_app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('objectstack#36732 — a desktop lands in the last app too, ahead of the declared default', () => {
+    phone.value = { isPhone: false, lastApp: 'showcase_app', settled: true };
+    renderAt('/');
+    expect(location()).toBe('/apps/showcase_app');
+  });
+
+  it('objectstack#36732 — a desktop waits for the record too, then resolves without it after the wait', () => {
+    vi.useFakeTimers();
+    try {
+      phone.value = { isPhone: false, lastApp: null, settled: false };
+      renderAt('/');
+      expect(location()).toBe('/home');
+      expect(screen.getByTestId('loading-fallback')).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(location()).toBe('/apps/crm_app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── objectstack#36732 — the retired `/home` address on a desktop ────────────
+describe('the retired /home address redirects into an app (objectstack#36732)', () => {
+  /** The `/home` route as App.tsx mounts it on a desktop: the resolver with the no-apps page. */
+  function renderHome(entry: string | { pathname: string; state?: unknown }) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <LocationProbe />
+        <Routes>
+          <Route
+            path="/home"
+            element={<RootLandingRedirect home={<div data-testid="home-no-apps-page" />} />}
+          />
+          <Route path="/apps/*" element={<div data-testid="app-surface" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    auth.value.isAuthenticated = true;
+  });
+
+  it('opening /home lands in the last-used app, keeping the query', () => {
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+    phone.value = { isPhone: false, lastApp: 'showcase_app', settled: true };
+    renderHome('/home?palette=1');
+    expect(location()).toBe('/apps/showcase_app?palette=1');
+    expect(screen.queryByTestId('home-no-apps-page')).toBeNull();
+  });
+
+  it('carries the visit\'s navigation state on to the app (an old /ai address\'s Builder handoff)', () => {
+    // `AiAddressRedirect` and the chrome's Home outside the `/me/apps`
+    // provider name `/home`; what their visit carries must survive the hop.
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+    renderHome({ pathname: '/home', state: { handoff: { prompt: 'Build a CRM' } } });
+    expect(location()).toBe('/apps/crm_app');
+    expect(screen.getByTestId('location-state').textContent).toBe('{"handoff":{"prompt":"Build a CRM"}}');
+  });
+
+  it('with no record it lands in the declared default, else the first app', () => {
+    metadata.value.apps = [OTHER_APP, DEFAULT_APP];
+    renderHome('/home');
+    expect(location()).toBe('/apps/crm_app');
+  });
+
+  it('a viewer with no product app stays on /home and is drawn the no-apps page', () => {
+    metadata.value.apps = [{ name: 'setup', _packageId: 'com.objectstack.setup' }];
+    renderHome('/home');
+    expect(location()).toBe('/home');
+    expect(screen.getByTestId('home-no-apps-page')).toBeInTheDocument();
+  });
+
+  it('never lands in an app a permission set hides: the first app it shows instead', () => {
+    // The contract review's case: `[hr, sales]`, no default, `hr` hidden by the sales rep's set.
+    metadata.value.apps = [{ name: 'hr' }, { name: 'sales' }];
+    served.value = { hidden: ['hr'], pending: false };
+    renderAt('/');
+    expect(location()).toBe('/apps/sales');
+  });
+
+  it('skips a last app a permission set now hides', () => {
+    metadata.value.apps = [{ name: 'hr' }, { name: 'sales' }];
+    served.value = { hidden: ['hr'], pending: false };
+    phone.value = { isPhone: false, lastApp: 'hr', settled: true };
+    renderHome('/home');
+    expect(location()).toBe('/apps/sales');
+  });
+
+  it('a member whose sets hide every product app gets the no-apps page, not a hidden app', () => {
+    metadata.value.apps = [{ name: 'setup', _packageId: 'com.objectstack.setup' }, { name: 'hr' }];
+    served.value = { hidden: ['hr'], pending: false };
+    renderHome('/home');
+    expect(location()).toBe('/home');
+    expect(screen.getByTestId('home-no-apps-page')).toBeInTheDocument();
+  });
+
+  it('waits while the `/me/apps` answer is out, then lands', () => {
+    metadata.value.apps = [{ name: 'hr' }, { name: 'sales' }];
+    served.value = { hidden: [], pending: true };
+    const { rerender } = renderHome('/home');
+    expect(location()).toBe('/home');
+    expect(screen.getByTestId('loading-fallback')).toBeInTheDocument();
+    served.value = { hidden: ['hr'], pending: false };
+    rerender(<></>);
+    renderHome('/home');
+    expect(location()).toBe('/apps/sales');
+  });
+
+  it('CONTROL: an app list that failed to load draws neither — it waits, as `/` does', () => {
+    metadata.value.apps = [];
+    metadata.value.status = 'error';
+    renderHome('/home');
+    expect(location()).toBe('/home');
+    expect(screen.queryByTestId('home-no-apps-page')).toBeNull();
+    expect(screen.getByTestId('loading-fallback')).toBeInTheDocument();
   });
 });

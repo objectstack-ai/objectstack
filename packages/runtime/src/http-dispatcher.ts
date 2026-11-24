@@ -15,6 +15,9 @@ import {
     // [#21941] The environment-membership gate raises the same loud outage
     // when its own read cannot answer.
     AuthzStoreUnavailableError,
+    // The ONE environment-membership judgment — this dispatcher and the REST
+    // server ask it alike, so the two doors of one host cannot disagree.
+    judgeEnvironmentMembership as judgeEnvironmentMembershipOf, isMembershipJudgedEnvironment,
     type AuthGate,
 } from '@objectstack/core';
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, declaredUserMessage, inProcessSessionReadInput, driverNotNullRefusalAnswer, thrownAnswerOf } from '@objectstack/types';
@@ -40,7 +43,7 @@ import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from 
 // only — `actionExecutionDeps` hands the endpoint step the same `deps` object
 // every domain already passes to `callData`, without this file calling it.
 import type { ActionExecutionDeps } from './action-execution.js';
-import { admittingCredentialKind } from './security/admitting-credential.js';
+import { admittingCredentialKind, sessionAdmittedPrincipal } from './security/admitting-credential.js';
 import { createAnalyticsDomain, handleAnalyticsRequest } from './domains/analytics.js';
 import { isServiceServeable } from './service-serveable.js';
 import { createI18nDomain, handleI18nRequest } from './domains/i18n.js';
@@ -54,10 +57,14 @@ import { createAutomationDomain, handleAutomationRequest } from './domains/autom
 import { createAuthDomain, handleAuthRequest } from './domains/auth.js';
 import { createApprovalsActDomain, APPROVALS_ACT_ROUTE } from './domains/approvals.js';
 import { createWebhooksRedeliverDomain } from './domains/webhooks.js';
+import { createCommentsDomain } from './domains/comments.js';
+import { createPersonalViewsDomain } from './domains/personal-views.js';
+import { createAttachmentsDomain } from './domains/attachments.js';
+import { createPrintDomain } from './domains/print.js';
 import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
-import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest } from './action-dispatch.js';
-import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
+import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest, type ActionResumeRequest } from './action-dispatch.js';
+import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge, resumeActionRunRequest } from './domains/mcp.js';
 import { createMetaDomain, handleMetadataRequest } from './domains/meta.js';
 import { createDataDomain, handleDataRequest } from './domains/data.js';
 
@@ -120,9 +127,10 @@ export interface HttpProtocolContext {
      * {@link executionContext}'s principal, and — for an API key — the
      * key-admission seam's ADR-0069 answer on the key's owner. Written by
      * {@link HttpDispatcher.resolveRequestScope}; read by the ADR-0069 gate,
-     * which judges a key-admitted request by the key's answer and re-reads the
-     * session only for a principal a session admitted. Undefined for an
-     * anonymous request.
+     * which judges a key-admitted request by the key's answer and a principal
+     * the request's own session admitted by the posture decided off that same
+     * read (`sessionAdmittedPrincipal`), so the session is read once per
+     * request. Undefined for an anonymous request.
      */
     admission?: { credential: 'api_key' | 'session'; authGate: AuthGate | undefined };
     /**
@@ -296,9 +304,6 @@ function isPathWithinPrefix(path: string, prefix: string): boolean {
     const next = path.charCodeAt(prefix.length);
     return Number.isNaN(next) || next === 47 /* '/' */ || next === 63 /* '?' */;
 }
-
-/** The object the environment-membership gate reads (control plane, cloud-provided). */
-const ENVIRONMENT_MEMBER_OBJECT = 'sys_environment_member';
 
 /**
  * The protocol-standard discovery route, and the canonical spelling of the API
@@ -529,10 +534,6 @@ export class HttpDispatcher {
      * `DispatcherConfig.enforceProjectMembership`).
      */
     private enforceMembership: boolean;
-    /** Well-known system project id — bypassed for any authenticated user. */
-    private static readonly SYSTEM_ENVIRONMENT_ID = '00000000-0000-0000-0000-000000000001';
-    /** Well-known platform org id — members bypass project membership. */
-    private static readonly PLATFORM_ORG_ID = '00000000-0000-0000-0000-000000000000';
 
     /**
      * @param _envRegistryIgnored — RETIRED (ADR-0006 Phase 5). Environment
@@ -1016,6 +1017,22 @@ export class HttpDispatcher {
         // `POST /webhooks/redeliver`, forwarded to the `webhooks` slot's
         // `handleRedeliver`, resolved per request. See `./domains/webhooks.ts`.
         this.domainRegistry.register(createWebhooksRedeliverDomain(this.domainDeps));
+        // The three comment doors for a kernel with no `http.server` (#36469;
+        // ruling A on #22438): exactly their three method and path shapes,
+        // forwarded to the `comments` slot's `handleCommentDoor`, resolved per
+        // request. See `./domains/comments.ts`.
+        this.domainRegistry.register(createCommentsDomain(this.domainDeps));
+        // The personal-view delete door and the attachment removal and rename
+        // doors for a kernel with no `http.server` (#36506; ruling A on
+        // #22438): exactly their method and path shapes, forwarded to the
+        // REQUEST kernel's `personal-views` / `file-attachments` member, read
+        // per request. See `./domains/own-door-bridge.ts`.
+        this.domainRegistry.register(createPersonalViewsDomain(this.domainDeps));
+        this.domainRegistry.register(createAttachmentsDomain(this.domainDeps));
+        // The print door for a kernel with no `http.server` (#36840): exactly
+        // `POST /print/records`, forwarded to the REQUEST kernel's `print`
+        // service's `handlePrintDoor`. See `./domains/print.ts`.
+        this.domainRegistry.register(createPrintDomain(this.domainDeps));
         this.domainRegistry.register(createAiDomain(this.domainDeps));
         this.domainRegistry.register(createActionsDomain(this.domainDeps));
         for (const route of createMcpDomains(this.domainDeps)) this.domainRegistry.register(route);
@@ -1592,6 +1609,9 @@ export class HttpDispatcher {
      *  - allow-listed path, no `auth` service, or no gate feature active —
      *    including an `isAuthGateActive()` probe that THROWS (a host whose
      *    probe faults never declared a gate) — answers null with no read;
+     *  - the gate is active and the request's own session admitted the
+     *    principal (`sessionAdmittedPrincipal`) ⇒ the posture decided off the
+     *    identity step's read, with no second read: its 403, or null;
      *  - the gate is active and the session API, the header bag or the read
      *    itself fails ⇒ the branded outage, never null;
      *  - the gate is active and the read RESOLVES with no posture (no session,
@@ -1631,6 +1651,20 @@ export class HttpDispatcher {
             const authService = await this.resolveService(this.requestKernel(context), 'auth', context.environmentId);
             if (!authService || typeof authService.isAuthGateActive !== 'function' || !authService.isAuthGateActive()) {
                 return null;
+            }
+            // A principal THIS request's own session read admitted is judged by
+            // the posture decided off that same read, recorded by the identity
+            // step above (`resolveRequestScope` → `context.admission`). ⛔ No
+            // second read for it: one request reads its session once, and the
+            // gate and principal resolution share that read. The read already
+            // succeeded, so there is no unread session for decision 2 B to
+            // refuse. An anonymous request, an OAuth access token (whose session
+            // the door established) and an identity step that degraded after
+            // the read fall through to the read below, as before.
+            const admitted = sessionAdmittedPrincipal(context as HttpProtocolContext | undefined);
+            if (admitted) {
+                const gate = evaluateAuthGate(admitted, cleanPath, method);
+                return gate ? this.error(gate.message, 403, { code: gate.code }) : null;
             }
             // The gate is ACTIVE from here: the session read either answers or
             // is the outage it is (#13906 decision 2 B). ⛔ Never a
@@ -1785,10 +1819,10 @@ export class HttpDispatcher {
         context: HttpProtocolContext,
     ): Promise<{ status: number; body: any } | null> {
         const environmentId = context.environmentId;
-        if (!environmentId) return null; // Unscoped legacy routes fall through.
-
-        // System project is always reachable by any authenticated user.
-        if (environmentId === HttpDispatcher.SYSTEM_ENVIRONMENT_ID) return null;
+        // Unscoped legacy routes fall through, and the system project is always
+        // reachable by any authenticated user — asked before any principal is
+        // read, through the judgment's own applicability predicate.
+        if (!isMembershipJudgedEnvironment(environmentId)) return null;
 
         // The gate judges the principal this request RESOLVED
         // (`resolveRequestScope`), whichever credential admitted it — a
@@ -1862,80 +1896,25 @@ export class HttpDispatcher {
         userId: string,
         activeOrganizationId: string | undefined,
     ): Promise<{ status: number; body: any } | null> {
-        // Platform-org members bypass project membership.
-        if (activeOrganizationId === HttpDispatcher.PLATFORM_ORG_ID) return null;
-
-        // Query sys_environment_member (control plane), on EVERY request.
-        //
-        // [#32230] A member's admission is never reused from an earlier
-        // request: a removal takes effect on the caller's next request, on
-        // every replica, and a store that cannot answer refuses that request
-        // (below) whoever was admitted a moment ago. A future cache here must
-        // first meet the authorization-cache rule in `resolve-authz-context.ts`
-        // (cache a success only behind seams that observe the writes it
-        // depends on, TTL as the residual bound) — and the writes that change
-        // this answer land in the control plane, which this request's engine
-        // need not observe.
-        //
-        // [#21941] The gate FAILS CLOSED when its read cannot answer. It used to
-        // catch every fault here and return `null` — the caller admitted — so a
-        // signed-in non-member passed whenever the read faulted. A read that
-        // could not answer is not a verdict about the caller either way: it is
-        // refused as the outage it is, with the loud, retriable answer the
-        // identity step and the domain gates already give an authorization
-        // input they could not read — `AuthzStoreUnavailableError`, 503
-        // `SERVICE_UNAVAILABLE`, thrown out of `dispatch()` to the transport's
-        // envelope — never as allowed, and never as the membership 403.
-        //
-        // Three answers, told apart before and around the read:
-        //
-        //  - NO ENGINE ⇒ refused. The read cannot be made. Only a host
-        //    `KernelResolver` writes `context.environmentId`, and this point is
-        //    reached only for a caller the `auth` service signed in; this
-        //    repository's `auth` provider (`plugin-auth`) declares ObjectQL a
-        //    hard dependency, so no composition built from it reaches this line
-        //    without an engine. An absent one here is a fault, not a
-        //    composition.
-        //  - OBJECT NOT REGISTERED ⇒ the gate does not apply. A composition
-        //    whose engine registers no `sys_environment_member` (it is a
-        //    cloud-provided object, `CLOUD_PROVIDED_OBJECT_NAMES`) holds no
-        //    environment membership to judge. The question is the registry's own
-        //    `getObject` — the one the engine's verbs ask before refusing an
-        //    unregistered name — never a caught throw. An engine whose registry
-        //    cannot be asked reads as before: it is asked, and a fault refuses.
-        //  - THE READ THROWS ⇒ refused. Anything the registered read raises.
+        // The verdict is `judgeEnvironmentMembership` in `@objectstack/core`
+        // (`security/environment-membership.ts`): the platform-organization
+        // pass, the fail-closed read of `sys_environment_member` on EVERY
+        // request (#32230: an admission is never reused), the three answers
+        // around it (#21941: no engine ⇒ the loud outage; the object not
+        // registered ⇒ the gate does not apply; the read throws ⇒ the loud
+        // outage) and the refusal. ⛔ None of it is re-spelled here: the REST
+        // server asks the same function, and two copies are how two doors of
+        // one host come to answer one caller differently. What stays here is
+        // this door's own: which engine is the request's, and the envelope.
         const qlService = await this.getObjectQLService(this.requestKernel(context));
         const ql = qlService ?? await this.resolveService(this.requestKernel(context), 'objectql');
-        if (!ql) {
-            throw new AuthzStoreUnavailableError(
-                ENVIRONMENT_MEMBER_OBJECT,
-                new Error('no ObjectQL engine resolved on this request\'s kernel'),
-            );
-        }
-        if (typeof ql.registry?.getObject === 'function' && !ql.registry.getObject(ENVIRONMENT_MEMBER_OBJECT)) {
-            return null;
-        }
-
-        let rows: unknown;
-        try {
-            // The membership read carries the explicit system opt-in. This
-            // gate is the one asking the question — the caller's user id is
-            // the `where`, not the reader — so the read runs as the platform,
-            // never as a context with no principal and no opt-in (the
-            // security middleware's former principal-less hand-off, which
-            // ADR-0096 D5 replaced with a refusal).
-            rows = await ql.find(ENVIRONMENT_MEMBER_OBJECT, {
-                where: { environment_id: environmentId, user_id: userId },
-                limit: 1,
-                context: { isSystem: true },
-            } as any);
-        } catch (err) {
-            throw new AuthzStoreUnavailableError(ENVIRONMENT_MEMBER_OBJECT, err);
-        }
-        if (rows && (rows as any).value) rows = (rows as any).value;
-        const isMember = Array.isArray(rows) && rows.length > 0;
-
-        if (isMember) return null;
+        const refusal = await judgeEnvironmentMembershipOf({
+            environmentId,
+            userId,
+            activeOrganizationId,
+            engine: ql,
+        });
+        if (!refusal) return null;
 
         // [#3842] `PROJECT_MEMBERSHIP_REQUIRED` was parked in `details.type`
         // — the fourth site, and the only one to use that spelling — because
@@ -1943,9 +1922,9 @@ export class HttpDispatcher {
         // one carrier `buildApiError` promotes into `error.code`; the two
         // genuine context fields stay in `details`.
         return this.error(
-            `Forbidden: user ${userId} is not a member of project ${environmentId}`,
-            403,
-            { code: 'PROJECT_MEMBERSHIP_REQUIRED', environmentId, userId },
+            refusal.message,
+            refusal.status,
+            { code: refusal.code, environmentId: refusal.environmentId, userId: refusal.userId },
         );
     }
 
@@ -2967,6 +2946,16 @@ export class HttpDispatcher {
      */
     async dispatchHostAction(request: ActionDispatchRequest): Promise<ActionDispatchAnswer> {
         return dispatchActionRequest(this.domainDeps, request, (context, hints) => this.placeHostActionRequest(context, hints));
+    }
+
+    /**
+     * [#34386] A host's own resume door over this dispatcher's deps — the MCP
+     * `resume_run` door's steps for the approval leg of a handed-off resume
+     * (`./action-dispatch.ts#dispatchActionResume`, the published entry),
+     * placed as {@link dispatchHostAction} places its call.
+     */
+    async resumeHostActionRun(request: ActionResumeRequest): Promise<ActionDispatchAnswer> {
+        return resumeActionRunRequest(this.domainDeps, request, (context, hints) => this.placeHostActionRequest(context, hints));
     }
 
     /**

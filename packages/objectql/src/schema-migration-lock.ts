@@ -12,10 +12,13 @@
  * the lock; the CLI re-exports it from `utils/schema-migration-lock.ts`. One
  * module, one name, one key: ⛔ never a second copy.
  *
- * Its own module, importing nothing but `node:crypto`, so the pins on it load
- * the lock and not the migration stack around it.
+ * [ADR-0154 D3 amended] How a session lock is taken, waited for and released
+ * on each dialect is `database-session-lock.ts`'s, which the audit seal lock
+ * rides on too; this module says only this lock's name, key, wait and words.
+ * It imports nothing but that module, so the pins on it load the lock and not
+ * the migration stack around it.
  */
-import { createHash } from 'node:crypto';
+import { acquireDatabaseSessionLock, databaseSessionLockPgKey } from './database-session-lock.js';
 
 /**
  * The one name every migrator locks on (#31598): two `os migrate apply` runs
@@ -39,10 +42,7 @@ export const SCHEMA_MIGRATION_LOCK_NAME = 'objectstack:schema-migrate';
  * 'advisory'`, its high 32 bits as `classid` and its low 32 as `objid`.
  * A string, so no JavaScript number rounds it on the way to the bind.
  */
-export const SCHEMA_MIGRATION_PG_LOCK_KEY = BigInt.asIntN(
-  64,
-  BigInt(`0x${createHash('sha256').update(SCHEMA_MIGRATION_LOCK_NAME).digest('hex').slice(0, 16)}`),
-).toString();
+export const SCHEMA_MIGRATION_PG_LOCK_KEY = databaseSessionLockPgKey(SCHEMA_MIGRATION_LOCK_NAME);
 
 /**
  * How long a migrator waits for another to finish before it refuses. No
@@ -50,25 +50,9 @@ export const SCHEMA_MIGRATION_PG_LOCK_KEY = BigInt.asIntN(
  */
 export const SCHEMA_MIGRATION_LOCK_WAIT_MS = 10 * 60_000;
 
-/** The slice of knex the lock uses, typed structurally. */
-interface LockKnex {
-  client: {
-    acquireRawConnection(): Promise<unknown>;
-    destroyRawConnection(connection: unknown): Promise<void>;
-  };
-  raw(sql: string, bindings?: readonly unknown[]): { connection(connection: unknown): Promise<unknown> };
-}
-
 /** A held schema-migration lock. `release()` is idempotent and never throws. */
 export interface SchemaMigrationLock {
   release(): Promise<void>;
-}
-
-/** The single row a lock statement answers, whichever client shaped the result. */
-function lockRow(result: unknown): Record<string, unknown> | undefined {
-  // pg answers `{ rows }`; mysql2 answers `[rows, fields]`.
-  const rows = Array.isArray(result) ? result[0] : (result as { rows?: unknown } | null)?.rows;
-  return Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
 }
 
 /**
@@ -83,83 +67,27 @@ function lockRow(result: unknown): Record<string, unknown> | undefined {
  * ONE line through `warn`, then waits up to `waitMs` and refuses on timeout —
  * this run then migrates nothing, and says so.
  *
- * The lock lives on a connection of its own, opened through the driver's own
- * client (its configuration, credentials and TLS) but OUTSIDE its pool: both
- * locks are session-scoped, so the lock and its release must run on one
- * session, which a pool does not promise; a pooled connection idle past the
- * pool's reaper would be closed and the lock released with it; and an
- * `OS_DATABASE_POOL_MAX=1` pool would have none left for the migration. A
- * session lock excludes every other session on the database, so the
- * migration's own pooled connections are serialized by it all the same.
+ * The lock lives on a connection of its own, outside the driver's pool (an
+ * `OS_DATABASE_POOL_MAX=1` pool would have none left for the migration);
+ * `database-session-lock.ts` says why, and its session lock excludes every
+ * other session on the database, the migration's own pooled ones included.
  */
 export async function acquireSchemaMigrationLock(
   driver: unknown,
   opts: { database: string; warn: (line: string) => void; waitMs?: number },
 ): Promise<SchemaMigrationLock | null> {
-  // [#31715] The dialect is the driver's own answer (`SqlDriver#dialectName`,
-  // its one public "which SQL do I speak"), read BEFORE the driver is asked
-  // for its Knex: a face that refuses to hand out Knex (the Turso remote
-  // transport) throws from `getKnex()` rather than answering `undefined`, and
-  // a dialect this lock does not cover must never reach that call. A Postgres
-  // or MySQL driver whose Knex cannot be handed out still throws here, loudly.
-  const dialect = (driver as { dialectName?: unknown } | null)?.dialectName;
-  if (dialect !== 'postgres' && dialect !== 'mysql') return null;
-  const knex = (driver as { getKnex?: () => LockKnex }).getKnex?.();
-  if (!knex) return null;
-  const pg = dialect === 'postgres';
   const waitMs = opts.waitMs ?? SCHEMA_MIGRATION_LOCK_WAIT_MS;
-  const connection = await knex.client.acquireRawConnection();
-  const run = async (sql: string, bindings: readonly unknown[]): Promise<Record<string, unknown> | undefined> =>
-    lockRow(await knex.raw(sql, bindings).connection(connection));
-  const close = async (): Promise<void> => {
-    try { await knex.client.destroyRawConnection(connection); } catch { /* closing releases the lock anyway */ }
-  };
-  const refuse = (): Error => new Error(
-    `Refusing to migrate ${opts.database}: another schema migration still held the migration lock `
-    + `('${SCHEMA_MIGRATION_LOCK_NAME}') after ${waitMs} ms, so this run changed nothing. `
-    + 'Run it again once that migration has finished.',
-  );
-  try {
-    const tried = pg
-      ? await run('select pg_try_advisory_lock(?::bigint) as locked', [SCHEMA_MIGRATION_PG_LOCK_KEY])
-      : await run('select GET_LOCK(?, 0) as locked', [SCHEMA_MIGRATION_LOCK_NAME]);
-    if (!(tried?.locked === true || Number(tried?.locked) === 1)) {
-      opts.warn(
-        `Another schema migration is running on ${opts.database}; waiting up to `
-        + `${Math.ceil(waitMs / 1000)} s for it to finish…`,
-      );
-      if (pg) {
-        await run(`set lock_timeout = ${Math.max(1, Math.trunc(waitMs))}`, []);
-        try {
-          await run('select pg_advisory_lock(?::bigint)', [SCHEMA_MIGRATION_PG_LOCK_KEY]);
-        } catch (error) {
-          // 55P03 lock_not_available: `lock_timeout` ran out.
-          if ((error as { code?: unknown } | null)?.code === '55P03') throw refuse();
-          throw error;
-        }
-      } else {
-        // GET_LOCK answers 1 (taken), 0 (timed out) or NULL (an error).
-        const waited = await run('select GET_LOCK(?, ?) as locked', [
-          SCHEMA_MIGRATION_LOCK_NAME,
-          Math.max(1, Math.ceil(waitMs / 1000)),
-        ]);
-        if (Number(waited?.locked) !== 1) throw refuse();
-      }
-    }
-  } catch (error) {
-    await close();
-    throw error;
-  }
-  let held = true;
-  return {
-    release: async () => {
-      if (!held) return;
-      held = false;
-      try {
-        if (pg) await run('select pg_advisory_unlock(?::bigint)', [SCHEMA_MIGRATION_PG_LOCK_KEY]);
-        else await run('select RELEASE_LOCK(?)', [SCHEMA_MIGRATION_LOCK_NAME]);
-      } catch { /* closing the session below releases it */ }
-      await close();
-    },
-  };
+  return acquireDatabaseSessionLock(driver, {
+    name: SCHEMA_MIGRATION_LOCK_NAME,
+    waitMs,
+    onWait: () => opts.warn(
+      `Another schema migration is running on ${opts.database}; waiting up to `
+      + `${Math.ceil(waitMs / 1000)} s for it to finish…`,
+    ),
+    refuse: () => new Error(
+      `Refusing to migrate ${opts.database}: another schema migration still held the migration lock `
+      + `('${SCHEMA_MIGRATION_LOCK_NAME}') after ${waitMs} ms, so this run changed nothing. `
+      + 'Run it again once that migration has finished.',
+    ),
+  });
 }

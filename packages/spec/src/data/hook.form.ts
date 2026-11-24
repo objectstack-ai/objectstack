@@ -8,8 +8,9 @@ import { defineForm } from '../ui/view.zod';
  * Hooks intercept the data lifecycle. The body field is a composite
  * (`{ language, source, capabilities?, timeoutMs?, memoryMb? }`) whose
  * `source` renders in a Monaco code editor with language-appropriate
- * syntax highlighting. The hook's refusal catalogue (`refusals`) sits beside it:
- * a js body or a handler may declare one, an expression body may not.
+ * syntax highlighting. The hook's refusal catalogue (`refusals`) and its
+ * declared texts (`texts`) sit beside it: a js body or a handler may declare
+ * them, an expression body may not.
  */
 export const hookForm = defineForm({
   schemaId: 'hook',
@@ -71,6 +72,20 @@ export const hookForm = defineForm({
               ],
             },
             { field: 'params', type: 'tags', helpText: 'Names the sentences may fill (e.g. state): the body throws { code, params: { state } }, and a {{ state }} hole renders it. Absent: the sentences are plain text' },
+          ],
+        },
+        // The declared texts are the same record shape as the refusal
+        // catalogue — keyed by the snake_case key the code asks for, an entry
+        // `{ message, params? }` with no member that echoes its key — so the
+        // row takes the same key-only record control.
+        {
+          field: 'texts',
+          type: 'record',
+          widget: 'key-only-record',
+          helpText: "Sentences the hook writes into records, keyed by the snake_case key its code asks for with ctx.text (e.g. follow_up_subject). The hook gets the declared message in the organization's language, translated, with the declared message as the fallback. For a JavaScript (L2) body or a handler; refused on an expression body",
+          fields: [
+            { field: 'message', type: 'textarea', required: true, helpText: 'The sentence the hook writes when its code asks for this key. Plain text, unless the entry declares params: then a {{ name }} hole fills a declared param' },
+            { field: 'params', type: 'tags', helpText: 'Names the sentence may fill (e.g. lead): the code asks for ctx.text(key, { lead }), and a {{ lead }} hole renders it. Absent: the sentence is plain text' },
           ],
         },
       ],

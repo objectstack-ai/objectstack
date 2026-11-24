@@ -186,10 +186,20 @@ async function drawerShowing(dataSource: { findOne: ReturnType<typeof vi.fn> }, 
     expect(dataSource.findOne.mock.calls.some((call: unknown[]) => call[0] === level.objectName && call[1] === level.recordId)).toBe(true),
   );
   return waitFor(() => {
-    const sheet = screen.getAllByRole('dialog').find((el) => within(el).queryByRole('button', { name: 'Edit' }));
+    const sheet = screen.getAllByRole('dialog').find((el) => within(el).queryByRole('button', { name: 'More actions' }));
     expect(sheet).toBeTruthy();
     return sheet!;
   }, { timeout: 5000 });
+}
+
+/**
+ * The drawer's Edit: an entry of its header's `⋯` (objectstack#36149 — the
+ * side preview draws no Edit button).
+ */
+async function clickDrawerEdit(sheet: HTMLElement) {
+  fireEvent.pointerDown(within(sheet).getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+  const item = await screen.findByRole('menuitem', { name: 'Edit' });
+  fireEvent.click(item);
 }
 
 beforeEach(() => {
@@ -215,7 +225,7 @@ describe('a drawer level’s Edit names the level’s object (objectstack#33111)
   it('the record page’s drawer: a child level’s Edit hands the child’s id and the child’s object', async () => {
     const { onEdit, dataSource } = mountRecordPage([TASK]);
     const sheet = await drawerShowing(dataSource, TASK);
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Edit' }));
+    await clickDrawerEdit(sheet);
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect(onEdit).toHaveBeenCalledWith({ id: TASK.recordId }, TASK.objectName);
   });
@@ -223,7 +233,7 @@ describe('a drawer level’s Edit names the level’s object (objectstack#33111)
   it('the list’s drawer: a child level’s Edit hands the child’s id and the child’s object', async () => {
     const { onEdit, dataSource } = mountListDrawer([LEAD, TASK]);
     const sheet = await drawerShowing(dataSource, TASK);
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Edit' }));
+    await clickDrawerEdit(sheet);
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect(onEdit).toHaveBeenCalledWith({ id: TASK.recordId }, TASK.objectName);
   });
@@ -239,7 +249,48 @@ describe('a drawer level’s Edit names the level’s object (objectstack#33111)
   it('CONTROL: the list drawer’s root level names the route’s object', async () => {
     const { onEdit, dataSource } = mountListDrawer();
     const sheet = await drawerShowing(dataSource, LEAD);
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Edit' }));
+    await clickDrawerEdit(sheet);
     expect(onEdit).toHaveBeenCalledWith({ id: LEAD.recordId }, LEAD.objectName);
+  });
+});
+
+/**
+ * objectstack#36149 — the side preview's header (the list's drawer and the
+ * record page's): no Edit button and no copy-id icon after the name; Edit and
+ * 「Copy record ID」 are entries of its `⋯`. CONTROL: the record page's own
+ * header keeps both as they were.
+ */
+describe('the side preview’s header: Edit and the id’s copy are in its ⋯ (objectstack#36149)', () => {
+  it('the list’s drawer draws no Edit button and no copy-id icon; its ⋯ holds both, and the copy writes the id', async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { dataSource } = mountListDrawer();
+    const sheet = await drawerShowing(dataSource, LEAD);
+    expect(within(sheet).queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(within(sheet).queryByRole('button', { name: 'Copy record ID' })).toBeNull();
+    fireEvent.pointerDown(within(sheet).getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(await screen.findByRole('menuitem', { name: 'Edit' })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy record ID' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(LEAD.recordId));
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  });
+
+  it('the record page’s drawer: the same ⋯ entries on its level', async () => {
+    const { dataSource } = mountRecordPage([TASK]);
+    const sheet = await drawerShowing(dataSource, TASK);
+    expect(within(sheet).queryByRole('button', { name: 'Edit' })).toBeNull();
+    fireEvent.pointerDown(within(sheet).getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(await screen.findByRole('menuitem', { name: 'Edit' })).toBeTruthy();
+    expect(await screen.findByRole('menuitem', { name: 'Copy record ID' })).toBeTruthy();
+  });
+
+  it('CONTROL: the record page’s own header keeps its Edit button and its copy-id icon, and no copy entry', async () => {
+    const { dataSource } = mountRecordPage();
+    await waitFor(() => expect(dataSource.findOne).toHaveBeenCalled());
+    expect(await screen.findByRole('button', { name: 'Edit' }, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy record ID' })).toBeTruthy();
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'More actions' }), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    await screen.findByRole('menu');
+    expect(screen.queryByRole('menuitem', { name: 'Copy record ID' })).toBeNull();
   });
 });

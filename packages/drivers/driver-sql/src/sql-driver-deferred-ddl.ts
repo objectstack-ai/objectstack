@@ -3,8 +3,8 @@
 /**
  * [#29520 codemod] The "Deferred schema DDL (#3917)" section of `SqlDriver`:
  * the bodies of `setDeferredDdl`, `getSchemaSyncStats`,
- * `flushDeferredSchemaDdl` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * `flushDeferredSchemaDdl` moved out of `sql-driver.ts` whole (split
+ * by #30139).
  *
  * A MOVE, not a redesign. {@link DeferredDdlFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`

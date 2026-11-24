@@ -6,7 +6,7 @@
  * The mobile app hosts the Console, so below `md` this popover is a phone UI.
  * Measured on a 375 px viewport, the popover was `w-96` (384 px) and lost its
  * right 9 px, and its own controls were 16–36 px tall. These pin the two
- * rules: the popover is capped at the viewport less a gutter, and every
+ * rules: the inbox fits the viewport (it fills it since objectstack#34589), and every
  * control the popover draws besides the rows (which are tall by content)
  * carries the phone tap floor.
  *
@@ -71,12 +71,12 @@ function choose(dialog: HTMLElement, name: RegExp) {
 }
 
 describe('InboxPopover at phone width (objectstack#29076)', () => {
-  it('is never wider than the viewport less a 0.5 rem gutter on each side', () => {
+  it('fills the phone, and is 440 px wide from md up (objectstack#34589)', () => {
     render(bell(0));
     const dialog = openInbox();
-    expect(dialog.className).toContain('max-w-[calc(100vw-1rem)]');
-    // the desktop width stays
-    expect(dialog.className).toContain('w-96');
+    for (const cls of ['w-full', 'max-w-none', 'sm:max-w-none', 'md:w-[440px]']) {
+      expect(dialog.className.split(/\s+/), cls).toContain(cls);
+    }
   });
 
   it('gives the Notifications tab controls the 44 px phone floor', () => {
@@ -119,5 +119,19 @@ describe('InboxPopover at phone width (objectstack#29076)', () => {
     const dialog = openInbox();
     choose(dialog, /Activity/);
     expect(within(dialog).getByRole('button', { name: 'View all activity' }).className).toContain(PHONE_TAP);
+  });
+});
+
+describe('the bell badge stays inside the phone bar (objectstack#34596)', () => {
+  it('below md the badge sits inside the 44 px trigger, at its corner; from md it keeps its desktop offset', () => {
+    render(bell(9));
+    const badge = screen.getByTestId('inbox-bell-badge');
+    // Two unread topics and nine approvals: past nine, the clamped label.
+    expect(badge.textContent).toBe('9+');
+    const classes = badge.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(['max-md:top-1', 'max-md:right-1', '-top-0.5', '-right-0.5']));
+    const trigger = screen.getByRole('button', { name: /^Notifications(,|$)/ });
+    expect(trigger).toContainElement(badge);
+    expect(trigger.className.split(/\s+/)).toEqual(expect.arrayContaining(['relative', 'max-md:size-11']));
   });
 });

@@ -59,7 +59,7 @@
  * bundles both files into one, where the cycle does not exist.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30341),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  *
@@ -71,6 +71,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { isPlannedRelationLeaf, plannedRelationLeafVerdict } from './relation-semi-join.js';
 import { ReadableIds, RLS_DENY_FILTER, controlledByParentMasterOf, filterSubtreeProvenanceOf, isReadableIds, markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -188,7 +189,15 @@ export async function composeReadableIdsChain<N>(
 ): Promise<N> {
   const { object, operation } = chain;
   const parents = this.refuseUncomposableReadableIdsClasses(object, operation, sites);
+  // [relation semi-join] A leaf the nested-relation lowering built carries its
+  // own planned scope (`relation-semi-join.ts`): the related object's read was
+  // already run through its whole pipeline as the caller, so the security
+  // service is not asked about a parent only such leaves name.
+  const askedParents = new Set(
+    sites.filter((s) => !isPlannedRelationLeaf(s.leaf)).map((s) => s.leaf.object),
+  );
   for (const parent of parents) {
+    if (!askedParents.has(parent)) continue;
     if (chain.answers.has(parent)) continue;
     const site = sites.find((s) => s.leaf.object === parent)!;
     const branch = [object, ...ancestors, parent];
@@ -231,19 +240,38 @@ export async function composeReadableIdsChain<N>(
     chain.answers.set(parent, { scope: isEmptyCondition(composed) ? undefined : composed });
   }
   // [#33696] Step 5: the required master's leaf over an unrestricted master,
-  // for a reader who holds View All on the object this node scopes.
+  // for a reader who holds View All on the object this node scopes. A leaf
+  // the nested-relation lowering planned is the caller's own condition on the
+  // master, never the master's read scope, so it is never dropped here.
   const scoped = ancestors.length === 0 ? object : ancestors[ancestors.length - 1]!;
   const master = requiredControlledByParentMasterOf(this._registry.getObject(scoped));
   const vacuous = (leaf: ReadableIds): boolean => {
+    if (isPlannedRelationLeaf(leaf)) return false;
     const answer = chain.answers.get(leaf.object);
     return leaf.object === master?.master && answer != null && answer.scope === undefined;
   };
   const pruned = master && sites.some((site) => vacuous(site.leaf)) && await readerViewsAllOf(chain, scoped)
     ? unrestrictedRequiredMasterLeavesDropped(node, master, vacuous)
     : node;
+  // [relation semi-join] A planned leaf whose read's driver options are not
+  // the related read's own is answered by the id read, as the caller, under
+  // the cap — read here, once per leaf that survived the step above, before
+  // the synchronous rewrite.
+  const surviving = new Set<object>();
+  if (pruned !== node) composeReadableIdsLeaves(pruned, (leaf) => { surviving.add(leaf); return []; });
+  const readIdsFor = new Map<object, unknown[]>();
+  for (const s of sites) {
+    if (pruned !== node && !surviving.has(s.leaf)) continue;
+    const verdict = plannedRelationLeafVerdict(s.leaf, chain.driverOptions);
+    if (verdict?.kind === 'read' && !readIdsFor.has(s.leaf)) readIdsFor.set(s.leaf, [...await verdict.readIds()]);
+  }
   // A parent with no answer (`null`, or never asked: not registered) is
   // `$in: []`.
   return composeReadableIdsLeaves(pruned, (leaf) => {
+    const ids = readIdsFor.get(leaf);
+    if (ids !== undefined) return ids;
+    const planned = plannedRelationLeafVerdict(leaf, chain.driverOptions);
+    if (planned !== undefined) return planned.kind === 'compose' ? ReadableIds.compose(leaf, planned.scope) : [];
     const answer = chain.answers.get(leaf.object);
     return answer ? ReadableIds.compose(leaf, answer.scope) : [];
   });

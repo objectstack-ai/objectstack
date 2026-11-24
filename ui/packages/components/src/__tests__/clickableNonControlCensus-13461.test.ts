@@ -227,16 +227,13 @@ const NOT_CONTROLS: Array<[file: string, key: string, reason: string]> = [
   ['packages/app-shell/src/views/metadata-admin/previews/PageBlockCanvas.tsx', 'div · handleBgClick', CANVAS],
   // The read-only tray of a node's regions: it keeps a click from starting a card drag.
   ['packages/app-shell/src/views/metadata-admin/previews/flow-canvas-parts.tsx', 'div · stopPropagation', GUARD],
-  ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · clearFieldSelOnEmpty', CANVAS],
-  ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · clearFieldSelOnEmpty', CANVAS],
-  ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · setRailOpen', SCRIM],
-  ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · setRailOpen', SCRIM],
-  ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · setRailOpen', SCRIM],
-  ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · setRailOpen', SCRIM],
+  ['packages/app-shell/src/views/studio-design/AccessPillar.tsx', 'div · setRailOpen', SCRIM],
+  ['packages/app-shell/src/views/studio-design/AutomationsPillar.tsx', 'div · setRailOpen', SCRIM],
+  ['packages/app-shell/src/views/studio-design/DataPillar.tsx', 'div · clearFieldSelOnEmpty', CANVAS],
+  ['packages/app-shell/src/views/studio-design/DataPillar.tsx', 'div · clearFieldSelOnEmpty', CANVAS],
+  ['packages/app-shell/src/views/studio-design/DataPillar.tsx', 'div · setRailOpen', SCRIM],
   ['packages/app-shell/src/views/studio-design/StudioRightSlot.tsx', 'div · onOverlayDismiss', SCRIM],
   ['packages/components/src/renderers/complex/data-table.tsx', 'div · stopPropagation', DRAG],
-  // The column header's context menu: its entries are buttons.
-  ['packages/components/src/renderers/complex/data-table.tsx', 'div · stopPropagation', GUARD],
   ['packages/plugin-dashboard/src/DashboardRenderer.tsx', 'div · handleBackgroundClick', CANVAS],
   ['packages/plugin-dashboard/src/DashboardRenderer.tsx', 'div · handleBackgroundClick', CANVAS],
   ['packages/plugin-designer/src/ProcessDesigner.tsx', 'div · handleCanvasClick', CANVAS],
@@ -261,7 +258,7 @@ const NOT_CONTROLS: Array<[file: string, key: string, reason: string]> = [
  */
 const BACKLOG: Array<[file: string, key: string]> = [
   // The data form preview selects a field by a click delegated from its frame.
-  ['packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx', 'div · closest,getAttribute,some,readFields,setFieldSel'],
+  ['packages/app-shell/src/views/studio-design/DataPillar.tsx', 'div · closest,getAttribute,some,readFields,setFieldSel'],
   ['packages/plugin-designer/src/DashboardEditor.tsx', 'div · onSelect'],
   ['packages/plugin-designer/src/DataModelDesigner.tsx', 'span · stopPropagation,handleStartFieldEdit'],
   ['packages/plugin-designer/src/PageDesigner.tsx', 'div · stopPropagation,toggle'],
@@ -273,8 +270,6 @@ const BACKLOG: Array<[file: string, key: string]> = [
   ['packages/plugin-gantt/src/GanttView.tsx', 'div · setSelectedTaskId'],
   ['packages/plugin-gantt/src/GanttView.tsx', 'div · setSelectedTaskId'],
   ['packages/plugin-gantt/src/GanttView.tsx', 'div · setSelectedTaskId'],
-  // The mobile card list.
-  ['packages/plugin-grid/src/ObjectGrid.tsx', 'div · handleClick'],
   ['packages/plugin-grid/src/VirtualGrid.tsx', 'div · getSelection,trim,toString,intersectsNode,getRangeAt,onRowClick'],
   ['packages/plugin-view/src/ManageViewsDialog.tsx', 'div · onRowClick'],
 ];

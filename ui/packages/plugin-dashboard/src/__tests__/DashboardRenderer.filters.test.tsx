@@ -197,3 +197,97 @@ describe('DashboardRenderer dashboard-level filters', () => {
     });
   });
 });
+
+/**
+ * objectstack#36372 — the always-visible mark naming the dashboard filters a
+ * widget is not filtered by. It is asked of the binding the widget's query is
+ * built from (`dashboardFiltersNotApplied` over `resolveBoundField`), so each
+ * case reads the query beside the mark: a marked filter is absent from the
+ * widget's `runtimeFilter`, an unmarked one is in it.
+ */
+describe('DashboardRenderer — the not-filtered mark agrees with the query (objectstack#36372)', () => {
+  const region = {
+    name: 'region',
+    field: 'region',
+    label: 'Region',
+    type: 'select' as const,
+    options: [{ value: 'EMEA', label: 'EMEA' }],
+    defaultValue: 'EMEA',
+  };
+
+  it('marks the opted-out widget, and only it, with the filter it does not follow', async () => {
+    const queryDataset = makeQueryDataset();
+    const schema: DashboardComponentSchema = {
+      type: 'dashboard',
+      globalFilters: [region],
+      widgets: [
+        { id: 'w1', type: 'bar', dataset: 'invoices', values: ['count'] },
+        { id: 'w2', type: 'pie', dataset: 'accounts', values: ['count'], filterBindings: { region: false } },
+        { id: 'w3', type: 'line', dataset: 'orders', values: ['count'], filterBindings: { region: 'ship_region' } },
+      ],
+    };
+    render(<DashboardRenderer schema={schema} dataSource={{ queryDataset }} />);
+
+    await waitFor(() => {
+      expect(lastRuntimeFilter(queryDataset, 'invoices')).toEqual({ region: 'EMEA' });
+      expect(lastRuntimeFilter(queryDataset, 'orders')).toEqual({ ship_region: 'EMEA' });
+    });
+    expect(lastRuntimeFilter(queryDataset, 'accounts')).toBeUndefined();
+
+    const mark = screen.getByTestId('dashboard-widget-filter-mark-w2');
+    expect(mark).toHaveAttribute('data-filters', 'region');
+    expect(mark).toHaveTextContent('Region');
+    expect(screen.queryByTestId('dashboard-widget-filter-mark-w1')).not.toBeInTheDocument();
+    // A rebound filter still reaches the widget, on another field: no mark.
+    expect(screen.queryByTestId('dashboard-widget-filter-mark-w3')).not.toBeInTheDocument();
+  });
+
+  it('marks a widget a filter\'s targetWidgets leaves out', async () => {
+    const queryDataset = makeQueryDataset();
+    const schema: DashboardComponentSchema = {
+      type: 'dashboard',
+      globalFilters: [{ ...region, targetWidgets: ['w1'] } as any],
+      widgets: [
+        { id: 'w1', type: 'bar', dataset: 'invoices', values: ['count'] },
+        { id: 'w2', type: 'pie', dataset: 'accounts', values: ['count'] },
+      ],
+    };
+    render(<DashboardRenderer schema={schema} dataSource={{ queryDataset }} />);
+
+    await waitFor(() => expect(lastRuntimeFilter(queryDataset, 'invoices')).toEqual({ region: 'EMEA' }));
+    expect(lastRuntimeFilter(queryDataset, 'accounts')).toBeUndefined();
+    expect(screen.getByTestId('dashboard-widget-filter-mark-w2')).toHaveAttribute('data-filters', 'region');
+    expect(screen.queryByTestId('dashboard-widget-filter-mark-w1')).not.toBeInTheDocument();
+  });
+
+  it('names the built-in date filter "Date range", never its reserved name', async () => {
+    const queryDataset = makeQueryDataset();
+    const schema: DashboardComponentSchema = {
+      type: 'dashboard',
+      dateRange: { field: 'created_at', defaultRange: 'last_90_days' },
+      widgets: [
+        { id: 'w1', type: 'bar', dataset: 'invoices', values: ['count'] },
+        { id: 'w2', type: 'pie', dataset: 'accounts', values: ['count'], filterBindings: { dateRange: false } },
+      ],
+    } as DashboardComponentSchema;
+    render(<DashboardRenderer schema={schema} dataSource={{ queryDataset }} />);
+
+    await waitFor(() => expect(lastRuntimeFilter(queryDataset, 'invoices')).toHaveProperty('created_at'));
+    expect(lastRuntimeFilter(queryDataset, 'accounts')).toBeUndefined();
+    const mark = screen.getByTestId('dashboard-widget-filter-mark-w2');
+    expect(mark).toHaveAttribute('data-filters', 'dateRange');
+    expect(mark).toHaveTextContent('Not filtered by Date range');
+    expect(screen.queryByTestId('dashboard-widget-filter-mark-w1')).not.toBeInTheDocument();
+  });
+
+  it('draws no mark on a dashboard that declares no filters', async () => {
+    const queryDataset = makeQueryDataset();
+    const schema: DashboardComponentSchema = {
+      type: 'dashboard',
+      widgets: [{ id: 'w1', type: 'bar', dataset: 'invoices', values: ['count'], filterBindings: { region: false } }],
+    };
+    render(<DashboardRenderer schema={schema} dataSource={{ queryDataset }} />);
+    await waitFor(() => expect(queryDataset).toHaveBeenCalled());
+    expect(screen.queryByTestId('dashboard-widget-filter-mark-w1')).not.toBeInTheDocument();
+  });
+});

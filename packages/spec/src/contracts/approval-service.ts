@@ -26,7 +26,13 @@
 // `./sharing-service.js` for the boundary and the measured consequence.
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
 import type { ErrorCode } from '../api/error-code-ledger.zod.js';
-import type { ResumeFailureDetails } from '../api/automation-api.zod.js';
+import type { FlowInnerRefusal, ResumeFailureDetails } from '../api/automation-api.zod.js';
+import type {
+  WORK_CALENDAR_INVALID_CODE,
+  WORK_CALENDAR_NOT_MAINTAINED_CODE,
+  WORK_CALENDAR_UNRESOLVED_CODE,
+  WorkCalendarUnresolvedReason,
+} from '../data/work-calendar.js';
 
 /**
  * Lifecycle states of an approval request, in the order the
@@ -65,6 +71,16 @@ export const APPROVAL_STATUSES = [
 
 /** Lifecycle state of an approval request — derived from {@link APPROVAL_STATUSES}. */
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+
+/**
+ * The most record ids one {@link IApprovalService.getRecordLocks} call — and
+ * one `POST {basePath}/approvals/records/:object/locks` request — carries. A
+ * longer list is refused whole (`400 VALIDATION_ERROR`), never truncated; a
+ * caller with more rows sends them in batches under it. The same cap as the
+ * record-grained explain batch, so a list page that asks both questions splits
+ * its rows the same way.
+ */
+export const APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS = 200;
 
 /**
  * Authored English display label for each {@link APPROVAL_STATUSES} entry —
@@ -299,11 +315,33 @@ export interface ApprovalRequestRow {
    */
   payload_labels?: Record<string, string>;
   /**
-   * SLA deadline, when the node config carries `escalation.timeoutHours`:
-   * `created_at + timeoutHours`. Display-only for now — automatic escalation
-   * needs a scheduler pass and is not yet wired.
+   * SLA deadline, when the node config carries `escalation.timeoutHours`: the
+   * instant the escalation sweep acts on, computed by the same function the
+   * sweep uses. Under `escalation.clock: 'wall_clock'` it is `created_at +
+   * timeoutHours` elapsed hours; under `'working_time'` it is `timeoutHours`
+   * working hours after `created_at` on the escalation's working calendar,
+   * recomputed on every read (ADR-0157 D12). Absent when the calendar cannot
+   * count it; {@link ApprovalRequestRow.sla_due_refusal} then says why.
    */
   sla_due_at?: string;
+  /**
+   * [ADR-0157 D9] Why a `working_time` escalation has no `sla_due_at`: its
+   * working calendar cannot count the deadline. The sweep does not escalate the
+   * request and tries again on its next pass, so once an administrator fixes
+   * the calendar the deadline returns with no other step. `code` is the
+   * calendar refusal's ledger code; `reason` (on `ERR_WORK_CALENDAR_UNRESOLVED`)
+   * says which resolution step failed; `date` (on
+   * `ERR_WORK_CALENDAR_NOT_MAINTAINED`) is the day the calendar is not
+   * maintained for; `message` is the refusal's own English sentence. Absent
+   * whenever `sla_due_at` is present, and on every `wall_clock` escalation.
+   */
+  sla_due_refusal?: {
+    code: typeof WORK_CALENDAR_UNRESOLVED_CODE | typeof WORK_CALENDAR_NOT_MAINTAINED_CODE | typeof WORK_CALENDAR_INVALID_CODE;
+    reason?: WorkCalendarUnresolvedReason;
+    calendar?: string;
+    date?: string;
+    message: string;
+  };
   /**
    * The owning flow's approval steps in graph order, for progress display
    * (resolved on single-request reads when the automation engine is
@@ -411,7 +449,14 @@ export interface ApprovalRequestRow {
    *   routed to an unstaffed position, or whose approvers have all since left,
    *   which would otherwise leave the request undecidable and the record locked
    *   forever. Clients OR it into the decision actions' `visible` gate; the
-   *   service re-checks the same privilege before applying any override.
+   *   service re-checks the same privilege before applying any override. The
+   *   override never APPROVES a request the caller submitted, so the approve
+   *   lever reads `can_override_approve` instead.
+   * - `can_override_approve` — `can_override`, except on a request the caller
+   *   submitted: the override never approves its actor's own request, and the
+   *   approve door refuses one with `403 FORBIDDEN`. Added beside
+   *   `can_override`, which keeps its meaning for reject / reassign / recall.
+   *   Optional only because a server that predates it does not send it.
    *
    * Absent when the row is surfaced outside a service read with a user context
    * (e.g. a raw data-API grid); a `record.viewer.*` predicate then fails closed.
@@ -420,6 +465,7 @@ export interface ApprovalRequestRow {
     can_act: boolean;
     is_submitter: boolean;
     can_override: boolean;
+    can_override_approve?: boolean;
   };
 }
 
@@ -636,6 +682,12 @@ export interface ApprovalActionRow {
 export interface ApprovalDecisionInput {
   decision: 'approve' | 'reject';
   actorId: string;
+  /**
+   * The decision's comment, recorded on the `sys_approval_action` audit row.
+   * A REJECT must carry it as a non-blank string — its reason; `decide()`
+   * refuses a reject whose comment is missing, blank or not a string with
+   * `400 VALIDATION_ERROR` before any write. An approve keeps it optional.
+   */
   comment?: string;
   /**
    * File references (already stored via the storage service) to attach to this
@@ -688,24 +740,33 @@ export interface ApprovalRecallInput {
  * (`api/automation-api.zod.ts`), the structure the automation resume door
  * already publishes inside its `400 FLOW_FAILED` `error.details` (#15221, the
  * ruling's third carrier). They are inherited here, never re-spelled, so the
- * two cannot drift. What this adds is the one member a success envelope
- * cannot leave to its envelope: on the resume door the registered code is
- * the answer's own `code`; on a success answer nothing else names the
- * failure class, so it rides here as {@link code}.
+ * two cannot drift. What this adds is what a success envelope
+ * cannot leave to its envelope: on the resume door the registered code is the
+ * answer's own `code`; on a success answer nothing else names the failure
+ * class, so it rides here as {@link code}. The same holds for the refusal that stranded
+ * the run (#34638): on the resume door `innerRefusal` rides beside these
+ * members in `error.details` (`FlowFailureDetailsSchema`) and `userMessage`
+ * at the envelope's top level, and on the decision doors' thrown
+ * `RESUME_FAILED` both ride the error body (#34579); a success answer has no
+ * envelope to carry either, so they ride here as {@link innerRefusal} and
+ * {@link userMessage} — the same names and shapes, so a caller reads one
+ * spelling on every channel.
  *
  * ⛔ Which is exactly why `ResumeFailureDetailsSchema` is NOT the reader for
- * this member. That schema declares the three shared members and not
- * {@link code}, and it is a plain non-strict `z.object`: parsing a report
- * with it SILENTLY STRIPS the code — the parse SUCCEEDS, raises no
- * `unrecognized_keys` issue, logs nothing, and hands back an object whose
- * failure class is simply gone. The one member the paragraph above calls
- * indispensable is the one the act of validating removes, and nothing in the
- * result says so. On the resume door that schema is the right reader,
- * because there the registered code rides on the `error` envelope it parses
- * beside; here there is no envelope, so read {@link code} off the report
- * itself — it is typed `ErrorCode`, required, and needs no parse at all. Use
- * that schema on this member to read the three shared facts if you like,
- * ⛔ never as a way to obtain the report. Both halves are measured in
+ * this member. That schema declares the three shared members and none of
+ * {@link code}, {@link innerRefusal} or {@link userMessage}, and it is a plain
+ * non-strict `z.object`: parsing a report with it SILENTLY STRIPS all three —
+ * the parse SUCCEEDS, raises no `unrecognized_keys` issue, logs nothing, and
+ * hands back an object whose failure class and refusal are simply gone. The
+ * one member the paragraph above calls indispensable, the code, is among
+ * those the act of validating removes, and nothing in the result says so. On
+ * the resume door that schema is the right reader, because there the
+ * registered code rides on the `error` envelope it parses beside, and the
+ * refusal pair on that envelope too; here there is no envelope, so read
+ * {@link code}, {@link innerRefusal} and {@link userMessage} off the report
+ * itself — the code is typed `ErrorCode`, required, and needs no parse at
+ * all. Use that schema on this member to read the three shared facts if you
+ * like, ⛔ never as a way to obtain the report. Both halves are measured in
  * `contracts/resume-failure-report.pin.test.ts`.
  *
  * ⛔ No new error code is minted under the ruling. `code` is typed as
@@ -720,7 +781,8 @@ export interface ApprovalRecallInput {
  * stands), and it stays exactly as it is. This structure is what a success
  * answer carries, and `finalized` / `decision` are already top-level members
  * of the results that carry it. The two share the `runId` / `repairable`
- * vocabulary through the spec declaration, on purpose.
+ * vocabulary through the spec declaration, on purpose — and the refusal pair
+ * ({@link innerRefusal}, {@link userMessage}) by the same names and shapes.
  *
  * Two halves of ONE telling. The prose `resumeError` beside this member is
  * the human-readable half; this is the machine-readable half. A producer
@@ -745,6 +807,47 @@ export interface ResumeFailureReport extends ResumeFailureDetails {
    * purpose: a success answer has no envelope `code` to fall back on.
    */
   code: ErrorCode;
+  /**
+   * [#34638] The refusal the stranded run's next step met, when it met one —
+   * the engine's own `AutomationResult.innerRefusal` (ruling B′ on #24914),
+   * copied verbatim: `code` in its wire spelling, `message` the refusal's own
+   * text without the node and operation prefixes. The value the decision
+   * doors' thrown `RESUME_FAILED` carries since #34579 (`innerRefusal` on
+   * `StrandedDecisionDetails`), told on the success channel for the strands
+   * that channel reports: a recall whose own resume stranded, and a subflow
+   * PARENT that stranded behind a resume that succeeded. Read the way the
+   * thrown envelope reads it: a value outside the declared shape (a `code`
+   * outside the closed ADR-0112 set, a `message` that is not a string) is
+   * dropped, never relayed.
+   *
+   * Optional, and absent when the run stranded on a fault that met no refusal
+   * (a crash, an unreachable store) — ⛔ never synthesised from the prose, and
+   * never part of the failure class: {@link code} and {@link repairable} are
+   * read the same way with or without it.
+   */
+  innerRefusal?: FlowInnerRefusal;
+  /**
+   * [#34638] The producer-marked end-user text of that refusal — the engine's
+   * `AutomationResult.userMessage`, verbatim. For a record hook that declares
+   * a `refusals` catalogue this is the declared sentence in the RUN's locale
+   * (`AutomationContext.locale`, `contracts/automation-service.ts`), while
+   * {@link innerRefusal}'s `message` keeps the diagnostic text. Every strand
+   * this report tells is a resumed leg, and a resumed leg renders in the
+   * language of whoever STARTED the run — usually the submitter, not this
+   * report's caller: a resume carries no locale of its own, and the decider's
+   * segment takes the decider's identity and grants and keeps the starter's
+   * locale. A run no person started (a record-change, schedule or webhook
+   * trigger) carries no locale, so there the sentence is the catalogue's
+   * authored message.
+   *
+   * Same semantics as on every other channel that carries it (the record
+   * save's error body, every flow door's `FLOW_FAILED`, the decision doors'
+   * `RESUME_FAILED`): presence IS the marking, and a blank or non-string
+   * value is no marking, so it is dropped. Absent when the run met no marked
+   * refusal; it can ride without {@link innerRefusal} (a marked failure that
+   * was no refusal).
+   */
+  userMessage?: string;
 }
 
 /** Result of a recall. */
@@ -781,7 +884,9 @@ export interface ApprovalRecallResult {
    * The machine-readable half of a resume failure this recall tolerated
    * (#15970; the #16472 ruling): the registered code, the `runId` of the run
    * that is actually stranded — which need not be {@link runId}, the run this
-   * request gated — and whether the engine says it is repairable.
+   * request gated — and whether the engine says it is repairable; and, when
+   * the strand met a refusal, that refusal (`innerRefusal` / `userMessage`,
+   * #34638).
    *
    * Optional and ADDITIVE. ⚠️ An absent member means no report was made,
    * never that no run is stranded: a producer that predates this field
@@ -880,11 +985,23 @@ export interface ApprovalDecisionResult {
    * declares — a caller holding only the status code reads a bare 500 as "the
    * decision did not happen", and the row IS terminal.
    *
-   * ⛔ They are not members of this result and must never be added to it:
-   * they ride the ERROR, so declaring them here would declare a success shape
-   * that never carries them. ⛔ Nor are they {@link resumeFailure}, which
-   * reports the other event of the #16472 ruling — a resume failure behind an
-   * answer that still succeeded.
+   * When the run stranded because the step after the decision was REFUSED —
+   * a record hook's declared refusal, a validation rule, a permission — the
+   * same body also carries that refusal (#34579): `innerRefusal`
+   * (`{ code, message }`, the engine's `AutomationResult.innerRefusal`,
+   * ruling B′ on #24914) and the refusal's marked `userMessage`, the text an
+   * approver can read. Both are absent when the run met no refusal (a fault),
+   * and neither moves the status code or the four facts. A flow author who
+   * wants such a refusal handled rather than stranded draws a `fault` edge
+   * from that step: the engine routes the refusal down it like any run-time
+   * failure, and the decision then answers normally.
+   *
+   * ⛔ They are not top-level members of this result and must never be
+   * added to it: they ride the ERROR, so declaring them here would declare a
+   * success shape that never carries them. The other event of the #16472
+   * ruling — a resume failure behind an answer that still succeeded — is told
+   * on {@link resumeFailure}, which carries the same pair under the same
+   * names when THAT strand met a refusal (#34638).
    */
   resumed?: boolean;
   /**
@@ -905,7 +1022,8 @@ export interface ApprovalDecisionResult {
    * answer (#15556; the #16472 ruling): the registered code, the `runId` of
    * the run that is actually stranded — the PARENT's when the strand is a
    * subflow's bubble-up, never the healthy child's that {@link runId} names —
-   * and whether the engine says it is repairable.
+   * and whether the engine says it is repairable; and, when the strand met a
+   * refusal, that refusal (`innerRefusal` / `userMessage`, #34638).
    *
    * Optional and ADDITIVE. ⚠️ An absent member means no report was made,
    * never that no run is stranded: a producer that predates this field
@@ -1013,9 +1131,44 @@ export interface IApprovalService {
   ): Promise<{ locked: boolean } | null>;
 
   /**
+   * **Are these records held by a locking approval?** — {@link getRecordLock}
+   * for a page of rows of one object, in one call, so a list that must know
+   * the lock before it opens a cell editor asks once per page and never once
+   * per row.
+   *
+   * Entry `i` of the answer answers `recordIds[i]` with exactly what
+   * {@link getRecordLock} answers for that id: `{ locked }` when the caller
+   * can read the record, `null` when it cannot or when it does not exist,
+   * ⛔ never an entry that tells the two apart. The same judgement, off the
+   * same snapshot, the record-lock `beforeUpdate` hook enforces. A repeated id
+   * is answered at each of its positions. A caller refused the object's read
+   * outright is refused the same way for every id.
+   *
+   * At most {@link APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS} ids per call; a caller
+   * with more pages under the cap.
+   *
+   * **Optional, and its absence is loud:** a door probes for presence and
+   * answers `501`, never a guess and never one {@link getRecordLock} per id.
+   *
+   * @param object - The target object's name
+   * @param recordIds - The target records' ids, at least one
+   * @returns One entry per id, in order
+   */
+  getRecordLocks?(
+    object: string,
+    recordIds: readonly string[],
+    context: ExecutionContext,
+  ): Promise<Array<{ locked: boolean } | null>>;
+
+  /**
    * Record a decision on a node-driven request. Honours the node's
    * `unanimous` behaviour, finalises the request when satisfied, and resumes
    * the owning flow run down the matching `approve` / `reject` edge.
+   *
+   * A reject carries its reason: one whose `comment` is missing, blank or not
+   * a string is refused with `400 VALIDATION_ERROR` before anything is read
+   * or written ({@link ApprovalDecisionInput.comment}). An approve keeps its
+   * comment optional.
    */
   decide(requestId: string, input: ApprovalDecisionInput, context: ExecutionContext): Promise<ApprovalDecisionResult>;
 

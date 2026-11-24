@@ -9,6 +9,10 @@ import {
     Middleware,
     UNMATCHED_ROUTE_PATTERN,
     createLogger,
+    openRequestSessionRead,
+    withRequestSessionRead,
+    withoutRequestSessionRead,
+    type RequestSessionReadHandle,
 } from '@objectstack/core';
 import type {
     HttpResponseObserver,
@@ -23,7 +27,7 @@ import {
     type MetricsRegistry,
 } from '@objectstack/observability';
 import { Hono } from 'hono';
-import { routePath } from 'hono/route';
+import { matchedRoutes, routePath } from 'hono/route';
 import { serve, type HttpBindings, type Http2Bindings } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 // The TLS listener factory (#16804). `@hono/node-server` takes it as an
@@ -195,6 +199,63 @@ export interface HonoCorsOptions {
      */
     credentials?: boolean;
     maxAge?: number;
+}
+
+/**
+ * The request's headers as this adapter hands them to a {@link Middleware} and
+ * to a route: Hono's lower-cased record, with `host` backfilled from the URL
+ * when the request carries none. A Fetch API `Request` does not expose `Host`
+ * (a forbidden header, derived from the URL by the transport), and
+ * hostname-based routing in REST and the dispatcher depends on it.
+ *
+ * ONE reading for both, so a middleware and the route see the same header set:
+ * the request's session-read carrier (`@objectstack/core`
+ * `readRequestSession`) keys a read by every header, and the inbound rate
+ * limiter's read in the middleware seam is the route's read only when the two
+ * agree.
+ */
+function readRequestHeaders(c: any): Record<string, string> {
+    const headers = c.req.header() as Record<string, string>;
+    if (!headers.host) {
+        try {
+            const u = new URL(c.req.url);
+            if (u.host) headers.host = u.host;
+        } catch { /* non-URL request, leave headers as-is */ }
+    }
+    return headers;
+}
+
+/**
+ * May the route Hono is running now be served the session reads the
+ * middleware seam made for this request (the seam at `seamIndex` among the
+ * handlers Hono matched)? Only when every handler Hono ran between the two is
+ * a middleware the whole server runs (`use('*')`).
+ *
+ * A session read's answer can depend on ambient state a middleware opens for
+ * the handlers below it, which the read's headers do not show: plugin-auth's
+ * door under the auth base path carries the request's address to the reads
+ * made behind it, and the organization's IP list is judged on those reads
+ * only (ADR-0069 D5). That door is a middleware scoped to a path, so a route
+ * behind any such middleware, or behind any other route that matched and
+ * handed the request on, reads for itself in a fresh scope: a read made
+ * outside a door never answers a reader inside it. Anything unreadable
+ * answers no.
+ */
+function seamReadsReachRoute(c: any, seamIndex: number): boolean {
+    try {
+        const routes = matchedRoutes(c);
+        const at = c.req.routeIndex;
+        if (!Number.isInteger(seamIndex) || !Number.isInteger(at) || at <= seamIndex || at >= routes.length) {
+            return false;
+        }
+        for (let i = seamIndex + 1; i < at; i++) {
+            const route = routes[i];
+            if (route?.method !== 'ALL' || (route.path !== '/*' && route.path !== '*')) return false;
+        }
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -714,6 +775,14 @@ export class HonoHttpServer implements IHttpServer {
      */
     private streamedRequests = new WeakSet<object>();
     /**
+     * The session-read scope the {@link installMiddlewareSeam} chain ran in,
+     * with the seam's position among the handlers Hono matched, for the route
+     * that serves the same request ({@link sessionReadScopeForRoute}). Keyed
+     * on the Hono context, the one object the seam and the route share; held
+     * only while the seam is waiting on the route.
+     */
+    private seamSessionReads = new WeakMap<object, { handle: RequestSessionReadHandle; seamIndex: number }>();
+    /**
      * The LAST-RESORT handler installed by {@link setFallbackHandler}, or
      * `undefined` when no consumer installed one. Exactly one — installing
      * again REPLACES, per the contract.
@@ -755,6 +824,7 @@ export class HonoHttpServer implements IHttpServer {
         this.app = new Hono();
         this.installErrorEnvelopeSeam();
         this.installResponseCompressionSeam();
+        this.installSessionReadIsolationSeam();
         // Inside the compression seam, ahead of every other middleware and
         // route, so every reader of a request body reads through the limit.
         installRequestBodyLimit(this.app, () => this.maxRequestBodyBytes);
@@ -794,6 +864,38 @@ export class HonoHttpServer implements IHttpServer {
         });
     }
 
+    /**
+     * Start every request outside any session-read scope (`@objectstack/core`
+     * `withoutRequestSessionRead`). Installed from the constructor, ahead of
+     * every middleware but the compression seam (which reads no session), so a
+     * request this server serves in process from inside another never reaches
+     * the outer request's session reads.
+     *
+     * The scopes themselves are opened where the reads they share are made:
+     * the {@link installMiddlewareSeam} chain runs in one (the inbound rate
+     * limiter reads the caller there), and a route registered through this
+     * class runs in that same scope or a fresh one
+     * ({@link sessionReadScopeForRoute}). Why a scope and not the request
+     * object: the seam and the route each get a request object of their own,
+     * built from the same request, so nothing held on either could carry the
+     * limiter's read to the route.
+     */
+    private installSessionReadIsolationSeam(): void {
+        this.app.use('*', (_c, next) => withoutRequestSessionRead(() => next()));
+    }
+
+    /**
+     * Run a registered route's handler in the session-read scope it may share:
+     * the scope the {@link installMiddlewareSeam} chain ran in, when the chain
+     * ran one and {@link seamReadsReachRoute} admits it, or a fresh one. Either
+     * way the route's own readers (the identity step, REST's gate) share their
+     * reads; only the first lets the route reuse the limiter's.
+     */
+    private sessionReadScopeForRoute<T>(c: any, fn: () => Promise<T>): Promise<T> {
+        const seam = this.seamSessionReads.get(c);
+        return seam && seamReadsReachRoute(c, seam.seamIndex) ? seam.handle.run(fn) : withRequestSessionRead(fn);
+    }
+
     /** The scheme this server binds — derived from {@link tls}, settable nowhere else. */
     getProtocol(): 'http' | 'https' {
         return this.tls ? 'https' : 'http';
@@ -808,9 +910,9 @@ export class HonoHttpServer implements IHttpServer {
             // failed`: a fallback that threw is a broken consumer, not a
             // refusal the consumer declared. The ruling names direct-mount
             // ROUTES, which is exactly this call site.
-            const { response } = await this.runHandler(c, handler, {
+            const { response } = await this.sessionReadScopeForRoute(c, () => this.runHandler(c, handler, {
                 renderDeclaredEnvelope: true,
-            });
+            }));
             // Unchanged, and pinned byte-for-byte: a throw that declared no
             // ADR-0112 envelope, and a handler that simply wrote nothing, both
             // still answer 500 with no cause in the body.
@@ -876,17 +978,8 @@ export class HonoHttpServer implements IHttpServer {
 
         _endParse?.();
 
-        const rawHeaders = c.req.header();
-        // Fetch API `Request` objects don't expose the `Host` header
-        // (it's a forbidden header — derived from the URL by the
-        // transport). Hostname-based routing in REST/dispatcher
-        // depends on it, so we backfill from `c.req.url`.
-        if (!rawHeaders.host) {
-            try {
-                const u = new URL(c.req.url);
-                if (u.host) rawHeaders.host = u.host;
-            } catch { /* non-URL request, leave headers as-is */ }
-        }
+        // `host` backfilled from the URL, as the middleware seam reads it too.
+        const rawHeaders = readRequestHeaders(c);
 
         const req = {
             params: readRouteParams(c),
@@ -1722,12 +1815,16 @@ export class HonoHttpServer implements IHttpServer {
         this.middlewareSeamInstalled = true;
 
         this.app.use('*', async (c, next) => {
+            // This seam's position among the handlers Hono matched, read before
+            // anything awaits: see `seamReadsReachRoute`.
+            const seamIndex = c.req.routeIndex;
             const chain = this.middlewares
                 .filter((m) => m.path === undefined || matchesRoutePattern(m.path, c.req.path))
                 .map((m) => m.handler);
             if (chain.length === 0) return next();
 
-            const headers = c.req.header() as Record<string, string>;
+            // The route's own reading, `host` included: see `readRequestHeaders`.
+            const headers = readRequestHeaders(c);
             const req = {
                 params: {},
                 query: readQuery(c),
@@ -1774,16 +1871,29 @@ export class HonoHttpServer implements IHttpServer {
                 // middleware cannot black-hole a request by accident.
                 if (!nextCalled && !responded) await run();
             };
-            await run();
 
-            if (responded && !continued) {
-                if (bodyJson !== undefined) {
-                    outHeaders.set('Content-Type', 'application/json');
-                    return new Response(JSON.stringify(bodyJson), { status, headers: outHeaders });
+            // The chain runs in a session-read scope of its own (the inbound
+            // rate limiter reads the caller here), held open for the route that
+            // serves this request and closed when that route has answered:
+            // {@link sessionReadScopeForRoute}. Hono's own `next()` runs outside
+            // it, so a raw-app handler below never reaches the chain's reads.
+            const sessionReads = openRequestSessionRead();
+            try {
+                await sessionReads.run(run);
+
+                if (responded && !continued) {
+                    if (bodyJson !== undefined) {
+                        outHeaders.set('Content-Type', 'application/json');
+                        return new Response(JSON.stringify(bodyJson), { status, headers: outHeaders });
+                    }
+                    return new Response((bodyRaw ?? '') as any, { status, headers: outHeaders });
                 }
-                return new Response((bodyRaw ?? '') as any, { status, headers: outHeaders });
+                this.seamSessionReads.set(c, { handle: sessionReads, seamIndex });
+                return await next();
+            } finally {
+                this.seamSessionReads.delete(c);
+                sessionReads.close();
             }
-            return next();
         });
     }
 

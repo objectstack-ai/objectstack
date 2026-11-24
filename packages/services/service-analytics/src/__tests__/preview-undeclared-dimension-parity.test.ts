@@ -6,18 +6,18 @@
  *
  * ## What these pins hold
  *
- * - A dimension whose field the object does not have (`bogus`) is refused
- *   `INVALID_FIELD` / 400 on every face, with the same message naming the
- *   member and the valid dimensions, alone or beside a declared dimension.
- *   Before, the preview grouped every row under one `null` key and served the
- *   total.
- * - CONTROL: a declared dimension and an undeclared one naming a real field
- *   (`amount`) serve the same groups on every face.
- * - The preview asks its gates in the live order, so a query with two mistakes
- *   is answered about the same one first on every face: a measure field the
- *   object does not have before a bogus dimension, a bogus dimension before
- *   the field-type door, and the field-type door before the column-reference
- *   gate.
+ * The dataset is a closed surface (ADR-0021, ADR-0149 D1): a selection
+ * dimension the dataset does not declare is refused by the closed-member rule
+ * (`dataset-declared-members.ts`) before any face reads anything — whether its
+ * field is missing (`bogus`) or real (`amount`), alone or beside a declared
+ * dimension — `INVALID_FIELD` / 400 with one message on every face, naming
+ * the member, the declared members and the remedy. Before, the faces judged
+ * the dimension's field, and a real one grouped.
+ *
+ * - CONTROL: a declared dimension serves the same groups on every face.
+ * - A query with two undeclared members names both and is answered about the
+ *   first in the closed-member rule's order (measures, then dimensions, then
+ *   time dimensions), the same on every face.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -118,58 +118,49 @@ describe('[#28201] an undeclared dimension on the native, ObjectQL and draft-pre
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
-  it("refuses 'bogus' INVALID_FIELD / 400 with one message on every face", async () => {
-    const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, { dimensions: ['bogus'], measures: ['total'] }))));
-    for (const err of refusals) {
-      expect(err.code, err.message).toBe('INVALID_FIELD');
-      expect(err.status).toBe(400);
-      expect(err.param).toBe('dimensions');
-      expect(err.field).toBe('bogus');
-      expect(err.dimension).toBe('bogus');
-      expect(err.message).toContain("Dimension 'bogus' on cube 'os28201_deals' groups by field 'bogus'");
-      expect(err.message).toContain('Valid dimensions: region.');
-    }
-    const [native, objectql, preview] = refusals;
-    expect(preview.message).toBe(native.message);
-    expect(objectql.message).toBe(native.message);
-  });
-
-  it("refuses 'bogus' beside a declared dimension with one message on every face", async () => {
-    const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, { dimensions: ['region', 'bogus'], measures: ['deals'] }))));
-    for (const err of refusals) {
-      expect(err.code, err.message).toBe('INVALID_FIELD');
-      expect(err.status).toBe(400);
-      expect(err.field).toBe('bogus');
-    }
-    expect(refusals[2].message).toBe(refusals[0].message);
-  });
-
-  for (const [dimension, expected] of [
-    ['region', [{ key: 'amer', total: 150 }, { key: 'emea', total: 30 }]],
-    ['amount', [{ key: 30, total: 30 }, { key: 50, total: 50 }, { key: 100, total: 100 }]],
+  for (const [label, selection, member] of [
+    ["'bogus'", { dimensions: ['bogus'], measures: ['total'] }, 'bogus'],
+    ["'bogus' beside a declared dimension", { dimensions: ['region', 'bogus'], measures: ['deals'] }, 'bogus'],
+    ["'amount', a real field the dataset does not declare", { dimensions: ['amount'], measures: ['total'] }, 'amount'],
   ] as const) {
-    it(`CONTROL: '${dimension}' serves the same groups on every face`, async () => {
-      for (const face of FACES) {
-        const result = await ask(face, { dimensions: [dimension], measures: ['total'] });
-        const groups = (result.rows as Array<Record<string, unknown>>)
-          .map((r) => ({ key: r[dimension], total: Number(r.total) }))
-          .sort((a, b) => String(a.key).localeCompare(String(b.key), undefined, { numeric: true }));
-        expect(groups, face).toEqual(expected);
+    it(`refuses ${label} INVALID_FIELD / 400 with one message on every face`, async () => {
+      const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, selection))));
+      for (const err of refusals) {
+        expect(err.code, err.message).toBe('INVALID_FIELD');
+        expect(err.status).toBe(400);
+        expect(err.param).toBe('dimensions');
+        expect((err as { member?: string }).member).toBe(member);
+        expect(err.message).toContain(`The dataset "os28201_deals" does not declare the dimension "${member}".`);
+        expect(err.message).toContain('Dimensions you may use: region.');
       }
+      const [native, objectql, preview] = refusals;
+      expect(preview.message).toBe(native.message);
+      expect(objectql.message).toBe(native.message);
     });
   }
 
-  for (const [label, selection, param] of [
-    ["'nope' beside 'bogus': the measure's missing field", { dimensions: ['bogus'], measures: ['nope'] }, 'measures'],
-    ["'region_sum' beside 'bogus': the dimension's missing field", { dimensions: ['bogus'], measures: ['region_sum'] }, 'dimensions'],
-    ["'amount + 1' beside 'region_sum': the field-type door", { dimensions: ['region'], measures: ['amount + 1', 'region_sum'] }, 'measures'],
+  it("CONTROL: 'region' serves the same groups on every face", async () => {
+    for (const face of FACES) {
+      const result = await ask(face, { dimensions: ['region'], measures: ['total'] });
+      const groups = (result.rows as Array<Record<string, unknown>>)
+        .map((r) => ({ key: r.region, total: Number(r.total) }))
+        .sort((x, y) => String(x.key).localeCompare(String(y.key)));
+      expect(groups, face).toEqual([{ key: 'amer', total: 150 }, { key: 'emea', total: 30 }]);
+    }
+  });
+
+  for (const [label, selection, param, named] of [
+    ["'nope' beside 'bogus': the measure", { dimensions: ['bogus'], measures: ['nope'] }, 'measures', 'measure "nope", dimension "bogus"'],
+    ["'region_sum' beside 'bogus': the measure", { dimensions: ['bogus'], measures: ['region_sum'] }, 'measures', 'measure "region_sum", dimension "bogus"'],
+    ["'amount + 1' beside 'region_sum': the first measure", { dimensions: ['region'], measures: ['amount + 1', 'region_sum'] }, 'measures', 'measure "amount + 1", measure "region_sum"'],
   ] as const) {
-    it(`two mistakes, ${label} first, on every face`, async () => {
+    it(`two mistakes, ${label} first, both named, on every face`, async () => {
       const refusals = await Promise.all(FACES.map((face) => refusalOf(ask(face, selection))));
       for (const err of refusals) {
         expect(err.code, err.message).toBe('INVALID_FIELD');
         expect(err.status).toBe(400);
         expect(err.param).toBe(param);
+        expect(err.message).toContain(`does not declare the ${named}.`);
       }
       expect(refusals[2].message).toBe(refusals[0].message);
     });

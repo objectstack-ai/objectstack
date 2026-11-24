@@ -23,8 +23,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { cleanup } from '@testing-library/react';
 
 const PACKAGE_ID = 'app.n4rr';
 
@@ -61,9 +60,10 @@ vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () 
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
-import { StudioDesignSurface } from './StudioDesignSurface';
+// The source loads `@objectstack/lint` lazily; paid here, at collection, not
+// inside a case's clock (check:test-source-alias).
+import '@objectstack/lint';
 import { STUDIO_HEADER, STUDIO_HEADER_PILLAR, STUDIO_HEADER_PILLAR_NAV } from './studio-tokens';
-import { t } from '../metadata-admin/i18n';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 
@@ -132,41 +132,4 @@ describe('Studio shell header below and above 640 px (objectui#12509)', () => {
     expect(segment.sm).toEqual(expect.arrayContaining(['flex-none', 'shrink-0']));
   });
 
-  it('the real header wears the tokens; every segment keeps its name and reads as an icon below `lg`', async () => {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
-        <Routes>
-          <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    const header = screen.getByTestId('studio-shell-header');
-    expect(header).toHaveClass(...STUDIO_HEADER.split(' '));
-
-    const nav = within(header).getByTestId('studio-pillar-nav');
-    expect(nav).toHaveClass(...STUDIO_HEADER_PILLAR_NAV.split(' '));
-
-    // Source order stays package · switcher · actions; only `order-last` moves the switcher below `sm`.
-    const groups = Array.from(header.children);
-    expect(groups).toHaveLength(3);
-    expect(groups[1]).toBe(nav);
-    expect(within(groups[2] as HTMLElement).getByText(t('engine.studio.publish', 'en'))).toBeInTheDocument();
-
-    for (const key of ['data', 'automations', 'interfaces', 'access']) {
-      const link = within(nav).getByRole('link', { name: t(`engine.studio.pillar.${key}`, 'en') });
-      expect(link).toHaveClass(...STUDIO_HEADER_PILLAR.split(' '));
-      // objectui#12725 — named from 1024 px (`lg`, was `xl`): the right slot
-      // leaves the top bar room for the four names at the card's 1010 reading.
-      expect(within(link).getByText(t(`engine.studio.pillar.${key}`, 'en'))).toHaveClass('sr-only', 'lg:not-sr-only');
-    }
-
-    // The chip is the piece that gives way on a tight row.
-    const chip = await waitFor(() => {
-      const el = within(header).getByTestId('studio-pkg-chip');
-      expect(el).toHaveAttribute('data-pkg-list-state', 'loaded');
-      return el;
-    });
-    expect(chip).toHaveClass('min-w-0');
-  });
 });

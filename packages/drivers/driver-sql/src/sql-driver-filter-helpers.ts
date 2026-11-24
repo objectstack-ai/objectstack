@@ -14,7 +14,7 @@
  * `resolveWithheldFilterRefusal`, `logWithheldFilterDiagnostic`,
  * `withWithheldFilterLog`, `compileFilters`, `applyContainsLike`,
  * `applyFilterCondition`, `declaredFieldsFor`, `applyFalseConstant` moved out
- * of `sql-driver.ts` whole by `scripts/codemod-split-sql-driver.mjs`.
+ * of `sql-driver.ts` whole (split by #29598 and #30441).
  *
  * A MOVE, not a redesign. {@link FilterHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`
@@ -39,12 +39,14 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
-import { isComposedReadableIds, resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
+import { isComposedReadableIds, isFixedReadLeaf, resolveFilterSubtreeProvenance } from '@objectstack/spec/data';
 import type { DriverOptions, ValueShapeFieldDef } from '@objectstack/spec/data';
-import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAsNumber, refuseReadableIdsOnce, temporalStorageForm } from '@objectstack/core';
+import { JSON_COLUMN_INCOMPATIBLE_OPERATORS, findMisplacedReadableIds, presentAsNumber, refuseFixedReadLeafOnce, refuseReadableIdsOnce, temporalStorageForm } from '@objectstack/core';
 import type { JsonColumnFieldClass } from '@objectstack/core';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { emitBalancedGroup } from './sql-driver-balanced-group.js';
+import { findMisplacedFixedReadLeaf, misplacedFixedReadLeafMessage } from './fixed-read-leaf-compile.js';
+import { presentStoredBoolean, sqliteBooleanBinding } from './sql-driver-sqlite-serialisation.js';
 import type { Knex } from 'knex';
 import {
   AUDIT_TIMESTAMP_COLUMNS, CROSS_FIELD_COMPARISON_OPERATORS, SQLITE_TIME_EXPR_REFS, TEXT_OPERATORS,
@@ -100,6 +102,8 @@ export interface FilterHelpersHost {
   readonly dateFieldsOnInstantColumn: SqlDriver['dateFieldsOnInstantColumn'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
   filterColumnExpr: SqlDriver['filterColumnExpr'];
+  readonly fixedReadLeafRefusalLog: SqlDriver['fixedReadLeafRefusalLog'];
+  fixedReadLeafSubquery: SqlDriver['fixedReadLeafSubquery'];
   isJsonColumn: SqlDriver['isJsonColumn'];
   readonly isMssql: SqlDriver['isMssql'];
   readonly isMysql: SqlDriver['isMysql'];
@@ -176,9 +180,16 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#coerceFilterValue`; the method's docblock there is its contract. */
-  static coerceFilterValue(this: Pick<FilterHelpersHost, 'coerceFilterValue' | 'isMssql' | 'isOracle' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
+  static coerceFilterValue(this: Pick<FilterHelpersHost, 'booleanFields' | 'coerceFilterValue' | 'isMssql' | 'isOracle' | 'isSqlite' | 'oracleRawUuidFieldsByObject' | 'oracleUuidBinding' | 'storageDatetimeValue' | 'temporalFieldKind' | 'toDateOnly'>, table: string | null, field: string, value: any): any {
     if (value == null || !table) return value;
     if (Array.isArray(value)) return value.map((v) => this.coerceFilterValue(table, field, v));
+
+    // [#35341] A boolean comparand against a declared scalar boolean column is
+    // bound the way `formatInput` binds the write (`sqliteBooleanBinding`), so
+    // `= false` selects the rows the row read presents as `false`.
+    if (this.isSqlite && typeof value === 'boolean' && this.booleanFields[table]?.includes(field) === true) {
+      return sqliteBooleanBinding(value);
+    }
 
     // [#31390] Oracle: a comparand against a `RAW(16)` uuid column (as the
     // catalog reports it — `SqlDriver#primeOracleRawUuidColumns`) binds as
@@ -331,7 +342,10 @@ export class FilterHelpersFacet {
         // `distinct()` — the divergence the conformance file's §D pins closed.
         return presentAuditTimestampOutput(value);
       case 'boolean':
-        return Boolean(value);
+        // [#34974] The presenter `formatOutput` applies to a `find()` row, so
+        // the text `'0'` / `'false'` a TEXT-affinity or unconverted column
+        // holds presents as `false` here too, never `Boolean('0')`.
+        return presentStoredBoolean(value);
       case 'number':
         // [#20889] The presenter lives in `@objectstack/core`, beside
         // `AGGREGATE_ANSWER_KIND`, so the analytics native-SQL face presents
@@ -513,13 +527,20 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#applyFilters`; the method's docblock there is its contract. */
-  static applyFilters(this: Pick<FilterHelpersHost, 'compileFilters' | 'logger' | 'readableIdsDriverName' | 'readableIdsRefusalLog' | 'resolveWithheldFilterRefusal'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+  static applyFilters(this: Pick<FilterHelpersHost, 'compileFilters' | 'fixedReadLeafRefusalLog' | 'logger' | 'readableIdsDriverName' | 'readableIdsRefusalLog' | 'resolveWithheldFilterRefusal'>, builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
     // [ADR-0139 D3] A `ReadableIds` leaf this compiler will not evaluate — an
     // UNCOMPOSED one anywhere, a composed one outside a `$in` comparand — is
     // refused before anything compiles: INTERNAL_ERROR / 500, logged at
     // `error` once per driver. ⛔ Never evaluated as "no restriction".
     const misplaced = findMisplacedReadableIds(filters, true);
     if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
+    // [ADR-0155 D1, D4] Likewise a fixed-read leaf anywhere but as a field's
+    // `$in` comparand, the one position `applyFilterCondition` compiles it in:
+    // the same envelope, logged once per driver on its own flag.
+    const misplacedLeaf = findMisplacedFixedReadLeaf(filters);
+    if (misplacedLeaf) {
+      throw refuseFixedReadLeafOnce(this.readableIdsDriverName, misplacedFixedReadLeafMessage(misplacedLeaf), this.logger, this.fixedReadLeafRefusalLog);
+    }
     try {
       this.compileFilters(builder, filters, options);
     } catch (err) {
@@ -686,7 +707,7 @@ export class FilterHelpersFacet {
   }
 
   /** The body of `SqlDriver#applyFilterCondition`; the method's docblock there is its contract. */
-  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isMssql' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'mssqlGuidColumnsByObject' | 'oracleRawUuidFieldsByObject' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog'>,
+  static applyFilterCondition(this: Pick<FilterHelpersHost, 'applyContainsLike' | 'applyCrossFieldComparison' | 'applyEmptyOperator' | 'applyFalseConstant' | 'applyFilterCondition' | 'applyJsonMembership' | 'applyLike' | 'applyLikePattern' | 'applyNormalizedComparison' | 'applyNowAnchorComparison' | 'applyNullSafeNegative' | 'applyTextOperatorOverNonTextColumn' | 'assertOperatorAppliesToColumn' | 'coerceFilterValue' | 'coercionKey' | 'filterColumnExpr' | 'isJsonColumn' | 'isMssql' | 'isNonTextColumn' | 'isOracle' | 'mapSortField' | 'mssqlGuidColumnsByObject' | 'oracleRawUuidFieldsByObject' | 'readableIdsSubquery' | 'remoteColumn' | 'withWithheldFilterLog' | 'fixedReadLeafSubquery' | 'readableIdsDriverName'>,
     builder: Knex.QueryBuilder,
     condition: any,
     logicalOp: 'and' | 'or' = 'and',
@@ -832,6 +853,19 @@ export class FilterHelpersFacet {
           if (rawOp === '$in' && isComposedReadableIds(opValue)) {
             const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
             (builder as any)[mIn](field, this.readableIdsSubquery(opValue, options));
+            continue;
+          }
+          // [ADR-0155 D2, D4] A fixed-read leaf, the other non-list a `$in` may
+          // hold, compiles to its fixed inner read in the list's own position,
+          // `field IN (SELECT …)` (`SqlDriver#fixedReadLeafSubquery`), under the
+          // outer statement's own wall and nothing else. `applyFilters` refused
+          // it at every other position. The object and column it is compared
+          // with type the inner read on PostgreSQL (ADR-0155 O2); on Oracle a
+          // RAW(16) uuid column, read as the list's `HEXTORAW` binding reads it.
+          if (rawOp === '$in' && isFixedReadLeaf(opValue)) {
+            const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
+            const oracleRawUuid = this.isOracle && this.oracleRawUuidFieldsByObject.get(table ?? '')?.has(localField) === true;
+            (builder as any)[mIn](field, this.fixedReadLeafSubquery(opValue, { object: table, column: field, evaluator: this.readableIdsDriverName, oracleRawUuid, transaction: options?.transaction }));
             continue;
           }
           // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar

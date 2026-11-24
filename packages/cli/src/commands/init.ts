@@ -975,6 +975,7 @@ export const TEMPLATES: Record<string, {
       return {
         '@objectstack/cli': pkgVersion(),
         'typescript': SCAFFOLD_TYPESCRIPT_RANGE,
+        'vitest': SCAFFOLD_VITEST_RANGE,
       };
     },
     scripts: {
@@ -989,6 +990,7 @@ export const TEMPLATES: Record<string, {
       deploy: 'objectstack deploy',
       validate: 'objectstack validate',
       lint: 'objectstack lint',
+      test: 'vitest run',
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
@@ -1022,6 +1024,35 @@ ${renderWiredStackKeys()}
 });
 `,
     srcFiles: withWiredBarrels({
+      // The starter test the `test` script runs (#35218); the plugin template's
+      // `package.test.ts` is the same shape and says why one has to ship.
+      'app.test.ts': () => `import { describe, expect, it } from 'vitest';
+import stack from './objectstack.config';
+import * as objects from './src/objects';
+
+// Importing objectstack.config.ts runs defineStack(), which checks the
+// definition against the ObjectStack protocol and throws on anything the
+// protocol refuses, so a definition the platform would refuse fails this file
+// before any test in it runs.
+//
+// The test below reads what the app declares. To test what the engine does
+// with a record (a required field refused, the rule a hook enforces, who sees
+// which rows), add @objectstack/verify and boot the stack with bootStack; the
+// objectstack-project skill shows how.
+describe('this app', () => {
+  it('is an app that hands every object in src/objects to the stack', () => {
+    expect(stack.manifest?.type).toBe('app');
+
+    // An object src/objects/index.ts exports is loaded only when the config
+    // hands it to the stack. One the config drops is never loaded, and
+    // \`objectstack validate\` neither counts nor checks it.
+    const loaded = (stack.objects ?? []).map((object) => object.name);
+    for (const object of Object.values(objects)) {
+      expect(loaded).toContain(object.name);
+    }
+  });
+});
+`,
       'src/objects/index.ts': (_name, namespace) => starterObjectExport(namespace),
       'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema, Field } from '@objectstack/spec/data';
 
@@ -1270,7 +1301,7 @@ describe('this package', () => {
   },
 
   empty: {
-    description: 'Minimal project with just a config file',
+    description: 'Minimal project: a config file and one starter test',
     get dependencies() {
       return {
         '@objectstack/spec': pkgVersion(),
@@ -1280,12 +1311,14 @@ describe('this package', () => {
       return {
         '@objectstack/cli': pkgVersion(),
         'typescript': SCAFFOLD_TYPESCRIPT_RANGE,
+        'vitest': SCAFFOLD_VITEST_RANGE,
       };
     },
     scripts: {
       build: 'objectstack compile',
       validate: 'objectstack validate',
       lint: 'objectstack lint',
+      test: 'vitest run',
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
@@ -1315,7 +1348,31 @@ export default defineStack({
   },
 });
 `,
-    srcFiles: {},
+    // The starter test the `test` script runs (#35218): the bundled template's
+    // CI runs `pnpm test`, and a `test` script with no test file fails (see the
+    // plugin template's `package.test.ts`). It reads the definition only; the
+    // comment points at `bootStack` for tests that need the engine.
+    srcFiles: {
+      'project.test.ts': () => `import { describe, expect, it } from 'vitest';
+import stack from './objectstack.config';
+
+// Importing objectstack.config.ts runs defineStack(), which checks the
+// definition against the ObjectStack protocol and throws on anything the
+// protocol refuses, so a definition the platform would refuse fails this file
+// before any test in it runs.
+//
+// The test below reads what the project declares. To test what the engine
+// does with a record (a required field refused, the rule a hook enforces, who
+// sees which rows), add @objectstack/verify and boot the stack with bootStack;
+// the objectstack-project skill shows how.
+describe('this project', () => {
+  it('declares an app with a namespace', () => {
+    expect(stack.manifest?.type).toBe('app');
+    expect(stack.manifest?.namespace).toBeTruthy();
+  });
+});
+`,
+    },
   },
 };
 

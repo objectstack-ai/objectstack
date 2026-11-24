@@ -45,7 +45,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "資格情報の使用",
           scim_refused: "SCIM 要求の拒否",
           audit_signing_key_change: "監査署名キーの変更",
-          dataset_query: "データセットクエリ"
+          dataset_query: "データセットクエリ",
+          scim_manager_unresolved: "SCIM マネージャーの未解決"
         }
       },
       user_id: {
@@ -264,6 +265,18 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "編集日時"
+      },
+      is_resolved: {
+        label: "解決済み",
+        help: "このトップレベルのコメントから始まるスレッドが解決済みかどうか。返信には設定できません"
+      },
+      resolved_by: {
+        label: "解決者",
+        help: "スレッドを解決したユーザー。プラットフォームが記録し、作成者は書き込めません"
+      },
+      resolved_at: {
+        label: "解決日時",
+        help: "スレッドが解決された日時。プラットフォームが記録し、作成者は書き込めません"
       },
       created_at: {
         label: "作成日時"

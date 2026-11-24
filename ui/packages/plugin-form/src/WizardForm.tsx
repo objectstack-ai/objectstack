@@ -22,6 +22,7 @@ import {
   evalFieldPredicate,
   isMissingForRequired,
   isServerOwnedValue,
+  planObjectFormulas,
   requiredWhenRestsOnStoredRecord,
 } from '@object-ui/core';
 import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
@@ -485,7 +486,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
   const { userId: currentUserId } = perms;
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
   // field opens on in create mode.
-  const { currency: homeCurrency } = useLocalization();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   const { t } = useWizardTranslation();
   // Upload-in-flight gate (objectui#10166). Scoped to the FINAL commit, not to
   // step navigation: moving between steps writes nothing, and blocking Next
@@ -661,7 +662,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           // Declared static defaults are this wizard's opening values (#4047)
           // — see `schemaDefaults` for the create-only boundary and for why
           // runtime defaults are left to the server.
-          setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
+          setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency, homeTimeZone })));
           seededRef.current = true;
         }
         // Not a read, so no earlier record read's failure describes the form.
@@ -800,6 +801,20 @@ export const WizardForm: React.FC<WizardFormProps> = ({
    */
   const predicateScope = usePredicateScope();
 
+  /**
+   * The object's `formula` fields, planned from the schema this wizard already
+   * read, for the acting user of the predicate scope (ADR-0113, formula
+   * paragraph). The final gate judges field rules on `plan.compute(record)`,
+   * the value a read of the written record would serve, as the form renderer
+   * does (`objectFormulas.ts`): never on the formula value last read.
+   * `undefined` when the object declares no formula, or its schema read
+   * failed or was never made, and the gate then judges the record as held.
+   */
+  const formulaPlan = useMemo(
+    () => planObjectFormulas(objectSchema?.fields, predicateScope),
+    [objectSchema, predicateScope],
+  );
+
   // Current section fields
   const currentSectionFields = useMemo(() => {
     if (currentStep >= 0 && currentStep < totalSteps) {
@@ -868,17 +883,28 @@ export const WizardForm: React.FC<WizardFormProps> = ({
     ): { missing: Map<number, string[]>; faultedVisibleWhen: Map<number, string[]> } => {
       const out = new Map<number, string[]>();
       const faultedVisibleWhen = new Map<number, string[]>();
+      // The record the rules are judged on: the object's formulas computed over
+      // it (see `formulaPlan`). Emptiness is still read off `record`, the values
+      // that are written.
+      const ruleRecord = formulaPlan ? formulaPlan.compute(record) : record;
       schema.sections.forEach((section, index) => {
         for (const field of buildSectionFields(section)) {
           const name = field?.name;
           if (!name || (field as any).hidden === true) continue;
+          // A `visibleWhen` reading a formula the form cannot compute is dropped,
+          // as the step form that draws the field drops it: shown, keeping its
+          // `required`, and no fault (`withoutUnservableVisibleWhen`).
+          const visibleWhen =
+            formulaPlan && formulaPlan.unservableReadsOf((field as any).visibleWhen).length > 0
+              ? undefined
+              : (field as any).visibleWhen;
           const state = resolveFieldRuleState(
             {
-              visibleWhen: (field as any).visibleWhen,
+              visibleWhen,
               readonlyWhen: (field as any).readonlyWhen,
               requiredWhen: (field as any).requiredWhen,
             },
-            record,
+            ruleRecord,
             {
               required: !!field.required,
               readonly: (field as any).readonly === true,
@@ -913,7 +939,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           // receives the ADR-0089 canonical view-level `visibleWhen` spelling.
           const viewVisible =
             (field as any).visibleOn == null ||
-            evalFieldPredicate((field as any).visibleOn, record, true, undefined, predicateScope, {
+            evalFieldPredicate((field as any).visibleOn, ruleRecord, true, undefined, predicateScope, {
               context: `visibleOn of field '${name}'`,
             });
           // A hidden or read-only field is not the user's to fill in.
@@ -938,7 +964,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
       });
       return { missing: out, faultedVisibleWhen };
     },
-    [schema.sections, buildSectionFields, isCreateWizard, isEditWizard, persistedRecord, predicateScope],
+    [schema.sections, buildSectionFields, isCreateWizard, isEditWizard, persistedRecord, predicateScope, formulaPlan],
   );
 
   // Handle step data collection (merge partial data into formData)
@@ -1129,7 +1155,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
               // Back to a fresh step 1 for the next entry — "fresh" means the
               // same opening values the wizard had, defaults included (#4047),
               // not a blank object the first entry never started from.
-              setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
+              setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency, homeTimeZone })));
               setCompletedSteps(new Set());
               setCurrentStep(0);
               setResetNonce((n) => n + 1);
@@ -1186,7 +1212,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
           if (schema.resetOnSuccess && schema.mode === 'create') {
             // Back to a fresh step 1 for the next entry — same opening values
             // as the first entry, defaults included (#4047).
-            setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency })));
+            setFormData(holdCreateSeed(createSeedRef, seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency, homeTimeZone })));
             setCompletedSteps(new Set());
             setCurrentStep(0);
             setResetNonce((n) => n + 1);
@@ -1249,7 +1275,7 @@ export const WizardForm: React.FC<WizardFormProps> = ({
   if (error) {
     return (
       <div className="p-4 border border-red-300 bg-red-50 rounded-md">
-        <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+        <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
         <p className="text-red-600 text-sm mt-1">{error.message}</p>
       </div>
     );

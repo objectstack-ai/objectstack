@@ -47,6 +47,7 @@ let appsFixture: any[] = [];
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
   useParams: () => ({ appName: routeAppNameFixture }),
+  useLocation: () => ({ pathname: '/', search: '' }),
 }));
 
 vi.mock('../../context/NavigationContext', () => ({
@@ -73,9 +74,10 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 vi.mock('@object-ui/components', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   Button: ({ children, ...p }: any) => <button type="button" {...p}>{children}</button>,
-  Popover: ({ children }: any) => <div>{children}</div>,
-  PopoverTrigger: ({ children }: any) => <div>{children}</div>,
-  PopoverContent: ({ children }: any) => <div>{children}</div>,
+  Sheet: ({ children }: any) => <div>{children}</div>,
+  SheetTrigger: ({ children }: any) => <div>{children}</div>,
+  SheetContent: ({ children }: any) => <div>{children}</div>,
+  SheetTitle: ({ children }: any) => <div>{children}</div>,
   Tabs: ({ children }: any) => <div>{children}</div>,
   TabsList: ({ children }: any) => <div>{children}</div>,
   TabsTrigger: ({ children }: any) => <button type="button">{children}</button>,

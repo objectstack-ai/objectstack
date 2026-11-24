@@ -133,7 +133,7 @@ describe('control cards — scored end to end against their golden builds', () =
       },
       actions: 0,
       grants: 6,
-      passedOf: [12, 26],
+      passedOf: [12, 28],
     },
     invoice_with_line_items: {
       tags: {
@@ -146,7 +146,7 @@ describe('control cards — scored end to end against their golden builds', () =
       },
       actions: 0,
       grants: 8,
-      passedOf: [20, 37],
+      passedOf: [20, 39],
     },
     project_with_tasks: {
       tags: {
@@ -158,7 +158,7 @@ describe('control cards — scored end to end against their golden builds', () =
       },
       actions: 0,
       grants: 5,
-      passedOf: [20, 32],
+      passedOf: [20, 34],
     },
   };
 
@@ -183,12 +183,14 @@ describe('control cards — scored end to end against their golden builds', () =
     // Each persona's own set, named as the runner grants it with no namespace
     // (its id): the sdr reads accounts and works contacts; the partner user
     // creates contacts and holds no grant on accounts, so its refused account
-    // edit is refused by the set.
+    // edit is refused by the set. The sdr's deletes are of contacts the admin
+    // owns, so its set also lifts the platform's owner-only delete floor
+    // (`writeScope: 'org'`; Modify All would unmask `email`).
     stack.permissions = [
       {
         name: 'sdr',
         label: 'SDR',
-        objects: { account: { allowRead: true }, contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+        objects: { account: { allowRead: true }, contact: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, writeScope: 'org' } },
         fields: { 'contact.email': { readable: false, editable: false } },
       },
       { name: 'partner_user', label: 'Partner User', objects: { contact: { allowRead: true, allowCreate: true } } },
@@ -209,6 +211,7 @@ describe('control cards — scored end to end against their golden builds', () =
     for (const degrade of [
       (a: Bag) => { a.permissions = []; },
       (a: Bag) => { delete a.permissions[0].objects.contact.allowEdit; },
+      (a: Bag) => { delete a.permissions[0].objects.contact.writeScope; },
       (a: Bag) => { a.permissions[1].objects.account = { allowRead: true, allowEdit: true }; },
       (a: Bag) => { a.actions = []; },
       (a: Bag) => { delete a.actions.find((x: Bag) => x.name === 'delete_contact').ai.requiresConfirmation; },
@@ -220,13 +223,22 @@ describe('control cards — scored end to end against their golden builds', () =
       expect(scoreScenarioArtifact(a, card).score!).toBeLessThan(1);
     }
 
-    // The sdr's delete waits on confirmation, and the build declares the
-    // card's confirm-gated delete_contact: withholding the raw delete is the
-    // route the card designs, so the check leaves both figures, never a pass.
+    // The sdr deletes a contact it names outright (`remove_ben`, applied: the
+    // maintainer's 2026-11-16 ruling) beside the ambiguous delete that waits on
+    // confirmation, so withholding the raw delete is measured, and fails, even
+    // though the build declares the card's confirm-gated delete_contact.
     const noDelete = structuredClone(complete);
     delete noDelete.permissions[0].objects.contact.allowDelete;
-    const routed = scoreScenarioArtifact(noDelete, card);
-    expect([routed.score, routed.total, routed.passed]).toEqual([1, full.total - 1, full.passed - 1]);
+    const withheld = scoreScenarioArtifact(noDelete, card);
+    expect(withheld.score!).toBeLessThan(1);
+    expect(withheld.personaGrants.find((c) => c.check === 'persona-grant:sdr:contact:delete')).toMatchObject({ pass: false });
+    expect(withheld.personaGrants.find((c) => c.check === 'persona-grant:sdr:contact:delete')!.notMeasured).toBeUndefined();
+    // Only a delete that waits on confirmation alone leaves the check to the run: with `remove_ben` out of the
+    // card, withholding the raw delete is the route the card designs, so the check leaves both figures, never a pass.
+    const waiting = { ...card, run: { ...card.run, operations: card.run.operations!.filter((o) => o.id !== 'remove_ben') } };
+    const fullWaiting = scoreScenarioArtifact(complete, waiting);
+    const routed = scoreScenarioArtifact(noDelete, waiting);
+    expect([routed.score, routed.total, routed.passed]).toEqual([1, fullWaiting.total - 1, fullWaiting.passed - 1]);
     expect(routed.personaGrants.find((c) => c.check === 'persona-grant:sdr:contact:delete')!.notMeasured).toMatch(/confirm-gated agent action delete_contact/);
   });
 

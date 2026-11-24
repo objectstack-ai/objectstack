@@ -1,5 +1,382 @@
 # @objectstack/plugin-mcp-server
 
+## 18.6.0
+
+### Minor Changes
+
+- 60fca0f: feat(runtime,mcp)!: an action declaring `ai.requiresConfirmation: true` never runs on the MCP caller's own `confirm: true` — `run_action` and `resume_run` hand it to the person in the app
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: semantic
+  Skills-docs: follow-up #34210
+  
+  <!-- adr-0087: not-required (already-registered action-requires-confirmation-elicited) The semantic entry registered with the contract already carries this move to the upgrade guide and os migrate meta: no key is added, removed or re-shaped, and nothing an author wrote is rewritten. -->
+  
+  **BREAKING** for an MCP client, an agent or a script that runs an action declaring `ai.requiresConfirmation: true` through the `run_action` or `resume_run` tool by sending `confirm: true` itself. Ruled by the account owner on the safety fix: the caller's own `confirm: true` never counts on such a call; the person it runs as confirms it in the app.
+  
+  This release implements the hand-off and refusal steps of the amended confirmation contract (`AI_ACTION_CONFIRMATION_CAPABILITY`, `@objectstack/spec/contracts`). The MCP doors do not elicit in the client yet: every declared-gated call takes the hand-off, whatever the client advertised.
+  
+  - After every admission gate, the subject load and the caller-scope subject verdict included, a declared-gated call is handed to the host's pending-confirmation service (`IActionConfirmationService`, registered under `ACTION_CONFIRMATION_SERVICE` = `'ai.actionConfirmation'`) through its `submit` member, and the call is answered with `status: 'pending_confirmation'`, the service's `pendingId`, a plain message, `actionName` and `objectName`. That answer is the tool's successful result. Nothing runs, and no `action_invocation` row is written. A `resume_run` hand-off carries its run (`run: { runId, values }`) and the run stays paused; approving it is the host's, as is what happens after.
+  - A host that registers no such service (the open-source build ships none) refuses the call `428 ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'`, with or without `confirm: true`. The person performs the action in the app.
+  - A service that answers no `pendingId` is a fault: the call fails and nothing runs.
+  - An AI service account acting for itself is refused whatever it sends, as before (ADR-0151 D3 rule 3). Its refusal now carries `details.reason: 'service_account'` at every action door, REST `/actions` and a host's door included.
+  - Unchanged: REST `/actions` stays outside the gate for a person; a host's door (`dispatchAction`) under the `ai` posture still reads `confirm`; the MCP `delete_record` and `delete_records` gates still read `confirm: true`. The `confirm` member stays accepted on `run_action` and `resume_run` and is not read.
+  
+  What changes for a caller:
+  
+  - FROM confirm with the person yourself, then send `confirm: true` on `run_action` / `resume_run` TO relay the pending answer's message and let the person approve it in the app; do not retry the call.
+  - FROM a script or agent that runs a gated action unattended with `confirm: true` TO a pending answer the person decides in the app, or the `no_confirmation_service` refusal on a host without the service. Where the action is safe unattended, its author declares `ai.requiresConfirmation: false`.
+  - A host that wants its people to approve these calls registers an `IActionConfirmationService` under `ACTION_CONFIRMATION_SERVICE`.
+- d6b1c2e: feat(runtime,mcp): the MCP `run_action` and `resume_run` tools ask the person in their client when it advertises `elicitation`
+  
+  Clause-②: no
+  Metadata-protocol: semantic (at the stdio MCP door, an author's `ai.requiresConfirmation: true` is confirmed in place for a client that advertises `elicitation`)
+  Skills-docs: follow-up owed — skills/objectstack-ai/SKILL.md (the `run_action` row of the MCP tool table; the same row the hand-off follow-up #34210 rewrites)
+  
+  This release implements step 1 of the amended confirmation contract (`AI_ACTION_CONFIRMATION_CAPABILITY`, `@objectstack/spec/contracts`) on the long-lived MCP server, the one behind the stdio transport.
+  
+  - When the client advertised `elicitation` at `initialize` (an empty `elicitation: {}` reads as form mode), a call on an action whose author declared `ai.requiresConfirmation: true` is asked in place: after every admission gate, the subject load and the caller-scope subject verdict included, the server sends one `elicitation/create` request in form mode, related to the open tool call, naming the action, the object and the record (its id, and the title the caller-scope read served, bounded to one line). Only the result's `action` is read.
+  - `accept` runs the call exactly once, as any admitted call, under the caller's permissions, on the gates and the subject read again after the answer; the next call is asked again. `decline` is refused `428 ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'declined'`. `cancel`, an error answer, a tool call cancelled by the client and a connection that closes first are refused with `reason: 'cancelled'`. No answer within the door's bound, `ACTION_CONFIRMATION_ELICITATION_TIMEOUT_MS` (five minutes, exported by `@objectstack/mcp`), is refused with `reason: 'timed_out'`, and a later answer runs nothing. Nothing is handed off on any of these answers.
+  - `resume_run` is asked the same way for the run's action: `accept` resumes the parked run with the call's values; any other answer refuses the call and the run stays paused.
+  - An AI service account is refused before anyone is asked, as before (`reason: 'service_account'`).
+  - Unchanged: a client that does not advertise `elicitation` takes the hand-off (or the `no_confirmation_service` refusal) exactly as before, and is never refused for that alone. The Streamable HTTP door builds a fresh server per request that never read the client's `initialize`, so it cannot elicit, and every caller there is handed off as before; its answers stay plain JSON.
+  - `McpActionBridge.runAction` and `resumeRun` take an optional third argument, `door: { elicitConfirmation }` (`McpActionCallDoor`), which the tools pass only when the call can be elicited. `@objectstack/mcp` also exports `actionConfirmationElicitorFor`, `actionConfirmationQuestion`, `confirmationQuestionText`, the bounds `ACTION_CONFIRMATION_QUESTION_TEXT_MAX` and `ACTION_CONFIRMATION_QUESTION_ID_MAX`, and the types `McpActionConfirmationSubject`, `McpActionConfirmationAnswer` and `McpActionConfirmationElicitor`.
+- c2cabce: feat(spec, mcp): a skill written for the in-product agents only opts out of MCP prompt projection with `mcpPrompt: false`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `SkillSchema` gains an optional boolean, `mcpPrompt`. A skill that sets `mcpPrompt: false` is never offered as an MCP prompt: `prompts/list` leaves it out and `prompts/get` answers it exactly as it answers an unknown prompt name. This holds on every MCP connection, the per-request HTTP endpoint and the long-lived stdio server alike, and whatever the skill's `tools` binding, including on a connection that serves every tool it binds.
+  
+  The binding test (a skill is offered only where the connection serves every tool it binds) answers whether a connection can run a playbook. It cannot tell whether the playbook is written for MCP. A skill can bind tools MCP serves under the same names, such as `create_record` and `update_record`, or `action_*` through `run_action`, and still tell the model to call in-product tools and wait for the in-product approval card, which an MCP client does not have. The skill's owner now says so on the skill.
+  
+  The stdio server takes its prompt list once, at boot. A skill saved with `mcpPrompt: false` while it runs stays on that list until restart, as any skill saved after boot is missing from it, but its `prompts/get` answers it as unknown at once.
+  
+  A skill without the key, or with `mcpPrompt: true`, is offered exactly as before, and nothing parses differently: the key has no default. The key changes nothing on the in-product agent runtime, which resolves, binds and activates the skill as it did, and the authoring checks on `tools` and `surface` report the same findings. The skill form does not offer the key: unset means offered, and the form's boolean switch would draw every offered skill as off, so `mcpPrompt` is authored in source or through the metadata API.
+  
+  Nothing to migrate.
+
+### Patch Changes
+
+- 64807a9: fix(mcp): `delete_record` / `delete_records` say the recycle bin keeps a business record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The two MCP delete tools described every delete as permanent. Measured on a booted stack over both transports, a confirmed delete of a business record goes to the recycle bin (`sys_recycle_bin`): it is kept for the deployment's retention (30 days by default) and can be restored through the REST recycle-bin door or the console. Only a platform object's record (`sys_`, `cloud_`, `ai_`), or any record on a host with no recycle bin, is deleted for good. There is no per-object switch.
+  
+  - The tool descriptions, both confirmation refusals, the served MCP skill text and the Console's skill download (its byte-for-byte copy) now say this, instead of "permanent".
+  - `delete_record` over the stdio transport answers `recycleBinEntryId` (the `DeleteDataResponse` key), as the HTTP transport already did. The stdio bridge did not ask the engine for the entry, so its answer named none and read as a permanent delete.
+  - `delete_records` answers `recycleBinEntries`: one `{ recordId, recycleBinEntryId }` per deleted record the bin kept, on both transports. A deleted record not listed there was deleted permanently. A fault's `progress` carries it too.
+  
+  Nothing changes in what is deleted, or in the confirmation gate.
+- f53bcce: fix(mcp): the served SKILL.md tells a client what to do when the data cannot answer a question
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The MCP server's client instructions (the SKILL.md a host with the dataset pair serves) taught how to choose between a governed metric and an object query, but said nothing about a question no metric, object or field can answer. A client then sometimes declined and went on to fill the gap with an assumed value and a conclusion drawn from it, measured once as "if laptops come with a typical warranty of 1 year or longer, none would run out before 2026-12-31", which is an answer the data cannot support.
+  
+  The dataset entries now carry one more rule: say the data the client can read does not record it and name what is missing, offer the computation if the user supplies the missing value, never fill the gap with an assumed value or a conclusion drawn from one, and take any figure added from a tool answer and cite it. Instruction text only; no tool, schema or metadata changes.
+- 8c6ddc5: feat(mcp,spec)!: `run_action` and `resume_run` refuse the `confirm` member — confirmation happens in the app, by the person
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none (the retired member belongs to an MCP tool's input, not to a key a metadata author writes; `ai.requiresConfirmation` keeps its meaning. The dev confirms against the diff.)
+  
+  <!-- adr-0087: not-required (already-registered action-requires-confirmation-elicited) The semantic entry for the amended confirmation contract already covers what a caller sends to run_action and resume_run; this change rewrites its wording so the same switch names the refusal of the confirm member. No authorable key is added, removed or re-shaped. -->
+  
+  **BREAKING** for an MCP client, an agent or a script that sends `confirm` to the `run_action` or `resume_run` tool. Ruled by the maintainer: the member is retired, so a stale client is refused loudly instead of silently ignored. Since the hand-off to the person in the app, the caller's `confirm: true` confirmed nothing on these two tools; now a call that carries the member at all is refused.
+  
+  - `run_action` and `resume_run` no longer declare `confirm`. A call that carries it, `true` or `false`, is refused by the tool's closed input, the same refusal any undeclared argument gets. This applies on every action, whether or not it declares `ai.requiresConfirmation`. The refusal names the member and says that confirmation happens in the app, by the person, or in the client when it supports elicitation and the connection can carry the question. Nothing is resolved or run.
+  - Unchanged: a call without the member on a declared-gated action is confirmed by the person. A client that advertised `elicitation` on a connection that can carry the question (stdio) has the person asked in the client, and `accept` runs the call. Otherwise the call is handed to the person (`status: 'pending_confirmation'`), or refused `428 ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'` on a host with no pending-confirmation service. The MCP `delete_record` and `delete_records` tools still require `confirm: true`. A host's own door (`dispatchAction`) under the `ai` posture still reads `confirm`.
+  - The served MCP skill (and the console's downloadable copy of it), the `tool.requiresConfirmation` retirement guidance in `@objectstack/spec`, and the contract prose in `@objectstack/spec/contracts` stop teaching `confirm: true` on these two tools. The upgrade-guide entry `action-requires-confirmation-elicited` now keys its switch on the hand-off rather than on elicitation, and names the refusal of the member.
+  
+  What changes for a caller:
+  
+  - FROM `run_action({ actionName, recordId, confirm: true })` (accepted, not read) TO `run_action({ actionName, recordId })`. Relay a `pending_confirmation` answer to the person and let them approve it in the app (or let them answer the question in their client, where it is asked there); do not retry.
+  - FROM `resume_run({ runId, values, confirm: true })` TO `resume_run({ runId, values })`.
+  - To fix a client: stop sending `confirm` to `run_action` and `resume_run`. Keep sending it to `delete_record` and `delete_records`.
+- b6a22b1: fix(mcp): `delete_record` tells the agent that a request naming one matching record is the human's approval
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The MCP `delete_record` tool description and its `confirm` member now say when the human's request is already the approval. When the human names the record to delete and exactly one record matches, that request approves the delete: the agent sends `confirm: true` on that call and does not ask again. When the name matches more than one record, or the request does not identify one record, the agent deletes nothing yet: it lists the candidates, asks the human which one, and sends `confirm: true` only after the answer.
+  
+  The same server's other texts now say the same rule. The skill served at `GET /api/v1/mcp/skill` (and the Console's "Download skill" copy of it) carries the two sentences in its `delete_record` entry instead of "Ask your human first", and its destructive-action gotcha and workflow step say that a delete the user named, with exactly one record matching, is already confirmed. The refusal of a `delete_record` call without `confirm: true` now says to retry with `confirm: true` when the human's request named exactly this one record, and to ask the human first when the name matched more than one record or the request is a bulk delete; its code (`ACTION_CONFIRMATION_REQUIRED`), status (428) and `details` are unchanged.
+  
+  Before, the description said "ask the human first, then retry", and models read a request that named one record either way: some asked a second time before a delete the user had already asked for.
+  
+  The gate is unchanged. A `delete_record` call without `confirm: true` is still refused with `ACTION_CONFIRMATION_REQUIRED` (428), and nothing is deleted. A deleted business record still goes to the recycle bin. `delete_records` (bulk) is unchanged: a call without `confirm: true` is the preview, and the agent sends `confirm: true` only after the human approves it.
+- c513d62: feat(mcp): the HTTP `initialize` instructions carry the governed-metric selection rule and the skills install line
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A client connected to the open MCP server over HTTP was told one sentence at `initialize`. The rule for choosing between a governed metric and an object query lived only in the dataset tools' own descriptions, which a client reads after it has already chosen a tool, and nothing named the skills package to install.
+  
+  When neither the host's per-request text nor the plugin's `instructions` option answers, `result.instructions` now carries, after that sentence:
+  
+  - **The selection rule**, only where the request registers both `list_datasets` and `query_dataset` (a bridge with the dataset members and a grant that admits `data:read`; an API key or session counts): look for a governed metric first with `list_datasets` and the question's business words; a word matches only an equal name, label or synonym; one measure match answers through `query_dataset`; several matches are a question for the user; no match falls back to `query_records` / `aggregate_records` and says the answer is not from a governed metric. A grant without `data:read` gets no dataset sentence.
+  - **The skills install line**: `Published skills: @objectstack/skills <version>` with the command that installs it into the agent's skills directory, with or without a project, `os skills install --version <version>`, at this package's own version (released together with `@objectstack/skills`), not the `version` option.
+  
+  Host-injected instructions and the `instructions` option are served exactly as before, with nothing appended. The stdio server's instructions are unchanged.
+- c6ecd1f: fix(mcp): the data loop on `GET /mcp/skill` is the published `objectstack-ask` skill's text
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The page an open server serves at `GET /mcp/skill` taught the governed-metric procedure in its own hand-written words, and those words had drifted from the published `objectstack-ask` skill. The page now carries the skill's own steps, generated from `skills/objectstack-ask/SKILL.md` into the package, under a new section **Answering a business question**. A test fails when the two differ.
+  
+  What a connected client now reads on that page, where it reads differently from before:
+  
+  - Each word for a thing measured is decided on its own: two words with one measure each are two metrics, computed both, not a question for the user. One word that matches several measures is still a question.
+  - A word with no match that is a loose form of several listed measures (a bare "revenue" beside Won Revenue, Annual Revenue and Planned Revenue) is a question too, with nothing computed yet. One near form selects nothing.
+  - `membersWithheld: true` is reported as members (measures or groupings) the user may not read, and the metric asked for may be among them.
+  - The fallback to object queries reads the object's fields first, uses `aggregate_records` rather than adding pages up, opens with a line saying the answer is not from a governed metric, and names a listed dataset on that object when there is one.
+  - The answer is written in the user's language, with labels rather than machine names, and states its filter and time window.
+  
+  The two dataset tool entries in the page's tool list now give only each tool's signature and what its answer carries. The section renders where it did before and nowhere else: only when the host carries the dataset tools and the grant has `data:read` (or names no scopes). Pages for other hosts and grants are byte-identical to before.
+- 4771d66: feat(mcp): `list_objects` and `describe_object` return the description an author wrote on an object and on its fields
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An MCP client that picks an object and its fields by reading the object tools now reads the text the author wrote for them. `list_objects` adds `description` to each object, and `describe_object` adds it to the object and to each field. The key is present only where the definition carries a non-blank `description`, so an object or field without one is answered exactly as before. Both transports (HTTP and stdio) answer the same shape, and the two tool descriptions name the new key.
+  
+  The text is the existing `description` key of the object and field schemas; no metadata key is added. It is read off the object as the caller is served it, so a field the caller cannot read is left out with its description, as it already was, and the caller is served the same authored text the `/meta` object door serves them when the request names no locale. With a request locale `/meta` translates object and field labels and descriptions; the MCP object tools do not localize labels or descriptions, and this change leaves that as it was.
+  
+  `McpObjectSummary` gains an optional `description` member.
+- 44c7a4a: feat(analytics): `list_datasets` offers `candidates` for a term that matched nothing, and the selection text says to ask about them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A business word that equalled no member's name, label or synonym used to get nothing back, so an AI went straight to the object query tools even when a listed measure was obviously what the user meant (`invoice` beside the measure labelled `Invoices`).
+  
+  `list_datasets` now fills the `candidates` member the spec already declares: for each term with no match in any listed dataset, the members near it, as `{ term, dataset, member }` pointers to members listed in the same answer.
+  
+  - **Near** means that, after the same normalization the matcher uses, one of the member's names, labels (any locale) or synonyms contains the term, or the term contains it, with both at least two characters (code points) long. `金额` is near `合同金额` and the reverse. No edit distance, stems or embeddings.
+  - **Only what the caller may read.** Candidates come from the datasets and members the answer lists. A member over a field the caller cannot read, a member over an `internal` field, and a dataset the caller may not query are never offered.
+  - **Never beside a match.** A term with a match anywhere in the answer has no candidates. What counts as a match is unchanged.
+  - **Listing order, capped.** Terms in the order sent (a repeated term is offered once), then datasets in the order listed, then each dataset's measures before its dimensions. At most `LIST_DATASETS_MAX_CANDIDATES_PER_TERM` (5) per term, with no marker for the cut. When nothing is offered the key is absent, never an empty list.
+  
+  The `list_datasets` tool description and the `initialize` selection rule the HTTP MCP server sends now say: each word that matches exactly one measure is computed, and two such words are two metrics computed both; one word matching several measures is a question for the user; a word with `candidates` is the same question, listing each candidate's label, dataset label and description, and a candidate is never picked or treated as a match; no match and no candidates falls back to the object tools, saying the answer is not from a governed metric.
+- 0c60897: feat(cli): `os skills install | update | status` install, update and check the published skills catalog at the server's version, with or without a project
+  
+  Clause-②: yes (widening: a new published CLI command group, `os skills install | update | status`)
+  Metadata-protocol: none
+  
+  Nothing installed the published skills catalog except `create-objectstack`'s scaffold-time sync, so a user who only connected an MCP client had no way to install it, and a project had no command to refresh it after an upgrade.
+  
+  - **`os skills install`** copies `@objectstack/skills` at one version into the agent's skills directory (`.claude/skills/` under the current directory, or `--dir`), in an empty directory or in a project; no `package.json` is read or written. The version is `--version` (exact), else the target environment's (`--target`, a URL or a restriction profile file, read exactly as `os validate --target` reads it), else the CLI's own version (the two are released together); the output names which. The tarball is read with `npm pack` from the registry the environment configures, and only `dist/skills/<name>/` is copied. A version the registry does not publish is refused, naming it. What was written is recorded in `.objectstack-skills.json` beside the skills.
+  - **`os skills update`** moves the recorded catalog to another version: it replaces the catalog's skills, removes those the new version dropped, and never writes, replaces or removes a skill directory it did not install. A catalog skill changed locally is refused unless `--force`.
+  - **`os skills status`** reports the installed version against the expected one, plus missing, modified and extra skills; it exits `0`, or `1` on a mismatch with `--check`. All three take `--json`.
+  
+  `@objectstack/mcp`: the open server's `initialize` skills install line now names `os skills install --version <version>` (and its `npx -p @objectstack/cli@<version>` form for a machine without the CLI) instead of `pnpm add -D @objectstack/skills@<version>`, which needed a project.
+- 6320abb: fix(mcp): stdio `list_datasets` localizes the dataset catalogue for the workspace default locale
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Over the stdio transport, `list_datasets` and `query_dataset` read the saved datasets untranslated. A workspace whose default locale is `zh-CN` therefore saw English member labels over stdio, and a term that equals a zh-CN bundle label (for example 总金额) matched nothing. The same workspace over HTTP, with no `Accept-Language`, showed the zh-CN labels and matched the term as `label`.
+  
+  The stdio bridge now localizes the dataset list with the same translator the HTTP door uses (`translateMetaList` from `@objectstack/rest`), for the i18n service's default locale. That is what the HTTP door answers when a call carries no locale, and it is the only locale a stdio session speaks (ADR-0149 D2). A host with no i18n service, or one whose i18n service cannot be resolved, keeps today's untranslated list. Matching is unchanged: a term still matches the label in the locale the catalogue is served in.
+  
+  `@objectstack/mcp` now depends on `@objectstack/rest`.
+- e556e3a: docs(skills): the `objectstack-ask` skill reads `candidates` for a word that matched nothing
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `list_datasets` now answers a business word that matched nothing with `candidates`, the members the server offers as possible readings. The `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it, still told a client to judge near readings itself from the catalogue. They now read the server's list, in the same rule the `list_datasets` tool description and the `initialize` selection rule state.
+  
+  What a connected client now reads, where it differs from before:
+  
+  - Step 1 names `candidates`: a word that matched nothing may have them, each a `{ term, dataset, member }` pointer to a member the same answer lists. A candidate is not a match.
+  - A word with no match and one or more candidates is a question for the user. The client lists each candidate's label, its dataset's label and its description, picks none, treats none as a match and computes nothing until the user answers.
+  - One candidate is a question too: the client asks whether it is the one meant. This replaces the earlier wording, in which one near form selected nothing and went to the fallback.
+  - No match and no candidates for the word for a thing measured is the fallback to the object tools, with the answer saying no governed metric was used (非指标口径).
+  - The client's own loose-form check is removed: the two rows that had the client judge whether a word was a loose form of several listed measures, and the paragraph that defined a loose form. This supersedes the loose-form sentences in this release's earlier `objectstack-ask` and `GET /mcp/skill` entries. Against a server that returns no `candidates`, a word with no match goes to the labelled fallback, which still names a listed dataset on the same object.
+  
+  The skill's eval cases cover several candidates, one candidate, and no candidates. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill; no code path changes.
+- 46991d0: feat(mcp): `list_objects` and `describe_object` serve labels and descriptions in the caller's locale
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The two MCP object tools now serve the object's label and description, and each field's label, description and option labels, in the caller's locale, the way the REST `/meta` object door serves them. Before, both tools served the authored text in every locale. A client asking in Chinese about an app with a Chinese translation bundle was shown the English labels.
+  
+  - **HTTP:** the locale is the request's `Accept-Language` (then `?locale=`, then the i18n service's default), read and translated by the `/meta` door's own routine. The dataset tools already used the same routine.
+  - **stdio:** the transport carries no request, so the locale is the i18n service's default. The stdio `list_datasets` already uses that locale.
+  
+  Translation runs on the object as the caller is served it, after the field mask, so a field the caller cannot read stays absent and so does its translated text. Names and option values never change. Where the bundle has no entry for a key, or no i18n service is registered, the tools serve the authored text. Without `Accept-Language`, the HTTP tools now serve the i18n default locale's bundle entries, as the REST door does. An app whose `en` bundle relabels a field (app-crm's `amount` is "Deal Value") shows that label there.
+  
+  The answer's shape is unchanged. Validation rule messages are translated by the same routine where the bundle carries them.
+- a841e26: fix(mcp): the `describe_object` tool description says whose words a field `description` carries
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The tool description used to promise each field's `description` "where written", next to an object description "where the author wrote one", so a client read every field description as the app author's text. Most of them are not: on the CRM example no field declares a description, and every field description `describe_object` returns (8 on each of its 6 objects) belongs to a column the platform adds to the object (`organization_id`, `created_at`, `created_by`, `updated_at`, `updated_by`, `owner_id`, `owning_business_unit_id`, `queue`), each answered with `system: true`. The sentence now reads "description (where set: the author's, or the platform's on a column it injects)". The answer itself does not change: same keys, same values, on both transports. The object-level clause stays as it was, because an object's description is always the one its author wrote.
+- 6932cb8: feat(analytics): `list_datasets` answers `nextStep` and `query_dataset` answers `sourceLine`, written by the platform in the caller's language
+  
+  Clause-②: yes (widening: the dataset tools' answers now carry `nextStep` and `sourceLine`, `@objectstack/service-analytics` exports `DATASET_NEXT_STEP_PRECEDENCE`, and the `list_datasets` / `query_dataset` descriptions and the MCP `initialize` rule gain the follow-`nextStep`, cite-`sourceLine` instructions)
+  Metadata-protocol: none
+  
+  The dataset tools now fill the two members the spec declares (`DatasetNextStepSchema`, `QueryDatasetOutputSchema.sourceLine`, `@objectstack/spec/ai`). Until now the decision "one match answers, several ask, near ones are offered, none falls back" and the citation line were left for each AI client to work out from `matches`, `candidates` and `provenance`; a model handed a finished sentence copies it, and one that builds it from parts often does not.
+  
+  - **`nextStep` on `list_datasets`, whenever `terms` were sent.** `decision` is the case of the ADR-0149 D3 rule the words are in, counted in measures: one measure equals the word ⇒ `one_measure`; more than one, in one dataset or several ⇒ `several_measures`; no match but `candidates` ⇒ `candidates_only`; otherwise `no_measure`, which includes a word that equals only a dimension. `terms` names every word sent (once each, in order) that is in the reported case. `note` is that case as a finished sentence: the measure and the names to query for `one_measure`; each member by its label and its dataset's label for `several_measures` and `candidates_only`, with "ask the user, do not pick"; the object query tools for an unknown word, and "ask which number" for a word that is only a grouping (both, when a `no_measure` answer holds one of each).
+  - **Words a `one_measure` or `candidates_only` answer leaves out are still named.** A `one_measure` `note` gives the measure word's query and then names each other word: one with candidates together with those candidates (label and dataset label) and "ask before using it"; an unknown one with its labelled fallback to the object query tools; a grouping word as that grouping. A `candidates_only` `note` asks about the candidates and names each unknown word with its labelled fallback and each grouping-only word the same way. Two words that equal the same measure are told it is one metric.
+  - **Precedence among mixed cases.** One answer reports one case, the first of `several_measures`, `one_measure`, `candidates_only`, `no_measure`. A word that matches only a dimension never outranks a measure match: `["营收", "销售阶段"]` reports `one_measure` for `营收`. The order is exported as `DATASET_NEXT_STEP_PRECEDENCE` from `@objectstack/service-analytics`, and the tool description and the MCP `initialize` rule name it.
+  - **A partial answer says so.** With `partial: true` the answer still carries `nextStep`, computed from what it lists, and `note` ends by saying the catalogue was incomplete, that a measure missing from it may exist, and to repeat the `warning`.
+  - **`sourceLine` on `query_dataset`.** The answer's `provenance` as one line to cite: each measure's label and the dataset's label, then each dimension's label (`指标：营收（数据集：销售分析）；维度：阶段`). `provenance` is unchanged and stays the structured source. The REST dataset door's answer is not changed.
+  - **Only what the caller may see.** Both sentences are composed from the answer being served: a member over a field the caller cannot read, an `internal` member and a dataset the caller may not query never appear in either.
+  - **Language.** The request's locale, else the workspace default, else English, the ladder every platform-composed sentence follows (`userTextLocalesOf`, read from the caller's execution context). Sentences are written in English, Simplified Chinese, Traditional Chinese and Japanese; another language takes the next rung. The HTTP and stdio MCP doors hand the executor the same execution context, so a caller reads the same sentence on either when both doors carry the same locale (the stdio door has no request locale, so there the workspace default or English decides).
+  
+  `@objectstack/mcp`: the `initialize` selection rule now tells the client to follow `nextStep`'s note, names the precedence, and says to cite `sourceLine`. Both tools pass the two members through unchanged.
+- 80d474b: fix(mcp): the `objectstack://objects` resources serve labels in the locale the object tools speak
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Over the stdio transport, the `objectstack://objects` and `objectstack://objects/{name}` resources now answer an object's label, description, field labels, field descriptions and option labels in the workspace's default locale, as `list_objects` and `describe_object` have since the object tools were localized. Before, the resources served the authored text, so a resource read and a tool call for the same object could name it in two languages.
+  
+  - The resources read the same localized view the two tools read, through the same translation the HTTP door's `/meta` answers use. A resource read and a tool call for one object answer the same labels.
+  - A field the caller cannot read stays absent from the resources, its translated text with it.
+  - With no default locale, or a key the bundle does not carry, the authored text is served, as before. Names never change.
+  - The Streamable HTTP door registers no resources, so nothing changes there.
+- 3b4ffb2: docs(skills): the `objectstack-ask` skill loads for every question about the app's records, asks back without a figure of its own, keeps terms whole and declines a record kind it cannot see
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `objectstack-ask` skill, and the page at `GET /mcp/skill` that is generated from it, now tell a connected client:
+  
+  - The skill is for every question answered from the app's records, before the first data tool call, even one that names no metric: what has been claimed, spent, sold or paid so far, as well as a number, a total, a ranking, a breakdown, a trend or a list ("how much", "so far", 「一共」 join the trigger words).
+  - A term sent to `list_datasets` is the user's noun phrase for the thing, kept whole ("travel budget", not "travel" and "budget") and without the verbs, time words and question words around it ("trip days", not "trip days requested").
+  - A reply that asks the user back states no figure of its own (no count, total or option number): each option is named by its label in a bullet, and its description is quoted as written. It asks only about matches or candidates for words the user wrote; a word with no match and no candidates goes to the object fallback instead of a question about another word's matches.
+  - The object fallback opens with one rule: when the question names a kind of record that no listed object or dataset is, the client says it cannot see those records here (they may be hidden from it) and stops, and never answers from a different object that merely links to them.
+  
+  Two sentences in the `candidates` row of step 2 that restated step 1 and the paragraph under the table are removed. The skill's eval cases add a question about what has been claimed so far and a question about a record kind no listed object shows. `packages/mcp/src/ask-skill.generated.ts` is regenerated from the skill; no code path changes.
+- Updated dependencies [e53e02e]
+- Updated dependencies [661ede2]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [66f6638]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [d3bea96]
+- Updated dependencies [18194fb]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [6cc3f97]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [c9ef653]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [89d5a41]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f8d016c]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [3dc3599]
+- Updated dependencies [f6f5b50]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [d576509]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @objectstack/rest@18.6.0
+  - @objectstack/lint@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/formula@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

@@ -57,6 +57,7 @@ import { validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
 // derivation the stack schema's own plural keys follow. Imported, not a second
 // table: `os init` wires, and `os g` looks up, exactly this key.
 import { singularToPlural } from '@objectstack/spec/shared';
+import { normalizeDatasetTerm } from '@objectstack/spec/ui';
 import { printHeader, printSuccess, printError, printInfo, printStep, printWarning, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 import { namespacedItemName, readProjectNamespace, type ProjectNamespace } from '../utils/project-namespace.js';
@@ -99,6 +100,8 @@ export interface ScaffoldObjectBinding {
   fields: readonly string[];
   /** The record's title field (`resolveDisplayField`), when it is a declared field. */
   displayField?: string;
+  /** That field's `label`, when the stack declares one as a plain string. */
+  displayFieldLabel?: string;
 }
 
 /** What a binding scaffold is rendered against: each reference it writes, resolved. */
@@ -983,6 +986,13 @@ export default ${toCamelCase(name)}PermissionSet;
      * the record's title field when the object has one, so a widget has a
      * dimension and a measure to bind from the first build.
      *
+     * Each member carries `synonyms` (ADR-0149 D1), the words a question is
+     * matched against, seeded from the labels the stack already declares
+     * ({@link datasetScaffoldSynonyms}): a member with neither `synonyms` nor
+     * a `description` draws `dataset-member-no-vocabulary`, and a scaffold
+     * adds no finding. The seed is a starting point, in whatever language the
+     * labels are written in, and the comment above it says to replace it.
+     *
      * Declared through `defineDataset`, which types the literal as a
      * `Dataset`: a bare object literal handed to the stack's `datasets` key
      * widens `aggregate` to `string` and fails the type check without
@@ -993,8 +1003,9 @@ export default ${toCamelCase(name)}PermissionSet;
     itemName: (name: string, namespace?: string) => itemNameFor(toSnakeCase(name), namespace),
     generate: (name: string, namespace?: string, bindings?: ScaffoldBindings) => {
       const object = requireBinding('dataset', bindings, 'object');
-      const dimension = object.displayField
-        ? `\n    { name: ${tsString(object.displayField)}, field: ${tsString(object.displayField)} },\n  `
+      const seeded = datasetScaffoldSynonyms(object);
+      const dimension = object.displayField && seeded.dimension !== undefined
+        ? `\n    { name: ${tsString(object.displayField)}, field: ${tsString(object.displayField)}, synonyms: [${tsString(seeded.dimension)}] },\n  `
         : '';
       return `import { defineDataset } from '@objectstack/spec/ui';
 
@@ -1010,6 +1021,11 @@ const ${toCamelCase(name)}Dataset = defineDataset({
   label: '${toTitleCase(name)}',
   object: ${tsString(object.name)},
 
+  // \`synonyms\` are the words people type for a member when they ask a
+  // question; a question that uses other words does not find it. The ones
+  // below are seeded from your labels: replace them with the words your users
+  // type, in their language, and add a one-sentence \`description\`.
+
   // The axes a widget groups by: a field on the object, or a path through a
   // lookup (\`account.region\`). Declare the fields people group by.
   dimensions: [${dimension}],
@@ -1017,7 +1033,7 @@ const ${toCamelCase(name)}Dataset = defineDataset({
   // The values a widget shows. Also: sum, avg, min and max over a numeric
   // field (\`{ name: 'total', aggregate: 'sum', field: 'amount' }\`).
   measures: [
-    { name: 'record_count', label: 'Records', aggregate: 'count' },
+    { name: 'record_count', label: 'Records', aggregate: 'count', synonyms: [${tsString(seeded.measure)}] },
   ],
 });
 
@@ -1287,9 +1303,60 @@ function tsString(value: string): string {
   return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r/g, '\\r').replace(/\n/g, '\\n')}'`;
 }
 
+/** The title field's `label`, when the stack declares one as a plain string. */
+function displayFieldLabelOf(item: Record<string, unknown>, field: string): { displayFieldLabel?: string } {
+  const declared = (item.fields as Record<string, unknown>)[field];
+  const label = declared && typeof declared === 'object' ? (declared as { label?: unknown }).label : undefined;
+  return typeof label === 'string' && label ? { displayFieldLabel: label } : {};
+}
+
 /** The words a scaffold labels a bound object's records with. */
 function objectPluralLabel(object: ScaffoldObjectBinding): string {
   return object.pluralLabel ?? object.label ?? toTitleCase(object.name);
+}
+
+/** The name and label of the one measure the `dataset` scaffold declares. */
+const DATASET_SCAFFOLD_MEASURE = { name: 'record_count', label: 'Records' } as const;
+
+/** A word the dataset schema takes as a synonym: trimmed, one line, at most 60 characters. */
+function isDatasetSynonym(word: string): boolean {
+  return word.length <= 60 && /^\S(?:.*\S)?$/u.test(word);
+}
+
+/**
+ * The one synonym the `dataset` scaffold seeds on each member (ADR-0149 D1),
+ * from the labels the stack already declares: the title field's label on the
+ * dimension, the object's plural label on the record count. A label is in the
+ * language the author wrote it in, so the seed is too.
+ *
+ * Within a dataset one word names one member: the schema refuses a synonym
+ * that equals another member's name, label or synonym once case, width,
+ * spacing, `_` and `-` are folded (`normalizeDatasetTerm`). So each seed is
+ * the first of its candidates that is a valid synonym and answers to no other
+ * member: a title field labelled like the object, or named `records`, falls
+ * to the next candidate rather than writing a dataset that does not parse.
+ * A word equal to its own member's name or label is accepted by the schema.
+ */
+function datasetScaffoldSynonyms(object: ScaffoldObjectBinding): { dimension?: string; measure: string } {
+  const pick = (candidates: readonly string[], taken: readonly string[]): string | undefined => {
+    const folded = new Set(taken.map(normalizeDatasetTerm));
+    return candidates.find((word) => isDatasetSynonym(word) && !folded.has(normalizeDatasetTerm(word)));
+  };
+  const objectLabel = object.label ?? toTitleCase(object.name);
+  const field = object.displayField;
+  const fieldTitle = field === undefined ? undefined : toTitleCase(field);
+  const dimension = field === undefined || fieldTitle === undefined
+    ? undefined
+    : pick(
+        [...(object.displayFieldLabel ? [object.displayFieldLabel] : []), fieldTitle, `${objectLabel} ${fieldTitle}`],
+        [DATASET_SCAFFOLD_MEASURE.name, DATASET_SCAFFOLD_MEASURE.label],
+      );
+  const plural = objectPluralLabel(object);
+  const measure = pick(
+    [plural, DATASET_SCAFFOLD_MEASURE.label, `${plural} ${DATASET_SCAFFOLD_MEASURE.label}`],
+    [...(field === undefined ? [] : [field]), ...(dimension === undefined ? [] : [dimension])],
+  ) ?? DATASET_SCAFFOLD_MEASURE.label;
+  return { ...(dimension === undefined ? {} : { dimension }), measure };
 }
 
 /**
@@ -1407,6 +1474,7 @@ export function stackBindingCandidates(config: unknown): {
       ...(typeof item.pluralLabel === 'string' && item.pluralLabel ? { pluralLabel: item.pluralLabel } : {}),
       fields: declared,
       ...(title && declared.includes(title) ? { displayField: title } : {}),
+      ...(title && declared.includes(title) ? displayFieldLabelOf(item, title) : {}),
     });
   }
   const flows = entries('flows').map(named).filter((name): name is string => !!name);

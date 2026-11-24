@@ -35,7 +35,7 @@ const ROWS_SHOWN = 100;
 /** ISO-8601: a date, or a date and time with a zone. */
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))?$/;
 
-/** A signing key fingerprint: lowercase hex SHA-256 of the raw public key, as the check prints it. */
+/** A signing key fingerprint: lowercase hex SHA-256 of the public key's bytes (Ed25519 raw, ES256 SPKI DER), as the check prints it. */
 const FINGERPRINT = /^[0-9a-f]{64}$/;
 
 /**
@@ -50,6 +50,10 @@ const FINGERPRINT = /^[0-9a-f]{64}$/;
  * with (`oneShotCrypto`: the declaring plugin's, or the existing local data
  * key; it never mints one). A signing key is trusted only through its wrapped
  * private half: a key row nobody can open is named, and trusted by nothing.
+ * With a host `audit.checkpointSigner` registered, the trusted keys are the
+ * ones it vouches for (Ed25519 or ES256, by the key's type) and the local
+ * derivation is not asked: a key the local signer used stays trusted after
+ * the switch only when the host signer pins it.
  *
  * Every row a checkpoint lists reads `unmodified`, `modified`, `missing`,
  * `late`, `redacted` or `expired`; a row of a sealed window no trusted

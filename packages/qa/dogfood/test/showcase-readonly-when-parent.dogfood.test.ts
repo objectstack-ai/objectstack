@@ -56,11 +56,11 @@ describe('showcase: parent-scoped readonlyWhen is server-enforced (#4889)', () =
     // A SETTLED invoice — the INV-1003 shape from the issue. `issued_on` /
     // `paid_on` satisfy the header's own `requiredWhen` rules for `paid`.
     paidInvoiceId = idOf(await ql.insert('showcase_invoice', {
-      name: 'INV-4889-PAID', account, status: 'paid', tax_rate: 8,
+      name: 'INV-4889-PAID', account, status: 'paid', tax_rate: 8, currency_code: 'USD',
       issued_on: '2026-01-05', paid_on: '2026-01-20',
     }, sys));
     draftInvoiceId = idOf(await ql.insert('showcase_invoice', {
-      name: 'INV-4889-DRAFT', account, status: 'draft', tax_rate: 8,
+      name: 'INV-4889-DRAFT', account, status: 'draft', tax_rate: 8, currency_code: 'USD',
     }, sys));
 
     paidLineId = idOf(await ql.insert('showcase_invoice_line', {

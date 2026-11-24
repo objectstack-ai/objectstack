@@ -451,11 +451,20 @@ export function FlowRunsPanel({
   flowName,
   nodes,
   locale,
+  published,
 }: {
   flowName: string;
   /** The flow's `nodes`, so a step reads by its node's name (objectui#13143). */
   nodes?: readonly unknown[];
   locale?: string;
+  /**
+   * objectstack#34818 — whether the flow has a published version, as the host
+   * knows it. `false`: the flow never ran, so the panel says how runs come to
+   * be listed and asks the engine nothing. `true`: a failed read is the
+   * engine's alone. Absent (a host that does not know): the one sentence that
+   * names both causes, as before.
+   */
+  published?: boolean;
 }) {
   const names = React.useMemo(() => flowNodeNames(nodes, locale), [nodes, locale]);
   const [runs, setRuns] = React.useState<FlowRun[]>([]);
@@ -463,6 +472,7 @@ export function FlowRunsPanel({
   const [reloadKey, setReloadKey] = React.useState(0);
 
   React.useEffect(() => {
+    if (published === false) return;
     const controller = new AbortController();
     let alive = true;
     setState('loading');
@@ -479,7 +489,20 @@ export function FlowRunsPanel({
       alive = false;
       controller.abort();
     };
-  }, [flowName, reloadKey]);
+  }, [flowName, reloadKey, published]);
+
+  if (published === false) {
+    return (
+      <div className="flex h-full flex-col p-3 text-xs">
+        <div className="flex items-center gap-1.5 pb-2 font-medium text-muted-foreground">
+          <Clock className="h-3 w-3" /> {tr('engine.flowRuns.title', locale)}
+        </div>
+        <EmptyDescription className="text-xs italic" data-testid="flow-runs-unpublished">
+          {tr('engine.flowRuns.unpublished', locale)}
+        </EmptyDescription>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col p-3 text-xs">
@@ -496,8 +519,8 @@ export function FlowRunsPanel({
         </button>
       </div>
       {state === 'unavailable' ? (
-        <div className="italic text-muted-foreground">
-          {tr('engine.flowRuns.unavailable', locale)}
+        <div className="italic text-muted-foreground" data-testid="flow-runs-unavailable">
+          {tr(published ? 'engine.flowRuns.engineOffline' : 'engine.flowRuns.unavailable', locale)}
         </div>
       ) : state === 'ready' && runs.length === 0 ? (
         <EmptyDescription className="text-xs italic">{tr('engine.flowRuns.empty', locale)}</EmptyDescription>

@@ -22,6 +22,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { MetadataSaveAdvisoryEvent } from '@object-ui/data-objectstack';
 import { emitSaveAdvisories, type TranslateFn } from './saveAdvisoryToast';
+import { clearPublishChecksShown, markPublishChecksShown } from '../preview/publishChecksShown';
 
 /** i18next-shaped `t` that renders the inline default with its holes filled. */
 const t: TranslateFn = (key, options) => {
@@ -95,14 +96,16 @@ describe('emitSaveAdvisories (#4133)', () => {
     expect(description).toContain(FINDING.hint);
   });
 
-  it('a finding with a userMessage (objectstack#32657): that sentence replaces message and hint, rule and where stay', () => {
+  it('a finding with a userMessage (objectstack#32657, objectstack#36746): that sentence is the whole line, without the rule id or where', () => {
     const sink = makeSink();
     const userMessage = '流程“nightly_purge”中的删除步骤没有筛选条件，会删除所有记录。请添加筛选条件。';
 
     emitSaveAdvisories(event({ advisories: [{ ...FINDING, userMessage }] }), t, sink);
 
     const description = sink.warning.mock.calls[0]![1]!.description!;
-    expect(description).toBe(`[${FINDING.rule}] ${FINDING.where} — ${userMessage}`);
+    expect(description).toBe(userMessage);
+    expect(description).not.toContain(`[${FINDING.rule}]`);
+    expect(description).not.toContain(FINDING.where!);
     expect(description).not.toContain(FINDING.message);
     expect(description).not.toContain(FINDING.hint);
   });
@@ -287,5 +290,52 @@ describe('emitSaveAdvisories — the door union is handled exhaustively', () => 
       emitSaveAdvisories(event({ door }), t, sink);
       expect(sink.warning).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+/**
+ * objectstack#34818 item 1 — 「发布后的提示只留一句结果」. A publish whose
+ * checks the author just reviewed (the pending-changes sheet or the flow
+ * designer's Problems tab listed them) keeps the title line alone; every other
+ * publish keeps the body, because there the toast is the only place the
+ * findings reach the author.
+ */
+describe('emitSaveAdvisories — a publish whose checks were reviewed (objectstack#34818)', () => {
+  const reviewed = (run: () => void) => {
+    markPublishChecksShown('flow', 'nightly_purge');
+    try {
+      run();
+    } finally {
+      clearPublishChecksShown('flow', 'nightly_purge');
+    }
+  };
+
+  it('keeps the one title line, on the same tier and duration', () => {
+    const sink = makeSink();
+    reviewed(() => emitSaveAdvisories(event({ door: 'publish' }), t, sink));
+    expect(sink.warning).toHaveBeenCalledTimes(1);
+    const [title, opts] = sink.warning.mock.calls[0]!;
+    expect(title).toContain('Published');
+    expect(opts?.description).toBeUndefined();
+    expect(opts!.duration).toBeGreaterThanOrEqual(10_000);
+    expect(sink.error).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: the same publish, not reviewed, keeps the body', () => {
+    const sink = makeSink();
+    emitSaveAdvisories(event({ door: 'publish' }), t, sink);
+    expect(sink.warning.mock.calls[0]![1]!.description).toContain(FINDING.message);
+  });
+
+  it('CONTROL: the save door keeps the body even for a reviewed item', () => {
+    const sink = makeSink();
+    reviewed(() => emitSaveAdvisories(event({ door: 'save' }), t, sink));
+    expect(sink.warning.mock.calls[0]![1]!.description).toContain(FINDING.message);
+  });
+
+  it('CONTROL: another item published alongside keeps its body', () => {
+    const sink = makeSink();
+    reviewed(() => emitSaveAdvisories(event({ door: 'publish', name: 'other_flow' }), t, sink));
+    expect(sink.warning.mock.calls[0]![1]!.description).toContain(FINDING.message);
   });
 });

@@ -156,7 +156,15 @@ async function stage(
     drafts: Array<{ type: string; name: string; item: unknown }>,
 ): Promise<void> {
     for (const d of drafts) {
-        await (p as any).saveMetaItem({ type: d.type, name: d.name, item: d.item, mode: 'draft', packageId: PKG });
+        // [#34864] The save door refuses a seed whose object does not exist, so
+        // a seed draft naming `MISSING` stands for one stored before that rule:
+        // written through the platform's own `migrate-stored` re-save, the one
+        // save the rule does not judge. Its publish is unchanged (#27393).
+        const atRest = d.type === 'seed' && (d.item as { object?: unknown }).object === MISSING;
+        await (p as any).saveMetaItem({
+            type: d.type, name: d.name, item: d.item, mode: 'draft', packageId: PKG,
+            ...(atRest ? { source: 'migrate-stored' } : {}),
+        });
     }
 }
 

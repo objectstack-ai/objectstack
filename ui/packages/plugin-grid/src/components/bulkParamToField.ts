@@ -22,7 +22,7 @@
  * `paramToField`).
  */
 import { EXPANDABLE_FIELD_TYPES } from '@object-ui/core';
-import { resolveFormWidgetType } from '@object-ui/fields';
+import { RECORD_BEING_EDITED_KEY, resolveFormWidgetType } from '@object-ui/fields';
 import type { BulkActionParam } from '@object-ui/types';
 
 /**
@@ -123,7 +123,10 @@ export function lookupTargetObject(param: BulkActionParam): string | undefined {
  *   bulk person params get the exact PeoplePicker the form's user fields use
  *   (search-first, avatar + department·email rows, banned users excluded).
  * - `BulkActionParam`'s documented catch-all keys (min/max/step/format/…) are
- *   forwarded to the widget as-is.
+ *   forwarded to the widget as-is — except `recordBeingEdited`, which only a
+ *   record form may stamp (`withRecordBeingEdited`): this dialog edits no
+ *   single record, so a param that writes the key itself is not let opt its
+ *   lookup into `{ $record }` resolution against the sibling params.
  */
 export function bulkParamToField(
   param: BulkActionParam,
@@ -160,8 +163,11 @@ export function bulkParamToField(
     object,
     labelField,
     placeholder,
+    // Never carried: the host's statement that one record is being edited,
+    // which this dialog cannot make (objectstack#34197).
+    [RECORD_BEING_EDITED_KEY]: _recordBeingEdited,
     ...extra
-  } = param;
+  } = param as BulkActionParam & { [RECORD_BEING_EDITED_KEY]?: unknown };
 
   const field: Record<string, any> = {
     ...extra,

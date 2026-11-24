@@ -144,7 +144,10 @@ measured budget with its class (ruling record 6181973363), is its lane's card, f
 never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
 layer at least as close to the code (ruling record 6120820653).
 A new pin for a component that already has a shared harness file goes into that file as a
-top-level `describe`, not a new file (ruling record 6583487846).
+top-level `describe`, not a new file (ruling record 6583487846). The merge queue's speed budget is
+`scripts/ci/queue-budget.json`, read weekly; an over week files one speed-up card; a PR that changes CI or adds a gate
+reports the affected job's before/after median as advisory, never a gate
+([why](docs/agents/build-and-test.md#the-merge-queue-speed-budget)).
 
 ### Running the dev server
 
@@ -206,8 +209,8 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
 7. **One Zod source per metadata type.** Each type (`view`, `flow`, `agent`, …) has exactly one schema in
    `packages/spec/src/{domain}/`. Environment-overlay opt-in lives only in `allowEnvironmentOverlay` on
    `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005, amended by ADR-0131 C5.
-8. **North Star alignment.** Read `docs/NORTH-STAR.md` before structural changes. If a change doesn't advance a row of
-   its *Features on the road* ladder, graded by its *Priority* — it probably shouldn't ship.
+8. **North Star alignment.** Read `docs/NORTH-STAR.md` before structural changes. If a change doesn't advance a core
+   feature of its *Product areas* or a *Features on the road* row, graded by *Priority* — it probably shouldn't ship.
 9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow
    **`OS_{DOMAIN}_{FEATURE}[_QUALIFIER]`** where `DOMAIN` is the subsystem (`AUTH`, `SEARCH`, `CORS`, `CLOUD`,
    `DATABASE`, `CLUSTER`, `MCP`, `SSO`, …) so related vars group together (cf. `OS_AUTH_*`, `OS_CORS_*`). Pick the
@@ -273,40 +276,40 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
 14. **⛔ A governed surface lands only the way its tier allows — Tier H by the maintainer's hand (merge or enqueue)
     or an authorized approval, Tier S by the owning seat on a contract-tier review of record; before that record no AI
     seat merges, queues, or arms auto-merge on a PR whose diff touches one.** The governed surfaces are `docs/adr/**`,
-    `docs/NORTH-STAR.md`, `.claude/**` (agents, hooks and settings — not only skills), `skills/**`, `AGENTS.md`,
-    `CLAUDE.md` and `.github/workflows/**`, and under `ui/` `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`,
-    `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`. The register is `GOVERNED_SURFACES` in
-    `scripts/pm/check-governed-merges.mjs`, each row carrying its tier; adding a surface is an edit *there*, never here,
-    and `pnpm check:pm-governed-prose` reds per-PR when this paragraph names fewer surfaces than the register — or
-    more. A fork PR (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies,
+    `docs/NORTH-STAR.md`, `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, `.github/workflows/**`, under `ui/`
+    `ui/docs/adr/**`, `ui/.claude/**`, `ui/skills/**`, `ui/AGENTS.md`, `ui/CLAUDE.md` and `ui/.github/workflows/**`, and
+    the guard itself: `scripts/pm/check-governed-queue-guard.mjs`, `scripts/pm/record-recognisers.mjs`,
+    `scripts/pm/dispatch-gates.mjs` and the register, `GOVERNED_SURFACES` in `scripts/pm/check-governed-merges.mjs`,
+    each row carrying its tier; adding a surface is an edit *there*, never here (`pnpm check:pm-governed-prose` pins the
+    list). A fork PR (head repo ≠ base repo) is a proposal, never a delivery, whatever its paths: no AI seat readies,
     queues, arms auto-merge on or approves it; the owning seat adopts the diff onto an internal branch and lands that.
 
     **Authoring stays open to every seat** — drafting, pushing, opening and revising the PR. What is reserved is the
-    **landing**: on a PR whose diff touches a governed surface ⛔ never merge, ⛔ never queue, ⛔ never arm
-    auto-merge, ⛔ never flip it out of draft to make any of those possible — judged on the PR's **file list**, not
-    its description; a **mixed diff is not a proportion question**, one path hit is enough; to land the rest, split off
-    the governed files. **The landing is tiered by the register; one Tier H path makes the whole PR Tier H.** **Tier H**
-    (人合: every row outside Tier S): those four lift only for an authorized APPROVED review by an account in
-    `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per PR — the OWNING seat then lands
-    it, later pushes included; the click stays the maintainer's. **Tier S** (席内达档复核落地: `.claude/**`,
-    objectstack workflow edits (`readWorkflowDiff`), skills-only wording and add-only ADR notes (`lowRiskArmVerdict`;
-    the seat labels unnamed security teaching) read as S): those four lift once the PR thread or its card carries a
-    `## Contract review` record for the PR's current head with `Served-tier: CONTRACT_REVIEW_TIER` and a PASS verdict
-    and every check is green — the owning seat lands it through the queue. A PR whose only governed paths are register
-    rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or a
-    hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR,
-    under any account** — an authorized account is agent-operated too; "CI is green" says nothing about a governance
-    change. An authorized account's enqueue is a review record too: ⛔ never a seat's.
+    **landing**: on such a PR ⛔ never merge, ⛔ never queue, ⛔ never arm auto-merge, ⛔ never flip it out of draft
+    to make any of those possible — judged on the PR's **file list**, not its description; a **mixed diff is not a
+    proportion question**, one path hit is enough; to land the rest, split off the governed files. **One Tier H path
+    makes the whole PR Tier H.** **Tier H** (人合: every row outside Tier S): those four lift only for an authorized
+    APPROVED review by an account in `GOVERNED_APPROVERS`, on ANY commit and not dismissed; that word is spent once per
+    PR — the OWNING seat then lands it, later pushes included; the click stays the maintainer's. **Tier S**
+    (席内达档 L2 审核落地: `.claude/**`, objectstack workflow edits (`readWorkflowDiff`), skills-only wording
+    and add-only ADR notes (`lowRiskArmVerdict`, on a `Security-touching: no` record, no named card ever labelled
+    `security`; the seat labels unnamed security teaching) read as S): those four lift once the PR thread or its card
+    carries a PASS `## Contract review` record for the PR's current head with `Served-tier: CONTRACT_REVIEW_TIER` and
+    every check is green — the owning seat queues it. `.claude/**` is S only on a line-start `Rule-change: none` in
+    the PR body (or `ruled` with a `Ruling-ref:` line quoting the maintainer) repeated on the record's
+    `Rule-change-verified:` line; no line, `yes`, settings and hooks are Tier H. A PR whose only governed paths are
+    register rows the queue leg regenerates byte-exact clears with zero approvals — an uncertified recompute, drift or
+    a hand-authored sibling keeps it governed. ⛔ **No agent seat submits an approving review on a governed-surface PR,
+    under any account**. An authorized account's enqueue is a review record too: ⛔ never a seat's.
 
     **Already armed or queued when you read this?** Disable auto-merge AND convert it back to **draft**, which disarms
-    an unqueued PR; no seat act, those two included, is measured to dequeue one (`platform-readings.md`, queue
-    membership), so ask the maintainer at once to remove a queued PR by hand — then confirm from the remote that it is
-    in neither the queue nor `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a
-    spent approval or a standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a
-    governed diff without its tier's record; CODEOWNERS routes every Tier H surface but the low-risk catalogs to the
-    approvers, the relay asks per pull on drafts (no barrier); the post-merge audit (`check-governed-merges.mjs`) lists
-    every governed-surface merge with its approver and merger — a merger the maintainer does not recognise, any agent
-    approval, or a Tier S merge without a PASS record is a seat violation, filed and rolled back. No seat judges this.
+    an unqueued PR; a queued one's landing seat sends the relay's `pr_dequeue`; any other seat, or a stroke that does
+    not land, asks the maintainer at once — then confirm from the remote that it is in neither the queue nor
+    `origin/main`. **Draft is no barrier by itself — the barrier is this directive**, and a spent approval or a
+    standing record IS the review record, ⛔ not a relaxation. Behind it: the queue guard refuses a governed diff
+    without its tier's record; the post-merge audit (`check-governed-merges.mjs`) lists every governed-surface merge
+    with its approver and merger — a merger the maintainer does not recognise, any agent approval, or a Tier S merge
+    without a PASS record is a seat violation, filed and rolled back. No seat judges this.
 
 15. **⛔ A version release is performed by the maintainer, by hand — no AI seat publishes, tags, cuts a Release, or
     triggers a release, and none merges the Version Packages PR.** A rule that binds every seat lives here,
@@ -437,7 +440,7 @@ _Generated by [Claude Code](https://claude.ai/code/session_<id>)_    ← session
 **PR body:** what a body write does to the footer depends on the CHANNEL (the MCP wrapper vs a
 raw REST call) and the ACTION (create vs edit) — measured in this repository, and the cells
 disagree, so ⛔ never generalise one to another; the readings live in pm-dispatch
-`references/platform-readings.md`. Send the footer you want stored, read the body back after
+`references/readings-write-shapes.md`. Send the footer you want stored, read the body back after
 every write, and ⛔ never re-send a body that already carries an appended footer. Durable
 attribution lives in body prose or a comment. **Issue comment:** the platform APPENDS the
 block above and recognises only that shape
@@ -726,7 +729,7 @@ test regenerate; the wrapper reports all three each run rather than staying sile
 | `packages/runtime/**` | Runtime Engineer | Bootstrap, plugin registration |
 | `packages/rest/**` | API Engineer | Route gen, middleware |
 | `packages/plugins/**` | Plugin Developer | Implements spec contracts. A new package here is named by its kind (`embedder-*`, `knowledge-*`, …); drivers and connectors have their own directories (`packages/drivers/driver-*`, `packages/connectors/connector-*`). The `plugin-` prefix is frozen to the ten that carry it today (`plugin-approvals`, `plugin-audit`, `plugin-auth`, `plugin-dev`, `plugin-email`, `plugin-hono-server`, `plugin-pinyin-search`, `plugin-security`, `plugin-sharing`, `plugin-webhooks`) and is never coined again; none of the ten is renamed |
-| `packages/services/**` | Service Engineer | Kernel-managed services. A new one (fills a `core-services` slot, registers a service, or holds transports/credentials) is `@objectstack/service-<name>` in `packages/services/service-<name>`. For any new package, in this row or the one above: a package name in an ADR is a proposal; where the tree's precedent differs, the PR that creates the package follows the precedent and leaves `docs/adr/**` untouched; the landing seat files that ADR's status-line amendment as its own `domain:skills` card after the merge, citing the merge commit (ruling record 6797014134) |
+| `packages/services/**` | Service Engineer | Kernel-managed services. A new one (fills a `core-services` slot, registers a service, or holds transports/credentials) is `@objectstack/service-<name>` in `packages/services/service-<name>`. For any new package, in this row or the one above: a package name in an ADR is a proposal; where the tree's precedent differs, the PR that creates the package follows the precedent and leaves `docs/adr/**` untouched (ruling record 6797014134); after the merge the landing seat adds one row (ADR, section, what it says, what is true now, landing PR, merge commit) to the open "ADR revisions, week of …" card, opening next week's if none is (ruling record 7031931263) |
 | `packages/adapters/**` | Integration Engineer | Framework bindings, zero business logic |
 | `packages/client*/**` | SDK Engineer | Public API, DX, type safety |
 | `apps/docs/**` | Docs Engineer | Fumadocs + Next.js, MDX |

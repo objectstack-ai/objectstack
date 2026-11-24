@@ -18,7 +18,9 @@ export const fr: TranslationData = {
         grp_account_developer: { label: 'Développeur' },
         grp_account_ai_assistant: { label: 'Assistant IA' },
         nav_account_profile: { label: 'Profil' },
+        nav_account_mobile_app: { label: 'Application mobile' },
         nav_account_notifications: { label: 'Notifications' },
+        nav_account_notification_settings: { label: 'Paramètres de notification' },
         nav_account_approvals: { label: 'Mes approbations en attente' },
         nav_account_memberships: { label: 'Mes organisations' },
         nav_account_linked: { label: 'Comptes liés' },
@@ -37,9 +39,8 @@ export const fr: TranslationData = {
       navigation: {
         group_overview: { label: 'Aperçu' },
         group_apps: { label: 'Applications' },
-        nav_packaged_actions: { label: 'Actions fournies par les packages' },
         nav_marketplace_browse: { label: 'Parcourir la Marketplace' },
-        nav_marketplace_installed: { label: 'Applications installées' },
+        nav_packages: { label: 'Packages' },
         nav_cloud_connection: { label: 'Connexion au cloud' },
         group_people_org: { label: 'Personnes et organisation' },
         group_access_control: { label: 'Contrôle d’accès' },
@@ -95,6 +96,9 @@ export const fr: TranslationData = {
         nav_settings_hub: { label: 'Tous les paramètres' },
         nav_settings_localization: { label: 'Localisation' },
         nav_exchange_rates: { label: 'Taux de change' },
+        nav_units_of_measure: { label: 'Unités de mesure' },
+        nav_work_calendars: { label: 'Calendriers de travail' },
+        nav_work_calendar_exceptions: { label: 'Exceptions de calendrier' },
         nav_settings_company: { label: 'Entreprise' },
         nav_settings_mail: { label: 'Envoi des e-mails' },
         nav_settings_sms: { label: 'Envoi des SMS' },
@@ -106,6 +110,7 @@ export const fr: TranslationData = {
         nav_settings_knowledge: { label: 'Connaissances' },
         nav_settings_lifecycle: { label: 'Cycle de vie des données' },
         nav_recycle_bin: { label: 'Corbeille' },
+        nav_public_forms: { label: 'Formulaires publics' },
         nav_notification_preferences: { label: 'Préférences de notification' },
         nav_notification_templates: { label: 'Modèles de notification' },
 
@@ -123,6 +128,7 @@ export const fr: TranslationData = {
         nav_datasources: { label: 'Sources de données' },
         nav_connector_credentials: { label: 'Identifiants des connecteurs' },
         nav_connector_connections: { label: 'Connexions des connecteurs' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'Applications OAuth' },
       },
@@ -189,13 +195,55 @@ export const fr: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: 'Nombre d’utilisateurs' } } },
-    sys_organization_metrics: { measures: { org_count: { label: 'Nombre d’organisations' } } },
-    sys_session_metrics: { measures: { session_count: { label: 'Nombre de sessions' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: 'Nombre d’installations' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: 'Nombre d’utilisateurs',
+          description: 'Nombre de comptes utilisateur enregistrés, actifs ou non.',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: 'Nombre d’organisations',
+          description: 'Nombre d’organisations enregistrées ; chacune possède ses propres membres, données et paramètres.',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: 'Nombre de sessions',
+          description: 'Nombre de sessions de connexion enregistrées, une par connexion depuis un navigateur ou un appareil.',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: 'Nombre d’installations',
+          description: 'Nombre d’installations de paquets enregistrées, une par paquet installé.',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: 'Type d’action' }, user_id: { label: 'Utilisateur' } },
-      measures: { event_count: { label: 'Nombre d’événements' } },
+      dimensions: {
+        action: {
+          label: 'Type d’action',
+          description: 'Type d’action enregistré par une entrée du journal d’audit, par exemple une création, une modification, une suppression, une connexion ou un changement de configuration.',
+        },
+        user_id: {
+          label: 'Utilisateur',
+          description: 'Utilisateur qui a effectué l’action auditée ; les entrées écrites par la plateforme elle-même sont regroupées sous « Système ».',
+        },
+      },
+      measures: {
+        event_count: {
+          label: 'Nombre d’événements',
+          description: 'Nombre d’entrées du journal d’audit ; chacune enregistre une action effectuée dans le système, par un utilisateur ou par la plateforme elle-même.',
+        },
+      },
     },
   },
 

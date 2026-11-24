@@ -2,16 +2,21 @@
  * The header chrome of the Console `ObjectView` (`./ObjectView.tsx`): the
  * create button, the header's actions folded into one menu for a narrow
  * header, and the list area for a view the server refused, moved out of
- * `ObjectViewInner` verbatim (objectstack#25992, slice 9). It calls no React
- * hook. Every input is passed in; the component reads the returned values.
+ * `ObjectViewInner` verbatim (objectstack#25992, slice 9). Every input is
+ * passed in, except Object settings (objectstack#36487), which it reads off
+ * the route the way the page bar's ⋮ does; the component reads the returned
+ * values.
  */
 
-import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Button, Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { Plus, Lock } from 'lucide-react';
 import type { ActionBarSchema, UIActionSchema } from '@object-ui/types';
 import type { useObjectTranslation } from '@object-ui/i18n';
 import type { useObjectListFavorite } from '../layout/SidebarItemMenu.js';
+import { useObjectSettingsGate, useObjectSettingsPath } from '../layout/SidebarItemMenu.js';
+import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 import type { useMetaItemRefusal } from '../hooks/useMetaItemRefusal.js';
 import type { useObjectActions } from '../hooks/useObjectActions.js';
 import { declaredPrimaryToolbarAction, MOBILE_FAB_LIST_CLEARANCE } from './objectViewHelpers.js';
@@ -37,6 +42,8 @@ export function useObjectViewHeaderChrome({
     isEnvironmentList,
     toolbarBar,
     viewAccess,
+    titleSwitcher,
+    createLabel,
 }: {
     objectCanCreate: ReturnType<typeof useObjectViewToolbarAffordances>['objectCanCreate'];
     createVisible: ReturnType<typeof useObjectViewToolbarAffordances>['createVisible'];
@@ -54,6 +61,17 @@ export function useObjectViewHeaderChrome({
     isEnvironmentList: ReturnType<typeof useObjectViewToolbarAffordances>['isEnvironmentList'];
     toolbarBar: ReturnType<typeof useObjectViewHeaderToolbar>['toolbarBar'];
     viewAccess: ReturnType<typeof useMetaItemRefusal>;
+    /**
+     * The view switcher (objectstack#35548): it leads the list's view bar, so
+     * the refused-view face, which draws no list, draws the bar's switcher
+     * itself — the reader's way to another view.
+     */
+    titleSwitcher?: ReactNode;
+    /**
+     * objectstack#36113 — the create button's words, 「New Account」: the
+     * object's singular name, since the button names what it creates.
+     */
+    createLabel: string;
 }) {
     // The header's primary action, drawn the same in both of the header's
     // faces (below). [#5153] `objectCanCreate && createVisible` — the
@@ -70,11 +88,13 @@ export function useObjectViewHeaderChrome({
             size="sm"
             onClick={actions.create}
             disabled={createDisabled}
-            className="shadow-none gap-1.5 sm:gap-2 h-8 sm:h-9"
+            // 28px and 13px, like every control of the list's two bars
+            // (objectstack#35548).
+            className="shadow-none gap-1 h-7 px-2.5 text-sm"
             data-testid="object-view-new-button"
         >
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">{t('console.objectView.new')}</span>
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{createLabel}</span>
         </Button>
     ) : null;
 
@@ -103,6 +123,13 @@ export function useObjectViewHeaderChrome({
     // face would keep no labelled action, so a long description alone would
     // send the page's one action into the `⋯`. Without a folded face the
     // header keeps `actions` at every width and the description truncates.
+    // objectstack#36487 — Object settings leads the folded menu, as it leads
+    // the page bar's ⋮ More: this object in Studio, for the principal the app
+    // bar's Studio entry is drawn for (`useObjectSettingsGate`); leaving asks
+    // first when the page holds unsaved edits (`confirmUnsavedLeave`).
+    const navigate = useNavigate();
+    const { appName, objectName } = useParams();
+    const objectSettingsPath = useObjectSettingsGate(useObjectSettingsPath({ appSegment: appName, objectName }));
     const toolbarRowActions: UIActionSchema[] = listActions?.some((a: { locations?: readonly string[] }) => a.locations?.includes('list_toolbar'))
         ? toolbarActionsWithDeepLink
         : [];
@@ -112,6 +139,14 @@ export function useObjectViewHeaderChrome({
         type: 'action:bar',
         location: 'list_toolbar',
         actions: [
+            ...(objectSettingsPath ? [{
+                name: 'object_view_object_settings',
+                label: t('console.nav.objectSettings', { defaultValue: 'Object settings' }),
+                icon: 'settings-2',
+                type: 'script' as const,
+                locations: ['list_toolbar' as const],
+                onClick: () => confirmUnsavedLeave(() => navigate(objectSettingsPath)),
+            }] : []),
             ...(importShown ? [{
                 name: 'object_view_import',
                 label: t('console.objectView.import'),
@@ -141,7 +176,6 @@ export function useObjectViewHeaderChrome({
     };
     const foldedHeaderActions = !isEnvironmentList && (showCreate || primaryToolbarAction) ? (
         <>
-            {createButton}
             {/* One inline slot at every width: `toolbarBar` keeps none below
                 `md` (`mobileMaxVisible: 0`), which would send the primary into
                 a second `⋯` beside the menu's. */}
@@ -149,13 +183,21 @@ export function useObjectViewHeaderChrome({
                 <ListHeaderActionBar schema={{ ...toolbarBar, actions: [primaryToolbarAction], maxVisible: 1, mobileMaxVisible: 1 }} />
             )}
             <ListHeaderActionBar schema={foldedMenuBar} />
+            {/* New last, as in the unfolded bar (objectstack#35548). */}
+            {createButton}
         </>
     ) : undefined;
 
     // objectui#12112 — the list area for a view the server refused: said as a
     // permission refusal, in the server's own sentence, which names the view.
     const refusedViewFace = viewAccess.refusal ? (
-        <div className="h-full flex items-center justify-center p-8">
+        <div className="flex h-full flex-col">
+        {titleSwitcher && (
+            <div className="flex h-10 shrink-0 items-center border-b px-4" data-testid="refused-view-bar">
+                {titleSwitcher}
+            </div>
+        )}
+        <div className="flex flex-1 items-center justify-center p-8">
             <Empty data-testid="view-access-denied">
                 <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
                     <Lock className="h-6 w-6 text-muted-foreground" />
@@ -163,6 +205,7 @@ export function useObjectViewHeaderChrome({
                 <EmptyTitle>{t('list.loadErrorForbiddenTitle')}</EmptyTitle>
                 {viewAccess.refusal.message && <EmptyDescription>{viewAccess.refusal.message}</EmptyDescription>}
             </Empty>
+        </div>
         </div>
     ) : null;
 

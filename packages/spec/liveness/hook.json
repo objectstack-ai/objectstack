@@ -124,11 +124,34 @@
           "verifiedAt": "2026-11-14",
           "evidenceScope": "in-repo",
           "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#fillHookRefusalParams (fills the picked sentence's `{{ NAME }}` holes from the throw's `params` through the formula template engine, the declared names alone in scope); packages/runtime/src/sandbox/hook-refusal-catalogue.ts#declaredRefusalMessage (renders an entry that declares `params`; one that declares none stays plain text)",
-          "producer": "packages/spec/src/data/hook.zod.ts#hookRefusalMessageRefusal (judges each sentence's holes against the declared names at save)",
+          "producer": "packages/spec/src/data/declared-entry.zod.ts#declaredRefusalEntrySchema (judges each sentence's holes against the declared names at save; #34273 moved the judge into the shared declared-entry factory)",
           "note": "[#33214, ruling 6879477573 问三] Seeded `live` with its reader in one change. The template engine is the one the flow `end` refusal renders through (`renderTextSlot`)."
         }
       },
       "note": "[#26170, maintainer ruling 6431311681 letter A] Seeded `live` together with its reader: the key, the body runner that answers it, the translation group and the coverage count land in one change (Prime Directive 10). [#33214, ruling 6879477573 letter A] Read on every path a hook runs on: the sandboxed `body` and the in-process `handler` seam, so the schema refuses `refusals` only on a hook whose code cannot throw a code (an expression body, or neither a body nor a handler). An error a host call raised and the body let through unchanged, a nested hook's refusal, a crash and a sandbox fault pass through untouched. DRILLED to the entry's four keys: the entry face is closed (`.strict()`)."
+    },
+    "texts": {
+      "status": "live",
+      "verifiedAt": "2026-11-16",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/runtime/src/sandbox/hook-text.ts#buildHookTextSurface (the one reader: `ctx.text(key, params)` answers a declared text in the organization's language, and a key the hook does not declare as a fault naming the hook and the key); packages/runtime/src/sandbox/body-runner.ts#hookBodyRunnerFactory (builds it for every sandboxed body invocation); packages/runtime/src/sandbox/quickjs-runner.ts#installCtx (wires it onto the VM's `ctx.text`); packages/runtime/src/sandbox/body-runner.ts#withInProcessHookTitle (the one in-process seam that hands every in-process handler the same `ctx.text`)",
+      "producer": "packages/objectql/src/hook-binder.ts#bindHooksToEngine (hands the AUTHORED hook to the body runner factory and to the in-process wrap, `texts` included); packages/spec/src/data/hook.zod.ts#HookSchema (refuses at save a key the hook's source asks for literally that `texts` does not declare)",
+      "children": {
+        "message": {
+          "status": "live",
+          "verifiedAt": "2026-11-16",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-text.ts#buildHookTextSurface (the sentence `ctx.text` answers: `hooks.<hook>.texts.<key>.message` picked through the `i18n` service in the organization's language — `readOrganizationTextLocale`, the Localization setting somebody set, else the app's `i18n.defaultLocale` — negotiated by `resolveBundleLocale`, else the declared `message`)"
+        },
+        "params": {
+          "status": "live",
+          "verifiedAt": "2026-11-17",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/runtime/src/sandbox/hook-refusal-catalogue.ts#renderHookTemplate (fills the picked sentence's `{{ NAME }}` holes from the call's `params` through the formula template engine, the declared names alone in scope); packages/runtime/src/sandbox/hook-text.ts#buildHookTextSurface (fills an entry that declares `params`; one that declares none stays plain text)",
+          "producer": "packages/spec/src/data/hook.zod.ts#HookTextSchema (judges the message's holes against the declared names at save)"
+        }
+      },
+      "note": "[#34374, ruling 6913660232 parameter 7] Seeded `live` with its reader in one change. Never the caller's language (parameter 2); a missing translation writes the declared sentence (parameter 5); an unreadable Localization setting rejects the call, the flow record write's rule (ruling 6929082704 letter A)."
     },
     "label": {
       "status": "live",

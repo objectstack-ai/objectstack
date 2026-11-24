@@ -1,5 +1,279 @@
 # @object-ui/core
 
+## 18.6.0
+
+### Minor Changes
+
+- 4240719: feat(ui): timesheet list view, an editable row × weekday entry grid
+  
+  Clause-②: yes (widening — new list view type `timesheet`, its `timesheet` block and the `VisualizationType` member; new locale keys)
+  Metadata-protocol: added
+  
+  A list view can now be `type: 'timesheet'`. It pivots detail records into rows × the seven days of one week, and every cell is editable:
+  
+  ```ts
+  type: 'timesheet',
+  timesheet: {
+    rowFields: ['project', 'task'], // 1–3 fields; one row per distinct combination
+    dateField: 'work_date',         // date or datetime
+    valueField: 'hours',            // number, currency or percent
+  }
+  ```
+  
+  - Typing into an empty cell creates a record carrying the row's field values, the day and the number. Changing a cell updates that record, and clearing it deletes the record. Each cell is one call on the record API, so hooks, validation rules and permissions judge it; a refusal stays on that cell with the server's message.
+  - A cell holding several records shows their sum and is read-only.
+  - The grid offers each write only to a caller who may make it (the affordance-to-grant map's `gridAddRow`, `listInlineEdit` with the value field's write permission, and `rowDelete`). A cell no granted write can change is read-only, and **Add row** needs the create grant. An interface page's list block relays the view's `timesheet` block.
+  - The week starts on the viewer's locale first day, with previous / this / next navigation. Row, day and week totals are always shown.
+  - **Add row** asks for the row field values first; typing a day then creates the record. The view's `filter` applies to the week's query.
+  - A `timesheet` view with an incomplete block shows "Timesheet configuration required", and `os validate` warns with `view/layout-without-binding`. `view/list-view-field-refs` checks the three field names.
+  
+  The renderer is the new lazy package `@object-ui/plugin-timesheet` (`object-timesheet`), with its own lazy locale namespace `timesheet.*`. The view switcher, the create-view dialog and the Studio list-view type section offer the new type.
+
+### Patch Changes
+
+- 84e6bbb: feat(app-shell): the action result dialog draws a `table` answer field as rows, and Import Users shows its result per row in one
+  
+  Clause-②: yes (widening) — the console now draws `format: 'table'` fields (declared since the spec half) instead of their label alone, and `sys_user.import_sso_users` draws its per-row report as a table instead of JSON; no input is refused that was accepted before
+  Metadata-protocol: none
+  
+  The console's action result dialog, and the param dialog's preflight panel that shares its field renderer, draw a field with `format: 'table'` as a table: one row per element of the array, one cell per entry of the field's `columns`, in order, under the column's `label` (or its `path`). A cell reads its `path` in the element; a missing key or a `null` draws an empty cell, a value that fits the column's `format` draws in it, and anything else draws as one line of JSON. An element that is not a plain object draws as JSON in its row's first cell. An empty array draws the header over a "No rows to display" line. The dialog widens when it draws a table.
+  
+  A `code-list` field now draws as a code list only when its value is an array of strings, as the renderer contract says; any other array draws as JSON.
+  
+  `@objectstack/platform-objects`: on a cloud-managed environment, the Import Users result shows one row per CSV line, with the email, whether it succeeded, whether the address was already pending, whether the hosting organization was told and why not, why a row was not added, the columns that were not applied, and a manager that was not linked. The summary counts stay above it.
+  
+  `@objectstack/spec`: `columns` is no longer marked `[PLANNED — not yet rendered]`, and the renderer contract now says that a `null` cell value draws an empty cell and that only a plain object is read by column paths (an array or `null` element draws as JSON). It also says that inside a table cell `text` and `code-list` draw the value alone with no copy control, while `secret` keeps its mask, reveal and copy and `qrcode` keeps its code and copy. Its liveness rows are `live`.
+  
+  `@object-ui/core`: `ResultDialogFieldSpec` gains `columns`, derived from the contract's answer-field row like its `label` and `format`, so the console's table renderer reads it off the runner's own type.
+- 31eb2ae: fix(plugin-grid): a rejected aggregate bulk action reports one outcome for the selection and refreshes the list
+  
+  Clause-②: yes (widening) — optional member userMessage on ActionResult (@object-ui/types) and ActionResponseOutcome (@object-ui/core); nothing removed or renamed
+  Metadata-protocol: none
+  
+  An aggregate bulk action (`bulkActionDefs` entry with `execution: 'aggregate'`) is one call for the whole selection. When that call rejected, the result dialog printed the rejection's platform `message` against every selected record, read "Succeeded 0 / N" even when the handler had already changed some of them, and the list kept showing the old values until a manual reload.
+  
+  A rejected aggregate run is now one outcome for the selection. The dialog says the action did not complete for the selected records and shows the rejection's message once: its `userMessage` when the handler threw one (the text it wrote for the user, already in the request's locale), else its `message`. It shows no per-record count and no per-record failure list, because one call cannot say which records it changed before it stopped, nor whether it kept those changes; it says only that some records may already have been changed. When the dialog is closed at the result step, the list re-reads its rows, whether the action resolved or rejected, and the selection stays after a rejection for a re-run. The per-record dispatch (`bulkActions: ['NAME']`) reports exactly as before.
+  
+  To carry the text, a failed script/server action dispatch now relays the refusal's `error.userMessage` on `ActionResult.userMessage` (`@object-ui/types`), read by `createServerActionHandler` (`@object-ui/core`); `error` stays the whole text. The new dialog sentence is translated in every locale pack.
+- 5a75579: fix(core, plugin-grid): an action's failure toast and a per-record bulk run's failed row show the handler's userMessage
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A handler that refuses with a `userMessage` (the text it wrote for the user, already in the request's locale) now has those words shown where a single action reports its failure. The failure toast of `ActionRunner` (`@object-ui/core`) shows the action's authored `errorMessage` when it declares one, else the refusal's `userMessage`, else the error's own message; before, it went straight from `errorMessage` to the platform's error text. An action that sets `errorMessage` keeps its text.
+  
+  The per-record bulk run (`bulkActions: ['NAME']`, `@object-ui/plugin-grid`) lists each failed record with its refusal's `userMessage` when the handler threw one, else the error's message, as the aggregate run already does for its one outcome. The error CSV keeps each failure's whole message. A blank `userMessage` is no marking and changes nothing.
+- 6a7403b: fix(console): a record page printed in a zh-CN organization shows dates in Chinese order, fits its line-items table to the sheet, and prints on white with plain values
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A print page (a record page that declares `print`), printed by `@objectstack/service-print` or by the console's Print button, now reads as a document:
+  
+  - **Dates in the locale's own order.** A `date` field authored `format: 'short'` drew `11月 15, '26` in `zh-CN`: only the month was translated into the English compact layout `Nov 15, '26`. That compact layout is now kept only for a locale that writes a date month first, then day, then year (`en`, `en-US`). Every other locale gets its own date with the year: `2026年11月15日` in `zh-CN` and `ja`, `15. Nov. 2026` in `de`, `15 Nov 2026` in `en-GB`. This is the face `formatDate` already drew for the default style with the year shown. It applies on screen as well as on paper, and to every reader of `formatDate(value, 'short', { locale })`.
+  - **Tables fit the printable width.** On a print page, a data table's cells drop their on-screen minimum width and single line on paper, so the columns shrink and wrap to the box. Before, a five-column `record:line_items` table on A4 portrait with 15 mm margins was 647 px wide in a 630 px box. Its last column ran past the box's border, and that border was drawn through the column. The running header and footer table is not affected.
+  - **White page, plain values.** On paper the page and everything around it are white instead of the app's background. A link, such as a lookup's referenced record, prints in the surrounding text colour with no underline. A select value drawn as a coloured badge prints as its label with no pill. The select badge carries a new inert attribute, `data-select-badge`, for this rule. Every rule sits inside `@media print` and is scoped to the print page, so the screen is unchanged.
+  
+  `avoidBreakInside` is unchanged: it still keeps each block whole on one sheet when the block fits.
+- 227ae36: feat(actions): an action body refuses in the caller's language through a declared refusal catalogue
+  
+  Clause-②: yes (widening) — an action may now declare `refusals` (`ActionRefusalSchema`); translation bundles accept `objects.<object>._actions.<action>.refusals.<CODE>.message` and `globalActions.<action>.refusals.<CODE>.message` (with `….reasons.<REASON>.message`); `@objectstack/spec` exports `ActionRefusalSchema` and the `ActionRefusal` type (`ui`), `actionRefusalMessageKey` (`system`), and `ACTION_REFUSAL_MESSAGE_HOLE_REFUSED`, `actionRefusalsWithoutSandboxedBody`, `undeclaredActionRefusalCodeAtSave`, `undeclaredActionRefusalReasonAtSave`, `undeclaredActionRefusalAtRun` and `undeclaredActionRefusalReasonAtRun` (`data`); `@objectstack/runtime` adds no export: the action body runner answers through `resolveActionRefusal` internally. Nothing that was accepted before is refused
+  Metadata-protocol: added
+  Skills-docs: follow-up #34824 — `skills/objectstack-i18n/SKILL.md` lists the hook refusal key only and `skills/objectstack-ui/rules/actions.md` teaches no action `refusals`; `content/docs/ui/actions.mdx` and `content/docs/ui/translations.mdx` gain the section and the key row here
+  
+  A `script` action's `js` body can now refuse the way a hook does: declare the refusals it may throw, keyed by code, and throw the code instead of the sentence — `refusals: { NOT_DRAFT: { message: 'Only a draft invoice can be signed off.', status: 409 } }`, then `throw { code: 'NOT_DRAFT' }`. The server answers with the entry's sentence in the caller's locale (the request's `executionContext.locale`), else the declared one, on the refusal's `userMessage`, with the entry's status (400 when it names none). The entry is the hook catalogue's, built by one shared factory: optional `reasons` (further sentences under one code) and `params` (the names a `{{ }}` hole may fill), under the same rules.
+  
+  - The translation sits beside the action's other copy: `objects.<object>._actions.<action>.refusals.<CODE>.message` for an action bound to an object, `globalActions.<action>.refusals.<CODE>.message` for an object-less one. `os i18n extract` scaffolds the keys and the coverage check counts them; `objectstack validate` refuses a translation over a code or reason the action does not declare.
+  - A code the catalogue does not declare, a reason a code with `reasons` does not declare, or a throw with no code is refused: at save when the body names it literally, otherwise when it runs, as a fault naming the action and the code. An error a `ctx.api` call raised and the body let through unchanged passes through as before, and so does a crash.
+  - `refusals` is read only for a `type: 'script'` action with a `js` body (an inline `target` function is lowered to one by `os build`); on any other action, or with no body, it is refused at save.
+  - A sentence with `params` is compiled like a hook's: `objectstack validate`, `compile` and the publish gate refuse a hole holding logic, an unknown formatter, an empty hole and `{{ amount | currency }}` with no code.
+  - An action without `refusals` is answered exactly as before.
+  
+  The shared declared-entry factory (`packages/spec/src/data/declared-entry.zod.ts`) now builds `HookRefusalSchema`, `ActionRefusalSchema` and `HookTextSchema`; the published hook schemas are unchanged.
+  
+  `@object-ui/core` lists `refusals` among the spec's declared action keys, so an action carrying a catalogue is not reported as having an unknown key; the console reads nothing new, because the refusal arrives already rendered on `userMessage`.
+- 066177b: feat(spec): an action's answer fields gain a `table` format, so a per-row answer is drawn as rows, not raw JSON
+  
+  Clause-②: yes (widening) — `format: 'table'` joins the field formats of `resultDialog.fields` and `preflight.fields`, and the field row gains `columns`; the only new refusals fall on the new value and the new key, and every action that parsed before still parses unchanged
+  Metadata-protocol: added
+  
+  An action whose server answers a list of rows (adding several people, importing a CSV) can now say how to show it. A field in `resultDialog.fields` (or `preflight.fields`, which shares the row) takes `format: 'table'` with `columns`, one entry per cell: `{ path, label?, format? }`, where `path` is read in one element of the array.
+  
+  **FROM → TO.** FROM: the answer's list could only be shown as a JSON block (`format: 'json'`). TO: `{ path: 'rows', format: 'table', columns: [{ path: 'email', label: 'Email' }, { path: 'reason', label: 'Reason' }] }` draws one row per element, one cell per column, in `columns` order, with the column `label` (or its `path`) as the header.
+  
+  Refused at parse, each with a message that names the fix:
+  
+  - `format: 'table'` without `columns`, or with an empty list. The columns are never guessed from the elements' keys.
+  - `columns` beside any other `format`, or on a field with no `format` (the dialog-level default is never `table`).
+  - `table` as a cell `format` (a table does not nest) and as the dialog-level `resultDialog.format` (a default carries no `columns`).
+  
+  The renderer contract is stated on `resultDialog`. The console's table renderer is still to come: until it lands, a `table` field draws its label alone, and `columns` is marked `[PLANNED — not yet rendered]`.
+  
+  `@object-ui/core`: the `ResultDialogSpec` / `ResultDialogFieldSpec` `format` members now derive from the contract, as their label members already do, so the console's action renderers keep type-checking against the widened set.
+- 6c7d730: fix(ui): CSV files the Console builds in the browser start with a UTF-8 byte-order mark, so Excel shows Chinese and other non-ASCII text correctly
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Excel reads a CSV file that has no byte-order mark in the computer's own code page, so Chinese names and other non-ASCII values opened as garbled text. The server export already writes the mark. Six Console downloads build their CSV in the browser and did not:
+  
+  - the list view's export when the data source cannot export on the server;
+  - the grid's export in the same case;
+  - the data table's Export CSV button;
+  - a report's CSV export;
+  - the bulk action's Download error CSV;
+  - the temporary-password CSV after an identity import.
+  
+  All six now build their file with the new `csvBlob(text)` from `@object-ui/core`. It puts one mark (U+FEFF, the bytes EF BB BF) before the text and types the file `text/csv;charset=utf-8`. The core package also exports the mark as `UTF8_BYTE_ORDER_MARK`. The CSV import already removes one leading mark, so a downloaded file can still be imported again. The data table's file is now typed with `charset=utf-8` too.
+- 6c1f9b3: feat(studio): an installed app's action is switched on or off on the action itself, in Studio; Setup › Packaged Actions retires (ADR-0146 D4, amended 2026-11-17)
+  
+  Clause-②: yes (narrowing: Setup's `nav_packaged_actions` entry and its `automation:packaged-actions` console page retire, and `PackagedActionsPage` leaves the private `@object-ui/app-shell`; widening: new studio-namespace locale keys, an optional `options` argument and the exported `TurnedOffPackagedItemOptions` on `@objectstack/types`' `describeTurnedOffPackagedItem`, and `ActionActivationProjection.disabledPackageOf` plus an optional `platform` argument on `describeDisabled` in `@objectstack/objectql`)
+  Metadata-protocol: none (no spec schema changes; `platform-objects` serves one fewer Setup navigation item, and one `.describe()` sentence changes)
+  
+  **BREAKING** for an administrator who used Setup › Packaged Actions, and for a nav entry or link that names its `automation:packaged-actions` page: the Setup entry and page are gone. An installed app's action is now switched on or off on the action itself in Studio (the object's Actions view, or a standalone action's page), and an old link to the page opens Studio. A platform action (one a kernel package ships) has no switch in the console any more; it is switched through the activation door, `POST /api/v1/actions/_activation/<object>/<action>`, and the `409 ACTION_DISABLED` message for one now says so.
+  
+  Before this change, the deployment's on/off switch for an installed app's actions lived on a separate Setup page, "Packaged Actions", away from where the action is read. It now sits on the action:
+  
+  - On the object's Actions view in Studio, a read-only app package's vendor action carries a "Switched on / off for this deployment" switch, the flow switch's twin. A switched-off action is marked in the list. A refusal is the server's sentence, shown verbatim; a caller the deployment's posture walls off sees the switch disabled with the reason.
+  - A standalone `action` item's page in Studio's "All metadata" area carries the same switch.
+  - The platform's own actions (any action a kernel package ships) carry no switch anywhere. When the package list cannot be read, no switch is offered.
+  - Studio's landing leads to them: an app's "N switched off" count opens the switched-off action (one) or the action list (several), and when that does not land on an action (several, or flows among them), the line names each switched-off action as a link, three at most, then a "more" link to the list. An action its object holds opens on that object's Actions view (a new `?action=<name>` beside `?surface=object:<object>` in the Data pillar selects it), since an action declared inside its object has no page of its own; any other action opens its own page. The landing's "Customizations in this environment" panel links its switched-off action rows the same way.
+  
+  The doors are unchanged: the read is the `sys_metadata_activation` ledger, the write is `POST /api/v1/actions/_activation/:object/:action` with body `{ enabled }`.
+  
+  Setup › Packaged Actions is removed in the same change. A bookmark of `/apps/setup/component/automation/packaged-actions` redirects to Studio (to the package's Data pillar when the URL names `?package=`). The runtime's "turned off" sentence for a dispatched app action now points at the action in Studio, and the `disabledActions` description in `@objectstack/spec` says the same; no schema shape changes.
+  
+  **Platform actions already switched off.** The retired page also listed the platform's own actions (those a kernel package ships, such as `sys_user`'s Ban User), so a deployment may hold ledger rows that switch one off. Those rows stay in force: no boot or upgrade step turns them back on, and the activation door is unchanged. Because Studio has no switch for them, the `409 ACTION_DISABLED` sentence for a platform action now names the activation door instead of Studio. To find them on a deployment, as a platform operator:
+  
+  1. `GET /api/v1/data/sys_metadata_activation?top=1000` and keep the rows with `metadata_type: "action"` and `active: false`. If the response says `hasMore: true`, the list is incomplete; page through it before concluding.
+  2. `GET /api/v1/packages`: a row whose `package_id` belongs to a package with `manifest.scope` `system` or `cloud` is a switched-off platform action.
+  
+  To turn one on again: `POST /api/v1/actions/_activation/<object>/<action>` with body `{"enabled": true}` (use `global` as `<object>` for an action that belongs to no object). The `packagedAutomation.*` console locale keys the page read are no longer read and are left in place for a later sweep.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what retires is a Setup navigation entry, its console page and the PackagedActionsPage export of the private @object-ui/app-shell package. Ledger rows, the activation door and authored metadata are unchanged, so there is nothing for objectstack migrate meta to rewrite. -->
+- 2487242: fix(objectql, metadata-protocol, console): a list view column on a field a disabled package adds no longer fails the whole list
+  
+  Clause-②: yes (widening: the view save door accepts withheld names; one spec read-decoration member; one locale key; one optional security-service member, add-only)
+  Metadata-protocol: none
+  
+  A package can add fields to another package's object. While that package is disabled, the platform leaves those fields out of the served object, and the data door refuses every request that names one (`400 INVALID_FIELD`, or `400 INVALID_SORT` for a sort). The owner's views still named the field, so a view with such a column, sort, filter, grouping level or searchable field failed for everyone. Saving the view (a rename, a pin, a Studio edit) was refused too (`422`, `list-view-field-unknown` / `sort-field-unknown`).
+  
+  - **The served object read names what is withheld.** `GET /api/v1/meta/object/:name` and the object list read carry `_withheldFields: { [field]: { packageId } }` when a disabled package withholds a field from the object. It is a read decoration (`METADATA_READ_DECORATIONS`), so the save door strips it, and the execution face and the layered editor read do not carry it. The registry gains `getWithheldExtensionFields(name)`.
+  - **A caller who may not read a withheld field is not told it exists.** The object-schema projection (ADR-0106) keeps a `_withheldFields` entry only for a caller the security service admits. `ISecurityService` gains an optional member, `getMetadataReadableWithheldFields(object, context)`, which answers the withheld names the caller may read; `@objectstack/plugin-security` implements it from each field's stored definition: the permission set's field entry, the field's own `requiredPermissions`, the fallback set for a caller with no set, and the on-behalf-of delegator. A security service without the member, an `undefined` answer or a throw drops every entry. Each dropped entry moves the caller's ETag, so two callers who are told different things never share a `304`. A caller exempt from the projection (a platform admin, a system context) is served every entry, as before.
+  - **The view save door judges a view against the stored object.** A `view` write is judged against the object with every disabled package's extension folded in (the new fold option `includeDisabledExtensions`). A withheld field is a real stored field, so the view saves and keeps its column and sort. A misspelled field is still refused. Other writes are still judged against the served object, so a page or flow that names a withheld field is still refused while the package is off. A served view's `_diagnostics` is judged against the same stored object, so it no longer warns `list-view-field-unknown` or `form-field-unknown` on a withheld name the save door accepts; a misspelled field still warns.
+  - **The console leaves withheld names out.** The list view and the grid leave a withheld field out of `$select`, `$filter`, `$orderby`, `$searchFields` and `groupBy`, and do not draw its column. A line above the rows names it (`list.withheldFieldsLeftOut`). Nothing is written to the view or to the user's list preferences, and a sort the user saves keeps the withheld entry. Once the package is enabled, the column, the sort and the grouping come back without any write.
+- 6d2db1d: fix(dashboard): a drill on a dimension across a relationship lists its records, and a failed drill says so in the viewer's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset dimension can read a field of a related object (`crm_account.owner_id`). Clicking such a bucket in a dashboard widget or a report built a drill filter on the dotted path itself, which the data API refuses with `INVALID_FIELD` / 400, and the drill drawer then printed that English developer message to the viewer.
+  
+  - **The drill resolves the relationship first.** `resolveDatasetDrillFilter` (`@object-ui/core`) reads the related object's ids matching the clicked value through the surface's own data source, as the viewer, and filters the base object on the relationship field: `{ crm_account: { $in: [...] } }`. A path of up to three hops (ADR-0071's limit) is read innermost first, one read per hop, and dimensions that share a hop are read together. A bucket with no relationship path drills exactly as before, with nothing extra read.
+  - **No drill rather than a wrong list.** A path past three hops offers no drill. A relationship the object does not declare as a single-valued lookup, the empty bucket of a relationship dimension, and more than 200 related records at a hop open the drawer on a localized notice instead of a list. The id list is never truncated. A report emits no drill in those cases and logs why.
+  - **The drawer speaks to the viewer.** When the drawer's list read fails, it shows a localized sentence (`dashboard.drillFailed`) instead of the server's message. New keys `dashboard.drillTooMany`, `dashboard.drillUnavailable` and `dashboard.drillFailed` are in every built-in locale.
+  - `buildDatasetDrillFilter` now refuses a relationship-path dimension with a `FilterOperatorError` instead of writing a dotted key, and takes the resolved conditions as an optional sixth argument.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [b019048]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [2e29287]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+  - @object-ui/types@18.6.0
+  - @objectstack/formula@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

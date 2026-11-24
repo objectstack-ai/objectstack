@@ -174,7 +174,10 @@ export const ProjectViews = defineView({
       },
     },
   },
-  // The default form — what the create and edit surfaces render.
+  // The default form. Since #36425 the Console's create and edit surfaces lay
+  // the record out by the object's fieldGroups and no longer load it, so it is
+  // inert there (lint: form-view-internal-not-loaded, allow-listed with its
+  // reason in test/author-time-advisories.test.ts).
   form: {
     type: 'simple',
     data,

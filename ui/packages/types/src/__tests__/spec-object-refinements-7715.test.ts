@@ -466,7 +466,9 @@ const SITES = [
     // `list-view` node's bag (`ListViewPropsBag`, objectui#12670), whose `type` IS the spec's
     // view kind, attaches both checks by reference; `list-view-properties-bag-12670.test.ts`
     // measures each against the spec's own issue.
-    notAttachable: ['checkListViewChartBinding'],
+    // `checkListViewTimesheetBinding` joined with objectstack#34382 and is not attachable
+    // here for the same reason: it judges `type: 'timesheet'`.
+    notAttachable: ['checkListViewChartBinding', 'checkListViewTimesheetBinding'],
   },
 ] as const;
 

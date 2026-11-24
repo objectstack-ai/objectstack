@@ -29,6 +29,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { toast } from 'sonner';
 import { t } from '../metadata-admin/i18n';
 import { PackageOwdOverviewPanel } from './PackageOwdOverviewPanel';
+import { StudioSaveHarness } from './__tests__/studioSaveHarness';
 
 /** Pick a dial's option by its label, through the trigger, as a user does; the dials are the shared Select (objectui#11865). */
 async function pickOwd(testId: string, label: string): Promise<void> {
@@ -106,6 +107,10 @@ const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
       { status, headers: { 'content-type': 'application/json' } },
     );
   }
+  // objectstack#36511 — the Save's second step, that one object's publish.
+  if (init?.method === 'POST' && /\/publish(\?|$)/.test(String(url))) {
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
   return new Response('null', { status: 404, headers: { 'content-type': 'application/json' } });
 });
 
@@ -129,10 +134,10 @@ afterEach(() => {
 });
 
 async function changeSharingAndSave(client: MetadataClient): Promise<void> {
-  render(<PackageOwdOverviewPanel client={client} packageId={PKG} locale="en-US" />);
+  render(<StudioSaveHarness><PackageOwdOverviewPanel client={client} packageId={PKG} locale="en-US" /></StudioSaveHarness>);
   await screen.findByTestId('owd-row-acme_account');
   await pickOwd('owd-internal-acme_account', t('engine.studio.settings.sharingPublicRead', 'en-US'));
-  fireEvent.click(screen.getByTestId('owd-save'));
+  fireEvent.click(await screen.findByTestId('studio-save'));
   await waitFor(() => expect(puts).toHaveLength(1));
 }
 

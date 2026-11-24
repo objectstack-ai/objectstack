@@ -2,6 +2,7 @@ import React from 'react';
 import { Input, EmptyValue, cn } from '@object-ui/components';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { InCellTextInput } from './InCellTextInput.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { useLocalization, useDisplayLocale, readHomeAmountSource, formatDisplayNumber, type HomeAmountSource } from '@object-ui/i18n';
 import { formatDate } from '@object-ui/core';
@@ -11,8 +12,9 @@ import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberB
 import { formatCurrency, currencyDisplayWidth } from './number-format.js';
 import { HomeAmountPreview } from './homeAmountPreview.js';
 import { useFollowedParentRecord } from './followedParentRow.js';
+import { useAdornmentInset } from './adornmentInset.js';
 
-export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, dataSource, ...props }: FieldWidgetComponentProps<number>) {
+export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, dataSource, inCell, onCommit: _onCommit, ...props }: FieldWidgetComponentProps<number>) {
   const currencyField = field as any;
   // Shared precedence: field currency → currencyConfig → tenant default (ADR-0053).
   // A `record`-mode amount (ADR-0144 D2) reads the code its record holds —
@@ -56,6 +58,22 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
 
   // Before the readonly return: hooks are unconditional (objectui#6780).
   const { refusal, readBadInput } = useBadInputRefusal('1234.56');
+
+  // ONE channel for the symbol (objectui#4414). This used to be a hand-written
+  // `currency === 'USD' ? '$' : currency` ternary, with a dead one-entry
+  // `CURRENCY_SYMBOLS` map sitting two lines above it restating the same fact —
+  // a table that looked like the place to add a currency but that nothing read.
+  // Both were hand copies of knowledge `Intl` already carries, and both are
+  // gone: `currencySymbol` reads the `currency` part of the SAME format the
+  // readonly branch below renders amounts with, so the two modes of this widget
+  // can no longer disagree (they did: `JPY` in the adornment, `¥1,235` in the
+  // readonly span). USD at the display-locale default is `$` either way.
+  const symbol = currency ? currencySymbol(currency, locale) : '';
+  // The input's left inset follows the symbol's rendered width: `US$` (zh-CN),
+  // `CA$` / `CHF` (en-US) are wider than the `$` a fixed inset was sized for
+  // and would sit on the amount's leading digits (objectstack#36678).
+  // Before the readonly return too: the inset is a hook.
+  const symbolInset = useAdornmentInset(symbol, { floor: 'pl-8', startRem: 0.75, gapRem: 0.5 });
 
   // A home field (ADR-0144 D5) is written by the engine alone, so it draws the
   // read face wherever it is drawn, a form that hands it `disabled` included,
@@ -186,22 +204,39 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
     domProps.onBlur?.(e);
   };
 
-  // ONE channel for the symbol (objectui#4414). This used to be a hand-written
-  // `currency === 'USD' ? '$' : currency` ternary, with a dead one-entry
-  // `CURRENCY_SYMBOLS` map sitting two lines above it restating the same fact —
-  // a table that looked like the place to add a currency but that nothing read.
-  // Both were hand copies of knowledge `Intl` already carries, and both are
-  // gone: `currencySymbol` reads the `currency` part of the SAME format the
-  // readonly branch above renders amounts with, so the two modes of this widget
-  // can no longer disagree (they did: `JPY` in the adornment, `¥1,235` in the
-  // readonly span). USD at the display-locale default is `$` either way.
-  const symbol = currency ? currencySymbol(currency, locale) : '';
+  // objectstack#36023 — in a list cell the cell itself is the input: the
+  // currency's code, then the raw amount right-aligned (the cell formats it
+  // again once saved).
+  if (inCell) {
+    return (
+      <InCellTextInput
+        {...domProps}
+        type="number"
+        align="end"
+        leading={currency}
+        value={value ?? ''}
+        onChange={(e) => {
+          readBadInput(e.target);
+          const val = e.target.value === '' ? null : parseFloat(e.target.value);
+          onChange(val as any);
+        }}
+        onBlur={handleBlur}
+        placeholder={currencyField?.placeholder}
+        disabled={props.disabled}
+        min={typeof currencyField?.min === 'number' ? currencyField.min : undefined}
+        max={typeof currencyField?.max === 'number' ? currencyField.max : undefined}
+        step={Math.pow(10, -fractionDigits).toFixed(fractionDigits)}
+        aria-invalid={!!error || !!refusal}
+        below={refusal ? <div className="px-2.5 pb-1"><BadInputMessage refusal={refusal} /></div> : null}
+      />
+    );
+  }
 
   return (
     <div className="space-y-1">
       <div className="relative">
         {symbol && (
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+          <span ref={symbolInset.ref} className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
             {symbol}
           </span>
         )}
@@ -226,7 +261,7 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
           // (and carries the wrong width for a JPY or KWD field).
           placeholder={currencyField?.placeholder}
           disabled={readonly || props.disabled}
-          className={cn(PHONE_TOUCH_HEIGHT, symbol ? 'pl-8' : '', refusal ? BAD_INPUT_BORDER : '', className)}
+          className={cn(PHONE_TOUCH_HEIGHT, symbolInset.insetClass, refusal ? BAD_INPUT_BORDER : '', className)}
           // Surface the field's declared range (e.g. `min: 0` on a budget) so the
           // browser's spinner/keyboard affordances respect it (objectui#2572);
           // server-side validation still owns enforcement.

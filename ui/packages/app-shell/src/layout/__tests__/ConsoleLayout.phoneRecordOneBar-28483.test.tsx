@@ -6,7 +6,7 @@
  * is the page's one bar, and the record's name shows once, as the header
  * title under it. The four doors (app menu, search, notifications, account)
  * stay on every other route, the object's list among them, one 「‹」 away.
- * From 768 px up every route keeps the app bar.
+ * From 768 px up no route draws the app bar (objectstack#36112).
  *
  * Harness: the real `ConsoleLayout` with its real `@object-ui/layout`
  * `AppShell` (`ConsoleLayout.oneMainLandmark-13334`'s). `AppHeader` is a stub
@@ -22,11 +22,25 @@ import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
+// The layout's reach includes `import('@objectstack/lint')` (the draft
+// preview bar's capability lint): pay that load during collection, not inside
+// a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 vi.mock('../../hooks/useAiSurface', () => ({
   useAiSurfaceEnabled: () => ({ enabled: false, isLoading: false }),
 }));
-vi.mock('../UnifiedSidebar', () => ({ UnifiedSidebar: () => <nav aria-label="App menu" /> }));
+vi.mock('../UnifiedSidebar', () => ({
+  UnifiedSidebar: () => <nav aria-label="App menu" data-testid="sidebar-stub" />,
+}));
+// The bar's own face is `PhoneAppNavBar.fixedTabs-35882`'s; here only where
+// the layout mounts it, with the real route rule (`isPhoneTabRoute`).
+vi.mock('../PhoneAppNavBar', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  PhoneAppNavBar: ({ basePath }: { basePath: string }) => (
+    <nav data-testid="phone-app-nav-bar-stub" data-base-path={basePath} />
+  ),
+}));
 vi.mock('../AppHeader', () => ({
   AppHeader: () => (
     <div data-testid="app-bar">
@@ -39,7 +53,7 @@ vi.mock('../ConsoleNotificationBanners', () => ({ ConsoleNotificationBanners: ()
 vi.mock('../../preview/DraftPreviewBar', () => ({ DraftPreviewBar: () => null }));
 vi.mock('../../preview/UnpublishedAppBar', () => ({ UnpublishedAppBar: () => null }));
 
-import { ConsoleLayout, isRecordPagePath } from '../ConsoleLayout';
+import { ConsoleLayout, isAppDocsPath, isRecordPagePath } from '../ConsoleLayout';
 import { NavigationProvider } from '../../context/NavigationContext';
 
 const APP = { name: 'crm', label: 'CRM', active: true, navigation: [] };
@@ -117,12 +131,11 @@ describe('a phone record page draws one bar (objectstack#28483)', () => {
     expect(screen.getByTestId('app-bar')).toBeInTheDocument();
   });
 
-  it('control: at 768 px and 1440 px a record route keeps the app bar, as before', () => {
+  it('from 768 px up no route draws the app bar at all (objectstack#36112)', () => {
     for (const width of [768, 1440]) {
       mountAt(RECORD, width);
-      const headers = document.querySelectorAll('header');
-      expect(headers, `${width} px`).toHaveLength(1);
-      expect(headers[0]).toContainElement(screen.getByTestId('app-bar'));
+      expect(document.querySelectorAll('header'), `${width} px`).toHaveLength(0);
+      expect(screen.queryByTestId('app-bar'), `${width} px`).toBeNull();
       cleanup();
     }
   });
@@ -149,6 +162,94 @@ describe('isRecordPagePath (objectstack#28483)', () => {
       '/organizations/acme',
     ]) {
       expect(isRecordPagePath(path), path).toBe(false);
+    }
+  });
+});
+
+/**
+ * objectstack#35882 — the phone's bottom bar (Home, Notifications, Approvals,
+ * search) is mounted on the three pages it opens, the app's home, the inbox
+ * list and the approvals inbox, and on no page below them: a list, a view, a
+ * dashboard, a page, a record and a record form have the page to themselves.
+ * While it is drawn the inset keeps its height free at the bottom. It replaces
+ * objectstack#34594's bar of menu entries, which every app route but a record
+ * and its forms drew.
+ */
+describe('the phone bottom bar is drawn on its three pages only (objectstack#35882)', () => {
+  const bar = () => screen.queryByTestId('phone-app-nav-bar-stub');
+  const insetKeepsBarFree = () =>
+    screen.getByTestId('console-route').parentElement!.className.includes('!pb-[calc(3.5rem+env(safe-area-inset-bottom))]');
+
+  it('at 375 px the app root, the inbox list and the approvals inbox draw it, and the inset keeps it free', () => {
+    for (const path of ['/apps/crm', '/apps/crm/sys_inbox_message', '/apps/crm/system/approvals']) {
+      mountAt(path, 375);
+      expect(bar(), path).not.toBeNull();
+      expect(insetKeepsBarFree(), path).toBe(true);
+      cleanup();
+    }
+  });
+
+  it('Home goes to this app\'s home', () => {
+    mountAt('/apps/crm', 375);
+    expect(bar()).toHaveAttribute('data-base-path', '/apps/crm');
+  });
+
+  it('at 375 px a list, a view, a dashboard, a page, a record page and both record forms draw none', () => {
+    for (const path of [
+      '/apps/crm/crm_lead',
+      '/apps/crm/crm_lead/view/all',
+      '/apps/crm/dashboard/sales',
+      '/apps/crm/page/home',
+      RECORD,
+      `${RECORD}/page/print_sheet`,
+      `${RECORD}/edit`,
+      '/apps/crm/crm_lead/new',
+    ]) {
+      mountAt(path, 375);
+      expect(bar(), path).toBeNull();
+      expect(insetKeepsBarFree(), path).toBe(false);
+      cleanup();
+    }
+  });
+
+  it('CONTROL — at 768 px and 1440 px no route draws it, the app root included', () => {
+    for (const width of [768, 1440]) {
+      for (const path of ['/apps/crm', '/apps/crm/crm_lead']) {
+        mountAt(path, width);
+        expect(bar(), `${width} px ${path}`).toBeNull();
+        expect(insetKeepsBarFree(), `${width} px ${path}`).toBe(false);
+        cleanup();
+      }
+    }
+  });
+});
+
+describe('an app\'s docs pages draw no app menu (objectstack#35424)', () => {
+  const appMenu = () => screen.queryByTestId('sidebar-stub');
+
+  it('at 1440 px a docs index, a book and an article draw no app menu, and keep the app bar (the one bar a desktop app still draws, objectstack#36112)', () => {
+    for (const path of ['/apps/crm/docs', '/apps/crm/docs/crm_manual', '/apps/crm/docs/crm_manual/crm_quotes']) {
+      mountAt(path, 1440);
+      expect(appMenu(), path).toBeNull();
+      expect(screen.getByTestId('app-bar'), path).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it('control: every other app route keeps the app menu', () => {
+    for (const path of ['/apps/crm', '/apps/crm/crm_lead', '/apps/crm/dashboard/sales', '/apps/crm/docsearch']) {
+      mountAt(path, 1440);
+      expect(appMenu(), path).not.toBeNull();
+      cleanup();
+    }
+  });
+
+  it('isAppDocsPath names the docs tree under an app and nothing else', () => {
+    for (const path of ['/apps/crm/docs', '/apps/crm/docs/', '/apps/crm/docs/manual/intro']) {
+      expect(isAppDocsPath(path), path).toBe(true);
+    }
+    for (const path of ['/docs', '/docs/manual/intro', '/apps/crm', '/apps/crm/docsearch', '/apps/crm/crm_lead/docs']) {
+      expect(isAppDocsPath(path), path).toBe(false);
     }
   });
 });

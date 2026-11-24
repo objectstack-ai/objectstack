@@ -24,7 +24,7 @@ import {
   InspectorSelectField,
   InspectorEmptyState,
 } from '../metadata-admin/inspectors/_shared.js';
-import { readFields, readGroups, updateGroup } from '../metadata-admin/previews/object-fields-io.js';
+import { groupMembership, readFields, readGroups, updateGroup } from '../metadata-admin/previews/object-fields-io.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
 import {
   acceptRelatedListEntries,
@@ -67,8 +67,9 @@ export function ObjectGroupInspector({
   const parentName = objectName || (typeof draft.name === 'string' ? draft.name : '');
   const { relationships, ready } = useRelatedListCatalog(parentName, draft);
   const memberCount = React.useMemo(
-    () => readFields(draft.fields).entries.filter((e) => e.def.group === groupKey).length,
-    [draft.fields, groupKey],
+    // A group's own `fields` list, else the older `Field.group` (objectstack#35900).
+    () => groupMembership(readFields(draft.fields), draft.fieldGroups).members.get(groupKey)?.length ?? 0,
+    [draft.fields, draft.fieldGroups, groupKey],
   );
 
   if (!group) {
@@ -152,12 +153,13 @@ export function ObjectGroupInspector({
  * draws that table at the group's position in the details column.
  *
  * What the picker can write is held to what the spec accepts:
- *  - only inbound relationships that are BODY TABLES are offered
- *    (objectstack#27478): a group positions a body table and never promotes a
- *    side card, so a relationship whose FK keeps it a side card, or hides it,
- *    is not offered. Body-ness is the record page's own verdict (`isPrimary`,
- *    `@objectstack/spec`'s `isBodyTableRelationship`), the predicate the spec's
- *    refusal reads too. A pick is checked against them before it is written (a
+ *  - only inbound relationships a group may place are offered
+ *    (objectstack#27478, objectstack#35889): a `'primary'` list (the group
+ *    positions it) or a plain master-detail list (the group makes it a body
+ *    table); a group never promotes a side card, so a relationship whose FK
+ *    keeps it a side card, or hides it, is not offered. The verdict is
+ *    `isPlaceable` (`@objectstack/spec`'s `isGroupPlaceableRelationship`), the
+ *    predicate the spec's refusal reads too. A pick is checked against them before it is written (a
  *    name matching none, or naming a list that is not a body table, is refused
  *    at `defineStack` and by the publish door's lint);
  *  - a stored value naming a list that is not a body table stays visible, with
@@ -199,10 +201,10 @@ function RelatedTablePlacement({
   // names all of that child's FKs); the spec refuses the entry otherwise.
   const namesBodyTablesOnly = (entry: string) => {
     const named = relationshipsNamedBy(entry, relationships);
-    return named.length > 0 && named.every((r) => r.isPrimary);
+    return named.length > 0 && named.every((r) => r.isPlaceable);
   };
   const options = relationships
-    .filter((r) => r.isPrimary)
+    .filter((r) => r.isPlaceable)
     .filter((r) => !placedElsewhere.has(r) || relationshipsNamedBy(current, relationships).includes(r))
     .map((r) => {
       const entry = relationshipEntry(r, relationships);
@@ -223,7 +225,10 @@ function RelatedTablePlacement({
     // table rule a group's entry answers to.
     if (blockedByFields || acceptRelatedListEntries([v], relationships).length === 0) return;
     if (!namesBodyTablesOnly(v)) return;
-    onPatch({ fieldGroups: updateGroup(groups, group.key, { relatedList: v }) });
+    // A group placing a table holds no fields, so a `fields` list naming none
+    // of the object's fields (the only kind left once the check above passed)
+    // goes with the change (objectstack#35900).
+    onPatch({ fieldGroups: updateGroup(groups, group.key, { relatedList: v, fields: undefined }) });
   };
   return (
     <div className="space-y-1" data-testid="group-related-table">

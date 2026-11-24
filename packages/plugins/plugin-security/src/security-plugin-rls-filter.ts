@@ -289,9 +289,11 @@ export async function computeLayeredRlsFilter(
     // the floor comes off only where the master gate DEMONSTRABLY covers the
     // same operation, which is a fact about the call site. The by-id write
     // pre-image gate vouches for it (step 2.8 runs immediately below it on
-    // the same pass, under a superset of its own guard); the bulk-write path
-    // does not and must not, because `assertControlledByParentWrite` returns
-    // early with no single id and nothing would replace the floor there.
+    // the same pass, under a superset of its own guard); the addressed
+    // predicate write vouches for it once step 2.8 has judged every master
+    // the write reaches, for the rows it judged (ADR-0055 §3 as amended
+    // 2026-11-22, ruling record 7073030861); a write that gate did not judge
+    // carries no vouch and keeps the floor.
     // Both directions are pinned in
     // `controlled-by-parent-detail-write-authority.test.ts`.
     //
@@ -387,9 +389,54 @@ export async function computeLayeredRlsFilter(
     // app-authored policy — even one spelling the identical predicate under a
     // different name — reaches the compiler untouched (ADR-0049, and the
     // ADR-0105 F1 lesson that a token match swallows authored policies).
-    const allRlsPolicies = opts?.dropPlatformOwnershipFloor
+    //
+    // [#35917] REPLACING the floor is not DELETING its term. Layer 1 is an OR
+    // of permissive policies, so taking the floor out of an OR an authored
+    // term stands in did not hand the row to the write authority — it handed
+    // it to the authored term alone, and a row the floor alone admitted (the
+    // caller's own closed deal, beside an authored `stage == 'open'` widener)
+    // was refused by id, while the predicate write, which keeps the floor
+    // beside an authored term (`predicateWriteFloorRelief`), wrote it. So the
+    // floor comes out only where it is the OR's LAST term: there the
+    // remaining Layer 1 is null and the authority's `allow` admits the row.
+    // Where an authored term would remain, the floor stays one term of the
+    // OR: the replacement adds no row there and removes none, and the
+    // authored term still bounds every row the floor does not admit — which
+    // is ADR-0066 ① on this posture: Modify All, the `allow` it earns
+    // included, does not lift an authored write policy.
+    //
+    // "An authored term would remain" is asked exactly as the compile below
+    // answers it, so the two cannot disagree: a policy that survives pass 1
+    // carrying a `using`, or one pass 1 drops for a missing column (a deny
+    // contribution). That is the test the predicate write asks too — whether
+    // the Layer 1 composed with the floor dropped is null.
+    // Pass 1 of the field-existence net (its reasons are on the compile
+    // below), as a function so the floor decision above asks it too.
+    const fieldExistencePassOne = (
+      policies: RowLevelSecurityPolicy[],
+    ): { compilable: RowLevelSecurityPolicy[]; dropped: number } => {
+      if (!objectFields) return { compilable: policies, dropped: 0 };
+      let dropped = 0;
+      const compilable = policies.filter((p) => {
+        const targetField = this.extractTargetField(p.using);
+        if (!targetField) return true;
+        if (objectFields.has(targetField)) return true;
+        if (tenancyDisabled && targetField === 'organization_id') {
+          return false;
+        }
+        dropped++;
+        return false;
+      });
+      return { compilable, dropped };
+    };
+    const withoutFloor = opts?.dropPlatformOwnershipFloor
       ? collected.filter((p) => !isPlatformOwnershipFloorPolicy(p))
       : collected;
+    let allRlsPolicies = withoutFloor;
+    if (withoutFloor.length < collected.length) {
+      const rest = fieldExistencePassOne(withoutFloor);
+      if (rest.dropped > 0 || rest.compilable.some((p) => !!p.using)) allRlsPolicies = collected;
+    }
     if (allRlsPolicies.length > 0) {
       // Field-existence safety, in TWO passes that answer two different
       // questions. Schema-lookup failure runs neither: a schema that cannot
@@ -417,19 +464,7 @@ export async function computeLayeredRlsFilter(
       // the compiler judges the compiled tree, where a negation is a `$not`
       // node and has no spelling left to hide behind. The matcher's
       // include-direction ruling is untouched — it never sees the phantom.
-      let dropped = 0;
-      const compilable = objectFields
-        ? allRlsPolicies.filter((p) => {
-            const targetField = this.extractTargetField(p.using);
-            if (!targetField) return true;
-            if (objectFields.has(targetField)) return true;
-            if (tenancyDisabled && targetField === 'organization_id') {
-              return false;
-            }
-            dropped++;
-            return false;
-          })
-        : allRlsPolicies;
+      const { compilable, dropped } = fieldExistencePassOne(allRlsPolicies);
       // [#25234 ruling A] The declared membership keys these policies read,
       // staged before they compile. The resolver's half ran above.
       await this.stageRlsMembership(context, compilable, object);
@@ -566,6 +601,100 @@ export async function computeLayeredRlsFilter(
   return { layer0, layer1, tenantLayer0Verdict, crossedByPlatformAdmin };
 }
 
+/**
+ * The caller's Layer 0 ALONE, as {@link computeLayeredRlsFilter} computes it:
+ * the same verdict, filter, operator crossing and verified-owner read
+ * crossing, without compiling Layer 1. The organization wall an app-authored
+ * elevation meets reads nothing else (`app-automation-organization-wall.ts`).
+ *
+ * The permission sets decide one fact only — whether a true platform operator
+ * crosses on a posture-permitting object (the superuser bit beside the
+ * `PLATFORM_ADMIN` evidence) — so they are loaded only where that fact is
+ * open: a posture-permitting object, and a context whose carried rung is the
+ * operator's, or that carries none. Everywhere else the crossing is `false`
+ * without them, exactly as the layered computation answers it.
+ */
+export async function computeTenantLayer0Only(
+  this: Pick<RlsFilterHost, 'getObjectFieldNames' | 'getObjectSecurityMeta' | 'hasPlatformAdminPosture' | 'isVerifiedPlatformOwnerSession' | 'logger' | 'metadata' | 'permissionEvaluator' | 'ql' | 'tenancyDisabledCache' | 'tenancyPosture'>,
+  loadPermissionSets: () => Promise<PermissionSet[]>,
+  object: string,
+  operation: string,
+  context: any,
+): Promise<{
+  layer0: Record<string, unknown> | null;
+  tenantLayer0Verdict: TenantLayer0Verdict;
+  crossedByPlatformAdmin: boolean;
+  /** Set when the `deny` is an external object's undeclared organization scope (ADR-0015 §10): the posture it is denied under. */
+  undeclaredExternalScopePosture?: RlsFilterHost['tenancyPosture'];
+}> {
+  const meta = await this.getObjectSecurityMeta(object);
+  const rlsOperation = rlsOperationForVerb(operation);
+  const isWrite = rlsOperation === 'insert' || rlsOperation === 'update' || rlsOperation === 'delete';
+  const posturePermits = meta.isPrivate || meta.tenancyDisabled || meta.isBetterAuthManaged;
+  const carriedPosture = context?.posture;
+  const carried = isCarriedPosture(carriedPosture);
+  let isPlatformAdmin = false;
+  if (posturePermits && (!carried || carriedPosture === 'PLATFORM_ADMIN')) {
+    const permissionSets = await loadPermissionSets();
+    const superuserBypass = isWrite
+      ? this.permissionEvaluator.hasSuperuserWriteBypass(object, permissionSets, { isPrivate: meta.isPrivate })
+      : this.permissionEvaluator.hasSuperuserReadBypass(object, permissionSets, { isPrivate: meta.isPrivate });
+    const probePlatformAdmin = this.hasPlatformAdminPosture(permissionSets);
+    const platformPosture = carried ? carriedPosture === 'PLATFORM_ADMIN' : probePlatformAdmin;
+    if (carried && platformPosture !== probePlatformAdmin) {
+      this.logger.warn?.(
+        '[authz/ADR-0099] Layer 0 exemption: carried posture rung and capability probe disagree; ' +
+          'enforcing the (narrower) carried rung',
+        { object, operation, carriedPosture, probePlatformAdmin, userId: context?.userId },
+      );
+    }
+    isPlatformAdmin = superuserBypass && platformPosture;
+  }
+  const objectFields = await this.getObjectFieldNames(this.metadata, object, this.ql);
+  const tenancyDisabled = this.tenancyDisabledCache.get(object) === true || meta.tenancyDisabled;
+  const tenantLayer0Input: TenantLayer0Input = tenantLayer0InputOf({
+    tenancyPosture: this.tenancyPosture,
+    context,
+    meta,
+    objectFields,
+    tenancyDisabled,
+    isPlatformAdmin,
+  });
+  const tenantLayer0Verdict = computeTenantLayer0Verdict(tenantLayer0Input);
+  const layer0 = tenantLayer0FilterOf(tenantLayer0Verdict);
+  const crossedByPlatformAdmin =
+    tenantLayer0Verdict.kind === 'none' &&
+    isPlatformAdmin &&
+    computeTenantLayer0Verdict({ ...tenantLayer0Input, isPlatformAdmin: false }).kind !== 'none';
+  const undeclaredExternalScope =
+    tenantLayer0Verdict.kind === 'deny' && tenantLayer0Input.externalOrganizationScopeUndeclared === true;
+  // [#12974] The verified platform owner's READ crosses, as in the layered
+  // computation (its audit line included).
+  if (!isWrite && layer0 !== null && !undeclaredExternalScope && (await this.isVerifiedPlatformOwnerSession(context))) {
+    this.logger.warn?.(
+      `[security] ${PLATFORM_OWNER_WALL_BYPASS_EVENT}: verified platform owner crossed ` +
+        'the Layer 0 organization wall on a read — the org filter below was NOT appended (only the ' +
+        "declared platform owner's reads cross it; writes stay walled for everyone)",
+      {
+        event: PLATFORM_OWNER_WALL_BYPASS_EVENT,
+        object,
+        operation,
+        userId: context?.userId,
+        organizationId: context?.tenantId ?? null,
+        tenancyPosture: this.tenancyPosture,
+        suppressedFilter: layer0,
+      },
+    );
+    return { layer0: null, tenantLayer0Verdict: { kind: 'none' }, crossedByPlatformAdmin };
+  }
+  return {
+    layer0,
+    tenantLayer0Verdict,
+    crossedByPlatformAdmin,
+    ...(undeclaredExternalScope ? { undeclaredExternalScopePosture: this.tenancyPosture } : {}),
+  };
+}
+
 /** The body of `SecurityPlugin#isVerifiedPlatformOwnerSession`; the method's docblock there is its contract. */
 export async function isVerifiedPlatformOwnerSession(
   this: Pick<RlsFilterHost, 'ql'>,
@@ -634,19 +763,28 @@ export async function computeWriteCheckFilter(
   // when the pre-image gate kept it: the same three replacements drop it here
   // (an `allow` from the declared write authority, a `public_read_write` OWD,
   // a covering master gate), and nothing else does.
-  const floorReplaced =
-    !!preImageOpts?.dropPlatformOwnershipFloor ||
-    this.platformFloorYieldsToObjectWriteModel(meta, object, operation, preImageOpts);
-  const withCheck = writeCheckPolicies(
-    this.collectRLSPolicies(
-      permissionSets,
-      object,
-      operation,
-      (context?.positions ?? []) as string[],
-      context,
-    ),
-    { keepOwnershipFloor: !floorReplaced },
+  //
+  // [#35917] And an `allow` replaces the floor here as it does there: the
+  // floor leaves a defaulted check only where no authored `using` stands
+  // beside it, the case where the pre-image dropped it as the OR's last term.
+  // Beside an authored term it stays a term of the check, so a write the
+  // pre-image admitted by the floor alone is not refused on its new image
+  // (the floor's `using` defaulted as the check). The test is read off the
+  // collection, ahead of the field-existence net, so where the two could part
+  // — an authored policy pass 1 skips as not applicable — the check keeps the
+  // floor: a term more in an OR, never one fewer.
+  const applicable = this.collectRLSPolicies(
+    permissionSets,
+    object,
+    operation,
+    (context?.positions ?? []) as string[],
+    context,
   );
+  const floorReplaced =
+    this.platformFloorYieldsToObjectWriteModel(meta, object, operation, preImageOpts) ||
+    (!!preImageOpts?.dropPlatformOwnershipFloor &&
+      !applicable.some((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using')));
+  const withCheck = writeCheckPolicies(applicable, { keepOwnershipFloor: !floorReplaced });
   if (withCheck.length === 0) return null;
   // [ADR-0105 D11 / commit 1d73d45c1] Stage the app-resolved membership sets on THIS
   // context before the `check` clause compiles — the same staging the read

@@ -45,6 +45,8 @@ const NO_PROVIDER_PERMISSIONS: PermissionsWithHelpers = Object.freeze({
   hasCapabilities: () => true,
   // [objectstack#28508] No provider → no has-queues answer.
   hasAnyQueue: undefined,
+  // [objectstack#34602] No provider → no per-object queue answer.
+  objectsUsingQueues: undefined,
   isLoaded: false,
   can: () => true,
   cannot: () => false,

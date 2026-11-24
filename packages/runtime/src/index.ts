@@ -184,6 +184,11 @@ export {
     collectJobNameCollisions,
     collectHooksWithoutBody,
 } from './app-artifact-handlers.js';
+// The `i18n` reader both binder doors hand `bindAppArtifactHandlers`, so a
+// declared hook or action refusal is answered in the caller's language: read
+// from the kernel at refusal time. `AppPlugin.start` passes it; install-local
+// (`@objectstack/cloud-connection`) passes the same one on install and rehydrate.
+export { hookRefusalI18nReader } from './sandbox/hook-refusal-catalogue.js';
 export type {
     AppArtifactHandlerBinding,
     AppArtifactHandlerBindingOptions,
@@ -256,6 +261,12 @@ export type { KernelResolver } from './http-dispatcher.js';
 // MCP `run_action` tool's rules.
 export { dispatchAction } from './action-dispatch.js';
 export type { ActionDispatchRequest, ActionDispatchAnswer, ActionDispatchPosture } from './action-dispatch.js';
+// [#34386] The approval leg of a handed-off `resume_run`: the MCP door's
+// resume steps as a function the host's approve door calls, so the host
+// resumes THAT parked run as the approving person and keeps no copy of the
+// `resume_run` gates.
+export { dispatchActionResume } from './action-dispatch.js';
+export type { ActionResumeRequest } from './action-dispatch.js';
 // ADR-0076 D11 step ③ — thin domain-handler registry seam; owning service
 // packages register normalized handlers via HttpDispatcher.registerDomainHandler.
 export { DomainHandlerRegistry } from './domain-handler-registry.js';

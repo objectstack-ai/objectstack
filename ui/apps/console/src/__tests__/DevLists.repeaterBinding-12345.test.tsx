@@ -54,6 +54,7 @@ describe('the DevLists dev route (objectui#12345)', () => {
   it('its repeater reads `showcase_category`, capped at ten, from the `dataSource` binding', async () => {
     const find = mount();
     await waitFor(() => expect(find).toHaveBeenCalled());
-    expect(find.mock.calls[0]).toEqual(['showcase_category', { $top: 10 }]);
+    // A paged repeater read declines the total it never draws.
+    expect(find.mock.calls[0]).toEqual(['showcase_category', { $top: 10, $count: false }]);
   });
 });

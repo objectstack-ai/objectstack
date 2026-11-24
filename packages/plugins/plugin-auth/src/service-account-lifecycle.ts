@@ -38,15 +38,25 @@
  * an owner cannot undo an administrator's stop; and an account whose owner has
  * left its organization (`service-account-owner-leaves.ts` suspends it) is not
  * resumed until an administrator names a new owner. An account whose owner the
- * organization's directory deactivated or deleted is suspended the same way
- * (the same module, its own reason); a re-activation of the owner does not
- * resume it, and resume refuses while the owner is still deactivated.
+ * organization's directory deactivated or deleted, or a platform administrator
+ * banned, is suspended the same way (the same module, a reason of its own for
+ * each); a re-activation or an unban of the owner does not resume it.
+ *
+ * ## The owner's account is active
+ *
+ * An AI service account runs only while its accountable owner's account is
+ * active. Resume and set-owner, like register, ask one shared check
+ * (`isAccountableOwnerActive`, `service-account-doors.ts`): the owner's row
+ * exists and holds no ban in force, whichever door disabled it. Resume refuses
+ * an account whose owner is disabled (`409 RESOURCE_CONFLICT`), and set-owner
+ * refuses to name a disabled person (`400 VALIDATION_FAILED`, field `ownerId`).
  *
  * The ban state is shared with the platform administrator's `/admin/ban-user`,
  * so this family marks its own: a suspension's `ban_reason` is
  * {@link SERVICE_ACCOUNT_SUSPENDED_REASON} (or it, `: ` and the caller's words),
- * the owner's leaving and the directory's deactivation of the owner each record
- * their own reason, and a ban already in force is never rewritten. An administrator of the account's organization lifts only
+ * the owner's leaving, the directory's deactivation of the owner and an
+ * administrator's ban of the owner each record their own reason, and a ban
+ * already in force is never rewritten. An administrator of the account's organization lifts only
  * those; any other ban only a platform administrator lifts, as the restore
  * guard keeps a platform administrator's stop of a key.
  *
@@ -80,8 +90,11 @@ import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { FORCED_RESET_REVOKE_REASON } from './forced-reset-revocation.js';
 import { MEMBERSHIP_ENDED_REVOKE_REASON } from './membership-ended-session.js';
 import { SCIM_DEACTIVATION_REVOKE_REASON } from './scim-deactivation-key-revocation.js';
-import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
-import { SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON, SERVICE_ACCOUNT_OWNER_LEFT_REASON } from './service-account-owner-leaves.js';
+import {
+  SERVICE_ACCOUNT_OWNER_BANNED_REASON,
+  SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON,
+  SERVICE_ACCOUNT_OWNER_LEFT_REASON,
+} from './service-account-owner-leaves.js';
 import { isAgentAccountRow } from './service-account-identity.js';
 import {
   API_KEY_OBJECT,
@@ -89,6 +102,8 @@ import {
   USER_OBJECT,
   activeMemberships,
   fail,
+  inactiveOwnerMessage,
+  isAccountableOwnerActive,
   isOrganizationAdministrator,
   parseJson,
   readRows,
@@ -122,14 +137,16 @@ export const SERVICE_ACCOUNT_SUSPENDED_REASON = 'AI service account suspended';
 
 /**
  * Is this ban reason one this family wrote (a suspension, the owner's leaving,
- * or the directory's deactivation of the owner)?
+ * the directory's deactivation of the owner, or an administrator's ban of the
+ * owner)?
  */
 export function isServiceAccountSuspensionReason(reason: unknown): boolean {
   const r = typeof reason === 'string' ? reason : '';
   return r === SERVICE_ACCOUNT_SUSPENDED_REASON
     || r.startsWith(`${SERVICE_ACCOUNT_SUSPENDED_REASON}: `)
     || r === SERVICE_ACCOUNT_OWNER_LEFT_REASON
-    || r === SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON;
+    || r === SERVICE_ACCOUNT_OWNER_DEACTIVATED_REASON
+    || r === SERVICE_ACCOUNT_OWNER_BANNED_REASON;
 }
 
 /** The longest ban reason a suspension records. */
@@ -289,15 +306,16 @@ export async function runResumeServiceAccount(
         + '(set-owner) before resuming it.',
     );
   }
-  // ...and an owner the organization's directory deactivated is not
-  // accountable either, until the directory re-activates them.
-  const [owner] = await readRows(found.engine, USER_OBJECT, { id: ownerId }, ['id', 'banned', 'ban_reason', 'ban_expires']);
-  if (owner && isUserBanInForce(owner as never, found.nowMs) && owner.ban_reason === SCIM_DEACTIVATION_BAN_REASON) {
+  // ...and an owner whose account is disabled, by any door (an
+  // administrator's ban, the directory's deactivation), is not accountable
+  // either: the one check register and set-owner ask too.
+  if (!(await isAccountableOwnerActive(found.engine, ownerId, found.nowMs))) {
     return fail(
       409,
       'RESOURCE_CONFLICT',
-      `The accountable owner of the AI service account '${read.id}' was deactivated by the organization's `
-        + 'directory. Name a new owner (set-owner), or have the directory re-activate the owner, before resuming it.',
+      `The accountable owner of the AI service account '${read.id}' is disabled: banned by an administrator, or `
+        + 'deactivated by the organization\'s directory. Name a new owner (set-owner), or have the owner\'s account '
+        + 're-activated, before resuming it.',
     );
   }
 
@@ -330,6 +348,13 @@ export async function runSetServiceAccountOwner(
   if ((await activeMemberships(found.engine, ownerId, found.nowMs, found.organizationId)).length === 0) {
     const message = `The accountable owner '${ownerId}' is not a member of the AI service account's organization. `
       + 'Name a person who is.';
+    return {
+      status: 400,
+      body: { success: false, error: { code: 'VALIDATION_FAILED', message, fields: [{ field: 'ownerId', code: 'invalid_value', message }] } },
+    };
+  }
+  if (!(await isAccountableOwnerActive(found.engine, ownerId, found.nowMs))) {
+    const message = inactiveOwnerMessage(ownerId);
     return {
       status: 400,
       body: { success: false, error: { code: 'VALIDATION_FAILED', message, fields: [{ field: 'ownerId', code: 'invalid_value', message }] } },

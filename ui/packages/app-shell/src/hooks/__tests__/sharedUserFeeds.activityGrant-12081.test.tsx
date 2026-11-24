@@ -85,6 +85,7 @@ const payload = (over: Partial<MePermissionsAuthenticatedResponse>): MePermissio
   tenantId: null,
   positions: [],
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   permissionSets: [],
   objects: {},
   fields: {},

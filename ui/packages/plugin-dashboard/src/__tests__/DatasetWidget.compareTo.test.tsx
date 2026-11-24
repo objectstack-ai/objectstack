@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor, within, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
 import { DashboardWidgetSchema as SpecDashboardWidgetSchema } from '@objectstack/spec/ui';
 
 let lastChartSchema: any = null;
@@ -534,9 +534,9 @@ describe('DatasetWidget — the comparison label comes from compareTo.kind (obje
  * Maintainer ruling 2026-08-07 chose **form 2, in-cell stacking**: the columns
  * stay `bucket × measure` (a comparison column would make them
  * `bucket × measure × window`), the comparison rides underneath the value in
- * smaller type, all three subtotals get the same treatment, and the CSV export
- * stays DATA-shaped — flat `<measure>__compare` columns, never a stacked
- * string. These tests pin all four.
+ * smaller type, and all three subtotals get the same treatment.
+ * These tests pin all three. (The CSV export the ruling also shaped is gone:
+ * the widget renders no download, objectstack#34906.)
  */
 const PIVOT_FIELDS = [
   { name: 'status', type: 'string', label: 'Status' },
@@ -647,36 +647,6 @@ describe('DatasetWidget — the cross-tab’s in-cell comparison (#3614)', () =>
     expect(grandCompare).toHaveTextContent('$360');
     expect(grandCompare).toHaveTextContent('3%');
     expect(grandCompare).toHaveAttribute('data-direction', 'down');
-  });
-
-  it('exports FLAT metric__compare columns — the CSV is data, not the stacked cell', async () => {
-    const origCreate = URL.createObjectURL;
-    const origRevoke = URL.revokeObjectURL;
-    const blobs: any[] = [];
-    (URL as any).createObjectURL = (b: any) => { blobs.push(b); return 'blob:x'; };
-    (URL as any).revokeObjectURL = () => {};
-    try {
-      const src = makeSource(async () => comparedPivotResult);
-      render(<DatasetWidget widget={pivotWidget({ compareTo: { kind: 'previousYear' } })} dataSource={src} />);
-      fireEvent.click(await screen.findByTestId('dataset-export'));
-      expect(blobs).toHaveLength(1);
-      const text: string = await blobs[0].text();
-
-      // One flat column per compared measure, labelled like the flat table's
-      // comparison column header.
-      // downloadCsv prepends a UTF-8 BOM (U+FEFF) so Excel reads non-ASCII
-      // labels; strip it before comparing the header line.
-      const [header, ...body] = text.replace(/^\uFEFF/, '').split('\r\n');
-      expect(header).toBe('Status,Priority,Amount,Amount · vs last year');
-      expect(body).toEqual(['Open,High,120,100', 'Open,Low,30,60', 'Done,High,200,200']);
-      // Not a stacked string anywhere: no display formatting survives into the
-      // data ("$120", "20%"), so a spreadsheet can still compute on it.
-      expect(text).not.toContain('$');
-      expect(text).not.toContain('%');
-    } finally {
-      (URL as any).createObjectURL = origCreate;
-      (URL as any).revokeObjectURL = origRevoke;
-    }
   });
 
   // ── Regression pins: nothing appears where no comparison exists ───────────

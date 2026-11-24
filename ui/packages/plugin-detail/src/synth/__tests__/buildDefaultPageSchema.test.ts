@@ -213,33 +213,20 @@ describe('buildDefaultPageSchema', () => {
     expect(page.regions[0].name).toBe('main');
   });
 
-  it('emits page:header, record:highlights, record:path, page:tabs — no discussion footer (objectstack#27055)', () => {
+  it('emits page:header, page:tabs — no strip, no discussion footer (objectstack#35891, objectstack#27055)', () => {
+    // A stage field and declared highlights: the default page still draws no
+    // stage bar and no highlight strip (the maintainer, 2026-11-20:
+    // 「把阶段条和关键字段条去掉」). The stage is the header's status tag.
     const types = buildDefaultPageSchema(declaredLeadDef).regions[0].components.map(
       (c: any) => c.type,
     );
     // The discussion is part of the timeline stream, the Timeline tab.
-    expect(types).toEqual([
-      'page:header',
-      'record:highlights',
-      'record:path',
-      'page:tabs',
-    ]);
+    expect(types).toEqual(['page:header', 'page:tabs']);
   });
 
-  it('omits record:path when no status field', () => {
-    const def: ObjectDefLike = { name: 'note', fields: { body: {} } };
-    const types = buildDefaultPageSchema(def).regions[0].components.map(
-      (c: any) => c.type,
-    );
-    expect(types).not.toContain('record:path');
-  });
-
-  it('omits record:highlights when no fields derivable', () => {
-    const def: ObjectDefLike = { name: 'empty', fields: {} };
-    const types = buildDefaultPageSchema(def).regions[0].components.map(
-      (c: any) => c.type,
-    );
-    expect(types).not.toContain('record:highlights');
+  it('control: buildDefaultHighlights, for a page that places the strip itself, still emits both blocks', () => {
+    const types = buildDefaultHighlights(declaredLeadDef).map((c: any) => c.type);
+    expect(types).toEqual(['record:highlights', 'record:path']);
   });
 
   it('hideDiscussion drops the timeline stream (objectstack#27055)', () => {
@@ -248,14 +235,14 @@ describe('buildDefaultPageSchema', () => {
     expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details']);
   });
 
-  it('options override auto-derivation', () => {
-    const page = buildDefaultPageSchema(leadDef, {
+  it('options override auto-derivation (the strip sub-builder)', () => {
+    const strip = buildDefaultHighlights(leadDef, {
       highlightFields: ['email'],
       statusField: 'rating',
       stages: [{ value: 'hot', label: 'Hot' }],
     });
-    const hl = page.regions[0].components.find((c: any) => c.type === 'record:highlights');
-    const path = page.regions[0].components.find((c: any) => c.type === 'record:path');
+    const hl = strip.find((c: any) => c.type === 'record:highlights');
+    const path = strip.find((c: any) => c.type === 'record:path');
     expect(props(hl).fields).toEqual(['email']);
     expect(props(path).statusField).toBe('rating');
     expect(props(path).stages).toEqual([{ value: 'hot', label: 'Hot' }]);
@@ -266,12 +253,12 @@ describe('buildDefaultPageSchema', () => {
     expect(props(header).recordChrome).toBe(true);
   });
 
-  it('page:tabs always carries a details tab containing record:details, then the Timeline', () => {
+  it('page:tabs always carries the Overview tab (value details) containing record:details, then the Timeline (objectstack#35595)', () => {
     const tabs = buildDefaultPageSchema(leadDef).regions[0].components.find(
       (c: any) => c.type === 'page:tabs',
     );
     expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details', 'timeline']);
-    expect(tabItems(tabs)[0].label).toBe('Details');
+    expect(tabItems(tabs)[0].label).toBe('Overview');
     expect(tabItems(tabs)[0].children[0].type).toBe('record:details');
     // The Timeline tab is the one stream: a record:activity (objectstack#27055).
     expect(tabItems(tabs)[1].children.map((c: any) => c.type)).toEqual(['record:activity']);
@@ -330,15 +317,24 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-      // Details, the Timeline, then Related (objectstack#27524: 动态 is
-      // second for every object).
-      expect(tabItems(tabs)).toHaveLength(3);
-      expect(tabItems(tabs)[2].label).toBe('Related');
-      expect(tabItems(tabs)[2].children).toHaveLength(2);
-      expect(tabItems(tabs)[2].children[0].type).toBe('record:related_list');
-      expect(props(tabItems(tabs)[2].children[0]).objectName).toBe('task');
-      expect(props(tabItems(tabs)[2].children[0]).relationshipField).toBe('lead_id');
-      expect(props(tabItems(tabs)[2].children[0]).limit).toBe(10);
+      // Overview, one tab per related list (objectstack#35595), then the
+      // Timeline — 动态 is last for every object (objectstack#34590).
+      expect(tabItems(tabs).map((t: any) => t.value)).toEqual([
+        'details',
+        'related:task.lead_id',
+        'related:note.parent_id',
+        'timeline',
+      ]);
+      expect(tabItems(tabs)[1].label).toBe('Tasks');
+      // A list without a title is labelled with its object name.
+      expect(tabItems(tabs)[2].label).toBe('note');
+      expect(tabItems(tabs)[1].children).toHaveLength(1);
+      expect(tabItems(tabs)[1].children[0].type).toBe('record:related_list');
+      expect(props(tabItems(tabs)[1].children[0]).objectName).toBe('task');
+      expect(props(tabItems(tabs)[1].children[0]).relationshipField).toBe('lead_id');
+      expect(props(tabItems(tabs)[1].children[0]).limit).toBe(10);
+      // A tab holds ONE table: no tab merges two lists, so each can carry its count.
+      expect(tabItems(tabs).filter((t: any) => t.children.filter((c: any) => c.type === 'record:related_list').length > 1)).toEqual([]);
     });
 
     it('draws an isPrimary related list as a body table of the Details tab (objectstack#27055)', () => {
@@ -348,11 +344,11 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Activity stream']);
+      expect(labels).toEqual(['Overview', 'Activity stream']);
       expect(tabItems(tabs)[0].children.map((c: any) => c.type)).toContain('record:related_list');
     });
 
-    it('draws primary lists in the body and collapses the rest into Related', () => {
+    it('draws primary lists in the body and gives each other list a tab of its own (objectstack#35595)', () => {
       const tabs = buildDefaultTabs(leadDef, {
         related: [
           { objectName: 'opportunity', relationshipField: 'lead_id', title: 'Opportunities', isPrimary: true },
@@ -361,13 +357,14 @@ describe('buildDefaultPageSchema', () => {
         ],
       });
       const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toEqual(['Details', 'Activity stream', 'Related']);
-      const related = tabItems(tabs).find((t: any) => t.label === 'Related');
-      expect(related.children).toHaveLength(2);
-      expect(related.children.map((c: any) => props(c).objectName)).toEqual(['task', 'note']);
+      expect(labels).toEqual(['Overview', 'Tasks', 'Notes', 'Activity stream']);
+      expect(tabItems(tabs).slice(1, 3).map((t: any) => t.children.map((c: any) => props(c).objectName))).toEqual([
+        ['task'],
+        ['note'],
+      ]);
     });
 
-    it('emits no reference rail and no aside region, keeping the Related tab', () => {
+    it('emits no reference rail and no aside region, keeping the lists as tabs', () => {
       const page = buildDefaultPageSchema(leadDef, {
         related: [
           { objectName: 'task', relationshipField: 'lead_id' },
@@ -378,8 +375,9 @@ describe('buildDefaultPageSchema', () => {
       // (objectstack#27055, ADR-0085).
       expect(page.regions.map((r: any) => r.name)).toEqual(['main']);
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-      const labels = tabItems(tabs).map((t: any) => t.label);
-      expect(labels).toContain('Related');
+      const values = tabItems(tabs).map((t: any) => t.value);
+      expect(values).toContain('related:task.lead_id');
+      expect(values).toContain('related:note.parent_id');
     });
 
     it('the timeline is ONE stream: no Activity or History tab (objectstack#27055)', () => {
@@ -396,26 +394,27 @@ describe('buildDefaultPageSchema', () => {
       });
     });
 
-    it('every object opens its Timeline second — a worked one and any other (objectstack#27524, Target 5)', () => {
+    it('every object puts its Timeline last — a worked one and any other (objectstack#34590, superseding objectstack#27524 Target 5)', () => {
       const related = [{ objectName: 'task', relationshipField: 'lead_id' }];
       const worked = { ...leadDef, stageField: 'status' } as ObjectDefLike;
       const workedTabs = buildDefaultPageSchema(worked, { related }).regions[0].components.find((c: any) => c.type === 'page:tabs');
-      expect(tabItems(workedTabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
+      expect(tabItems(workedTabs).map((t: any) => t.value)).toEqual(['details', 'related:task.lead_id', 'timeline']);
       const plainTabs = buildDefaultPageSchema(leadDef, { related }).regions[0].components.find((c: any) => c.type === 'page:tabs');
-      expect(tabItems(plainTabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
+      expect(tabItems(plainTabs).map((t: any) => t.value)).toEqual(['details', 'related:task.lead_id', 'timeline']);
     });
 
-    it('Details / Timeline / Related / Approvals tab order is stable', () => {
+    it('Overview / the lists / Approvals / Timeline tab order is stable (objectstack#34590, objectstack#35595)', () => {
       const page = buildDefaultPageSchema(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { count: 1 },
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
-        'Details',
-        'Activity stream',
-        'Related',
+        'Overview',
+        'task',
         'Approvals',
+        'Activity stream',
       ]);
     });
 
@@ -459,7 +458,7 @@ describe('buildDefaultPageSchema', () => {
       expect(hasCustom).toBe(true);
     });
 
-    it('highlights slot replaces the entire chips+path strip', () => {
+    it('highlights slot places the strip the page draws (the default page draws none, objectstack#35891)', () => {
       const page = buildDefaultPageSchema(leadDef, {
         slots: { highlights: { type: 'div', id: 'custom-strip' } },
       });
@@ -472,16 +471,17 @@ describe('buildDefaultPageSchema', () => {
       expect(has('record:path')).toBe(false);
     });
 
-    it('details slot replaces only the Details tab body, keeps other tabs', () => {
+    it('details slot replaces only the Overview tab body, keeps other tabs', () => {
       const page = buildDefaultPageSchema(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         slots: { details: { type: 'div', id: 'custom-details' } },
       });
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
+      // (objectstack#34590 supersedes objectstack#27524 Targets 5 and 8: 「「动态」在最后」)
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
-        'Details',
+        'Overview',
+        'task',
         'Activity stream',
-        'Related',
       ]);
       expect(tabItems(tabs)[0].children).toEqual([{ type: 'div', id: 'custom-details' }]);
       // record:details default body must be gone
@@ -520,11 +520,10 @@ describe('buildDefaultPageSchema', () => {
       const page = buildDefaultPageSchema(declaredLeadDef, {
         slots: { header: { type: 'div', id: 'h' } },
       });
-      // header replaced, but tabs (with the timeline stream) + highlights still default
+      // header replaced, tabs (with the timeline stream) still default; no
+      // strip is the default too (objectstack#35891)
       const types = page.regions[0].components.map((c: any) => c.type);
-      expect(types).toContain('record:highlights');
-      expect(types).toContain('record:path');
-      expect(types).toContain('page:tabs');
+      expect(types).toEqual(['div', 'page:tabs']);
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(tabs).some((t: any) => t.value === 'timeline')).toBe(true);
     });
@@ -555,15 +554,15 @@ describe('buildDefaultPageSchema', () => {
       expect(types).toContain('record:path');
     });
 
-    it('buildDefaultTabs emits Details/Timeline/Related in order', () => {
+    it('buildDefaultTabs emits Overview / the lists / Timeline in order (objectstack#34590, objectstack#35595)', () => {
       const tabs = buildDefaultTabs(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
       });
       expect(tabs.type).toBe('page:tabs');
       expect(tabItems(tabs).map((t: any) => t.label)).toEqual([
-        'Details',
+        'Overview',
+        'task',
         'Activity stream',
-        'Related',
       ]);
     });
 
@@ -587,25 +586,23 @@ describe('buildDefaultPageSchema', () => {
       expect(JSON.stringify(page)).not.toContain('record:attachments');
     });
 
-    it('enable.files → the Related tab closes with record:attachments (objectstack#27055)', () => {
+    it('enable.files → an Attachments tab of its own holding record:attachments (objectstack#35595)', () => {
       const page = buildDefaultPageSchema(filesDef);
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-      // Attachments sit at the foot of 关联, as they sit at the foot of the
-      // related column — no tab of their own.
-      expect(tabItems(tabs).some((t: any) => t.value === 'attachments')).toBe(false);
-      const related = tabItems(tabs).find((t: any) => t.value === 'related');
-      expect(related.label).toBe('Related');
-      expect(related.children).toEqual([{ type: 'record:attachments' }]);
+      const attachments = tabItems(tabs).find((t: any) => t.value === 'attachments');
+      expect(attachments.label).toBe('Attachments');
+      expect(attachments.children).toEqual([{ type: 'record:attachments' }]);
+      // CONTROL: no merged Related tab carries them any more.
+      expect(tabItems(tabs).some((t: any) => t.value === 'related')).toBe(false);
     });
 
-    it('attachments follow the side lists in the Related tab', () => {
+    it('the Attachments tab follows the lists\' tabs and precedes the Timeline (objectstack#35595)', () => {
       const tabs = buildDefaultTabs(filesDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
       });
-      // The Timeline opens second, as for every object (objectstack#27524).
-      expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related']);
-      const related = tabItems(tabs).find((t: any) => t.value === 'related');
-      expect(related.children.map((c: any) => c.type)).toEqual(['record:related_list', 'record:attachments']);
+      expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details', 'related:task.lead_id', 'attachments', 'timeline']);
+      const task = tabItems(tabs).find((t: any) => t.value === 'related:task.lead_id');
+      expect(task.children.map((c: any) => c.type)).toEqual(['record:related_list']);
     });
 
     it('hideAttachments suppresses the tab', () => {
@@ -650,17 +647,23 @@ describe('buildDefaultPageSchema', () => {
       expect(tab.children).toEqual([{ type: 'record:approvals', properties: { ...nodePayload } }]);
     });
 
-    it('the Approvals tab sits after Related, for every object (objectstack#27524)', () => {
+    it('the Approvals tab sits after the lists and Attachments and before the Timeline, for every object (objectstack#34590, objectstack#35595)', () => {
       const plain = buildDefaultTabs(leadDef, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { node: nodePayload },
       });
-      expect(tabItems(plain).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related', 'approvals']);
+      expect(tabItems(plain).map((t: any) => t.value)).toEqual(['details', 'related:task.lead_id', 'approvals', 'timeline']);
       const worked = buildDefaultTabs({ ...leadDef, enable: { files: true } }, {
         related: [{ objectName: 'task', relationshipField: 'lead_id' }],
         approvals: { node: nodePayload },
       });
-      expect(tabItems(worked).map((t: any) => t.value)).toEqual(['details', 'timeline', 'related', 'approvals']);
+      expect(tabItems(worked).map((t: any) => t.value)).toEqual([
+        'details',
+        'related:task.lead_id',
+        'attachments',
+        'approvals',
+        'timeline',
+      ]);
     });
 
     it('a details slot override keeps the Approvals tab', () => {
@@ -671,6 +674,71 @@ describe('buildDefaultPageSchema', () => {
       const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
       expect(tabItems(tabs).some((t: any) => t.value === 'approvals')).toBe(true);
       expect(tabItems(tabs)[0].children[0].id).toBe('custom-details');
+    });
+  });
+
+  // objectstack#36693 — the activity stream tab follows the object's switches
+  // for its three sources, as Attachments follows `enable.files`: with the
+  // discussion (`feeds`), the activity (`activities`) and the field changes
+  // (`trackHistory`) all off there is nothing to draw, so no tab.
+  describe('activity stream tab follows its sources (objectstack#36693)', () => {
+    const allOff = { feeds: false, activities: false };
+    const values = (page: any) =>
+      tabItems(page.regions[0].components.find((c: any) => c.type === 'page:tabs')).map((t: any) => t.value);
+    const nodePayload = {
+      approvals: { available: true, requests: [{ id: 'req_1' }], pendingRequest: null },
+      currentUserId: 'u_1',
+    };
+
+    it('all three sources off → no stream tab and no record:activity anywhere', () => {
+      const page = buildDefaultPageSchema({ ...leadDef, enable: allOff });
+      expect(values(page)).toEqual(['details']);
+      expect(JSON.stringify(page)).not.toContain('record:activity');
+      // `trackHistory: false` written out reads the same as absent.
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, trackHistory: false } }))).toEqual(['details']);
+      const tabs = buildDefaultTabs({ ...leadDef, enable: allOff }, {
+        related: [{ objectName: 'task', relationshipField: 'lead_id' }],
+      });
+      expect(tabItems(tabs).map((t: any) => t.value)).toEqual(['details', 'related:task.lead_id']);
+    });
+
+    it('any one source on → the stream tab is drawn as before (control, one key each)', () => {
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, feeds: true } }))).toEqual(['details', 'timeline']);
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, activities: true } }))).toEqual(['details', 'timeline']);
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, trackHistory: true } }))).toEqual(['details', 'timeline']);
+      // `feeds` / `activities` are opt-out: absent is on.
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { feeds: false } }))).toEqual(['details', 'timeline']);
+      expect(values(buildDefaultPageSchema({ ...leadDef, enable: { activities: false } }))).toEqual(['details', 'timeline']);
+    });
+
+    it("a 'sys_activity' entry in relatedLists does not bring back an empty stream tab", () => {
+      const page = buildDefaultPageSchema({ ...leadDef, enable: allOff, relatedLists: ['sys_activity'] });
+      expect(values(page)).toEqual(['details']);
+      // CONTROL: with a source on, the same entry places the tab.
+      const live = buildDefaultPageSchema({ ...leadDef, enable: { ...allOff, feeds: true }, relatedLists: ['sys_activity'] });
+      expect(values(live)).toEqual(['details', 'timeline']);
+    });
+
+    it('an authored discussion slot still draws, whatever the switches say', () => {
+      const page = buildDefaultPageSchema({ ...leadDef, enable: allOff }, {
+        slots: { discussion: { type: 'div', id: 'custom-discussion' } },
+      });
+      const timeline = tabItems(page.regions[0].components.find((c: any) => c.type === 'page:tabs'))
+        .find((t: any) => t.value === 'timeline');
+      expect(timeline.children).toEqual([{ type: 'div', id: 'custom-discussion' }]);
+    });
+
+    it('CONTROL: Approvals is unchanged, drawn only when the record has requests', () => {
+      const def = { ...leadDef, enable: allOff };
+      expect(values(buildDefaultPageSchema(def))).toEqual(['details']);
+      expect(values(buildDefaultPageSchema(def, { approvals: { count: 1, node: nodePayload } }))).toEqual(['details', 'approvals']);
+    });
+
+    it('a details slot override keeps the gate', () => {
+      const page = buildDefaultPageSchema({ ...leadDef, enable: allOff }, {
+        slots: { details: { type: 'div', id: 'custom-details' } },
+      });
+      expect(values(page)).toEqual(['details']);
     });
   });
 });
@@ -953,21 +1021,110 @@ describe('buildDefaultTabs — stable tab values (objectui#2257)', () => {
   const relA = { title: 'Invoices', objectName: 'invoice', relationshipField: 'account', isPrimary: true };
   const relB = { title: 'Notes', objectName: 'note', relationshipField: 'account' };
 
-  it('emits semantic values: details (primary in its body) / timeline / related (rest)', () => {
+  it('emits semantic values: details (primary in its body) / related:<object>.<field> (each other list) / timeline', () => {
     const tabs = buildDefaultTabs(undefined, {
       related: [relA, relB],
     });
+    // objectstack#35595 — each list its own tab; 动态 last (objectstack#34590).
     expect(tabItems(tabs).map((i: any) => i.value)).toEqual([
-      'details', 'timeline', 'related',
+      'details', 'related:note.account', 'timeline',
     ]);
   });
 
   it('values stay stable when the related list shrinks (URL tokens must not shift)', () => {
     const both = buildDefaultTabs(undefined, { related: [relA, relB] });
     const onlyB = buildDefaultTabs(undefined, { related: [relB] });
-    // 'related' names the same (stacked) tab in both trees — an index value
-    // would have pointed at 'related:invoice' before and 'related' after.
-    expect(tabItems(both).some((i: any) => i.value === 'related')).toBe(true);
-    expect(tabItems(onlyB).some((i: any) => i.value === 'related')).toBe(true);
+    // The value names the relationship, not a position: the Notes tab keeps
+    // its token whether or not Invoices is passed.
+    expect(tabItems(both).some((i: any) => i.value === 'related:note.account')).toBe(true);
+    expect(tabItems(onlyB).some((i: any) => i.value === 'related:note.account')).toBe(true);
+  });
+
+  it('two lists over one child object stay two tabs (objectstack#35595)', () => {
+    const tabs = buildDefaultTabs(undefined, {
+      related: [
+        { objectName: 'lead', relationshipField: 'converted_contact', title: 'Leads (converted)' },
+        { objectName: 'lead', relationshipField: 'duplicate_contact', title: 'Leads (duplicate)' },
+      ],
+    });
+    expect(tabItems(tabs).map((i: any) => i.value)).toEqual([
+      'details', 'related:lead.converted_contact', 'related:lead.duplicate_contact', 'timeline',
+    ]);
+  });
+});
+
+/**
+ * objectstack#35897 — a declared `relatedLists` arranges the tabs after the
+ * overview, the three built-in tabs placed by object name. The host's
+ * `related` is what exists (`deriveRelatedLists` drops unlisted side lists);
+ * this pins the arrangement. Each row's control differs by one entry.
+ */
+describe('declared relatedLists arranges the tabs (objectstack#35897)', () => {
+  const def = (relatedLists?: unknown[], files = true): ObjectDefLike => ({
+    name: 'account',
+    label: 'Account',
+    fields: { name: { type: 'text', label: 'Name' } },
+    ...(files ? { enable: { files: true } } : {}),
+    ...(relatedLists ? { relatedLists } : {}),
+  });
+  const related = [
+    { objectName: 'task', relationshipField: 'account_id' },
+    { objectName: 'contact', relationshipField: 'account_id' },
+  ];
+  const values = (d: ObjectDefLike, approvals = true) =>
+    tabItems(buildDefaultTabs(d, { related, ...(approvals ? { approvals: { count: 1 } } : {}) })).map((t: any) => t.value);
+
+  it('undeclared or empty: the lists, then attachments, approvals and the stream, as before (control)', () => {
+    const before = ['details', 'related:task.account_id', 'related:contact.account_id', 'attachments', 'approvals', 'timeline'];
+    expect(values(def())).toEqual(before);
+    expect(values(def([]))).toEqual(before);
+  });
+
+  it("['task', 'sys_attachment', 'contact']: task, attachments, contact, then the unlisted approvals and the stream last", () => {
+    expect(values(def(['task', 'sys_attachment', 'contact']))).toEqual([
+      'details', 'related:task.account_id', 'attachments', 'related:contact.account_id', 'approvals', 'timeline',
+    ]);
+  });
+
+  it("leaving 'sys_attachment' out removes the attachments tab", () => {
+    expect(values(def(['task', 'contact']))).toEqual([
+      'details', 'related:task.account_id', 'related:contact.account_id', 'approvals', 'timeline',
+    ]);
+  });
+
+  it("'sys_attachment' listed on an object without files draws no attachments tab", () => {
+    expect(values(def(['sys_attachment', 'task', 'contact'], false))).not.toContain('attachments');
+  });
+
+  it('places the approvals and stream tabs where they are listed; approvals still need requests', () => {
+    expect(values(def(['sys_activity', 'contact', 'sys_approval_request', 'task']))).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'approvals', 'related:task.account_id',
+    ]);
+    expect(values(def(['sys_activity', 'contact', 'sys_approval_request', 'task']), false)).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'related:task.account_id',
+    ]);
+  });
+
+  it('reads the object form by its list, object.field by its one FK, and the attachments tab stays the file-rows node', () => {
+    const tabs = buildDefaultTabs(def([{ list: 'contact.account_id', label: 'People' }, 'sys_attachment', 'task']), { related });
+    expect(tabItems(tabs).map((t: any) => t.value)).toEqual([
+      'details', 'related:contact.account_id', 'attachments', 'related:task.account_id', 'timeline',
+    ]);
+    expect(tabItems(tabs).find((t: any) => t.value === 'attachments').children).toEqual([{ type: 'record:attachments' }]);
+  });
+
+  it('a related tab the host passed but no entry names follows the listed tabs, in the order passed', () => {
+    expect(values(def(['contact']))).toEqual(['details', 'related:contact.account_id', 'related:task.account_id', 'approvals', 'timeline']);
+  });
+
+  // objectstack#35901 — an unplaced list another package brings sits at the end of the tabs.
+  it('…and before a trailing run of listed approvals / stream tabs, which close the strip', () => {
+    expect(values(def(['contact', 'sys_approval_request', 'sys_activity']))).toEqual([
+      'details', 'related:contact.account_id', 'related:task.account_id', 'approvals', 'timeline',
+    ]);
+    // Control: a stream listed before a related entry is no trailing run.
+    expect(values(def(['sys_activity', 'contact']))).toEqual([
+      'details', 'timeline', 'related:contact.account_id', 'related:task.account_id', 'approvals',
+    ]);
   });
 });

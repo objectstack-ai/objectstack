@@ -15,7 +15,8 @@
  * principal holding the namespace's capability, returns the row.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { resetCloudManagedForTesting } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SysPlatformSetting, SysPlatformSettingAudit, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import { SettingsService } from './settings-service.js';
@@ -222,3 +223,52 @@ describe('settingsReadDoorMiddleware — the operations it scopes', () => {
     expect(ran).toBe(false);
   });
 });
+
+/**
+ * #33891 — in a cloud-managed process the door also leaves out the rows the
+ * settings routes hide (`cloud-managed-settings.ts`): every `storage` row and
+ * every row of a hidden `ai` key. Driven hosted and self-hosted (the control)
+ * on the same rows; a system context reads them all either way.
+ */
+for (const managed of [true, false]) {
+  describe(`the read door, ${managed ? 'cloud-managed' : 'self-hosted (control)'}`, () => {
+    beforeEach(async () => {
+      if (managed) process.env.OS_CLOUD_MANAGED = '1';
+      else delete process.env.OS_CLOUD_MANAGED;
+      resetCloudManagedForTesting();
+      for (const [namespace, key] of [['storage', 'adapter'], ['ai', 'provider'], ['ai', 'openai_api_key'], ['ai', 'trace_enabled']]) {
+        await engine.insert('sys_setting', {
+          namespace, key, scope: 'tenant', user_id: null, value: 'v', value_enc: null,
+          encrypted: false, locked: false, locked_reason: null,
+        }, SYS);
+        await engine.insert('sys_platform_setting', {
+          namespace, key, value: 'v', value_enc: null, encrypted: false, locked: false, locked_reason: null,
+        }, SYS);
+      }
+    });
+    afterEach(() => {
+      delete process.env.OS_CLOUD_MANAGED;
+      resetCloudManagedForTesting();
+    });
+
+    const hostedRows = async (object: string, as: any): Promise<string[]> =>
+      ((await engine.find(object, { where: { namespace: { $in: ['storage', 'ai'] } } }, as)) as any[])
+        .map((r) => `${r.namespace}.${r.key}`).sort();
+
+    for (const object of ['sys_setting', 'sys_platform_setting']) {
+      it(`${object}: a reader holding every capability ${managed ? 'reads no storage row and no hidden ai key' : 'reads every row'}`, async () => {
+        const rows = await hostedRows(object, BOTH);
+        if (managed) expect(rows).toEqual(['ai.trace_enabled']);
+        else expect(rows).toEqual(['ai.openai_api_key', 'ai.provider', 'ai.trace_enabled', 'storage.adapter']);
+      });
+
+      it(`${object}: a count agrees with the list`, async () => {
+        expect(await engine.count(object, { where: { namespace: { $in: ['storage', 'ai'] } } }, BOTH)).toBe(managed ? 1 : 4);
+      });
+
+      it(`${object}: a system context reads every row`, async () => {
+        expect(await hostedRows(object, SYS)).toEqual(['ai.openai_api_key', 'ai.provider', 'ai.trace_enabled', 'storage.adapter']);
+      });
+    }
+  });
+}

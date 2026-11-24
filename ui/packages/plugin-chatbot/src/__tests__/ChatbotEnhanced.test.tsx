@@ -1225,10 +1225,13 @@ describe('ChatbotEnhanced — publish build-health line (ADR-0038)', () => {
     );
     await waitFor(() => expect(screen.getByTestId('publish-health')).toBeInTheDocument());
     expect(screen.getByText(/12 sample rows live/i)).toBeInTheDocument();
-    // Errors present → the "verified" claim is withheld; the findings show instead.
+    // Errors present → the "verified" claim is withheld; the findings show instead,
+    // as the generic sentence on the line with their agent text under the details
+    // (objectstack#32984: neither finding carries a userMessage).
     expect(screen.queryByText(/verified/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/returns NO data/i)).toBeInTheDocument();
-    expect(screen.getByText(/not probed/i)).toBeInTheDocument();
+    expect(screen.getByTestId('publish-health-summary')).toHaveTextContent(/need fixing/i);
+    expect(screen.getByText(/returns NO data/i).closest('details')).not.toBeNull();
+    expect(screen.getByText(/not probed/i).closest('details')).not.toBeNull();
   });
 
   it('claims "verified" only when the probes ran clean', async () => {
@@ -1243,7 +1246,7 @@ describe('ChatbotEnhanced — publish build-health line (ADR-0038)', () => {
       <ChatbotEnhanced autoPublishDrafts isLoading={false} messages={[userMsg, draftMsg('app.todo')]} onPublishDrafts={onPublishDrafts} />,
     );
     await waitFor(() => expect(screen.getByTestId('publish-health')).toBeInTheDocument());
-    expect(screen.getByText(/6 sample rows live · 2 views · 3 widgets · 1 seed verified/i)).toBeInTheDocument();
+    expect(screen.getByText(/6 sample rows live · 2 views · 3 widgets · 1 sample data set verified/i)).toBeInTheDocument();
   });
 
   it('renders the seed-load failure loudly', async () => {
@@ -1258,7 +1261,9 @@ describe('ChatbotEnhanced — publish build-health line (ADR-0038)', () => {
       <ChatbotEnhanced autoPublishDrafts isLoading={false} messages={[userMsg, draftMsg('app.todo')]} onPublishDrafts={onPublishDrafts} />,
     );
     await waitFor(() => expect(screen.getByTestId('publish-health')).toBeInTheDocument());
-    expect(screen.getByText(/no readable seed bodies/i)).toBeInTheDocument();
+    // objectstack#32984 — the line says it; the loader's engine text is the detail.
+    expect(screen.getByTestId('publish-health-seed')).toHaveTextContent('Sample data failed to load.');
+    expect(screen.getByText(/no readable seed bodies/i).closest('details')).not.toBeNull();
   });
 
   it('stays silent (no health element) for legacy boolean outcomes', async () => {
@@ -1312,7 +1317,38 @@ describe('publishHealthFromResponse', () => {
     const health = publishHealthFromResponse({
       seedApplied: { success: false, errors: ['row 3 rejected'] },
     });
-    expect(health).toEqual({ seedError: 'row 3 rejected' });
+    expect(health).toEqual({ seedFailed: true, seedError: 'row 3 rejected' });
+  });
+
+  it('objectstack#32984 — reads userMessage and fix only when they are non-empty strings', async () => {
+    const { publishHealthFromResponse } = await import('../ChatbotEnhanced');
+    const health = publishHealthFromResponse({
+      probes: {
+        issues: [
+          { severity: 'error', code: 'seed_no_rows', message: 'agent text', fix: 'agent fix', userMessage: 'customer sentence' },
+          { severity: 'warning', code: 'w', message: 'm2', fix: '', userMessage: '   ' },
+          { severity: 'warning', code: 'w', message: 'm3', fix: 42, userMessage: { text: 'x' } },
+        ],
+      },
+    });
+    expect(health?.issues).toEqual([
+      { severity: 'error', code: 'seed_no_rows', message: 'agent text', fix: 'agent fix', userMessage: 'customer sentence' },
+      { severity: 'warning', code: 'w', message: 'm2' },
+      { severity: 'warning', code: 'w', message: 'm3' },
+    ]);
+  });
+
+  it('objectstack#32984 — a loader finding object gives its message, and no producer text invents none', async () => {
+    const { publishHealthFromResponse } = await import('../ChatbotEnhanced');
+    expect(
+      publishHealthFromResponse({
+        seedApplied: {
+          success: false,
+          errors: [{ sourceObject: 'task', field: 'owner', message: 'Reference not found: owner = "ann"' }],
+        },
+      }),
+    ).toEqual({ seedFailed: true, seedError: 'Reference not found: owner = "ann"' });
+    expect(publishHealthFromResponse({ seedApplied: { success: false } })).toEqual({ seedFailed: true });
   });
 
   it('returns undefined when the server reported neither (older runtimes)', async () => {

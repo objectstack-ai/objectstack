@@ -14,7 +14,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { formatRefusal, loadScenarios, readCapabilityAreas, type Truth } from '../src/index.js';
+import { SelectOptionSchema } from '@objectstack/spec/data';
+
+import { formatRefusal, loadScenarios, readCapabilityAreas, truthsOver, type Truth } from '../src/index.js';
+import { promptLanguageGaps } from '../src/runner/prompts.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCENARIOS_DIR = resolve(HERE, '../../../../docs/qa/scenarios');
@@ -46,6 +49,13 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     // asOf 2026-10-31, calendar this_month: i2 (10-03) and i3 (10-28), not i1 (09-12).
     issued_this_month: scalar(2),
     tax_rate: UNANSWERABLE,
+    // The answerable twins of the three unanswerable questions, and the min truth.
+    inv_002_largest_line: scalar(100),
+    acme_discount: UNANSWERABLE,
+    // Acme's invoices are i1 (100) and i2 (120).
+    acme_invoiced: scalar(220),
+    lowest_shipping: UNANSWERABLE,
+    smallest_invoice: scalar(75),
   },
   project_with_tasks: {
     open_tasks: scalar(3),
@@ -56,6 +66,13 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     tasks_in_active_projects: scalar(3),
     open_by_project_status: groups(['active', 2], ['planned', 1]),
     relaunch_sponsor: UNANSWERABLE,
+    // Website relaunch tasks not done: t2 (in_progress) and t3 (todo).
+    relaunch_open_tasks: scalar(2),
+    office_move_hourly_rate: UNANSWERABLE,
+    // Office move: t5 (12) and t6 (2).
+    office_move_avg_estimate: scalar(7),
+    smallest_budget: UNANSWERABLE,
+    smallest_total_estimate: scalar(4),
   },
   crm_account_with_contacts: {
     tech_accounts: scalar(2),
@@ -67,6 +84,13 @@ const EXPECTED_TRUTHS: Record<string, Record<string, Truth>> = {
     tech_contacts: scalar(3),
     contacts_by_industry: groups([null, 1], ['retail', 1], ['tech', 3]),
     acme_revenue: UNANSWERABLE,
+    // Headcounts: Acme 120, Shopwell 15, Bitworks 45.
+    acme_headcount: scalar(120),
+    avg_credit_limit: UNANSWERABLE,
+    avg_headcount: scalar(60),
+    most_open_tickets: UNANSWERABLE,
+    largest_headcount: scalar(120),
+    smallest_headcount: scalar(15),
   },
 };
 
@@ -82,11 +106,15 @@ const EXPECTED_PERSONA_TRUTHS: Record<string, Record<string, Record<string, Trut
     // contractor is assigned t1, t3, t5 — only t3 is open; client_viewer hides `task`.
     open_tasks: { contractor: scalar(1), client_viewer: WITHHELD },
     relaunch_estimate: { contractor: WITHHELD },
+    // contractor is assigned t1 (done) and t3 (todo) on the relaunch.
+    relaunch_open_tasks: { contractor: scalar(1), client_viewer: WITHHELD },
   },
   crm_account_with_contacts: {
     // sdr owns ac1 and ac3; the unattached contact resolves to no owner.
     contacts_per_account: { sdr: groups(['ac1', 2], ['ac3', 1]) },
     account_count: { sdr: scalar(2), partner_user: WITHHELD },
+    // sdr's accounts are Acme (120) and Bitworks (45); partner_user hides `account`.
+    smallest_headcount: { sdr: scalar(45), partner_user: WITHHELD },
   },
 };
 
@@ -134,10 +162,129 @@ describe('the open scenario library (docs/qa/scenarios)', () => {
     });
   }
 
+  it('every seed value of a single-choice field the card asks for is a valid option value', () => {
+    // An option value is a lowercase machine identifier (`SelectOptionSchema.value`), so a build
+    // can only declare options the platform accepts; a seed value no option can hold is refused,
+    // with every row that looks it up (requisition_to_receipt's `supplier.rating` "A"/"B"/"C").
+    const invalid: string[] = [];
+    for (const { card } of result.cards) {
+      for (const { object, field } of card.expect.selectFields ?? []) {
+        for (const row of card.run.seed[object] ?? []) {
+          const v = row[field];
+          if (v === null || v === undefined) continue;
+          if (!SelectOptionSchema.safeParse({ label: String(v), value: v }).success) invalid.push(`${card.id}: ${object}.${field} = ${JSON.stringify(v)}`);
+        }
+      }
+    }
+    expect(invalid).toEqual([]);
+  });
+
+  it('a seed row dated after the card\'s asOf is a plan (a due, start, end or expected date), never a fact the card treats as done', () => {
+    // travel_expense's step `as_118_2` was decided 2026-11-02, after its asOf 2026-10-31: the agent
+    // rightly refused to pay a claim over a future-dated approval. Each card's future-dated fields, pinned.
+    const future: Record<string, string[]> = {};
+    for (const { card } of result.cards) {
+      if (card.asOf === undefined) continue;
+      const fields = new Set<string>();
+      for (const [object, rows] of Object.entries(card.run.seed)) {
+        for (const row of rows) {
+          for (const [field, v] of Object.entries(row)) {
+            if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) && v.slice(0, 10) > card.asOf) fields.add(`${object}.${field}`);
+          }
+        }
+      }
+      if (fields.size > 0) future[card.id] = [...fields].sort();
+    }
+    expect(future).toEqual({
+      asset_lifecycle: ['checkout.due_on'],
+      leave_balances: ['leave_day.leave_date', 'leave_request.end_date', 'leave_request.start_date'],
+      order_to_cash: ['invoice.due_date'],
+      requisition_to_receipt: ['purchase_order.expected_date'],
+      travel_expense: ['trip_request.end_date', 'trip_request.start_date'],
+    });
+  });
+
+  it('a last-N-days truth counts no row on the extra day the platform\'s preset adds (last_30_days spans 31 days ending on asOf)', () => {
+    // The card's `last_days` window is the N days ending on asOf; the platform's
+    // `last_N_days` preset runs from N days before asOf, one day more. A row on that
+    // day makes an app that uses the preset answer differently from the card.
+    const ambiguous: string[] = [];
+    for (const loaded of result.cards) {
+      const widened = structuredClone(loaded.card);
+      const ids: string[] = [];
+      for (const q of widened.run.questions) {
+        for (const f of 'filter' in q.truth ? (q.truth.filter ?? []) : []) {
+          if (f.op === 'in_window' && typeof f.value === 'object' && f.value !== null && 'kind' in f.value && f.value.kind === 'last_days') {
+            f.value = { kind: 'last_days', days: f.value.days + 1 };
+            ids.push(q.id);
+          }
+        }
+      }
+      if (ids.length === 0) continue;
+      const wide = truthsOver(widened, loaded.card.run.seed);
+      for (const id of [...new Set(ids)]) {
+        if (JSON.stringify([wide.truths[id], wide.personaTruths[id]]) !== JSON.stringify([loaded.truths[id], loaded.personaTruths[id]])) ambiguous.push(`${loaded.card.id}/${id}`);
+      }
+    }
+    expect(ambiguous).toEqual([]);
+  });
+
+  it('names its decide action as the route (`via`) of each manager approval the card decides through it, and only those', () => {
+    // The Build grant check leaves these writes to the run when the set withholds the verb and the build
+    // declares the action. asset_lifecycle manager_approves_scrap and order_to_cash approve_discount have
+    // the same shape but no measured run behind them, so they stay measured until one exists.
+    const routed = result.cards.flatMap(({ card }) =>
+      card.run.operations.filter((o) => o.via !== undefined).map((o) => `${card.id}/${o.id} via ${o.via}`),
+    );
+    expect(routed.sort()).toEqual([
+      'leave_balances/manager_approves_step_one via decide_approval_step',
+      'requisition_to_receipt/manager_approves_level_one via decide_approval_step',
+      'travel_expense/manager_approves_step_one via decide_approval_step',
+    ]);
+  });
+
+  it('every card tagged for a report asks for one in its detailed prompt, in both languages', () => {
+    // The Build check `dashboards.report` grades a report the prompt never asked for otherwise.
+    const silent = result.cards
+      .filter(({ card }) => card.capabilities.includes('dashboards.report'))
+      .filter(({ card }) => !/\breport\b/i.test(card.prompt.detailed.en ?? '') || !/报表/.test(card.prompt.detailed.zh ?? ''))
+      .map(({ card }) => card.id);
+    expect(silent).toEqual([]);
+  });
+
   it('reads the capability areas from the checklist tree', () => {
     // A closed set read from disk, not a list kept here: the assertion is only
     // that it is non-trivial and holds an area every seed card uses.
     expect(areas.size).toBeGreaterThan(1);
     expect(areas.has('ai')).toBe(true);
   });
+});
+
+describe('the three control cards: Chinese asks, unanswerable twins, every field aggregate', () => {
+  const result = loadScenarios(SCENARIOS_DIR, { areas: readCapabilityAreas(AREAS_DIR), library: 'open' });
+  const controls = result.cards.filter((c) => c.card.tier === 'control');
+
+  it('holds the three controls (control for the cases below)', () => {
+    expect(controls.map((c) => c.card.id).sort()).toEqual(Object.keys(EXPECTED_TRUTHS).sort());
+  });
+
+  for (const { card } of controls) {
+    it(`${card.id}: --lang zh runs it in every mode, with either build prompt: no text the runner sends lacks its Chinese`, () => {
+      for (const prompt of ['short', 'detailed'] as const) {
+        expect(promptLanguageGaps(card, { lang: 'zh', prompt }, ['scratch', 'template', 'ask']), prompt).toEqual([]);
+      }
+      // Each Chinese text is Chinese, not the English one copied over.
+      const texts = [card.prompt.short, card.prompt.detailed, card.iterate.change, ...card.run.questions.map((q) => q.ask), ...card.run.operations.map((o) => o.ask)];
+      for (const t of texts) {
+        expect(t.zh, t.en).toMatch(/[\u4e00-\u9fff]/);
+        expect(t.zh, t.en).not.toBe(t.en);
+      }
+    });
+
+    it(`${card.id}: three unanswerable questions beside the answerable ones, and an avg, a max and a min truth`, () => {
+      const kinds = card.run.questions.map((q) => q.truth.kind);
+      expect(kinds.filter((k) => k === 'unanswerable')).toHaveLength(3);
+      for (const kind of ['avg', 'max', 'min'] as const) expect(kinds, kind).toContain(kind);
+    });
+  }
 });

@@ -287,6 +287,14 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { rows: [{ email: 'refusal.probe.pending.import@example.com', name: 'Pending Import Probe' }] },
       note: 'the gate runs first; off a managed environment the admin gets 409 RESOURCE_CONFLICT and no one is imported',
     },
+    // The pending-person remove door: the same gate first, the same 409 off a
+    // managed environment. The probe names a person who is not pending, so a
+    // managed boot would refuse it 409 too and remove no one.
+    'POST /api/v1/auth/admin/remove-sso-user': {
+      bucket: 'objectstack-gate',
+      body: { userId: targetUserId },
+      note: 'the gate runs first; off a managed environment the admin gets 409 RESOURCE_CONFLICT and no one is removed',
+    },
     // ── ADR-0095 D3 — the platform-admin roster (a read; no body is read) ───
     'POST /api/v1/auth/admin/list-platform-admins': {
       bucket: 'objectstack-gate',

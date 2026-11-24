@@ -110,7 +110,7 @@ import {
   takeClearConfirmRequest,
 } from './sampleDataNotice.js';
 import { SampleDataLeaveBanner } from './SampleDataLeaveBanner.js';
-import { getCloudBase, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
+import { getCloudBase, getCloudHomeUrl, getRuntimeConfig, isMarketplaceEnabled } from '../../runtime-config.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import { useMetadata } from '../../providers/MetadataProvider.js';
 import { appRouteSegment, filterActiveApps } from '../../utils/index.js';
@@ -118,6 +118,7 @@ import { waitForServedApp, type ServedApp } from './waitForServedApp.js';
 import { SuggestedBindingsPanel, type SuggestedBindingsStrings } from '../../components/SuggestedBindingsPanel.js';
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
+import { suggestedSetLabel, usePackagePermissionSets } from '../../components/suggestedSetLabel.js';
 import { errorCodeIs } from '@object-ui/types';
 import { readTargetNamespaceRefusal } from './targetNamespaceRefusal.js';
 import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
@@ -175,6 +176,43 @@ function versionEntryId(version: string): string {
 }
 
 /**
+ * ADR-0090 D5 — a package's suggested audience bindings ("this app suggests
+ * granting SET to Everyone") on this page, with the deployment's decision on
+ * each. Accept/dismiss/revoke need `manage_metadata` server-side; the panel
+ * renders nothing for a caller without it (the list answers 403).
+ *
+ * The prompt, the toasts and the state lines name the set by its label
+ * (`suggestedSetLabel`), read from the package's own sets as this runtime
+ * serves them. The read is made on mount, as the panel's own read of the
+ * suggestions is, so a mount drawn after an install reads what it registered.
+ */
+function PackageSuggestedBindings({ packageId, className }: { packageId: string; className?: string }) {
+  const { t } = useObjectTranslation();
+  const sets = usePackagePermissionSets(packageId);
+  const set = (s: SuggestedBinding) => suggestedSetLabel(s, sets);
+  const strings: SuggestedBindingsStrings = {
+    describe: (s) =>
+      t(s.anchor === 'guest' ? 'marketplace.suggestedBindings.promptGuest' : 'marketplace.suggestedBindings.promptEveryone', { set: set(s) }),
+    confirm: t('marketplace.suggestedBindings.confirm'),
+    confirming: t('marketplace.suggestedBindings.confirming'),
+    dismiss: t('marketplace.suggestedBindings.dismiss'),
+    confirmedToast: (s) => t('marketplace.suggestedBindings.confirmedToast', { set: set(s), anchor: s.anchor }),
+    dismissedToast: (s) => t('marketplace.suggestedBindings.dismissedToast', { set: set(s) }),
+    guestUnsupported: t('marketplace.suggestedBindings.guestUnsupported'),
+    acceptedState: (s) => t('marketplace.suggestedBindings.acceptedState', { set: set(s) }),
+    notInForceState: (s) => t('marketplace.suggestedBindings.notInForceState', { set: set(s) }),
+    dismissedState: (s) => t('marketplace.suggestedBindings.dismissedState', { set: set(s) }),
+    revoke: t('marketplace.suggestedBindings.revoke'),
+    revoking: t('marketplace.suggestedBindings.revoking'),
+    revokedToast: (s) => t('marketplace.suggestedBindings.revokedToast', { set: set(s) }),
+    reopen: t('marketplace.suggestedBindings.reopen'),
+    reopening: t('marketplace.suggestedBindings.reopening'),
+    reopenedToast: (s) => t('marketplace.suggestedBindings.reopenedToast', { set: set(s) }),
+  };
+  return <SuggestedBindingsPanel packageId={packageId} strings={strings} className={className} />;
+}
+
+/**
  * The page under the frame that fetches its strings first — the
  * `marketplace` namespace (`MarketplaceNamespaceGate.tsx` says why).
  */
@@ -196,37 +234,6 @@ function MarketplacePackagePageBody() {
   // Dates and numbers on this surface read the display locale; a bare
   // `toLocale*()` call used the MACHINE's locale (objectui#9909).
   const displayLocale = useDisplayLocale();
-  // ADR-0090 D5 — install-time suggested audience bindings ("this app
-  // suggests granting <set> to Everyone"), surfaced right after a
-  // successful install into THIS runtime, with the deployment's decision on
-  // each. Accept/dismiss/revoke need `manage_metadata` server-side; the panel
-  // renders nothing for a caller without it (the list answers 403).
-  const suggestionStrings: SuggestedBindingsStrings = {
-    describe: (s: SuggestedBinding) =>
-      t(s.anchor === 'guest' ? 'marketplace.suggestedBindings.promptGuest' : 'marketplace.suggestedBindings.promptEveryone', { set: s.permission_set_name }),
-    confirm: t('marketplace.suggestedBindings.confirm'),
-    confirming: t('marketplace.suggestedBindings.confirming'),
-    dismiss: t('marketplace.suggestedBindings.dismiss'),
-    confirmedToast: (s: SuggestedBinding) =>
-      t('marketplace.suggestedBindings.confirmedToast', { set: s.permission_set_name, anchor: s.anchor }),
-    dismissedToast: (s: SuggestedBinding) =>
-      t('marketplace.suggestedBindings.dismissedToast', { set: s.permission_set_name }),
-    guestUnsupported: t('marketplace.suggestedBindings.guestUnsupported'),
-    acceptedState: (s: SuggestedBinding) =>
-      t('marketplace.suggestedBindings.acceptedState', { set: s.permission_set_name }),
-    notInForceState: (s: SuggestedBinding) =>
-      t('marketplace.suggestedBindings.notInForceState', { set: s.permission_set_name }),
-    dismissedState: (s: SuggestedBinding) =>
-      t('marketplace.suggestedBindings.dismissedState', { set: s.permission_set_name }),
-    revoke: t('marketplace.suggestedBindings.revoke'),
-    revoking: t('marketplace.suggestedBindings.revoking'),
-    revokedToast: (s: SuggestedBinding) =>
-      t('marketplace.suggestedBindings.revokedToast', { set: s.permission_set_name }),
-    reopen: t('marketplace.suggestedBindings.reopen'),
-    reopening: t('marketplace.suggestedBindings.reopening'),
-    reopenedToast: (s: SuggestedBinding) =>
-      t('marketplace.suggestedBindings.reopenedToast', { set: s.permission_set_name }),
-  };
   const basePath = appName ? `/apps/${appName}` : '';
   const { refresh: refreshMetadata } = useMetadata();
   // The adapter `MetadataProvider` reads through: the deploy wait asks the
@@ -1065,7 +1072,7 @@ function MarketplacePackagePageBody() {
     && ((localInstall !== null && !localInstall.notLoaded) || cloudInstall !== null)
     && !installOpen
     && !resultCarriesPanel ? (
-      <SuggestedBindingsPanel packageId={manifestId} strings={suggestionStrings} />
+      <PackageSuggestedBindings packageId={manifestId} />
     ) : null;
 
   // objectstack#30616 — the runtime's count of the sample rows a purge of this
@@ -1336,7 +1343,7 @@ function MarketplacePackagePageBody() {
             its suggested audience bindings are confirmable right here. Not
             for an unmanaged copy: nothing is registered under the package. */}
         {localResult.ok && suggestFor && !localResult.unmanaged ? (
-          <SuggestedBindingsPanel packageId={suggestFor} strings={suggestionStrings} className="mt-2" />
+          <PackageSuggestedBindings packageId={suggestFor} className="mt-2" />
         ) : null}
         {/* The package's connector credentials that still need an
             administrator: set each one here, or skip it for Setup. */}
@@ -1982,11 +1989,13 @@ function MarketplacePackagePageBody() {
                 <AlertCircle className="h-4 w-4 mt-0.5 text-amber-600" aria-hidden="true" />
                 <div className="flex-1">{envsError}</div>
               </div>
-              {/* Only when the runtime named an upstream cloud. An empty base
-                  used to fall back to a composed vendor URL that 404'd
+              {/* The control plane's declared console home page when the
+                  runtime serves one (objectstack#34622), else the upstream
+                  cloud's origin, and only when the runtime named one. An empty
+                  base used to fall back to a composed vendor URL that 404'd
                   (objectui#7253); an `href=""` would reload this page. */}
-              {cloudConsoleUrl() ? (
-                <a href={cloudConsoleUrl()} target="_blank" rel="noopener noreferrer">
+              {(getCloudHomeUrl() ?? cloudConsoleUrl()) ? (
+                <a href={getCloudHomeUrl() ?? cloudConsoleUrl()} target="_blank" rel="noopener noreferrer">
                   <Button variant="outline" size="sm" className="w-full">
                     <ExternalLink className="h-4 w-4 mr-1.5" aria-hidden="true" />
                     {t('marketplace.action.openOnCloud')}
@@ -2132,7 +2141,7 @@ function MarketplacePackagePageBody() {
           {deploy?.phase === 'served'
             && getRuntimeConfig().defaultEnvironmentId
             && getRuntimeConfig().defaultEnvironmentId === selectedEnv && (
-            <SuggestedBindingsPanel packageId={pkg.manifest_id} strings={suggestionStrings} />
+            <PackageSuggestedBindings packageId={pkg.manifest_id} />
           )}
 
           {/* The package's connector credentials, read from this runtime's

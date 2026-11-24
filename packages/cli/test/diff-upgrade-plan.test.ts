@@ -144,7 +144,8 @@ describe('os diff — what the upgrade plan adds', () => {
       { type: 'removed', category: 'data', name: 'acme_old', breaking: false, detail: 'seed dataset removed, mode insert' },
       {
         type: 'added', category: 'data', name: 'acme_tier', breaking: false,
-        detail: 'seed dataset added: 1 record(s); mode replace; a replay deletes nothing and inserts these again, so rows already in the table stay',
+        detail: 'seed dataset added: 1 record(s); mode replace; `replace` is a retired seed mode: a replay refuses this '
+          + "dataset and writes none of it. Declare `mode: 'ignore'` (or 'upsert') with an `externalId` that names a row",
       },
       {
         type: 'modified', category: 'data', name: 'acme_stage', breaking: false,
@@ -154,7 +155,10 @@ describe('os diff — what the upgrade plan adds', () => {
     ]);
   });
 
-  it('an insert dataset, added or changed, says a replay inserts its records again; ignore stays silent', () => {
+  // [#34613] A stored artifact built before the retirement can still carry
+  // `insert`: the diff names the mode as retired and the fix, rather than
+  // describing a replay that no longer writes the dataset.
+  it('a retired insert dataset, added or changed, says a replay refuses it; ignore stays silent', () => {
     const before = lead({}, [
       { object: 'acme_source', mode: 'insert', records: [{ name: 'web' }] },
       { object: 'acme_region', mode: 'ignore', records: [{ name: 'emea' }] },
@@ -164,7 +168,8 @@ describe('os diff — what the upgrade plan adds', () => {
       { object: 'acme_region', mode: 'ignore', records: [{ name: 'apac' }] },
       { object: 'acme_channel', mode: 'insert', records: [{ name: 'email' }] },
     ]);
-    const insertNote = "a replay inserts these again, and a row the database refuses is that row's error";
+    const insertNote = '`insert` is a retired seed mode: a replay refuses this dataset and writes none of it. '
+      + "Declare `mode: 'ignore'` (or 'upsert') with an `externalId` that names a row";
     expect(diffStacks(before, after)).toEqual([
       {
         type: 'added', category: 'data', name: 'acme_channel', breaking: false,
@@ -175,6 +180,30 @@ describe('os diff — what the upgrade plan adds', () => {
         detail: `seed dataset changed: records; mode insert; ${insertNote}`,
       },
       { type: 'modified', category: 'data', name: 'acme_region', breaking: false, detail: 'seed dataset changed: records; mode ignore' },
+    ]);
+  });
+});
+
+describe('os diff — objectExtensions fields, as the plan compares them (#34095)', () => {
+  const ACCOUNT = { name: 'crm_account', label: 'Account', fields: { name: { type: 'text' } } };
+
+  it('an extension field added to an object the config owns prints under that object', () => {
+    const entries = diffStacks(
+      { objects: [ACCOUNT] },
+      { objects: [ACCOUNT], objectExtensions: [{ extend: 'crm_account', fields: { invoiced_amount: { type: 'number' } } }] },
+    );
+    expect(entries).toEqual([
+      { type: 'added', category: 'objects.crm_account.fields', name: 'invoiced_amount', breaking: false, detail: 'optional field added' },
+    ]);
+  });
+
+  it('an object reached only through an extension prints its field changes, and is never an added or removed object', () => {
+    const entries = diffStacks(
+      { objectExtensions: [{ extend: 'crm_contact', fields: { tier: { type: 'text' } } }] },
+      { objectExtensions: [{ extend: 'crm_contact', fields: { tier: { type: 'number' } } }] },
+    );
+    expect(entries).toEqual([
+      { type: 'modified', category: 'objects.crm_contact.fields', name: 'tier', breaking: true, detail: 'type changed: text → number' },
     ]);
   });
 });

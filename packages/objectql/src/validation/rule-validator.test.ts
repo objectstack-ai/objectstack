@@ -2464,25 +2464,38 @@ describe('evaluateValidationRules — built-in messages are localized (#3957)', 
  *
  * The evaluator emitted the authored sentence verbatim, so a deployment with a
  * complete `zh-CN` bundle read platform-generated refusals in Chinese and
- * author-written refusals in English **inside one error envelope**. The
- * built-in field catalog has resolved through `messages.translate` since #3957;
- * what was missing was a key shape for an author's own rule, not a channel.
+ * author-written refusals in English **inside one error envelope**. What was
+ * missing was a key shape for an author's own rule, not a channel.
  *
- * These tests drive the SAME `ValidationMessageContext.translate` hook the
- * built-in catalog uses (the engine's `i18nService`, `II18nService.t`
- * semantics: the key is echoed back on a miss). If a second i18n path were ever
- * added to objectql, this fixture would keep passing through the old one — so
- * the address is asserted explicitly, not just the output.
+ * [#35384] The sentence is metadata (`objects.<o>._validations.<rule>.message`,
+ * the key `/meta`'s `translateObjectValidations` reads), so these tests drive
+ * `ValidationMessageContext.labelTranslation` — the bundle and the metadata
+ * route's `ResolveOptions` the refusal's labels read (#34030) — and never the
+ * `translate` (`t()`) hook, which carries the built-in messages only. A `t()`
+ * that would answer a rule message is wired beside it in the first test, so a
+ * reader that went back to `t()` reads the decoy.
  */
 describe('evaluateValidationRules — authored rule messages resolve from the bundle (#14253)', () => {
-  /** An `II18nService.t`-shaped lookup over a flat key→string map. */
-  const service = (entries: Record<string, string>) => {
-    const seen: string[] = [];
+  /** A `locale|a.b.c` map as the nested per-locale bundle `getTranslations()` hands over. */
+  const bundleOf = (entries: Record<string, string>): Record<string, Record<string, unknown>> => {
+    const bundle: Record<string, Record<string, any>> = {};
+    for (const [address, value] of Object.entries(entries)) {
+      const [locale, key] = address.split('|');
+      const parts = key.split('.');
+      let cur = (bundle[locale] ??= {});
+      for (const part of parts.slice(0, -1)) cur = cur[part] ??= {};
+      cur[parts[parts.length - 1]] = value;
+    }
+    return bundle;
+  };
+  /** `labelTranslation` over `entries`, read in `locale`; counts its calls. */
+  const service = (entries: Record<string, string>, locale = 'zh-CN') => {
+    const calls = { count: 0 };
     return {
-      seen,
-      t: (key: string, locale: string) => {
-        seen.push(`${locale}|${key}`);
-        return entries[`${locale}|${key}`] ?? key;
+      calls,
+      labelTranslation: () => {
+        calls.count += 1;
+        return { bundle: bundleOf(entries) as any, options: { locale } };
       },
     };
   };
@@ -2512,28 +2525,41 @@ describe('evaluateValidationRules — authored rule messages resolve from the bu
     }],
   });
 
-  it('asks for objects.<object>._validations.<rule>.message, and returns what it gets', () => {
+  it('reads objects.<object>._validations.<rule>.message through labelTranslation, never t()', () => {
     const i18n = service({
       'zh-CN|objects.duly_duty._validations.standing_no_frequency.message':
         '常规任务必须设置频率。',
+      // Another object's rule of the same name: not this refusal's address.
+      'zh-CN|objects.other_duty._validations.standing_no_frequency.message': 'WRONG — another object',
     });
     const [err] = failing(scriptSchema('A standing duty must declare a frequency.'), {}, 'insert', {
-      messages: { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t },
+      messages: {
+        locale: 'zh-CN',
+        objectName: 'duly_duty',
+        labelTranslation: i18n.labelTranslation,
+        translate: (key: string) => (key.includes('._validations.') ? 'WRONG — read through t()' : key),
+      },
     });
     expect(err.message).toBe('常规任务必须设置频率。');
-    expect(i18n.seen).toContain('zh-CN|objects.duly_duty._validations.standing_no_frequency.message');
     // The wire vocabulary is unchanged — ADR-0114's `code` does not split
     // because a sentence is now translatable.
     expect(err.code).toBe('rule_violation');
     expect(err.field).toBe('frequency');
   });
 
-  it('keeps the authored sentence when the bundle has no entry (the key echoes back)', () => {
+  it('keeps the authored sentence when the bundle has no entry', () => {
     const i18n = service({});
     const [err] = failing(scriptSchema('A standing duty must declare a frequency.'), {}, 'insert', {
-      messages: { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t },
+      messages: { locale: 'zh-CN', objectName: 'duly_duty', labelTranslation: i18n.labelTranslation },
     });
     expect(err.message).toBe('A standing duty must declare a frequency.');
+  });
+
+  it('keeps the authored sentence when the service cannot hand its translations over', () => {
+    const [err] = failing(scriptSchema('authored'), {}, 'insert', {
+      messages: { locale: 'zh-CN', objectName: 'duly_duty', labelTranslation: () => undefined },
+    });
+    expect(err.message).toBe('authored');
   });
 
   it('does not consult the bundle without an object name or a locale', () => {
@@ -2541,12 +2567,12 @@ describe('evaluateValidationRules — authored rule messages resolve from the bu
       'zh-CN|objects.duly_duty._validations.standing_no_frequency.message': '常规任务必须设置频率。',
     });
     expect(failing(scriptSchema('authored'), {}, 'insert', {
-      messages: { locale: 'zh-CN', translate: i18n.t },
+      messages: { locale: 'zh-CN', labelTranslation: i18n.labelTranslation },
     })[0].message).toBe('authored');
     expect(failing(scriptSchema('authored'), {}, 'insert', {
-      messages: { objectName: 'duly_duty', translate: i18n.t },
+      messages: { objectName: 'duly_duty', labelTranslation: i18n.labelTranslation },
     })[0].message).toBe('authored');
-    expect(i18n.seen).toEqual([]);
+    expect(i18n.calls.count).toBe(0);
   });
 
   it('survives a throwing i18n service — a 400 must not become a 500', () => {
@@ -2554,7 +2580,7 @@ describe('evaluateValidationRules — authored rule messages resolve from the bu
       messages: {
         locale: 'zh-CN',
         objectName: 'duly_duty',
-        translate: () => { throw new Error('i18n exploded'); },
+        labelTranslation: () => { throw new Error('i18n exploded'); },
       },
     });
     expect(err.message).toBe('authored');
@@ -2566,7 +2592,7 @@ describe('evaluateValidationRules — authored rule messages resolve from the bu
       'zh-CN|objects.duly_duty._validations.contact_email.message': '联系邮箱格式不正确。',
       'zh-CN|objects.duly_duty._validations.payload_shape.message': '负载结构不符合约定。',
     });
-    const messages = { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t };
+    const messages = { locale: 'zh-CN', objectName: 'duly_duty', labelTranslation: i18n.labelTranslation };
 
     const fsm = {
       fields: { status: { type: 'select', label: '状态' } },
@@ -2623,7 +2649,7 @@ describe('evaluateValidationRules — authored rule messages resolve from the bu
       }],
     };
     const [err] = failing(schema, { account_type: 'enterprise', approver: null }, 'insert', {
-      messages: { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t },
+      messages: { locale: 'zh-CN', objectName: 'duly_duty', labelTranslation: i18n.labelTranslation },
     });
     expect(err.message).toBe('企业客户需要审批人。');
   });
@@ -2643,7 +2669,7 @@ describe('evaluateValidationRules — authored rule messages resolve from the bu
       }],
     };
     const [err] = failing(schema, {}, 'insert', {
-      messages: { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t },
+      messages: { locale: 'zh-CN', objectName: 'duly_duty', labelTranslation: i18n.labelTranslation },
     });
     expect(err.message).toMatch(/could not be evaluated/);
     expect(err.message).not.toBe('这条不该出现。');
@@ -2666,8 +2692,11 @@ describe('evaluateValidationRules — a tenant-rewritten rule message beats the 
   const PACKAGED = 'A standing duty must declare a frequency.';
   const REWRITE = 'Pick how often this duty repeats.';
   const ZH = '常规任务必须设置频率。';
-  const KEY = 'zh-CN|objects.duly_duty._validations.standing_no_frequency.message';
-  const t = (key: string, locale: string) => ({ [KEY]: ZH } as Record<string, string>)[`${locale}|${key}`] ?? key;
+  // [#35384] The catalog entry as the bundle `labelTranslation` hands over.
+  const labelTranslation = () => ({
+    bundle: { 'zh-CN': { objects: { duly_duty: { _validations: { standing_no_frequency: { message: ZH } } } } } } as any,
+    options: { locale: 'zh-CN' },
+  });
 
   const failing = (schema: any, data: Record<string, unknown>, opts: Record<string, unknown>) => {
     try {
@@ -2691,7 +2720,7 @@ describe('evaluateValidationRules — a tenant-rewritten rule message beats the 
   });
   const packagedRule = (name: string) => (name === 'standing_no_frequency' ? scriptRule(PACKAGED) : undefined);
   const messages = (extra: Record<string, unknown> = {}) =>
-    ({ locale: 'zh-CN', objectName: 'duly_duty', translate: t, ...extra });
+    ({ locale: 'zh-CN', objectName: 'duly_duty', labelTranslation, ...extra });
 
   it('returns the rewrite as written in a non-default locale', () => {
     const [err] = failing(schemaWith(REWRITE), {}, { messages: messages({ packagedRule }) });

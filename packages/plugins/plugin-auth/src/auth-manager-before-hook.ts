@@ -12,7 +12,8 @@
  * it stood, re-indented four levels and otherwise unedited: the same actor
  * resolver handed to the attribution scope, the same refresh skip for a minted
  * principal session, the same per-number OTP send guard, the same password
- * complexity and reuse checks, the same
+ * complexity and reuse checks, the cloud-managed refusal on the two doors that
+ * change a membership or its role (added after the move), the same
  * remove-member, organization-delete and no-record revoke refusals, the same
  * held-caller refusal on the admin plugin's role-scalar actions, the same
  * no-record admin revoke refusal, the same held-caller refusal on rewriting or
@@ -20,8 +21,8 @@
  * the same cloud-as-IdP authorization gate, the same break-glass
  * last-local-credential refusal, the same audience posture and uniqueness
  * refusal on password sign-up, the same cloud-managed invite-member refusal,
- * the same account lockout gate, and the same first-user `disableSignUp` flip
- * — in the same order.
+ * the same account lockout gate (on every password door), and the same
+ * first-user `disableSignUp` flip — in the same order.
  *
  * ## How the moved body reaches the class
  *
@@ -58,18 +59,27 @@
  * Nothing re-exports this module, so the published surface does not move.
  */
 
+import { ACCEPT_INVITATION_ONE_STEP_PATH } from './invitation-mailbox-proof.js';
 import { isCloudManaged } from '@objectstack/core';
 import { VENDOR_ROLE_SCALAR_ADMIN_PATHS } from './admin-impersonate-endpoint.js';
 import { setAuthActorResolver } from './auth-actor-attribution.js';
 import { AuthManager } from './auth-manager.js';
-import { SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
+import { passwordSignInDoorOf, recordLockoutRequest } from './auth-manager-sign-in-lockout.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
+import {
+  endMagicLinkIssuedBeforeCredentialChange,
+  endPhoneCodeIssuedBeforeCredentialChange,
+  endTwoFactorChallengeIssuedBeforeCredentialChange,
+  endVerifyEmailLinkIssuedBeforeCredentialChange,
+  noteSignInCredential,
+  RESET_DOOR_SUBJECT,
+} from './credential-change-ends-prior-access.js';
 import {
   isLastLocalCredentialHolder,
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
-import { answerRefusedAuthorization } from './oauth-authorize-refusal.js';
+import { answerRefusedAuthorization, gateAnswerRefuses, refusalDetailOf } from './oauth-authorize-refusal.js';
 import { refuseRequestNamingDifferentAccounts } from './one-account-per-request.js';
 import {
   SSO_ONLY_RESET_UNREADABLE_MESSAGE,
@@ -85,7 +95,8 @@ import { isPendingSsoSource, PENDING_SSO_MESSAGES } from './pending-sso-marker.j
 import { ORGANIZATION_DELETE_PATH } from './organization-delete.js';
 import { carriesPrincipalSession } from './principal-session-mint.js';
 import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
-import { ssoDiscoveryCompanionContext } from './sso-discovery-companion-origins.js';
+import { refuseSsoDiscoveryHostNotPublic, ssoDiscoveryCompanionContext } from './sso-discovery-companion-origins.js';
+import { declareSsoDiscoveryReadsOf, judgeSsoDiscoveryUrl } from './sso-discovery-egress.js';
 import { snapshotRoleChangeGrants, UPDATE_MEMBER_ROLE_PATH } from './role-change-granted-set.js';
 import { refuseVisitorResendWithoutLiveTransport } from './visitor-verification-resend.js';
 
@@ -121,6 +132,30 @@ const CLOUD_MANAGED_RESET_DOORS: ReadonlySet<string> = new Set([
   PHONE_RESET_PASSWORD_PATH,
   '/request-password-reset',
   '/phone-number/request-password-reset',
+]);
+
+/**
+ * Every organization-family door that writes or deletes an organization
+ * membership row, which a cloud-managed environment refuses: the
+ * organisation that hosts it manages membership and its tiers. Make Owner
+ * (`sys_member.transfer_ownership`) sends the owner tier to
+ * update-member-role, so it is refused there; create makes the caller the
+ * new organization's owner, and delete ends every membership of the
+ * organization. `/organization/add-member` (exactly a platform administrator,
+ * adding a membership) is deliberately absent: it restores a membership the
+ * environment lost. The census of the family, with each other route's reason,
+ * is `cloud-managed.ts`'s header.
+ */
+const CLOUD_MANAGED_MEMBERSHIP_DOORS: ReadonlyMap<
+  string,
+  'removeMember' | 'updateMemberRole' | 'leaveOrganization' | 'acceptInvitation' | 'createOrganization' | 'deleteOrganization'
+> = new Map([
+  ['/organization/remove-member', 'removeMember'],
+  [UPDATE_MEMBER_ROLE_PATH, 'updateMemberRole'],
+  ['/organization/leave', 'leaveOrganization'],
+  ['/organization/accept-invitation', 'acceptInvitation'],
+  ['/organization/create', 'createOrganization'],
+  [ORGANIZATION_DELETE_PATH, 'deleteOrganization'],
 ]);
 
 /**
@@ -170,7 +205,12 @@ export async function globalBeforeHook(
   this: BeforeHookHost,
   ctx: any,
   setShouldSkipSessionRefresh: typeof import('better-auth/api').setShouldSkipSessionRefresh,
-): Promise<ReturnType<typeof ssoDiscoveryCompanionContext> | Response | void> {
+): Promise<
+  | ReturnType<typeof ssoDiscoveryCompanionContext>
+  | Awaited<ReturnType<typeof endVerifyEmailLinkIssuedBeforeCredentialChange>>
+  | Response
+  | void
+> {
   // ── #4586: hand the attribution scope its actor resolver ─────
   // FIRST, and unconditionally: this global before-hook is the one
   // seam every better-auth endpoint passes through (`matcher: () =>
@@ -204,6 +244,20 @@ export async function globalBeforeHook(
   // `principal-session-mint.ts` (3b).
   if (carriesPrincipalSession(ctx)) await setShouldSkipSessionRefresh(true);
 
+  // ── SSO discovery connects only to addresses public at connect time ──
+  // Ahead of every branch below that may answer early: a vendor endpoint
+  // that reads an identity provider (`/sso/register`, `/sign-in/sso`,
+  // `/sso/callback/*`) runs in the SSO discovery scope the request routing
+  // opened, which judges only reads at origins the request's provider
+  // configuration names (`sso-discovery-egress.ts`). Here the scope takes the
+  // deployment's configured trust from this request's context and, on a
+  // registration, the origins its body has the server read; a stored
+  // provider's are named as the vendor reads its row. This reads nothing.
+  // Naming an origin trusts nothing: a read of it is sent through the
+  // outbound-request guard, unless the deployment's configured trusted
+  // origins list it. Outside that scope this does nothing.
+  await declareSsoDiscoveryReadsOf(ctx);
+
   // ── An auth request is judged and executed as one account ────────
   // AHEAD OF EVERY GATE BELOW, and of the endpoint: a request whose
   // session cookie and bearer token name two different signed-in
@@ -214,6 +268,29 @@ export async function globalBeforeHook(
   // read nothing, so they keep their place. `one-account-per-request.ts`
   // states the rule and how each credential is read.
   await refuseRequestNamingDifferentAccounts(ctx);
+
+  // ── ADR-0069 D2: what this request is, for the lock at session creation ──
+  // Its path, and the session of record it presents, read from the store
+  // before the endpoint runs (and before it can replace that row), so the
+  // lock's refusal at session creation tells a sign-in from a new session for
+  // an account the caller is already signed in as by the session of record,
+  // never by the request's own view of it, and judges the same request where
+  // the endpoint context does not reach the database hooks. Lockout on only;
+  // see `auth-manager-sign-in-lockout.ts`.
+  await recordLockoutRequest.call(this, ctx);
+
+  // ── A credential change ends access issued before it ──────────
+  // An email-change link, a verification link that signs its holder in and
+  // a magic link minted before the account's last credential change answer
+  // what a link never issued answers, and a second-factor challenge opened
+  // before it, and a sign-in code texted before it, are ended. `credential-change-ends-prior-access.ts` states the
+  // rule and its one predicate.
+  const endedVerifyLink = await endVerifyEmailLinkIssuedBeforeCredentialChange(ctx);
+  if (endedVerifyLink) return endedVerifyLink;
+  const endedMagicLink = await endMagicLinkIssuedBeforeCredentialChange(ctx);
+  if (endedMagicLink) return endedMagicLink;
+  await endTwoFactorChallengeIssuedBeforeCredentialChange(ctx);
+  await endPhoneCodeIssuedBeforeCredentialChange(ctx);
 
   // ── [#33203] Cloud-managed: no reset door sets a local password ──
   // A hosted environment sets no local password for anyone, a platform
@@ -278,6 +355,10 @@ export async function globalBeforeHook(
   const resetSubject = resetDoor
     ? await resolveResetDoorUserId(ctx, this.config.phoneOtp?.allowedAttempts ?? 3)
     : undefined;
+  // The account a reset door sets the password of, for the after-hook, which
+  // ends its sessions again once the password is written
+  // (`credential-change-ends-prior-access.ts`).
+  if (resetSubject?.ok && resetSubject.userId && ctx?.context) ctx.context[RESET_DOOR_SUBJECT] = resetSubject.userId;
   if (resetSubject?.ok && resetSubject.userId) {
     const source = await readUserSource(this.getDataEngine(), resetSubject.userId);
     if (source.ok && isPendingSsoSource(source.value)) {
@@ -325,7 +406,8 @@ export async function globalBeforeHook(
   if (
     ctx?.path === '/sign-up/email' ||
     ctx?.path === '/reset-password' ||
-    ctx?.path === '/change-password'
+    ctx?.path === '/change-password' ||
+    ctx?.path === ACCEPT_INVITATION_ONE_STEP_PATH
   ) {
     const candidate =
       (typeof ctx?.body?.password === 'string' && ctx.body.password) ||
@@ -362,6 +444,32 @@ export async function globalBeforeHook(
       }
     }
     // fall through to the path's own handling below
+  }
+
+  // ── Cloud-managed: membership and its tiers are the hosting organisation's ──
+  // On a cloud-managed environment the organisation that hosts it manages
+  // who is a member and at which tier, so every door that writes or deletes
+  // an organization membership row (`CLOUD_MANAGED_MEMBERSHIP_DOORS`:
+  // remove-member, update-member-role with Make Owner, leave,
+  // accept-invitation, create, delete) refuses every request with the
+  // invite-member envelope (`cloud-managed.ts`), ahead of the vendor's
+  // handler: nothing is written. AHEAD of the remove-member permission arm,
+  // the organization-delete records arm and the role-change grant read below,
+  // so a refused request runs none of them. As with invite-member, the fact
+  // is public (`features.cloudManaged` on `/auth/config`), so answering it
+  // ahead of the session check tells an anonymous caller nothing new.
+  // add-member is not among these doors. This line is the only one: the
+  // invitation refusal has a second line in `beforeCreateInvitation`, but no
+  // in-process caller reaches these vendor operations (each is reached
+  // through its route alone, so through this hook), so one line is enough
+  // today. A future in-process caller of one of them needs its own refusal.
+  const membershipDoor = CLOUD_MANAGED_MEMBERSHIP_DOORS.get(ctx?.path ?? '');
+  if (membershipDoor && isCloudManaged()) {
+    const { APIError } = await import('better-auth/api');
+    throw new APIError('CONFLICT', {
+      message: CLOUD_MANAGED_REFUSAL_MESSAGES[membershipDoor],
+      code: CLOUD_MANAGED_REFUSAL_CODE,
+    });
   }
 
   // ── #8289: remove-member answers its PERMISSION denial itself ──
@@ -529,6 +637,10 @@ export async function globalBeforeHook(
   // answered `200` and the provider row landed, in every held state.
   if (ctx?.path === '/sso/register') {
     const actor = await this.resolveActor(ctx);
+    // The origins the body names reach the vendor's register endpoint only
+    // for an actor these gates admitted, and only after the host its
+    // discovery reads was resolved (below).
+    let bodyOrigins: string[] = [];
     if (actor?.userId) {
       await this.assertActorNotHeld(actor);
       const ok = await this.isPlatformAdminUserId(actor.userId);
@@ -542,8 +654,33 @@ export async function globalBeforeHook(
       // [#32085] One email domain, one provider: a domain another
       // provider already serves is refused 409, naming that provider.
       await this.assertSsoProviderDomainFree(ctx);
+      // SSO discovery connects only to addresses that are public at connect
+      // time: the host this registration's discovery reads is judged before
+      // the vendor's endpoint runs, by the rule its read is judged by when it
+      // connects, unless the deployment's configured trusted origins (read
+      // here, before any body-named origin joins them) list it
+      // (`refuseSsoDiscoveryHostNotPublic`). Asked before the sign-out
+      // switch below, whose check reads the same discovery document: a host
+      // that is not public is refused on the member that names it, whatever
+      // the switch says, and nothing is read from it. A host that answers
+      // otherwise when its read connects is refused there, nothing sent.
+      const notPublic = await refuseSsoDiscoveryHostNotPublic({
+        body: ctx?.body,
+        isConfiguredTrusted: (url) =>
+          typeof ctx?.context?.isTrustedOrigin === 'function' && ctx.context.isTrustedOrigin(url) === true,
+        judge: judgeSsoDiscoveryUrl,
+      });
+      if (notPublic) {
+        const { APIError } = await import('better-auth/api');
+        throw new APIError(notPublic.status, {
+          code: notPublic.code,
+          message: notPublic.message,
+          field: notPublic.field,
+        });
+      }
       // Ruling record 6866334319: the sign-out switch, as on update-provider.
       await this.assertSsoSignOutOfIdpSupported(ctx);
+      bodyOrigins = await this.ssoDiscoveryTrustedOrigins(ctx?.body);
     }
     // The origins the body names (its issuer and any explicit `oidcConfig`
     // endpoint) and a known IdP's companion origins (Microsoft Entra ID's
@@ -551,7 +688,7 @@ export async function globalBeforeHook(
     // fetch and validation only: the router's origin check has already run
     // against the configured trusted origins alone, and never sees them
     // (`sso-discovery-companion-origins.ts`).
-    return ssoDiscoveryCompanionContext(ctx, await this.ssoDiscoveryTrustedOrigins(ctx?.body));
+    return ssoDiscoveryCompanionContext(ctx, bodyOrigins);
   }
 
   // ── D5.1: cloud-as-IdP authorization gate ───────────────────
@@ -591,19 +728,27 @@ export async function globalBeforeHook(
       // D5.1 host contract is `(userId, clientId)` and the control plane
       // derives org membership / app assignment from the user itself.
       if (actor?.userId) {
-        let allowed = true;
+        // The first refusing answer, kept: a boolean `false`, or the host's
+        // refusal object with its reason and sentence.
+        let refusal: { answer: unknown } | undefined;
         for (const clientId of clientIds) {
-          allowed = await this.config.oidcAuthorizeGate({ userId: actor.userId, clientId });
-          if (!allowed) break;
+          const answer: unknown = await this.config.oidcAuthorizeGate({ userId: actor.userId, clientId });
+          if (gateAnswerRefuses(answer)) {
+            refusal = { answer };
+            break;
+          }
         }
-        if (!allowed) {
+        if (refusal) {
           // The refusal, delivered by who is asking (`oauth-authorize-refusal.ts`):
-          // the `403` envelope for a fetch or an API client, unchanged; for a
-          // browser navigating here, `access_denied` back to the client's
-          // REGISTERED `redirect_uri`, or a readable page when there is none.
+          // the `403` envelope for a fetch or an API client; for a browser
+          // navigating here, `access_denied` back to the client's REGISTERED
+          // `redirect_uri`, or a readable page when there is none. A boolean
+          // refusal is answered as it always was; a refusal object adds the
+          // host's validated reason and sentence (`refusalDetailOf`).
           return answerRefusedAuthorization(ctx, {
             userId: actor.userId,
             consoleUrl: this.getConsolePageUrl('/'),
+            detail: refusalDetailOf(refusal.answer),
           });
         }
       }
@@ -859,17 +1004,32 @@ export async function globalBeforeHook(
   });
 
   // ── ADR-0069 D2: account lockout (gate) ─────────────────────
+  // On every password door (`/sign-in/email`, `/sign-in/phone-number`),
   // BEFORE better-auth checks the password: the attempt is stamped as a
   // failure (settled by the after-hook once the check answers), and a
   // locked identity is refused — a lock must hold even against the
-  // correct password. The refusal is the one a wrong password gets, made
-  // by better-auth's own credential check (`sign-in-lockout-refusal.ts`),
-  // unless the deployment opted into `403 ACCOUNT_LOCKED`. It is a
-  // refused sign-in, so it writes its `login_failed` row
-  // (`auth-session-audit.ts`, account events).
-  if (ctx?.path === SIGN_IN_EMAIL_PATH) {
-    const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
-    if (email) await this.admitSignInAttempt(email, ctx);
+  // correct password. The refusal is the one a wrong password gets at that
+  // door, made by better-auth's own credential check
+  // (`sign-in-lockout-refusal.ts`), unless the deployment opted into `403
+  // ACCOUNT_LOCKED`. It is a refused sign-in, so it writes its
+  // `login_failed` row (`auth-session-audit.ts`, account events).
+  const passwordDoor = passwordSignInDoorOf(ctx);
+  if (passwordDoor) {
+    if (passwordDoor.identifier) await this.admitSignInAttempt(passwordDoor.identifier, ctx, passwordDoor.door);
+    // A sign-in during which the account's password changes is refused: the
+    // first of its two readings (`credential-change-ends-prior-access.ts`).
+    // Each door's account is the one the vendor's own lookup at that door
+    // names, read through the vendor's adapter, so the reading needs no data
+    // engine.
+    const { door, identifier } = passwordDoor;
+    await noteSignInCredential(ctx, async () => {
+      if (!identifier) return undefined;
+      const id: unknown =
+        door === 'phone'
+          ? (await ctx.context.adapter.findOne({ model: 'user', where: [{ field: 'phoneNumber', value: identifier }] }))?.id
+          : (await ctx.context.internalAdapter.findUserByEmail(identifier.toLowerCase()))?.user?.id;
+      return typeof id === 'string' && id.length > 0 ? id : undefined;
+    });
     return;
   }
 

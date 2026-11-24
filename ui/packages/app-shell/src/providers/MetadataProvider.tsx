@@ -19,6 +19,7 @@ import {
 import { isActionSwitchedOff, markSwitchedOffActions, markSwitchedOffActionsByObject, normalizeSchemaReferenceKeys } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
 import { resolveInlineMode } from '@object-ui/plugin-form/core';
+import { fieldGroupsPlaceRelationship, isGroupPlaceableRelationship } from '@objectstack/spec/data';
 import {
   MetadataCtx,
   answeredLoadFailure,
@@ -60,6 +61,22 @@ interface TypeCacheEntry {
   error: Error | null;
   fetchedAt: number;
   promise: Promise<any[]> | null;
+  /**
+   * An answer (a list or a failure) has landed and is still held: set when a
+   * fetch settles, cleared only when the entry drops its items (`invalidate`).
+   * A refetch in place (`refresh()`, a lapsed TTL) keeps it, so a reader that
+   * already drew the old answer is not sent back to waiting while the new one
+   * is on the wire (objectstack#35932).
+   */
+  answered: boolean;
+}
+
+/**
+ * Whether a type's answer is in hand: ready, failed, or refetching in place
+ * over an answer it still holds (`TypeCacheEntry.answered`).
+ */
+function typeAnswered(entry: TypeCacheEntry): boolean {
+  return entry.status === 'ready' || entry.status === 'error' || (entry.status === 'loading' && entry.answered);
 }
 
 /**
@@ -189,7 +206,11 @@ const NAMES_ONLY_SCOPE = '';
  * by-name envelope (no `sortability`), shares no request with the adapter's
  * `getObjectSchema` (objectui#13044), and cannot tell an absent object from a
  * refused one (`OBJECT_PACKAGE_DISABLED`), so a route's reader never takes
- * its answer for its own.
+ * its absences for its own: a name it left out is still asked by name. The
+ * one thing a route's reader does take from it is a definition it SERVED
+ * (objectstack#35306): the list door serves that definition through the same
+ * gate, mask and translation as the by-name door, and the by-name envelope's
+ * extras never reach a scope.
  */
 const NAMES_BATCH_SCOPE: unique symbol = Symbol('names-batch');
 
@@ -607,17 +628,17 @@ function viewItemBody(view: any): Record<string, any> {
  * this entry by its listViews key.
  * FORM-family views land in `formViews` only, never in the list-view switcher.
  *
- * `bucket.form` — what create and edit render — is set ONLY from a form item
- * that carries `isDefault` (objectui#11539). `@objectstack/spec` `ViewSchema`
- * calls a container's `form` its "Default form view" and `formViews`
+ * `bucket.form` is set ONLY from a form item that carries `isDefault`
+ * (objectui#11539). No record create or edit reads it any more
+ * (objectstack-ai/objectstack#36425): those lay out by the object's field
+ * groups. It stays merged so the served object still says what it declares.
+ * `@objectstack/spec` `ViewSchema` calls a container's `form` its "Default form view" and `formViews`
  * "Additional named form views", and the served rows say which one is default:
  * `OBJECT.form` alone carries `isDefault`. There is no "first form wins"
  * fallback, so arrival order decides nothing: a default arriving after a named
  * form still takes `.form`, and a named form arriving after the default does
  * not displace it. A container with no `form` serves its named forms with no
- * `isDefault`, and `.form` stays unset. Create and edit then take the path an
- * object with no default form view takes: `resolveFormViewLayout` returns no
- * sections, and the dialog lays out the object's own fields. A named form —
+ * `isDefault`, and `.form` stays unset. A named form —
  * which can be a public anonymous intake form or a wizard — is reached only by
  * its name, through `formViews`.
  */
@@ -701,19 +722,39 @@ export function mergeViewsIntoObjects(objects: any[], views: any[]): any[] {
 }
 
 /**
- * Relationship-driven master-detail: a child object's `master_detail`/`lookup`
- * field can carry `inlineEdit: true` to declare "edit me inline within my
- * parent's form". This pass scans every object for such fields and merges the
- * resulting child collections into each parent object's form view as
- * `subforms` — so the parent's standard create/edit form renders an atomic
- * master-detail form with NO view config and NO bespoke page. The intent lives
- * in the data model (where it's defined once, e.g. by an AI modelling the
- * schema); forms just follow. An explicit `form.subforms` entry for the same
- * child overrides the model-derived one.
+ * Relationship-driven master-detail: a parent object's field group can name a
+ * child list (`fieldGroups[].relatedList`) to declare "these rows are part of
+ * me". This pass scans every object for such children and sets the
+ * resulting child collections on each parent object as `groupSubforms` — so
+ * the parent's standard create/edit form renders an atomic master-detail form
+ * with NO view config and NO bespoke page (`recordFormSubforms` in
+ * `utils/recordFormNavigation`). The intent lives in the data model (where
+ * it's defined once, e.g. by an AI modelling the schema); forms just follow.
+ *
+ * objectstack-ai/objectstack#36425 — this is the ONLY source of a record
+ * form's child collections. An internal form view's `subforms` is not read:
+ * the create and edit forms no longer load an object's internal form views,
+ * and the derived list is no longer merged into `form`.
+ *
+ * objectstack#35889 (maintainer ruling B, 「明细表应该改成指看分组的定义了」) —
+ * a child is inlined in its parent's form ONLY when a field group of the
+ * PARENT names it (`fieldGroups[].relatedList`) and a group may place it
+ * (`@objectstack/spec`'s `isGroupPlaceableRelationship`: a plain
+ * `master_detail` FK, or a `relatedList: 'primary'` one). That is the same
+ * test that puts its table into the record page's body, so the record page,
+ * its forms and the record page's edit state carry the same tables.
+ * `inlineEdit` on the FK no longer pulls a child in by itself: it only picks
+ * the form factor (`'grid'` / `'form'`; anything else lets the child's shape
+ * decide).
  */
 export function attachInlineSubforms(objects: any[]): any[] {
   if (!objects?.length) return objects;
   const inlineByParent: Record<string, any[]> = {};
+  // objectstack#35889 — each parent's field groups, by name.
+  const groupsByParent = new Map<string, unknown>();
+  for (const obj of objects) {
+    if (obj?.name && Array.isArray(obj.fieldGroups)) groupsByParent.set(obj.name, obj.fieldGroups);
+  }
   for (const child of objects) {
     const fields = child?.fields;
     if (!fields) continue;
@@ -722,19 +763,22 @@ export function attachInlineSubforms(objects: any[]): any[] {
       : Object.entries(fields);
     for (const [fname, fdef] of entries) {
       const d: any = fdef;
-      if (!fname || !d?.inlineEdit) continue;
+      if (!fname || !d) continue;
       if (d.type !== 'master_detail' && d.type !== 'lookup') continue;
       // `reference` is the only target spelling read (objectui#11070 round 4);
       // a legacy def was folded onto it at ingestion (`ensureType` runs
       // `normalizeSchemaReferenceKeys` over every `object` item it stores).
       const parent = d.reference;
       if (!parent) continue;
+      const placedByGroup = isGroupPlaceableRelationship(d)
+        && fieldGroupsPlaceRelationship(groupsByParent.get(parent), child.name, fname);
+      if (!placedByGroup) continue;
       (inlineByParent[parent] ||= []).push({
         childObject: child.name,
         relationshipField: fname,
         // Resolve the inline-edit form factor (grid vs per-row form) from the
         // declared value, falling back to the smart default by child shape.
-        inlineMode: resolveInlineMode(child, d.inlineEdit, { relationshipField: fname }),
+        inlineMode: resolveInlineMode(child, d.inlineEdit === 'grid' || d.inlineEdit === 'form' ? d.inlineEdit : undefined, { relationshipField: fname }),
         ...(d.inlineTitle ? { title: d.inlineTitle } : {}),
         ...(Array.isArray(d.inlineColumns) ? { columns: d.inlineColumns } : {}),
         ...(typeof d.inlineAmountField === 'string' ? { amountField: d.inlineAmountField } : {}),
@@ -745,16 +789,7 @@ export function attachInlineSubforms(objects: any[]): any[] {
   return objects.map((obj) => {
     const derived = inlineByParent[obj.name];
     if (!derived?.length) return obj;
-    const form: any = { ...(obj.form || { type: 'simple' }) };
-    const explicit: any[] = Array.isArray(form.subforms) ? form.subforms : [];
-    const explicitChildren = new Set(explicit.map((s: any) => s.childObject));
-    // Model-derived first; an explicit view subform for the same child wins.
-    form.subforms = [...derived.filter((d) => !explicitChildren.has(d.childObject)), ...explicit];
-    const next: any = { ...obj, form };
-    if (obj.formViews?.default) {
-      next.formViews = { ...obj.formViews, default: { ...obj.formViews.default, subforms: form.subforms } };
-    }
-    return next;
+    return { ...obj, groupSubforms: derived };
   });
 }
 
@@ -930,6 +965,7 @@ function emptyEntry(): TypeCacheEntry {
     error: null,
     fetchedAt: 0,
     promise: null,
+    answered: false,
   };
 }
 
@@ -1055,8 +1091,17 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
    */
   const dropAdapterWorld = useCallback((): void => {
     adapterObjectNamesRef.current.clear();
+    answeredBundleRef.current = null;
     try { adapterRef.current?.clearCache?.(); } catch { /* adapter mid-swap */ }
   }, []);
+  /**
+   * objectstack#35932 — the items of the last app bundle that answered in this
+   * world. A refresh pulse drops the adapter's bundle, which then answers
+   * `pending` until its reload lands; the scope's views keep answering from
+   * these meanwhile (`viewsForObjects`), as a `/meta/view` list refetching in
+   * place does. A world switch forgets them (`dropAdapterWorld`).
+   */
+  const answeredBundleRef = useRef<AppBundleItems | null>(null);
 
   const [version, setVersion] = useState(0);
   // Defer state bumps so they never occur synchronously during a consumer's
@@ -1104,6 +1149,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       watchedBundleLoadsRef.current.add(peek.settled);
       void peek.settled.then(bump, bump);
     }
+    if (peek.status === 'ready') answeredBundleRef.current = peek.items;
     return peek;
   }, [bump]);
   useEffect(() => {
@@ -1263,6 +1309,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           if (type === 'object') ingestObjectList(items, res);
           entry.items = items;
           entry.status = 'ready';
+          entry.answered = true;
           entry.error = null;
           entry.fetchedAt = Date.now();
           entry.promise = null;
@@ -1296,6 +1343,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         .catch((err: unknown) => {
           const error = err instanceof Error ? err : new Error(String(err));
           entry.status = 'error';
+          entry.answered = true;
           entry.error = error;
           entry.promise = null;
           // Stamped on failure too, so ERROR_RETRY_COOLDOWN_MS has a clock to
@@ -1645,6 +1693,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           dropAdapterObjectReads();
         }
         entry.status = 'idle';
+        entry.answered = false;
         entry.items = [];
         entry.byName.clear();
         entry.error = null;
@@ -1816,6 +1865,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       const entry = getEntry('app');
       entry.items = cached;
       entry.status = 'ready';
+      entry.answered = true;
       entry.fetchedAt = 0;
       for (const it of cached) {
         if (isNamedItem(it)) {
@@ -1869,32 +1919,46 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
    *     list already in hand, and asks for none: a reader of its views names it.
    *   - The bundle still loading, or the app about to be entered in this
    *     commit: a list already in hand answers, so a scope never unsettles
-   *     because an app was entered after it; otherwise the scope waits.
+   *     because an app was entered after it; so does the bundle that last
+   *     answered, when it holds every asked name (a reload after a refresh
+   *     pulse, objectstack#35932); otherwise the scope waits.
    *   - No bundle (no app entered, or a host without one): the list, as before.
    */
   const viewsForObjects = useCallback(
     (asked: readonly string[]): { views: unknown[]; settled: boolean } => {
       const listed = getEntry('view');
       const peek = peekBundle();
-      if (peek?.status === 'ready') {
-        const bundledObjects = peek.items.get('object');
-        const fromBundle = (bundledViews(peek.items) as { value: unknown[] }).value;
+      // objectstack#35932 — a bundle reloading after a refresh pulse still
+      // answers with the items it last answered (`answeredBundleRef`), so the
+      // pulse never sends a drawn route back to its skeleton (which remounts it).
+      // Only when those items hold every asked object: one outside them waits
+      // for the reload, as before, rather than asking the `/meta/view` list.
+      const answered = peek?.status === 'pending' ? answeredBundleRef.current : null;
+      const items = peek?.status === 'ready'
+        ? peek.items
+        : answered && asked.every((name) => answered.get('object')?.has(name)) ? answered : null;
+      if (items) {
+        const bundledObjects = items.get('object');
+        const fromBundle = (bundledViews(items) as { value: unknown[] }).value;
         const outside = asked.some((name) => !bundledObjects?.has(name));
         if (!outside) {
-          const views = listed.status === 'ready' ? bundledWithListed(fromBundle, bundledObjects, listed.items) : fromBundle;
+          const views = listed.status === 'ready' || (listed.status === 'loading' && listed.answered)
+            ? bundledWithListed(fromBundle, bundledObjects, listed.items)
+            : fromBundle;
           return { views, settled: true };
         }
         const list = readType('view');
-        const status = getEntry('view').status;
-        return { views: bundledWithListed(fromBundle, bundledObjects, list), settled: status === 'ready' || status === 'error' };
+        return { views: bundledWithListed(fromBundle, bundledObjects, list), settled: typeAnswered(getEntry('view')) };
       }
-      if (listed.status === 'ready') return { views: listed.items, settled: true };
+      // objectstack#35932 — a list refetching in place still answers: the
+      // scope stays settled on the views it holds, so a refresh pulse never
+      // sends a drawn route back to its skeleton (which remounts it).
+      if (listed.status === 'ready' || (listed.status === 'loading' && listed.answered)) return { views: listed.items, settled: true };
       // `none` here is an app not entered YET: `peekBundle` answers null once
       // the commit has settled without one.
       if (peek) return { views: NO_VIEWS, settled: false };
       const views = readType('view');
-      const status = getEntry('view').status;
-      return { views, settled: status === 'ready' || status === 'error' };
+      return { views, settled: typeAnswered(getEntry('view')) };
     },
     [getEntry, peekBundle, readType],
   );
@@ -1919,14 +1983,13 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         ? NAMES_BATCH_SCOPE
         : scope.packageId || (namesOnly ? NAMES_ONLY_SCOPE : undefined);
       if (packageId === undefined) {
-        const status = getEntry('object').status;
         const served = readType('object');
         const views = readType('view');
         return {
           objects: composeObjects(served, views) as any[],
           served,
           missing: NO_NAMES,
-          settled: (status === 'ready' || status === 'error') && getEntry('view').status !== 'loading',
+          settled: typeAnswered(getEntry('object')) && (getEntry('view').status !== 'loading' || getEntry('view').answered),
           views,
         };
       }
@@ -1953,6 +2016,17 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           }
         }
       }
+      // objectstack#35306 — the definition the presence read (the batched
+      // names scope) answered for `name`, once that read has answered it
+      // served; `undefined` while it is asked, absent, failed or never asked.
+      const presence = batched ? undefined : scopesRef.current.get(NAMES_BATCH_SCOPE);
+      const presentDefinition = (name: string): unknown =>
+        presence?.names.get(name) === 'answered' ? presence.items.find((it: any) => it?.name === name) : undefined;
+      // A reader that asks a name for its side effect and reads the scope
+      // through an earlier read (a route's lookup targets) learns of a name
+      // answered here only on the render this bump causes, as it would of a
+      // by-name answer landing.
+      let answeredFromPresence = false;
       let namesSettled = true;
       const failedNames: string[] = [];
       const toBatch: string[] = [];
@@ -1980,6 +2054,42 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
               else entry.missing = [...entry.missing, name];
               continue;
             }
+            // objectstack#34211 — a presence read (the batched names scope)
+            // asks only whether this runtime registers the object: one the
+            // entered app's bundle holds is registered, and is answered with
+            // the bundle's definition, as a by-name read of it is. A name the
+            // bundle does not hold, or a bundle not yet in hand, is asked.
+            if (batched) {
+              const bundled = readBundledItem('object', name);
+              if (bundled.state === 'hit') {
+                entry.names.set(name, 'answered');
+                entry.items = [...entry.items, bundled.value];
+                continue;
+              }
+            } else {
+              // objectstack#35306 — the other way round: a name the presence
+              // read has answered SERVED is answered with the definition that
+              // read carried, and not asked again by name. The list door
+              // serves an object's definition through the same per-caller
+              // gate, mask and translation as the by-name door, and its
+              // switched-off actions beside it (`ingestObjectList`); what the
+              // by-name envelope adds (`sortability`, `cascadeDeleteObjects`)
+              // rides the adapter's own copy, never a scope's
+              // (`cloneServedObject`). So a lookup target the presence read
+              // answered costs no second request. Only a served answer is
+              // taken: a name the presence read left out may be
+              // absent or refused, which only a by-name read tells apart
+              // (`NAMES_BATCH_SCOPE`), so it is asked by name as before. Never
+              // under the draft preview, whose reads must see the drafts.
+              const present = previewClientRef.current ? undefined : presentDefinition(name);
+              if (present) {
+                entry.names.set(name, 'answered');
+                entry.items = [...entry.items, present];
+                if (entry.missing.includes(name)) entry.missing = entry.missing.filter((n) => n !== name);
+                answeredFromPresence = true;
+                continue;
+              }
+            }
             namesSettled = false;
             if (batched) toBatch.push(name);
             else void fetchScopeName(packageId, entry, name);
@@ -1987,6 +2097,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         }
       }
       if (toBatch.length > 0) void fetchScopeNames(entry, toBatch);
+      if (answeredFromPresence) bump();
       // objectui#13052 — `settled` stays false while a name's read has
       // failed (a failure is not an answer, objectui#13009); `failed` names
       // those reads once nothing else is still in flight, so a reader can stop
@@ -2033,7 +2144,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
         views: scopeViews.views,
       };
     },
-    [fetchScopeList, fetchScopeName, fetchScopeNames, getEntry, readType, viewsForObjects],
+    [bump, fetchScopeList, fetchScopeName, fetchScopeNames, getEntry, readBundledItem, readType, viewsForObjects],
   );
 
   const value = useMemo<MetadataContextValue>(() => {

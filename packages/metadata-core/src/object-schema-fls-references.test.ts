@@ -173,13 +173,24 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
             lifecycle: { class: 'record', ttl: { field: 'secret_score', expireAfter: '30d' } },
             publicSharing: { enabled: true, redactFields: ['secret_score', 'title'], eligibility: 'record.secret_score > 0' },
             external: { remoteName: 't', columnMap: { SCORE: 'secret_score', TITLE: 'title' } },
-            userActions: { edit: { enabled: true, disabledWhen: 'record.secret_score > 5' }, delete: false },
+            userActions: {
+                edit: { enabled: true, disabledWhen: 'record.secret_score > 5' },
+                delete: false,
+                transfer: { enabled: true, visibleWhen: 'record.secret_score > 0', disabledWhen: 'record.title == ""' },
+            },
         });
         expect(served.tenancy).toEqual({ enabled: true });
         expect(served.lifecycle).toEqual({ class: 'record' });
         expect(served.publicSharing).toEqual({ enabled: true, redactFields: ['title'] });
         expect(served.external).toEqual({ remoteName: 't', columnMap: { TITLE: 'title' } });
-        expect(served.userActions).toEqual({ edit: { enabled: true }, delete: false });
+        // `transfer` is a CRUD flag like `edit`: the predicate reading the denied
+        // field goes, the switch and the readable predicate stay (the unclassified
+        // fail-safe would drop the whole entry instead).
+        expect(served.userActions).toEqual({
+            edit: { enabled: true },
+            delete: false,
+            transfer: { enabled: true, disabledWhen: 'record.title == ""' },
+        });
     });
 
     it('filters a list view\'s columns, and drops a view whose filter reads the denied field', () => {
@@ -280,6 +291,30 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         expect(served.fields.title.group).toBe('secret_score');
     });
 
+    it('[#35900] filters the denied field out of a group\'s own fields list and keeps the readable rest in order', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({}),
+            fieldGroups: [
+                { key: 'main', label: 'Main', fields: ['secret_score', 'title', 'id'] },
+                { key: 'other', label: 'Other', fields: ['id'] },
+            ],
+        });
+        expect(served.fieldGroups).toEqual([
+            { key: 'main', label: 'Main', fields: ['title', 'id'] },
+            { key: 'other', label: 'Other', fields: ['id'] },
+        ]);
+    });
+
+    it('[#35900] CONTROL: a fields list naming only readable fields is served as written', () => {
+        const served = mask({
+            name: 'thing',
+            fields: fieldsWith({}),
+            fieldGroups: [{ key: 'main', label: 'Main', fields: ['title', 'id'] }],
+        });
+        expect(served.fieldGroups).toEqual([{ key: 'main', label: 'Main', fields: ['title', 'id'] }]);
+    });
+
     it('[#27069] serves relatedLists and a group relatedList naming a child that shares the denied field\'s name', () => {
         // The entries name CHILD objects (or `object.field`), never a field of
         // this object, so a child called like the denied field is still served.
@@ -291,6 +326,15 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         });
         expect(served.relatedLists).toEqual(['secret_score', 'task.thing_id']);
         expect(served.fieldGroups).toEqual([{ key: 'lines', label: 'Lines', relatedList: 'secret_score.thing_id' }]);
+    });
+
+    it('[#35899] serves a relatedLists object entry whose columns share the denied field\'s name', () => {
+        // The columns are fields of the CHILD, governed by the child's own
+        // projection; filtering them against THIS object's denied set would
+        // drop an unrelated child column.
+        const entries = [{ list: 'task', label: 'Open tasks', columns: ['subject', 'secret_score'] }, 'sys_activity'];
+        const served = mask({ name: 'thing', fields: fieldsWith({}), relatedLists: entries });
+        expect(served.relatedLists).toEqual(entries);
     });
 
     it('deletes an UNCLASSIFIED key that mentions the denied field — fail-safe, never a leak', () => {

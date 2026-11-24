@@ -27,7 +27,11 @@ import { stackFilterJudge } from '../utils/authoring-filter-judge.js';
 import { buildAccessMatrix, diffAccessMatrix } from '@objectstack/lint';
 import { runAuthoringRules, splitBySeverity, authoringRulesFor } from '@objectstack/lint';
 import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manifest.js';
-import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
+import {
+  preflightDeclaredCapabilities,
+  preflightProviderWiring,
+  renderCapabilityMessage,
+} from '../utils/capability-preflight.js';
 import { collectAndLintDocs, placeCollectedDocs, type DocIssue } from '../utils/collect-docs.js';
 import { buildRuntimeBundle, cleanupOldRuntimeBundles } from '../utils/build-runtime.js';
 import {
@@ -92,6 +96,10 @@ import { findOverrideDeclarationRefusals } from '../utils/override-declarations.
 // `os validate` step 3a-iv runs, over the save and install doors' own judge
 // (`judgeExtensionFieldSuffix`).
 import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
+// [ADR-0146 D10] …and the arrangement of an extended object, the paired
+// `.custom` package's alone: the same walk and the same doors' judge
+// (`judgeExtensionArrangement`).
+import { findExtensionArrangementRefusals } from '../utils/extension-arrangement.js';
 
 // [#29051] An undeclared top-level flow cycle — the walk `os validate` step
 // 3a-vii runs, over the automation engine's own judge.
@@ -931,6 +939,28 @@ export default class Compile extends Command {
         this.exit(1);
       }
 
+      // 3b-iii-bis-2. [ADR-0146 D10] An extended object's whole arrangement
+      //     is the paired `.custom` package's, at build time — the SAME call
+      //     `os validate` makes at its step 3a-iv-bis
+      //     (`judgeExtensionArrangement`): `fieldGroups` or `relatedLists` on
+      //     an `objectExtensions` entry of any other package is refused, with
+      //     the prescription naming `place`, and no artifact is written.
+      const arrangementRefusals = findExtensionArrangementRefusals(result.data as Record<string, unknown>);
+      if (arrangementRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: arrangementRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = arrangementRefusals.length;
+        console.log('');
+        printError(`${n} object extension key${n > 1 ? 's declare' : ' declares'} an arrangement only a paired \`.custom\` package declares (ADR-0146 D10)`);
+        printBulletList(
+          arrangementRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-arrangement refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
       // 3b-iii-ter. [#28893] Flow region shape (ADR-0031) is judged by the
       //     rule table at step 3b since #29049 (`flow-region-shape-invalid`),
       //     the same verdict `os validate` and `os lint` give.
@@ -1023,7 +1053,16 @@ export default class Compile extends Command {
       //     `{ token, message }` record beside its own preflight call, so
       //     mirroring it is what keeps the two commands from reporting
       //     different sets. One list cannot drift from itself.
-      capProviderWarnings = capPreflight.warnings.map((c) => ({
+      // An `enterprise` token whose package resolves but which no `plugins[]`
+      // entry provides is enforced by nothing (`preflightProviderWiring`), the
+      // same advisory `os validate` raises.
+      const capWiring = await preflightProviderWiring({
+        requires: (config as { requires?: unknown }).requires,
+        packages: packageEntries,
+        plugins: (config as { plugins?: unknown }).plugins,
+        projectDir: path.dirname(absolutePath),
+      });
+      capProviderWarnings = [...capPreflight.warnings, ...capWiring].map((c) => ({
         token: c.token,
         message: renderCapabilityMessage(c),
       }));

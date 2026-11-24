@@ -24,6 +24,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { DataEngineInsertOptions, EngineDeleteOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 type Recorded = { level: 'debug' | 'info' | 'warn' | 'error'; message: string };
@@ -47,8 +48,11 @@ function recordingLogger() {
  * `transactional: false` omits `beginTransaction` entirely — the shape the
  * declared degrade (ADR-0119 D1) exists for. Every in-tree driver implements
  * it; test doubles and foreign engines are what reach that path.
+ *
+ * `lockRows: true` declares `supports.lockRows` (#34373): `reads` records the
+ * options each `find()` carried, so a pin can ask which read asked for a lock.
  */
-function makeDriver(opts: { transactional?: boolean } = {}) {
+function makeDriver(opts: { transactional?: boolean; lockRows?: boolean } = {}) {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
     let s = stores.get(o);
@@ -61,6 +65,8 @@ function makeDriver(opts: { transactional?: boolean } = {}) {
   const begun: unknown[] = [];
   const committed: unknown[] = [];
   const rolledBack: unknown[] = [];
+  /** [#34373] Every `find()`, with the options it carried. */
+  const reads: Array<{ object: string; fields: unknown; options: any }> = [];
   const snapshots = new Map<unknown, Map<string, Map<string, Record<string, unknown>>>>();
   let nextId = 0;
 
@@ -82,15 +88,17 @@ function makeDriver(opts: { transactional?: boolean } = {}) {
   const driver: any = {
     name: 'primary',
     version: '0.0.0',
-    supports: {},
+    supports: opts.lockRows ? { lockRows: true } : {},
     writes,
+    reads,
     begun,
     committed,
     rolledBack,
     rowsOf: (o: string) => Array.from(storeFor(o).values()),
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async syncSchema() {},
-    async find(o: string, ast: any) {
+    async find(o: string, ast: any, options?: any) {
+      reads.push({ object: o, fields: ast?.fields, options });
       return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
     },
     async findOne(o: string, ast: any) {
@@ -227,7 +235,7 @@ const loner = {
 
 async function makeEngine(
   objects: any[],
-  opts: { transactional?: boolean } = {},
+  opts: { transactional?: boolean; lockRows?: boolean } = {},
 ) {
   const rec = recordingLogger();
   const engine = new ObjectQL({ logger: rec.logger } as any);
@@ -709,5 +717,116 @@ describe('hook firing is unchanged by the transaction wrap (#7413)', () => {
       'kid:afterDelete',
     ]);
     expect(events.filter((e) => e === 'parent:afterDelete')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#34373] The cascade arm deletes by id, so the read is where the caller's
+// predicate has to keep holding: inside the unit of work it is taken with
+// `lockRows` on a driver that declares `supports.lockRows`. A caller's own
+// `lockRows` that cannot hold is refused before any driver runs.
+// ---------------------------------------------------------------------------
+
+describe('[#34373] a predicate delete with a cascade locks the rows it walks', () => {
+  /** The reads of `parent` that asked for a lock. */
+  const lockedReads = (driver: any) => driver.reads.filter((r: any) => r.options?.lockRows === true);
+
+  it('reads the matched rows with lockRows, on the unit\'s own handle, when the driver declares the bit', async () => {
+    const { engine, driver } = await makeEngine([parent, detail, link], { lockRows: true });
+    const p1 = await engine.insert('parent', { name: 'doomed' });
+    const p2 = await engine.insert('parent', { name: 'doomed' });
+    const kept = await engine.insert('parent', { name: 'kept' });
+    await engine.insert('detail', { parent: p1.id });
+    await engine.insert('link', { parent: p2.id });
+    driver.reads.length = 0;
+    driver.writes.length = 0;
+
+    const removed = await engine.delete('parent', { where: { name: 'doomed' }, multi: true });
+
+    expect(removed).toBe(2);
+    expect(driver.rowsOf('parent').map((r: any) => r.id)).toEqual([kept.id]);
+    expect(driver.begun).toHaveLength(1);
+    const handle = driver.begun[0];
+    // Exactly one read asked for a lock: the matched-row read of the root
+    // object, inside the unit, before any write of the walk or the delete.
+    const locked = lockedReads(driver);
+    expect(locked).toHaveLength(1);
+    expect(locked[0].object).toBe('parent');
+    expect(locked[0].options.transaction).toBe(handle);
+    expect(locked[0].fields).toContain('id');
+    for (const w of driver.writes) expect(w.transaction).toBe(handle);
+  });
+
+  it('sends no lock request to a driver that does not declare supports.lockRows', async () => {
+    const { engine, driver } = await makeEngine([parent, detail]);
+    const p = await engine.insert('parent', { name: 'doomed' });
+    await engine.insert('detail', { parent: p.id });
+    driver.reads.length = 0;
+
+    expect(await engine.delete('parent', { where: { name: 'doomed' }, multi: true })).toBe(1);
+    expect(driver.begun).toHaveLength(1);
+    expect(lockedReads(driver)).toHaveLength(0);
+  });
+
+  it('sends no lock request when no transaction opens (a driver with no beginTransaction)', async () => {
+    const { engine, driver } = await makeEngine([parent, detail], { transactional: false, lockRows: true });
+    const p = await engine.insert('parent', { name: 'doomed' });
+    await engine.insert('detail', { parent: p.id });
+    driver.reads.length = 0;
+
+    expect(await engine.delete('parent', { where: { name: 'doomed' }, multi: true })).toBe(1);
+    expect(lockedReads(driver)).toHaveLength(0);
+  });
+
+  // A caller cannot ask for the lock through the read and delete verbs: their
+  // option sets are closed, and `lockRows` is not on them, so it is refused as
+  // an option the engine does not execute. Unchanged by this card; pinned so
+  // the one sender stays the engine's own.
+  it('the find and delete verbs refuse a caller\'s lockRows as an option they do not execute', async () => {
+    const { engine, driver } = await makeEngine([loner], { lockRows: true });
+    await engine.insert('loner', { name: 'solo' });
+    driver.reads.length = 0;
+    driver.writes.length = 0;
+
+    await expect(engine.find('loner', { where: { name: 'solo' }, lockRows: true } as unknown as EngineQueryOptions))
+      .rejects.toThrow(/does not recognise option 'lockRows'/);
+    await expect(engine.delete('loner', { where: { name: 'solo' }, multi: true, lockRows: true } as unknown as EngineDeleteOptions))
+      .rejects.toThrow(/does not recognise option 'lockRows'/);
+    expect(driver.reads).toHaveLength(0);
+    expect(driver.writes).toHaveLength(0);
+  });
+
+  // A bag the engine hands on without a closed set (an insert's options) meets
+  // the engine -> driver hop's own check: a lock that cannot hold is refused
+  // before any driver runs.
+  it('refuses a lockRows its object\'s driver cannot honour: NOT_IMPLEMENTED / 501, nothing written', async () => {
+    const { engine, driver } = await makeEngine([loner]);
+    driver.writes.length = 0;
+
+    await expect(engine.insert('loner', { name: 'solo' }, { lockRows: true } as unknown as DataEngineInsertOptions))
+      .rejects.toMatchObject({ code: 'NOT_IMPLEMENTED', status: 501, object: 'loner' });
+    expect(driver.writes).toHaveLength(0);
+    expect(driver.rowsOf('loner')).toHaveLength(0);
+  });
+
+  it('refuses a lockRows with no transaction to hold it: PRECONDITION_REQUIRED / 428, nothing written', async () => {
+    const { engine, driver } = await makeEngine([loner], { lockRows: true });
+    driver.writes.length = 0;
+
+    await expect(engine.insert('loner', { name: 'solo' }, { lockRows: true } as unknown as DataEngineInsertOptions))
+      .rejects.toMatchObject({ code: 'PRECONDITION_REQUIRED', status: 428, object: 'loner' });
+    expect(driver.writes).toHaveLength(0);
+    expect(driver.rowsOf('loner')).toHaveLength(0);
+  });
+
+  it('lets the same lockRows through inside engine.transaction() on a driver that declares the bit', async () => {
+    const { engine, driver } = await makeEngine([loner], { lockRows: true });
+    driver.writes.length = 0;
+
+    await engine.transaction(async () => engine.insert('loner', { name: 'solo' }, { lockRows: true } as unknown as DataEngineInsertOptions));
+
+    expect(driver.rowsOf('loner')).toHaveLength(1);
+    expect(driver.writes.filter((w: any) => w.op === 'create')).toHaveLength(1);
+    expect(driver.writes[0].transaction).toBe(driver.begun[0]);
   });
 });

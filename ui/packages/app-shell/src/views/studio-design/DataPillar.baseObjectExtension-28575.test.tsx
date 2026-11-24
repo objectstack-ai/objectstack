@@ -68,6 +68,18 @@ const baseServed = () => ({
   },
 });
 
+type Row = Record<string, unknown>;
+/** The base as served with a published extension merged in: its fields added, its patches applied. */
+function mergedServed(ext: Row): Row {
+  const fields: Record<string, Row> = { ...(baseServed().fields as Record<string, Row>), ...(ext.fields as Record<string, Row>) };
+  for (const [name, patch] of Object.entries((ext.fieldPatches ?? {}) as Record<string, Row>)) {
+    const { options, ...rest } = patch as { options?: Record<string, Row> };
+    const opts = (fields[name].options as Row[] | undefined)?.map((o) => ({ ...o, ...(options?.[String(o.value)] ?? {}) }));
+    fields[name] = { ...fields[name], ...rest, ...(opts ? { options: opts } : {}) };
+  }
+  return { ...baseServed(), fields };
+}
+
 const mockClient = {
   list: vi.fn(async (_type: string, opts?: { packageId?: string }) =>
     opts?.packageId === PAIR ? [] : [{ name: OBJECT, label: 'Account' }],
@@ -82,8 +94,20 @@ const mockClient = {
   get: vi.fn(async (type: string, name: string, opts?: { packageId?: string }) =>
     type === 'object_extension' && name === OBJECT && opts?.packageId === PAIR ? srv.publishedExt : null,
   ),
-  save: vi.fn(async (type: string, _name: string, _body: unknown, _opts?: { packageId?: string }) => {
+  // objectstack#36511 — the Save's own publish: the pair's extension draft
+  // goes live, and the base serves it merged.
+  publish: vi.fn(async (type: string) => {
+    if (type === 'object_extension' && srv.draftExt) {
+      srv.publishedExt = { ...srv.draftExt, _packageId: PAIR };
+      srv.served = mergedServed(srv.draftExt);
+      srv.draftExt = null;
+    }
+    return {};
+  }),
+  reset: vi.fn(async () => ({})),
+  save: vi.fn(async (type: string, _name: string, body: unknown, _opts?: { packageId?: string }) => {
     if (type === 'object_extension' && srv.refuse) throw srv.refuse;
+    if (type === 'object_extension') srv.draftExt = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
     return { ok: true, version: 'v2', state: 'draft' };
   }),
 };
@@ -125,6 +149,8 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
+import { ObjectExtensionSchema } from '@objectstack/spec/data';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { emitMetadataRefresh } from '../../assistant/assistantBus';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -186,9 +212,9 @@ afterEach(() => {
 
 async function renderBase(over: Partial<StudioBaseCustomization> = {}) {
   render(
-    <MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
+    <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${BASE}/data`]}>
       <DataPillar packageId={BASE} readOnly customization={customizationOf(over)} />
-    </MemoryRouter>,
+    </MemoryRouter></StudioSaveHarness>,
   );
   await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
 }
@@ -210,9 +236,14 @@ async function addFromFormToolbar(label: string): Promise<void> {
   await userEvent.click(within(popover).getByTestId('add-field-create'));
 }
 
-/** A field card of the Form layout, by its label (a base object's layout is read-only). */
-const cardOf = (label: string) =>
-  screen.queryAllByLabelText(tFormat('engine.studio.designer.fieldAriaReadOnly', 'en', { label }));
+/**
+ * A field card of the Field layout, by its label: arranged in the pair's
+ * extension where it is writable (objectstack#36505), read-only where walled.
+ */
+const cardOf = (label: string) => [
+  ...screen.queryAllByLabelText(tFormat('engine.studio.designer.fieldAria', 'en', { label })),
+  ...screen.queryAllByLabelText(tFormat('engine.studio.designer.fieldAriaReadOnly', 'en', { label })),
+];
 
 describe('Studio adds a field to a read-only base object as an extension in its pair (objectstack#28575)', () => {
   it('Add field "Region" asks the ensure door once, writes region__c into an extension at the pair, and sends no body of the base object', async () => {
@@ -224,6 +255,8 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     // The api name carries the suffix before Create.
     expect(within(popover).getByTestId('add-field-api-name-preview')).toHaveTextContent('region__c');
     await userEvent.click(within(popover).getByTestId('add-field-create'));
+
+    await pressStudioSave();
 
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     expect(ensure).toHaveBeenCalledTimes(1);
@@ -237,11 +270,14 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     // Wanted 3 — it shows in the Form at once, and its inspector edits the extension.
     expect(cardOf('Region')).toHaveLength(1);
     const inspector = await screen.findByTestId('data-field-inspector');
-    expect(within(inspector).getByText('region__c')).toBeInTheDocument();
+    // objectstack#35018 — the header names the field by its label; its machine name is under 开发者信息.
+    expect(within(inspector.querySelector('header') as HTMLElement).getByText('Region')).toBeInTheDocument();
+    expect(within(within(inspector).getByTestId('field-developer-section')).getByDisplayValue('region__c')).toBeInTheDocument();
     const label = within(inspector).getByTestId('field-label-input');
     expect(label).toBeEnabled();
     expect(within(inspector).queryByTestId('field-base-patch-only')).toBeNull();
     await userEvent.type(label, ' code');
+    await pressStudioSave();
     await waitFor(
       () =>
         expect(extensionSaves().at(-1)?.[2]).toStrictEqual({
@@ -257,8 +293,10 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     await renderBase();
     await openForm();
     await addFromFormToolbar('Region');
+    await pressStudioSave();
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     await addFromFormToolbar('Tier');
+    await pressStudioSave();
     await waitFor(
       () => expect(Object.keys((extensionSaves().at(-1)?.[2].fields ?? {}) as object)).toEqual(['region__c', 'tier__c']),
       { timeout: 8000 },
@@ -273,6 +311,7 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     await userEvent.type(within(popover).getByTestId('add-field-label-input'), 'Region');
     expect(within(popover).getByTestId('add-field-api-name-preview')).toHaveTextContent('region__c');
     await userEvent.click(within(popover).getByTestId('add-field-create'));
+    await pressStudioSave();
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     expect(Object.keys(extensionSaves()[0]![2].fields as object)).toEqual(['region__c']);
   });
@@ -298,6 +337,8 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     await userEvent.type(within(popover).getByTestId('add-field-label-input'), 'Tier');
     await userEvent.click(within(popover).getByTestId('add-field-create'));
 
+    await pressStudioSave();
+
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     // The draft starts from the published body: publishing it keeps region__c.
     expect(extensionSaves()[0]![2]).toStrictEqual({
@@ -317,6 +358,7 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     expect(label).toBeEnabled();
     await userEvent.clear(label);
     await userEvent.type(label, 'Company');
+    await pressStudioSave();
     await waitFor(
       () => expect(extensionSaves().at(-1)?.[2]).toStrictEqual({ extend: OBJECT, fieldPatches: { name: { label: 'Company' } } }),
       { timeout: 8000 },
@@ -336,6 +378,7 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     expect(within(inspector).getByTestId('option-value')).toBeDisabled();
     await userEvent.clear(optionLabel);
     await userEvent.type(optionLabel, 'Tech');
+    await pressStudioSave();
     await waitFor(
       () =>
         expect(extensionSaves().at(-1)?.[2]).toStrictEqual({
@@ -377,6 +420,7 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     await renderBase();
     await openForm();
     await addFromFormToolbar('Region');
+    await pressStudioSave();
     await waitFor(() => expect(screen.getByText(walled, { exact: false })).toBeInTheDocument(), { timeout: 8000 });
 
     cleanup();
@@ -387,6 +431,7 @@ describe('Studio adds a field to a read-only base object as an extension in its 
     await renderBase();
     await openForm();
     await addFromFormToolbar('Region');
+    await pressStudioSave();
     await waitFor(() => expect(screen.getByText(suffix, { exact: false })).toBeInTheDocument(), { timeout: 8000 });
   });
 
@@ -413,9 +458,9 @@ describe('Studio adds a field to a read-only base object as an extension in its 
 describe('CONTROL: a writable package’s add-field is unchanged (objectstack#28575)', () => {
   it('a plain name into the object’s own body, and a fully editable inspector', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
     await openForm();
@@ -425,14 +470,15 @@ describe('CONTROL: a writable package’s add-field is unchanged (objectstack#28
     await userEvent.type(within(popover).getByTestId('add-field-label-input'), 'Region');
     expect(within(popover).getByTestId('add-field-api-name-preview')).toHaveTextContent(/^.*region$/);
     await userEvent.click(within(popover).getByTestId('add-field-create'));
+    const inspector = await screen.findByTestId('data-field-inspector');
+    expect(within(inspector).queryByTestId('field-base-patch-only')).toBeNull();
+    expect(within(inspector).getByRole('checkbox', { name: t('designer.field.required', 'en') })).toBeEnabled();
+    await pressStudioSave();
     await waitFor(() => expect(saves().some(([type]) => type === 'object')).toBe(true), { timeout: 8000 });
     const [, , body] = saves().filter(([type]) => type === 'object').at(-1)!;
     expect(Object.keys(body.fields as object)).toEqual(['name', 'industry', 'region']);
     expect(extensionSaves()).toEqual([]);
     expect(ensure).not.toHaveBeenCalled();
-    const inspector = await screen.findByTestId('data-field-inspector');
-    expect(within(inspector).queryByTestId('field-base-patch-only')).toBeNull();
-    expect(within(inspector).getByRole('checkbox', { name: t('designer.field.required', 'en') })).toBeEnabled();
   });
 });
 
@@ -445,6 +491,7 @@ describe('A Chinese label names a base object\'s extension field by pinyin, suff
     await userEvent.type(within(popover).getByTestId('add-field-label-input'), '客户等级');
     expect(within(popover).getByTestId('add-field-api-name-preview')).toHaveTextContent('kehu_dengji__c');
     await userEvent.click(within(popover).getByTestId('add-field-create'));
+    await pressStudioSave();
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     expect(extensionSaves()[0][2]).toStrictEqual({
       extend: OBJECT,
@@ -467,6 +514,7 @@ describe('the object header says where a base object’s extension is saved (obj
     await openForm();
     expect(savedTo()).toBeNull();
     await addFromFormToolbar('Region');
+    await pressStudioSave();
     await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
     await waitFor(() => expect(savedTo()).toHaveTextContent(SAVED_TO), { timeout: 8000 });
     expect(environment()).toHaveTextContent(ENVIRONMENT);
@@ -493,9 +541,9 @@ describe('the object header says where a base object’s extension is saved (obj
 
   it('CONTROL: an object of a writable package says nothing of the kind', async () => {
     render(
-      <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+      <StudioSaveHarness><MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
         <DataPillar packageId="com.example.showcase" />
-      </MemoryRouter>,
+      </MemoryRouter></StudioSaveHarness>,
     );
     await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
     expect(savedTo()).toBeNull();
@@ -519,5 +567,84 @@ describe('a base object follows an extension draft the copilot writes (objectsta
 
     await waitFor(() => expect(cardOf('Region')).toHaveLength(1), { timeout: 8000 });
     expect(extensionDraftReads()).toBe(before + 1);
+  });
+});
+
+/**
+ * objectstack#36505 (ADR-0146 D10) — the 「字段布局」 tab of an installed
+ * object: no longer walled read-only, its edits go into the pair's extension
+ * as the WHOLE arrangement (`fieldGroups`, every group listing its members),
+ * saved and published by the extension's Save with the rest of the buffer;
+ * the base object is never written, and the canvas marks each field's source.
+ */
+describe('the Field layout tab arranges an installed object into its pair (objectstack#36505)', () => {
+  const groupedServed = () => ({
+    ...baseServed(),
+    fieldGroups: [{ key: 'basic', label: 'Basic' }, { key: 'more', label: 'More' }],
+    fields: {
+      name: { type: 'text', label: 'Account Name', required: true, group: 'basic' },
+      industry: { type: 'select', label: 'Industry', options: [{ value: 'technology', label: 'Technology' }], group: 'more' },
+      // Served in `more`, where the pair's published placement put it.
+      region__c: { type: 'text', label: 'Region', group: 'more' },
+    },
+  });
+  const DELETE_GROUP = t('engine.studio.designer.groupDelete', 'en');
+  const sourceOf = (label: string) => within(cardOf(label)[0]!).queryByTestId('field-source-mark')?.getAttribute('data-source');
+
+  beforeEach(() => {
+    srv.served = groupedServed();
+    srv.publishedExt = {
+      extend: OBJECT,
+      fields: { region__c: { type: 'text', label: 'Region' } },
+      fieldPatches: { name: { label: 'Account Name' } },
+      place: [{ field: 'region__c', group: 'more' }, { list: 'crm_contact', after: 'sys_activity' }],
+      _packageId: PAIR,
+    };
+  });
+
+  it('the tab reads Field layout and says where its groups are used; the canvas is editable and marks each source', async () => {
+    await renderBase();
+    expect(FORM).toBe('Field layout');
+    await openForm();
+    expect(screen.getByTestId('form-layout-used-on')).toHaveTextContent(t('engine.studio.data.form.usedOn', 'en'));
+    expect(await screen.findByTestId('form-designer-add-section-footer')).toBeInTheDocument();
+    await waitFor(() => expect(sourceOf('Region')).toBe('environment'), { timeout: 8000 });
+    expect(sourceOf('Account Name')).toBe('base');
+    expect(sourceOf('Industry')).toBe('base');
+  });
+
+  it('deleting a group writes the whole arrangement into the pair, keeps every other key, and never writes the base', async () => {
+    await renderBase();
+    await openForm();
+    await screen.findByDisplayValue('Basic', undefined, { timeout: 8000 });
+    const basic = screen.getByDisplayValue('Basic').closest('.\\@container') as HTMLElement;
+    await userEvent.click(within(basic).getByRole('button', { name: DELETE_GROUP }));
+    await pressStudioSave();
+    await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
+
+    const [, name, body, opts] = extensionSaves()[0];
+    expect([name, opts.packageId]).toEqual([OBJECT, PAIR]);
+    // The whole arrangement, every group listing its members: `name` left
+    // `basic` with it, so it is listed nowhere and shows after the last group.
+    expect(body.fieldGroups).toEqual([{ key: 'more', label: 'More', fields: ['industry', 'region__c'] }]);
+    // Every other key of the stored extension is kept; the field placement
+    // the arrangement replaces is taken off, the tab placement stays.
+    expect(body.fields).toEqual({ region__c: { type: 'text', label: 'Region' } });
+    expect(body.fieldPatches).toEqual({ name: { label: 'Account Name' } });
+    expect(body.place).toEqual([{ list: 'crm_contact', after: 'sys_activity' }]);
+    const parsed = ObjectExtensionSchema.safeParse(body);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(saves().some(([type]) => type === 'object')).toBe(false);
+    expect(mockClient.publish).toHaveBeenCalledWith('object_extension', OBJECT, expect.objectContaining({ packageId: PAIR }));
+  });
+
+  it('CONTROL: walled, the layout stays read-only and nothing is written', async () => {
+    await renderBase({ walled: true });
+    await openForm();
+    await screen.findByText('Basic', undefined, { timeout: 8000 });
+    expect(screen.queryByTestId('form-designer-add-section-footer')).toBeNull();
+    expect(screen.queryByRole('button', { name: DELETE_GROUP })).toBeNull();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(mockClient.save).not.toHaveBeenCalled();
   });
 });

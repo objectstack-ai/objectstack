@@ -39,6 +39,13 @@ export interface RuntimeFeatures {
   /** `/api/v1/marketplace/*` is reachable from this runtime. */
   marketplace: boolean;
   /**
+   * This host serves the deployment notice (`GET /api/settings/deployment/notice`).
+   * Observed by the server from its composition, never declared: a hosted
+   * environment mounts the settings routes without the notice and answers it
+   * `503`. A runtime that serves no key predates the flag and keeps the notice.
+   */
+  deploymentNotice: boolean;
+  /**
    * AI-driven metadata authoring ("online development") is offered by this
    * runtime. Default true; the capability is still gated server-side by the
    * presence of the metadata-authoring agent. When false, the SPA hides the
@@ -333,6 +340,33 @@ export interface AppShellRuntimeConfig {
    * absolute `https:` URL, so nothing is re-validated here.
    */
   mapStyleUrl?: string;
+  /**
+   * The control plane's upgrade / billing entry (objectstack#34622): the
+   * absolute URL `RuntimeConfigPlugin` serves as the top-level `upgradeUrl`
+   * when the host declares one (objectstack#14514, maintainer ruling cloud#1850
+   * option A), absent otherwise. A deep address, so the Cloud console root's
+   * landing never redirects it back into this environment.
+   *
+   * Taken VERBATIM: the producer already refuses a value that is not an
+   * absolute http(s) URL, and nothing here composes, trims or defaults one.
+   * Re-derived from each payload in full, like `mapStyleUrl`: absent, empty
+   * and non-string all leave it absent, and a later payload without the key
+   * withdraws it. Read it through {@link getUpgradeUrl}.
+   */
+  upgradeUrl?: string;
+  /**
+   * The control plane's console home page (objectstack#34622): the absolute
+   * URL `RuntimeConfigPlugin` serves as the top-level `cloudHomeUrl` when the
+   * host declares one, absent otherwise. Same contract as `upgradeUrl`
+   * (maintainer ruling cloud#1850 option A's shape).
+   *
+   * Taken VERBATIM: the producer already refuses a value that is not an
+   * absolute http(s) URL, and nothing here composes, trims or defaults one.
+   * Re-derived from each payload in full: absent, empty and non-string all
+   * leave it absent, and a later payload without the key withdraws it. Read
+   * it through {@link getCloudHomeUrl}.
+   */
+  cloudHomeUrl?: string;
 }
 
 const defaults: AppShellRuntimeConfig = {
@@ -340,7 +374,7 @@ const defaults: AppShellRuntimeConfig = {
   singleEnvironment: false,
   defaultOrgId: null,
   defaultEnvironmentId: null,
-  features: { installLocal: false, marketplace: true, aiStudio: true, autoPublishAiBuilds: true, customDomain: false, sso: false, scim: false, storageUsage: false },
+  features: { installLocal: false, marketplace: true, deploymentNotice: true, aiStudio: true, autoPublishAiBuilds: true, customDomain: false, sso: false, scim: false, storageUsage: false },
   // `stage: 'preview'` while the whole platform is pre-GA, so the badge shows
   // out of the box on any runtime that hasn't sent an explicit stage yet.
   branding: { productName: 'ObjectOS', productShortName: 'ObjectOS', stage: 'preview', brandColor: '#4F46E5', pwaThemeColor: '#4f46e5' },
@@ -461,12 +495,25 @@ export async function initRuntimeConfig(baseUrl: string = ''): Promise<void> {
         typeof body.mapStyleUrl === 'string' && body.mapStyleUrl.trim()
           ? body.mapStyleUrl.trim()
           : undefined,
+      // objectstack#34622 — the declared upgrade entry, verbatim, or none.
+      upgradeUrl:
+        typeof body.upgradeUrl === 'string' && body.upgradeUrl.trim()
+          ? body.upgradeUrl
+          : undefined,
+      // objectstack#34622 — the declared console home page, verbatim, or none.
+      cloudHomeUrl:
+        typeof body.cloudHomeUrl === 'string' && body.cloudHomeUrl.trim()
+          ? body.cloudHomeUrl
+          : undefined,
       defaultOrgId: body.defaultOrgId ?? current.defaultOrgId ?? null,
       defaultEnvironmentId: body.defaultEnvironmentId ?? current.defaultEnvironmentId ?? null,
       features: body.features
         ? {
           installLocal: !!body.features.installLocal,
           marketplace: body.features.marketplace !== false,
+          // Only an explicit `false` withdraws the notice: a runtime older
+          // than the key still serves it.
+          deploymentNotice: body.features.deploymentNotice !== false,
           aiStudio: body.features.aiStudio !== false,
           autoPublishAiBuilds: body.features.autoPublishAiBuilds !== false,
           // Commercial flags default OFF unless the server explicitly grants
@@ -611,6 +658,34 @@ export function getCloudBase(): string {
 }
 
 /**
+ * The control plane's declared upgrade / billing entry, or `undefined` when
+ * this runtime declares none (objectstack#34622,
+ * {@link AppShellRuntimeConfig.upgradeUrl}).
+ *
+ * The upgrade links (storage-full banner, AI quota call to action) open this
+ * when it is present and keep their `cloudConsoleUrl()` target, with its
+ * show/hide rule, when it is absent. ⛔ Never compose a substitute from
+ * {@link getCloudBase}: the path below the origin belongs to the control plane.
+ */
+export function getUpgradeUrl(): string | undefined {
+  return current.upgradeUrl;
+}
+
+/**
+ * The control plane's declared console home page, or `undefined` when this
+ * runtime declares none (objectstack#34622,
+ * {@link AppShellRuntimeConfig.cloudHomeUrl}).
+ *
+ * The marketplace's "Open on Cloud" link opens this when it is present and
+ * keeps its `cloudConsoleUrl()` target, with its show/hide rule, when it is
+ * absent. ⛔ Never compose a substitute from {@link getCloudBase}: the path
+ * below the origin belongs to the control plane.
+ */
+export function getCloudHomeUrl(): string | undefined {
+  return current.cloudHomeUrl;
+}
+
+/**
  * Is a marketplace catalog reachable from this runtime? (objectui#5504)
  *
  * Reads the server's OWN answer — `features.marketplace`, which
@@ -678,6 +753,23 @@ export function isMarketplaceEnabled(): boolean {
  */
 export function isAiStudioEnabled(): boolean {
   return current.features?.aiStudio !== false;
+}
+
+/**
+ * Does this host serve the deployment notice? (objectstack#34186)
+ *
+ * Reads the server's OWN answer, `features.deploymentNotice`, which the runtime
+ * observes from its composition: true exactly when the settings plugin mounted
+ * the notice's door. A hosted environment mounts the settings routes without
+ * it, answers the notice `503`, and says `false`, so it is never asked.
+ *
+ * Fails OPEN (`!== false`), as {@link isMarketplaceEnabled} does: a self-hosted
+ * runtime older than the key serves the notice and sends no key, and its
+ * administrators keep the notice. ⛔ Never inferred from the notice's own
+ * failure: the flag is what spares the request.
+ */
+export function isDeploymentNoticeServed(): boolean {
+  return current.features?.deploymentNotice !== false;
 }
 
 /**

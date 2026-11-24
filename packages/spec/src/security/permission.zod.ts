@@ -727,6 +727,34 @@ const ObjectPermissionBaseSchema = lazySchema(() => strictObject(
   modifyAllRecords: z.boolean().default(false).describe('Modify All Data (Bypass Sharing) — bypasses sharing rules and ownership on the objects record sharing enforces on; on an object with NO owner field sharing abstains, so the platform created_by write floor still applies. Includes delete: an omitted allowDelete parses to true, and an explicit allowDelete: false beside it is refused.'),
 
   /**
+   * View All Fields: a READ vote on every field of the object, fields added
+   * later included (ADR-0066 D2 ⑧; the field-axis split ruled on the
+   * decision card, ruling of record 6912661484, letter A).
+   *
+   * - It casts NO edit vote (ruled: read-only). An edit comes from the
+   *   default (a field no set names follows the object grant) or from an
+   *   explicit `editable: true` field row.
+   * - Inside one set, specific beats general: the set's own field row on the
+   *   same object is its whole say on that field, so an own
+   *   `readable: false` row means this set casts no read vote there.
+   * - It is a FIELD vote only: it grants no object access (pair it with
+   *   `allowRead`), widens no record (that is `viewAllRecords`), and plays no
+   *   part in the private-posture wildcard rule or in any admin posture.
+   * - Allowed on the `'*'` wildcard entry, where it votes on every object the
+   *   set does not name explicitly (the same lookup the super-user bits take).
+   *
+   * Today `viewAllRecords` / `modifyAllRecords` still vote on every field
+   * too, so on a set that carries either bit this key changes nothing; the
+   * built-in admin sets carry it so they keep their field visibility when
+   * those two bits stop voting on fields.
+   *
+   * Deliberately OPTIONAL (no Zod default), like `allowExport`: a default
+   * would materialize the key into every parsed entry, and a runtime built
+   * before the key existed refuses a key it does not know.
+   */
+  viewAllFields: z.boolean().optional().describe('View All Fields: a read vote on every field of this object, including fields added later. Casts no edit vote: edits come from the default or from explicit editable: true field rows. A field row of the same set beats it, so an own readable: false row keeps the field hidden for this set. Grants no object access and widens no record. Allowed on the \'*\' entry.'),
+
+  /**
    * [ADR-0057 D1] Read access DEPTH (Dataverse-style access level), layered on
    * top of OWD. For owner-scoped (`private`) objects it widens the owner-match:
    * `own` (owner only) | `own_and_reports` (me + my sys_user.manager_id
@@ -1032,6 +1060,21 @@ const FIELD_PERMISSION_WHEN_ON_READABLE =
   + 'on every row, declare `readable: false` on an entry without `when`.';
 
 /**
+ * [#34664] The two sentences an acknowledged roll-up read is refused with.
+ * Module-private for the reason {@link ADMIN_SCOPE_BUSINESS_UNIT_BLANK} gives.
+ */
+const FIELD_PERMISSION_ROLLUP_REASON_BLANK =
+  'A blank `rollupSourceUnreadableReason` acknowledges nothing: write why holders of this set may read the '
+  + 'roll-up summary although they cannot read the child data it aggregates, or remove the key so `os lint` '
+  + 'keeps reporting the `security-rollup-source-unreadable` warning.';
+
+const FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN =
+  'A `rollupSourceUnreadableReason` acknowledges that holders of this set READ a roll-up summary over child data '
+  + 'they cannot read, so it is refused beside `readable: false`: that entry declares no read of the column, so there '
+  + 'is nothing to acknowledge. Keep `readable: true` (the default) to acknowledge the read, or remove the reason to keep the '
+  + 'column hidden.';
+
+/**
  * Field Level Security (FLS)
  *
  * [Ruling of record 6408558941, letter A — ADR-0066 ⑧ note of 2026-10-26] An
@@ -1044,13 +1087,31 @@ const FIELD_PERMISSION_WHEN_ON_READABLE =
  * every field of it, on every row (ADR-0066 ⑧ note of 2026-11-02, ruling of
  * record 6573563853): `viewAllRecords` votes `readable: true`,
  * `modifyAllRecords` votes `readable: true` and `editable: true`; View All
- * never grants an edit. Otherwise union without deny is unchanged. The write gate
+ * never grants an edit. One exception (ADR-0066 ⑧ note of 2026-11-15): a set
+ * holding View All without Modify All casts no read vote on a field its OWN
+ * entry declares `readable: false`, so that row binds the set's own holders;
+ * another set's vote, and the Modify All vote, are as before. Otherwise union
+ * without deny is unchanged. The write gate
  * judges it on the stored row before an update and on the incoming row of an
  * insert. It reaches the EDIT vote only: reads are row-blind (per-row masking
  * waits for a measured need), so `readable: false` beside a `when` is refused
  * at parse time — a per-row read lock the runtime would not deliver. The
  * cross-key rule is a refinement, declared as a dropped-refinement site; the
  * published JSON Schema states it in `when`'s description.
+ *
+ * [#34664] `rollupSourceUnreadableReason` is read at AUTHORING time only, by
+ * `os lint`'s `security-rollup-source-unreadable` rule: on the set's entry for
+ * a `summary` column it acknowledges a meant pair — this set reads the roll-up
+ * although it cannot read the child data the roll-up aggregates — and turns
+ * that one finding (this set × this column) into an `info` note quoting the
+ * reason. The runtime reads no part of the KEY, and the server never sends it
+ * on the permission responses that reuse this shape. The ENTRY that carries it
+ * is an ordinary declaring entry, though: it votes `readable: true` (its
+ * default) in the field merge, where only declaring sets vote and the most
+ * permissive vote wins, so on a set that had no entry for the column, adding
+ * one to carry the reason restores the column for holders whose other sets mask
+ * it. A blank reason, and a reason beside `readable: false` (the entry declares
+ * no read, so there is nothing to acknowledge), are refused at parse time.
  */
 export const FieldPermissionSchema = lazySchema(() => strictObject(
   {
@@ -1113,6 +1174,29 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
       + 'reads) holds the row: it judges the condition on the stored row exactly as the write gate does on an update '
       + 'of that row, so a lock that applies only from a stage onward disables the field only on the rows it names.',
     ),
+  /**
+   * [#34664] Why this set is MEANT to read a roll-up summary over child data it
+   * cannot read. Authoring-time only: `os lint` reads it on the set's entry for
+   * a `summary` column and reports `security-rollup-source-unreadable` for that
+   * set and column as an `info` note quoting the reason, instead of a warning
+   * `--strict` fails on. The runtime does not read the key; the entry carrying
+   * it votes `readable: true` in the field merge like any declaring entry.
+   */
+  rollupSourceUnreadableReason: z.string()
+    .refine(NON_BLANK_STRING, { message: FIELD_PERMISSION_ROLLUP_REASON_BLANK })
+    .optional()
+    .describe(
+      'Authoring-time acknowledgement, read only by `os lint` (the runtime does not read it): why holders of this '
+      + 'set are meant to read this roll-up `summary` column although the set cannot read the child object, the '
+      + 'aggregated child field or a child field the roll-up\'s `filter` tests (e.g. \'Service staff read account '
+      + 'totals but not invoice rows\'). Declared on the set\'s entry for the summary column, it turns that set\'s '
+      + '`security-rollup-source-unreadable` warning for the column into an `info` note quoting the reason, so '
+      + '`os lint --strict` passes; every other finding is unchanged. The runtime does not read the key, but the entry '
+      + 'that carries it is an ordinary declaring entry: it votes `readable: true` in the field merge (only declaring '
+      + 'sets vote, and the most permissive vote wins), so on a set that had no entry for the column, adding one to '
+      + 'carry the reason restores the column for holders whose other sets mask it. A blank reason is refused, and so '
+      + 'is a reason beside `readable: false`, an entry that declares no read to acknowledge.',
+    ),
 }).refine(
   // The cross-key rule: a condition reaches the edit vote only, so an entry
   // that conditions a read lock is refused rather than enforced row-blind
@@ -1123,6 +1207,12 @@ export const FieldPermissionSchema = lazySchema(() => strictObject(
   // dropped-refinements ledger.
   (p) => p.when === undefined || p.readable !== false,
   { message: FIELD_PERMISSION_WHEN_ON_READABLE, path: ['when'] },
+).refine(
+  // [#34664] The acknowledgement names a READ of the roll-up; beside a mask
+  // there is no read, so the declaration would promise nothing. Refused
+  // rather than ignored, the same shape as the `when` rule above.
+  (p) => p.rollupSourceUnreadableReason === undefined || p.readable !== false,
+  { message: FIELD_PERMISSION_ROLLUP_REASON_ON_HIDDEN, path: ['rollupSourceUnreadableReason'] },
 ));
 
 /**

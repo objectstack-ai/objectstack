@@ -167,7 +167,8 @@ async function storedCopies(ctx: Booted, count: number): Promise<Array<{ body: u
 
 /** The file carried the marks: the round trip below is not a pass-through. */
 function expectMarkedFile(csv: string): void {
-  expect(csv.split('\r\n')[0]).toBe("ID,Body,'-Memo");
+  // [#34163] The file opens with one UTF-8 byte-order mark; the header row follows it.
+  expect(csv.replace(/^\uFEFF/, '').split('\r\n')[0]).toBe("ID,Body,'-Memo");
   for (const v of MARKED) expect(csv).toContain(`,'${v},'${v}\r\n`);
   for (const v of ['+86 138 0013 8000', '-120.50', 'Acme Ltd']) expect(csv).toContain(`,${v},${v}\r\n`);
 }

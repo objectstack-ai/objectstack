@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#29987 codemod] The top-level helpers of `conversions/registry.ts` that two
-// or more conversions read, moved out whole by
-// `scripts/codemod-split-conversions-registry.mjs` (lever (b) of ruling
+// or more conversions read, moved out whole
+// (split by #29993; lever (b) of ruling
 // 6591753301).
 //
 // A MOVE, not a redesign: each declaration below is its `registry.ts` text

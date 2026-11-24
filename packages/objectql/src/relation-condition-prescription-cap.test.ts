@@ -11,7 +11,7 @@
  * reasoning, and this file reads every reason the way a client does — through
  * `mapDataError` — and requires the whole route in what survives the cut,
  * ahead of "NOT applied". Run against the words as they stood on `origin/main`
- * `cf218eed1`, the second-level and dotted-key routes are cut on the card's
+ * `cf218eed1`, the second-level (now hop-limit) and dotted-key routes are cut on the card's
  * fixture, and every reason's route is cut on the stress fixture.
  *
  * Two fixtures. The card's — a 21-character object, a 21-character field, a
@@ -71,8 +71,9 @@ const STRESS_MULTI: Fixture = { ...STRESS, multiple: true };
 function routes(f: Fixture): Record<string, readonly [string, string]> {
   const ids = f.multiple ? '"$contains": ID } }, one per id.' : '"$in": [ID, …] } }.';
   return {
-    secondLevel: [`Read '${f.target}' with { "parent_account": { … } }`, ids],
-    dottedKey: [`Read '${f.target}' with that condition`, ids],
+    // Refused at the third hop, on the single-valued `parent_account`, so its route is `$in`.
+    hopLimit: [`Read '${f.target}' with { "parent_account": { … } }`, '"$in": [ID, …] } }.'],
+    dottedKey: [`read '${f.target}' with that condition`, ids],
     empty: ['Name one (', '"$null": false } }.'],
     undeclaredKey: ['Name a field it declares', '"FIELD": VALUE } }.'],
     unregistered: ['Match ', ids],
@@ -130,8 +131,10 @@ describe('[#27351] the nested-relation condition refusal: every route lands insi
       const route = routes(f);
       const condition = conditionOf(f);
 
-      it('a second-level relation', () => {
-        expectRouteInside(f, refusal(f, { ...condition, parent_account: { [f.keys[0]]: 'x' } }), route.secondLevel);
+      it('a relation past the hop limit', () => {
+        // Four hops through the self-referencing `parent_account`: refused at the third.
+        const hop = (inner: unknown) => ({ parent_account: inner });
+        expectRouteInside(f, refusal(f, { ...condition, ...hop(hop(hop({ [f.keys[0]]: 'x' }))) }), route.hopLimit);
       });
 
       it('a dotted key', () => {

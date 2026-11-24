@@ -9,7 +9,9 @@
  * "package not found", with no pillars and no package actions, and a way back
  * to the Studio landing. And `/studio/<pkg>/<segment>` for a segment no pillar
  * has fell through to the Interfaces pillar with nothing highlighted; it now
- * renders a not-found state, the real pillars still linked above it.
+ * renders a not-found state, the real pillars still linked above it. (The
+ * Interfaces pillar itself retired with objectstack#36502: its old segment is
+ * not "not found" but lands on the Data pillar, pinned last in this file.)
  *
  * Read from the package list Studio already loads (`GET /api/v1/packages`,
  * one request): a kernel package the switcher hides is installed, so it is
@@ -21,7 +23,7 @@ import '@testing-library/jest-dom/vitest';
 // The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
 import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
@@ -119,6 +121,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * The package list has answered and the surface has read it: the list read
+ * was made, and its answer has had a turn to land. (The package switcher's
+ * `data-pkg-list-state` said this until the switcher was removed,
+ * objectstack#36501.)
+ */
+async function listAnswered(fetchMock: ReturnType<typeof servePackages>): Promise<void> {
+  await waitFor(() => expect(packageListReads(fetchMock)).toBeGreaterThan(0), { timeout: 8000 });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
+}
+
 describe('Studio: a package id no package has renders "package not found" (objectstack#26708)', () => {
   it.each(['data', 'automations', 'interfaces', 'access'])('%s: not found, no pillars, no package actions', async (pillar) => {
     const fetchMock = servePackages();
@@ -144,42 +159,32 @@ describe('Studio: a package id no package has renders "package not found" (objec
   });
 
   it('CONTROL — a listed package renders its builder', async () => {
-    servePackages();
+    const fetchMock = servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`);
-    const header = screen.getByTestId('studio-shell-header');
-    await waitFor(() =>
-      expect(within(header).getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    // The four pillars and, objectstack#28561, the "All metadata" area.
-    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(5);
+    // The three pillars and, objectstack#28561, the "All metadata" area.
+    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(4);
   });
 
-  it('CONTROL — a kernel package the switcher hides is installed, never "not found"', async () => {
-    servePackages();
+  it('CONTROL — a kernel package the Studio landing hides is installed, never "not found"', async () => {
+    const fetchMock = servePackages();
     renderAt(`/studio/${KERNEL_ID}/data`);
-    const header = screen.getByTestId('studio-shell-header');
-    await waitFor(() =>
-      expect(within(header).getByTestId('studio-pkg-chip')).toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
   });
 
   it('CONTROL — a package list that failed to load leaves the builder as it was', async () => {
     const fetchMock = servePackages({ fail: true });
     renderAt(`/studio/${PHANTOM}/data`);
-    await waitFor(() => expect(packageListReads(fetchMock)).toBeGreaterThan(0));
-    await waitFor(() =>
-      expect(within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip'))
-        .toHaveAttribute('data-pkg-list-state', 'failed'),
-    );
+    await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
-    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(5);
+    expect(within(screen.getByTestId('studio-pillar-nav')).getAllByRole('link')).toHaveLength(4);
   });
 });
 
 describe('Studio: a pillar segment no pillar has renders a not-found state (objectstack#26708)', () => {
-  it('names the segment, keeps the real pillars linked, and does not mount Interfaces', async () => {
+  it('names the segment, keeps the real pillars linked, and mounts no pillar', async () => {
     servePackages();
     renderAt(`/studio/${PACKAGE_ID}/bogus_pillar`);
 
@@ -189,21 +194,21 @@ describe('Studio: a pillar segment no pillar has renders a not-found state (obje
     expect(links.map((a) => a.getAttribute('href'))).toEqual([
       `/studio/${PACKAGE_ID}/data`,
       `/studio/${PACKAGE_ID}/automations`,
-      `/studio/${PACKAGE_ID}/interfaces`,
       `/studio/${PACKAGE_ID}/access`,
       `/studio/${PACKAGE_ID}/metadata`,
     ]);
     for (const link of links) expect(link).not.toHaveAttribute('aria-current');
   });
 
-  it('CONTROL — the interfaces segment still opens the Interfaces pillar', async () => {
+  it('CONTROL — the retired interfaces segment is not "not found": it lands on the Data pillar (objectstack#36502)', async () => {
     servePackages();
     renderAt(`/studio/${PACKAGE_ID}/interfaces`);
     const current = await waitFor(() =>
       within(screen.getByTestId('studio-pillar-nav')).getByRole('link', { current: 'page' }),
     );
-    expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/interfaces`);
+    expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/data`);
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
+    expect(screen.getByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });
 });
 
@@ -217,12 +222,9 @@ describe('Studio: no copilot beside a package that is not there (objectstack#326
   });
 
   it('CONTROL — a listed package keeps its copilot', async () => {
-    servePackages();
+    const fetchMock = servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`);
-    await waitFor(() =>
-      expect(within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip'))
-        .toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    await listAnswered(fetchMock);
     expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
     expect(screen.getByTestId('studio-chat-dock')).toBeInTheDocument();
   });
@@ -234,12 +236,9 @@ describe('Studio: no copilot beside a package that is not there (objectstack#326
     expect(screen.queryByTestId('injected-copilot')).toBeNull();
     cleanup();
 
-    servePackages();
+    const listedFetch = servePackages();
     renderAt(`/studio/${PACKAGE_ID}/data`, <StudioDesignSurface aiSlot={<div data-testid="injected-copilot" />} />);
-    await waitFor(() =>
-      expect(within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip'))
-        .toHaveAttribute('data-pkg-list-state', 'loaded'),
-    );
+    await listAnswered(listedFetch);
     expect(screen.getByTestId('injected-copilot')).toBeInTheDocument();
   });
 });

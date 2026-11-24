@@ -39,7 +39,15 @@ vi.mock('sonner', () => ({
 vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadata: () => ({ apps: apps.value, refresh }),
-  useAdapter: () => ({ getClient: () => ({ meta: { saveItem, deleteItem } }) }),
+  useAdapter: () => ({
+    getClient: () => ({ meta: { saveItem, deleteItem } }),
+    // objectstack#35054 — a save starts from the stored app (the layers read):
+    // the listed row minus its read decorations, which no layer carries.
+    getAuthoredItem: async (_type: string, name: string) => {
+      const row = apps.value.find((a: any) => a.name === name);
+      return row ? Object.fromEntries(Object.entries(row).filter(([k]) => !k.startsWith('_'))) : null;
+    },
+  }),
 }));
 
 const { AppManagementPage } = await import('../AppManagementPage');

@@ -22,10 +22,17 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { ObjectDefaultInspector } from './ObjectDefaultInspector';
 import { t } from '../i18n';
+// The inspector reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
-const ICON_LABEL = t('designer.object.icon', 'en-US');
+// objectstack#35985: the row picks the icon and the colour together, and is
+// labelled for both.
+const ICON_LABEL = t('designer.object.iconAndColor', 'en-US');
 
 function mount(draft: Record<string, unknown>, readOnly = false) {
   const onPatch = vi.fn();

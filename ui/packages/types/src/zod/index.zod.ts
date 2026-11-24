@@ -330,6 +330,7 @@ export {
   ObjectMapSchema,
   ObjectMapConfigSchema,
   ObjectTreeSchema,
+  ObjectTimesheetSchema,
   ObjectGanttSchema,
   ObjectCalendarSchema,
   ObjectKanbanSchema,

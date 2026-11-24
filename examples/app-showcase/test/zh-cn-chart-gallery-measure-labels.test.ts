@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { translateMetadataDocument, type TranslationBundle } from '@objectstack/spec/system';
 import { ShowcaseProjectDataset, ShowcaseTaskDataset } from '../src/ui/datasets/chart-gallery.dataset.js';
+import { ShowcaseAccountDataset, ShowcaseInvoiceDataset } from '../src/ui/datasets/revenue-pulse.dataset.js';
 import { ShowcaseTranslationBundle } from '../src/system/translations/index.js';
 
 const bundle = ShowcaseTranslationBundle as unknown as TranslationBundle;
@@ -37,5 +38,27 @@ describe('showcase Chart Gallery — KPI measure labels per locale', () => {
       .toEqual({ task_count: 'Tasks' });
     expect(labels(translateMetadataDocument('dataset', ShowcaseProjectDataset, bundle, en), ['project_count', 'budget_sum']))
       .toEqual({ project_count: 'Projects', budget_sum: 'Total Budget' });
+  });
+});
+
+// Every member of the app's four datasets carries a business `description`
+// (ADR-0149 D1), and the same translator serves it in Chinese under zh-CN.
+// `check:i18n-coverage` holds the translated half as a count; this names the
+// member that lost either half.
+describe('showcase datasets — every member description, authored and served per locale', () => {
+  const datasets = [ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset];
+  type Member = { name: string; description?: unknown };
+  const members = (doc: unknown): Member[] => {
+    const d = doc as { dimensions?: Member[]; measures?: Member[] };
+    return [...(d.dimensions ?? []), ...(d.measures ?? [])];
+  };
+
+  it.each(datasets.map((ds) => [ds.name, ds] as const))('%s', (_name, ds) => {
+    const zh = members(translateMetadataDocument('dataset', ds, bundle, { locale: 'zh-CN' }));
+    for (const member of members(ds)) {
+      expect(typeof member.description, `${ds.name}.${member.name} has no description`).toBe('string');
+      const served = zh.find((m) => m.name === member.name)?.description;
+      expect(served, `${ds.name}.${member.name} serves no zh-CN description`).toMatch(/[一-鿿]/);
+    }
   });
 });

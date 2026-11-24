@@ -25,6 +25,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { LiteKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
+// Paid at collection, not inside a clocked case: the dispatcher's package
+// store reaches this dependency through a dynamic import.
+import '@objectstack/metadata';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
@@ -277,4 +280,39 @@ describe('trustProxy decides whether a forged header can mint fresh buckets', ()
             await shutdown(kernel);
         }
     }, 30_000);
+
+    it('under the trusted-network form, keys by the entry the declared proxy appended', async () => {
+        // The test client connects from loopback, so loopback is the declared proxy.
+        const trustProxy = { networks: ['127.0.0.0/8', '::1'], header: 'x-forwarded-for' };
+        const { kernel, baseUrl } = await boot({ rateLimit: { budget: BUDGET, trustProxy } });
+        try {
+            // Each request's appended entry is a distinct client: none is cut off.
+            const statuses: number[] = [];
+            for (let i = 0; i < BUDGET.maxRequests + 2; i++) {
+                const res = await fetch(`${baseUrl}/api/v1/health`, {
+                    headers: { 'x-forwarded-for': `198.51.100.250, 203.0.113.${i}` },
+                });
+                statuses.push(res.status);
+            }
+            expect(statuses).not.toContain(429);
+
+            // One appended entry that overspends is cut off, whatever is written to its left.
+            const repeated: number[] = [];
+            for (let i = 0; i < BUDGET.maxRequests + 2; i++) {
+                const res = await fetch(`${baseUrl}/api/v1/health`, {
+                    headers: { 'x-forwarded-for': `198.51.100.${i}, 192.0.2.1` },
+                });
+                repeated.push(res.status);
+            }
+            expect(repeated).toContain(429);
+        } finally {
+            await shutdown(kernel);
+        }
+    }, 30_000);
+
+    it('refuses a malformed trusted-network form when the plugin is created', () => {
+        expect(() => createDispatcherPlugin({
+            rateLimit: { budget: BUDGET, trustProxy: { networks: [] } as never },
+        })).toThrow(/`networks`/);
+    });
 });

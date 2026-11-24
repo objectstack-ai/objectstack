@@ -17,7 +17,7 @@
  * resolves its collections, and a dataset has no `name`, so it is claimed by
  * value. With the stamps counted as part of that value the body copy was a
  * second dataset: two entries in the shared `seed-datasets` registry, and a
- * `mode: 'insert'` row written twice.
+ * `mode: 'insert'` row written twice (that mode is since retired, #34613).
  *
  * The fixtures elsewhere could not see this: they are `upsert`-only, which is
  * idempotent, and their additive fixture shares object REFERENCES between the
@@ -25,6 +25,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { LiteKernel, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -40,7 +42,7 @@ const coreBody = () => ({
     version: '1.0.0',
     type: 'app',
     objects: [{ name: 'stamped_account', label: 'Account', fields: { name: { name: 'name', type: 'text', label: 'Name' } } }],
-    data: [{ object: 'stamped_account', mode: 'insert', records: [{ name: 'once' }] }],
+    data: [{ object: 'stamped_account', mode: 'ignore', records: [{ name: 'once' }] }],
 });
 
 const ordersBody = (withOwnDataset = false) => ({
@@ -50,7 +52,7 @@ const ordersBody = (withOwnDataset = false) => ({
     type: 'module',
     dependencies: { [CORE_ID]: '^1.0.0' },
     objects: [{ name: 'stamped_order', label: 'Order', fields: { name: { name: 'name', type: 'text', label: 'Name' } } }],
-    ...(withOwnDataset ? { data: [{ object: 'stamped_order', mode: 'insert', records: [{ name: 'second' }] }] } : {}),
+    ...(withOwnDataset ? { data: [{ object: 'stamped_order', mode: 'ignore', records: [{ name: 'second' }] }] } : {}),
 });
 
 /** The compiled additive shape: both halves, round-tripped through JSON. */
@@ -90,7 +92,7 @@ describe('additive artifact — real registration, then the seed registry', () =
         expect(artifact.data[0]._packageId).toBeUndefined();
 
         expect(seeds).toHaveLength(1);
-        expect(seeds).toEqual([expect.objectContaining({ object: 'stamped_account', mode: 'insert' })]);
+        expect(seeds).toEqual([expect.objectContaining({ object: 'stamped_account', mode: 'ignore' })]);
     });
 
     it('still registers a second package\'s OWN dataset', async () => {

@@ -43,6 +43,14 @@ export interface MetadataAuthoringGateContext {
      * when the door stated none: the gate composes `en`.
      */
     userTextLocales?: readonly string[];
+    /**
+     * [ADR-0150 D2, #34226] The package the write is addressed to: the save's
+     * `packageId`, or a restore's row binding. Absent or `null` for a write
+     * naming no package. A gate that judges an item keyed `(package, name)`
+     * reads it to tell a package's own item from another package's item of
+     * the same name.
+     */
+    packageId?: string | null;
 }
 
 export type MetadataAuthoringGate = (ctx: MetadataAuthoringGateContext) => void | Promise<void>;

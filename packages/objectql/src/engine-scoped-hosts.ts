@@ -11,7 +11,7 @@
  * a body assigns it), so a body reads and writes the instance exactly as
  * the method did.
  *
- * Written by `scripts/codemod-split-engine.mjs` (its second pass). It imports
+ * Written by the engine codemod's second pass (split by #30264). It imports
  * types only, so it forms no evaluation cycle and is evaluated before the
  * classes whichever module loads first. `index.ts` re-exports nothing from
  * this module.

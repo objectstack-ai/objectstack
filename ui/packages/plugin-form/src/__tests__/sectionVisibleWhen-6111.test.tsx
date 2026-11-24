@@ -12,8 +12,8 @@
  *
  * `@objectstack/spec` declares `FormSection.visibleWhen`; this repo's spec
  * bridge carries it (`packages/react/src/spec-bridge/bridges/form-view.ts:250`);
- * `RecordFormPage` / `resolveFormViewLayout` wire whole `sections` objects into
- * the layouts. Every layout then renders a section header as a virtual
+ * `RecordFormPage` and the record dialog wired whole `sections` objects into
+ * the layouts (until #36425, which stopped both loading a form view). Every layout then renders a section header as a virtual
  * `section-divider` pseudo-field — and none of them copied the predicate onto
  * it, so the key was declared, mapped, carried, and dropped one hop before
  * anything evaluated it.
@@ -59,8 +59,8 @@
  *
  * Routing the modal/drawer/split rows through `ObjectForm` (which is what
  * `RecordFormPage` does) exercises BOTH hops; the direct `ModalForm` row covers
- * `resolveFormViewLayout`, which mounts `ModalForm` without passing through
- * `ObjectForm` at all.
+ * a host that mounts `ModalForm` without passing through `ObjectForm` at all
+ * (the record dialog's shape before #36425).
  *
  * ## Reverse verification (direction predicted BEFORE running)
  *
@@ -122,7 +122,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { PredicateScopeProvider } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
@@ -179,6 +179,13 @@ afterEach(() => {
 });
 
 /**
+ * Section names are read inside the `<form>`: with two sections drawn, the
+ * dialog and the full-page form also repeat each name in their section
+ * navigation above the form (objectstack#34605).
+ */
+const inForm = () => within(document.querySelector('form') as HTMLElement);
+
+/**
  * Two sections: `Always` carries no predicate and is the paired control that
  * proves the form rendered AT ALL — so a missing `Compensation` heading is a
  * verdict and not an inability. `Compensation` carries the gate.
@@ -209,10 +216,10 @@ const renderObjectForm = async (
     </PredicateScopeProvider>,
   );
   // The un-gated sibling heading is the readiness signal AND the control.
-  await waitFor(() => expect(screen.getByText('Always')).toBeTruthy());
+  await waitFor(() => expect(inForm().getByText('Always')).toBeTruthy());
 };
 
-/** Mount `ModalForm` directly — the shape `resolveFormViewLayout` produces. */
+/** Mount `ModalForm` directly — the shape a host that skips `ObjectForm` mounts. */
 const renderModalFormDirect = async (
   scope: Record<string, unknown>,
   extra: Record<string, unknown> = {},
@@ -233,11 +240,11 @@ const renderModalFormDirect = async (
       />
     </PredicateScopeProvider>,
   );
-  await waitFor(() => expect(screen.getByText('Always')).toBeTruthy());
+  await waitFor(() => expect(inForm().getByText('Always')).toBeTruthy());
 };
 
 /** The gated section's heading — `null` when the layout hid it. */
-const gatedHeading = () => screen.queryByText('Compensation');
+const gatedHeading = () => inForm().queryByText('Compensation');
 
 /**
  * The gated section's claimed MEMBER field (#6236) — `null` when the layout's
@@ -263,7 +270,7 @@ const LAYOUTS: {
     mount: (scope, gate) => renderObjectForm(scope, { formType: 'modal', open: true }, gate),
   },
   {
-    label: 'ModalForm — mounted directly (the resolveFormViewLayout shape)',
+    label: 'ModalForm — mounted directly (a host that skips ObjectForm)',
     mount: (scope, gate) => renderModalFormDirect(scope, {}, gate),
   },
   {

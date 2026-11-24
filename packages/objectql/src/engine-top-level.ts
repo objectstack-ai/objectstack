@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#29986 codemod] The top-level declarations ahead of `ObjectQL` in
-// `engine.ts` that moved out whole by `scripts/codemod-split-engine.mjs` (lever
+// `engine.ts` that moved out whole (split by #30012; lever
 // (b) of ruling 6591753301).
 //
 // A MOVE, not a redesign: each declaration below is its `engine.ts` text
@@ -11,15 +11,16 @@
 // re-exports, by name, every declaration here it exported before, so every
 // importer of `./engine.js` reads what it read.
 
-import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
+import { AUDIT_PROVENANCE_FIELDS, ENGINE_UPDATE_UPSERT_REMOVED, FILE_REFERENCE_TYPES, FullTextSearchSchema, QUERY_CURSOR_REMOVED, QUERY_DISTINCT_REMOVED, REFERENCE_VALUE_TYPES, RPC_QUERY_ALIAS_SLOTS, VALID_AST_OPERATORS, foldQueryAliasSlots, isFilterAST, isMultiValueField, lowerFilterCondition, normalizeFilterComparandTypes, parseFilterAST, percentScaleOf, readAutonumberCounter, referenceCarrierOf, referenceTargetOf, resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import type { DroppedFieldsEvent, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryAliasSlot, RecycleBinClearedReference, ServiceObject } from '@objectstack/spec/data';
 import type { EngineFilterJudgement, ISecurityService } from '@objectstack/spec/contracts';
 import { assertFilterIsMaterializable, assertListComparandShapes, collectComposableReadableIds, invalidFilterError } from './filter-comparand-shape.js';
+import { collectFixedReadLeaves } from './fixed-read-leaf-position.js';
 import { assertResolvedTemporalTokensInRange, assertTemporalComparandsInterpretable } from './temporal-comparand-door.js';
 import type { ResolvedTokenJudge } from './temporal-comparand-door.js';
 import { assertTextOperatorTargetsAreStringCapable } from './text-operator-declared-type-door.js';
 import { mapRelationConditions, narrowNumberComparands } from './number-comparand-declared-type-door.js';
-import { lowerRelationSite } from './relation-filter-lowering.js';
+import { lowerRelationSite, relationReadDriverRefusal } from './relation-filter-lowering.js';
 import type { RelationFilterSite } from './relation-filter-lowering.js';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { judgeCollectionItemOwnerStamp } from '@objectstack/spec/kernel';
@@ -35,7 +36,8 @@ import type { SchemaRegistry } from './registry.js';
 import { SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { ExpressionEngine, analyzeRelationshipTraversals, formulaReadOrder, isUnparseableDate } from '@objectstack/formula';
 import type { EvalError, EvalOptionLabels, EvalPermissions } from '@objectstack/formula';
-import { declaredOptionLabels } from './formula-option-labels.js';
+import { declaredOptionLabels, planCallsOptionLabel } from './formula-option-labels.js';
+import { planWorkCalendarNeeds, type FormulaWorkCalendars } from './formula-work-calendars.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY, AssembledViewArtifactSchema, isAggregatedViewContainer, isViewContainerShaped } from '@objectstack/spec';
 import type { Expression } from '@objectstack/spec';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
@@ -43,8 +45,8 @@ import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { ValidationError } from './validation/record-validator.js';
 import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
-import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
-import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import { collectReferenceTraversals, readsPermissionPredicate, readsUserRoot, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
+import type { ReferentialClearExemption, RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { declaredColumnSet } from './declared-read-columns.js';
 
 /**
@@ -101,15 +103,18 @@ export interface AdmittedValueShapeViolationTally {
  * in, and an in-engine audit hook depends on landing inside it.
  *
  * Four ordinary paths open such a unit around the dispatch:
- *   - the write door itself, when the object has a metadata-bound `after*`
- *     hook that can abort — blocking with `onError` `abort`, or carrying a
- *     `condition` — so that abort rolls the row back as `HookSchema.onError`
- *     says (#22782, #22856, `opensAfterAbortUnit`);
+ *   - the write's own engine body, when the object has a metadata-bound
+ *     `after*` hook that can abort — blocking with `onError` `abort`, or
+ *     carrying a `condition` — so that abort rolls the row back as
+ *     `HookSchema.onError` says (#22782, #22856, `opensAfterAbortUnit`). One
+ *     rule for `insert`, `update` and `delete`: the unit opens around the
+ *     executor, inside the middleware chain, so a middleware's work before
+ *     and after `next()` runs outside it (#35142, #35167);
  *   - a by-id {@link ObjectQL.delete} whose cascade is `'atomic'` — each
  *     dependent's own `afterDelete` fires inside the wrap the parent opened,
  *     and the parent's row removal can still refuse afterwards (#7413). The
  *     PARENT's `afterDelete` is outside that wrap by construction (inside the
- *     door's own unit when the first path opened one); the cascaded
+ *     write's own unit when the first path opened one); the cascaded
  *     CHILDREN's are not;
  *   - `runAtomicBatch` in `@objectstack/metadata-protocol` —
  *     `batchData`/`deleteManyData` with `atomic: true` runs every member's
@@ -948,8 +953,11 @@ export function lowerWhereFilterArray<T extends object | undefined>(
     // asks "can that column's storage rule READ this value".
     // It must run BEFORE `resolveWhereTokens` (which is downstream of every
     // caller of this function) because the refusal has to precede the driver —
-    // hence the door steps around `{placeholder}` strings rather than judging
-    // them; the token resolver refuses the unknown ones a moment later, loudly.
+    // hence the door judges a `{placeholder}` by its kind rather than as the
+    // value it resolves to: a date macro is stepped around (judged by its year
+    // once resolved), a period key or a context token is judged as written, and
+    // an unknown or record-context token is left to the token resolver, which
+    // refuses it a moment later, loudly.
     assertTemporalComparandsInterpretable(object, operation, schema, where);
     // [#20351] The NUMBER-comparand declared-type door, fifth on the same seam
     // and fifth question about the same predicate: is this string a number the
@@ -1051,6 +1059,10 @@ export function lowerWhereFilterArray<T extends object | undefined>(
   // reference into any other position is refused here by name, as the object
   // branch refuses it — first, before the doors below read it as a value.
   collectComposableReadableIds(object, operation, condition, 'where');
+  // [ADR-0155 D1] The same for a fixed-read leaf the lowering carried by
+  // reference: `parseFilterAST` refuses one as a `$in` comparand (400), and
+  // any other position is refused here by name, before the doors below.
+  collectFixedReadLeaves(object, operation, condition, 'where');
   // [#8296] Same door as the object branch above, on the LOWERED condition —
   // the array sugar (`[['is_open','=',true]]`) names fields too, and a gate on
   // one branch would answer one mistake two ways depending on the spelling.
@@ -1236,6 +1248,16 @@ function admissionRefusalOf(
  * stops there: which ids the read finds, the cap and the caller's permissions
  * on the related object need data and a caller, and are execution's alone.
  *
+ * [#33876] One driver verdict IS the engine's own admission, so the judge
+ * answers it too: on a read verb, a single-valued nested-relation condition
+ * is refused before any related read when the object's driver does not
+ * declare `DriverCapabilities.readableIdsLeaf` (`relationReadDriverRefusal`,
+ * the one function execution calls). The judge reads the driver's DECLARED
+ * capabilities through `driverOf` and calls nothing on it. A host that
+ * resolves no driver for the object (`driverOf` absent or answering `null`:
+ * the authoring-time judge, whose engine holds no datasource) does not judge
+ * this verdict; execution, which must resolve a driver, still raises it.
+ *
  * What differs by verb sits BETWEEN or AROUND those stages and judges
  * something other than `where`: option-key folding and refusal, the driver
  * lookup (`getDriver`, before stage 1 on the writes and between the stages on
@@ -1247,9 +1269,10 @@ function admissionRefusalOf(
  * ## What it reads
  *
  * The `where` value, the object's declared field map (`schema`, the
- * registry's), and the execution context (for stage 2). No driver, no data,
- * no hook, no middleware. Execution's own stages read nothing more, measured
- * door by door on #20157.
+ * registry's), the execution context (for stage 2), and [#33876] the
+ * declared capabilities of the object's driver (above). No driver call, no
+ * data, no hook, no middleware. Execution's own stages read nothing more,
+ * measured door by door on #20157.
  *
  * A thrown door diagnostic becomes the returned refusal, with the same `code`,
  * `status` and `message` execution raises. Anything else is re-thrown
@@ -1262,6 +1285,7 @@ function judgeWhereAdmission(
   schema: unknown,
   context: Parameters<typeof filterTokenContextFrom>[0],
   schemaOf?: (name: string) => unknown,
+  driverOf?: (name: string) => { readonly name?: unknown; readonly supports?: unknown } | null,
 ): EngineFilterJudgement {
   try {
     const admitted = lowerWhereFilterArray(object, operation, { where }, schema, schemaOf);
@@ -1277,8 +1301,15 @@ function judgeWhereAdmission(
     // of the filter is lowered with each condition standing for the empty id
     // set, which the shared lowering treats as it treats any `$in` / `$or`.
     const sites = relationSitesOf(object, operation, resolved, schema, schemaOf);
+    // [#33876] Execution's up-front driver verdict, at the point execution
+    // raises it: after admission, before any related read.
+    const driver = sites.length === 0 || driverOf === undefined ? null : driverOf(object);
+    if (driver !== null) {
+      const driverRefusal = relationReadDriverRefusal(object, operation, sites, () => driver);
+      if (driverRefusal !== undefined) throw driverRefusal;
+    }
     for (const site of sites) {
-      const inner = judgeWhereAdmission(site.target, 'find', site.condition, schemaOf?.(site.target), context, schemaOf);
+      const inner = judgeWhereAdmission(site.target, 'find', site.condition, schemaOf?.(site.target), context, schemaOf, driverOf);
       if (!inner.ok) return inner;
     }
     const related = sites.length === 0
@@ -1402,10 +1433,25 @@ const MAX_FORMULA_SCALE = 100;
  * carries is a no-op request either way — so the rounding is skipped and the
  * value is returned whole.
  */
-function formulaRoundingScale(def: { scale?: unknown } | undefined): number | undefined {
+function formulaRoundingScale(
+  def: { type?: unknown; scale?: unknown; returnType?: unknown; max?: unknown } | undefined,
+): number | undefined {
   const scale = def?.scale;
   if (typeof scale !== 'number' || !Number.isInteger(scale) || scale < 0) return undefined;
-  return scale <= MAX_FORMULA_SCALE ? scale : undefined;
+  // [#35047] A percentage — a formula returning `percent`, or a stored
+  // `percent` field computed from its `expression` — declares its `scale` as
+  // the decimal places of the DISPLAYED percentage. So the value is rounded at
+  // the storage the percent field uses (`percentScaleOf`, the rule the write
+  // seam's `max_scale` allowance follows): a fraction carries `scale + 2`
+  // places (`scale: 1` keeps 0.417, which reads 41.7%), a whole percentage
+  // exactly `scale`. Rounding a fraction to `scale` itself turned 41.7% into
+  // 40.0%.
+  const percentage = def?.type === 'percent' || (def?.type === 'formula' && def.returnType === 'percent');
+  const places = percentage
+    && percentScaleOf({ type: 'percent', max: typeof def?.max === 'number' ? def.max : undefined }) === 'fraction'
+    ? scale + 2
+    : scale;
+  return places <= MAX_FORMULA_SCALE ? places : undefined;
 }
 
 /**
@@ -2005,13 +2051,15 @@ function assertProjectionHasNoDottedPaths(
  * one the caller may not query, so the narrowing in `expandSearchOnAst` left
  * nothing. Same code and status — the search cannot be honoured for this
  * caller either way — with a message that names the cause, not a declaration
- * fault the object does not have.
+ * fault the object does not have. [#34700] A field a registered search-field
+ * withholder names counts as one the caller may not query.
  */
 function emptySearchSetError(object: string, schema: any, internalExcluded: boolean, withheld = false): Error {
   const declared: unknown[] = Array.isArray(schema?.searchableFields) ? schema.searchableFields : [];
   const err: any = withheld ? new Error(
     `Object '${object}' has no field this caller may search, so 'search' cannot be honoured on it: `
-    + `every field it searches is one field-level security does not let this caller query. `
+    + `every field it searches is one field-level security, or a query guard of the object's own, `
+    + `does not let this caller query. `
     + 'Answering every row instead would read as "everything matched". Grant read access to one of '
     + `its searchable fields, or filter on a field this caller can read.`,
   ) : new Error(
@@ -2221,7 +2269,11 @@ export function undeclaredWriteFieldErrors(
  * ⛔ Keyed on `type === 'formula'` literally — the test the read path's
  * projection and `driver-sql`'s `fieldHasColumn` use. `summary` is NOT here: a
  * roll-up HAS a column, and a caller-supplied value is persisted (measured on
- * #20805, SQLite and memory) — a separate question, not this door's.
+ * #20805, SQLite and memory) — a separate question, not this door's. [#34672]
+ * Its answer is the static-`readonly` strip on both verbs
+ * ({@link summaryFieldsLockedOnWrite}), which exempts the `isSystem` write
+ * the roll-up recompute makes; this door, which runs in every context, would
+ * take that write too.
  *
  * Pure: the caller's objects are never mutated. A row keeps its reference when
  * nothing was taken, else it is a shallow copy without the keys.
@@ -2409,12 +2461,23 @@ function staticReadonlySparesOrganization(schema: unknown, wallJudgesOrganizatio
  * ONE function for both passes that read the subject, the pre-hook withhold
  * and the post-hook strip, so the hook view and the stored row cannot
  * disagree about the column. [#25062] The write preview's strip reads it too.
+ *
+ * [#34672] ...and with every roll-up `summary` field read as `readonly: true`
+ * ({@link summaryFieldsLockedOnWrite}), as {@link updateStaticReadonlySubject}
+ * reads it on update: a person's or an import's starting value for a roll-up
+ * is taken and reported as `readonly`, and the create strip re-seeds the
+ * column with the empty-child-list value (`staticReadonlyCreateStrip`). The
+ * flag is added BEFORE {@link staticReadonlyInsertSubject} judges the schema,
+ * so its exclusions hold for the roll-ups too: a `sys_` object and a
+ * platform-internal `managedBy` bucket stay outside the subject. `isSystem`
+ * (seed loads, package installs, historical imports, the recompute) runs none
+ * of these passes and keeps the value it sends.
  */
 export function insertStaticReadonlySubject(
   schema: unknown,
   wallJudgesOrganization: boolean,
 ): ReturnType<typeof staticReadonlyInsertSubject> {
-  const subject = staticReadonlyInsertSubject(schema as any);
+  const subject = staticReadonlyInsertSubject(withSummaryRollUpsReadonly(schema) as any);
   if (!subject || !staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return subject;
   const fields = { ...subject.fields };
   delete fields[SystemFieldName.ORGANIZATION_ID];
@@ -2436,13 +2499,75 @@ export function insertStaticReadonlySubject(
  * reads the wall's flag once and hands that one value to all of them, so the
  * hook view and the stored row cannot disagree about the column. [#25062] The
  * `update`-mode preview's strip reads it too.
+ *
+ * [#34672] ...and with every roll-up `summary` field read as `readonly: true`
+ * ({@link summaryFieldsLockedOnWrite}): the engine owns that value on
+ * update, so a person's or an import's write to it is taken and reported as
+ * `readonly`, exactly as if the author had declared the flag. The roll-up's
+ * own write is `isSystem` and skips these passes. Because the lock lives in
+ * this one view, every pass named above takes the same keys.
  */
 export function updateStaticReadonlySubject(schema: unknown, wallJudgesOrganization: boolean): unknown {
-  if (!staticReadonlySparesOrganization(schema, wallJudgesOrganization)) return schema;
-  const { name, fields } = schema as { name?: string; fields: Record<string, unknown> };
+  const sparesOrganization = staticReadonlySparesOrganization(schema, wallJudgesOrganization);
+  const locked = withSummaryRollUpsReadonly(schema);
+  if (!sparesOrganization) return locked;
+  const { name, fields } = locked as { name?: string; fields: Record<string, unknown> };
   const kept = { ...fields };
   delete kept[SystemFieldName.ORGANIZATION_ID];
   return { name, fields: kept };
+}
+
+/**
+ * [#34672] `schema` with every field {@link summaryFieldsLockedOnWrite} names
+ * read as `readonly: true`, or `schema` itself when it names none. The one
+ * spelling of the roll-up lock that both static-`readonly` views read
+ * ({@link insertStaticReadonlySubject}, {@link updateStaticReadonlySubject}).
+ * The schema's other members are carried over, so the insert subject's
+ * `name` and `managedBy` exclusions judge the locked view as they judge the
+ * registered one.
+ */
+function withSummaryRollUpsReadonly(schema: unknown): unknown {
+  const rollUps = summaryFieldsLockedOnWrite(schema);
+  if (rollUps.length === 0) return schema;
+  const fields = { ...(schema as { fields: Record<string, unknown> }).fields };
+  for (const field of rollUps) fields[field] = { ...(fields[field] as Record<string, unknown>), readonly: true };
+  return { ...(schema as Record<string, unknown>), fields };
+}
+
+/**
+ * [#34672] The roll-up `summary` fields a person's or an import's write
+ * judges read-only although the author did not declare `readonly: true`, on
+ * create and on update alike. The engine computes a roll-up from its child
+ * rows and writes it through `update()` under an `isSystem` context
+ * (`recomputeSummaries`, the backfill, the enable refresh), which the static
+ * strip exempts. So the only writes this lock takes are a caller's: a REST
+ * `POST` or `PATCH`, an import in any `writeMode`, an MCP create, a
+ * predicate update. Before it, such a write was stored and read downstream
+ * until the next child write recomputed the roll-up.
+ *
+ * On create the taken value is replaced by the empty-child-list seed
+ * (`initializeSummaryFields`, re-run by `staticReadonlyCreateStrip`): `0`
+ * for `count` / `sum`, nothing for `min` / `max` / `avg`. Historical imports
+ * write as the system principal and keep a pre-computed total; a seed load (a
+ * package install's too) never sends one, because the seed loader takes a
+ * seed record's roll-up value out before the write (#35655). The `summary` note on
+ * `RUNTIME_OWNED_FIELD_TYPES` in `validation/rule-validator.ts` says why the
+ * type rides this strip and not the runtime-owned one.
+ *
+ * Keyed on `type === 'summary'` literally, like the roll-up readers
+ * (`getSummaryDescriptors`, `summary-enable-refresh.ts`). A field already
+ * declared `readonly: true` is left as it is.
+ */
+export function summaryFieldsLockedOnWrite(schema: unknown): string[] {
+  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return [];
+  const locked: string[] = [];
+  for (const [name, def] of Object.entries(fields as Record<string, unknown>)) {
+    if (!def || typeof def !== 'object') continue;
+    const d = def as { type?: unknown; readonly?: unknown };
+    if (d.type === 'summary' && d.readonly !== true) locked.push(name);
+  }
+  return locked;
 }
 
 /**
@@ -2901,6 +3026,14 @@ function applyFormulaPlan(
    * when no formula of the plan calls `label()`.
    */
   optionLabels?: EvalOptionLabels,
+  /**
+   * [ADR-0157 D4] What the working-day functions count with: each row's
+   * organization's calendars, resolved once per call by
+   * `formulaWorkCalendarsFor` (`formula-work-calendars.ts`). `undefined` when no formula
+   * of the plan calls one, or where no resolution runs (a synchronous
+   * evaluation), where such a formula then reads `null` and says why.
+   */
+  workCalendars?: FormulaWorkCalendars,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -2936,7 +3069,9 @@ function applyFormulaPlan(
         scope = hop.record;
         empty = hop.empty;
       }
-      const evaluated = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      const evaluated = ExpressionEngine.evaluate(fp.expression, {
+        now, timezone, user, org, permissions, optionLabels, workCalendars: workCalendars?.(rec), record: scope,
+      });
       // An invalid Date minted from text `date()` could not parse evaluates
       // `ok` (a predicate relies on that) but serializes to the `null` an empty
       // source gives: for a field it is a fault, said like any other.
@@ -3016,6 +3151,8 @@ async function hydrateWriteFormulas(
   relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>,
   /** [#26608] The option labels `label()` reads, in the writer's locale — the reader of this response. */
   optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined,
+  /** [ADR-0157 D4] The calendars the working-day functions count with, resolved over `records`. */
+  workCalendarsFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaWorkCalendars | undefined>,
 ): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -3025,8 +3162,122 @@ async function hydrateWriteFormulas(
   if (plan.length === 0) return;
   applyFormulaPlan(
     plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records),
-    optionLabelsFor?.(plan),
+    optionLabelsFor?.(plan), await workCalendarsFor?.(plan, records),
   );
+}
+
+/**
+ * [ADR-0113 D1, as amended] The `formula` fields computed over a record for
+ * the rule validator's `formulaValues`: a required field's `visibleWhen` that
+ * reads a formula is judged on the value a read would serve. The SAME plan and
+ * evaluation a read uses, over a copy of the record.
+ *
+ * Two kinds of formula that does not compute, answered apart:
+ *
+ * - **Unservable** — the write path cannot know the value a read would serve:
+ *   the formula reads through a reference (no hop is resolved here), calls
+ *   `label()` (no option label is read here), calls `current_user.can()`
+ *   and this write resolved no permission map, or reads the acting user
+ *   (`current_user`, `user`, `ctx`, `os`) and this write has none — a system
+ *   write; or it reads such a formula, at any depth (the plan's read closure,
+ *   {@link orderFormulaPlan}). A formula over one may compute cleanly over the
+ *   `null` it reads here, and still not be the value a read serves, so it is
+ *   unservable too. Named in `unservable` with the reason, and the validator
+ *   counts a predicate reading one as SHOWN; `noActingUser` names those
+ *   unservable for the missing user alone, so the validator logs them as
+ *   `no-acting-user`, as it logs the direct `current_user` spelling.
+ * - **A fault a read shares** — an operator over an empty operand, an
+ *   undeclared key, a cycle: a read serves `null` for it, and so does this
+ *   copy, so the predicate is judged on that `null`, as the form judges it.
+ *
+ * The plan, and which formulas are unservable, are built on the first call,
+ * so a write whose predicates read no formula pays nothing; a record already
+ * computed is answered from a memo, so the verdicts of several fields over the
+ * same merged and prior records compute each once. `undefined` when the
+ * object declares no formula.
+ */
+function formulaValuesFor(
+  schema: any,
+  execCtx: ExecutionContext | undefined,
+  permissions: EvalPermissions | undefined,
+): ((record: Record<string, unknown>) => { record: Record<string, unknown>; unservable: ReadonlyMap<string, string>; noActingUser: ReadonlySet<string> }) | undefined {
+  const fields = schema?.fields;
+  if (!fields || typeof fields !== 'object') return undefined;
+  const formulaNames = Object.keys(fields).filter((name) => fields[name]?.type === 'formula');
+  if (formulaNames.length === 0) return undefined;
+  // The same test `applyFormulaPlan` binds `current_user` by.
+  const actingUser = Boolean(execCtx?.userId);
+  let plan: FormulaPlanEntry[] | null | undefined;
+  const unservable = new Map<string, string>();
+  const noActingUser = new Set<string>();
+  const memo = new WeakMap<object, Record<string, unknown>>();
+  return (record) => {
+    if (plan === undefined) {
+      try {
+        plan = planFormulaProjection(schema, undefined).plan;
+      } catch {
+        plan = null;
+        for (const name of formulaNames) unservable.set(name, 'cannot be planned (its expression does not compile)');
+      }
+      // In read order, so a formula's reads are judged before it.
+      for (const entry of plan ?? []) {
+        const why = unservableReason(entry, permissions, actingUser, unservable, noActingUser);
+        if (!why) continue;
+        unservable.set(entry.name, why.reason);
+        if (why.noActingUser) noActingUser.add(entry.name);
+      }
+    }
+    if (plan === null) return { record, unservable, noActingUser };
+    const hit = memo.get(record);
+    if (hit) return { record: hit, unservable, noActingUser };
+    const copy: Record<string, unknown> = { ...record };
+    applyFormulaPlan(plan, [copy], execCtx, permissions);
+    memo.set(record, copy);
+    return { record: copy, unservable, noActingUser };
+  };
+}
+
+/**
+ * Why the write path cannot compute the value a read serves for one formula,
+ * or `undefined` when it can ({@link formulaValuesFor}). `known` holds the
+ * formulas already judged unservable, earlier in read order, and
+ * `knownNoActingUser` those of them judged so for the missing acting user
+ * alone; `noActingUser` on the answer says the same of this one, directly or
+ * through the formula it reads.
+ */
+function unservableReason(
+  entry: FormulaPlanEntry,
+  permissions: EvalPermissions | undefined,
+  actingUser: boolean,
+  known: ReadonlyMap<string, string>,
+  knownNoActingUser: ReadonlySet<string>,
+): { reason: string; noActingUser?: true } | undefined {
+  if (entry.hops) {
+    return { reason: `reads through ${[...entry.hops.keys()].map((f) => `'${f}'`).join(', ')}, a reference the write path does not follow` };
+  }
+  if (planCallsOptionLabel([entry])) return { reason: 'calls label(), which the write path does not answer' };
+  // [ADR-0157 D4] The validator's formula values resolve no working calendar.
+  if (planWorkCalendarNeeds([entry])) {
+    return { reason: 'calls a working-day function, which counts with a working calendar the write path does not load' };
+  }
+  if (!permissions && readsPermissionPredicate(entry.expression)) {
+    return { reason: 'calls current_user.can(), and this write resolved no permission map' };
+  }
+  // A read computes it for the reader; a system write has nobody to compute
+  // it for, so its `null` here is no value any read serves (ADR-0137 D4's
+  // `no-acting-user` arm, as for the direct `current_user` spelling). Read at
+  // bare-root granularity, so a formula reading only `os.org` counts too: the
+  // strict direction, the unconditional `required`.
+  if (!actingUser && readsUserRoot(entry.expression)) {
+    return { reason: 'reads the acting user or a bare ctx/os root, and this write has no acting user (a system write)', noActingUser: true };
+  }
+  if (known.size === 0) return undefined;
+  const reads = storedExpressionReads(entry);
+  // Reads the member reader cannot name count as reading every formula.
+  const via = reads === null ? [...known.keys()][0] : [...reads].find((name) => known.has(name));
+  if (via === undefined) return undefined;
+  const reason = `reads the formula '${via}', which ${known.get(via)}`;
+  return knownNoActingUser.has(via) ? { reason, noActingUser: true } : { reason };
 }
 
 /**
@@ -3124,6 +3375,14 @@ interface StoredExpressionServing {
    * every later reader and by search, so it never depends on the writer's locale.
    */
   optionLabelsFor?: (plan: FormulaPlanEntry[]) => EvalOptionLabels | undefined;
+  /**
+   * [ADR-0157 D4, open point 1] The calendars the working-day functions count
+   * with, resolved over the images in each one's organization. A calendar
+   * refusal (D8) stores the field blank, as any expression that does not
+   * evaluate does, with the fault reported once through `onFault`; the write
+   * itself goes through.
+   */
+  workCalendarsFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaWorkCalendars | undefined>;
 }
 
 /**
@@ -3145,7 +3404,7 @@ async function computeStoredExpressions(
   const scratch = images.map((image) => ({ ...image }));
   applyFormulaPlan(
     plan, scratch, execCtx, await serving.permissionsFor(plan, scratch), serving.onFault,
-    await serving.relatedFor?.(plan, scratch), serving.optionLabelsFor?.(plan),
+    await serving.relatedFor?.(plan, scratch), serving.optionLabelsFor?.(plan), await serving.workCalendarsFor?.(plan, scratch),
   );
   return scratch.map((row) => {
     const values: Record<string, unknown> = {};
@@ -3512,6 +3771,23 @@ export function hookMatchesObject(
     if (hookTargetList(entry.excludeObjects).includes(objectName)) return false;
   }
   return true;
+}
+
+/**
+ * [ADR-0155 D4] Is `entry` a registration made for `objectName` BY NAME: one
+ * that {@link hookMatchesObject} dispatches for it AND whose `object` names it
+ * literally? A global registration (no `object`) or a `'*'` one covers the
+ * object without naming it, and is outside: the engine reads a registration
+ * by the object it names, and counts no global one, on the line
+ * `hasObjectMiddleware` draws for middleware. The dispatch half is
+ * {@link hookMatchesObject}'s alone, so an `excludeObjects` that subtracts the
+ * object takes it out here too.
+ */
+export function hookNamesObject(
+  entry: Pick<HookEntry, 'object' | 'excludeObjects'>,
+  objectName: string,
+): boolean {
+  return hookTargetList(entry.object).includes(objectName) && hookMatchesObject(entry, objectName);
 }
 
 /**
@@ -4079,6 +4355,54 @@ export type EngineMiddleware = (
 ) => Promise<void>;
 
 /**
+ * [#34700] What a search-field withholder is asked, once per read that carries
+ * a non-blank `search` on its object: the caller's `where` as written (before
+ * the search is ANDed in and before any middleware adds its own predicate),
+ * the context the middlewares will see, and the fields the server resolved
+ * the search over before any withholding.
+ */
+export interface SearchFieldWithholdingRequest {
+  readonly object: string;
+  readonly where: unknown;
+  readonly context: ExecutionContext;
+  readonly searchFields: readonly string[];
+}
+
+/**
+ * [#34700] A guard of an object's own — a middleware that refuses a query
+ * naming some of its columns for some callers — tells the search expansion
+ * which of `searchFields` this caller may not query, so a server-chosen search
+ * set never names them (`EngineMiddlewareOptions.withholdSearchFields`).
+ * `undefined` or `[]` withholds nothing. A throw propagates, as from the
+ * security service's `getQueryableFields`.
+ */
+export type SearchFieldWithholder = (
+  request: SearchFieldWithholdingRequest,
+) => Promise<readonly string[] | undefined> | readonly string[] | undefined;
+
+/** The options of `ObjectQL#registerMiddleware`. */
+export interface EngineMiddlewareOptions {
+  /** The object the middleware runs for; absent or `'*'` = every object. */
+  object?: string;
+  /**
+   * [#34700] The middleware is a guard of the object's own (plugin-audit's
+   * parent-field query guard, #21154) and this names the fields a non-blank
+   * `search` must not scan for the caller, asked for the reads the middleware
+   * runs on. They leave the server-resolved search set before the expansion,
+   * beside what the security service's `getQueryableFields` withholds
+   * (#25672). A field the caller names in `searchFields` is never withheld, so
+   * the middleware still refuses it; a context-less read is not asked. The
+   * middleware stays the enforcement.
+   */
+  withholdSearchFields?: SearchFieldWithholder;
+}
+
+/** One registered middleware, as `ObjectQL#registerMiddleware` stores it. */
+export interface EngineMiddlewareEntry extends EngineMiddlewareOptions {
+  fn: EngineMiddleware;
+}
+
+/**
  * "Which of these tombstoned `sys_file` rows is something still holding?"
  * (commit c3c72a4bc).
  *
@@ -4412,12 +4736,14 @@ export function staticReadonlyStoredView(
     preserveAudit: boolean;
     hookWrittenKeys: ReadonlySet<string> | undefined;
     wallJudgesOrganization?: boolean;
+    /** The walk's referential clear, which the strip keeps — so the view keeps it too. */
+    referentialClear?: ReferentialClearExemption;
   },
 ): Record<string, unknown> {
   if (!strip.runs) return data;
   return stripReadonlyFields(
     updateStaticReadonlySubject(schema, strip.wallJudgesOrganization === true) as any, data, supplied, undefined,
-    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys },
+    { preserveAudit: strip.preserveAudit, hookWrittenKeys: strip.hookWrittenKeys, referentialClear: strip.referentialClear },
   ) ?? data;
 }
 
@@ -4589,20 +4915,57 @@ export function cascadeSetAdd(index: Map<string, Set<string>>, object: string, i
 /**
  * [#23221] The one child delete a cascade walk is issuing, for that delete to
  * recognise itself by — see {@link ObjectQL.cascadeIssuedDeletes}. The walk
- * opens one per `cascade` dependent, around its own `delete()` call, and the
- * `delete()` whose object and id match claims it.
+ * opens one around its own `delete()` call, and the `delete()` whose object
+ * and target match claims it: a by-id delete by `id`, and a batch of children
+ * (ruling 6893661036, option F1) by `ids`, the exact set its `where.id.$in`
+ * names. Exactly one of the two is set.
  */
 interface CascadeIssuedDelete {
   /** The child object the walk is deleting from, as the registry names it. */
   readonly object: string;
-  /** The child row's id, as a string (the walk's `String(depId)`). */
-  readonly id: string;
+  /** The child row's id, as a string (the walk's `String(depId)`): a by-id child delete. */
+  readonly id?: string;
+  /** The chunk's ids, as strings: a cascade batch, one predicate delete over `where.id.$in`. */
+  readonly ids?: ReadonlySet<string>;
   /**
    * Set by the `delete()` that recognised itself. One token, one dispatch: a
    * later delete of the same row inside that call (a hook's own) finds it
    * claimed and is not marked.
    */
   claimed: boolean;
+}
+
+/**
+ * [ruling 6893661036, F1] A cascade batch's caller-scoped read did not return
+ * every child the walk asked it to delete: a row the caller may not delete is
+ * NARROWED out of a predicate delete, where the by-id delete of the same row
+ * REFUSES it. Thrown by `delete()` before any hook dispatches and before any
+ * write, and caught by the walk alone, which then deletes that chunk the by-id
+ * way, so the caller meets today's refusal and the whole cascade rolls back.
+ * Never reaches a caller: it is engine-internal and carries no code.
+ */
+class CascadeBatchNarrowed extends Error {
+  constructor(object: string) {
+    super(`cascade batch on '${object}' was narrowed by the caller's scope; deleting that chunk by id`);
+    this.name = 'CascadeBatchNarrowed';
+  }
+}
+
+/**
+ * [ruling 6893661036, F1] The id set a cascade batch names: `where` is exactly
+ * `{ id: { $in: [...] } }`, the shape the walk issues, and nothing else.
+ * `undefined` for any other predicate.
+ */
+function cascadeBatchIdsOf(where: unknown): string[] | undefined {
+  if (where === null || typeof where !== 'object' || Array.isArray(where)) return undefined;
+  const keys = Object.keys(where);
+  if (keys.length !== 1 || keys[0] !== 'id') return undefined;
+  const idSpec = (where as { id?: unknown }).id;
+  if (idSpec === null || typeof idSpec !== 'object' || Array.isArray(idSpec)) return undefined;
+  const opKeys = Object.keys(idSpec);
+  if (opKeys.length !== 1 || opKeys[0] !== '$in') return undefined;
+  const list = (idSpec as { $in?: unknown }).$in;
+  return Array.isArray(list) ? list.map((v) => String(v)) : undefined;
 }
 
 /**
@@ -5110,6 +5473,12 @@ export interface ReadableIdsChain {
   readonly security: ReadableIdsSecurityResolution;
   readonly context: ExecutionContext | undefined;
   readonly answers: Map<string, { scope: FilterCondition | undefined } | null>;
+  /**
+   * The driver options the read's driver call is handed — what a planned
+   * relation leaf's own options are compared with (`relation-semi-join.ts`);
+   * `undefined` is a bag with no keys. Every executor boundary passes them.
+   */
+  readonly driverOptions?: unknown;
 }
 
 /**
@@ -5163,17 +5532,43 @@ export const SECURITY_SERVICE_SOURCE_SLOT: unique symbol = Symbol.for('objectsta
  */
 const WRITE_PRECONDITION_OPTION: unique symbol = Symbol('objectql.writePrecondition');
 
+/**
+ * The engine's own channel for a referential write to one lookup on one row,
+ * on the `update` it issues: `{ object, id, field }` of the holder row and
+ * lookup. Two writers, both engine-owned referential integrity and never a
+ * caller write: the `set_null` delete walk's clear (`cascadeDeleteRelations`)
+ * and the recycle-bin restore's re-link of that clear and its undo (ADR-0148
+ * D2, `recycle-bin/restore.ts`). `update()` hands the read-only strips that one
+ * key, at the value the write received ({@link ReferentialClearOption}).
+ *
+ * A module-private symbol, the shape of {@link WRITE_PRECONDITION_OPTION}, and
+ * for the same reason: no options object a door builds, no hook's `ctx.api`
+ * write and nothing outside this package can carry it. ⛔ Not the
+ * operation-private `__referentialFieldClear` context key, which a write a
+ * hook issues through `ctx.api` during the cleanup dispatch INHERITS
+ * (`buildReferentialFieldClear`); and ⛔ not `isSystem`, whose exemption is
+ * total. ⛔ Not re-exported by `index.ts` or `core.ts`.
+ */
+const REFERENTIAL_CLEAR_OPTION: unique symbol = Symbol('objectql.referentialClear');
+
+/** What the delete walk or the restore puts under {@link REFERENTIAL_CLEAR_OPTION}: the holder row and the lookup it writes. */
+interface ReferentialClearOption {
+  readonly object: string;
+  readonly id: string;
+  readonly field: string;
+}
+
 // [#29986 codemod] Declared above without `export`, and read by `engine.ts` or a section module.
 export {
-  AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, AutonumberReaders, CascadeIssuedDelete,
-  DISPATCHABLE_HOOK_EVENTS, ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
+  AUTONUMBER_COLLISION_ATTEMPTS, AUTONUMBER_SEED_PAGE_SIZE, AutonumberReaders, CascadeBatchNarrowed,
+  CascadeIssuedDelete, DISPATCHABLE_HOOK_EVENTS, cascadeBatchIdsOf, ENGINE_AGGREGATE_OPTION_KEYS, ENGINE_DELETE_OPTION_KEYS, ENGINE_FIND_OPTION_KEYS,
   ENGINE_QUERY_SLOTS, ENGINE_UPDATE_OPTION_KEYS, ENGINE_WIRE_ONLY_SLOTS, FormulaFaultSink, FormulaRelated,
   IssuedAutonumber, METADATA_ARRAY_KEYS, ReadableIdsSecurityResolution, StoredExpressionServing, TransactionScope,
-  WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
+  REFERENTIAL_CLEAR_OPTION, ReferentialClearOption, WIRE_ONLY_CANONICAL_SHAPES, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
   assertDispatchableHookEvent, assertHookScopeNotSelfCancelling, assertOrderByIsMaterializable,
   assertProjectionHasNoDottedPaths, assertValidHookExcludeObjects, assertValidHookObject,
   assertValidUnscopedMultiWriteFlag, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
-  deleteWalkTargetOf, describeNonFilterWhere, emptySearchSetError, formulaPlanEntry, handBackWithheldInsertReadonly,
+  deleteWalkTargetOf, describeNonFilterWhere, emptySearchSetError, formulaPlanEntry, formulaValuesFor, handBackWithheldInsertReadonly,
   hydrateWriteFormulas, isWhereFilterObject, judgeWhereAdmission, noteRegistrationStamp,
   organizationPredicateDeleteRefusal, planFormulaProjection, planStoredExpressions, readStoredAutonumberCounter,
   recomputeAutonumberReaders, refuseSearchOverrideNamingNoField, refuseSearchOverrideNamingNoSearchableField,

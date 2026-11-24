@@ -45,7 +45,8 @@
  * the wiring below reads them off that context instead of inventing a private
  * one (this package has no access to the current user, so it cannot author a
  * `sys_comment` row on its own):
- *   `showCommentInput` (needs `onAddComment`) · `enableThreading` (replies
+ *   `showCommentInput` (needs `onAddComment`, and a `types` that admits
+ *   `comment`: objectstack#34371) · `enableThreading` (replies
  *   need `onAddReply`) · `enableReactions` (needs `onToggleReaction`) ·
  *   `enableMentions` (withholds the @-autocomplete suggestions when off)
  *
@@ -75,22 +76,35 @@ import {
   normalizeLimit,
   describeRefusedFeedLimit,
   isRefusedFeedRead,
+  feedTypesAdmitComments,
+  warnWithheldCommentComposer,
   IMPERSONATED_ACTOR_FALLBACK,
   type SysActivityRow,
 } from './recordActivityFeed';
 import { useRecordAriaProps } from './recordComponentAria';
 import { useDefaultRecordPage } from '../defaultRecordPage';
 import {
+  RecordCommentsInPanelContext,
   RecordFieldChangesContext,
   RecordFieldHistoryContext,
   RecordTimelineCountContext,
   RecordTimelinePanelContext,
   RecordTimelineTotalContext,
   filterTimelineStream,
+  mergeFieldHistoryIntoFeed,
   mergeTimelineStream,
   timelineStreamFilters,
   type TimelineStreamFilter,
 } from '../recordTimelineStream';
+
+/**
+ * Dev mode, in this package's established spelling for it — the build's
+ * `NODE_ENV`, read per call — the guard `record-related-list.tsx` and
+ * `record-path.tsx` put on their authoring diagnostics.
+ */
+const isDevBuild = (): boolean =>
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.NODE_ENV !== 'production';
 
 const splitDesigner = (props: Record<string, any>) => {
   const { 'data-obj-id': id, 'data-obj-type': type, style, ...rest } = props || {};
@@ -104,6 +118,15 @@ const splitDesigner = (props: Record<string, any>) => {
  * reported under this name.
  */
 const BLOCK_NAME = 'record:activity';
+
+/**
+ * The stream's chips while its comments are the comment panel's
+ * (objectstack#36075 item 5): 全部 / 活动 / 讨论 go, 变更 stays
+ * (objectstack#30074). It is offered where the record's field history is
+ * shown, and pressed again it goes back to every entry.
+ */
+const PANEL_STREAM_FILTERS: readonly TimelineStreamFilter[] = ['changes'];
+const NO_STREAM_FILTERS: readonly TimelineStreamFilter[] = [];
 
 export interface RecordActivityRendererProps {
   schema?: RecordActivityComponentProps & {
@@ -175,6 +198,18 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
     enableThreading: read('enableThreading'),
     showSubscriptionToggle: read('showSubscriptionToggle'),
   };
+
+  // objectstack#34371 — a `types` allow-list that leaves out `comment` filters
+  // every comment out of this block, the ones posted here included. Such a
+  // block offers no composer and no Comments-only filter, and, where the
+  // composer would have been offered, tells the author why once, in development.
+  const commentsShown = feedTypesAdmitComments(types, BLOCK_NAME);
+  const composerWithheld = !commentsShown && config.showCommentInput !== false;
+  const nodeId: string | undefined = typeof schema.id === 'string' ? schema.id : undefined;
+  const typesKey = JSON.stringify(types ?? null);
+  React.useEffect(() => {
+    if (composerWithheld && isDevBuild()) warnWithheldCommentComposer(BLOCK_NAME, nodeId, JSON.parse(typesKey));
+  }, [composerWithheld, nodeId, typesKey]);
 
   const hostItems: FeedItem[] | undefined = Array.isArray(schema.items)
     ? (schema.items as FeedItem[])
@@ -291,15 +326,31 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   const [chosenStreamFilter, setStreamFilter] = React.useState<TimelineStreamFilter>('all');
   const [streamPages, setStreamPages] = React.useState(1);
   // objectstack#30074 — no 变更 chip while the record's field history is not
-  // shown; a chip that is not offered filters nothing.
-  const streamFilters = timelineStreamFilters(React.useContext(RecordFieldHistoryContext));
+  // shown; a chip that is not offered filters nothing. Nor while this block
+  // un-mixes the field changes (`unifiedTimeline: false`): it shows none, so
+  // its `changes_only` is not offered either (objectstack#33996).
+  const fieldHistoryShown = React.useContext(RecordFieldHistoryContext) && unifiedTimeline !== false;
+  // objectstack#36075 — the comments are the comment panel's: the stream
+  // draws the system entries alone. Of its chips only 变更 is kept, the one
+  // that is not about comments (objectstack#30074).
+  const commentsInPanel = React.useContext(RecordCommentsInPanelContext) && asStream;
+  const streamFilters = commentsInPanel
+    ? fieldHistoryShown
+      ? PANEL_STREAM_FILTERS
+      : NO_STREAM_FILTERS
+    : timelineStreamFilters(fieldHistoryShown);
   const streamFilter: TimelineStreamFilter = streamFilters.includes(chosenStreamFilter) ? chosenStreamFilter : 'all';
 
   const discussionItems = discussion?.items as FeedItem[] | undefined;
   const applied = React.useMemo(() => {
-    const sourceItems: FeedItem[] = hostItems ?? discussionItems ?? fetched ?? [];
+    const handed: FeedItem[] = hostItems ?? discussionItems ?? fetched ?? [];
+    const sourceItems = commentsInPanel ? handed.filter((item) => item.type !== 'comment') : handed;
     if (!asStream) {
-      return { ...applyFeedConfig(sourceItems, { types, showCompleted, unifiedTimeline }, pageSize, BLOCK_NAME), total: 0 };
+      // objectstack#33996 — off the default record page (an authored page)
+      // the field changes the host hands over join the feed by the stream's
+      // pairing, oldest first as this face reads.
+      const feed = mergeFieldHistoryIntoFeed(sourceItems, fieldChanges);
+      return { ...applyFeedConfig(feed, { types, showCompleted, unifiedTimeline }, pageSize, BLOCK_NAME), total: 0 };
     }
     // The chip filters the WHOLE stream before the page is cut, so 讨论 is
     // every comment, not the comments of the first page.
@@ -318,7 +369,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
     const shown = limit * streamPages;
     if (total <= shown) return { items: all.items, hasMore: false, total };
     return { items: all.items.slice(0, shown), hasMore: true, total };
-  }, [hostItems, discussionItems, fetched, types, showCompleted, unifiedTimeline, pageSize, asStream, asPeek, peekEntries, fieldChanges, streamFilter, streamPages, limit]);
+  }, [hostItems, discussionItems, fetched, commentsInPanel, types, showCompleted, unifiedTimeline, pageSize, asStream, asPeek, peekEntries, fieldChanges, streamFilter, streamPages, limit]);
   const items = applied.items;
   const hasMore = applied.hasMore || (canSelfFetch && fetchedHasMore);
 
@@ -331,12 +382,13 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
   // self-fetch answers for its one `sys_activity` read.
   const activityDenied =
     hostItems !== undefined ? false : discussion ? !!discussion.activityDenied : canSelfFetch && selfDenied;
-  const commentsDenied = hostItems === undefined && !!discussion?.commentsDenied;
+  // A refused or failed comment read is the comment panel's to say, not the stream's.
+  const commentsDenied = hostItems === undefined && !commentsInPanel && !!discussion?.commentsDenied;
   // objectstack#29188: which of the host's reads FAILED (5xx, network). Only a
   // mounted DiscussionContext reports it; host `items` and the self-fetch
   // carry no failure verdict, as before.
   const activityFailed = hostItems === undefined && !!discussion?.activityFailed;
-  const commentsFailed = hostItems === undefined && !!discussion?.commentsFailed;
+  const commentsFailed = hostItems === undefined && !commentsInPanel && !!discussion?.commentsFailed;
 
   // The timeline takes `filterMode` as a CONTROLLED prop, so the authored
   // `filterMode` becomes the initial state here and the dropdown stays usable —
@@ -372,6 +424,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
 
   return (
     <div className={className} {...designer} {...ariaProps}>
+      <RecordFieldHistoryContext.Provider value={fieldHistoryShown}>
       <RecordActivityTimeline
         items={items}
         config={config}
@@ -380,7 +433,8 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         onFilterChange={setFilterMode}
         hasMore={hasMore}
         onLoadMore={handleLoadMore}
-        onAddComment={discussion?.onAddComment as any}
+        onAddComment={commentsInPanel ? undefined : (discussion?.onAddComment as any)}
+        commentsShown={commentsShown && !commentsInPanel}
         onAddReply={discussion?.onAddReply as any}
         onToggleReaction={discussion?.onToggleReaction as any}
         // objectui#12268: the author's Edit and Delete on their own comment.
@@ -408,7 +462,9 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
                 streamFilter,
                 streamFilters,
                 onStreamFilterChange: (next: TimelineStreamFilter) => {
-                  setStreamFilter(next);
+                  // A lone 变更 chip (the comments in the panel) has no 全部
+                  // beside it: pressed again, it goes back to every entry.
+                  setStreamFilter(commentsInPanel && next === streamFilter ? 'all' : next);
                   setStreamPages(1);
                 },
                 totalCount: applied.total,
@@ -416,6 +472,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
               }
             : {})}
       />
+      </RecordFieldHistoryContext.Provider>
     </div>
   );
 };
@@ -457,6 +514,9 @@ export function RecordTimelineCountProbe({
   const discussion = useDiscussionContext();
   const fieldChanges = React.useContext(RecordFieldChangesContext);
   const hostTotal = React.useContext(RecordTimelineTotalContext);
+  // objectstack#36075 — the stream it counts holds no comments while the
+  // comment panel holds them, exactly as the drawn stream does.
+  const commentsInPanel = React.useContext(RecordCommentsInPanelContext);
   const bag = (node?.properties ?? {}) as Record<string, any>;
   const read = (key: string) => node?.[key] ?? bag[key];
   const hostItems = Array.isArray(read('items')) ? (read('items') as FeedItem[]) : undefined;
@@ -464,8 +524,14 @@ export function RecordTimelineCountProbe({
   // objectstack#29188: a failed read leaves the count as unknown as a refused one.
   const denied = hostItems !== undefined
     ? false
-    : !!discussion?.activityDenied || !!discussion?.commentsDenied || !!discussion?.activityFailed || !!discussion?.commentsFailed;
-  const sourceItems = hostItems ?? (discussion?.items as FeedItem[] | undefined);
+    : !!discussion?.activityDenied ||
+      !!discussion?.activityFailed ||
+      (!commentsInPanel && (!!discussion?.commentsDenied || !!discussion?.commentsFailed));
+  const heldItems = hostItems ?? (discussion?.items as FeedItem[] | undefined);
+  const sourceItems = React.useMemo(
+    () => (commentsInPanel && heldItems ? heldItems.filter((item) => item.type !== 'comment') : heldItems),
+    [commentsInPanel, heldItems],
+  );
   const types = read('types');
   const showCompleted = read('showCompleted');
   const unifiedTimeline = read('unifiedTimeline');

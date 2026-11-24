@@ -410,13 +410,26 @@ export const ptBR: PlatformTranslationData = {
         multi_factor: { title: 'Multifator', description: 'Quem nesta organização deve proteger a conta com um aplicativo autenticador (TOTP).' },
       },
       keys: {
-        allowed_ip_ranges: { label: 'Faixas de IP permitidas' },
-        session_idle_timeout_minutes: { label: 'Tempo limite de inatividade (minutos)' },
-        session_absolute_max_hours: { label: 'Duração máxima da sessão (horas)' },
-        max_concurrent_sessions_per_user: { label: 'Máximo de sessões simultâneas por usuário' },
+        allowed_ip_ranges: {
+          label: 'Faixas de IP permitidas',
+          help: 'Faixas CIDR ou IPs exatos (um por linha ou separados por vírgula), por exemplo 203.0.113.0/24. Quando definido, a sessão de um membro não é aberta para esta organização de fora dessas faixas, e uma sessão que depois chega de fora delas é encerrada; o mesmo vale para qualquer requisição cujo endereço de cliente o servidor não consiga determinar. Cada faixa deve estar dentro das faixas de IP permitidas da implantação, quando ela define alguma, e a lista deve incluir o endereço de onde você a salva. Vazio = apenas as faixas da implantação se aplicam. Administradores da plataforma ficam sujeitos apenas às faixas da implantação.',
+        },
+        session_idle_timeout_minutes: {
+          label: 'Tempo limite de inatividade (minutos)',
+          help: 'Encerra a sessão de um membro após esta quantidade de minutos de inatividade. Não pode ser maior que o tempo limite de inatividade da implantação, quando ela define um. 0 = o tempo limite de inatividade da implantação.',
+        },
+        session_absolute_max_hours: {
+          label: 'Duração máxima da sessão (horas)',
+          help: 'Força uma nova autenticação esta quantidade de horas após o login, independentemente da atividade. Não pode ser maior que a duração da implantação, quando ela define uma. 0 = a duração da implantação.',
+        },
+        max_concurrent_sessions_per_user: {
+          label: 'Máximo de sessões simultâneas por usuário',
+          help: 'Limita as sessões simultâneas com login de um membro nesta organização; acima do limite, as mais antigas são encerradas, e sessões em outras organizações não são contadas nem encerradas. Verificado no login e quando um membro muda para esta organização. Não pode ser maior que o limite da implantação, quando ela define um, que continua contando todas as sessões do membro. 0 = apenas o limite da implantação.',
+        },
         mfa_required: {
           label: 'Exigir autenticação multifator',
           options: { off: 'Desativado', administrators: 'Administradores', everyone: 'Todos' },
+          help: 'Quem deve usar um aplicativo autenticador: administradores (da plataforma, da organização e delegados) ou todos. As pessoas obrigadas que não se cadastraram perdem o acesso aos dados quando termina o período de carência da implantação. Um nível mais fraco que o da implantação é recusado; Desativado = o requisito da implantação. Requer a autenticação de dois fatores ativada nesta implantação; enquanto estiver desativada, salvar um requisito é recusado.',
         },
       },
     },

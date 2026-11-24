@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useState, useMemo, type ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Command,
   Dialog,
@@ -35,6 +35,9 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
+  DIALOG_VIEWPORT_GUTTER,
+  ObjectIconTile,
+  cn,
 } from '@object-ui/components';
 import {
   LayoutDashboard,
@@ -47,9 +50,10 @@ import {
   Boxes,
   Database,
   Workflow,
+  Plus,
   type LucideIcon,
 } from 'lucide-react';
-import { useRecordSearch } from '@object-ui/react';
+import { useObjectLabel, usePredicateScope, useRecordSearch, type RecordSearchHit } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useTheme } from './ThemeProvider.js';
 import { navEntriesShownToMember, useNavMemberGates, type NavMemberGates } from '../hooks/useNavMemberGates.js';
@@ -58,6 +62,7 @@ import { resolveKeyedI18nLabel, getRecordDisplayName, appRouteSegment } from '..
 import { appAddressSegment, filterActiveApps } from '../utils/appRoute.js';
 import { navigationNames } from '../console/appObjectScope.js';
 import { getIcon } from '../utils/getIcon.js';
+import { AppMark } from '../layout/AppMark.js';
 import { useRecentItems } from '../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../hooks/useRecentItemLabel.js';
 import { recentItemObject } from '../console/home/recentItemTypeLabel.js';
@@ -70,6 +75,7 @@ import { resolveHref, resolveNavItemLabel } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 import { findByName, useNavTargetLabel, type NavTargetLabelOptions } from '../hooks/useNavTargetLabel.js';
 import { readObjectsByName } from '../hooks/useObjectPresence.js';
+import { useNavTargetColor } from '../hooks/useNavTargetIcon.js';
 
 import { useAuth } from '@object-ui/auth';
 import { matchesPaletteQuery } from './paletteMatch.js';
@@ -78,6 +84,18 @@ import { isPackageLessItem, studioOrgScopePath } from '../views/studio-design/st
 import { DESIGNER_SURFACE_PARAM, formatSurfaceParam } from '../views/metadata-admin/nav-selection.js';
 import { flattenNavigation, useAppReportEntries } from '../views/appReportIndex.js';
 import { useServedApps } from '../hooks/useLauncherApps.js';
+import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
+import {
+  CREATE_AS_MAX,
+  paletteCreateHref,
+  paletteCreateTargets,
+  routeObjectName,
+  type PaletteCreateObjectDef,
+  type PaletteCreateTarget,
+} from './paletteCreate.js';
+import { PalettePreviewPane, type PalettePreviewTarget } from './PalettePreviewPane.js';
+import { PaletteEnterHint } from './PaletteEnterHint.js';
+import { PaletteCurrentPageGroup, paletteCurrentPage } from './PaletteCurrentPage.js';
 
 /** A recent row names its object by name (objectstack#29121). */
 const RECENT_ROW_LABELS: NavTargetLabelOptions = { byName: true };
@@ -226,7 +244,12 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   const { apps, activeApp, objects, onAppChange, dataSource } = inStudio ? NO_APP : props;
   const { open, setOpen } = useCommandPalette();
   const [inputValue, setInputValue] = useState('');
+  // The entry the keyboard is on, by its cmdk value (objectstack#36286): the
+  // footer says what Enter does to it, and a record hit is previewed beside
+  // the results.
+  const [selectedValue, setSelectedValue] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
   const { appName } = useParams();
   const { setTheme } = useTheme();
   const { t, language } = useObjectTranslation();
@@ -246,7 +269,10 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
 
   // Reset query when the palette closes so reopening doesn't show stale state.
   useEffect(() => {
-    if (!open) setInputValue('');
+    if (!open) {
+      setInputValue('');
+      setSelectedValue('');
+    }
   }, [open]);
   // What was typed between the shortcut and this input's focus starts the
   // query (objectstack#32627).
@@ -411,15 +437,19 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
    */
   const metadata = useMetadata();
   const recentTargetLabel = useNavTargetLabel(RECENT_ROW_LABELS);
-  const recentContext = (item: RecentItem): { type?: string; icon?: string } => {
+  const recentContext = (item: RecentItem): { objectName?: string; type?: string; icon?: string; color?: string } => {
     const objectName = recentItemObject(item);
     if (!objectName) return {};
-    const def = findByName(readObjectsByName(metadata, [objectName]), objectName) as { icon?: unknown } | undefined;
+    const def = findByName(readObjectsByName(metadata, [objectName]), objectName) as { icon?: unknown; color?: unknown } | undefined;
     return {
+      objectName,
       type: recentTargetLabel({ kind: 'object', objectName }) ?? objectName,
       icon: typeof def?.icon === 'string' && def.icon !== '' ? def.icon : undefined,
+      color: typeof def?.color === 'string' ? def.color : undefined,
     };
   };
+  // objectstack#35985 — an object entry draws the object's tile, in its colour.
+  const navTargetColor = useNavTargetColor();
 
   // Index object defs by name so group headings can resolve the object's
   // localized label (labels may be `{ key, defaultValue }` i18n objects, which
@@ -440,7 +470,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
     const order: string[] = [];
     const byObject = new Map<
       string,
-      { objectLabel: string; icon?: string; hits: typeof recordHits }
+      { objectLabel: string; icon?: string; color?: string; hits: typeof recordHits }
     >();
     for (const hit of recordHits) {
       let group = byObject.get(hit.objectName);
@@ -449,7 +479,12 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
         // label (already objectName when the def had no string label).
         const objDef = objectsByName.get(hit.objectName);
         const label = resolveKeyedI18nLabel(objDef?.label, t) || hit.objectLabel;
-        group = { objectLabel: label, icon: hit.icon, hits: [] };
+        group = {
+          objectLabel: label,
+          icon: hit.icon,
+          color: typeof objDef?.color === 'string' ? objDef.color : hit.color,
+          hits: [],
+        };
         byObject.set(hit.objectName, group);
         order.push(hit.objectName);
       }
@@ -460,6 +495,71 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
       return { objectName: name, ...group };
     });
   }, [recordHits, objectsByName, t]);
+
+  // objectstack#36286 — the record hit the keyboard is on, previewed beside
+  // the results while there are any.
+  const recordHitByValue = new Map<string, RecordSearchHit>();
+  for (const hit of recordHits) recordHitByValue.set(recordHitValue(hit), hit);
+  const selectedHit = recordHitByValue.get(selectedValue);
+  const previewTarget: PalettePreviewTarget | null = selectedHit
+    ? { objectName: selectedHit.objectName, recordId: selectedHit.recordId }
+    : null;
+  const showPreview = recordGroups.length > 0;
+  // A query's record hits answer after its other entries are drawn, above
+  // them: when a new set of hits lands, the selection moves to the first one,
+  // so the top entry is the one Enter opens and the pane previews.
+  const firstHitValue = recordGroups[0]?.hits[0] ? recordHitValue(recordGroups[0].hits[0]) : '';
+  // Compared by the hits' text alone (ui/AGENTS.md #10): only a new set of
+  // hits moves the selection, and the arrow keys own it after.
+  const hitSignature = recordHits.map(recordHitValue).join('\n');
+  const [seenHitSignature, setSeenHitSignature] = useState('');
+  if (hitSignature !== seenHitSignature) {
+    setSeenHitSignature(hitSignature);
+    if (firstHitValue !== '') setSelectedValue(firstHitValue);
+  }
+
+  // objectstack#36286 — what the page behind the palette offers (its list's
+  // or its record's favorites entry), above everything else on the empty
+  // palette; nothing once something is typed.
+  const currentPage =
+    open && !inStudio && inputValue.trim() === ''
+      ? paletteCurrentPage(location.pathname, (name) => objectsByName.has(name))
+      : null;
+
+  // objectstack#36286 — the app's objects the member may create a record of,
+  // the object of the page the palette was opened on first. Only once
+  // something is typed: the empty palette is the recent records' screen.
+  const predicateScope = usePredicateScope();
+  const { objectLabel } = useObjectLabel();
+  const query = inputValue.trim();
+  const createTargets: PaletteCreateTarget[] =
+    open && query !== '' && !inStudio
+      ? paletteCreateTargets(
+          searchableObjectNames,
+          objectsByName as ReadonlyMap<string, PaletteCreateObjectDef>,
+          perms,
+          predicateScope,
+          routeObjectName(location.pathname, searchableObjectNames),
+        )
+      : [];
+  const createLabel = (target: PaletteCreateTarget) =>
+    servedObjectLabel(target.def as { name: string; label?: unknown }, language, objectLabel, target.objectName);
+  // A "New OBJECT" entry, found by its label's words and the object's own label and name.
+  const newRecordRows = createTargets
+    .map((target) => {
+      const objectText = createLabel(target);
+      const label = t('console.objectView.newObject', { object: objectText, defaultValue: 'New {{object}}' });
+      return { target, label, objectText };
+    })
+    .filter((row) => matches(row.label, row.objectText, row.target.objectName, NEW_RECORD_TERM));
+  // "Create 'words' as OBJECT": the typed words seed the object's title field.
+  // Not for an object the query already names as a "New" entry — the words
+  // ask for that action then, not for a record called that.
+  const newRecordObjects = new Set(newRecordRows.map((row) => row.target.objectName));
+  const createAsRows = createTargets
+    .filter((target) => target.prefillField && !newRecordObjects.has(target.objectName))
+    .slice(0, CREATE_AS_MAX)
+    .map((target) => ({ target, objectText: createLabel(target) }));
 
   return (
     <PaletteDialog
@@ -474,13 +574,16 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
         // without relying on i18n-fragile visible text (C4).
         'data-testid': COMMAND_PALETTE_TESTID,
       }}
+      value={selectedValue}
+      onValueChange={setSelectedValue}
+      wide={showPreview}
     >
       <CommandInput
         placeholder={t('console.commandPalette.placeholder')}
         value={inputValue}
         onValueChange={setInputValue}
       />
-      <CommandList>
+      <CommandList className="min-w-0">
         <CommandEmpty>
           {isSearching || studio.loading ? (
             <span className="inline-flex items-center gap-2 text-muted-foreground">
@@ -495,6 +598,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
           )}
         </CommandEmpty>
 
+        {currentPage && (
+          <PaletteCurrentPageGroup
+            page={currentPage}
+            objectDef={objectsByName.get(currentPage.objectName)}
+            run={runCommand}
+          />
+        )}
+
         {/* Recently visited records (cloud-synced via sys_user_preference).
             Only renders when the input is empty so search results don't
             compete with this fallback list. */}
@@ -503,7 +614,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             heading={t('console.commandPalette.recentRecords', { defaultValue: 'Recently viewed' })}
           >
             {recentRecords.map((item) => {
-              const { type, icon } = recentContext(item);
+              const { objectName, type, icon, color } = recentContext(item);
               const Icon = icon ? getIcon(icon) : FileText;
               return (
                 <CommandItem
@@ -511,7 +622,11 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                   value={`recent ${recentLabel(item)} ${item.id}`}
                   onSelect={() => leaveTo(item.href)}
                 >
-                  <Icon className="mr-2 h-4 w-4" />
+                  {objectName ? (
+                    <ObjectIconTile glyph={Icon} color={color} className="mr-2" />
+                  ) : (
+                    <Icon className="mr-2 h-4 w-4" />
+                  )}
                   <span className="truncate">{recentLabel(item)}</span>
                   {type && (
                     <span
@@ -553,10 +668,10 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                   key={`${hit.objectName}:${hit.recordId}`}
                   // Stable across queries: cmdk filters nothing here
                   // (`shouldFilter` false), it only selects by the value.
-                  value={`record ${hit.display} ${hit.objectLabel} ${hit.objectName} ${hit.recordId}`}
+                  value={recordHitValue(hit)}
                   onSelect={() => leaveTo(`${recordHitBaseUrl(hit.objectName)}/${hit.objectName}/record/${hit.recordId}`)}
                 >
-                  <Icon className="mr-2 h-4 w-4" />
+                  <ObjectIconTile glyph={Icon} color={group.color} className="mr-2" />
                   <span className="truncate">{hit.display}</span>
                   {hit.subtitle && (
                     <span className="ml-auto max-w-[45%] truncate text-xs text-muted-foreground">
@@ -568,19 +683,21 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             </CommandGroup>
           );
         })}
+
         {/* Object Navigation */}
         {objectItems.length > 0 && (
           <CommandGroup heading={t('console.commandPalette.objects')}>
             {objectItems
               .map(item => {
                 const Icon = getIcon(item.icon);
+                const color = item.objectName ? navTargetColor({ kind: 'object', objectName: item.objectName }) : undefined;
                 return (
                   <CommandItem
                     key={item.id}
                     value={`object ${navLabel(item)} ${item.objectName}`}
                     onSelect={() => leaveTo(resolveHref(item, baseUrl, templateContext).href)}
                   >
-                    <Icon className="mr-2 h-4 w-4" />
+                    <ObjectIconTile glyph={Icon} color={color} className="mr-2" />
                     <span>{navLabel(item)}</span>
                   </CommandItem>
                 );
@@ -697,14 +814,14 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
             <CommandGroup heading={t('console.commandPalette.switchApp')}>
               {appItems
                 .map(app => {
-                  const Icon = getIcon(app.icon);
                   return (
                     <CommandItem
                       key={app.name}
                       value={`app ${resolveKeyedI18nLabel(app.label, t)} ${app.name}`}
                       onSelect={() => runCommand(() => confirmUnsavedLeave(() => onAppChange(appAddressSegment(apps, app) ?? app.name)))}
                     >
-                      <Icon className="mr-2 h-4 w-4" />
+                      {/* objectstack#36157 — the app's own mark, as the switcher draws it. */}
+                      <AppMark app={app} size="sm" className="mr-2" />
                       <span>{resolveKeyedI18nLabel(app.label, t)}</span>
                       {app.name === activeApp?.name && (
                         <span className="ml-auto text-xs text-muted-foreground">{t('console.commandPalette.current')}</span>
@@ -731,6 +848,49 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
           </>
         )}
 
+        {/* objectstack#36286 — create a record, below every result: the
+            "New OBJECT" entries the query finds, then "Create 'words' as
+            OBJECT". Last, so Enter on a query that finds something opens it. */}
+        {(newRecordRows.length > 0 || createAsRows.length > 0) && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={t('console.commandPalette.create', { defaultValue: 'Create' })}>
+              {newRecordRows.map(({ target, label }) => (
+                <CommandItem
+                  key={`create-new:${target.objectName}`}
+                  value={`create new ${target.objectName}`}
+                  onSelect={() => leaveTo(paletteCreateHref(baseUrl, target.objectName))}
+                >
+                  <ObjectIconTile
+                    glyph={getIcon(typeof target.def.icon === 'string' ? target.def.icon : undefined)}
+                    color={typeof target.def.color === 'string' ? target.def.color : undefined}
+                    className="mr-2"
+                  />
+                  <span className="truncate">{label}</span>
+                </CommandItem>
+              ))}
+              {createAsRows.map(({ target, objectText }) => (
+                <CommandItem
+                  key={`create-as:${target.objectName}`}
+                  value={`create as ${target.objectName}`}
+                  onSelect={() =>
+                    leaveTo(paletteCreateHref(baseUrl, target.objectName, { field: target.prefillField!, value: query }))
+                  }
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  <span className="truncate">
+                    {t('console.commandPalette.createAs', {
+                      query,
+                      object: objectText,
+                      defaultValue: 'Create "{{query}}" as {{object}}',
+                    })}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
         {/* Full Search Page */}
         {showFullSearch && (
           <>
@@ -748,6 +908,8 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
           </>
         )}
       </CommandList>
+      {showPreview && <PalettePreviewPane target={previewTarget} dataSource={dataSource} />}
+      <PaletteEnterHint value={selectedValue} />
     </PaletteDialog>
   );
 }
@@ -769,6 +931,9 @@ function PaletteDialog({
   title,
   description,
   contentProps,
+  value,
+  onValueChange,
+  wide,
   children,
 }: {
   open: boolean;
@@ -776,14 +941,19 @@ function PaletteDialog({
   title: ReactNode;
   description: ReactNode;
   contentProps: Record<`data-${string}`, string>;
+  /** The selected entry's cmdk value (objectstack#36286). */
+  value: string;
+  onValueChange: (value: string) => void;
+  /** Room for the record preview beside the results (objectstack#36286). */
+  wide: boolean;
   children: ReactNode;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 shadow-lg" {...contentProps}>
+      <DialogContent className={cn('overflow-hidden p-0 shadow-lg', wide && PALETTE_WIDE_CLASS)} {...contentProps}>
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">{description}</DialogDescription>
-        <Command shouldFilter={false} className={PALETTE_COMMAND_CLASS}>
+        <Command shouldFilter={false} value={value} onValueChange={onValueChange} className={PALETTE_COMMAND_CLASS}>
           {children}
         </Command>
       </DialogContent>
@@ -791,9 +961,23 @@ function PaletteDialog({
   );
 }
 
-/** The cmdk root's classes, as `CommandDialog` draws them. */
+/**
+ * The palette's width while a record preview is drawn beside the results
+ * (objectstack#36286): room for two halves. The preview pane itself shows only
+ * from a 45rem frame on (`PREVIEW_PANE_CLASS`), so a narrower window keeps the
+ * results alone. The cap (768px) is wider than the narrowest `sm` window can
+ * hold with a margin, so it reads the shared viewport gutter (objectui#12603).
+ */
+const PALETTE_WIDE_CLASS = `sm:max-w-3xl ${DIALOG_VIEWPORT_GUTTER}`;
+
+/**
+ * The cmdk root's classes, as `CommandDialog` draws them, laid out as a grid
+ * (objectstack#36286): the input and the footer span the frame, the results
+ * and the record preview pane share the row between them. The root is also the
+ * container the pane's width query reads (`@container/palette`).
+ */
 const PALETTE_COMMAND_CLASS =
-  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5';
+  '@container/palette grid grid-cols-[minmax(0,1fr)_auto] [&>[cmdk-input-wrapper]]:col-span-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5';
 
 /** The theme commands, matched by their label and their value (objectui#11812, objectstack#33061). */
 const THEME_COMMANDS = [
@@ -801,6 +985,18 @@ const THEME_COMMANDS = [
   { value: 'theme dark', theme: 'dark', Icon: Moon },
   { value: 'theme system', theme: 'system', Icon: Monitor },
 ] as const;
+
+/**
+ * A record hit's cmdk value (objectstack#36286 reads the selection back by it):
+ * stable across queries, since cmdk filters nothing here (`shouldFilter`
+ * false) and only selects by the value.
+ */
+function recordHitValue(hit: RecordSearchHit): string {
+  return `record ${hit.display} ${hit.objectLabel} ${hit.objectName} ${hit.recordId}`;
+}
+
+/** A "New OBJECT" entry is also found by this word, in every language (objectstack#36286). */
+const NEW_RECORD_TERM = 'create new';
 
 /** The full-search command's value, matched beside its label (objectui#11812, objectstack#33061). */
 const FULL_SEARCH_VALUE = 'search all results full page';

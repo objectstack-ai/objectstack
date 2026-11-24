@@ -87,6 +87,9 @@ vi.mock('../../preview/DraftChangesPanel', async () => {
   };
 });
 
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
@@ -144,10 +147,10 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-/** The object the header names: its api-name chip. */
+/** The object the header names: its title's tooltip (objectstack#34794). */
 async function openObjectIs(name: string): Promise<void> {
   await waitFor(
-    () => expect(within(screen.getByTestId('data-object-header')).getByTestId('studio-item-api-name')).toHaveTextContent(name),
+    () => expect(within(screen.getByTestId('data-object-header')).getByRole('heading', { level: 1 })).toHaveAttribute('title', name),
     { timeout: 8000 },
   );
 }
@@ -168,7 +171,7 @@ async function openTask(): Promise<void> {
 
 /** The card's repro: add a Picklist "Priority" with no option yet; the autosave holds it. */
 async function holdAPicklist(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await addFieldFromFormToolbar(undefined, { label: 'Priority', type: /^Picklist$/ });
   await screen.findByTestId('studio-held', undefined, { timeout: 8000 });
 }
@@ -195,7 +198,7 @@ describe('a held Data field guards create and Pending changes (objectstack#26845
     fireEvent.change(within(dialog).getByLabelText(t('engine.studio.data.nameLabel', 'en')), {
       target: { value: 'Ticket' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en') }));
+    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createLive', 'en') }));
     await openObjectIs('acme_ticket');
     expect(confirmSpy).toHaveBeenCalledTimes(2);
   });

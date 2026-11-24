@@ -8,12 +8,12 @@
  *
  * What this module holds, and what it reads:
  *
- *  - which types Studio customizes ({@link STUDIO_CUSTOMIZE_TYPES}): the
- *    Interfaces pillar's four and the app its rail navigates, each an
+ *  - which types Studio customizes ({@link STUDIO_CUSTOMIZE_TYPES}): a view,
+ *    dashboard, report and page, and an app, each an
  *    `overridable` type of the spec's closed classification
  *    (`isOverridableMetadataType`);
  *  - the body the pair's draft is written with ({@link overrideDraftBody}):
- *    the document the pillar holds, without its `_` keys, declaring
+ *    the document the editor holds, without its `_` keys, declaring
  *    `overrides: { package, basedOn }`;
  *  - the declaration the server serves for an item ({@link useServedOverride}):
  *    the pair's draft as the draft door serves it, else the layered read's
@@ -25,7 +25,7 @@
  *    offers Restore, with its confirmation (objectstack#29692).
  *
  * The pair's id for a write is the ensure door's answer
- * (`packages-io.ts#ensureCustomizationPackage`); the pillar asks it.
+ * (`packages-io.ts#ensureCustomizationPackage`); the editor asks it.
  */
 
 import * as React from 'react';
@@ -65,17 +65,18 @@ import { useStudioFoldedMenuClose } from './StudioItemHeader.js';
 import { readFields, writeFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
 
 /**
- * The types Studio's Customize door covers: the Interfaces pillar's view,
- * dashboard, report and page (an `object` leaf's list view is a `view`;
- * objectstack#30063: a page, block or source, is edited in its designer as
- * a dashboard is), and the app whose navigation that pillar's rail edits
- * (objectstack#30059: the whole app is copied into the pair on the first
- * saved navigation edit). Each is an
- * `overridable` type of the spec's classification. Translations and email
- * templates are too: no pillar designs them, and the All metadata area's form
- * editor customizes them (`StudioBundleItemEditor`, objectstack#28569). So is
- * a read-only package's dataset, in that editor with its own designer
- * (objectstack#30064, `metadataArea.ts#AREA_CUSTOMIZE_EDITOR_TYPES`).
+ * The types Studio's Customize door covers: a view, dashboard, report and page
+ * (objectstack#30063: a page, block or source, is edited in its designer as a
+ * dashboard is), and an app (objectstack#30059: the whole app is copied into
+ * the pair on the first saved navigation edit). Each is an `overridable` type
+ * of the spec's classification. Their door was the Interfaces pillar's header;
+ * since objectstack#36502 retired that pillar, a read-only base's view,
+ * dashboard, report or page is customized in the All metadata area's editor
+ * (`StudioBundleItemEditor`, `metadataArea.ts#AREA_CUSTOMIZE_EDITOR_TYPES`),
+ * and an app's navigation in the running app's design mode
+ * (`layout/designModeMenuSave.ts`). Translations and email templates are
+ * customized in that editor too (objectstack#28569), and so is a read-only
+ * package's dataset, with its own designer (objectstack#30064).
  */
 export const STUDIO_CUSTOMIZE_TYPES: readonly string[] = ['view', 'dashboard', 'report', 'page', 'app'];
 
@@ -152,9 +153,18 @@ export interface ServedOverride {
   declaration: OverrideDeclarationParsed | null;
   /** `draft`: the pair's pending draft declares it; `active`: the served row does. */
   state: 'draft' | 'active' | null;
+  /**
+   * objectstack#35600 (ADR-0146 D2, D11) — what the layered read at `base`
+   * served for the item: `base`, a code layer (the base ships the item, so an
+   * override of it can be declared); `environment`, no code layer but a row
+   * stored in this environment (an item no package ships: environment
+   * metadata, never an override); `none`, neither. `null` when that read was
+   * not made (the pair's draft answered first) or failed.
+   */
+  shipped: 'base' | 'environment' | 'none' | null;
 }
 
-const NO_OVERRIDE: ServedOverride = { declaration: null, state: null };
+const NO_OVERRIDE: ServedOverride = { declaration: null, state: null, shipped: null };
 
 /**
  * The override of `base` the server serves for `item`: the pair's pending
@@ -167,10 +177,18 @@ const NO_OVERRIDE: ServedOverride = { declaration: null, state: null };
  * of one locale is never read as the template's.
  *
  * A failed read is no declaration, as an absent one: no fact, no badge.
+ * The same layered read says whether the base ships the item
+ * ({@link ServedOverride.shipped}).
+ *
+ * objectstack#36750 — `item.unpublished`: the caller knows nothing is
+ * published under the item's name (a list view's fallback default id, which
+ * no view is held under). The layered read is not asked, and the answer is
+ * the one its 404 gave: no override, `shipped: 'none'`. The pair's draft is
+ * still read first: the item's first save into the pair creates it there.
  */
 export function useServedOverride(
   client: Pick<MetadataClient, 'getDraft' | 'layered'>,
-  item: { type: string; name: string; member?: string } | null,
+  item: { type: string; name: string; member?: string; unpublished?: boolean } | null,
   base: string | null,
   pair: string | null,
   nonce: string | number,
@@ -178,7 +196,8 @@ export function useServedOverride(
   const itemType = item?.type ?? '';
   const itemName = item?.name ?? '';
   const itemMember = item?.member ?? '';
-  const key = itemType && itemName && base ? JSON.stringify([itemType, itemName, itemMember, base]) : '';
+  const itemUnpublished = item?.unpublished === true;
+  const key = itemType && itemName && base ? JSON.stringify([itemType, itemName, itemMember, base, itemUnpublished]) : '';
   const [answer, setAnswer] = React.useState<{ key: string; served: ServedOverride }>({ key: '', served: NO_OVERRIDE });
   React.useEffect(() => {
     if (!key || !base) return;
@@ -191,20 +210,23 @@ export function useServedOverride(
           .getDraft(itemType, itemName, { packageId: pair, ...memberScope })
           .catch(() => null);
         const declared = declaredOverrideOf(extractDraftBody(draft), base);
-        if (declared) return { declaration: declared, state: 'draft' };
+        if (declared) return { declaration: declared, state: 'draft', shipped: null };
       }
+      if (itemUnpublished) return { declaration: null, state: null, shipped: 'none' };
       const layered = await client
         .layered(itemType, itemName, { packageId: base, ...memberScope })
         .catch(() => null);
-      const declared = declaredOverrideOf(layered?.overlay, base);
-      return declared ? { declaration: declared, state: 'active' } : NO_OVERRIDE;
+      if (!layered) return NO_OVERRIDE;
+      const shipped = layered.code != null ? 'base' : layered.overlay != null ? 'environment' : 'none';
+      const declared = declaredOverrideOf(layered.overlay, base);
+      return declared ? { declaration: declared, state: 'active', shipped } : { declaration: null, state: null, shipped };
     })().then((served) => {
       if (!cancelled) setAnswer({ key, served });
     });
     return () => {
       cancelled = true;
     };
-  }, [client, key, itemType, itemName, itemMember, base, pair, nonce]);
+  }, [client, key, itemType, itemName, itemMember, itemUnpublished, base, pair, nonce]);
   // A re-read of the same item keeps the last answer until it lands, so the
   // badge does not blink off and on after a save.
   return key && answer.key === key ? answer.served : NO_OVERRIDE;
@@ -526,13 +548,95 @@ export function foldObjectExtension(
     const patch = patches[entry.name];
     entries.push(isPlainRecord(patch) ? { name: entry.name, def: applyFieldPatch(entry.def, patch) } : entry);
   }
+  // objectstack#36505 — a field the extension places into a group (`place`
+  // `{ field, group }`) is served in that group: laying the extension's own
+  // declaration (which carries no `group`) over the served field keeps it.
+  const placedIn = new Set<string>();
+  if (Array.isArray(ext.place)) {
+    for (const entry of ext.place) {
+      if (isPlainRecord(entry) && typeof entry.field === 'string' && typeof entry.group === 'string') placedIn.add(entry.field);
+    }
+  }
   for (const [name, def] of Object.entries(own)) {
     if (!isPlainRecord(def)) continue;
     const at = entries.findIndex((e) => e.name === name);
-    if (at >= 0) entries[at] = { name, def };
-    else entries.push({ name, def });
+    const servedGroup = at >= 0 ? entries[at].def.group : undefined;
+    const laid = placedIn.has(name) && def.group === undefined && typeof servedGroup === 'string' ? { ...def, group: servedGroup } : def;
+    if (at >= 0) entries[at] = { name, def: laid };
+    else entries.push({ name, def: laid });
   }
-  return { ...object, fields: writeFields({ shape: view.shape, entries }) };
+  if (!Array.isArray(ext.fieldGroups)) return { ...object, fields: writeFields({ shape: view.shape, entries }) };
+  return applyExtensionFieldGroups({ ...object, fields: writeFields({ shape: view.shape, entries }) }, ext.fieldGroups, own);
+}
+
+/**
+ * objectstack#36505 (ADR-0146 D10) — `body` without the `place` entries a
+ * written `fieldGroups` replaces: a `{ field }` or `{ group }` placement
+ * beside the whole arrangement is refused at save
+ * (`refusePlacementsTheArrangementReplaces` on `ObjectExtensionSchema`), and
+ * the arrangement already lists the field, or holds the group, where the
+ * placement put it. A `{ list }` placement stays (the tab list is not
+ * replaced by `fieldGroups`); `place` left empty is taken off.
+ */
+export function withoutReplacedPlacements(body: ObjectExtensionBody): ObjectExtensionBody {
+  if (!Array.isArray(body.place)) return body;
+  const kept = body.place.filter((entry: unknown) => {
+    if (!isPlainRecord(entry)) return true;
+    return typeof entry.field !== 'string' && !isPlainRecord(entry.group);
+  });
+  if (kept.length === body.place.length) return body;
+  const out: ObjectExtensionBody = { ...body };
+  if (kept.length > 0) out.place = kept;
+  else delete out.place;
+  return out;
+}
+
+/**
+ * objectstack#36505 (ADR-0146 D10) — the extension's whole field arrangement
+ * laid over `object`, the way the registry fold serves it
+ * (`applyCustomArrangement`, `@objectstack/objectql`): its `fieldGroups`
+ * replace the object's, a field a group lists follows that group, and a
+ * field the extension does not declare (`own`) loses a `group` naming a
+ * listing group or a group the arrangement does not have, so it shows after
+ * the last group. The served object already holds the PUBLISHED
+ * arrangement; this shows the buffer's before it is saved.
+ */
+function applyExtensionFieldGroups(
+  object: Record<string, unknown>,
+  arrangement: unknown[],
+  own: Record<string, unknown>,
+): Record<string, unknown> {
+  const groups = arrangement.filter(isPlainRecord).map((g) => ({ ...g }));
+  const listedIn = new Map<string, string>();
+  const keys = new Set<string>();
+  const listing = new Set<string>();
+  const tables = new Set<string>();
+  for (const g of groups) {
+    if (typeof g.key !== 'string') continue;
+    keys.add(g.key);
+    if (typeof g.relatedList === 'string') {
+      tables.add(g.key);
+      continue;
+    }
+    if (!Array.isArray(g.fields)) continue;
+    listing.add(g.key);
+    for (const name of g.fields) if (typeof name === 'string' && !listedIn.has(name)) listedIn.set(name, g.key);
+  }
+  const view = readFields(object.fields);
+  const entries = view.entries.map((e) => {
+    const group = e.def.group;
+    if (typeof group !== 'string') return e;
+    const listedAt = listedIn.get(e.name);
+    if (listedAt !== undefined) return listedAt === group ? e : { name: e.name, def: { ...e.def, group: listedAt } };
+    const declaredHere = Object.prototype.hasOwnProperty.call(own, e.name);
+    if (tables.has(group) || ((!keys.has(group) || listing.has(group)) && !declaredHere)) {
+      const def = { ...e.def };
+      delete def.group;
+      return { name: e.name, def };
+    }
+    return e;
+  });
+  return { ...object, fieldGroups: groups, fields: writeFields({ shape: view.shape, entries }) };
 }
 
 /**

@@ -238,3 +238,66 @@ describe('objectstack#33864 — the suggested-bindings strip names its set by la
     );
   });
 });
+
+/**
+ * objectstack#33865 (`ux-conventions.write-feedback`) — Revoke on a granted
+ * suggestion is a write, and it answers with a toast naming the set, as Grant
+ * and Dismiss do. The Studio mount hands the strip its own `revokedToast`
+ * sentence; this reads it through the REAL pillar: Grant, then Revoke on the
+ * row the Grant left.
+ *
+ * Pinned:
+ *  - Grant → Revoke: the Revoke answers with the revoked sentence naming the
+ *    set by its label, after the Grant's own toast, and the row then reads
+ *    dismissed with Reconsider;
+ *  - CONTROL: a Revoke the server refuses answers with the server's message
+ *    and never the revoked sentence — the toast follows the write, not the
+ *    press.
+ */
+describe('objectstack#33865 — Revoke on a granted suggestion answers with a toast', () => {
+  const fmt = (key: string, set: string, anchor?: string) =>
+    tFormat(key, 'en', anchor === undefined ? { set } : { set, anchor });
+  const GRANTED = { ...PENDING, status: 'confirmed' as const, deployment_decision: true };
+
+  async function grant() {
+    api.list.mockResolvedValue([PENDING]);
+    api.confirm.mockResolvedValue({ suggestion: GRANTED, bindingCreated: true });
+    renderAccess(false);
+    const row = await screen.findByTestId('suggested-binding-crm_user', undefined, { timeout: 8000 });
+    await waitFor(() => expect(row).toHaveTextContent('CRM user'));
+    within(row).getByTestId('suggested-binding-confirm-crm_user').click();
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        fmt('engine.studio.access.suggestConfirmedToast', 'CRM user', 'everyone'),
+      ),
+    );
+    return screen.findByTestId('suggested-binding-revoke-crm_user');
+  }
+
+  it('Grant then Revoke: the Revoke toasts the revoked sentence naming the set, and the row reads dismissed', async () => {
+    api.dismiss.mockResolvedValue({ ...GRANTED, status: 'dismissed' });
+    const revoke = await grant();
+    expect(toast.success).toHaveBeenCalledTimes(1);
+
+    revoke.click();
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenLastCalledWith(fmt('engine.studio.access.suggestRevokedToast', 'CRM user')),
+    );
+    expect(toast.success).toHaveBeenCalledTimes(2);
+    expect(api.dismiss).toHaveBeenCalledWith('sug_1');
+    const row = screen.getByTestId('suggested-binding-crm_user');
+    await waitFor(() => expect(row).toHaveAttribute('data-state', 'dismissed'));
+    expect(row).toHaveTextContent(fmt('engine.studio.access.suggestDismissedState', 'CRM user'));
+    expect(within(row).getByTestId('suggested-binding-reopen-crm_user')).toBeInTheDocument();
+  });
+
+  it('CONTROL: a refused Revoke toasts the server message, never the revoked sentence', async () => {
+    api.dismiss.mockRejectedValue(refused(409, 'CONFLICT', 'the suggestion changed under you'));
+    const revoke = await grant();
+
+    revoke.click();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('the suggestion changed under you'));
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.success).not.toHaveBeenCalledWith(fmt('engine.studio.access.suggestRevokedToast', 'CRM user'));
+  });
+});

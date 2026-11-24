@@ -1,0 +1,8 @@
+{
+  "file": "packages/objectql/src/fixed-read-leaf-seam.ts",
+  "adrs": [
+    "ADR-0139",
+    "ADR-0155"
+  ],
+  "invariant": "The engine's executor seam passes a fixed-read leaf (isFixedReadLeaf: SharedRecordIds) through to the driver by reference, composing nothing, at a read verb's executor boundary on the final AST (after the ReadableIds composition, into every composed scope) and at an update's and a delete's executor entry (ADR-0155 D4). It admits a leaf only after the position and verb walk (fixed-read-leaf-position.ts), when the identity the leaf names is the context's user or its delegator or the context is a system one (compared, never replaced), when neither class D4 recognises applies (the object on another datasource than the inner read's table; a middleware or a beforeFind or afterFind hook registered for that table by name, a registration naming no object or '*' being outside), and when the driver's DriverCapabilities.fixedReadLeaves names the leaf. Every refusal is INTERNAL_ERROR / 500 before any driver is asked, logged at error once per evaluator, never INVALID_FILTER. Do not substitute an id list for a leaf a driver does not name, do not read around either class, do not re-derive or replace the recipient, and do not refuse a boot here."
+}

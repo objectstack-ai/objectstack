@@ -215,7 +215,8 @@ async function exportedCells(format: 'csv' | 'xlsx' | 'json', buffer: Buffer): P
     return cells;
   }
   if (format === 'csv') {
-    const [header, ...lines] = buffer.toString('utf8').split('\r\n').filter((l) => l.length > 0);
+    // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+    const [header, ...lines] = buffer.toString('utf8').replace(/^\uFEFF/, '').split('\r\n').filter((l) => l.length > 0);
     expect(header).toBe('ID,Day,At');
     for (const line of lines) {
       const [id, d, dt] = line.split(',');

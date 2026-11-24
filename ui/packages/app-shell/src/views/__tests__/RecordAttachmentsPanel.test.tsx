@@ -37,12 +37,22 @@ function setup(dataSource: any) {
 beforeEach(() => vi.restoreAllMocks());
 
 /**
+ * Open the only row's ⋮ menu and choose `item`: a file row carries its
+ * Download and Delete in that menu since the dense attachments rows
+ * (objectstack#35602).
+ */
+async function chooseRowAction(user: ReturnType<typeof userEvent.setup>, item: string) {
+  await user.click(screen.getByRole('button', { name: /^More for / }));
+  await user.click(await screen.findByRole('menuitem', { name: item }));
+}
+
+/**
  * Press a row's delete and answer the confirm dialog it opens (objectui#12248:
  * the delete asks first, through `ActionConfirmDialog`). The delete-path pins
  * below are about what happens AFTER the user confirms.
  */
 async function deleteAndConfirm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Delete attachment' }));
+  await chooseRowAction(user, 'Delete attachment');
   const dialog = await screen.findByRole('alertdialog');
   await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
 }
@@ -141,7 +151,7 @@ describe('RecordAttachmentsPanel — denied vs empty list (#4269)', () => {
     );
     expect(screen.getByText("You don't have access to these attachments.")).toBeInTheDocument();
     // The empty state is reserved for a genuine 200-with-zero-rows.
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('withdraws the Upload affordance under a denied list', async () => {
@@ -190,11 +200,11 @@ describe('RecordAttachmentsPanel — denied vs empty list (#4269)', () => {
   it('a genuine 200-with-zero-rows still renders the empty state AND the Upload button', async () => {
     setup(makeDataSource({ find: vi.fn(async () => []) }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByText('No attachments yet. Upload a file to get started.'),
-      ).toBeInTheDocument(),
-    );
+    // The empty state an upload-capable reader gets since the dense
+    // attachments rows (objectstack#35602): one dashed line to drop on or
+    // pick from.
+    await waitFor(() => expect(document.querySelector('[data-attachments-empty]')).not.toBeNull());
+    expect(screen.getByRole('button', { name: 'choose a file' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
     expect(screen.queryByTestId('record-attachments-denied')).not.toBeInTheDocument();
   });
@@ -263,7 +273,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
       screen.getByText("We couldn't load the attachments for this record."),
     ).toBeInTheDocument();
     // The empty state is reserved for a genuine 200-with-zero-rows.
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('a 5xx renders the unavailable state', async () => {
@@ -278,7 +288,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument(),
     );
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   // A 401 is AUTHENTICATION, not authorization: the session expired, the user
@@ -303,7 +313,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
       expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument(),
     );
     expect(screen.queryByTestId('record-attachments-denied')).not.toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   it('withdraws the Upload affordance under an unloaded list', async () => {
@@ -386,7 +396,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
 
     await waitFor(() => expect(find).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId('record-attachments-unavailable')).toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 
   // The other three states must keep their own meaning — this card only
@@ -415,11 +425,11 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
   it('a genuine 200-with-zero-rows still renders the empty state AND the Upload button', async () => {
     setup(makeDataSource({ find: vi.fn(async () => []) }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByText('No attachments yet. Upload a file to get started.'),
-      ).toBeInTheDocument(),
-    );
+    // The empty state an upload-capable reader gets since the dense
+    // attachments rows (objectstack#35602): one dashed line to drop on or
+    // pick from.
+    await waitFor(() => expect(document.querySelector('[data-attachments-empty]')).not.toBeNull());
+    expect(screen.getByRole('button', { name: 'choose a file' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
     expect(screen.queryByTestId('record-attachments-unavailable')).not.toBeInTheDocument();
   });
@@ -429,7 +439,7 @@ describe('RecordAttachmentsPanel — unavailable vs empty list (#4684)', () => {
 
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
     expect(screen.queryByTestId('record-attachments-unavailable')).not.toBeInTheDocument();
-    expect(screen.queryByText(/No attachments yet/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-attachments-empty]')).toBeNull();
   });
 });
 
@@ -600,7 +610,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const calledUrl = String(fetchSpy.mock.calls[0][0]);
@@ -629,7 +639,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -653,7 +663,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('Please sign in to download this attachment.'),
@@ -675,7 +685,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(
@@ -700,7 +710,7 @@ describe('RecordAttachmentsPanel — authenticated signed-URL download (#2970)',
     setup(makeDataSource());
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
 
     await waitFor(() =>
       expect(openSpy).toHaveBeenCalledWith(
@@ -766,7 +776,7 @@ describe('RecordAttachmentsPanel — mobile shell openFile', () => {
   async function tapDownload(rows: unknown[] = [ROW]) {
     setup(makeDataSource({ find: vi.fn(async () => rows) }));
     await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Download' }));
+    await chooseRowAction(userEvent.setup(), 'Download');
   }
 
   afterEach(() => {
@@ -922,5 +932,200 @@ describe('RecordAttachmentsPanel — upload attaches through the upload’s own 
     stubStorage(() => ok({ fileId: 'f-new', name: 'quote.pdf' }));
     await uploadOne();
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('did not attach it to this record'));
+  });
+});
+
+describe('RecordAttachmentsPanel — the uploader column names other people\'s files (objectstack#35724)', () => {
+  /** The list item rendering `fileName`. */
+  const rowOf = (fileName: string): HTMLElement => {
+    const li = screen.getByText(fileName).closest('li');
+    if (!li) throw new Error(`no row for ${fileName}`);
+    return li as HTMLElement;
+  };
+
+  it('the list read expands the uploader', async () => {
+    const dataSource = makeDataSource();
+    setup(dataSource);
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    expect(dataSource.find).toHaveBeenCalledWith(
+      'sys_attachment',
+      expect.objectContaining({ $expand: ['uploaded_by'] }),
+    );
+  });
+
+  it('another user\'s file, expanded by a reader who may read that user, shows the uploader\'s name', async () => {
+    setup(makeDataSource({ find: vi.fn(async () => [{ ...ROW, uploaded_by: { id: 'u-ada', name: 'Ada Lovelace' } }]) }));
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    expect(within(rowOf('report.pdf')).getByText('Ada Lovelace')).toBeInTheDocument();
+  });
+
+  it('a reader without user-read rights, served the bare id, sees no name and no id', async () => {
+    setup(makeDataSource({ find: vi.fn(async () => [{ ...ROW, uploaded_by: 'u-ada' }]) }));
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+    const row = rowOf('report.pdf');
+    expect(row.textContent).not.toContain('u-ada');
+    expect(row.textContent).not.toContain('Ada Lovelace');
+    expect(row.querySelector('[title="u-ada"]')).toBeNull();
+  });
+});
+
+describe('RecordAttachmentsPanel — Rename sends the new name to the rename door (objectstack#35724)', () => {
+  const renameTo = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+    await chooseRowAction(user, 'Rename');
+    const dialog = await screen.findByTestId('attachment-rename-dialog');
+    const input = within(dialog).getByTestId('attachment-rename-input');
+    await user.clear(input);
+    await user.type(input, name);
+    await user.click(within(dialog).getByTestId('attachment-rename-submit'));
+  };
+
+  it('PATCHes the attachment with the trimmed name, and the row shows the stored name', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { id: 'a1', file_name: 'Q3 report.pdf' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    setup(makeDataSource());
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await renameTo(user, '  Q3 report.pdf ');
+
+    await waitFor(() => expect(screen.getByText('Q3 report.pdf')).toBeInTheDocument());
+    expect(screen.queryByText('report.pdf')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('attachment-rename-dialog')).not.toBeInTheDocument());
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0] as [RequestInfo | URL, RequestInit];
+    expect(String(url)).toContain('/api/v1/attachments/a1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(String(init.body))).toEqual({ file_name: 'Q3 report.pdf' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a refused rename keeps the old name and names the rule, and the dialog stays open', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ success: false, error: { code: 'RECORD_NOT_ACCESSIBLE', message: 'Cannot update attachment a1' } }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    setup(makeDataSource());
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+
+    await renameTo(userEvent.setup(), 'other.pdf');
+
+    const dialog = await screen.findByTestId('attachment-rename-dialog');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('alert')).toHaveTextContent(
+        'Only the uploader or someone who can edit this record may rename this attachment.',
+      ),
+    );
+    expect(screen.queryByText('other.pdf')).not.toBeInTheDocument();
+  });
+
+  it('a blank name or the unchanged name cannot be saved, and nothing is sent', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    setup(makeDataSource());
+    await waitFor(() => expect(screen.getByText('report.pdf')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await chooseRowAction(user, 'Rename');
+    const dialog = await screen.findByTestId('attachment-rename-dialog');
+    const input = within(dialog).getByTestId('attachment-rename-input');
+    const save = within(dialog).getByTestId('attachment-rename-submit');
+    expect(input).toHaveValue('report.pdf');
+    expect(save).toBeDisabled();
+    await user.clear(input);
+    await user.type(input, '   ');
+    expect(save).toBeDisabled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#36442 — a row's name opens the file in the page. The preview
+ * mints its link through the download's own door (`/files/:id/url`, with the
+ * console's token), so a refused reader gets the download's own copy; the
+ * download itself stays in the row's ⋮ menu.
+ */
+describe('RecordAttachmentsPanel — the name opens the in-page preview (objectstack#36442)', () => {
+  const ROWS = [
+    { ...ROW, id: 'a1', file_id: 'f1', file_name: 'report.pdf', mime_type: 'application/pdf' },
+    { ...ROW, id: 'a2', file_id: 'f2', file_name: 'photo.png', mime_type: 'image/png' },
+    { ...ROW, id: 'a3', file_id: 'f3', file_name: 'memo.docx', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  ];
+  const signed = (id: string) =>
+    new Response(JSON.stringify({ success: true, data: { url: `/api/v1/storage/_local/raw/tok-${id}` } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  it('clicking the name previews the file on the signed link the download mints', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => signed(String(input).match(/files\/(\w+)\/url/)![1]!));
+    setup(makeDataSource({ find: vi.fn(async () => ROWS) }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'report.pdf' }));
+    const dialog = await screen.findByTestId('file-preview-dialog');
+    await waitFor(() => expect(dialog.querySelector('iframe')?.getAttribute('src')).toContain('/api/v1/storage/_local/raw/tok-f1'));
+    expect(String(fetchSpy.mock.calls[0]![0])).toContain('/api/v1/storage/files/f1/url');
+    expect(within(dialog).getByText('1 / 3')).toBeInTheDocument();
+  });
+
+  it('next walks to the following row, with its own signed link', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => signed(String(input).match(/files\/(\w+)\/url/)![1]!));
+    setup(makeDataSource({ find: vi.fn(async () => ROWS) }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'report.pdf' }));
+    const dialog = await screen.findByTestId('file-preview-dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Next file' }));
+    await waitFor(() =>
+      expect((within(dialog).getByRole('img', { name: 'photo.png' }) as HTMLImageElement).getAttribute('src')).toContain('tok-f2'),
+    );
+    expect(within(dialog).getByText('2 / 3')).toBeInTheDocument();
+  });
+
+  it('a reader the download refuses is refused by the preview, with the same copy', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ success: false, error: { code: 'ATTACHMENT_DOWNLOAD_DENIED', message: 'no' } }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    setup(makeDataSource({ find: vi.fn(async () => ROWS) }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'photo.png' }));
+    const dialog = await screen.findByTestId('file-preview-dialog');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('alert')).toHaveTextContent("You don't have access to download this attachment."),
+    );
+    expect(dialog.querySelector('img, iframe')).toBeNull();
+    // Asked once: a refusal is not re-asked on every render.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a Word file offers the download only, and its download is the row menu\'s download', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => signed(String(input).match(/files\/(\w+)\/url/)![1]!));
+    setup(makeDataSource({ find: vi.fn(async () => ROWS) }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'memo.docx' }));
+    const dialog = await screen.findByTestId('file-preview-dialog');
+    expect(within(dialog).getByText('This file type cannot be previewed. Please download it.')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const view = dialog.querySelector('[data-preview-state="unsupported"]') as HTMLElement;
+    await user.click(within(view).getByRole('button', { name: 'Download' }));
+    await waitFor(() =>
+      expect(openSpy).toHaveBeenCalledWith(expect.stringContaining('tok-f3'), '_blank', 'noopener,noreferrer'),
+    );
+  });
+
+  it('the row menu still carries the download', async () => {
+    setup(makeDataSource({ find: vi.fn(async () => [ROW]) }));
+    const user = userEvent.setup();
+    await screen.findByRole('button', { name: 'report.pdf' });
+    await user.click(screen.getByRole('button', { name: /^More for / }));
+    expect(await screen.findByRole('menuitem', { name: 'Download' })).toBeInTheDocument();
   });
 });

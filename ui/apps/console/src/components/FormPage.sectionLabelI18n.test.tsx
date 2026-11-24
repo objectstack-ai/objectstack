@@ -81,6 +81,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { createI18n } from '@object-ui/i18n';
+import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { FormPage } from './FormPage';
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -119,6 +121,17 @@ const NAMELESS_AUTHORED = 'Attachments';
  */
 const DECOY = '⛔ keyed by the authored label';
 
+/**
+ * The entry-label fixture's two object fields: what the object declares, and
+ * what the app bundle translates that OBJECT label to — the agent-side copy.
+ */
+const AGENT_NAME_AUTHORED = 'Submitter name';
+const AGENT_NAME_TRANSLATED = '提交人姓名';
+const AGENT_EMAIL_AUTHORED = 'Submitter email';
+const AGENT_EMAIL_TRANSLATED = '提交人邮箱';
+/** The form ENTRY's own label, as the form endpoint serves it (already localized). */
+const ENTRY_NAME_SERVED = '您的姓名';
+
 const BUNDLE = {
   [NS]: {
     objects: {
@@ -132,6 +145,10 @@ const BUNDLE = {
     fields: {
       [API_NAME]: {
         full_name: FIELD_TRANSLATED,
+        // The OBJECT fields' agent-side translations — see the entry-label
+        // describe below. No entry in this file's first fixture names them.
+        supplied_name: AGENT_NAME_TRANSLATED,
+        supplied_email: AGENT_EMAIL_TRANSLATED,
       },
     },
   },
@@ -195,8 +212,8 @@ function stubFetch(body: unknown) {
  * around it would move this file off the route and onto a harness — see the
  * header.
  */
-function renderPublicRoute() {
-  vi.stubGlobal('fetch', stubFetch(SERVED));
+function renderPublicRoute(served: unknown = SERVED) {
+  vi.stubGlobal('fetch', stubFetch(served));
   return render(
     <MemoryRouter initialEntries={['/f/apply']}>
       <Routes>
@@ -329,5 +346,96 @@ describe('objectui#8813 — public form i18n on the /f/:slug route', () => {
       </MemoryRouter>,
     );
     await expect(liveSections()).rejects.toThrow();
+  });
+});
+
+/**
+ * A form ENTRY that declares its own `label` is the form's visitor-facing copy,
+ * served already localized by the form endpoint
+ * (`_sections.{section}.fields.{field}.label`). The bundle's
+ * `fields.{object}.{field}` translates a different text — the OBJECT field's,
+ * the agent-side label — so it may only overlay a row whose label came from
+ * the object field. Every leg asserts both strings, so an overlay that wins
+ * and an entry label that wins can never read alike.
+ */
+describe('a form entry\'s own label wins over the bundle\'s object-field translation', () => {
+  const ENTRY_FORM = {
+    type: 'simple',
+    columns: 1,
+    title: 'Support',
+    sections: [
+      {
+        name: 'how_can_we_help',
+        fields: [
+          // Entry-declared label — printed as served.
+          { field: 'supplied_name', label: ENTRY_NAME_SERVED, required: true },
+          // No entry label — the object field's label, and its bundle overlay.
+          { field: 'supplied_email', required: true },
+        ],
+      },
+    ],
+  };
+  const ENTRY_SERVED = {
+    slug: 'apply',
+    object: API_NAME,
+    form: ENTRY_FORM,
+    objectSchema: {
+      name: API_NAME,
+      label: 'Inquiry',
+      fields: {
+        supplied_name: { type: 'text', label: AGENT_NAME_AUTHORED },
+        supplied_email: { type: 'text', label: AGENT_EMAIL_AUTHORED },
+      },
+    },
+  };
+
+  /** The two row labels, in order, once the form has drawn both. */
+  async function rowLabels(): Promise<string[]> {
+    await waitFor(() => expect(document.body.querySelectorAll('form label').length).toBe(2));
+    return Array.from(document.body.querySelectorAll('form label')).map(
+      // The visual-only required `*` sits inside the label.
+      (l) => (l.textContent ?? '').replace(/\*$/, ''),
+    );
+  }
+
+  it('ENTRY_LABEL_RENDERS_AS_SERVED — the entry label, not the object field\'s translation', async () => {
+    renderPublicRoute(ENTRY_SERVED);
+    const [name] = await rowLabels();
+
+    expect(name).toBe(ENTRY_NAME_SERVED);
+    expect(document.body.textContent).not.toContain(AGENT_NAME_TRANSLATED);
+    expect(screen.getByLabelText(new RegExp(ENTRY_NAME_SERVED))).toBeInTheDocument();
+  });
+
+  it('CONTROL OBJECT_LABEL_TAKES_THE_BUNDLE — a row with no entry label still reads the translation', async () => {
+    renderPublicRoute(ENTRY_SERVED);
+    const [, email] = await rowLabels();
+
+    expect(email).toBe(AGENT_EMAIL_TRANSLATED);
+    expect(document.body.textContent).not.toContain(AGENT_EMAIL_AUTHORED);
+  });
+
+  it('REQUIRED_REFUSAL_NAMES_THE_VISIBLE_LABELS — the entry label, and the overlay for the object row', async () => {
+    renderPublicRoute(ENTRY_SERVED);
+    await rowLabels();
+    await userEvent.click(document.body.querySelector('button[type="submit"]') as HTMLButtonElement);
+
+    // The banner/toast frame names every refused row by the label on screen.
+    await waitFor(() => expect(vi.mocked(toast.error)).toHaveBeenCalled());
+    const calls = vi.mocked(toast.error).mock.calls;
+    const msg = String(calls[calls.length - 1]?.[0]);
+    expect(msg).toContain(ENTRY_NAME_SERVED);
+    expect(msg).not.toContain(AGENT_NAME_TRANSLATED);
+    expect(msg).toContain(AGENT_EMAIL_TRANSLATED);
+
+    // The per-row message the name input points at says the same.
+    const input = screen.getByLabelText(new RegExp(ENTRY_NAME_SERVED));
+    await waitFor(() => expect(input.getAttribute('aria-describedby')).toBeTruthy());
+    const rowMsg = (input.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? '')
+      .join(' ');
+    expect(rowMsg).toContain(ENTRY_NAME_SERVED);
+    expect(rowMsg).not.toContain(AGENT_NAME_TRANSLATED);
   });
 });

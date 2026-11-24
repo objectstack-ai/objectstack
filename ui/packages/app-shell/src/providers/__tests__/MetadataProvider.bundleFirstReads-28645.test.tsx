@@ -98,7 +98,12 @@ function makeAdapter(calls: string[], bundle: Bundle | null, viewsHeld?: Promise
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          if (options?.names) {
+            calls.push(`${type}?names=${options.names.join(',')}`);
+            const named = type === 'object' ? OBJECTS.filter((o) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : type === 'view' ? VIEWS : type === 'page' ? PAGES : [];
           const answer = { type, items: structuredClone(all) };
@@ -377,5 +382,43 @@ describe('MetadataProvider — bundle-first reads (objectstack#28645)', () => {
     expect(lists(calls)).toEqual(['app']);
     expect(served!.views).toHaveLength(0);
     expect(served!.objects).toHaveLength(0);
+  });
+});
+
+describe('MetadataProvider — a presence read is answered from the entered app\'s bundle (objectstack#34211)', () => {
+  // The batched names scope (`views: false`, `batch: true`) is the presence
+  // read the sidebar's `requiresObject` gate asks: an object the bundle holds
+  // is registered, so it costs no `?names=` request.
+  const presence = (m: ReturnType<typeof mount>, names: string[]) =>
+    m.ctx().readObjectScope!({ names, views: false, batch: true } as Parameters<NonNullable<Ctx['readObjectScope']>>[0]);
+
+  it('answers a bundled name from the bundle, and asks nothing', async () => {
+    const m = mount();
+    act(() => m.bundle.enter());
+    await act(async () => { await m.bundle.land(); });
+    await waitFor(() => expect(presence(m, ['b28645_plan', 'b28645_price']).settled).toBe(true));
+    const scope = presence(m, ['b28645_plan', 'b28645_price']);
+    expect((scope.served as Doc[]).map((o) => o.name).sort()).toEqual(['b28645_plan', 'b28645_price']);
+    expect(scope.missing).toEqual([]);
+    expect(m.calls.filter((c) => c.startsWith('object'))).toEqual([]);
+  });
+
+  it('asks, in one `?names=` read, only the names the bundle does not hold', async () => {
+    const m = mount();
+    act(() => m.bundle.enter());
+    await act(async () => { await m.bundle.land(); });
+    await waitFor(() => expect(presence(m, ['b28645_plan', 'b28645_outside', 'b28645_absent']).settled).toBe(true));
+    const scope = presence(m, ['b28645_plan', 'b28645_outside', 'b28645_absent']);
+    expect((scope.served as Doc[]).map((o) => o.name).sort()).toEqual(['b28645_outside', 'b28645_plan']);
+    expect(scope.missing).toEqual(['b28645_absent']);
+    expect(m.calls.filter((c) => c.startsWith('object'))).toEqual(['object?names=b28645_outside,b28645_absent']);
+  });
+
+  it('CONTROL: with the bundle still on the wire, the names are asked as before', async () => {
+    const m = mount();
+    act(() => m.bundle.enter());
+    await waitFor(() => expect(m.calls).toContain('app'));
+    await waitFor(() => expect(presence(m, ['b28645_plan']).settled).toBe(true));
+    expect(m.calls.filter((c) => c.startsWith('object'))).toEqual(['object?names=b28645_plan']);
   });
 });

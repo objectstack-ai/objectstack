@@ -423,3 +423,44 @@ describe('createServerActionHandler — transport failure', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * The refusal's producer-marked `userMessage` (objectstack#34173). The
+ * `/actions` door answers a thrown `userMessage` beside `message` on the
+ * ADR-0112 `error` object — from a script body and from a server action's
+ * handler alike. The handler relays it on `ActionResult.userMessage`, so a
+ * host that reports the failure to the end user (the grid's aggregate bulk
+ * result) can show it; `error` stays the whole text.
+ */
+describe('createServerActionHandler — userMessage relay (objectstack#34173)', () => {
+  const refusing = (error: Record<string, unknown>) => vi.fn(async () => ({
+    ok: false,
+    status: 400,
+    json: async () => ({ success: false, error: { code: 'HOOK_ABORTED', httpStatus: 400, message: 'plan_b is closed_won', ...error } }),
+  })) as unknown as ServerActionFetch;
+
+  it('relays error.userMessage verbatim beside error, which stays the message', async () => {
+    const handler = createServerActionHandler({ fetch: refusing({ userMessage: '  Plan B is Closed Won.' }) });
+
+    const res = await handler({ type: 'script', name: 'mass_update_stage' } as ActionDef);
+
+    expect(res).toEqual({ success: false, error: 'plan_b is closed_won', userMessage: '  Plan B is Closed Won.' });
+  });
+
+  it('an unmarked refusal carries no userMessage', async () => {
+    const handler = createServerActionHandler({ fetch: refusing({}) });
+
+    const res = await handler({ type: 'script', name: 'mass_update_stage' } as ActionDef);
+
+    expect(res).toEqual({ success: false, error: 'plan_b is closed_won' });
+    expect('userMessage' in res).toBe(false);
+  });
+
+  it('a blank or non-string userMessage is no marking', async () => {
+    for (const userMessage of ['   ', 42, { text: 'x' }]) {
+      const handler = createServerActionHandler({ fetch: refusing({ userMessage }) });
+      const res = await handler({ type: 'script', name: 'mass_update_stage' } as ActionDef);
+      expect('userMessage' in res).toBe(false);
+    }
+  });
+});

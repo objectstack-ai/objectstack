@@ -313,8 +313,8 @@ export function useExpressionSystemPermissions(): EvalSystemPermissions | undefi
  * An `ExpressionEvaluator` over {@link buildExpressionScope}.
  *
  * Every app-shell site that needs an evaluator imperatively (i.e. one it cannot
- * take from `useExpressionContext()`, because it builds the field list ABOVE
- * the provider it mounts) calls this instead of `new ExpressionEvaluator(...)`
+ * take from `useExpressionContext()`, because it evaluates ABOVE the provider
+ * it mounts) calls this instead of `new ExpressionEvaluator(...)`
  * with a hand-written bag.
  */
 export function createExpressionEvaluator(input: ExpressionScopeInput = {}): ExpressionEvaluator {
@@ -566,8 +566,7 @@ function reportAppShellVisibleFault(
  * Returns true if the item should be visible (fail-open on evaluation errors,
  * matching the evaluator's own default). A NAVIGATION entry is not gated here:
  * it goes through {@link evaluateNavigationVisibility}, which withholds on a
- * fault (objectui#12700). This fail-open answer is the object-field gate's
- * (`isObjectFieldVisible`) and the published export's.
+ * fault (objectui#12700). This fail-open answer is the published export's.
  */
 export function evaluateVisibility(
   expression: string | boolean | { dialect?: string; source?: string } | undefined,
@@ -589,8 +588,7 @@ export function evaluateVisibility(
   // second evaluation, same single engine call as before.
   //
   // FAIL-OPEN here, deliberately: a predicate that cannot be evaluated still
-  // returns `true`. This function is the object-field gate's and the published
-  // export's; the NAVIGATION gate moved to `evaluateNavigationVisibility`,
+  // returns `true`. This function is the published export's; the NAVIGATION gate moved to `evaluateNavigationVisibility`,
   // which withholds on a fault (objectui#12700, ruled). objectui#6443 made the
   // fault loud and left the verdict alone.
   const report = (reason: unknown): void =>
@@ -721,54 +719,49 @@ export interface FieldVisibilityDeclaration {
 }
 
 /**
- * Should this object field be rendered? — the app-shell's field-list gate.
+ * Does this object field belong in a record form's field list? — the
+ * app-shell's field-list gate, called by `RecordFormPage` and by `AppContent`'s
+ * global record-form modal to build the `fields` they hand the form.
  *
- * The name is `isObjectFieldVisible` and not the shorter `isFieldVisible`,
- * because that shorter name is twice taken in this repo by functions answering
- * different questions: `views/metadata-admin/inspectors/flow-node-config.ts`
- * gates a flow node's CONFIG inputs on the node's type, and `apps/console`'s
- * `FormPage` evaluates the VIEW-level field predicate — "different authoring
- * slots with different owners", in that file's own words. Neither reads an
- * object field's declared metadata keys, which is the only thing this one does;
- * one shared name across the three would blur exactly the distinction those
- * files keep.
+ * The name says LISTED, not visible, on purpose: this gate decides which fields
+ * the form may draw at all, and the form decides which of those it draws for
+ * the record on screen. (`isFieldVisible` is also twice taken in this repo, by
+ * `views/metadata-admin/inspectors/flow-node-config.ts` and `apps/console`'s
+ * `FormPage`, for different authoring slots with different owners.)
  *
  * ## The keys, and the one that is NOT read
  *
- * Both call sites (`RecordFormPage`, and `AppContent`'s global record-form
- * modal) used to gate on `evaluateVisibility(f.visible, …)`. That key is
- * refused by `FieldSchema`, so the gate was unreachable through the authoring
- * surface — a field `visible` never survives validation, and a census over the
- * framework's 113 `*.object.*` files found zero of them. Maintainer ruling,
- * 2026-08-27 (objectui#6514, Option A): read the DECLARED keys instead and
- * DELETE the dead read. `visible` is not consulted, in either polarity.
+ * Maintainer ruling, 2026-08-27 (objectui#6514, Option A): the two declared
+ * keys decide, and the spec-refused `visible` decides nothing, in either
+ * polarity. `FieldSchema` refuses `visible` by name, so honouring it here would
+ * be a second contract for a spelling the platform tells authors not to write.
  *
- * ## Why the two keys compose as AND
+ * ## Each declared key is read on the tier that has its bindings
  *
- * `hidden` is the static gate; `visibleWhen` is documented as "shown only when
- * TRUE (else hidden)" — a NECESSARY condition, never a licence to un-hide a
- * statically hidden field. So a field shows only when it is not `hidden` AND
- * its predicate holds. This is the same shape `@object-ui/core`'s
- * `resolveFieldRuleState` already uses one tier down, where the static and the
- * predicate OR into the restrictive verdict (`readonly || readonlyWhen`,
- * `required || requiredWhen`).
+ *  - `hidden` is static, so it is read HERE: a `hidden: true` field never
+ *    enters the list, whatever its predicate says.
+ *  - `visibleWhen` is a per-record predicate, so it is evaluated by the form
+ *    renderer (`@object-ui/components`' form, through `resolveFieldRuleState`),
+ *    where the record is bound as `record` (the persisted row under the live
+ *    values) and `current_user` / `features` come from the `ExpressionProvider`
+ *    both call sites mount around the form. It is re-evaluated as the user
+ *    edits, so a field whose predicate turns true mid-edit appears.
  *
- * ## Scope: no `current_user` binding is ADDED here
+ * It is NOT evaluated here as well. This tier has no record: a total
+ * (`has()`-guarded) predicate such as `has(record.stage) && record.stage ==
+ * "closed_lost"` answers a clean `false` without one, so evaluating it here
+ * removed the field from the list before the form ever saw the record, and a
+ * form laid out from the object's `fieldGroups` draws only listed fields.
  *
- * Field-level visibility keeps the contract's current scope (ruling
- * sub-clause, 2026-08-27). This helper adds no roots: it hands `visibleWhen` to
- * `evaluateVisibility` over whatever evaluator the caller already built, and
- * the fail-open on a faulting predicate is the shipped, documented behaviour of
- * this tier (objectui#6443 / #6487) — unchanged. Per-user field hiding is the
- * option/form layers' job, because those bind the user.
+ * The two keys still compose as AND — `hidden` is a necessary condition the
+ * predicate cannot lift (the shape `resolveFieldRuleState` uses for
+ * `readonly || readonlyWhen`) — and a predicate that faults keeps the fail-open
+ * posture of the renderer that evaluates it (objectui#6443 / #6487 for this
+ * tier's history). No scope root is added or removed by this gate.
  */
-export function isObjectFieldVisible(
-  field: FieldVisibilityDeclaration | undefined,
-  evaluator: ExpressionEvaluator,
-): boolean {
+export function isObjectFieldListed(field: FieldVisibilityDeclaration | undefined): boolean {
   // INVERTED. `hidden: true` means "do not render"; `false` and absent both
   // mean "render". Read it backwards and nothing goes red — a field either
   // vanishes with no diagnostic, or leaks to a principal it was hidden from.
-  if (field?.hidden === true) return false;
-  return evaluateVisibility(field?.visibleWhen, evaluator, 'visibleWhen');
+  return field?.hidden !== true;
 }

@@ -35,8 +35,9 @@ import {
   ArrowDown,
   SlidersHorizontal,
   X,
+  Plus,
 } from 'lucide-react';
-import type { DataSource, LookupColumnDef, LookupFilterDef } from '@object-ui/types';
+import type { DataSource, LookupColumnDef } from '@object-ui/types';
 // The repo's single filter sink (`packages/core/src/utils/filter-converter.ts`)
 // — shared with plugin-list's `buildEffectiveFilter` and plugin-view's
 // ObjectView, so a spec `ViewFilterRule[]` lowers in exactly one place.
@@ -46,8 +47,10 @@ import { usePermissions } from '@object-ui/permissions';
 import { RelatedRecordActionsProvider, useRelatedRecordActions } from '@object-ui/react';
 import { useFieldTranslation } from './useFieldTranslation.js';
 import { useRecordQuery } from './useRecordQuery.js';
+import { isRecordReference, type LookupFilterEntry } from './lookupRecordReference.js';
 import { objectResolvesSearch } from './searchOffer.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
+import { isImeKey } from './imeKey.js';
 // The one place a lookup column's display value is decided — shared with the
 // inline dropdown in LookupField so a single `lookupColumns` declaration
 // cannot render two different ways (objectui#5492).
@@ -212,45 +215,63 @@ export interface RecordPickerGridSlotProps {
 }
 
 /**
- * Convert LookupFilterDef[] to a Record<string, any> compatible with
+ * The comparisons `orEmpty` pairs with — the spec's six scalar orderings and
+ * equalities (`LOOKUP_FILTER_SCALAR_COMPARISONS` in `field.zod.ts`, which
+ * refuses the flag on any other operator).
+ */
+const OR_EMPTY_OPERATORS: ReadonlySet<string> = new Set(['eq', 'ne', 'gt', 'lt', 'gte', 'lte']);
+
+/** No condition: an operator outside the nine, which adds nothing to the filter. */
+const NO_CONDITION = Symbol('no-condition');
+
+/** One entry's condition on its column, in the `$filter` record form. */
+function lookupFilterCondition(f: LookupFilterEntry): unknown {
+  switch (f.operator) {
+    case 'eq': return f.value;
+    case 'ne': return { $ne: f.value };
+    case 'gt': return { $gt: f.value };
+    case 'lt': return { $lt: f.value };
+    case 'gte': return { $gte: f.value };
+    case 'lte': return { $lte: f.value };
+    case 'contains': return { $contains: f.value };
+    case 'in': return { $in: f.value };
+    case 'notIn': return { $nin: f.value };
+    default: return NO_CONDITION;
+  }
+}
+
+/**
+ * Convert `lookupFilters` entries to a Record<string, any> compatible with
  * QueryParams.$filter.  Supports operator mapping for eq/ne/gt/lt/gte/lte/
  * contains/in/notIn.
+ *
+ * An entry with `orEmpty: true` also matches a candidate whose column is null:
+ * it is sent as `{ $or: [condition, { column: { $null: true } }] }`, one member
+ * of a `$and` list, so two such entries — or one beside a plain entry on the
+ * same column — each keep their own alternative.
+ *
+ * ⛔ A `{ $record }` comparand is the picker's to replace with a value of the
+ * record being edited (`resolveLookupFilters`, which LookupField runs before
+ * calling this). An entry still carrying one here was never resolved and is
+ * left out: the server knows no record being edited, and refuses the
+ * reference rather than read it.
  */
 export function lookupFiltersToRecord(
-  filters: LookupFilterDef[],
+  filters: readonly LookupFilterEntry[],
 ): Record<string, any> {
   const result: Record<string, any> = {};
+  const orEmpty: Record<string, any>[] = [];
   for (const f of filters) {
-    switch (f.operator) {
-      case 'eq':
-        result[f.field] = f.value;
-        break;
-      case 'ne':
-        result[f.field] = { $ne: f.value };
-        break;
-      case 'gt':
-        result[f.field] = { $gt: f.value };
-        break;
-      case 'lt':
-        result[f.field] = { $lt: f.value };
-        break;
-      case 'gte':
-        result[f.field] = { $gte: f.value };
-        break;
-      case 'lte':
-        result[f.field] = { $lte: f.value };
-        break;
-      case 'contains':
-        result[f.field] = { $contains: f.value };
-        break;
-      case 'in':
-        result[f.field] = { $in: f.value };
-        break;
-      case 'notIn':
-        result[f.field] = { $nin: f.value };
-        break;
+    if (isRecordReference(f.value)) continue;
+    const condition = lookupFilterCondition(f);
+    if (condition === NO_CONDITION) continue;
+    if (f.orEmpty === true && OR_EMPTY_OPERATORS.has(f.operator)) {
+      orEmpty.push({ $or: [{ [f.field]: condition }, { [f.field]: { $null: true } }] });
+    } else {
+      result[f.field] = condition;
     }
   }
+  if (orEmpty.length > 0) result.$and = orEmpty;
   return result;
 }
 
@@ -404,8 +425,10 @@ export interface RecordPickerDialogProps {
    * Base filters applied to every query.
    * Converted from LookupFieldMetadata.lookupFilters.
    * Restricts which records are selectable (e.g. only active records).
+   * `{ $record }` values arrive already resolved (LookupField); one that did
+   * not is left out of the query by `lookupFiltersToRecord`.
    */
-  lookupFilters?: LookupFilterDef[];
+  lookupFilters?: readonly LookupFilterEntry[];
 
   /**
    * Hard filter constraint applied to every query. Unlike `lookupFilters`,
@@ -505,6 +528,14 @@ export interface RecordPickerDialogProps {
    * )}
    */
   renderGrid?: (props: RecordPickerGridSlotProps) => React.ReactNode;
+
+  /**
+   * A first row above the records that creates one instead of picking one
+   * (objectstack#35601: a record page's related tab offers its 「新建」 here,
+   * so 「+ 添加」 is one entry). Choosing it is the host's to handle; the
+   * dialog only draws the row. Absent, nothing is drawn.
+   */
+  createRow?: { label: string; onSelect: () => void };
 }
 
 /**
@@ -556,6 +587,7 @@ export function RecordPickerDialog({
   filterColumns,
   renderFilterBar,
   renderGrid,
+  createRow,
 }: RecordPickerDialogProps) {
   // The column the record title stands in for. The `'name'` default only keys
   // that column; `declaredDisplayField` is what the title resolver ranks.
@@ -943,7 +975,9 @@ export function RecordPickerDialog({
   // Page jump handler
   const handlePageJump = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key !== 'Enter') return;
+      // objectstack#35996 — an Enter that picks an input-method candidate
+      // neither jumps nor clears the box under the composition.
+      if (e.key !== 'Enter' || isImeKey(e)) return;
       const page = parseInt(pageJumpValue, 10);
       if (!isNaN(page) && page >= 1 && page <= totalPages) {
         setCurrentPage(page);
@@ -1325,6 +1359,21 @@ export function RecordPickerDialog({
           </div>
         )}
 
+        {createRow && (
+          <button
+            type="button"
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2 text-left text-sm text-primary hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              PHONE_TOUCH_HEIGHT,
+            )}
+            onClick={createRow.onSelect}
+            data-testid="record-picker-create-row"
+          >
+            <Plus className="size-4 shrink-0" aria-hidden="true" />
+            {createRow.label}
+          </button>
+        )}
+
         {/* Grid area — external ObjectGrid via renderGrid slot, or built-in table */}
         {renderGrid ? (
           /* External grid component (e.g. ObjectGrid from plugin-grid) */
@@ -1441,7 +1490,7 @@ export function RecordPickerDialog({
                             <TableHead
                               key={col.field}
                               style={styleWidth}
-                              className="cursor-pointer select-none relative group text-xs font-semibold uppercase tracking-wider"
+                              className="cursor-pointer select-none relative group text-xs font-medium uppercase tracking-wider"
                               onClick={() => handleSort(col.field)}
                               aria-sort={sortField === col.field ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
                             >

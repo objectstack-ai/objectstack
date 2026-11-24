@@ -12,10 +12,16 @@
  * a stray `managedBy` (an old stored row) must not move the answer.
  *
  * Both sites are pinned: the routed page's badge, and the Studio Access
- * pillar's kind chip (`studio`). They read one derivation, so they agree.
+ * pillar's kind chip (`studio`). They read one derivation, so they agree; the
+ * Studio chip words the package answer for the builder (objectstack#35018:
+ * "Included with the app"), the page keeps "Package".
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches these through dynamic imports: their first load is paid at collection.
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@objectstack/spec/identity';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -88,17 +94,19 @@ async function renderWith(site: Site, extra: Record<string, unknown>, packageId?
 }
 
 const badgeText = () => screen.getByTestId('perm-provenance-badge').textContent;
+/** The package answer as each site words it (objectstack#35018). */
+const PACKAGE_TEXT: Record<Site, string> = { page: 'Package', studio: 'Included with the app' };
 
 describe.each<Site>(['page', 'studio'])('the provenance badge (%s site)', (site) => {
   it('a set opened under a packageId reads "Package"', async () => {
     await renderWith(site, {}, 'com.example.sales');
-    expect(badgeText()).toBe('Package');
+    expect(badgeText()).toBe(PACKAGE_TEXT[site]);
   });
 
   it('a set whose code layer is a package artifact reads "Package"', async () => {
     codeLayer = { _packageId: 'com.example.sales', name: 'sales_perms' };
     await renderWith(site, {});
-    expect(badgeText()).toBe('Package');
+    expect(badgeText()).toBe(PACKAGE_TEXT[site]);
   });
 
   it('a set with neither reads "Added"', async () => {

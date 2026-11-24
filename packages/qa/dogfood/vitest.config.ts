@@ -249,6 +249,15 @@ export default defineConfig({
               find: /^@objectstack\/metadata-core$/,
               replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
             },
+            // [#33795] `rollup-grouped-recompute-33795.test.ts` drives the bulk
+            // update doors (`updateManyData`, `batchData`) of
+            // `ObjectStackProtocolImplementation` over a real engine and SQL
+            // driver; the doors' roll-up batch wiring is the pin's subject, so
+            // it resolves to SOURCE, like the entries above.
+            {
+              find: /^@objectstack\/metadata-protocol$/,
+              replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts'),
+            },
             // [#13513] `date-bucket-parity-turso.test.ts` drives
             // `TursoDriver` itself — it asserts the driver's SQL date
             // bucketing against the in-memory reference, plus the on-disk
@@ -387,6 +396,14 @@ export default defineConfig({
             {
               find: /^@objectstack\/plugin-sharing$/,
               replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
+            },
+            // The print dogfood tests import service-print's SOURCE by relative
+            // path, and that source builds its print-door member over
+            // `createDoorTableMember`; the member is part of what those tests
+            // boot, so it resolves to THIS checkout's source too.
+            {
+              find: /^@objectstack\/plugin-hono-server$/,
+              replacement: path.resolve(__dirname, '../../plugins/plugin-hono-server/src/index.ts'),
             },
           ],
         },

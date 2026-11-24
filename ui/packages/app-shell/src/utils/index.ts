@@ -18,14 +18,14 @@ export type { RecordDisplayNameOptions } from '@object-ui/core';
 
 export {
   resolveRecordFormTarget,
-  resolveFormViewLayout,
+  resolveRecordFormModalLayout,
 } from './recordFormNavigation.js';
 export type {
   ObjectDefinitionForNavigation,
   RecordFormTarget,
-  ObjectDefinitionForFormView,
+  ObjectDefinitionForRecordForm,
   FormViewDefinition,
-  FormViewModalLayout,
+  RecordFormModalLayout,
 } from './recordFormNavigation.js';
 
 export { deriveRelatedLists } from './deriveRelatedLists.js';
@@ -58,7 +58,7 @@ export type { NotificationTarget } from './appRoute.js';
 
 // Where "home" is (objectui#7256) — the declared landing, read once and shared
 // by the `/` redirect (apps/console) and the chrome's Home affordances.
-export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath } from './homePath.js';
+export { HOME_LAUNCHER_PATH, resolveDeclaredHomePath, resolveDesktopHomePath } from './homePath.js';
 export type { DeclaredHomeApp } from './homePath.js';
 
 /**

@@ -37,6 +37,7 @@ import {
     assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { objectStorageSyncRefusedNotice } from './protocol-registry-hydration.js';
 // The object plane reaches `@objectstack/lint` only through a dynamic import; paid
 // here at module scope so the first load lands during collection, not inside a
 // clocked window (`pnpm check:test-source-alias`).
@@ -319,6 +320,11 @@ describe('[#33563] revertCommit reports a fault after an item\'s row write in fa
         expect(res.failed[0].error).toContain('its row was restored to the body of version 1');
         expect(res.failed[0].error).toContain("'object-storage-sync-refused' advisory");
         expect((res.advisories ?? []).map((a: any) => a.rule)).toContain('object-storage-sync-refused');
+        // [#32958] The revert door answers the one builder's notice, whole: no
+        // copy of its own, so the builder's door-neutral text is what it says.
+        const notice = (res.advisories ?? []).find((a: any) => a.rule === 'object-storage-sync-refused');
+        expect(notice).toEqual(objectStorageSyncRefusedNotice('ticket', new Error('the datasource is read-only')));
+        expect(`${notice.message} ${notice.hint}`).not.toMatch(/\bsave|\bpublish/i);
         expect(storedLabel(rows)).toBe('Ticket');
     });
 

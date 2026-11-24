@@ -51,6 +51,13 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  * |             | objectui#2257). Never stacks history.          |              |
  * | `palette`   | Command palette overlay (alias `cmdk`).        | replace      |
  * | `shortcuts` | Keyboard-shortcuts dialog overlay.             | replace      |
+ * | `comments`  | The phone's comment page over a record route:  | push (open), |
+ * |             | empty = the threads, a top-level comment's id  | pop (close)  |
+ * |             | = that thread (objectstack#36076). On the      |              |
+ * |             | desktop, a thread's id opens the comment panel |              |
+ * |             | at it (a comment notice's link, #36410).       |              |
+ * | `comment`   | With `comments`: the comment in that thread to | with         |
+ * |             | scroll to (objectstack#36410).                 | `comments`   |
  * | `from`      | Ancestor breadcrumb trail for a record route,  | push (with   |
  * |             | so drilling record→related-record keeps a      | the drill-in) |
  * |             | clickable path back (`Account → #p → Invoice`).|              |
@@ -85,6 +92,14 @@ import { NAV_RUN_ACTION_PARAM } from '@object-ui/layout';
  */
 export const RECORD_DRAWER_PARAM = 'recordId';
 
+/**
+ * The object of the record the drawer's root shows, when it is not the
+ * listed object's (objectstack#36015): a lookup chip in the list opens the
+ * record it names in the list's drawer. Absent ⇒ the listed object. Read
+ * only beside {@link RECORD_DRAWER_PARAM}.
+ */
+export const RECORD_DRAWER_OBJECT_PARAM = 'recordObject';
+
 /** Global record-form overlay: `new` | `<recordId>` (framework#2604). */
 export const RECORD_FORM_PARAM = 'form';
 
@@ -118,6 +133,31 @@ export const RECORD_RELATED_ENLARGE_PUSHED_STATE = '__relatedEnlargePushed';
  * `usePhoneNavDrawerHistory`.
  */
 export const NAV_DRAWER_OPEN_STATE = '__navDrawerOpen';
+
+/**
+ * The phone's comment page over the record page (`?comments=`, objectstack#36076):
+ * present and empty, the record's threads; a top-level comment's id, that
+ * thread. On the desktop full page (objectstack#36410), a top-level comment's
+ * id opens the comment panel at that thread — the link a comment notice
+ * carries (plugin-audit writes it, `/{object}/{id}?comments=…`); empty there,
+ * it means nothing. Read by `RecordDetailView`.
+ */
+export const RECORD_COMMENTS_PARAM = 'comments';
+
+/**
+ * Beside {@link RECORD_COMMENTS_PARAM} (objectstack#36410): the comment in
+ * that thread to scroll to and mark — a reply a notice is about. Absent, the
+ * thread's own comment. Read by `RecordDetailView`; dropped whenever the
+ * reader moves to another thread or leaves the comments.
+ */
+export const RECORD_COMMENT_PARAM = 'comment';
+
+/**
+ * History-state flag beside {@link RECORD_COMMENTS_PARAM}: the record view
+ * pushed this `?comments=` entry, so 「‹」 pops it. Not a URL parameter; an
+ * entry reached by a reload or a shared link carries none, and 「‹」 replaces.
+ */
+export const RECORD_COMMENTS_PUSHED_STATE = '__commentsPushed';
 
 /** Command palette overlay (ADR-0054 Phase 1; alias `cmdk`). */
 export const COMMAND_PALETTE_PARAM = 'palette';
@@ -156,11 +196,14 @@ export { NAV_RUN_ACTION_PARAM };
  */
 export const RESERVED_URL_PARAMS: readonly string[] = [
   RECORD_DRAWER_PARAM,
+  RECORD_DRAWER_OBJECT_PARAM,
   RECORD_FORM_PARAM,
   RECORD_FORM_OBJECT_PARAM,
   RECORD_FORM_LINK_PARAM,
   RECORD_DETAIL_TAB_PARAM,
   RECORD_RELATED_ENLARGE_PARAM,
+  RECORD_COMMENTS_PARAM,
+  RECORD_COMMENT_PARAM,
   COMMAND_PALETTE_PARAM,
   KEYBOARD_SHORTCUTS_PARAM,
   RECORD_TRAIL_PARAM,

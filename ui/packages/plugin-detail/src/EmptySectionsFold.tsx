@@ -9,10 +9,11 @@
 import * as React from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { Button } from '@object-ui/components';
-import { usePrintPage } from '@object-ui/react';
+import { usePrintPage, useRecordPagePreferences } from '@object-ui/react';
 import type { DetailViewSection } from '@object-ui/types';
 import { hasCellValue } from './emptiness';
 import { useDetailTranslation } from './useDetailTranslation';
+import { useEmptyFieldTotal, useRecordFieldList } from './recordFieldList';
 
 export interface EmptySectionsFoldProps {
   /** The sections the body draws, as handed to each `DetailSection`. */
@@ -143,31 +144,61 @@ export interface EmptySectionsLineProps {
   /** The record as the sections read it (record plus the inline-edit draft). */
   data: Record<string, unknown> | null | undefined;
   isEditing: boolean;
+  /**
+   * The object the record page shows; the line reads and writes the reader's
+   * remembered "show empty fields" choice for it (objectstack#35166).
+   */
+  objectName?: string;
   /** Draw one section (its error boundary included) at its index. */
   renderSection: (section: DetailViewSection, index: number) => React.ReactNode;
 }
 
 /**
- * The record page v3 fold of empty sections (objectstack#27055, Target 2):
+ * The record page fold of empty sections (objectstack#27055, Target 2):
  * every section that is ENTIRELY empty leaves its place and the body ends in
  * ONE quiet line naming them — 「地址 · 转化 · 附加信息 · 3 个空分区 · 展开」.
  * Sections with a value draw in their order as before. Expanding the line
  * draws every section in its own place and turns the line into a 「收起」.
  *
- * Drawn on the synthesized default page only (`DetailView` asks
- * `useDefaultRecordPage`); elsewhere the whole-body fold
- * ({@link EmptySectionsFold}) keeps its own rule. Edit mode and a print page
- * draw every section, for the reasons that fold gives.
+ * Drawn by a record page's details body: every `record:details` body
+ * (`EmptySectionsLineContext`, objectstack#35019) and anything the
+ * synthesized default page draws (`useDefaultRecordPage`). Elsewhere the
+ * whole-body fold ({@link EmptySectionsFold}) keeps its own rule. Where every
+ * section is empty the line names them all, so it takes that fold's place on
+ * those bodies. Edit mode and a print page draw every section, for the
+ * reasons that fold gives.
+ *
+ * Expanded or not is the reader's one remembered "show empty fields" choice
+ * for the object (objectstack#35166), the same `showEmptyFields` entry each
+ * section's own row reads (`DetailSection`, objectstack#25883): a reader who
+ * chose to see empty fields finds the line open on every record page of the
+ * object, default or authored, and expanding or collapsing the line writes
+ * that choice back. With no host store or no object name the line keeps its
+ * own state, forgotten on unmount, as before.
  */
 export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
   sections,
   data,
   isEditing,
+  objectName,
   renderSection,
 }) => {
   const { t } = useDetailTranslation();
   const isPrintPage = usePrintPage() !== null;
-  const [revealed, setRevealed] = React.useState(false);
+  const recordPagePreferences = useRecordPagePreferences();
+  const [localRevealed, setLocalRevealed] = React.useState(false);
+  const remembered =
+    recordPagePreferences && objectName
+      ? {
+          shown: recordPagePreferences.get(objectName).showEmptyFields === true,
+          set: (shown: boolean) => recordPagePreferences.update(objectName, { showEmptyFields: shown }),
+        }
+      : null;
+  const revealed = remembered ? remembered.shown : localRevealed;
+  const toggleRevealed = () => {
+    if (remembered) remembered.set(!remembered.shown);
+    else setLocalRevealed((r) => !r);
+  };
   const folded = isEditing || isPrintPage ? [] : sections.map((section) => isFoldableEmptySection(section, data));
   const foldedCount = folded.filter(Boolean).length;
   if (foldedCount === 0) return <>{sections.map(renderSection)}</>;
@@ -189,7 +220,7 @@ export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
       <button
         type="button"
         aria-expanded={revealed}
-        onClick={() => setRevealed((r) => !r)}
+        onClick={toggleRevealed}
         className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center sm:min-h-0 sm:min-w-0 rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {revealed
@@ -203,5 +234,37 @@ export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
       {sections.map((section, index) => (revealed || !folded[index] ? renderSection(section, index) : null))}
       {line}
     </>
+  );
+};
+
+/**
+ * The field list's last row (objectstack#36147): every empty field of every
+ * group the list holds, folded into one 「显示 N 个空字段」 row. The groups
+ * hide their own empty rows and report them (`useReportEmptyFields`); this
+ * row reads the total and reveals them all in place, then reads 「隐藏空字段」.
+ * Draws nothing when no group holds an empty row, and outside a field list.
+ */
+export const EmptyFieldsRow: React.FC = () => {
+  const { t } = useDetailTranslation();
+  const list = useRecordFieldList();
+  const total = useEmptyFieldTotal();
+  if (!list || total === 0) return null;
+  const shown = list.showEmpty;
+  return (
+    <div className="-ml-2" data-empty-fields-row="" data-empty-fields-count={total}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-expanded={shown}
+        onClick={list.toggleShowEmpty}
+        className="h-11 sm:h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+      >
+        {shown ? <EyeOff className="h-3.5 w-3.5 mr-1.5" /> : <Eye className="h-3.5 w-3.5 mr-1.5" />}
+        {shown
+          ? t('detail.hideEmptyFields', { defaultValue: 'Hide empty fields' })
+          : t('detail.showEmptyFields', { count: total, defaultValue: 'Show {{count}} empty fields' })}
+      </Button>
+    </div>
   );
 };

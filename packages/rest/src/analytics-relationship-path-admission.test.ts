@@ -371,21 +371,27 @@ for (const strategy of ['native', 'objectql'] as const) {
       expect(await answerOf(() => h.service.generateSql({ cube: LEDGER, measures: ['count'], dimensions: [`${OPEN}.name`] } as never, MEMBER_CTX as never))).toEqual({ answered: 'string' });
     });
 
-    it('the dataset door refuses a related object without a read grant, named through a relationship the dataset does not declare, as a declared one', async () => {
+    it('the dataset door never reads a related object without a read grant: refused 403 through a declared join, and refused before any read when named through a relationship the dataset does not declare', async () => {
       const reference = await h.datasetDoor(
         dataset([DENIED], [{ name: 'denied_dim', field: `${DENIED}.label`, type: 'string' }]),
         { measures: ['row_count'], dimensions: ['denied_dim'] },
       );
       expect({ status: reference.status, code: reference.body?.code }).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+      // [ADR-0021, ADR-0149 D1] A dataset selection names only the members its
+      // dataset declares. `${DENIED}.label` is not one of them, so the door
+      // refuses it as an undeclared member before anything is read — the path
+      // never reaches the related object, so it can be neither served nor
+      // admitted. The caller may read this dataset's own objects (the ledger and
+      // the included open object), so the dataset's read refusal does not apply
+      // and the closed-member 400 answers, naming only the members THIS
+      // dataset declares.
       const answer = await h.datasetDoor(
         dataset([OPEN], [{ name: 'open_dim', field: `${OPEN}.name`, type: 'string' }]),
         { measures: ['row_count'], dimensions: [`${DENIED}.label`] },
       );
-      expect({ status: answer.status, code: answer.body?.code, message: answer.body?.message }).toEqual({
-        status: reference.status,
-        code: reference.body?.code,
-        message: reference.body?.message,
-      });
+      expect({ status: answer.status, code: answer.body?.code }).toEqual({ status: 400, code: 'INVALID_FIELD' });
+      expect(String(answer.body?.message)).toContain(`The dataset "rpa_inline" does not declare the dimension "${DENIED}.label".`);
+      expect(String(answer.body?.message)).toContain('Dimensions you may use: title_dim, open_dim.');
       expect(answer.body?.rows).toBeUndefined();
     });
   });

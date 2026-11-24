@@ -73,6 +73,21 @@ describe('validate-ai-surface-affinity', () => {
     expect(findings[0].message).toContain("'build'");
   });
 
+  it('reads a skill its owner keeps out of MCP (mcpPrompt: false) exactly as one without the key (#34167)', () => {
+    // The opt-out narrows MCP prompt projection only; the in-product binding
+    // this rule guards is the same either way.
+    const stack = (mcpPrompt?: boolean) => ({
+      agents: [{ name: 'helper', surface: 'ask', skills: ['metadata_authoring', 'record_writing'] }],
+      skills: [
+        { name: 'metadata_authoring', surface: 'build', tools: [], ...(mcpPrompt === undefined ? {} : { mcpPrompt }) },
+        { name: 'record_writing', surface: 'ask', tools: ['create_record'], ...(mcpPrompt === undefined ? {} : { mcpPrompt }) },
+      ],
+    });
+    const undeclared = validateAiSurfaceAffinity(stack());
+    expect(undeclared).toHaveLength(1);
+    expect(validateAiSurfaceAffinity(stack(false))).toEqual(undeclared);
+  });
+
   it("flags a 'build' agent referencing an 'ask' skill (symmetric)", () => {
     const stack = {
       agents: [{ name: 'builder', surface: 'build', skills: ['data_explorer'] }],

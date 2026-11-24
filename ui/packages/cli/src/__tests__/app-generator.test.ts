@@ -1840,3 +1840,36 @@ describe('generated app type-checks under its own tsconfig', () => {
     );
   });
 });
+
+describe('generated stylesheet carries the ten-token chart palette (objectstack#34902)', () => {
+  const CHART_N = Array.from({ length: 10 }, (_, i) => `--chart-${i + 1}`);
+  /** `--chart-N` declarations inside one top-level block, e.g. `:root` or `.dark`. */
+  const chartValuesIn = (css: string, selector: ':root' | '.dark'): Record<string, string> => {
+    const head = selector === ':root' ? /^:root\s*\{([\s\S]*?)\n\}/m : /^\.dark\s*\{([\s\S]*?)\n\}/m;
+    const block = head.exec(css)?.[1] ?? '';
+    return Object.fromEntries(
+      [...block.matchAll(/^\s*(--chart-\d+)\s*:\s*([^;]+);/gm)].map((m) => [m[1], m[2].trim()]),
+    );
+  };
+  const library = readFileSync(resolve(REPO_ROOT, 'packages/components/src/index.css'), 'utf-8');
+
+  it('declares --chart-1..10 in light and dark with the library\'s own values', () => {
+    const libraryLight = chartValuesIn(library, ':root');
+    const libraryDark = chartValuesIn(library, '.dark');
+    // Non-vacuity: the library itself carries all ten in both themes.
+    expect(Object.keys(libraryLight).sort()).toEqual([...CHART_N].sort());
+    expect(Object.keys(libraryDark).sort()).toEqual([...CHART_N].sort());
+    for (const [shape, files] of Object.entries({ plain: plainFiles(), routed: routedFiles() })) {
+      const css = files['src/index.css'];
+      expect(chartValuesIn(css, ':root'), `${shape} light`).toEqual(libraryLight);
+      expect(chartValuesIn(css, '.dark'), `${shape} dark`).toEqual(libraryDark);
+    }
+  });
+
+  it('maps --color-chart-6..10 through the declared variables', () => {
+    const css = plainFiles()['src/index.css'];
+    for (let i = 6; i <= 10; i++) {
+      expect(css).toContain(`--color-chart-${i}: hsl(var(--chart-${i}));`);
+    }
+  });
+});

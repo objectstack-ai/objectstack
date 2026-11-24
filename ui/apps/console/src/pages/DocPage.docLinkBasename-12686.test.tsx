@@ -193,6 +193,9 @@ describe("a doc-to-doc link in an app's doc stays in that app's docs route (obje
   it('CONTROL: outside an app the header home link is still the portal', async () => {
     renderDoc('/_console');
     await screen.findByRole('link', { name: 'index' });
-    expect(screen.getByRole('link', { name: 'Documentation' }).getAttribute('href')).toBe('/_console/docs');
+    // The portal header's home link, and the path above the article
+    // (objectstack#35424): both name the portal.
+    const links = screen.getAllByRole('link', { name: 'Documentation' });
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(links.map(() => '/_console/docs'));
   });
 });

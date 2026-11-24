@@ -43,15 +43,31 @@
 import { codeSelfServiceRefusal } from './account-self-service-refusal-code.js';
 import { BANNED_USER_CODE, causeBannedUserRefusal } from './banned-user-refusal-cause.js';
 import type { AuthManager } from './auth-manager.js';
-import { refusalCodeOf, SIGN_IN_EMAIL_PATH } from './auth-session-audit.js';
+import { refusalCodeOf } from './auth-session-audit.js';
+import { passwordSignInDoorOf } from './auth-manager-sign-in-lockout.js';
+import {
+  endSessionsAfterCredentialWrite,
+  refuseSignInAcrossCredentialChange,
+  RESET_DOOR_PATHS,
+  RESET_DOOR_SUBJECT,
+} from './credential-change-ends-prior-access.js';
 import { narrowDirectoryForExternalCaller } from './external-directory-door.js';
+import {
+  accessAPasswordChangeKeeps,
+  endWhatTheAccountAddedBeforeAReset,
+  whatAResetKeeps,
+  type MountedOAuthGrants,
+  type ResetEndedAccess,
+} from './password-reset-ends-added-access.js';
 import { SESSION_SCOPING_REFUSAL } from './organization-access-policy.js';
 import { refuseIntrospectionForBannedSubject } from './oauth-token-read-ban-refusal.js';
+import { carryRefusalReasonOnCallback } from './oauth-callback-refusal-reason.js';
 import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotation.js';
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
 import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
 import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
 import { explainUntrustedDiscoveryRefusal } from './sso-discovery-companion-origins.js';
+import { explainSsoDiscoveryConnectRefusal } from './sso-discovery-egress.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { stampRoleChangeGrantedSet } from './role-change-granted-set.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
@@ -69,11 +85,14 @@ export interface AfterHookHost {
   auditRefusedSignIn: AuthManager['auditRefusedSignIn'];
   enforceConcurrentCap: AuthManager['enforceConcurrentCap'];
   externalDirectoryDoorDeps: AuthManager['externalDirectoryDoorDeps'];
+  getDataEngine: AuthManager['getDataEngine'];
   isEmailDeliveryLive: AuthManager['isEmailDeliveryLive'];
   logDurabilityDegradation: AuthManager['logDurabilityDegradation'];
   recordPasswordHistory: AuthManager['recordPasswordHistory'];
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
+  sendPasswordChangeReminder: AuthManager['sendPasswordChangeReminder'];
+  sendPasswordResetNotice: AuthManager['sendPasswordResetNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
   settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
   settleSsoSignOutOfIdp: AuthManager['settleSsoSignOutOfIdp'];
@@ -163,8 +182,186 @@ async function refusedAfterTheCredential(returned: unknown): Promise<boolean> {
   return after.includes(code);
 }
 
+/**
+ * What a wrong password answers at `door`: better-auth's own refusal there
+ * (1.7.12), its code read off the vendor's own tables — `BASE_ERROR_CODES` for
+ * the email door, the phone-number plugin's `$ERROR_CODES` for the phone door —
+ * so no code is minted here.
+ */
+async function wrongPasswordAt(ctx: any, door: 'email' | 'phone'): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  const { BASE_ERROR_CODES } = await import('@better-auth/core/error');
+  const phoneCodes = door === 'phone' ? ctx?.context?.getPlugin?.('phone-number')?.$ERROR_CODES : undefined;
+  const phoneRefusal = phoneCodes?.INVALID_PHONE_NUMBER_OR_PASSWORD;
+  return APIError.from('UNAUTHORIZED', phoneRefusal ?? BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
+}
+
+/** Whether the endpoint answered a success (no `APIError` on `returned`). */
+async function endpointSucceeded(ctx: any): Promise<boolean> {
+  try {
+    const { isAPIError } = await import('better-auth/api');
+    return !isAPIError(ctx?.context?.returned);
+  } catch {
+    return !(ctx?.context?.returned instanceof Error);
+  }
+}
+
+/**
+ * A door that ends the account's sessions when it sets the password ends them
+ * again now that the password is written (`credential-change-ends-prior-
+ * access.ts`): both reset doors, and `/change-password` asked to end the other
+ * sessions, which keeps the session it installed.
+ */
+async function endSessionsOnceThePasswordIsWritten(this: Pick<AfterHookHost, 'logDurabilityDegradation'>, ctx: any): Promise<void> {
+  const resetDoor = RESET_DOOR_PATHS.has(ctx?.path);
+  const changeDoor = ctx?.path === '/change-password' && ctx?.body?.revokeOtherSessions === true;
+  if (!resetDoor && !changeDoor) return;
+  if (!(await endpointSucceeded(ctx))) return;
+  const internal = ctx?.context?.internalAdapter;
+  const subject: unknown = resetDoor ? ctx?.context?.[RESET_DOOR_SUBJECT] : actingUserIdOf(ctx);
+  const installed: unknown = ctx?.context?.returned?.token;
+  if (typeof subject !== 'string' || !subject || !internal || (changeDoor && (typeof installed !== 'string' || !installed))) {
+    this.logDurabilityDegradation(
+      'AuthManager: a password was set by a door that ends the account\'s sessions, but the sessions were NOT '
+        + 'ended again once the password was written: the account it set could not be named. The door ended '
+        + 'them before the write, as it always has. Remedy: none per request; report it, the next such door '
+        + 'ends them again.',
+      new Error('the account of a session-ending password door could not be named'),
+      { object: 'sys_session', path: String(ctx?.path) },
+    );
+    return;
+  }
+  await endSessionsAfterCredentialWrite(internal, subject, changeDoor ? (installed as string) : undefined);
+}
+
+/**
+ * The OAuth grant stores of the request: better-auth's storage adapter, and
+ * whether a plugin is mounted, read off the vendor's own plugin registry
+ * (`getPlugin`), so an arm runs only where its plugin is mounted.
+ */
+function mountedOAuthGrantsOf(ctx: any): MountedOAuthGrants {
+  const context = ctx?.context;
+  return {
+    store: context?.adapter,
+    mounted: (pluginId: string) => typeof context?.getPlugin === 'function' && Boolean(context.getPlugin(pluginId)),
+  };
+}
+
+/**
+ * Mail the account a completed self-service reset just ended for what it
+ * ended and what it kept (`auth.password_reset_notice`). Best-effort: a
+ * notice whose account or kept setup cannot be read, or that cannot be sent,
+ * is logged at warn and never fails the reset, which has already ended
+ * everything it ends.
+ */
+async function noticeWhatAResetEnded(
+  this: Pick<AfterHookHost, 'getDataEngine' | 'sendPasswordResetNotice'>,
+  ctx: any,
+  internal: { findUserById(id: string): Promise<unknown> },
+  userId: string,
+  ended: ResetEndedAccess,
+): Promise<void> {
+  try {
+    const user = (await internal.findUserById(userId)) as { email?: unknown; name?: unknown } | null | undefined;
+    if (typeof user?.email !== 'string' || !user.email) return;
+    const kept = await whatAResetKeeps(this.getDataEngine() as never, userId);
+    await this.sendPasswordResetNotice(
+      { email: user.email, id: userId, ...(typeof user.name === 'string' && user.name ? { name: user.name } : {}) },
+      ended,
+      kept,
+      ctx,
+    );
+  } catch (err) {
+    ctx?.context?.logger?.warn?.('AuthManager: the password-reset notice could not be read', {
+      error: (err as Error)?.message,
+    });
+  }
+}
+
+/**
+ * A completed self-service reset ends what the account added before it and
+ * tells the account so, and a password change reminds the account what it
+ * keeps (`password-reset-ends-added-access.ts`). A completed reset whose
+ * account cannot be named, and a reset's read or write that fails, reach the
+ * requester as an error; neither mail ever fails the reset or the change.
+ */
+async function endOrRemindWhatTheAccountAdded(
+  this: Pick<AfterHookHost, 'getDataEngine' | 'sendPasswordChangeReminder' | 'sendPasswordResetNotice'>,
+  ctx: any,
+): Promise<void> {
+  const resetDoor = RESET_DOOR_PATHS.has(ctx?.path);
+  const changeDoor = ctx?.path === '/change-password';
+  if (!resetDoor && !changeDoor) return;
+  if (!(await endpointSucceeded(ctx))) return;
+  const internal = ctx?.context?.internalAdapter;
+  if (resetDoor) {
+    const subject: unknown = ctx?.context?.[RESET_DOOR_SUBJECT];
+    // The password is written, and nothing it should end can be found: the
+    // requester is answered an error, and the next completed reset ends it.
+    if (typeof subject !== 'string' || !subject || !internal) {
+      throw new Error(
+        'a password reset completed, but the account it reset could not be named, so the API keys, linked '
+          + 'sign-in accounts, authorized apps, registered OAuth applications and minted SCIM credentials it '
+          + 'held before the reset were not ended; reset it again',
+      );
+    }
+    const engine = this.getDataEngine() as never;
+    const ended = await endWhatTheAccountAddedBeforeAReset(
+      {
+        accounts: internal,
+        apiKeys: engine,
+        oauth: mountedOAuthGrantsOf(ctx),
+        registrations: engine,
+        warn: (message) => ctx?.context?.logger?.warn?.(message),
+      },
+      subject,
+    );
+    await noticeWhatAResetEnded.call(this, ctx, internal, subject, ended);
+    return;
+  }
+  const user = ctx?.context?.session?.user as { id?: unknown; email?: unknown; name?: unknown } | undefined;
+  if (!internal || typeof user?.id !== 'string' || !user.id || typeof user.email !== 'string' || !user.email) return;
+  try {
+    const engine = this.getDataEngine() as never;
+    const kept = await accessAPasswordChangeKeeps(
+      { accounts: internal, apiKeys: engine, oauth: mountedOAuthGrantsOf(ctx), registrations: engine },
+      user.id,
+    );
+    if (
+      kept.apiKeys.length === 0
+      && kept.signInAccounts.length === 0
+      && kept.authorizedApps.length === 0
+      && kept.ownedApps.length === 0
+      && kept.scimCredentials.length === 0
+    ) return;
+    await this.sendPasswordChangeReminder(
+      { email: user.email, id: user.id, ...(typeof user.name === 'string' && user.name ? { name: user.name } : {}) },
+      kept,
+      ctx,
+    );
+  } catch (err) {
+    ctx?.context?.logger?.warn?.('AuthManager: the password-change reminder could not be read', {
+      error: (err as Error)?.message,
+    });
+  }
+}
+
 /** The body of `createAuthInstance`'s `hooks.after` arrow; the comments there and in it are its contract. */
 export async function globalAfterHook(this: AfterHookHost, ctx: any) {
+  // ── A credential change ends access issued before it ──────────────
+  // FIRST: a password sign-in during which the account's password changed
+  // is refused, its session ended and the response left without one, ahead
+  // of every after-hook that reads the new session — the second-factor
+  // plugin's among them, which then opens no challenge. Its refusal is what
+  // a wrong password answers at that door; the lockout settlement below
+  // reads it as one, and it is thrown once that settlement has run.
+  // `credential-change-ends-prior-access.ts` states the rule.
+  const signInDoor = passwordSignInDoorOf(ctx);
+  const signInAcrossChange = signInDoor
+    ? await refuseSignInAcrossCredentialChange(ctx, () => wrongPasswordAt(ctx, signInDoor.door))
+    : undefined;
+  if (signInAcrossChange) ctx.context.returned = signInAcrossChange;
+
   // ── #8243: impersonation must actually take effect for a bearer ──
   // FIRST among the after-hooks that touch the response, because the
   // bearer plugin's own after-hook runs behind this one and must see
@@ -229,12 +426,17 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // See `sso-provider-lifecycle.ts`.
   if (ctx?.path === SSO_PROVIDER_DELETE_PATH) await this.settleSsoProviderDelete(ctx);
 
+  // A refused platform sign-in: the environment's callback hands the host's
+  // reason on to the sign-in page (`oauth-callback-refusal-reason.ts`).
+  carryRefusalReasonOnCallback(ctx);
+
   // Ruling record 6866334319: an OIDC provider saved with "sign out of the
   // company sign-in too" on keeps the end_session_endpoint its before-hook
   // read (`sso-sign-out-of-idp.ts`).
   if (ctx?.path === '/sso/register' || ctx?.path === '/sso/update-provider') await this.settleSsoSignOutOfIdp(ctx);
 
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
+  // On every password door (`/sign-in/email`, `/sign-in/phone-number`).
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
   // the after-hook with it on `ctx.context.returned`; a success leaves
   // the session payload there. The gate stamped this attempt as a
@@ -243,8 +445,9 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // names is neither: the password passed and a policy then refused the
   // sign-in, so the stamp is handed back and the counter is left as it
   // stood. Its `login_failed` row is still written below.
-  if (ctx?.path === SIGN_IN_EMAIL_PATH) {
-    const email = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
+  const passwordDoor = passwordSignInDoorOf(ctx);
+  if (passwordDoor) {
+    const { door, identifier: email } = passwordDoor;
     if (email) {
       let succeeded = true;
       try {
@@ -260,14 +463,17 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
           : await refusedAfterTheCredential(ctx?.context?.returned)
             ? 'refused-after-credential'
             : 'refused',
+        door,
       );
       // A refused sign-in writes `login_failed`, and the one that
       // stamped the lockout also writes `account_locked`. A successful
       // one is recorded as `login` by the session hook, unchanged. A
       // sign-in refused because the account is locked had its row
       // written by the gate, with the lock as its reason.
-      if (!succeeded && !settlement.refusedByLock) await this.auditRefusedSignIn(ctx, email, settlement);
-      if (succeeded) {
+      if (!succeeded && !settlement.refusedByLock) await this.auditRefusedSignIn(ctx, email, settlement, door);
+      // The session controls and the last-login stamp below are the email
+      // door's, as before.
+      if (succeeded && door === 'email') {
         const uid = ctx?.context?.returned?.user?.id;
         // [ADR-0069 TL;DR 6] The cap of the organization the new session
         // was scoped to at creation (ADR-0093 D9), never above the
@@ -297,9 +503,13 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
     // `details.cause: 'scim_deactivated'`; an administrator's ban is
     // answered as before. See `banned-user-refusal-cause.ts`. It throws
     // on a match, so it stays after the settlement and the refusal's
-    // `login_failed` row above.
-    await causeBannedUserRefusal(ctx);
-    return;
+    // `login_failed` row above. The phone door goes on to the hooks below,
+    // as before.
+    if (signInAcrossChange) throw signInAcrossChange;
+    if (door === 'email') {
+      await causeBannedUserRefusal(ctx);
+      return;
+    }
   }
 
   // ── ADR-0069 D1: on a successful change/reset — stamp
@@ -312,8 +522,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // the handler ran, the reading the change-email notice below takes — and
   // only when the before-hook's reuse and forced-change checks ran for that
   // same account. The history entry is the old hash those checks read, so it
-  // is appended only to the account it was read from.
-  if (ctx?.path === '/change-password' || ctx?.path === '/reset-password') {
+  // is appended only to the account it was read from. FIRST among the steps
+  // a password write sets off: neither write throws (each reports its own
+  // failure), so the endings below, which can, never leave a written
+  // password without its stamp or its history entry.
+  const passwordChangeDoor = ctx?.path === '/change-password' || ctx?.path === '/reset-password';
+  if (passwordChangeDoor) {
     let succeeded: boolean;
     try {
       const { isAPIError } = await import('better-auth/api');
@@ -346,8 +560,16 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
     }
     delete ctx.context.__osPwChangeUserId;
     delete ctx.context.__osPwHistory;
-    return;
   }
+
+  // ── A credential change ends access issued before it ──────────────
+  // Behind the password-change after-effects above, which never throw.
+  await endSessionsOnceThePasswordIsWritten.call(this, ctx);
+  // ── A password reset ends what the account added before it ────────
+  // And a password change reminds the account what it keeps. Behind the
+  // sessions above.
+  await endOrRemindWhatTheAccountAdded.call(this, ctx);
+  if (passwordChangeDoor) return;
 
   // ── #8019: tell the OLD address, without gating on it ──────────────
   // Maintainer ruling 2026-08-12 — 「notify the OLD address — do not
@@ -442,6 +664,12 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // `/sso/register` only; the same status and code, the remedy appended to
   // the vendor's message (`sso-discovery-companion-origins.ts`).
   await explainUntrustedDiscoveryRefusal(ctx);
+
+  // ── A registration's discovery read refused when it connected ──
+  // `/sso/register` only: answered as the before-hook answers a discovery
+  // host that is not public, on the member that names it
+  // (`sso-discovery-egress.ts`). Throws on a match.
+  await explainSsoDiscoveryConnectRefusal(ctx);
 
   // ── #29163: update-user's uncoded refusal carries its code ──
   // Same seam as the change-email section above; throws on a match.

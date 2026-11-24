@@ -1,6 +1,6 @@
 # ADR-0094: Permission-Set Definitions Have One Authoritative Store — `sys_permission_set` Becomes a Pure Projection
 
-**Status**: Accepted (2026-07-14); **D5 retired 2026-08-09** (see D5-R) · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D2/D3/D13): **the projection is retired by execution** — #15204 stage 8 (`66949b7729`, 2026-10-13) unregistered the `sys_permission_set` row object, the `permission` projector with its boot reconcile, and the data-door write-through; D1 stands, generalized by ADR-0131 D3. See the notes under the TL;DR, D1–D4, the Consequences, the 2026-07-14 addendum and the 2026-09-04 amendment.
+**Status**: Accepted (2026-07-14); **D5 retired 2026-08-09** (see D5-R) · **Amended** (2026-10-14, [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D2/D3/D13): **the projection is retired by execution** — #15204 stage 8 (`66949b7729`, 2026-10-13) unregistered the `sys_permission_set` row object, the `permission` projector with its boot reconcile, and the data-door write-through; D1 stands, generalized by ADR-0131 D3. See the notes under the TL;DR, D1–D4, the Consequences, the 2026-07-14 addendum and the 2026-09-04 amendment. · **Amended** (2026-11-15, #34077): **on both `revertCommit` limbs a projector failure now reaches the caller** — since PR #33805 (`568f214a6c`) the revert reads the projector's answer, reports the item in `failed[]` and answers `success: false`; the 2026-09-04 amendment's "logged without reaching the caller" still holds for `rollbackMetaItem`. See the notes under D2 and in that amendment (below its table and in its `projectionApplied` bullet).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (overlay store), [ADR-0056](./0056-permission-model-landing-verification.md) (landing verification), [ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md) (two doors / provenance)
 **Closes**: framework#2875 (root cause behind the #2857 display-freshness class)
@@ -127,6 +127,12 @@ thrown, the metadata write itself succeeded and boot reconciliation heals on nex
 > and since 2026-09-03 that set includes the recovery doors. `projectionApplied` is
 > also not surfaced at every site: three of the seven call and await the projector
 > without putting an outcome on the response.
+>
+> ⚠️ **Amended 2026-11-15 (#34077 / PR #33805)** — for both `revertCommit` limbs a
+> projector failure is now put on the response: the item is reported in `failed[]` and
+> the revert answers `success: false`. No `projectionApplied` key was added, and
+> `rollbackMetaItem` is unchanged: it awaits the projector and puts no projection outcome
+> on the response. See the note in the amendment at the end.
 
 `plugin-security` registers the `permission` projector. It re-reads the **fresh layered
 effective body** and:
@@ -566,6 +572,13 @@ that same file — D2's three, plus the four #14982 added:
 | `revertCommit`, soft-remove limb | `deleted` | none | — |
 | `deleteMetaItem`, legacy raw-engine exit | `deleted` | none | `projectionApplied` |
 
+⚠️ **Amended 2026-11-15 (#34077 / PR #33805)** — in the two `revertCommit` rows
+the `—` now says only that the answer carries no `projectionApplied` key. Since
+PR #33805 a projector failure on either limb is on the response: the item is
+reported in `failed[]` and the revert answers `success: false`. The
+`rollbackMetaItem` row is unchanged: still `—`, and still no projection outcome
+on the response. See the note under the `projectionApplied` bullet below.
+
 Three things D2's three-name sentence hides, each measured on the call sites
 rather than inferred from the method names:
 
@@ -583,6 +596,17 @@ rather than inferred from the method names:
   declare no such key on their response types and #14982 deliberately added
   none: there the projector is called and awaited, and a failure is logged
   without reaching the caller.
+  ⚠️ **Amended 2026-11-15 (#34077 / PR #33805)** — for both `revertCommit`
+  limbs, "logged without reaching the caller" no longer holds. Since PR #33805
+  (`568f214a6c`) the revert reads the projector's answer
+  (`packages/metadata-protocol/src/protocol-package-commits.ts#revertCommit`):
+  a failure is still logged, and it now puts the item in `failed[]`, with its
+  row state named and the projector's own error text left on the log line,
+  and the revert answers `success: false`. That answer still carries no
+  `projectionApplied` key, and the sentence above still holds for
+  `rollbackMetaItem`, which awaits the projector and does not read its answer.
+  Pinned by
+  `packages/metadata-protocol/src/protocol.revert-commit-honest-outcome.test.ts`.
 
 The count is enforced, not incidental —
 `packages/metadata-protocol/src/protocol.recovery-doors-mutation-projector.test.ts`

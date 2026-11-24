@@ -56,6 +56,9 @@ import { ComponentPropsMap } from '@objectstack/spec/ui';
 // Registers every `element:*` renderer at module scope, not in a hook
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../../../renderers';
+// The page renderer loads `@object-ui/react-runtime` lazily; loading it here
+// pays that transform during collection, not inside a case's clocked window.
+import '@object-ui/react-runtime';
 
 afterEach(cleanup);
 
@@ -336,5 +339,28 @@ describe('element:repeater `dataSource.sort` — the items the adapter is handed
   it('is the binding\'s member, not a published flat input: the flat `sort` is retired upstream (objectui#12085)', () => {
     expect(inputsOf(REPEATER).has('dataSource')).toBe(true);
     expect(inputsOf(REPEATER).has('sort')).toBe(false);
+  });
+});
+
+describe('element:repeater — declines the total it never draws', () => {
+  it('a paged read carries `$count: false`, so the server skips its `count(*)`', async () => {
+    // The repeater prints rows and never a record count; a paged read without
+    // the opt-out pays for a total nothing on screen shows.
+    const find = mountRepeater({}, { limit: 5 });
+    await waitFor(() => expect(find).toHaveBeenCalled());
+    for (const query of queries(find)) {
+      expect(query.$count).toBe(false);
+      // Reachability: the binding's limit still pages the read.
+      expect(query.$top).toBe(5);
+    }
+  });
+
+  it('CONTROL: an unpaged read sends neither `$top` nor `$count` — the server counts nothing there', async () => {
+    const find = mountRepeater({});
+    await waitFor(() => expect(find).toHaveBeenCalled());
+    for (const query of queries(find)) {
+      expect(query).not.toHaveProperty('$count');
+      expect(query).not.toHaveProperty('$top');
+    }
   });
 });

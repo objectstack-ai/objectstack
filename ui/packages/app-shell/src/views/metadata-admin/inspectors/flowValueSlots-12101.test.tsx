@@ -39,11 +39,15 @@ import { FLOW_NODE_CONFIG_TYPES, fieldsForNodeType, mergeServerFlowFields, type 
 import { jsonSchemaToFlowFields } from './json-schema-to-fields';
 import { flowFieldZh } from '../i18n';
 import type { ScopeGroup } from './useFlowScope';
+// The inspector reaches `objectPickerClosure`'s and `celAuthoring`'s dynamic
+// `@objectstack/lint` import; its first load is paid here, at collection,
+// never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
 const PICK = 'Insert a reference';
-const TOGGLE = 'Write as a CEL expression';
+const TOGGLE = 'Write as a formula';
 const env = (source: string) => ({ dialect: 'cel', source });
 
 
@@ -102,10 +106,21 @@ describe('objectui#12101 — hole mode is exactly the text slots the spec names'
         .filter((f) => f.refMode === 'hole')
         .map((f) => `${type}.${f.path[1]}`),
     );
+    // An `envelopeOnly` slot (a record write's `fields`, objectstack#34062) is
+    // text only where a value is a `template` envelope; a bare string there is
+    // a literal, so the map is not a hole-mode field. The inspector's text
+    // envelope cell is objectstack#34445's.
     const rendered = FLOW_NODE_TEXT_SLOTS.filter((s) =>
-      fieldsForNodeType(s.nodeType).some((f) => f.path[0] === 'config' && f.path[1] === s.key),
+      !s.envelopeOnly && fieldsForNodeType(s.nodeType).some((f) => f.path[0] === 'config' && f.path[1] === s.key),
     ).map((s) => `${s.nodeType}.${s.key}`);
     expect(holeFields.sort()).toEqual(rendered.sort());
+  });
+
+  it('a record write\'s `fields` is an envelopeOnly text slot and not a hole-mode field (inspector half: objectstack#34445)', () => {
+    for (const type of ['create_record', 'update_record']) {
+      expect(FLOW_NODE_TEXT_SLOTS.find((s) => s.nodeType === type && s.key === 'fields')?.envelopeOnly).toBe(true);
+      expect(fieldOf(type, 'fields').refMode).not.toBe('hole');
+    }
   });
 
   it('a served http url / headers keeps hole mode (the descriptor marks neither)', () => {
@@ -168,6 +183,20 @@ describe('objectui#12101 — a value map writes a literal or a CEL value envelop
       renderMap(type, key, { account: '{account.id}' });
       const alert = screen.getByRole('alert').textContent ?? '';
       expect(alert).toContain("{ dialect: 'cel', source: 'account.id' }");
+    });
+  }
+});
+
+describe('objectstack#34445 — a record write\'s `fields` cell judges a text envelope by the record-field rule', () => {
+  for (const type of ['create_record', 'update_record']) {
+    it(`${type}.fields: a text envelope shows no refusal`, () => {
+      renderMap(type, 'fields', { escalation_reason: { dialect: 'template', source: 'Escalated: {{ record.priority }}' } });
+      expect(screen.queryByRole('alert')).toBeNull();
+    });
+
+    it(`CONTROL — ${type}.fields: a malformed envelope is still refused`, () => {
+      renderMap(type, 'fields', { escalation_reason: { dialect: 'template', source: '{record.priority}' } });
+      expect(screen.getByRole('alert').textContent ?? '').toContain('{{');
     });
   }
 });

@@ -315,8 +315,11 @@ describe('run-dev.js on a workspace package with no build output', () => {
     // The upstream line is deliberately NOT suppressed: nothing here changes
     // which arguments the CLI accepts or how oclif reports, only what is said
     // alongside. Asserting it also proves case 1 really reached that failure
-    // rather than dying earlier for some unrelated reason.
-    expect(unbuilt.stderr).toContain('Error: command i18n:extract:nope.ts not found');
+    // rather than dying earlier for some unrelated reason. The id is spelled
+    // as typed, with the CLI's space topic separator: the `command_not_found`
+    // hook (`src/hooks/command-not-found/point-at-help.ts`) words the refusal
+    // that oclif still raises and prints.
+    expect(unbuilt.stderr).toContain('Error: command i18n extract nope.ts not found');
     expect(unbuilt.code).toBe(2);
   });
 
@@ -376,8 +379,10 @@ describe('the same probe, read by a parent that stalls (the merge-queue shape)',
     // so it survives only because awaiting our own write had already emptied
     // the buffer ahead of it. This assertion reds in the queue beside the lead
     // line — and a formatter that had merely failed to LOAD could not have
-    // removed it, which is what rules that reading out.
-    expect(stalled.stderr).toContain('Error: command i18n:extract:nope.ts not found');
+    // removed it, which is what rules that reading out. (The words are the
+    // `command_not_found` hook's, the id spelled as typed; the write and the
+    // exit on top of ours are still oclif's `handle()`.)
+    expect(stalled.stderr).toContain('Error: command i18n extract nope.ts not found');
     expect(stalled.code).toBe(2);
   });
 });

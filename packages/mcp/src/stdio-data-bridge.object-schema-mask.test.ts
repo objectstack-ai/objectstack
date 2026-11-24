@@ -609,8 +609,9 @@ describe('stdio describe_object and the objects resource judge readonly on the D
   // The HTTP twin's fixture (`packages/runtime/src/domains/mcp-object-schema-mask.test.ts`,
   // "describe_object serves readonly where a write never stands — the real
   // engine and security layer"): `marked_up` is a stored expression over
-  // `hidden_cost`, which the member may not read, so the member's mask deletes
-  // `marked_up.expression` while the engine still computes the field.
+  // `hidden_cost`, which the member may not read. Field-level security covers
+  // what a value is computed from, so the security service withholds
+  // `marked_up` from the member with `hidden_cost`.
   const TICKET = {
     name: 'ticket',
     label: 'Ticket',
@@ -629,8 +630,8 @@ describe('stdio describe_object and the objects resource judge readonly on the D
   };
   /**
    * The member's answer, field for field: the map the HTTP twin's PARITY pin
-   * holds for the same declaration and the same mask. `hidden_cost` is not
-   * served at all; `marked_up` is served, without its expression, as readonly.
+   * holds for the same declaration and the same mask. Neither `hidden_cost`
+   * nor `marked_up`, the stored expression over it, is served.
    */
   const MEMBER_READONLY = {
     title: false,
@@ -641,9 +642,9 @@ describe('stdio describe_object and the objects resource judge readonly on the D
     bare_formula: true,
     doubled: true,
     locked_note: false,
-    marked_up: true,
   };
-  const READABLE = Object.keys(TICKET.fields).filter((f) => f !== 'hidden_cost');
+  /** The security service's answer for the member, as the HTTP twin's real one gives it. */
+  const READABLE = Object.keys(TICKET.fields).filter((f) => f !== 'hidden_cost' && f !== 'marked_up');
   const memberSecurity = {
     getReadableFields: async () => [...READABLE],
     getMetadataReadableFields: async () => [...READABLE],
@@ -696,27 +697,27 @@ describe('stdio describe_object and the objects resource judge readonly on the D
     return { text, json: JSON.parse(text) };
   }
 
-  it('precondition: the member\'s served object carries marked_up WITHOUT its expression', async () => {
+  it('precondition: the member\'s served object carries neither hidden_cost nor marked_up, the stored expression over it', async () => {
     const view = callerObjectView(stdioObjectView({ metadataService: metadataService() }), {
       resolvePrincipal: MEMBER,
       security: () => memberSecurity,
     });
     const served = (await view.getObject(TICKET.name)) as any;
-    expect(served.fields.marked_up, 'the member is served the field').toBeDefined();
-    expect(served.fields.marked_up.expression, 'the mask deleted the expression').toBeUndefined();
+    expect(served.fields.marked_up, 'the stored expression over the hidden field is not served').toBeUndefined();
     expect(served.fields.hidden_cost, 'the field it names is not served').toBeUndefined();
+    expect(served.fields.doubled, 'CONTROL: a stored expression over a readable field is served').toBeDefined();
   });
 
   for (const [door, describe] of [
     ['describe_object over stdio', describeOverStdio],
     ['the objectstack://objects/{name} resource', describeOverResource],
   ] as const) {
-    it(`${door}: marked_up is readonly: true, and neither its expression nor hidden_cost is served`, async () => {
+    it(`${door}: neither marked_up nor hidden_cost is served, and the rest keep their readonly`, async () => {
       const { text, json } = await describe();
       expect(readonlyOf(json)).toEqual(MEMBER_READONLY);
       expect(mentions(text, 'hidden_cost')).toBe(false);
       expect(text).not.toContain('record.');
-      expect(json.fields.find((f: any) => f.name === 'marked_up')).not.toHaveProperty('expression');
+      expect(json.fields.find((f: any) => f.name === 'marked_up')).toBeUndefined();
     });
   }
 

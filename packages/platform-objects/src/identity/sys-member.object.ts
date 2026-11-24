@@ -24,6 +24,7 @@ export const SysMember = ObjectSchema.create({
   label: 'Member',
   pluralLabel: 'Members',
   icon: 'user-check',
+  color: 'blue',
   isSystem: true,
   managedBy: 'better-auth',
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
@@ -228,6 +229,9 @@ export const SysMember = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/update-member-role',
       recordIdParam: 'memberId',
+      // Hidden while cloud-managed: the hosting organisation manages members
+      // and their roles there, and the door refuses (409 RESOURCE_CONFLICT).
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'update_member_role',
       successMessage: 'Member role updated',
@@ -254,6 +258,8 @@ export const SysMember = ObjectSchema.create({
       type: 'api',
       target: '/api/v1/auth/organization/remove-member',
       recordIdParam: 'memberIdOrEmail',
+      // Hidden while cloud-managed, as `update_member_role` above.
+      visible: 'features.cloudManaged != true',
       requiresFeature: 'organization',
       requiresMembershipReach: 'remove_member',
       confirmText: 'Remove this member from the organization? They will lose access to all org resources.',
@@ -301,7 +307,9 @@ export const SysMember = ObjectSchema.create({
       // predicate at key resolution and drop the button silently. `has()`
       // alone — the operand is a bare equality against a literal (see
       // `materializeDeclaredFields` in `@objectstack/objectql`).
-      visible: "has(record.role) && record.role != 'owner'",
+      // Hidden while cloud-managed, as `update_member_role` above (the same
+      // door).
+      visible: "has(record.role) && record.role != 'owner' && features.cloudManaged != true",
       requiresFeature: 'organization',
       requiresMembershipReach: 'transfer_ownership',
       confirmText: 'Make the selected member an owner of this organization? They get every owner privilege, including deleting the organization. You stay an owner too; to step down, use Change Role on your own membership.',

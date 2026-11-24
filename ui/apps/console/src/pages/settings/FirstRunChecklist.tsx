@@ -10,12 +10,28 @@
  *
  * ## Where it is drawn
  *
- * Home (`/home`), above the page's own sections. Home is the environment's own
- * home (ObjectUI ADR-0075): every deployment that declares no landing app opens
- * there after sign-in, the Setup-only one included (`RootLandingRedirect`).
- * Mounted by the console's Home route (`App.tsx`), inside the
- * `ConsolePermissionsScope` that route already sits under: that provider is
- * what answers which capabilities this session holds.
+ * From 768 px up, at the top of the Setup app's first page (objectstack#36732,
+ * item 5, option A): the desktop's platform home page retired, so an
+ * administrator who has an app lands in it, and Setup's first page is where
+ * the platform is set up. Handed to app-shell's `SetupFirstPageSlotProvider`
+ * by the console's app route (`AppContent.tsx`).
+ *
+ * And Home (`/home`), in the slot Home's page gives its host's checklist
+ * (app-shell's `HomePage`, `checklist`): on a desktop that is the no-apps
+ * empty state, so a new environment's first administrator meets it on the
+ * first screen. Mounted by the console's Home route (`App.tsx`).
+ *
+ * Both mounts sit inside `ConsolePermissionsScope`: that provider is what
+ * answers which capabilities this session holds.
+ *
+ * Home names the placement (`placement`). `top`, above the page's sections
+ * (a desktop, or a page with no app yet), draws the card as it always was.
+ * `afterApps` is a phone's: the card sits in the content column after the
+ * apps and starts folded to one line, its title, its progress and Continue,
+ * so the first screen keeps the launcher (objectstack#34596). Continue opens
+ * the card in place, and a fold control closes it again; like the done rows'
+ * fold, this is the mount's own state and a fresh visit starts folded.
+ * Folding changes no row and no completion rule.
  *
  * ## Who sees it, and what each row says
  *
@@ -53,6 +69,24 @@
  *      drawn and not done it claims the `connect_assistant` item, and Home's
  *      Connect an AI Assistant card stands aside.
  *
+ * ## What the host adds: the profile
+ *
+ * The rows above are the platform's. A host can add rows, hide rows that do
+ * not apply to it, and leave rows optional, through the checklist's PROFILE
+ * (`firstRunChecklistProfile.ts`), which the served auth config selects
+ * (`features.cloudManaged`). This component reads the profile's lists and
+ * never which host it runs on. On a self-hosted deployment the profile is
+ * empty and the checklist is exactly the rows above. On a managed one:
+ *
+ *   9. Put your first app in: the launcher lists an app that is not a platform
+ *      built-in (the launcher's own `/me/apps` answer, no request of its own).
+ *  10. Add your first record, OPTIONAL there: a person created a record on an
+ *      object those apps list (one `sys_activity` read; the feed keeps 14 days,
+ *      which is why the row is optional). Links to the first of those apps.
+ *
+ * and the mail row is drawn only once it reads done. Until the auth config
+ * answers, nothing is drawn; a config that cannot be read is self-hosted.
+ *
  * Language and country are named in the page's language (`Intl.DisplayNames`),
  * not by the setting's option label: the language options are autonyms, so a
  * zh-CN page read 「当前为English、美国 (US)」.
@@ -67,7 +101,18 @@
  * one control under them names how many are done and shows them (in their
  * place in the list) or folds them again, so the card keeps the first screen
  * for the work left (objectstack#32157). Unfolding is this mount's own state:
- * a fresh visit starts folded.
+ * a fresh visit starts folded. The control counts the required rows and the
+ * optional ones apart once an optional row is done, since the progress line
+ * counts the required rows alone (`checklistDoneCount`).
+ *
+ * Above the page, once few rows are left to do (`drawsOneLine`: two or fewer,
+ * optional ones included), the card folds to one line: its title, its
+ * progress, each row left by its title and a Set button, and the close
+ * button; no description, no done rows and no control to unfold them. The
+ * line wraps on a narrow page rather than scroll. A localization row's Set
+ * opens the full card with that row's editor, and the card folds back to the
+ * line once the editor closes; every other row's Set opens the page its row
+ * links to. A phone's card (`afterApps`) folds its own way, above.
  *
  * ## Hiding it
  *
@@ -92,13 +137,16 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Circle, Loader2, X } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import {
+  appRouteSegment,
   connectAssistantPath,
   resolveSetupAppPath,
+  useAdapter,
   useConnectedAccess,
   useHomeItemClaim,
+  useLauncherApps,
   useMetadata,
 } from '@object-ui/app-shell';
 import { useAuth } from '@object-ui/auth';
@@ -119,10 +167,11 @@ import {
   LOCALIZATION_NAMESPACE,
   TIMEZONE_KEY,
   checklistCompletion,
+  checklistDoneCount,
   deviceStorage,
   dismissRecordKey,
+  drawsOneLine,
   hasInvitedColleagues,
-  isOptionalRow,
   isOrganizationNamed,
   localizationRows,
   markDismissed,
@@ -133,6 +182,19 @@ import {
   type ChecklistSettingsRow,
   type ChecklistSettingsState,
 } from './firstRunChecklistLogic';
+import {
+  SELF_HOSTED_PROFILE,
+  appObjectNames,
+  checklistProfileFor,
+  hasOwnApp,
+  isProfileOptionalRow,
+  ownApps,
+  profileDrawsRow,
+  readFirstRecordCreated,
+  type ChecklistApp,
+  type FirstRecordSource,
+  type FirstRunChecklistProfile,
+} from './firstRunChecklistProfile';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -184,6 +246,7 @@ function currentValue(resolved: ResolvedSettingValue): string {
 function ChecklistRow({
   id,
   done,
+  optional = false,
   title,
   detail,
   action,
@@ -191,13 +254,14 @@ function ChecklistRow({
 }: {
   id: string;
   done: boolean;
+  /** The row may be left undone: the profile's answer (`isProfileOptionalRow`). */
+  optional?: boolean;
   title: string;
   detail?: string;
   action?: ReactNode;
   children?: ReactNode;
 }) {
   const { t } = useObjectTranslation();
-  const optional = isOptionalRow(id);
   return (
     <li
       className="flex items-start gap-3 py-3"
@@ -215,14 +279,14 @@ function ChecklistRow({
           {title}
           {optional ? (
             <span
-              className="ml-2 rounded-full border border-border px-1.5 py-px align-middle text-[11px] font-normal text-muted-foreground"
+              className="ml-2 rounded-full border border-border px-1.5 py-px align-middle text-xs font-normal text-muted-foreground"
               data-testid={`first-run-checklist-optional-${id}`}
             >
               {t('console.firstRunChecklist.optional')}
             </span>
           ) : null}
         </p>
-        {detail ? <p className="mt-0.5 text-[13px] text-muted-foreground">{detail}</p> : null}
+        {detail ? <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p> : null}
         {children}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
@@ -409,17 +473,43 @@ function SettingsRowEditor({
   );
 }
 
-export function FirstRunChecklist() {
+/**
+ * Where Home draws the checklist: app-shell's `HomeChecklistPlacement`, by
+ * value (see the module doc).
+ */
+export type FirstRunChecklistPlacement = 'top' | 'afterApps';
+
+/**
+ * One row as the checklist draws it: the full row (`node`), and what the
+ * one-line form draws of it, its title and where its Set goes (a page to open,
+ * or the localization row to open for editing in the full card).
+ */
+interface ChecklistDrawnRow {
+  id: string;
+  done: boolean;
+  title: string;
+  set?: { to: string } | { edit: ChecklistSettingsRow['id'] };
+  node: ReactNode;
+}
+
+export function FirstRunChecklist({ placement = 'top' }: { placement?: FirstRunChecklistPlacement } = {}) {
   const { t, language } = useObjectTranslation();
-  const { user, activeOrganization, getMembers, listInvitations } = useAuth();
+  const { user, activeOrganization, getMembers, listInvitations, getAuthConfig } = useAuth();
   const { systemPermissions } = usePermissions();
   const { apps } = useMetadata();
+  const dataSource = useAdapter();
+  // The apps the launcher offers this user: the `/meta/app` list narrowed by
+  // the console's one `/me/apps` read. "Put your first app in" reads it.
+  const launcher = useLauncherApps((apps ?? []) as Array<ChecklistApp & Record<string, unknown>>);
   const labels = useSettingsLabel(LOCALIZATION_NAMESPACE);
   const aiLabels = useSettingsLabel(AI_NAMESPACE);
 
   const [editing, setEditing] = useState<ChecklistSettingsRow['id'] | null>(null);
   // Whether the rows that are done are drawn; folded on every visit.
   const [showDone, setShowDone] = useState(false);
+  // A phone's card starts folded to one line; folded on every visit.
+  const foldable = placement === 'afterApps';
+  const [unfolded, setUnfolded] = useState(false);
   // The browser's answers are read once per mount: what the rows offer does not
   // change under the administrator while they look at it.
   const [browser] = useState(readBrowserAnswers);
@@ -440,6 +530,29 @@ export function FirstRunChecklist() {
   // Hidden in this mount by the close button; a record from an earlier visit is
   // read from the device below.
   const [hiddenKey, setHiddenKey] = useState<string | null>(null);
+  // The host's profile, from the served auth config (`firstRunChecklistProfile.ts`).
+  // `null` until the config answers: drawing the self-hosted rows first and
+  // the host's a moment later would move the list under the reader.
+  const [profile, setProfile] = useState<FirstRunChecklistProfile | null>(null);
+  // Whether a person created a record, read for one identity and object list.
+  const [firstRecord, setFirstRecord] = useState<{ key: string; created: boolean } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // The auth client holds one config answer per signed-in stretch, which
+    // sign-in already read: this asks no new request.
+    Promise.resolve(getAuthConfig?.())
+      .then((config) => {
+        if (!cancelled) setProfile(checklistProfileFor(config?.features));
+      })
+      .catch(() => {
+        // Unreadable: the checklist is what it is without a host.
+        if (!cancelled) setProfile(SELF_HOSTED_PROFILE);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [getAuthConfig]);
 
   useEffect(() => {
     if (!identity || !userId || !orgId || heldKey === null) return;
@@ -488,24 +601,57 @@ export function FirstRunChecklist() {
       assistant.state === 'ready' && !assistant.connected,
   );
   useHomeItemClaim('connect_assistant', drawsAssistantRow);
+  // Add your first record: read once the checklist is going to draw, the
+  // profile adds the row and the launcher has answered, for the objects the
+  // environment's own apps list. Keyed on that list's content, never on the
+  // array's identity (AGENTS.md #10).
+  const own = ownApps(launcher.apps);
+  const recordObjects = appObjectNames(own);
+  const firstRecordKey =
+    settings && !dismissed && identity && profile?.addedRows.includes('first_record') && !launcher.pending && dataSource
+      ? [identity, recordObjects.join(',')].join('\u0001')
+      : null;
+  useEffect(() => {
+    if (!firstRecordKey || !dataSource) return;
+    let cancelled = false;
+    readFirstRecordCreated(dataSource as unknown as FirstRecordSource, recordObjects)
+      .then((created) => {
+        if (!cancelled) setFirstRecord({ key: firstRecordKey, created });
+      })
+      .catch(() => {
+        // Unreadable (no activity feed, or a refused read): the row is left out.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `recordObjects` and `dataSource` are carried by the key's content.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRecordKey]);
+  const recordCreated = firstRecord && firstRecord.key === firstRecordKey ? firstRecord.created : undefined;
+
   const setSettings = (update: (prev: ChecklistSettingsState) => ChecklistSettingsState) =>
     setLoaded((prev) => (prev ? { identity: prev.identity, settings: update(prev.settings) } : prev));
 
-  if (!settings || dismissed || !orgId || !userId || !recordKey) return null;
+  if (!settings || !profile || dismissed || !orgId || !userId || !recordKey) return null;
+  const optionalRow = (id: string) => isProfileOptionalRow(profile, id);
 
   const setupPath = resolveSetupAppPath(apps);
   const localization = localizationRows(settings.localization.manifest, settings.localization.values, browser);
   const organizationNamed = isOrganizationNamed(activeOrganization?.name);
 
-  const rows: Array<{ id: string; done: boolean; node: ReactNode }> = [];
+  const rows: ChecklistDrawnRow[] = [];
 
+  const organizationPath = `${setupPath}/sys_organization/record/${encodeURIComponent(orgId)}`;
   rows.push({
     id: 'organization_name',
     done: organizationNamed,
+    title: t('console.firstRunChecklist.organizationName.title'),
+    set: { to: organizationPath },
     node: (
       <ChecklistRow
         key="organization_name"
         id="organization_name"
+        optional={optionalRow('organization_name')}
         done={organizationNamed}
         title={t('console.firstRunChecklist.organizationName.title')}
         detail={
@@ -515,7 +661,7 @@ export function FirstRunChecklist() {
         }
         action={
           <RowLink
-            to={`${setupPath}/sys_organization/record/${encodeURIComponent(orgId)}`}
+            to={organizationPath}
             label={organizationNamed ? t('console.firstRunChecklist.change') : t('console.firstRunChecklist.organizationName.action')}
             testId="first-run-checklist-link-organization_name"
           />
@@ -529,10 +675,13 @@ export function FirstRunChecklist() {
     rows.push({
       id: row.id,
       done: row.done,
+      title: settingsRowTitle(row, t),
+      set: { edit: row.id },
       node: (
         <ChecklistRow
           key={row.id}
           id={row.id}
+          optional={optionalRow(row.id)}
           done={row.done}
           title={settingsRowTitle(row, t)}
           detail={settingsRowDetail(row, labels, language, t)}
@@ -589,10 +738,13 @@ export function FirstRunChecklist() {
     rows.push({
       id: 'mail',
       done,
+      title: t('console.firstRunChecklist.mail.title'),
+      set: { to: `${setupPath}/system/settings/mail` },
       node: (
         <ChecklistRow
           key="mail"
           id="mail"
+          optional={optionalRow('mail')}
           done={done}
           title={t('console.firstRunChecklist.mail.title')}
           detail={done ? t('console.firstRunChecklist.mail.done') : t('console.firstRunChecklist.mail.todo')}
@@ -612,10 +764,13 @@ export function FirstRunChecklist() {
     rows.push({
       id: 'invite',
       done: colleagues,
+      title: t('console.firstRunChecklist.invite.title'),
+      set: { to: `${setupPath}/sys_user/view/all_users` },
       node: (
         <ChecklistRow
           key="invite"
           id="invite"
+          optional={optionalRow('invite')}
           done={colleagues}
           title={t('console.firstRunChecklist.invite.title')}
           detail={colleagues ? t('console.firstRunChecklist.invite.done') : t('console.firstRunChecklist.invite.todo')}
@@ -637,17 +792,24 @@ export function FirstRunChecklist() {
     rows.push({
       id: 'ai_provider',
       done: ai.done,
+      title: t('console.firstRunChecklist.aiProvider.title'),
+      set: { to: `${setupPath}/system/settings/${AI_NAMESPACE}` },
       node: (
         <ChecklistRow
           key="ai_provider"
           id="ai_provider"
+          optional={optionalRow('ai_provider')}
           done={ai.done}
           title={t('console.firstRunChecklist.aiProvider.title')}
           detail={
             !ai.done
               ? t('console.firstRunChecklist.aiProvider.todo')
               : ai.source === 'environment'
-                ? t('console.firstRunChecklist.aiProvider.doneEnvironment', { provider })
+                ? provider
+                  ? t('console.firstRunChecklist.aiProvider.doneEnvironment', { provider })
+                  : // In use, handed over by the host, and named by no option:
+                    // there is no provider name to put in the sentence.
+                    t('console.settingsView.aiProviderManaged')
                 : t('console.firstRunChecklist.aiProvider.doneSettings', { provider })
           }
           action={
@@ -667,10 +829,13 @@ export function FirstRunChecklist() {
     rows.push({
       id: 'connect_assistant',
       done,
+      title: t('console.firstRunChecklist.connectAssistant.title'),
+      set: { to: assistantPath },
       node: (
         <ChecklistRow
           key="connect_assistant"
           id="connect_assistant"
+          optional={optionalRow('connect_assistant')}
           done={done}
           title={t('console.firstRunChecklist.connectAssistant.title')}
           detail={
@@ -690,10 +855,64 @@ export function FirstRunChecklist() {
     });
   }
 
+  for (const added of profile.addedRows) {
+    if (added === 'first_app' && !launcher.pending) {
+      const done = hasOwnApp(launcher.apps);
+      rows.push({
+        id: 'first_app',
+        done,
+        title: t('console.firstRunChecklist.firstApp.title'),
+        node: (
+          <ChecklistRow
+            key="first_app"
+            id="first_app"
+            optional={optionalRow('first_app')}
+            done={done}
+            title={t('console.firstRunChecklist.firstApp.title')}
+            detail={done ? t('console.firstRunChecklist.firstApp.done') : t('console.firstRunChecklist.firstApp.todo')}
+          />
+        ),
+      });
+    }
+    if (added === 'first_record' && recordCreated !== undefined) {
+      const done = recordCreated;
+      const firstOwn = own[0];
+      rows.push({
+        id: 'first_record',
+        done,
+        title: t('console.firstRunChecklist.firstRecord.title'),
+        set: firstOwn ? { to: `/apps/${appRouteSegment(firstOwn)}` } : undefined,
+        node: (
+          <ChecklistRow
+            key="first_record"
+            id="first_record"
+            optional={optionalRow('first_record')}
+            done={done}
+            title={t('console.firstRunChecklist.firstRecord.title')}
+            detail={done ? t('console.firstRunChecklist.firstRecord.done') : t('console.firstRunChecklist.firstRecord.todo')}
+            action={
+              firstOwn ? (
+                <RowLink
+                  to={`/apps/${appRouteSegment(firstOwn)}`}
+                  label={t('console.firstRunChecklist.firstRecord.action')}
+                  testId="first-run-checklist-link-first_record"
+                />
+              ) : undefined
+            }
+          />
+        ),
+      });
+    }
+  }
+
+  // The host hides the rows that do not apply to it while they read not done.
+  const drawn = rows.filter((row) => profileDrawsRow(profile, row.id, row.done));
   // Done rows are folded away, the optional ones included; only the required
   // ones decide whether the checklist is still drawn and what its progress says.
-  const doneCount = rows.filter((row) => row.done).length;
-  const completion = checklistCompletion(rows);
+  // The control that unfolds them names the required and the optional apart,
+  // so its count never reads larger than the progress line's.
+  const doneCount = checklistDoneCount(drawn, optionalRow);
+  const completion = checklistCompletion(drawn, optionalRow);
   if (completion.complete) return null;
 
   const hide = () => {
@@ -701,61 +920,187 @@ export function FirstRunChecklist() {
     setHiddenKey(recordKey);
   };
 
-  return (
-    <div className="px-4 pt-4 sm:px-6 lg:px-8">
+  const progress = t('console.firstRunChecklist.progress', { done: completion.done, total: completion.total });
+
+  const dismissButton = (
+    <button
+      type="button"
+      onClick={hide}
+      aria-label={t('console.firstRunChecklist.dismiss')}
+      title={t('console.firstRunChecklist.dismiss')}
+      className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+      data-testid="first-run-checklist-dismiss"
+    >
+      <X className="h-4 w-4" />
+    </button>
+  );
+
+  // Above the page, with few rows left and none open for editing: one line,
+  // each row left by its title and its Set. A localization row's Set opens the
+  // full card with that row's editor; the others open their page.
+  if (!foldable && editing === null && drawsOneLine(drawn)) {
+    return (
+      <div className="px-4 pt-4 sm:px-6 lg:px-8">
+        <section
+          className="mx-auto flex max-w-[1120px] flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-border bg-card py-2 pl-4 pr-1.5"
+          data-testid="first-run-checklist"
+          data-one-line="true"
+          aria-labelledby="first-run-checklist-title"
+        >
+          <p className="flex min-w-0 items-baseline gap-2">
+            <span id="first-run-checklist-title" className="text-sm font-medium tracking-tight">
+              {t('console.firstRunChecklist.title')}
+            </span>
+            <span className="shrink-0 text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
+              {progress}
+            </span>
+          </p>
+          <ul className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1.5">
+            {drawn
+              .filter((row) => !row.done)
+              .map(({ id, title, set }) => (
+                <li
+                  key={id}
+                  className="flex min-w-0 items-center gap-2"
+                  data-testid={`first-run-checklist-row-${id}`}
+                  data-done="false"
+                  data-optional={optionalRow(id) ? 'true' : undefined}
+                >
+                  <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 text-sm">{title}</span>
+                  {optionalRow(id) ? (
+                    <span
+                      className="shrink-0 rounded-full border border-border px-1.5 py-px text-xs text-muted-foreground"
+                      data-testid={`first-run-checklist-optional-${id}`}
+                    >
+                      {t('console.firstRunChecklist.optional')}
+                    </span>
+                  ) : null}
+                  {set && 'edit' in set ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 shrink-0"
+                      onClick={() => setEditing(set.edit)}
+                      data-testid={`first-run-checklist-set-${id}`}
+                    >
+                      {t('console.firstRunChecklist.set')}
+                    </Button>
+                  ) : set ? (
+                    <Button asChild size="sm" variant="outline" className="h-7 shrink-0">
+                      <Link to={set.to} data-testid={`first-run-checklist-link-${id}`}>
+                        {t('console.firstRunChecklist.set')}
+                      </Link>
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+          </ul>
+          {dismissButton}
+        </section>
+      </div>
+    );
+  }
+
+  if (foldable && !unfolded) {
+    return (
       <section
-        className="mx-auto max-w-[1120px] rounded-xl border border-border bg-card px-5 pt-4 pb-1"
+        className="flex items-center justify-between gap-2 rounded-xl border border-border bg-card py-2 pl-4 pr-1.5"
         data-testid="first-run-checklist"
+        data-folded="true"
         aria-labelledby="first-run-checklist-title"
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <h2 id="first-run-checklist-title" className="text-base font-semibold tracking-tight">
-              {t('console.firstRunChecklist.title')}
-            </h2>
-            <p className="mt-1 text-[13px] text-muted-foreground">{t('console.firstRunChecklist.description')}</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
-              {t('console.firstRunChecklist.progress', { done: completion.done, total: completion.total })}
-            </span>
-            <button
-              type="button"
-              onClick={hide}
-              aria-label={t('console.firstRunChecklist.dismiss')}
-              title={t('console.firstRunChecklist.dismiss')}
-              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              data-testid="first-run-checklist-dismiss"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-        <ol className="mt-2 divide-y divide-border" id="first-run-checklist-rows">
-          {rows.filter((row) => showDone || !row.done).map((row) => row.node)}
-        </ol>
-        {doneCount > 0 ? (
-          <div className="border-t border-border py-2">
-            <button
-              type="button"
-              onClick={() => setShowDone((shown) => !shown)}
-              aria-expanded={showDone}
-              aria-controls="first-run-checklist-rows"
-              className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-              data-testid="first-run-checklist-toggle-done"
-            >
-              {showDone ? (
-                <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-              ) : (
-                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-              )}
-              {showDone
-                ? t('console.firstRunChecklist.hideDone')
-                : t('console.firstRunChecklist.showDone', { done: doneCount })}
-            </button>
-          </div>
-        ) : null}
+        <p className="flex min-w-0 items-baseline gap-2">
+          <span id="first-run-checklist-title" className="truncate text-sm font-medium tracking-tight">
+            {t('console.firstRunChecklist.title')}
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
+            {progress}
+          </span>
+        </p>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="shrink-0 gap-0.5 px-1.5 text-primary"
+          onClick={() => setUnfolded(true)}
+          aria-expanded={false}
+          data-testid="first-run-checklist-continue"
+        >
+          {t('console.firstRunChecklist.continue')}
+          <ChevronRight className="h-4 w-4" aria-hidden />
+        </Button>
       </section>
-    </div>
+    );
+  }
+
+  const card = (
+    <section
+      className={cn(
+        'rounded-xl border border-border bg-card px-5 pt-4 pb-1',
+        !foldable && 'mx-auto max-w-[1120px]',
+      )}
+      data-testid="first-run-checklist"
+      data-folded={foldable ? 'false' : undefined}
+      aria-labelledby="first-run-checklist-title"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h2 id="first-run-checklist-title" className="text-base font-medium tracking-tight">
+            {t('console.firstRunChecklist.title')}
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">{t('console.firstRunChecklist.description')}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-xs text-muted-foreground" data-testid="first-run-checklist-progress">
+            {progress}
+          </span>
+          {foldable ? (
+            <button
+              type="button"
+              onClick={() => setUnfolded(false)}
+              aria-expanded
+              aria-controls="first-run-checklist-rows"
+              aria-label={t('common.collapse')}
+              title={t('common.collapse')}
+              className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              data-testid="first-run-checklist-fold"
+            >
+              <ChevronUp className="h-4 w-4" aria-hidden />
+            </button>
+          ) : null}
+          {dismissButton}
+        </div>
+      </div>
+      <ol className="mt-2 divide-y divide-border" id="first-run-checklist-rows">
+        {drawn.filter((row) => showDone || !row.done).map((row) => row.node)}
+      </ol>
+      {doneCount.required + doneCount.optional > 0 ? (
+        <div className="border-t border-border py-2">
+          <button
+            type="button"
+            onClick={() => setShowDone((shown) => !shown)}
+            aria-expanded={showDone}
+            aria-controls="first-run-checklist-rows"
+            className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            data-testid="first-run-checklist-toggle-done"
+          >
+            {showDone ? (
+              <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            )}
+            {showDone
+              ? t('console.firstRunChecklist.hideDone')
+              : doneCount.optional > 0
+                ? t('console.firstRunChecklist.showDoneSplit', { required: doneCount.required, optional: doneCount.optional })
+                : t('console.firstRunChecklist.showDone', { done: doneCount.required })}
+          </button>
+        </div>
+      ) : null}
+    </section>
   );
+
+  // In the content column (a phone's placement) the column gives the width
+  // and the gutters; above the page the card brings its own.
+  return foldable ? card : <div className="px-4 pt-4 sm:px-6 lg:px-8">{card}</div>;
 }

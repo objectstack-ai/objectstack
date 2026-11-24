@@ -1,0 +1,47 @@
+{
+  "skill_name": "objectstack-i18n",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our ObjectStack app needs Simplified Chinese: translate the `account` object's label and its `industry` field's options.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Through the ObjectStack metadata API over MCP, with no project files, relabel `opportunity` as 商机 for our Chinese users.",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "We are adding Japanese to our ObjectStack app. What configuration and tooling does that take?",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "`os i18n check` says zh-CN is missing navigation keys. How do we find and fill them?",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "我们的 ObjectStack 应用要支持繁体中文，导航菜单和仪表盘标题也要翻译。",
+      "should_trigger": true,
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "In a plain React app without ObjectStack, set up react-i18next with lazy-loaded language files and a language switcher.",
+      "should_trigger": false,
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "Format a currency amount for German users in a Node.js script with Intl.NumberFormat.",
+      "should_trigger": false,
+      "files": []
+    }
+  ]
+}

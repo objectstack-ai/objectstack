@@ -123,8 +123,14 @@ const runViaMcp = (h: ReturnType<typeof boot>, name: string, input: Record<strin
     });
 };
 
-describe('the AI-facing door refuses an unconfirmed call on a gated action (#15942)', () => {
-    it('refuses with the ADR-0112 envelope, dispatches nothing, and reads no record', async () => {
+// [#33690] The MCP door no longer reads the member on a gated action: under
+// the amended contract it hands the call to the person through the host's
+// pending-confirmation service, and with none registered (this harness
+// registers none) it refuses `reason: 'no_confirmation_service'`. The cases
+// below flipped from "runs once the member rides" to "refused either way";
+// the hand-off itself is pinned in `action-confirmation-handoff-33690.test.ts`.
+describe('the AI-facing door refuses a call on a gated action, whatever it carries (#15942, #33690)', () => {
+    it('refuses with the ADR-0112 envelope and dispatches nothing', async () => {
         const h = boot();
 
         const thrown: any = await runViaMcp(h, GATED.name, { recordId: 'lead_1' }).catch((e) => e);
@@ -133,54 +139,50 @@ describe('the AI-facing door refuses an unconfirmed call on a gated action (#159
         expect(thrown.code).toBe(ACTION_CONFIRMATION_REQUIRED_CODE);
         expect(thrown.code).toBe('ACTION_CONFIRMATION_REQUIRED');
         expect(thrown.status).toBe(428);
-        // The machine-readable retry, so a refused agent never re-parses prose.
+        // The machine-readable half: which case of the amended contract refused it.
         expect(thrown.details).toEqual({
             actionName: GATED.name,
             objectName: OBJECT,
             confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+            reason: 'no_confirmation_service',
         });
-        // The prose still names both, for the human reading a transcript.
         expect(String(thrown.message)).toContain(GATED.name);
-        expect(String(thrown.message)).toContain(AI_ACTION_CONFIRMATION_MEMBER);
-        // Nothing ran, and nothing was read: the gate sits ahead of both.
+        // Nothing ran. The subject IS read now: the person is asked only after
+        // every admission gate, the subject load and its verdict included.
         expect(h.executeAction).not.toHaveBeenCalled();
-        expect(h.callData).not.toHaveBeenCalled();
     });
 
-    it('runs the SAME call once the member rides on the request', async () => {
+    it('[#33690] the SAME call with the member rides is refused too: the caller\'s confirm never counts', async () => {
         const h = boot();
 
-        const result: any = await runViaMcp(h, GATED.name, {
+        const thrown: any = await runViaMcp(h, GATED.name, {
             recordId: 'lead_1',
             [AI_ACTION_CONFIRMATION_MEMBER]: true,
-        });
+        }).catch((e) => e);
 
-        expect(result?.ok).toBe(true);
-        expect(h.executeAction).toHaveBeenCalledTimes(1);
+        expect({ code: thrown?.code, status: thrown?.status }).toEqual({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+        expect(thrown?.details?.reason).toBe('no_confirmation_service');
+        expect(h.executeAction).not.toHaveBeenCalled();
     });
 
-    it('gates a FLOW action too — ahead of the type branch, so no run is created', async () => {
+    it('gates a FLOW action too — no run is created, with the member or without it', async () => {
         const h = boot();
 
-        const thrown: any = await runViaMcp(h, GATED_FLOW.name, {}).catch((e) => e);
-
-        expect(thrown.code).toBe('ACTION_CONFIRMATION_REQUIRED');
-        expect(thrown.status).toBe(428);
+        for (const input of [{}, { [AI_ACTION_CONFIRMATION_MEMBER]: true }]) {
+            const thrown: any = await runViaMcp(h, GATED_FLOW.name, input).catch((e) => e);
+            expect(thrown.code).toBe('ACTION_CONFIRMATION_REQUIRED');
+            expect(thrown.status).toBe(428);
+        }
         expect(h.execute).not.toHaveBeenCalled();
-        // Control: the same action DOES dispatch once confirmed, so the
-        // assertion above is about the gate and not about a flow that never
-        // could have run in this harness.
-        await runViaMcp(h, GATED_FLOW.name, { [AI_ACTION_CONFIRMATION_MEMBER]: true });
-        expect(h.execute).toHaveBeenCalledTimes(1);
     });
 
-    it('admits ONLY the boolean `true` — a truthy string and `false` are not attestations', async () => {
-        for (const value of ['true', 1, {}, false, null]) {
+    it('refuses whatever the member\'s value — none of them runs it', async () => {
+        for (const value of ['true', 1, {}, false, null, true]) {
             const h = boot();
             const thrown: any = await runViaMcp(h, GATED.name, {
                 [AI_ACTION_CONFIRMATION_MEMBER]: value,
             }).catch((e) => e);
-            expect(thrown.code, `\`${JSON.stringify(value)}\` must not confirm`).toBe(
+            expect(thrown.code, `\`${JSON.stringify(value)}\` must not run it`).toBe(
                 'ACTION_CONFIRMATION_REQUIRED',
             );
             expect(h.executeAction).not.toHaveBeenCalled();
@@ -269,10 +271,13 @@ describe('[ADR-0151 D3 rule 3] an AI service account does not confirm an action 
             });
             expect(refusal?.code).toBe('ACTION_CONFIRMATION_REQUIRED');
             expect(refusal?.status).toBe(428);
+            // [#33690] The amended contract's rule 6: the account's refusal
+            // names its case at every door.
             expect(refusal?.details).toEqual({
                 actionName: GATED.name,
                 objectName: OBJECT,
                 confirmationMember: AI_ACTION_CONFIRMATION_MEMBER,
+                reason: 'service_account',
             });
         }
     });

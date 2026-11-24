@@ -103,7 +103,7 @@ selects `dimensions` (X / group / split) and `values` (the measures to plot):
 | `layout` | `object` | optional | Grid position and size (auto-flowed into the grid when omitted) |
 | `chartConfig` | `object` | optional | Chart **appearance**: `title`, `subtitle`, `description`, `colors`, `height`, `showLegend`, `showDataLabels`, `annotations`, `interaction`. The bound dataset decides which series exist and which column each one reads, so `type`, `xAxis`, `yAxis` and `series` are refused here — see below |
 | `colorVariant` | `enum` | optional | KPI/card accent color |
-| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. The delta is coloured by the measure's `polarity`: `'lower'` draws a rise red and a fall green, `'neutral'` draws neither; undeclared, a rise is green. |
+| `compareTo` | `object` | optional | Period-over-period comparison: `{ kind: 'previousPeriod' \| 'previousYear', dimension? }`. Omit `dimension` when the selection dates exactly one time dimension — the runtime resolves it, and errors naming the candidates rather than guessing when it cannot. The window's date key must be a dimension the dataset declares, so the date field it comes from must be a field of the dataset's own object — see [The Date Key of a Compare Widget](#the-date-key-of-a-compare-widget). The delta is coloured by the measure's `polarity`: `'lower'` draws a rise red and a fall green, `'neutral'` draws neither; undeclared, a rise is green. |
 | `options` | `object` | optional | The query keys below. Presentation does not go here — see below |
 
 ### What `chartConfig` does **not** carry
@@ -223,12 +223,19 @@ export const salesDataset = defineDataset({
   object: 'opportunity',
   include: ['account'],
   dimensions: [
-    { name: 'region', field: 'account.region', type: 'string' },
-    { name: 'close_month', field: 'close_date', type: 'date', dateGranularity: 'month' },
+    { name: 'region', field: 'account.region', type: 'string', synonyms: ['territory', 'area'] },
+    {
+      name: 'close_month', field: 'close_date', type: 'date', dateGranularity: 'month',
+      synonyms: ['closing month', 'month closed'],
+    },
   ],
   measures: [
-    { name: 'revenue', field: 'amount', aggregate: 'sum' },
-    { name: 'deal_count', aggregate: 'count' },
+    {
+      name: 'revenue', field: 'amount', aggregate: 'sum',
+      synonyms: ['sales', 'pipeline value'],
+      description: 'The total amount of every opportunity, open or closed.',
+    },
+    { name: 'deal_count', aggregate: 'count', synonyms: ['deals', 'number of deals'] },
   ],
 });
 
@@ -299,7 +306,11 @@ the *West* bucket → one order).
 The drawer also offers an **"Open in list →"** escape hatch — escalate the peek
 to the object's full list page (sort / bulk-select / export / shareable URL),
 scoped by the same drill filter. In-place drawer is the default (keep context);
-the escape hatch is there when you need the full surface. **Reports drill
+the escape hatch is there when you need the full surface. Not every drill gets
+the link today: a drill on a dimension whose `field` is a relationship path,
+such as `region` in the `sales` dataset above (`account.region`), stays in the
+drawer, because the list page's URL filter has no spelling for a condition on a
+related record. **Reports drill
 identically**: a `summary` / `matrix` report opens the same in-place drawer on
 row/cell click, so dashboard and report drill behave the same.
 
@@ -329,7 +340,8 @@ click-drillable; expose the detail through a `table`/`pivot` widget instead.
 > whitelist, and chart-segment drill for the `scatter` / `treemap` / `sankey`
 > families. Those knobs live in the renderer; dataset-bound dashboards drill
 > through the semantic layer as described above (and get the "Open in list →"
-> escape hatch from the host app, e.g. the console).
+> escape hatch from the host app, e.g. the console, except today on a
+> relationship-path dimension, as noted above).
 
 ### Aggregation Functions
 
@@ -494,11 +506,63 @@ both refuse the board rather than shipping it — see
 Opt a single widget out with `filterBindings: { <name>: false }` (see
 [Per-Widget Filter Bindings](#per-widget-filter-bindings) below).
 
-This describes the **authorable surface** — what a dashboard may declare, and what
-author-time validation accepts. It is not a claim about the analytics query API,
-which does accept an object's own field as an ad-hoc dimension without the dataset
-declaring it; `widget-dimension-unknown` is what holds the line for authored
-dashboards.
+The dataset query that renders a widget holds the same line at runtime: it
+answers only the measures and dimensions its dataset declares, by their declared
+names, and refuses an object's own field named as a dimension with
+`400 INVALID_FIELD` (see [Datasets](/docs/data-modeling/analytics)).
+`widget-dimension-unknown` refuses the same mistake at author time. Only the
+cube query (`POST /analytics/query`), which is not a dataset, still groups by an
+object's own field without a declaration.
+
+### The Date Key of a Compare Widget
+
+A widget with `compareTo` compares over a date window, and the runtime takes that
+window from the widget's filter, the dashboard's `dateRange` filter included. The
+window is sent to the dataset query as a time dimension named after the filtered
+**field** (`dateRange.field`, `created_at` by default). A dataset query answers
+only declared dimensions, so when that field is a field of the dataset's own
+object, its name must also be the **name** of a date dimension the dataset
+declares:
+
+```typescript
+dimensions: [
+  // The dashboard's dateRange filters `close_date`, so a compare widget's
+  // window arrives as the dimension "close_date".
+  {
+    name: 'close_date', label: 'Close date', field: 'close_date', type: 'date',
+    synonyms: ['closing date', 'date closed'],
+  },
+],
+```
+
+Otherwise the widget's query is refused with `400 INVALID_FIELD`, and the message
+names the remedy: declare a date dimension named after the date-range field.
+
+A date field of a related record — a dotted `relationship.field` such as
+`account.signed_at`, which a dashboard filter may otherwise name (see
+[Filtering on a Related Record's Field](#filtering-on-a-related-records-field)) —
+cannot be a dimension name, because a dimension name is a snake_case identifier
+with no dot. Declare a date dimension **over** the path instead, under any name
+(the relationship is listed in the dataset's `include`, as for any dimension over
+a path):
+
+```typescript
+dimensions: [
+  // The dashboard's dateRange filters `account.signed_at`; the compare widget
+  // reads the dataset and sends its window as the dimension "account_signed".
+  { name: 'account_signed', label: 'Account signed', field: 'account.signed_at', type: 'date' },
+],
+```
+
+When the window's key is such a path, the widget reads the dataset definition
+and sends the window under the one declared dimension with `type: 'date'` and
+`field` equal to the path. A widget `compareTo.dimension` may name it by either
+spelling, the path or the declared name. When no declared date dimension covers
+the path, or two or more do, the widget sends the dotted key as it is, and the
+dataset query refuses the comparison with `400 INVALID_FIELD`. A key that can be
+a dimension name, such as `close_date`, is always sent as it is.
+
+No author-time rule checks a compare widget's date key yet.
 
 ### Filtering on a Related Record's Field
 
@@ -511,7 +575,7 @@ evaluates it on one of two paths, and the path decides how deep it may reach:
 | Path | When it serves the query | Depth |
 | :--- | :--- | :--- |
 | Native SQL | A SQL datasource (SQLite, PostgreSQL, MySQL, SQL Server, Turso), unless the query buckets a date by granularity, reads a federated object, or reads an object with an engine-enforced read gate (an engine middleware, or a `controlled_by_parent` read scope) | Every hop, as a `LEFT JOIN` per relationship |
-| Engine aggregate | Every query the native SQL path does not serve | One relationship |
+| Engine aggregate | Every query the native SQL path does not serve | Up to three relationships (ADR-0071's hop limit), each read as the caller |
 
 On the engine-aggregate path the filter reads the related object **as the
 caller**, with that object's row-level security and field permissions, and keeps
@@ -525,16 +589,47 @@ the base rows whose relationship points at a record it returned:
   unfiltered set.
 - A related field the caller cannot read is refused (`403 PERMISSION_DENIED`), as
   filtering on it directly would be.
-- More than 1,000 matching related records are refused (`400 INVALID_FILTER`),
-  never truncated. Narrow the related condition.
+- On a SQL datasource a condition through a single-valued relation usually
+  runs inside the same statement, as a subquery, so the number of matching
+  related records is not limited. Where the engine reads the matching related
+  ids first instead (a multi-valued relation, on every driver; a related object
+  on another datasource, a federated one, one whose reads an object-scoped
+  middleware or an `afterFind` hook shapes, or one read under different driver
+  options than the queried object, its tenant scope most commonly; the full
+  list is in [Query Syntax](/docs/protocol/objectql/query-syntax)), more than
+  1,000 of them are refused (`400 INVALID_FILTER`), never truncated. Narrow the
+  related condition. On a driver that cannot run it in one read (MongoDB,
+  OData), a condition through a single-valued relation is refused before
+  anything is read (`400 INVALID_FILTER`), naming the two-step route.
 - These are refused (`400 INVALID_FIELD`) rather than answered differently: a
-  path of two or more relationships (`line.plan.order.status`), a related-field
-  condition under `$not` (write `$ne` / `$nin` inside the condition instead), and
-  a related field compared with another field (`$field`).
+  path of four or more relationships (`line.plan.order.customer.tier`), a
+  related-field condition under `$not` (write `$ne` / `$nin` inside the
+  condition instead), and a related field compared with another field
+  (`$field`).
 
-A related field in a **dataset's own** `filter`, or in a **measure's** own
-`filter`, is still evaluated only on the native SQL path; the engine-aggregate
-path refuses it (`400 INVALID_FIELD`) rather than count rows it cannot join.
+On the native SQL path, too, a related-field condition that is not under
+`$not` never selects a row with no related record (an empty relationship, or
+one naming a record that no longer exists), whether it sits in the query's
+filter, a measure's own `filter` or the dataset's own `filter`: `$ne`, `$nin`,
+`$notContains`, `$null: true`, `$eq: null`, `$exists: false` and `$empty: true`
+included, so the two paths agree on such rows. The same `$or` brings back the
+rows with an empty relationship on both paths; a row naming a record that no
+longer exists is not brought back by it. A related record that exists with no
+value in the field still satisfies `$ne` and `$nin`, and `$nin: []` (an empty
+list, which excludes no value) selects every row whose related record exists.
+One native-path exception remains, under `$not`, which the engine path refuses:
+the native path still selects such a row when the negated condition is one a
+missing value does not satisfy, such as a comparison with a value
+(`{ $not: { 'order.status': 'open' } }`) or a presence test (`$null: false`,
+`$exists: true`, `$ne: null`, `$empty: false`), so write `$ne` / `$nin` inside
+the condition instead. Two `$not`s cancel: `{ $not: { $not: CONDITION } }`
+selects exactly the rows `CONDITION` selects, so it leaves such a row out
+wherever `CONDITION` does.
+
+A related field in a **dataset's own** `filter` is evaluated on both paths, as
+in the query's filter. A related field in a **measure's** own `filter` is still
+evaluated only on the native SQL path; the engine-aggregate path refuses it
+(`400 INVALID_FIELD`) rather than count rows it cannot join.
 
 ### Date Filter Defaults
 
@@ -564,6 +659,42 @@ answers `200 OK` with a zero. Every tile read 0 while the filter bar showed
 `custom` is **not** accepted here. It is a `dateRange.defaultRange` sentinel
 meaning "open the picker with no preset applied", and a bare filter value gives
 it no `from`/`to` to hand over.
+
+### Defaulting to the Current ISO Week
+
+Weekly data is often keyed by an ISO week rather than by a date: a text field
+such as `cost_week` holds `2026-W47`. A text filter over that field can default
+to the current week with the placeholder `{current_iso_week}`:
+
+{/* os:check */}
+```typescript
+globalFilters: [
+  { field: 'cost_week', label: 'Week', type: 'text', defaultValue: '{current_iso_week}' },
+]
+```
+
+Each time the dashboard opens, the placeholder resolves to the current week's
+key, and the filter box shows that key (`2026-W47`), not the placeholder. The
+user can edit it like any typed value, and it filters the field the same way.
+
+- **The week.** The key is the ISO-8601 week, written `YYYY-Www`. Weeks start
+  on Monday, and week 1 is the week that holds the year's first Thursday. Near
+  New Year the year in the key can differ from the calendar year: Friday
+  2027-01-01 is in `2026-W53`, and Monday 2027-01-04 starts `2027-W01`. This is
+  the same label an analytics `week` bucket groups by.
+- **The day.** "Today" is the calendar day in the workspace time zone, the
+  same day the date macros such as `{today}` read.
+- **A fixed week.** A literal key, `defaultValue: '2026-W47'`, stays a fixed
+  default.
+- **Widget filters.** `{current_iso_week}` also works as a value in any
+  filter condition, such as a widget's `filter: { cost_week: '{current_iso_week}' }`.
+  It resolves before the query runs, in the browser and on the server.
+- **Not a date.** The key is text. A `type: 'date'` filter refuses it as a
+  default, and so does a calendar view's `initialDate`. To filter a date field
+  to this week, use the `this_week` preset or `{current_week_start}` /
+  `{current_week_end}`. In a filter on a date, datetime or time field the
+  placeholder is refused (`INVALID_FILTER`, 400), as the literal key is: use it
+  only on fields that store week keys.
 
 ### Per-Widget Filter Bindings
 
@@ -612,9 +743,11 @@ or re-target. `os validate` and the publish door refuse such a key with
   absent). A dashboard embedded in a page that declares its own `variables` merges the two
   scopes: a filter shadows only an outer variable of the same name, and a write goes to the
   scope that defines the variable.
-- **Bindings in Studio.** The dashboard widget inspector has a **Dashboard filter bindings**
-  section, one row per declared filter, with an apply toggle (the `false` opt-out) and a
-  field picker for the override.
+- **Bindings in Studio.** The dashboard widget inspector has a **Follows the filters at the
+  top of the page** section, one row per declared filter, named by the filter's label (the
+  date range reads **Date**; a filter with no label reads its dimension's label), with an
+  apply toggle (the `false` opt-out) and a field picker for the override. The panel names
+  fields, metrics and data sources by their labels; a machine name shows on hover only.
 - **Refresh.** The page header has a **Refresh All** button, and `refreshIntervalSeconds`
   re-reads the widgets every that many seconds (`0` or unset: no automatic refresh). Widgets
   re-read in place rather than remounting, single-value tiles included.
@@ -632,14 +765,23 @@ export const projectTasksDataset = defineDataset({
   label: 'Project Tasks',
   object: 'project_task',
   dimensions: [
-    { name: 'status', field: 'status', type: 'string' },
-    { name: 'priority', field: 'priority', type: 'string' },
-    { name: 'completed_month', field: 'completed_at', type: 'date', dateGranularity: 'month' },
+    { name: 'status', field: 'status', type: 'string', synonyms: ['state', 'progress'] },
+    { name: 'priority', field: 'priority', type: 'string', synonyms: ['urgency', 'importance'] },
+    {
+      name: 'completed_month', field: 'completed_at', type: 'date', dateGranularity: 'month',
+      synonyms: ['month completed', 'finish month'],
+    },
   ],
   measures: [
-    { name: 'open_count', aggregate: 'count', filter: { status: { $ne: 'done' } } },
-    { name: 'done_count', aggregate: 'count', filter: { status: 'done' } },
-    { name: 'task_count', aggregate: 'count' },
+    {
+      name: 'open_count', aggregate: 'count', filter: { status: { $ne: 'done' } },
+      synonyms: ['open tasks', 'unfinished tasks'],
+    },
+    {
+      name: 'done_count', aggregate: 'count', filter: { status: 'done' },
+      synonyms: ['done tasks', 'completed tasks'],
+    },
+    { name: 'task_count', aggregate: 'count', synonyms: ['tasks', 'number of tasks'] },
   ],
 });
 ```

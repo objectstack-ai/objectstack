@@ -33,14 +33,14 @@
  * objectui bumps its `@objectstack/spec` dependency (cross-repo spec skew).
  */
 
-import { useContext, useEffect, useMemo, useState, type ReactElement, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ReactElement, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 // `useDatasetDimensionMeta` is the analytics label net's SHARED React glue
 // (objectui#4389): the locale-free metadata read this widget and the dataset
 // report block both take, lifted out of the two longhand copies PR #4388 left
 // behind. It lives in `@object-ui/react` because it reads the host context —
 // see its file header for the measured dependency direction. This widget
 // layers its CHART-ONLY colour/order derivation on top, below.
-import { SchemaRenderer, useDatasetDimensionMeta, useDataInvalidation, classifyLoadError } from '@object-ui/react';
+import { SchemaRenderer, SchemaRendererContext, useDatasetDimensionMeta, useDataInvalidation, classifyLoadError } from '@object-ui/react';
 import {
   buildChartSeries,
   buildOptionColorMap,
@@ -56,6 +56,9 @@ import {
   formatDimensionValue,
   buildDatasetFieldHelpers,
   buildDatasetDrillFilter,
+  datasetDrillHasRelationshipPath,
+  datasetDrillPathsResolvable,
+  resolveDatasetDrillFilter,
   FilterOperatorError,
   // The pivot key encoders now live in `@object-ui/core` so this widget and the
   // report renderer's cross-tab share ONE implementation — each having written
@@ -88,7 +91,7 @@ import {
 } from '@object-ui/core';
 import { cn, Skeleton, ChartSkeleton, GridSkeleton, RefreshIndicator } from '@object-ui/components';
 import { builtinAggregateLabels, useSafeFieldLabel, useSafeTranslate, useDisplayLocale } from '@object-ui/i18n';
-import { AlertTriangle, ShieldAlert, Download, ArrowUpIcon, ArrowDownIcon, MinusIcon, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { AlertTriangle, ShieldAlert, ArrowUpIcon, ArrowDownIcon, MinusIcon, ChevronsUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 // objectui#7063 — the default empty state is stated ONCE for the dashboard
 // surface (see that component's header for why it is dashboard-local).
 import { WidgetEmptyState } from './WidgetEmptyState';
@@ -105,12 +108,14 @@ import {
   metricTileValueClass,
   metricTileValueTitle,
 } from './metricTile';
-import { DrillDownDrawer } from './DrillDownDrawer';
+import { DrillDownDrawer, type DrillDownNotice } from './DrillDownDrawer';
 import { DatasetQueryCoalescerContext } from './datasetQueryBatch';
 import { metricDrillFilter, readMeasureDrillScope } from './metricDrill';
 import { sharedMeasureDrillScope, scopeDrillFilter } from './measureDrill';
+import { measuredFieldsOf } from './drillConditions';
 import { specDefaultWidgetType } from './widgetDispatch';
 import { DASHBOARD_WIDGET_MULTI_MEASURE_TYPES } from '@objectstack/spec/ui';
+import { SnakeCaseIdentifierSchema } from '@objectstack/spec/shared';
 
 type Row = Record<string, unknown>;
 // One RESULT-side totals grouping (the response's `totals[]`), named apart from
@@ -194,34 +199,6 @@ export function buildPivot(
     cellIndex.set(pivotCellKey(rid, cid), index);
   });
   return { rowHeaders, colHeaders, cellIndex };
-}
-
-/** RFC4180-ish CSV cell: quote when it contains a comma, quote, or newline. */
-function csvCell(v: string | number | null | undefined): string {
-  if (v == null) return '';
-  const str = String(v);
-  return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-}
-
-/** Serialize a 2D array (first row = headers) to CSV text. */
-export function toCsv(rows: Array<Array<string | number | null | undefined>>): string {
-  return rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
-}
-
-/** Trigger a client-side CSV download (no-op outside the browser). A UTF-8 BOM
- *  is prepended so Excel opens non-ASCII labels (e.g. Chinese) correctly. */
-function downloadCsv(filename: string, rows: Array<Array<string | number | null | undefined>>): void {
-  if (typeof document === 'undefined') return;
-  const base = filename && filename.trim() ? filename.trim() : 'export';
-  const blob = new Blob([`\uFEFF${toCsv(rows)}`], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = base.endsWith('.csv') ? base : `${base}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
 }
 
 /** Column the executor attaches a comparison window's value under. */
@@ -331,7 +308,9 @@ function boundedDateWindow(value: unknown): [string, string] | null {
  * stays in the filter untouched.
  *
  * **Which dimension gets shifted is not decided here.** Every window found is
- * lowered under the name the author wrote. Zero of them, or two, is the
+ * returned under the name the author wrote; the widget sends a key no
+ * dimension can be named under its declared dimension's name
+ * (`mapCompareWindowKeys`), a rename, never a choice. Zero of them, or two, is the
  * executor's error to raise — it names the candidates (`resolveCompareDimension`).
  * Guessing one renderer-side would trade a loud error for a quietly wrong
  * window, which is the failure class objectstack#5011 set out to end. The one
@@ -441,6 +420,130 @@ export function filterDatesField(filter: unknown, dimension?: string): boolean {
     );
   };
   return walk(filter);
+}
+
+/**
+ * Whether a comparison-window date key can be a declared dimension's name: the
+ * dataset schema's own dimension-name grammar (`SnakeCaseIdentifierSchema`)
+ * decides, the one the dataset door reads too. A related record's field
+ * (`account.founded_at`) never can, because the grammar has no dot.
+ */
+export function canBeDimensionName(key: string): boolean {
+  return SnakeCaseIdentifierSchema.safeParse(key).success;
+}
+
+/** The parts of a declared dataset dimension the window-key mapping reads. */
+export interface DeclaredDatasetDimension {
+  name: string;
+  field?: string;
+  type?: string;
+}
+
+/**
+ * The declared name each comparison-window date key is sent under, for the
+ * keys no dimension can be named (`canBeDimensionName`), such as a dotted
+ * `relationship.field` (objectstack#34350).
+ *
+ * The dataset query answers only declared dimensions, and a dimension name has
+ * no dot, so a window keyed on a related record's field is refused at the
+ * door. A dataset can still declare a date dimension OVER that path
+ * (`{ name: 'account_founded', field: 'account.founded_at', type: 'date' }`),
+ * and the window is then sent under that declared name. The door's refusal of
+ * an undeclared key is unchanged: this only finds the declaration.
+ *
+ * A key is mapped when exactly one declared dimension has `type: 'date'` and
+ * `field` equal to the key, spelled exactly. Every other key is left as it is,
+ * so the door's refusal answers for it:
+ *  - a key that can be a dimension name (`close_date`) is the author's
+ *    dimension name and never renamed here;
+ *  - no declared date dimension over the path;
+ *  - two or more, because choosing between two declarations is a guess;
+ *  - a declared name another window already uses, or that two keys would
+ *    share, because two windows on one dimension would no longer be the
+ *    windows the filter states.
+ */
+export function mapCompareWindowKeys(
+  keys: readonly string[],
+  declared: readonly DeclaredDatasetDimension[],
+): Record<string, string> {
+  const candidate = new Map<string, string>();
+  for (const key of keys) {
+    if (canBeDimensionName(key) || candidate.has(key)) continue;
+    const over = declared.filter((d) => d.type === 'date' && d.field === key);
+    if (over.length === 1) candidate.set(key, over[0].name);
+  }
+  const targets = Array.from(candidate.values());
+  const mapped: Record<string, string> = {};
+  for (const [key, name] of candidate) {
+    if (keys.includes(name) || targets.filter((t) => t === name).length > 1) continue;
+    mapped[key] = name;
+  }
+  return mapped;
+}
+
+/** The declared dimensions in a dataset definition document, as read. */
+function declaredDimensionsOf(doc: unknown): DeclaredDatasetDimension[] {
+  const def = (doc as { item?: unknown; data?: unknown } | null)?.item
+    ?? (doc as { data?: unknown } | null)?.data
+    ?? doc;
+  const dims: unknown[] = Array.isArray((def as { dimensions?: unknown } | null)?.dimensions)
+    ? (def as { dimensions: unknown[] }).dimensions
+    : [];
+  return dims.flatMap((d) => {
+    const { name, field, type } = (d ?? {}) as { name?: unknown; field?: unknown; type?: unknown };
+    return typeof name === 'string'
+      ? [{ name, ...(typeof field === 'string' ? { field } : {}), ...(typeof type === 'string' ? { type } : {}) }]
+      : [];
+  });
+}
+
+/**
+ * The declared name each comparison-window key that no dimension can be named
+ * is sent under (`mapCompareWindowKeys`), read off the dataset definition.
+ *
+ * The definition is read only when such a key exists, through the host's
+ * authenticated `apiFetch` and as the widget's reader (`?callerPackage=`,
+ * ADR-0150 D3), the read the dataset-bound chart and the report's date range
+ * make. Every other widget reads nothing and its query is unchanged.
+ * `pending` holds the query until the read answers. A failed read maps
+ * nothing, so the door's refusal of the key still answers.
+ */
+function useCompareWindowKeyMap(
+  dataset: string,
+  packageId: string | undefined,
+  keys: readonly string[],
+): { pending: boolean; map: Record<string, string> } {
+  const apiFetch = useContext(SchemaRendererContext)?.apiFetch;
+  const keysSig = JSON.stringify(keys);
+  const readKey = `${packageId ?? ''}|${dataset}|${keysSig}`;
+  const needsRead = keys.length > 0 && !!dataset;
+  const [read, setRead] = useState<{ key: string; map: Record<string, string> } | null>(null);
+
+  useEffect(() => {
+    if (!needsRead) return;
+    let cancelled = false;
+    const wanted = JSON.parse(keysSig) as string[];
+    (async () => {
+      let map: Record<string, string> = {};
+      try {
+        const doFetch = apiFetch ?? fetch;
+        const query = packageId ? `?${new URLSearchParams({ callerPackage: packageId })}` : '';
+        const res = await doFetch(`/api/v1/meta/dataset/${encodeURIComponent(dataset)}${query}`, {
+          headers: { accept: 'application/json' },
+          credentials: 'include',
+        });
+        if (res.ok) map = mapCompareWindowKeys(wanted, declaredDimensionsOf(await res.json()));
+      } catch {
+        // Mapped nothing: the key goes out as authored and the door refuses it.
+      }
+      if (!cancelled) setRead({ key: readKey, map });
+    })();
+    return () => { cancelled = true; };
+  }, [needsRead, dataset, packageId, keysSig, readKey, apiFetch]);
+
+  if (!needsRead) return { pending: false, map: {} };
+  if (!read || read.key !== readKey) return { pending: true, map: {} };
+  return { pending: false, map: read.map };
 }
 
 /** Single-value KPI widget types — rendered as a number, not a chart. */
@@ -901,21 +1004,61 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // tile as a widget without `compareTo` (objectstack#25970). Any date
   // condition the author wrote, a one-bound `{ $gte }` included, still goes to
   // the executor, whose refusal names the fix (`filterDatesField`).
-  const compareTo = declaredCompareTo && filterDatesField(runtimeFilter, declaredCompareTo.dimension)
-    ? declaredCompareTo
+  //
+  // A window keyed on a field no dimension can be named (a related record's
+  // `relationship.field`) goes out under the declared date dimension over that
+  // path, read off the dataset definition (`mapCompareWindowKeys`,
+  // objectstack#34350). `compareTo.dimension` names the window by either
+  // spelling, the filtered field or that declared name, and is sent as the
+  // declared name too. The query waits for that read; a widget with no such key
+  // reads nothing.
+  const pathWindowKeys = useMemo(
+    () => (declaredCompareTo
+      ? extractDateWindows(runtimeFilter).windows.map((w) => w.dimension).filter((k) => !canBeDimensionName(k))
+      : []),
+    [declaredCompareTo, runtimeFilter],
+  );
+  const windowKeys = useCompareWindowKeyMap(datasetName, packageId, pathWindowKeys);
+  const windowKeyMap = windowKeys.map;
+  const comparedDimension = declaredCompareTo?.dimension;
+  const comparedKey = comparedDimension == null
+    ? undefined
+    : Object.keys(windowKeyMap).find((key) => windowKeyMap[key] === comparedDimension) ?? comparedDimension;
+  const compareTo = declaredCompareTo && filterDatesField(runtimeFilter, comparedKey)
+    ? (comparedKey != null && windowKeyMap[comparedKey]
+      ? { ...declaredCompareTo, dimension: windowKeyMap[comparedKey] }
+      : declaredCompareTo)
     : undefined;
+  const windowKeyMapSig = JSON.stringify(windowKeyMap);
+  const compareToSig = JSON.stringify(compareTo ?? null);
   const { windows: compareWindows, rest: selectionFilter } = useMemo(
-    () => (compareTo
-      ? extractDateWindows(runtimeFilter)
-      : { windows: [] as DatasetTimeWindow[], rest: runtimeFilter }),
-    [compareTo, runtimeFilter],
+    () => {
+      if (!compareTo) return { windows: [] as DatasetTimeWindow[], rest: runtimeFilter };
+      const extracted = extractDateWindows(runtimeFilter);
+      const map = JSON.parse(windowKeyMapSig) as Record<string, string>;
+      return {
+        ...extracted,
+        windows: extracted.windows.map((w) => (map[w.dimension] ? { ...w, dimension: map[w.dimension] } : w)),
+      };
+    },
+    // `compareTo` is rebuilt each render when it is renamed, so its value is
+    // what keys this memo, never its identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [compareToSig, runtimeFilter, windowKeyMapSig],
   );
 
   // `signature` is the query an `ok` answer was read for, and `refreshing` marks
   // a re-read of that same query in flight (objectui#10815, see the effect).
   const [state, setState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'error'; rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Array<Record<string, unknown>>; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; drillScopes?: unknown; error?: string; forbidden?: boolean; signature?: string; refreshing?: boolean }>({ status: 'idle', rows: [] });
   // Drill-through (ADR-0021 D2): the clicked bucket's record-list filter + title.
-  const [drill, setDrill] = useState<{ filter: Record<string, unknown>; title: string } | null>(null);
+  // A bucket on a relationship-path dimension opens the drawer on a `notice`
+  // while each hop's schema is read, and keeps one when the path cannot be
+  // drilled (`resolveDatasetDrillFilter`); `filter` is set once there is a list
+  // to read.
+  const [drill, setDrill] = useState<{ filter?: Record<string, unknown>; title: string; notice?: DrillDownNotice; columns?: string[] } | null>(null);
+  // The click a pending relationship resolution answers: a later click, or the
+  // drawer closing, makes an earlier answer stale.
+  const drillRequest = useRef(0);
   // ── The flat table's client-side sort (objectui#5827) ────────────────────
   // `null` = the dataset's own order. Declared up here with the other hooks
   // because the table branch sits AFTER this component's early returns, where a
@@ -931,7 +1074,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // render-time `now` and would otherwise force a refetch loop. The
   // query-affecting options join it so editing a widget's granularity/sort in
   // the designer refetches instead of re-rendering the previous grid.
-  const signature = `${widgetType}|${packageId ?? ''}|${datasetName}|${dimensions.join(',')}|${values.join(',')}|${JSON.stringify(rawFilter ?? null)}|${JSON.stringify(compareTo ?? null)}|${dateGranularity ?? ''}|${JSON.stringify(order ?? null)}|${limit ?? ''}`;
+  const signature = `${widgetType}|${packageId ?? ''}|${datasetName}|${dimensions.join(',')}|${values.join(',')}|${JSON.stringify(rawFilter ?? null)}|${JSON.stringify(compareTo ?? null)}|${dateGranularity ?? ''}|${JSON.stringify(order ?? null)}|${limit ?? ''}`
+    // The comparison window's declared names, once read (`useCompareWindowKeyMap`).
+    + (pathWindowKeys.length > 0 ? `|${windowKeys.pending ? 'pending' : windowKeyMapSig}` : '');
 
   // ── The data-invalidation bus (objectui#10815) ───────────────────────────
   // `notifyDataChanged` from `@object-ui/react`, read the objectui#10623 /
@@ -963,6 +1108,9 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       return;
     }
     if (values.length === 0) { setState({ status: 'idle', rows: [] }); return; }
+    // The comparison window's declared names are still being read: the query
+    // that would go out now names the key the door refuses.
+    if (windowKeys.pending) { setState({ status: 'loading', rows: [] }); return; }
     let cancelled = false;
     // A re-read of the query already on screen (the bus moved the nonce) keeps
     // the current answer up under a `RefreshIndicator` instead of swapping the
@@ -1142,8 +1290,8 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   // ── The analytics label net's OUTPUT, with the locale bundle applied ──────
   // objectui#4030 (source thread objectstack#5076): the net above RESOLVES a
   // select dimension's option label but used to hand the object's authored
-  // English label straight to the axis, the legend, the table cells and the
-  // CSV — the same screen's related list showing the translation beside it.
+  // English label straight to the axis, the legend, and the table cells —
+  // the same screen's related list showing the translation beside it.
   // The bundle is applied HERE, once, on the shared `{value → label}` /
   // localized-options pair every one of those consumers reads, rather than per
   // surface. `fieldOptionLabel` is the resolver list and form surfaces already
@@ -1334,7 +1482,11 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
   const drillDims = dimensionFields ? dimensions.filter((d) => d in dimensionFields) : [];
   // objectstack-ai/objectstack#1752: a date-only widget has no equality drill dim but still drills by the
   // server's per-row date RANGE, so the presence of ranges makes it drillable too.
-  const canDrill = !!drillObject && (drillDims.length > 0 || !!drillRanges?.length);
+  // A relationship path deeper than ADR-0071's hop limit offers no drill at all:
+  // dropping its condition would list a superset of what the bucket counted.
+  const canDrill = !!drillObject
+    && (drillDims.length > 0 || !!drillRanges?.length)
+    && datasetDrillPathsResolvable(drillDims, dimensionFields);
   // objectstack-ai/objectstack#30615 — a drill stands for the MEASURES the
   // clicked mark or cell shows: a chart mark its series' measure, a cross-tab
   // cell its column's, a table row every measure it holds. It opens only when
@@ -1343,6 +1495,50 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     if (!drillObject) return;
     const scope = sharedMeasureDrillScope(state, measures);
     if (!scope) return;
+    const drillTitle = title || String(widget?.title ?? '');
+    // objectstack-ai/objectstack#36256 item 4 — the list shows the record's
+    // name, the fields this bucket is grouped by and the fields the measure
+    // aggregates; the reader adds the rest. A relationship path
+    // (`crm_account.industry`) shows its lookup field (`crm_account`): the
+    // list draws no dotted column.
+    const columns = Array.from(new Set([
+      ...drillDims.map((d) => dimensionFields?.[d]).filter((f): f is string => !!f).map((f) => f.split('.')[0]),
+      ...Object.values(drillRanges?.[index] ?? {}).map((range) => range.field.split('.')[0]),
+      ...measuredFieldsOf(scope),
+    ]));
+    const request = ++drillRequest.current;
+    const scopedFilter = scopeDrillFilter(runtimeFilter, scope);
+    // A dimension whose field is a `relationship.field` path drills as one
+    // nested-relation condition (`{ account: { owner: VALUE } }`), which the
+    // server matches in the database; no related id is read here. Each hop's
+    // schema is read through this widget's data source first, to confirm it is
+    // a single-valued relationship, so the drawer opens at once on a notice and
+    // lists once the filter is built; a path it cannot drill keeps a notice.
+    // `too-many` is no longer produced and stays mapped for compatibility.
+    if (datasetDrillHasRelationshipPath(drillDims, dimensionFields)) {
+      setDrill({ title: drillTitle, notice: 'resolving' });
+      resolveDatasetDrillFilter({
+        object: drillObject,
+        rawRow: drillRawRows?.[index],
+        drillDims,
+        dimensionFields: dimensionFields ?? {},
+        runtimeFilter: scopedFilter,
+        rawRanges: drillRanges?.[index],
+        dataSource,
+      }).then(
+        (resolution) => {
+          if (drillRequest.current !== request) return;
+          if (resolution.status === 'resolved') setDrill({ filter: resolution.filter, title: drillTitle, columns });
+          else setDrill({ title: drillTitle, notice: resolution.status === 'too-many' ? 'too-many' : 'unavailable' });
+        },
+        (error: unknown) => {
+          if (drillRequest.current !== request) return;
+          console.warn('[DatasetWidget] drill-down could not resolve its relationship dimension:', error);
+          setDrill({ title: drillTitle, notice: 'failed' });
+        },
+      );
+      return;
+    }
     // objectui#10789 — composing the widget's filter with the clicked bucket
     // lowers both through the throwing converter form. A widget filter the
     // dataset query carried to the server can still be one this layer refuses
@@ -1354,21 +1550,28 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     let merged: Record<string, unknown>;
     try {
       // The clicked bucket AND the widget filter AND the measure's scope.
-      merged = buildDrillFilter(drillRawRows?.[index], drillDims, dimensionFields ?? {}, scopeDrillFilter(runtimeFilter, scope), drillRanges?.[index]);
+      merged = buildDrillFilter(drillRawRows?.[index], drillDims, dimensionFields ?? {}, scopedFilter, drillRanges?.[index]);
     } catch (error) {
       if (!(error instanceof FilterOperatorError)) throw error;
       console.warn(`[DatasetWidget] drill-down refused — the drilled list cannot be scoped: ${error.message}`);
       return;
     }
-    setDrill({ filter: merged, title: title || String(widget?.title ?? '') });
+    setDrill({ filter: merged, title: drillTitle, columns });
+  };
+  const closeDrill = () => {
+    drillRequest.current += 1;
+    setDrill(null);
   };
   const drillDrawer = drill && drillObject ? (
     <DrillDownDrawer
       open
-      onClose={() => setDrill(null)}
+      onClose={closeDrill}
       title={drill.title || String(widget?.title ?? tt('dashboard.details', 'Details'))}
       objectName={drillObject}
       filter={drill.filter}
+      notice={drill.notice}
+      defaultColumns={drill.columns}
+      target="dialog"
       dataSource={dataSource}
     />
   ) : null;
@@ -1436,7 +1639,11 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       ranges: drillRanges?.[0],
     });
     const openTileDrill = tileDrillFilter
-      ? () => setDrill({ filter: tileDrillFilter, title: heading?.title || measureLabel })
+      ? () => setDrill({
+        filter: tileDrillFilter,
+        title: heading?.title || measureLabel,
+        columns: measuredFieldsOf(readMeasureDrillScope(state, tileMeasure)),
+      })
       : undefined;
     const tileDrillProps = openTileDrill
       ? {
@@ -1517,9 +1724,6 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     const displayRows = relabelDimensions(state.rows, dimensionLabels);
     // Drill-through (canDrill / openDrill / drillDrawer) is computed above and
     // shared with the chart path — tables/pivots drill by flat row index.
-    // CSV export — display-label headers + the underlying grouped rows (measures
-    // kept numeric so the data round-trips into a spreadsheet). Shared by the flat
-    // table and the cross-tab.
     // Measure columns, each followed by its comparison column when the executor
     // attached one. `compareOf` names the base measure a comparison column
     // belongs to — its format, and the label it is qualified with, both come
@@ -1537,49 +1741,6 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     const measureColumns = values.flatMap((m) =>
       comparedValues.includes(m) ? [m, compareColumn(m)] : [m],
     );
-    // The cross-tab exports its comparison columns too (objectui#3614), even
-    // though its DISPLAY stacks them inside the cell: a CSV is data, not a
-    // picture of the table. So each compared measure keeps its own flat
-    // `<measure>__compare` column here and every exported cell stays the bare
-    // number a spreadsheet can compute on — serializing the stacked cell would
-    // emit strings like "$120 $100 20%", which is a screenshot in CSV clothing.
-    const exportColumns = [...dimensions, ...measureColumns];
-    // `rows` is a parameter because the flat table now renders its rows in an
-    // order of its own (objectui#5827 — blank bucket last, plus whatever the
-    // user sorted by), and "the CSV follows the table" has to mean the order
-    // too, not just the cell text. The cross-tab passes `displayRows`, which is
-    // what this always exported.
-    const exportCsv = (rows: Row[]) => downloadCsv(String(widget?.title ?? datasetName ?? 'export'), [
-      exportColumns.map((c) => columnLabel(c)),
-      // The CSV follows the table's own cells (objectui#4263): a dotted
-      // dimension exports the label the table now shows, and a local one is
-      // unchanged for the same reason its cell is.
-      // …and #4330 widens that to a LOCAL select dimension for the same
-      // reason: the CSV is the table's data, so it exports the cell. Measures
-      // stay numeric (the raw values that must round-trip into a spreadsheet);
-      // the drill filter — the identity key — reads `drillRawRows`, untouched.
-      ...rows.map((r) => exportColumns.map((c) => {
-        const v = r[c];
-        return v == null ? '' : (typeof v === 'number' ? v : String(v));
-      })),
-    ]);
-    const exportBtnFor = (rows: Row[]) => (
-      <button
-        type="button"
-        onClick={() => exportCsv(rows)}
-        data-testid="dataset-export"
-        title={tt('dashboard.exportCsv', 'Export CSV')}
-        aria-label={tt('dashboard.exportCsv', 'Export CSV')}
-        // objectstack#29078 — below `sm` the button is a 44 px touch target.
-        // At that size, pinned over the table's top-right corner, it would
-        // cover the last column's sort button, so on a phone it leaves the
-        // corner and takes its own right-aligned row above the table.
-        className="absolute right-1 top-1 z-10 rounded p-1 text-muted-foreground opacity-70 hover:bg-accent/50 hover:text-foreground hover:opacity-100 max-sm:static max-sm:ml-auto max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center"
-      >
-        <Download className="h-3.5 w-3.5" />
-      </button>
-    );
-    const exportBtn = exportBtnFor(displayRows);
 
     // pivot → a true cross-tab when there are ≥2 dimensions: the LAST dimension
     // spreads ACROSS as columns, the rest go DOWN as rows, measures fill the
@@ -1686,7 +1847,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
       const showTotalRow = colTotalById.size > 0;
       const totalLabel = tt('dashboard.total', 'Total');
       return (
-        <div className="relative h-full w-full overflow-auto p-1" data-testid="dataset-matrix">{refreshBar}{exportBtn}
+        <div className="relative h-full w-full overflow-auto p-1" data-testid="dataset-matrix">{refreshBar}
           <table className="w-full text-xs">
             {compareCaption}
             <thead className="bg-muted/40">
@@ -1926,7 +2087,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden, packag
     };
 
     return (
-      <div className="relative h-full w-full overflow-auto p-1">{refreshBar}{exportBtnFor(orderedEntries.map((e) => e.row))}
+      <div className="relative h-full w-full overflow-auto p-1">{refreshBar}
         <table className="w-full text-xs">
           <thead className="bg-muted/40">
             <tr>

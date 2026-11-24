@@ -7,19 +7,25 @@
  */
 
 /**
- * objectstack#28868 — the default record page draws each fact once.
+ * objectstack#28868, as objectstack#35849 / objectstack#35891 changed it — the
+ * default record page draws each field in its group.
  *
- * 1. No guessed strip: an object that declares no `highlightFields` has no
- *    `record:highlights` node, and the body hides none of its fields. The
- *    maintainer's ruling: 「没声明就不挑」.
- * 2. A declared strip is unchanged: the declared list minus the name field,
- *    at most six, and the body leaves out exactly the fields the strip draws.
- * 3. The stage once: when the page draws `record:path`, its `statusField`
- *    joins the body's `hideFields`.
+ * 1. No guessed highlights: an object that declares no `highlightFields` has
+ *    none, and nothing is picked from field names or types. The maintainer's
+ *    ruling: 「没声明就不挑」 (objectstack#28868, kept by objectstack#35849:
+ *    「自动选择的关键字会让人误会」).
+ * 2. A declared list is still the author's — the hover card, the related
+ *    lists and the record picker read it (`deriveHighlightFields`, minus the
+ *    name field, at most six) — but the default page draws no strip for it
+ *    (objectstack#35891) and the body takes none of its fields out of their
+ *    groups (objectstack#35849: 「后台配的分组原样生效」).
+ * 3. The stage likewise: the default page draws no `record:path`; the stage
+ *    field stays in its group, and the header's status tag moves it.
  *
+ * Until objectstack#35849 the body's `hideFields` left out the strip's fields
+ * and the path's stage field; those pins are migrated here to the new rule.
  * The owner rule (the meta line leaves the owner out when the strip carries
- * it) and the one word for the owner are pinned beside the meta line, in
- * `RecordMetaFooter.ownerOnce-28868.test.tsx`.
+ * it) is pinned beside the meta line, in `RecordMetaFooter.ownerOnce-28868.test.tsx`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -98,69 +104,55 @@ describe('1. no declared highlightFields: no strip, and the body keeps every fie
   });
 });
 
-describe('2. a declared strip: the declared list minus the name field, max 6', () => {
-  it('the strip draws exactly the declared list without the title, and the body leaves out exactly those', () => {
+describe('2. a declared list: still the author\'s, but no strip and no field leaves its group', () => {
+  it('deriveHighlightFields still reads the declared list without the title, at most six', () => {
     const def = { ...account, highlightFields: ['name', 'industry', 'owner_id'] };
     expect(deriveHighlightFields(def, null)).toEqual(['industry', 'owner_id']);
-    const page = buildDefaultPageSchema(def);
-    expect(nodesOfType(page, 'record:highlights').map((n) => n.properties.fields)).toEqual([['industry', 'owner_id']]);
-    expect(bodyHideFields(page)).toEqual([['industry', 'owner_id']]);
+    const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    expect(deriveHighlightFields({ name: 'wide', fields: {}, highlightFields: names }, null)).toEqual(names.slice(0, 6));
   });
 
-  it('a declared entry past the sixth is drawn by the body, not dropped from both', () => {
-    const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-    const wide: ObjectDefLike = {
-      name: 'wide',
-      fields: { name: { type: 'text' }, ...Object.fromEntries(names.map((n) => [n, { type: 'text' }])) },
-    };
-    // The record page passes its declared list in as `highlightFields`
-    // (RecordDetailView's synthesized parts): the strip cuts it at six, and so
-    // does the body's hide list.
-    const page = buildDefaultPageSchema(wide, { highlightFields: names });
-    expect(nodesOfType(page, 'record:highlights').map((n) => n.properties.fields)).toEqual([names.slice(0, 6)]);
-    expect(bodyHideFields(page)).toEqual([names.slice(0, 6)]);
+  it('the default page has no record:highlights node and the body hides nothing', () => {
+    const def = { ...account, highlightFields: ['name', 'industry', 'owner_id'] };
+    const page = buildDefaultPageSchema(def);
+    expect(nodesOfType(page, 'record:highlights')).toEqual([]);
+    expect(bodyHideFields(page)).toEqual([undefined]);
+  });
+
+  it('a host passing its declared list in as highlightFields changes neither', () => {
+    // RecordDetailView passes the object's list in its synthesized parts.
+    const page = buildDefaultPageSchema(account, { highlightFields: ['industry', 'owner_id'] });
+    expect(nodesOfType(page, 'record:highlights')).toEqual([]);
+    expect(bodyHideFields(page)).toEqual([undefined]);
   });
 });
 
-describe('3. the stage once: the path\'s statusField leaves the body', () => {
-  it('an opportunity with a path has no stage field in the body', () => {
+describe('3. the stage stays in its group; the default page draws no path', () => {
+  it('an opportunity with a stage field has no record:path, and the stage stays in the body', () => {
     const page = buildDefaultPageSchema(opportunity());
-    expect(nodesOfType(page, 'record:path').map((n) => n.properties.statusField)).toEqual(['stage']);
-    expect(bodyHideFields(page)).toEqual([['stage']]);
+    expect(nodesOfType(page, 'record:path')).toEqual([]);
+    expect(bodyHideFields(page)).toEqual([undefined]);
   });
 
-  it('the stage joins a declared strip\'s hide list, once', () => {
+  it('a declared strip holding the stage hides neither', () => {
     const page = buildDefaultPageSchema(opportunity({ highlightFields: ['amount', 'stage'] }));
-    expect(bodyHideFields(page)).toEqual([['amount', 'stage']]);
-  });
-
-  it('control: no path (stageField: false), so the stage stays in the body', () => {
-    const page = buildDefaultPageSchema(opportunity({ stageField: false }));
-    expect(nodesOfType(page, 'record:path')).toEqual([]);
     expect(bodyHideFields(page)).toEqual([undefined]);
   });
 
-  it('control: a status field with no stages to draw is no path, so it stays in the body', () => {
-    const def: ObjectDefLike = { name: 'note', fields: { body: { type: 'text' }, status: { type: 'text' } } };
-    const page = buildDefaultPageSchema(def);
-    expect(nodesOfType(page, 'record:path')).toEqual([]);
-    expect(bodyHideFields(page)).toEqual([undefined]);
-  });
-
-  it('an authored highlights slot decides: its record:path hides the stage, a slot without one does not', () => {
+  it('an authored highlights slot is drawn as written, and still takes nothing out of the body', () => {
     const withPath = buildDefaultPageSchema(opportunity({ stageField: false }), {
       slots: { highlights: { type: 'record:path', properties: { statusField: 'stage' } } },
     });
-    expect(bodyHideFields(withPath)).toEqual([['stage']]);
-
-    const withoutPath = buildDefaultPageSchema(opportunity(), {
-      slots: { highlights: { type: 'div', id: 'custom-strip' } },
-    });
-    expect(bodyHideFields(withoutPath)).toEqual([undefined]);
+    expect(nodesOfType(withPath, 'record:path').map((n) => n.properties.statusField)).toEqual(['stage']);
+    expect(bodyHideFields(withPath)).toEqual([undefined]);
   });
 
-  it('buildDefaultTabs on its own hides what the default strip for the same options draws', () => {
-    expect(bodyHideFields(buildDefaultTabs(opportunity()))).toEqual([['stage']]);
-    expect(bodyHideFields(buildDefaultTabs(opportunity({ stageField: false })))).toEqual([undefined]);
+  it('buildDefaultTabs on its own hides nothing either', () => {
+    expect(bodyHideFields(buildDefaultTabs(opportunity()))).toEqual([undefined]);
+    expect(bodyHideFields(buildDefaultTabs(opportunity({ highlightFields: ['amount'] })))).toEqual([undefined]);
+  });
+
+  it('control: the strip sub-builder still emits the path for a page that places it', () => {
+    expect(buildDefaultHighlights(opportunity()).map((n) => n.type)).toEqual(['record:path']);
   });
 });

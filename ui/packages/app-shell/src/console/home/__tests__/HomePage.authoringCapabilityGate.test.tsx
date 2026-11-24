@@ -238,6 +238,7 @@ const eePayload = (systemPermissions?: string[]): MePermissionsAuthenticatedResp
     tenantId: 'acme',
     positions: ['org_owner', 'everyone'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['organization_admin', 'member_default'],
     ...(systemPermissions ? { systemPermissions } : {}),
     objects: {},
@@ -252,6 +253,18 @@ function renderHome(permissions: MePermissionsResponse) {
       <HomePage />
     </MePermissionsProvider>,
   );
+}
+
+
+/**
+ * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
+ * no-apps empty state (`HomePage.desktopNoApps-36732.test.tsx`); the empty
+ * state these cases read is a phone's, so they render at phone width.
+ */
+function atPhoneWidth() {
+  const real = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
+  return () => Object.defineProperty(window, 'innerWidth', { value: real, configurable: true, writable: true });
 }
 
 describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
@@ -356,9 +369,12 @@ describe('HomePage authoring-CTA capability gate (objectstack#8270)', () => {
   });
 
   describe('the zero-app workspace', () => {
+    let restoreWidth = () => {};
     beforeEach(() => {
       appsFixture = [];
+      restoreWidth = atPhoneWidth();
     });
+    afterEach(() => restoreWidth());
 
     it('explains the posture instead of telling the owner to build something', () => {
       // This branch renders before the builder cover exists, and its admin copy

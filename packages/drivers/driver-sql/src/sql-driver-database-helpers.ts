@@ -5,8 +5,8 @@
  * `sqliteFilename`, `ensureDatabaseExists`, `createDatabase`,
  * `setFileColumnsMovedResolver`, `setTenantKeyCertifiedResolver`,
  * `isTenantKeyCertified`, `resolveFileColumnsMoved`, `mediaColumnIsJson`,
- * `isJsonField` moved out of `sql-driver.ts` whole by
- * `scripts/codemod-split-sql-driver.mjs`.
+ * `isJsonField` moved out of `sql-driver.ts` whole (split
+ * by #29598 and #30249).
  *
  * A MOVE, not a redesign. {@link DatabaseHelpersFacet} is a stateless facet of `SqlDriver`
  * (ruling 6624345766): each static method of it is the body of the `SqlDriver`

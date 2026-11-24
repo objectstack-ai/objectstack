@@ -23,6 +23,7 @@ import { defineStack } from '@objectstack/spec';
 
 const OBJECT = 'fol_version';
 const NAME = "'v' + string(record.version_no) + ' · ' + label(record.kind)";
+const GAPS = 'label(record.gaps)';
 
 const fixtureStack = defineStack({
   manifest: {
@@ -50,13 +51,35 @@ const fixtureStack = defineStack({
           ],
         },
         display_name: { type: 'formula', label: 'Name', expression: { dialect: 'cel', source: NAME }, returnType: 'text' },
+        // A multi-select read through `label()`: each selected label, joined
+        // with `, `. `kind` + `display_name` above is its single-select CONTROL.
+        gaps: {
+          type: 'select',
+          label: 'Gaps',
+          multiple: true,
+          options: [
+            { label: 'No sales price', value: 'no_sales_price' },
+            { label: 'No customer', value: 'no_customer' },
+            { label: 'No freight region', value: 'no_freight_region' },
+          ],
+        },
+        gaps_note: {
+          type: 'formula', label: 'Gaps Note', expression: { dialect: 'cel', source: GAPS }, returnType: 'text',
+        },
       },
     },
   ],
   translations: [
     {
       'zh-CN': {
-        objects: { [OBJECT]: { fields: { kind: { options: { clean: '清稿', redline: '修订稿' } } } } },
+        objects: {
+          [OBJECT]: {
+            fields: {
+              kind: { options: { clean: '清稿', redline: '修订稿' } },
+              gaps: { options: { no_sales_price: '无销售价', no_customer: '无客户', no_freight_region: '无运费区域' } },
+            },
+          },
+        },
       },
     },
   ],
@@ -141,5 +164,24 @@ describe('dogfood: a formula name reads its select option label in the reader\'s
       expect(shown, locale).toBeTruthy();
       expect((await readOne(locale, created.id)).display_name, locale).toBe(`v7 · ${shown}`);
     }
+  });
+
+  it('label() over a multi-select reads each selected label, joined, in each reader\'s locale', async () => {
+    const created = await create('en-US', { version_no: 8, kind: 'clean', gaps: ['no_sales_price', 'no_customer'] });
+    const zh = await readOne('zh-CN', created.id);
+    expect(zh.gaps_note).toBe('无销售价, 无客户');
+    expect(zh.display_name).toBe('v8 · 清稿'); // CONTROL: the single select on the same record
+    const en = await readOne('en-US', created.id);
+    expect(en.gaps_note).toBe('No sales price, No customer');
+    expect(en.display_name).toBe('v8 · Clean');
+
+    const one = await create('zh-CN', { version_no: 9, kind: 'clean', gaps: ['no_freight_region'] });
+    expect(one.gaps_note).toBe('无运费区域');
+    expect((await readOne('en-US', one.id)).gaps_note).toBe('No freight region');
+
+    const empty = await create('en-US', { version_no: 10, kind: 'clean', gaps: [] });
+    expect((await readOne('zh-CN', empty.id)).gaps_note).toBe('');
+    const none = await create('en-US', { version_no: 11, kind: 'clean' });
+    expect((await readOne('en-US', none.id)).gaps_note).toBe('');
   });
 });

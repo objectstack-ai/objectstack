@@ -36,6 +36,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TEXT_SLOT_TEMPLATE_REFUSAL, VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
 import { AutomationEngine } from '../engine.js';
 import { installBuiltinNodes } from './index.js';
+import { stubbedFetchEgress } from './stubbed-fetch-egress.testkit.js';
 
 function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
@@ -56,7 +57,7 @@ function makeEngine(durable = false): { engine: AutomationEngine; enqueued: Enqu
   installBuiltinNodes(engine, {
     logger: silentLogger(),
     getService(name: string) { return name === 'messaging' ? messaging : undefined; },
-  } as any);
+  } as any, { egress: stubbedFetchEgress() });
   return { engine, enqueued };
 }
 
@@ -100,7 +101,7 @@ function httpExecutor(): { execute: (...args: any[]) => Promise<any> } {
       return Reflect.get(target, key, receiver);
     },
   });
-  installBuiltinNodes(recorder as AutomationEngine, { logger: silentLogger(), getService() { return undefined; } } as any);
+  installBuiltinNodes(recorder as AutomationEngine, { logger: silentLogger(), getService() { return undefined; } } as any, { egress: stubbedFetchEgress() });
   return executors.get('http')!;
 }
 

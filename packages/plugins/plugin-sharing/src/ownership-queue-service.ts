@@ -100,6 +100,7 @@ import type {
   ResolvedQueue,
 } from '@objectstack/spec/contracts';
 import { QueueMemberType } from '@objectstack/spec/security';
+import { resolveInjectedColumnProvenance } from '@objectstack/spec/data';
 import { METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 import type { OptionalSharingLogger } from './logger-shapes.js';
 import type { SharingEngine } from './sharing-service.js';
@@ -123,6 +124,20 @@ export const QUEUE_MEMBER_OBJECT = 'sys_queue_member';
 /** The `sys_metadata_activation.metadata_type` a declared queue is switched by. */
 export const QUEUE_ACTIVATION_TYPE = 'queue';
 
+/** An organization's own assignment rules (owned by this plugin). */
+const ASSIGNMENT_RULE_OBJECT = 'sys_assignment_rule';
+/** The registry type and the activation-ledger `metadata_type` of a declared assignment rule. */
+const ASSIGNMENT_RULE_TYPE = 'assignment_rule';
+/**
+ * How many objects' "is a record sitting in a queue?" reads run at once in
+ * {@link OwnershipQueueService.objectsUsingQueues}: each is one `limit 1`
+ * read (the `queue` column carries no index, so a read that finds nothing can
+ * scan the organization's rows of that object), bounded so a stack with many
+ * owned objects does not take every connection of the pool for one session
+ * payload.
+ */
+const SITTING_READ_CONCURRENCY = 8;
+
 /** The member kinds a specification may carry, as a set for the row guard. */
 const MEMBER_KINDS: ReadonlySet<string> = new Set(QueueMemberType.options);
 
@@ -134,6 +149,8 @@ export interface OwnershipQueueEngine extends SharingEngine {
   registry?: {
     listItems?: (type: string) => unknown[];
     getObject?: (name: string) => unknown;
+    /** Every registered object definition — {@link OwnershipQueueService.objectsUsingQueues}'s population. */
+    getAllObjects?: () => unknown[];
   };
 }
 
@@ -389,6 +406,144 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     if ((await this.activeDeclaredQueues()).length > 0) return true;
     const declaredNames = new Set(this.declaredItems().map((q) => q.name));
     return (await this.authoredQueueNames(engine, organizationId, declaredNames)).length > 0;
+  }
+
+  /**
+   * [#34602] The objects of `organizationId` on which a queue filter can find
+   * something: a record sits in a queue now (no owner, a queue set — the
+   * list's "in a queue" filter, verbatim), OR an active assignment rule routes
+   * the object's new records into a queue (the organization's
+   * `sys_assignment_rule` rows, and the declared rules the activation ledger
+   * leaves on). The union, so neither reading misses what the other sees: a
+   * rule that assigns an owner parks nothing until nobody holds the queue, and
+   * a record moved into a queue by hand has no rule behind it.
+   *
+   * Only objects carrying the platform's `queue` column with storage behind
+   * it are considered (a federated object's column is the injection's alone).
+   * The routed half is registry reads plus one read of the organization's
+   * rules; the sitting half is one `limit 1` read per remaining object, at most
+   * {@link SITTING_READ_CONCURRENCY} at a time. A failed read leaves that
+   * object (or the organization's rules) out, logged once: the cost is a
+   * hidden filter, never a refused payload. Ordered by name.
+   */
+  async objectsUsingQueues(organizationId: string | null): Promise<string[]> {
+    const engine = this.engine();
+    if (!engine) return [];
+    const candidates = this.queueColumnObjects(engine);
+    if (candidates.size === 0) return [];
+    const out = new Set<string>();
+    for (const object of await this.routedObjects(engine, organizationId)) {
+      if (candidates.has(object)) out.add(object);
+    }
+    const remaining = [...candidates.keys()].filter((object) => !out.has(object));
+    for (let i = 0; i < remaining.length; i += SITTING_READ_CONCURRENCY) {
+      const batch = remaining.slice(i, i + SITTING_READ_CONCURRENCY);
+      const verdicts = await Promise.all(batch.map((object) => this.hasSittingRecord(engine, object, organizationId, candidates.get(object) === true)));
+      batch.forEach((object, k) => { if (verdicts[k]) out.add(object); });
+    }
+    return [...out].sort();
+  }
+
+  /**
+   * The registered objects that carry the `queue` column with storage behind
+   * it, each mapped to whether it also carries the `organization_id` column
+   * (the platform's or the author's). The sitting read names that column only
+   * when it exists: filtering on a column the table lacks is refused by the
+   * driver, which would hide the object's queue filter for good.
+   */
+  private queueColumnObjects(engine: OwnershipQueueEngine): Map<string, boolean> {
+    let all: unknown[] | undefined;
+    try {
+      all = engine.registry?.getAllObjects?.();
+    } catch (err: any) {
+      this.warnOnce('registry::objects', '[queue] the object registry could not be listed — no object is reported as using queues', { error: err?.message });
+      return new Map();
+    }
+    const out = new Map<string, boolean>();
+    for (const def of Array.isArray(all) ? all : []) {
+      if (!isRecord(def) || typeof def.name !== 'string' || def.name === '') continue;
+      if (resolveInjectedColumnProvenance(def, 'queue') !== 'injected-provisioned') continue;
+      out.set(def.name, resolveInjectedColumnProvenance(def, 'organization_id') !== 'absent');
+    }
+    return out;
+  }
+
+  /**
+   * The objects an active assignment rule routes into a queue: the declared
+   * rules the activation ledger leaves on, and the organization's own rows
+   * (a row under a declared rule's name is not a rule of its own, as the
+   * engine reads it). A failed read of the organization's rows contributes
+   * nothing, logged once.
+   */
+  private async routedObjects(engine: OwnershipQueueEngine, organizationId: string | null): Promise<Set<string>> {
+    const out = new Set<string>();
+    const declared = (() => {
+      try {
+        const items = engine.registry?.listItems?.(ASSIGNMENT_RULE_TYPE);
+        return (Array.isArray(items) ? items : []).filter(isRecord);
+      } catch {
+        return [];
+      }
+    })();
+    const declaredNames = new Set(declared.map((r) => str(r.name)).filter((n): n is string => n !== null));
+    const routing = declared.filter((r) => r.active !== false && typeof r.object === 'string' && routesToQueue(r.entries));
+    if (routing.length > 0) {
+      const off = await this.switchedOff(ASSIGNMENT_RULE_TYPE, [...new Set(routing.map((r) => String(r.name)))]);
+      for (const r of routing) if (!off.has(String(r.name))) out.add(String(r.object));
+    }
+    const getObject = engine.registry?.getObject;
+    if (typeof getObject === 'function' && !getObject.call(engine.registry, ASSIGNMENT_RULE_OBJECT)) return out;
+    try {
+      const rows = await readMembershipToCompletion(engine, {
+        object: ASSIGNMENT_RULE_OBJECT,
+        where: { recipient_type: 'queue', ...(organizationId ? { organization_id: organizationId } : {}) },
+        fields: ['name', 'object_name', 'active'],
+        subject: `the assignment rules${organizationId ? ` of organization '${organizationId}'` : ''}`,
+      });
+      for (const r of rows ?? []) {
+        const name = str(r.name);
+        const object = str(r.object_name);
+        if (!object || (name && declaredNames.has(name))) continue;
+        if (r.active === false || r.active === 0 || r.active === '0' || r.active === 'false') continue;
+        out.add(object);
+      }
+    } catch (err: any) {
+      this.warnOnce('read::sys_assignment_rule', '[queue] sys_assignment_rule read failed — no object is reported as routed into a queue by an organization rule until it succeeds', { error: readFailureReason(err) });
+    }
+    return out;
+  }
+
+  /**
+   * Is a record of `object` sitting in a queue now: no owner, a queue set? The
+   * read always carries `organizationId` as the context's `tenantId`, so a
+   * driver that walls the object on a declared `tenancy.tenantField` keeps
+   * other organizations' rows out. The explicit `organization_id` predicate is
+   * added only when the object has that column (`scopeByColumn`); an object
+   * with neither column nor a declared tenant field holds environment-wide
+   * rows and is read as such.
+   */
+  private async hasSittingRecord(
+    engine: OwnershipQueueEngine,
+    object: string,
+    organizationId: string | null,
+    scopeByColumn: boolean,
+  ): Promise<boolean> {
+    try {
+      const rows = await engine.find(object, {
+        where: {
+          owner_id: { $empty: true },
+          queue: { $empty: false },
+          ...(organizationId && scopeByColumn ? { organization_id: organizationId } : {}),
+        },
+        fields: ['id'],
+        limit: 1,
+        context: organizationId ? { ...SYSTEM_CTX, tenantId: organizationId } : SYSTEM_CTX,
+      });
+      return Array.isArray(rows) && rows.length > 0;
+    } catch (err: any) {
+      this.warnOnce(`read::sitting::${object}`, `[queue] could not read whether a '${object}' record sits in a queue — its queue filter stays hidden until the read succeeds`, { object, error: err?.message });
+      return false;
+    }
   }
 
   // ── Helpers the plugin's other modules read ────────────────────────────────
@@ -791,6 +946,11 @@ export class OwnershipQueueService implements IOwnershipQueueService {
     this.warned.add(key);
     this.logger?.warn?.(message, meta);
   }
+}
+
+/** Does any of a declared rule's entries route into a queue? */
+function routesToQueue(entries: unknown): boolean {
+  return Array.isArray(entries) && entries.some((e) => isRecord(e) && isRecord(e.assignTo) && e.assignTo.type === 'queue');
 }
 
 /** A declared queue's member specifications — positions, by the schema's own rule. */

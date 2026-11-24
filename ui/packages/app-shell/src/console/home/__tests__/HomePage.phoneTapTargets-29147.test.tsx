@@ -139,6 +139,10 @@ vi.mock('../../../layout/ActivityObjectLabel', () => ({ ActivityObjectLabel: () 
 // like every other source this page reads.
 vi.mock('../../deployment-notice/DeploymentNotice', () => ({ DeploymentNotice: () => null }));
 
+// The page reaches `capabilityLint`'s dynamic `@objectstack/lint` import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 
 /** Enough apps that the strip folds the rest behind "More". */
@@ -189,13 +193,30 @@ describe('the greeting row (objectstack#29147)', () => {
   });
 
   it('with no app yet, the empty state\'s "Ask AI" is 44 px below sm', async () => {
-    state.apps = [];
-    state.agents = [{ name: 'ask' }];
-    state.askAgent = true;
-    render(<HomePage />);
-    expectPhoneTarget(await screen.findByTestId('home-ask-ai'), ['h-10'], ['max-sm:h-11']);
+    const restoreWidth = atPhoneWidth();
+    try {
+      state.apps = [];
+      state.agents = [{ name: 'ask' }];
+      state.askAgent = true;
+      render(<HomePage />);
+      expectPhoneTarget(await screen.findByTestId('home-ask-ai'), ['h-10'], ['max-sm:h-11']);
+    } finally {
+      restoreWidth();
+    }
   });
 });
+
+
+/**
+ * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
+ * no-apps empty state (`HomePage.desktopNoApps-36732.test.tsx`); the empty
+ * state these cases read is a phone's, so they render at phone width.
+ */
+function atPhoneWidth() {
+  const real = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
+  return () => Object.defineProperty(window, 'innerWidth', { value: real, configurable: true, writable: true });
+}
 
 describe('"Your apps" (objectstack#29147)', () => {
   it('the heading\'s links are 44 px tall below sm', () => {
@@ -249,5 +270,66 @@ describe('"Recently accessed" and the activity feed (objectstack#29147)', () => 
   it('"View all activity" is 44 px tall below sm', () => {
     render(<HomePage />);
     expectPhoneTarget(screen.getByTestId('home-activity-view-all'), ['inline-flex', 'items-center'], ['max-sm:min-h-11']);
+  });
+});
+
+describe('the host checklist slot: above the page on a desktop; a phone with apps shows the app list alone (objectstack#34596, objectstack#35881)', () => {
+  const realWidth = window.innerWidth;
+  function atWidth(width: number) {
+    Object.defineProperty(window, 'innerWidth', { value: width, configurable: true, writable: true });
+  }
+  afterEach(() => atWidth(realWidth));
+
+  /** Records each placement Home asks for and draws a marker there. */
+  function slot() {
+    const placements: string[] = [];
+    const checklist = (placement: string) => {
+      placements.push(placement);
+      return <div data-testid={`checklist-slot-${placement}`} />;
+    };
+    return { placements, checklist };
+  }
+  const follows = (a: HTMLElement, b: HTMLElement) =>
+    Boolean(b.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it('1024 px: drawn once, above the greeting and the apps; never after them', () => {
+    atWidth(1024);
+    const { placements, checklist } = slot();
+    render(<HomePage checklist={checklist} />);
+    const marker = screen.getByTestId('checklist-slot-top');
+    expect(screen.queryByTestId('checklist-slot-afterApps')).toBeNull();
+    expect(new Set(placements)).toEqual(new Set(['top']));
+    expect(follows(screen.getByTestId('home-work-summary'), marker)).toBe(true);
+    expect(follows(screen.getByTestId('home-apps-count'), marker)).toBe(true);
+  });
+
+  // objectstack#35881 — a phone's Home is the app list alone: the checklist
+  // goes with the rest of the page it used to sit in (objectstack#34596).
+  it('375 px with apps: the page is the app list, and no placement is asked for', () => {
+    atWidth(375);
+    const { placements, checklist } = slot();
+    render(<HomePage checklist={checklist} />);
+    expect(screen.getByTestId('home-phone-app-list')).toBeInTheDocument();
+    expect(screen.getByTestId('phone-app-row-app_0')).toBeInTheDocument();
+    expect(placements).toEqual([]);
+    expect(screen.queryByTestId('home-work-summary')).toBeNull();
+    expect(screen.queryByTestId('home-my-work-open-inbox')).toBeNull();
+  });
+
+  it('375 px with no app yet: there are no apps to keep, so it is drawn above the empty state', () => {
+    atWidth(375);
+    state.apps = [];
+    const { placements, checklist } = slot();
+    render(<HomePage checklist={checklist} />);
+    expect(screen.getByTestId('checklist-slot-top')).toBeInTheDocument();
+    expect(new Set(placements)).toEqual(new Set(['top']));
+  });
+
+  it('CONTROL: with no slot given a desktop page draws as it did', () => {
+    atWidth(1024);
+    render(<HomePage />);
+    expect(screen.queryByTestId('checklist-slot-top')).toBeNull();
+    expect(screen.queryByTestId('checklist-slot-afterApps')).toBeNull();
+    expect(screen.getByTestId('home-apps-count')).toBeInTheDocument();
   });
 });

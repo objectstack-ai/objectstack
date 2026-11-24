@@ -156,6 +156,8 @@ window.matchMedia = ((query: string) => ({
 let serverDrafts: Array<Record<string, unknown>> = [];
 /** How many `_drafts` reads the page sent. */
 let draftReads = 0;
+/** What the package's published object list answers (the Data pillar's rail). */
+let objectRows: Array<Record<string, unknown>> = [];
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -216,6 +218,7 @@ const THREAD = [
 beforeEach(() => {
   serverDrafts = [BORROWING_ROW];
   draftReads = 0;
+  objectRows = [];
   sdk.discardDrafts.mockReset();
   chat.set({ messages: uiMessagesToChatMessages(THREAD as never, { isStreaming: false }), isLoading: false });
   window.sessionStorage.clear();
@@ -227,6 +230,7 @@ beforeEach(() => {
         draftReads += 1;
         return json({ drafts: serverDrafts });
       }
+      if (url === `/api/v1/meta/object?package=${encodeURIComponent(PACKAGE_ID)}`) return json(objectRows);
       return json([]);
     }) as unknown as typeof fetch,
   );
@@ -242,7 +246,7 @@ function LocationProbe(): React.ReactElement {
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
 }
 
-function renderStudio(entry = `/studio/${PACKAGE_ID}/interfaces?surface=object%3Ahcpl_borrowing`) {
+function renderStudio(entry = `/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_borrowing`) {
   return render(
     <MemoryRouter initialEntries={[entry]}>
       <LocationProbe />
@@ -285,15 +289,24 @@ describe('the Studio copilot\'s applied card opens the 变更 drawer in place (o
   });
 
   it('arriving with ?changes=review (the full-page chat\'s link) opens the drawer, then drops the param', async () => {
+    renderStudio(`/studio/${PACKAGE_ID}/data?changes=review`);
+    await waitFor(() => expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'true'));
+    expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-posture', 'review');
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
+  });
+
+  // objectstack#36502 — the link printed before the Interfaces pillar retired
+  // still opens the drawer: the redirect to the Data pillar keeps `?changes=`.
+  it('an old /interfaces?changes=review link lands on the Data pillar with the drawer open', async () => {
     renderStudio(`/studio/${PACKAGE_ID}/interfaces?changes=review`);
     await waitFor(() => expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'true'));
     expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-posture', 'review');
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/interfaces`));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
   });
 
   it('CONTROL: a value the surface does not know opens nothing, and is dropped all the same', async () => {
-    renderStudio(`/studio/${PACKAGE_ID}/interfaces?changes=publish`);
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/interfaces`));
+    renderStudio(`/studio/${PACKAGE_ID}/data?changes=publish`);
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
     await act(drain);
     expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'false');
   });
@@ -301,6 +314,7 @@ describe('the Studio copilot\'s applied card opens the 变更 drawer in place (o
 
 describe('the Studio copilot\'s composer (objectui#12725 Target item 4)', () => {
   it('zh: the placeholder reads「问问数据，或让我改改这个应用…」, and the chip names the item in view', async () => {
+    objectRows = [{ name: 'hcpl_borrowing', label: '借阅记录' }];
     render(
       <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
         <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_borrowing`]}>
@@ -314,10 +328,11 @@ describe('the Studio copilot\'s composer (objectui#12725 Target item 4)', () => 
     const composer = await within(slot).findByRole('textbox');
     expect(composer).toHaveAttribute('placeholder', '问问数据，或让我改改这个应用…');
     // The chip `plugin-chatbot` declares (`surfaceContextLabel`), naming the
-    // item the URL has open.
+    // item the URL has open — objectstack#34725: 「正在看：借阅记录 · 记录」,
+    // the object's label and the view on screen, never the internal name.
     const chip = within(slot).getByTestId('surface-context-chip');
-    expect(chip).toHaveTextContent('正在讨论：');
-    expect(chip).toHaveTextContent('hcpl_borrowing');
+    await waitFor(() => expect(chip).toHaveTextContent('正在看：借阅记录 · 记录'));
+    expect(chip).not.toHaveTextContent('hcpl_borrowing');
   });
 });
 

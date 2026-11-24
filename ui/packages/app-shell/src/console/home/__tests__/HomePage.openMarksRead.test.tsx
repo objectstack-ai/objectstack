@@ -176,6 +176,9 @@ function installServerDouble() {
   );
 }
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { HomePage } from '../HomePage';
 import { __resetSharedUserFeeds } from '../../../hooks/sharedUserFeeds';
 
@@ -251,7 +254,7 @@ describe('Home "My work → Notifications": opening a notification marks it read
       expect(markReadBodies).toEqual([{ ids: ['ntf_1'] }]);
       expect(timeline).toEqual([
         'POST /api/v1/notifications/read',
-        'navigate /apps/crm/sys_inbox_message?view=mine',
+        'navigate /apps/crm/inbox',
       ]);
     } finally {
       INBOX[0].action_url = original;

@@ -64,11 +64,21 @@ export default defineConfig({
     // name from `SEARCH_COMPANION_FIELD`: VALUE imports, judged against the
     // source in the checkout, not a build of it. Only the test loads the
     // engine; the tool reads the name from `@objectstack/spec/data`.
+    //
+    // The `@objectstack/rest` entry is for the stdio bridge's dataset loader
+    // (ADR-0149 D2), which localizes the saved datasets with the REST
+    // package's `translateMetaList`: a VALUE import every stdio-bridge suite
+    // reaches, judged against the translator in the checkout, not a build of it.
+    // The `@objectstack/service-analytics` entry is for that loader's suite,
+    // whose stand-in executor matches terms with the platform's own
+    // `matchDatasetTerms`, judged against the matcher in the checkout.
     alias: [
       { find: /^@objectstack\/metadata-core$/, replacement: path.resolve(__dirname, '../metadata-core/src/index.ts') },
       { find: /^@objectstack\/metadata-core\/testing$/, replacement: path.resolve(__dirname, '../metadata-core/src/testing.ts') },
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../lint/src/index.ts') },
       { find: /^@objectstack\/objectql\/core$/, replacement: path.resolve(__dirname, '../objectql/src/core.ts') },
+      { find: /^@objectstack\/rest$/, replacement: path.resolve(__dirname, '../rest/src/index.ts') },
+      { find: /^@objectstack\/service-analytics$/, replacement: path.resolve(__dirname, '../services/service-analytics/src/index.ts') },
     ],
   },
 });

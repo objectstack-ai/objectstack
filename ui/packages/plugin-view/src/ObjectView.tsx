@@ -229,8 +229,8 @@ function pickFlatMapConfig(
   );
 }
 
-/** The eight per-kind blocks a list view carries at its top level. */
-const LIST_VIEW_KIND_BLOCKS = ['kanban', 'calendar', 'gallery', 'timeline', 'gantt', 'map', 'chart', 'tree'] as const;
+/** The nine per-kind blocks a list view carries at its top level. */
+const LIST_VIEW_KIND_BLOCKS = ['kanban', 'calendar', 'gallery', 'timeline', 'gantt', 'map', 'chart', 'tree', 'timesheet'] as const;
 
 /**
  * [#25923] The per-kind blocks a host `views` entry declares, by reference,
@@ -436,7 +436,6 @@ export const OBJECT_VIEW_TABLE_RELAY_KEYS = [
   'showColumnTypeIcons',
   'showPagination',
   'showSearch',
-  'singleClickEdit',
 ] as const satisfies readonly (keyof NonNullable<ObjectViewSchema['table']>)[];
 
 type TableRelayKey = (typeof OBJECT_VIEW_TABLE_RELAY_KEYS)[number];
@@ -2013,6 +2012,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           chart: 'chart-column',
           tree: 'list-tree',
           page: 'layout-template',
+          timesheet: 'calendar-clock',
         } satisfies Record<string, string>;
 
         /** `never` only while every {@link ViewType} has an icon name. */
@@ -2156,6 +2156,7 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
       map: currentNamedViewConfig?.map,
       chart: currentNamedViewConfig?.chart,
       tree: currentNamedViewConfig?.tree,
+      timesheet: currentNamedViewConfig?.timesheet,
     };
     const declaredKinds = Object.keys(canonicalViewKindBlocks)
       .filter((kind) => canonicalViewKindBlocks[kind] != null);
@@ -2342,6 +2343,13 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           titleField: kanbanCfg.titleField || 'name',
           cardFields,
           ...(kanbanCfg.summarizeField ? { summarizeField: kanbanCfg.summarizeField } : {}),
+          // objectstack#36370 — the lane statistic and the two card toggles,
+          // each only when the block declares it (`ListView`'s twin relays the
+          // same three), so `summary: { type: 'none' }` hides the header total
+          // here too and a board without them draws as before.
+          ...(kanbanCfg.summary && typeof kanbanCfg.summary === 'object' ? { summary: kanbanCfg.summary } : {}),
+          ...(typeof kanbanCfg.showFieldLabels === 'boolean' ? { showFieldLabels: kanbanCfg.showFieldLabels } : {}),
+          ...(typeof kanbanCfg.hideEmptyFields === 'boolean' ? { hideEmptyFields: kanbanCfg.hideEmptyFields } : {}),
           ...(kanbanConditionalFormatting ? { conditionalFormatting: kanbanConditionalFormatting } : {}),
         };
       }
@@ -2571,6 +2579,14 @@ export const ObjectView: React.FC<ObjectViewProps> = ({
           // the spec's tree block is the four keys above, and the spread only
           // added undeclared keys and let a block key named like a node key
           // override the node's own value.
+        };
+      case 'timesheet':
+        // objectstack#34382 — the editable row × weekday grid, its binding by
+        // reference; `ObjectTimesheet` judges it and refuses an incomplete one.
+        return {
+          type: 'object-timesheet',
+          ...baseProps,
+          timesheet: viewOptions.timesheet,
         };
       case 'chart': {
         // ⛔ HOST-COMPOSITION ONLY (objectui#5321) — the same record as

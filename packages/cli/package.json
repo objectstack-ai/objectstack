@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/cli",
-  "version": "18.5.0",
+  "version": "18.6.0",
   "description": "Command Line Interface for ObjectStack Protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -53,7 +53,8 @@
       "glob": "**/*.js"
     },
     "hooks": {
-      "preparse": "./dist/hooks/preparse/strip-arg-separator.js"
+      "preparse": "./dist/hooks/preparse/strip-arg-separator.js",
+      "command_not_found": "./dist/hooks/command-not-found/point-at-help.js"
     },
     "topicSeparator": " ",
     "topics": {
@@ -96,8 +97,14 @@
       "secret": {
         "description": "Maintain stored secrets: report orphaned rows, re-wrap old ciphertext"
       },
+      "skills": {
+        "description": "Install, update and check the published ObjectStack skills catalog in your agent's skills directory"
+      },
       "storage": {
         "description": "Inspect stored files: report orphaned attachments"
+      },
+      "user": {
+        "description": "Maintain user accounts on the server: set a password"
       }
     }
   },

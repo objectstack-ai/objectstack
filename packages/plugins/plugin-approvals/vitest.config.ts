@@ -50,6 +50,13 @@ export default defineConfig({
         find: /^@objectstack\/service-messaging$/,
         replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts'),
       },
+      // [#34730] `approval-requested-slack-dm.integration.test.ts` sends the
+      // DM through connector-slack's REAL client, stubbed at the HTTP
+      // boundary — the current client's verdict, not a `dist` build's.
+      {
+        find: /^@objectstack\/connector-slack$/,
+        replacement: path.resolve(__dirname, '../../connectors/connector-slack/src/index.ts'),
+      },
     ],
   },
   test: {

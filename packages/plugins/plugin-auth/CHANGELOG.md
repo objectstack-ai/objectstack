@@ -1,5 +1,457 @@
 # Changelog
 
+## 18.6.0
+
+### Minor Changes
+
+- e53e02e: feat(console): a Mobile App page in the account app shows the code that connects the ObjectOS mobile app to this server
+  
+  Clause-②: yes (widening) — a new account-app navigation entry and component (`account:mobile_app`), a new `mobileApp` namespace in the `@object-ui/i18n` packs, and a new optional `features.publicBaseUrl` served on `GET /api/v1/auth/config` (declared in `AuthFeaturesConfigSchema`, registered in `PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS`, typed on `AuthPublicConfig`); nothing that worked before is refused
+  Metadata-protocol: added
+  
+  The account app (avatar menu → Profile) gains a **Mobile App** entry after Profile. Its page shows a QR code that encodes `objectos://connect?server=<this server's public base URL, URL-encoded>`, the same link as copyable text, and one line saying the code holds only the server's address, never the account.
+  
+  `GET /api/v1/auth/config` now serves `features.publicBaseUrl`: the base URL the auth layer builds every link from (`OS_AUTH_URL`, then `BETTER_AUTH_URL`, then `OS_BASE_URL`), with any sub-path mount, as an address only (scheme, host and path; a credential, query or fragment in the setting is never served). The page encodes that URL. The page normalises it the same way again before use, so the code carries the server's address and nothing else. The browser's own address is never used, because it can be an internal or proxied host. When that URL names `localhost` or a private address, or a public host on plain `http:` (the mobile app signs in through it, so it must be HTTPS), the page shows no code and says how to fix it: set `OS_AUTH_URL` on the server to its public `https://` address and restart it. A server that does not publish the field gets a page saying it does not offer this yet.
+  
+  No app-store links are shown: no setting carries them today.
+
+### Patch Changes
+
+- c493adb: feat(plugin-auth): `POST /api/v1/auth/admin/import-users` takes a `positions` column, assigned in a second pass as Setup assigns a position
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The user import gains one column, `positions`: position machine names, several separated by `;` (or an array on a JSON row) — the same column `admin/import-sso-users` reads. Nothing that worked before is refused: a file with no `positions` column imports exactly as before.
+  
+  - Each named position is assigned after every row of the batch has landed, as a `sys_user_position` grant written under the importing administrator's own execution context, so it passes the same checks as assigning a position in Setup (the position catalog, delegated administration, the holder's organization membership).
+  - A position that does not exist (`unresolved`) or whose assignment is refused (`refused`, with the refusal's `code`) is reported on its row, and the user is still created. `rows[].positions` lists each named position's outcome (`assigned`, `already_assigned`, `unresolved`, `refused`), a cell that is not a list reads `'unreadable'`, and `summary.positions` counts them. The import only adds positions; it never removes one.
+  - When the positions cannot be judged at all, the users are still created and every named position is reported `refused` on its row: `NOT_IMPLEMENTED` on a server that cannot assign positions during an import, `PERMISSION_DENIED` when the caller's own access does not resolve. Dry runs do not assign.
+  - There is no permission-set column: a position carries its permission sets.
+  
+  `@object-ui/app-shell`: the Users import wizard offers a `positions` target column, and its options panel explains the column (`console.identityImport.positionsHint`, in every `@object-ui/i18n` pack).
+- fb79d47: fix(plugin-auth): Set Manager refuses only a person a SCIM directory holds, so an admin can change the manager of someone who signs in through SSO
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `POST /api/v1/auth/admin/set-user-manager` refused every user whose `sys_user.source` is `idp_provisioned` with `403 PERMISSION_DENIED`, saying a directory owns their manager. ADR-0135 D4 stamps that value on every sign-in through an identity provider by a person with no local password: the platform's own SSO on a hosted environment, and any social or enterprise OIDC provider. Those people have no directory behind them. So after their first sign-in, nobody could change their manager, and approvals routed to the manager could not follow a reorganisation.
+  
+  The endpoint now refuses only a person a SCIM directory holds: `source` is `idp_provisioned` and a SCIM connection has provisioned or linked them (a `sys_scim_subject` row). The answer is unchanged for them (`403 PERMISSION_DENIED`, `details.reason: 'idp_provisioned'`), and its message says to change the manager in the directory. Everyone else gets the answer a local user gets. The admin user import's `manager_id` column runs the same check, so an SSO-only row's manager link now lands. The self-assignment, cycle, depth and cross-organization refusals are unchanged. Nothing that was accepted before is refused now.
+  
+  `sys_user`'s **Set Manager** action is now offered to a platform admin on every user row. It used to be hidden on `idp_provisioned` rows. A SCIM-held row is refused by the endpoint, which names the directory.
+  
+  `os explain approval-approvers-may-resolve-empty` now says the admin operation refuses an identity a SCIM directory holds, and that an identity that only signs in through SSO is set like any other.
+  
+  The `idp_provisioned` stamp itself (ADR-0135 D4) and the password refusals are unchanged.
+- 99a6ec0: fix(auth)!: a cloud-managed environment sets no local password for anyone, a platform administrator included
+  
+  Clause-②: yes (narrowing) — narrowed: on a cloud-managed environment only (`OS_CLOUD_MANAGED=1`), `POST /admin/set-user-password` now answers `409 RESOURCE_CONFLICT` for an `env_native` target too, where it set the password, and `POST /set-initial-password` now answers `409 RESOURCE_CONFLICT` to a signed-in platform administrator too, where it set their first local password; `POST /reset-password` and `POST /phone-number/reset-password` now answer `409 RESOURCE_CONFLICT` to every request, where a valid token or code set (or created) the password, and `POST /request-password-reset` and `POST /phone-number/request-password-reset` answer `409 RESOURCE_CONFLICT` too, where they answered success and sent a link or code. Two refusal sentences are added (`CLOUD_MANAGED_REFUSAL_MESSAGES.resetPassword` and `.requestPasswordReset`). The two existing ones (`.setUserPassword` and `.setInitialPassword`) no longer promise a local or break-glass password. The managed `set-user-password` arm no longer reads the target's identity source, so its `503 SERVICE_UNAVAILABLE` answer for an unreadable source is gone on a managed environment.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the cloud-managed password doors; `content/docs/permissions/authentication.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answers are runtime refusals at six auth doors under a deployment switch that only hosted environments set, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a cloud-managed environment (`OS_CLOUD_MANAGED=1`, set only on hosted containers): a hosted environment sets no local password for anyone and has no local break-glass administrator. `POST /admin/set-user-password` (the Set Password action on a user) refuses every target, an environment-native account included; `POST /set-initial-password` refuses every signed-in caller, a platform administrator included; and the self-service reset doors (`POST /reset-password`, `POST /phone-number/reset-password`, and `POST /request-password-reset`, `POST /phone-number/request-password-reset`, which send the link or code) refuse every request. Each answers `409 RESOURCE_CONFLICT` and writes nothing. A caller with no session at `set-initial-password` is answered as before.
+  
+  Unchanged: every self-hosted deployment (the variable unset), where the doors answer as before, SSO-only mode's rules included; and a local password a user already holds on a managed environment (invalidating those is the hosting cloud's work).
+  
+  What to do: nothing on a self-hosted deployment. On a hosted environment, sign in through the hosting organisation's identity provider; there is no local password to set.
+- 329f2f7: feat(auth): a cloud-managed environment can remove a pending person, cancelling their invitation at the host
+  
+  Clause-②: yes (widening) — added: `POST /api/v1/auth/admin/remove-sso-user` (platform administrators, cloud-managed environments only); an optional `userRemoved` member on the environment-user host contract and the `'removed'` event kind; the `'deactivated'` value of the host outcome's `reason`. Nothing that was accepted is refused.
+  Metadata-protocol: none
+  
+  On a cloud-managed environment, a person added to sign in through the hosting organisation's identity provider stays pending until their first sign-in. Before this change a pending person with a typo in their email could only be deactivated.
+  
+  **Removing a pending person.** `POST /api/v1/auth/admin/remove-sso-user` with `{ "userId": "…" }` asks the host first, outside any transaction, then removes the person with their positions, permission sets and membership in one unit of work:
+  
+  - The host is told through `userRemoved`. A host without it is told through `userDeactivated` with `source: 'idp_pending'`, which already means "cancel the invitation". A host should implement `userRemoved`.
+  - A host refusal (403/409) answers with the host's sentence, and no one is removed.
+  - A host that cannot be reached refuses the removal with `503 SERVICE_UNAVAILABLE`, and no one is removed: the door calls the host once and keeps no record to ask again from, so try again. Durable retry is the host's job.
+  - With no host wired, the person is removed and the answer says `host: { notified: false, reason: 'no_host' }`.
+  - A person who is not pending answers `409`: deactivate them instead. This holds at the removal itself: the person is re-checked inside the unit of work and the delete carries `source: 'idp_pending'`, so a person whose first sign-in lands while the host is asked is not removed. On an object with cascading lookups (such as `sys_user`) the engine re-deletes by id after the cascade, so a first sign-in committing in that narrow window is not yet refused.
+  - A person that other records still point at (`deleteBehavior: 'restrict'`) answers the engine's refusal, and nothing is removed. If the host had already cancelled the invitation of a person who is still pending and not deactivated, the door sends it again through `userAdded`, once, and the answer says whether that worked.
+  - An unknown id answers `404`; a body with any key but `userId` answers `400`. Off a cloud-managed environment the door answers `409` and removes no one.
+  
+  **A deactivated person is never sent an invitation.** Adding a deactivated pending person again no longer calls `userAdded`; the answer says `host: { notified: false, reason: 'deactivated' }`. Reactivating them (`admin/unban-user`) is what tells the host again.
+  
+  Nothing to migrate.
+- 3372da0: fix(plugin-auth)!: under the local sign-in path `off`, the auth settings save keeps a way to sign in, and a client the IP allow-list refuses at the direct sign-in door lands on the sign-in page
+  
+  Clause-②: yes (narrowing) — narrowed: with direct sign-in on and its local sign-in path `off` (`directSignIn.localSignIn: 'off'`, or `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=off`), an auth settings save (`PUT /api/settings/auth`) that turns Google off, or clears a Google client credential no environment variable backs, while Google is the last way in the sign-in page offers answers `400 SETTINGS_VALIDATION` with the new copy `googleLocalOff` and saves nothing, where it saved, even with email and password (or phone sign-in) switched on; and a `GET /api/v1/auth/sign-in/direct` from a client the IP allow-list refuses answers `302` to the Console's `/login?error=IP_NOT_ALLOWED` (keeping a same-origin `?redirect=`), where it answered the `403 IP_NOT_ALLOWED` JSON body. Widened: under `off` with nothing else in force (no Google, no identity provider row, no social or OIDC provider with credentials, no host sign-in handoff), a save of `email_password_enabled: false` answers `200` and saves, where it answered `400 SETTINGS_VALIDATION`, because the sign-in page offers no email and password there either way; module exports (not on the package entry) `DIRECT_SIGN_IN_NETWORK_REFUSED`, `isDirectSignInDoorNavigation` and `directSignInNetworkRefusal`; a `googleLocalOff` key on the sign-in floor copy, in all 11 locales; the `@object-ui/i18n` key `auth.login.errors.networkNotAllowed`, in all 11 shipped locales (no key renamed or removed); the Console sign-in page explains `?error=IP_NOT_ALLOWED`; `markSignOutRoundTrip` in `@object-ui/auth` takes the sign-in page path it records.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches direct sign-in, the auth settings save, the IP allow-list or the sign-out note; `content/docs/permissions/sso.mdx` gains the rules in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answers are a runtime refusal of one settings save under a deployment switch and the status of one refused auth navigation, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment running direct sign-in with the local sign-in path `off`: saving the auth settings with Google off (or with an unbacked Google client credential cleared) while Google is the last way in the sign-in page offers is refused `400 SETTINGS_VALIDATION` and nothing is saved, unless another way in the page offers remains (another identity provider row, a social or OIDC provider with a client ID and secret, or a host sign-in handoff). Email and password and phone sign-in do not count there, because the page does not offer them; turning email and password on in the same save does not help. Before, the save went through and the sign-in page then showed "No sign-in method is available". Also **BREAKING** for anything that reads the status of `GET /api/v1/auth/sign-in/direct` from a client outside the IP allow-list: it is now `302` to `/login?error=IP_NOT_ALLOWED` with no cookie set, instead of the `403` JSON body.
+  
+  Unchanged: the local sign-in path `hidden` (the default) and direct sign-in off, where email and password and phone sign-in count as before; the IP allow-list itself, which does not exempt the door: nothing is started and no provider is read for a refused client, every other auth request from it (including a `POST` to the door and the door path with a trailing slash) is still refused `403 IP_NOT_ALLOWED`, and the refusal is still audited and logged.
+  
+  What to do: nothing, unless you turn Google off as the last way in under `off`, or switch email and password off there. Register another identity provider first, or set `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden` (with email and password sign-in on) and restart. If email and password sign-in was switched off under `off` (that save is no longer refused), setting the local path back to `hidden` is not enough: set `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` as well, then restart. A client that checked the door's `403` status should check for the `302` to `/login?error=IP_NOT_ALLOWED` instead.
+  
+  Also fixed: the `503` sentence for a provider delete whose provider list could not be read now says the sign-in page offers no email and password, which is true under both reasons the check runs; and the note a provider-logout sign-out leaves in the tab now records the sign-in page the provider returns to, and only a load of that page reads it, so a provider that never sends the browser back no longer makes the next deep link opened in that tab drop its `?redirect=`.
+- 18194fb: feat(plugin-auth)!: a SCIM directory sets, changes and clears a user's manager through the Enterprise User `manager` attribute
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is the answer a SCIM user write gets when the manager it names would be refused by the admin endpoint. There is nothing for `objectstack migrate meta` to rewrite; the identity provider's manager mapping is corrected in the directory. -->
+  
+  **BREAKING** for a SCIM identity provider that sends a manager the admin endpoint would refuse. A SCIM create, replace or patch that names the Enterprise User `manager` attribute, for an active user the directory holds, whose manager resolves to a User the same connection provisioned, and where that link would make the user their own manager, close a cycle, run past the 20-link depth cap, or cross an organization boundary, used to answer `201` / `200` and leave `manager_id` untouched. It now answers SCIM `400` with `scimType: invalidValue` and the admin endpoint's reason, and nothing of the request is written. Those four are the only requests served before and refused now. Remedy: correct the manager in the directory.
+  
+  **On upgrade.** An identity provider that syncs by replace and maps no manager clears, on its next sync, a `manager_id` set earlier for a user the directory holds, because a replace without the attribute is a clear. Map the manager attribute in the identity provider before upgrading if those values should stay.
+  
+  **The gap.** `POST /api/v1/auth/admin/set-user-manager` refuses a person a SCIM directory holds and says to change the manager in the directory, but nothing carried the directory's answer to `sys_user.manager_id`: `@better-auth/scim` stored and echoed `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:manager` and wrote nothing of it onto the user. So a SCIM-held user's manager could not change from either side, and approvals routed to the manager could not follow a reorganisation.
+  
+  **The rule.** A SCIM user write that names the attribute now projects `manager.value` onto `sys_user.manager_id`, inside the SCIM transaction. `manager.value` is the manager's SCIM resource `id` (RFC 7643 §4.3), looked up among the Users the same connection provisioned; a `$ref` alone is read by its final `/Users/{id}` segment. The link goes through the admin endpoint's own refusals, above.
+  
+  - **Silence is not a clear.** A create or PATCH that does not name the attribute leaves `manager_id` as it is. An explicit PATCH `remove`, or a replace without the attribute, clears it.
+  - **One owner per identity.** The projection writes only on an identity whose manager the directory owns, which is exactly the set the admin endpoint refuses (one shared predicate). On any other identity, for example one holding a local password, the admin endpoint owns the column and the projection writes nothing.
+  - **A reference that names no User is served.** An unknown id, an `externalId` or email, another connection's id, a `$ref` with no readable `/Users/{id}` segment, or a User of this connection whose platform user no longer exists does not fail the write: the user is saved, `manager_id` stays as it was, and the event is recorded with one operator warning and one `scim_manager_unresolved` audit row (when `@objectstack/plugin-audit` is installed), both once per connection per window, carrying the count held back. The row names the connection, the user and the reference, cut to 256 characters, and nothing else from the request; a request that is refused writes none.
+  - **An unchanged manager is not judged again**, so a write is never refused over a chain other links have since reshaped, and a report whose manager was deleted keeps working.
+  
+  **Where it does not project, and why.**
+  
+  - Outside an authenticated SCIM request: the vendor also runs this step while it decommissions a connection or replays a provisioning domain. Neither is a write the directory made, and a decommission must never be refused over an org-chart reference.
+  - When the user's profile source belongs to another connection: that connection authors the user's name and email, so its manager is the one that counts, not this request's.
+  - For an inactive user: a deprovision is never refused over the org chart. A manager named while the user is inactive is not applied on re-activation alone; it lands on the next replace, or on a patch that changes it. (`@better-auth/scim` calls the host only when a PATCH changes what it stores, so a patch that re-sends the same value, or removes an attribute the directory never sent, writes nothing; a replace always reaches the projection.)
+  
+  The `idp_provisioned` stamp (ADR-0135 D4) is unchanged.
+- 4c0cf65: feat(plugin-auth): the environment-access refusal can carry the host's reason and sentence to the sign-in page, and the sign-in page names the application on a hand-off
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `AuthManagerOptions.oidcAuthorizeGate` (the ADR-0069 D5.1 environment-access gate) may now answer `{ allowed: false, reason, message }` in place of `false`: a reason code from the host's own closed set and the sentence the refused person reads. The refusal then carries both:
+  
+  - the `403` envelope keeps `code: ENV_ACCESS_DENIED`, gains `reason`, and its `message` is the host's sentence;
+  - the redirect back to a registered `redirect_uri` keeps `error=access_denied`, sends the host's sentence as `error_description`, and adds `objectstack_error_reason` (RFC 6749 §8.2 asks an unregistered parameter to carry a vendor prefix);
+  - the readable refusal page shows the host's sentence, HTML-escaped, beside the signed-in account.
+  
+  Nothing the host answers is trusted as markup or as a URL fragment. A reason outside `[a-z_]{1,40}` is dropped and the refusal stands. A sentence with a control character or an angle bracket, or longer than 300 characters, is replaced by the fixed sentence. On the redirect, a sentence outside the character set RFC 6749 §4.1.2.1 allows for `error_description` (printable ASCII without `"` and `\`) is also replaced by the fixed sentence.
+  
+  On the environment, the OAuth callback for the platform identity provider keeps a valid `objectstack_error_reason` on its redirect to the Console sign-in page. The sign-in page shows its own sentence for `not_member` and `invitation_pending` (in every Console language); any other reason, or none, keeps the existing `access_denied` sentence. The organization's name is carried only inside the host's sentence.
+  
+  The sign-in page reads the client name only for the client its signed request names: on an OAuth hand-off it asks the new `GET /api/v1/auth/oauth2/client-name` and says "Sign in to continue to NAME". Any other answer keeps the host line ("Continue to HOST"). The read is rate-limited per client address (a fixed window of 10 reads per 60 seconds, counted in the kernel `cache` service when one is registered); over the limit it answers `429` `RATE_LIMIT_EXCEEDED` with `Retry-After`.
+  
+  Unchanged: a gate that answers a boolean is answered byte for byte as before on all three doors; who is admitted (an object refuses only when it says `allowed: false`; any other answer keeps the truthiness the gate was always read with); which `redirect_uri` is followed.
+  
+  Upgrade note: a host may return the refusal object only once it runs this plugin-auth release or later. An older plugin-auth reads any object as an admission.
+- 842637a: feat(auth): an invitation is accepted in one step with the proof its mail carries
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **The invitation mail carries a mailbox proof.** The accept link in the mail carries a single-use proof bound to the invitation, its address and its expiry; a resend retires it. The proof is never at rest in clear, the stored mail row never holds the proof, and the console's copy-link action answers the link without it. The invitation mail is sent inline, never through the durable mail queue, because the queue delivers from the stored row.
+  - **One door redeems it.** `POST /api/v1/auth/organization/accept-invitation-one-step` takes the invitation id, the proof, a name and a password. In one request it creates the account (or sets the password of an account whose address is not verified, ending every session that account had with the reason a password reset records, in an order that matches the vendor's order), verifies the address, accepts the invitation and signs in. The password-age stamp and the forced-change clear that every password change writes are written too. On an account whose password it replaces, the password history is consulted before the proof is spent and extended after, as the reset door does. The proof is spent only by a request that passed every gate; one server process serializes concurrent redemptions of a proof, and across server processes single use is as strong as the store's consume. A bad proof gets one `INVALID_TOKEN` refusal that does not say which check failed, and the real proof stays usable. The door is rate-limited per client network address and per invitation, and runs the sign-up gates before anything is written: email sign-up switched off, SSO-only mode, password length, complexity and breach checks, a name for a new account, and who may sign up. A refused request leaves the proof usable.
+  - **An address with an account signs in as today.** The door sets a password on an existing account only when it reads all of these: the address is not verified; the account's only sign-in account is its email and password one, or it has none; it has no second factor, enabled or enrolled; its user row holds no phone number, verified or not; it holds no standing grant (an API key, an OAuth client consent, an OAuth access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM credential or a link to an identity provider's directory, revoked or expired ones included); its identity source is local; and the server allows a local password here (not SSO-only, email and password on). Every other account answers `sign_in`, including one in a state no rule names and one whose reading fails, and the proof stays unspent. Every reading is taken again once the account's sessions are revoked and before the password is written; an account that no longer passes then answers `sign_in` with its sessions revoked, and the proof stays unspent. Every store this plugin mounts that is keyed by a user, and every column of the vendor's user model with every plugin this plugin can mount, is classified as a claim the judge reads or as no claim, and a test holds each classification to what is mounted. The classification covers what this plugin mounts and nothing another package mounts.
+  - **`sys_device_code` gains an index on `user_id`** (`@objectstack/platform-objects`), so the door reads a user's device authorizations by an indexed lookup, as it reads every other standing grant.
+  - **A cloud-managed environment refuses it.** With `OS_CLOUD_MANAGED=1` the door sets no local password: a request carrying a proof answers `409 RESOURCE_CONFLICT`, the cloud-managed refusal, before the proof is read. `CLOUD_MANAGED_REFUSAL_MESSAGES` gains the door's message. A process without the variable is unaffected.
+  - **Without the proof, a session must hold the verified invited address.** Called with a session and no proof, the door accepts only when the session's address is the invited one and verified, and otherwise answers `verify_email`. A copied link still owes the verification mail.
+  - **`SendTemplateInput.deliverOnlyData`** (`@objectstack/spec`): render values delivered with the message and never written to the stored mail row, which gives no sign they were overlaid. Required template variables are checked against `data` alone. A send carrying them is delivered inline, never through the durable queue, so its sender gives up queued delivery where a queue is mounted. Only the server-side template send declares the key; `POST /email/send` and a script's `ctx.email.send` take a `SendEmailInput`, which has none.
+  - **The accept page offers one form.** A signed-out visitor whose link carries the proof sees a name and password form, or a provider sign-in, in place of the sign-in redirect. The accept page does not keep the proof in its address. A provider sign-in returns to the page, which redeems the invitation for the new session. A link without the proof keeps today's path. The `@object-ui/auth` client gains `acceptInvitationOneStep`, with the types `AuthInvitationOneStepInput` and `AuthInvitationOneStepOutcome`.
+- c4c0794: fix(plugin-auth,app-shell): an accept refused for an unverified address answers the vendor's own code, and the Console's accept page takes the person to verify
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Skills-docs: none — `git grep` of `skills/` finds no page that teaches accepting an invitation or `/organization/accept-invitation`; the rule is stated in the self-hosting docs.
+  
+  The rule that refuses the accept is stated, with its BREAKING notice and its migration, in this release's entry "accepting, declining and listing an organization invitation need a verified email address on every deployment, and an invitation sign-up joins by accepting once verified". This entry carries only the parts of that change that ship beside it.
+  
+  **What changes.**
+  
+  - `POST /api/v1/auth/organization/accept-invitation` (`@objectstack/plugin-auth`) answers a session whose address is unverified with better-auth's own `403 EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION` and its sentence, the answer its accept route gives when its option is on, and writes nothing. The vendor's not-found, expiry and recipient refusals still come first, so a session that is not the invitee learns nothing new. The check runs on the vendor's `beforeAcceptInvitation` hook, on the session user the vendor itself resolved (cookie or bearer token alike).
+  - The Console's accept page (`@object-ui/app-shell`) answers that refusal with the verification-mail screen (`/verify-email-prompt`) for the account's address, whose link returns to the accept page, instead of a toast.
+  
+  `@objectstack/runtime` carries only the dispatcher error-vocabulary row that classifies the vendor code above as foreign vocabulary; nothing it runs changes.
+- 36af6b0: fix(plugin-auth)!: in multi-org mode `POST /api/v1/auth/admin/import-users` joins each row's user to the importing administrator's current organization, under create-user's rule
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are refusals of an admin HTTP request in multi-org mode: no stored row, layer, registry key or authored value changes, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an administrator importing users under a walled posture (`group` / `isolated`, `features.multiOrgEnabled`). Single-org deployments, and a degraded wall, do not move. The import now follows create-user's rule (ADR-0093 D3 amendment): every row's user joins the administrator's current organization as `member`, in the same unit of work as its account. Four answers move:
+  
+  - FROM: an administrator with no current organization got `200` and every row's user was created, in no organization. TO: the whole import is refused `400 NO_ACTIVE_ORGANIZATION` (create-user's code and sentence) and no user is created. A `dryRun` is refused the same way.
+  - FROM: a server that cannot run the join inside the account's unit of work (no unit of work wired, or better-auth's organization plugin off) imported every row. TO: the whole import is refused `501 NOT_IMPLEMENTED`, as create-user is, and no user is created.
+  - FROM: a row whose organization would refuse the member (its membership limit) was created anyway, in no organization. TO: that row fails with the refusal's code (for example `ORGANIZATION_MEMBERSHIP_LIMIT_REACHED`), its account is rolled back, and it gets no temporary password and no invitation. The other rows still land.
+  - FROM: on `mode: 'upsert'`, a row matching an existing user updated its profile and touched no membership. TO: the matched user joins the current organization too, and a refused join fails the row with its profile update rolled back. A user already in the organization is not added twice.
+  
+  The fix for a caller: switch to the organization the people belong to before importing them. A row refused for the membership limit imports once the limit is raised (`OS_ORG_MEMBERSHIP_LIMIT`).
+  
+  Because the imported users are now members of the current organization, a `positions` column on a multi-org import is judged against that organization's membership and assigns, where it was refused on every row before.
+- c0665c0: fix(auth): the console's Import Users and Add User work on a cloud-managed environment again
+  
+  Clause-②: yes (widening) — added: `organizationId` in the bodies of `POST /api/v1/auth/admin/add-sso-user`, `/admin/import-sso-users` and `/admin/remove-sso-user`, admitted only when it equals the organization the caller's session is working in. Nothing that was accepted is refused.
+  Metadata-protocol: none
+  
+  A `type: 'api'` action forwarded to the auth mount carries the caller's active organization as `body.organizationId`. The three SSO-user doors refused every key outside their own set, so the console's Import Users (`sys_user.import_sso_users`) and Add User (`sys_user.add_sso_user`) always answered `400 INVALID_REQUEST` "Unknown field(s): organizationId".
+  
+  Each door now admits that one key under a constraint:
+  
+  - absent: unchanged;
+  - equal to the session's active organization: admitted, and ignored. The organization a person joins is still read from the session, never from the body;
+  - a different organization: `400 INVALID_REQUEST`, naming the organization sent and the one the session holds;
+  - a value that is not a non-empty string: `400 INVALID_REQUEST`, saying the key must be the id of the organization you are working in. This is checked before the session is read, so it is the answer whether or not the session has an organization;
+  - a string organization sent by a caller whose session works in no organization: `400 NO_ACTIVE_ORGANIZATION`, naming the organization sent.
+  
+  On every refusal nothing is read or written and the host is not told.
+  
+  The stamp itself (`buildApiActionRequest` in `@objectstack/runtime`) is unchanged: every identity-route forward still carries it.
+- 348fbc0: fix(plugin-auth): a helper's unclassified internal failure is answered with the generic message and logged
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A route's unclassified internal failure is answered with a generic message, and the error is logged server-side; a refusal the vendor classifies (it carries a body code) keeps its own message and status, and so does a throw whose status addresses the caller (4xx). Every other route catch in `auth-plugin.ts` already applied this rule. The three result mappers its doors answer through, and the client-creation step of `POST /sys-oauth-application/register`, now apply it too:
+  
+  - `mapAuthApiError`, shared by `POST /admin/create-user`, `POST /admin/set-user-password`, `POST /admin/import-users`, `POST /admin/add-sso-user`, `POST /admin/import-sso-users` and `POST /organization/add-member`: an unclassified failure answers `INTERNAL_ERROR` with `Internal server error`, the words those routes' own catches use.
+  - The membership step of `POST /service-account/register`: such a failure answers `INTERNAL_ERROR` with `The request could not be completed.`, the words that route's own catch uses.
+  - `runSetInitialPassword` (`POST /set-initial-password`): such a failure answers `INTERNAL_ERROR` with `Internal server error`.
+  - `POST /sys-oauth-application/register`: a client-creation failure with no vendor body and no 4xx status answers `OAUTH_REGISTER_FAILED` with `Internal server error`, the words the route's outer catch uses; a vendor refusal keeps its own description and status.
+  
+  Each such answer keeps the status and the code it had; only the message changes. A refusal the vendor classifies, a refusal a hook or middleware declares, and a throw with a 4xx status are answered exactly as before.
+  
+  Each site logs such a failure once, at error level, with the logger the plugin already holds, naming the route (`[AuthPlugin] create-user failed`, `[AuthPlugin] service-account/register failed`, `[AuthPlugin] sys-oauth-application/register failed`, …). For a host that mounts these helpers itself, `AdminUserEndpointDeps.logger`, `IdentityImportDeps.logger` and `PendingSsoUserDeps.logger` accept an optional `error`; `OrganizationAddMemberDeps`, `ServiceAccountDoorDeps` and `SetInitialPasswordOptions` accept an optional `logger`; and `mapAuthApiError` takes an optional third argument, the logger. A host whose logger has no `error` gets the line at `warn`; a host that passes no logger answers the same generic message and logs nothing.
+  
+  What to do: nothing. A client that showed the message of a `500` from these doors now shows the generic sentence; the code and status it branches on are unchanged.
+- ea1edf9: fix(plugin-auth): a single-use auth value is redeemed at most once, even across processes sharing a database
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  better-auth redeems its single-use values (email verification, password reset, magic-link and one-time codes, and the other values it keeps in `sys_verification`) through the storage adapter's `consumeOne`. The ObjectQL adapter now hands a redeemed value back only to the call whose own delete removed the stored row, and answers `null` to every other call, as better-auth's `consumeOne` contract requires. This holds for any number of server processes on one database.
+  
+  A value that was already redeemed answers `null`, which better-auth refuses as an invalid or expired value. A single redemption is unchanged: it receives the value and removes it.
+  
+  The adapter reads the data engine's delete answer to decide. A data engine whose delete answers neither whether nor how many rows it removed (`IDataEngine.delete` declares `boolean | number`) now fails the redemption with an error naming that answer, rather than handing the value back.
+- 0ff3b14: fix(auth)!: the environment-access gate on `/oauth2/authorize` judges every client the request names, from the query and the body
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` and no hand-written page under `content/docs/**` teaches `oidcAuthorizeGate` or the authorize endpoint's environment-access gate.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: the change is a runtime refusal at one auth endpoint, judged by a host callback whose signature does not change, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment that sets `oidcAuthorizeGate` (the ADR-0069 D5.1 environment-access gate; open editions and self-host leave it unset). The gate on `/oauth2/authorize` now judges every client the request names: the query's `client_id` and the body's `client_id`, each a string or an array, de-duplicated ("each a string or an array" describes what the gate collects from the parsed request, not a promise that every transport accepts both forms). If any one of them is refused, the request is refused with the existing refusal: `403 ENV_ACCESS_DENIED` for a fetch or an API client, and for a browser the redirect or the readable page it already gets. A request that names no client anywhere is unchanged, and so is an unauthenticated request, which still goes on to sign in.
+  
+  Who moves: only a host whose `oidcAuthorizeGate` assumes it is called at most once per request. It can now be called once for each distinct client the request names, and the first refusal ends the request. The callback's signature, `({ userId, clientId }) => boolean | Promise<boolean>`, does not change.
+  
+  Unchanged: a deployment with no `oidcAuthorizeGate`; a `GET` naming one client; the passes that resume an authorization (sign-in, `/oauth2/consent`, `/oauth2/continue`), which the gate already judged; and the refusal's code, status, message and delivery.
+- e2a4c66: fix(auth)!: on a cloud-managed environment every organization door that writes or deletes a membership row refuses, add-member excepted; membership is managed by the hosting organisation
+  
+  Clause-②: no (narrowing) — narrowed: on a cloud-managed environment only (`OS_CLOUD_MANAGED=1`), six organization doors that write or delete a membership row now answer `409 RESOURCE_CONFLICT` to every request and write nothing, where they changed membership: `POST /organization/remove-member`, `POST /organization/update-member-role` (Make Owner calls it), `POST /organization/leave`, `POST /organization/accept-invitation`, `POST /organization/create` (it made the caller the new organization's owner) and `POST /organization/delete` (it ended every membership of the organization). Six refusal sentences are added (`CLOUD_MANAGED_REFUSAL_MESSAGES.removeMember`, `.updateMemberRole`, `.leaveOrganization`, `.acceptInvitation`, `.createOrganization`, `.deleteOrganization`). Their seven actions are hidden while `features.cloudManaged` is on, as the invite actions are (`sys_member.update_member_role`, `remove_member`, `transfer_ownership`; `sys_organization.leave_organization`, `create_organization`, `delete_organization`; `sys_invitation.accept_invitation`), and `PUBLIC_AUTH_FEATURES.cloudManaged.gatedInputs` books the seven paths.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the organization membership doors or the cloud-managed mode; `content/docs/permissions/authentication.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: seven paths join a feature-flag registry list, and the moved answers are runtime refusals at six auth doors under a deployment switch that only hosted environments set, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a cloud-managed environment (`OS_CLOUD_MANAGED=1`, set only on hosted containers): membership and membership tiers are managed by the organisation that hosts the environment. Every organization door that writes or deletes a membership row refuses every request with `409 RESOURCE_CONFLICT` and writes nothing, as `POST /organization/invite-member` already did: Remove Member, Change Role and Make Owner, Leave Organization, Accept Invitation, Create Organization and Delete Organization. Their actions are hidden there.
+  
+  Who moves: an owner (or administrator) of a cloud-managed environment who changed membership from inside the environment, and a member who left, accepted an invitation, or created or deleted an organization there. Make the change in the hosting organisation instead.
+  
+  Unchanged: every self-hosted deployment (the variable unset), where every door answers as before; `POST /organization/add-member`, which on a managed environment admits exactly a platform administrator, adding a membership, to restore one the environment lost; and the organization doors that write no membership row (teams, invitations, the active organization, the organization's own fields) or only read.
+- 6dd5716: fix(plugin-auth)!: a change to a user's credential ends every other outstanding password-reset token of that user
+  
+  Clause-②: no (narrowing) — a password write through either of this plugin's storage adapters (the factory `AuthManager` composes, and the exported raw `createObjectQLAdapter`) ends every other password-reset link and texted reset code still outstanding for that user, in the same request and before the new password is written. In the `AuthManager` composition that is every door that sets a password: a completed reset (`POST /reset-password`, `POST /phone-number/reset-password`), the user's own `POST /change-password`, an administrator's `POST /admin/set-user-password`, and a first password (`POST /set-initial-password`). No request, response or metadata shape is added, removed or re-shaped; a link or code requested after the change resets as usual.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. What moves is which reset links and codes stay live after a password change, and which password writes are refused, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** password-reset narrowing (`@objectstack/plugin-auth`): a change to a user's credential ends every other outstanding password-reset token of that user.
+  
+  - **Now.** When a user's password is set through either storage adapter, every reset link (`/request-password-reset`) and texted reset code (`/phone-number/request-password-reset`) issued for that user beforehand is ended. In the `AuthManager` composition an ended link or code answers exactly what one never issued answers: `400 INVALID_TOKEN` at `POST /reset-password`, the `INVALID_TOKEN` redirect at the link's landing (`GET /reset-password/:token`), and the never-sent answer at `POST /phone-number/reset-password`; with a host `secondaryStorage` there, its cached copy is removed too. A password write whose outstanding tokens cannot be ended, or whose cached copies cannot be named, does not land: the door answers an error and the old password stands. So does every password write when `verification.storeIdentifier` is set to anything but `plain`, because the tokens cannot be found under it; the `AuthManager` composition never sets it.
+  - **The raw `createObjectQLAdapter`.** It is handed none of better-auth's options, so through it the rule covers the token rows only. A host that pairs it with a `secondaryStorage` or a `verification.storeIdentifier` setting is outside the rule; compose the factory, `createObjectQLAdapterFactory`, as `AuthManager` does.
+  - **Who moves.** A person holding a reset link or code issued before their password changed requests a new one. Nothing else changes: another user's links and codes, and a link or code requested after the change, reset as before.
+- 3f5ffe7: fix(plugin-auth)!: a sign-up the email_domain posture admits by an invitation is not bound before its address is verified
+  
+  Clause-②: no (narrowing) — narrowed: under the `email_domain` audience posture with `membershipPolicy: 'auto'`, a self-serve sign-up whose address is off the allowlist, admitted by a pending invitation addressed to it, is not bound to the Default Organization while its address is unverified; it joins by accepting the invitation.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the `email_domain` posture's invitation sign-up; `content/docs/deployment/self-hosting.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answer is a membership the sign-up seam does not write for an unverified invitation-admitted sign-up, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for an `email_domain` deployment with `membershipPolicy: 'auto'` that relies on an invited address outside its allowlist joining the Default Organization when it signs up.
+  
+  - Under `email_domain` with `membershipPolicy: 'auto'`, an account that a sign-up off the allowlist created, admitted by a pending invitation addressed to it, is not bound to the Default Organization while its address is unverified. Its membership comes from accepting the invitation once the address is verified, with the role the invitation carries, or from a platform administrator. Verifying the address binds nothing by itself.
+  - This is the rule that already holds under `invite_only` for a sign-up admitted by the invitation it presents; both postures now read one decision, `isAdmittedByInvitationAlone` (`audience-posture.ts`).
+  
+  Unchanged: an address on the allowlist, invited or not, which the domain rule admits and the membership policy binds at creation; a sign-up the invitation mail's own link verifies as it accepts; the first account of a deployment, accounts an administrator creates and accounts a boot command provisions, which are bound as before; the `invite_only` and `open` postures.
+  
+  What to do: an invitee outside the allowlist completes the verification mail the sign-up sends, signs in and accepts the invitation, or opens the invitation mail's own link, which verifies the address and accepts in one step. A platform administrator can instead attach the account with the member list's **Add Member** action.
+- 8b7c5d5: fix(plugin-auth)!: accepting, declining and listing an organization invitation need a verified email address on every deployment, and an invitation sign-up joins by accepting once verified
+  
+  Clause-②: no (narrowing) — narrowed: from a session whose email address is not verified, `POST /api/v1/auth/organization/accept-invitation` and `POST /api/v1/auth/organization/reject-invitation` answer `403 EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION` and `GET /api/v1/auth/organization/list-user-invitations` answers `403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION`, on every deployment, whatever the state of its mail transport; nothing is accepted or declined and no membership is written. Under the `invite_only` posture with `membershipPolicy: 'auto'`, a sign-up admitted by the invitation it presents is not bound to the Default Organization while its address is unverified; it joins by accepting the invitation. The codes are better-auth's own. The `sys_invitation` actions **Accept Invitation** and **Decline Invitation** post to those routes and answer the same.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches accepting an organization invitation or invitation sign-up; `content/docs/deployment/self-hosting.mdx` gains the rules in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped. The moved answers are runtime refusals at three organization invitation routes and a membership the sign-up seam does not write for an unverified invitation sign-up, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment whose people answer invitations with an address that is not verified: email verification off (the default under `invite_only`, or declared off under `open`), no live mail transport, or a social or SSO provider that does not verify the address.
+  
+  - Accepting, declining and listing an organization invitation require a verified email address, on every deployment. A password account verifies by the verification mail; an account a social or SSO provider made counts only when the provider verified the address. The invitation's id, which its accept link and a copied link carry, is no proof of the mailbox, and no setting relaxes the rule.
+  - Reading one invitation by its id (`GET /api/v1/auth/organization/get-invitation`) stays open, so the accept page can show it.
+  - Under `invite_only` with `membershipPolicy: 'auto'`, an account a sign-up admitted by the invitation it presents is not bound to the Default Organization while its address is unverified. Its membership comes from accepting the invitation once the address is verified, with the role the invitation carries, or from a platform administrator.
+  - A deployment without a live mail transport cannot onboard a password account by invitation link; an invitee whose social or SSO provider verifies the address can still accept a copied link there.
+  
+  Unchanged: the invitation mail's own link, which carries a proof of the mailbox and accepts in one step (`POST /api/v1/auth/organization/accept-invitation-one-step`); a verified account, which accepts, declines and lists its invitations as before; the first account of a deployment, accounts an administrator creates and accounts a boot command provisions, which are bound as before; sending, resending and cancelling invitations.
+  
+  The Console's accept-invitation page answers a refused decline with the verification-mail screen for the account's address, as it answers a refused accept, and that screen's link brings the person back to answer the invitation.
+  
+  `@objectstack/verify`: a booted stack's `signUp` mints its fixture member through the operator door (the ticket the stack's own auth manager stages for that address), so the account is bound at creation as before; a stack whose auth service offers no such door falls back to the invitation lane.
+  
+  What to do: an invitee completes the verification mail (`POST /api/v1/auth/send-verification-email`, then the link it carries) before answering, or opens the invitation mail's own link. On a deployment with no live mail transport, a platform administrator creates the account (`POST /api/v1/auth/admin/create-user`) or attaches an account that already exists with the member list's **Add Member** action, which is open to platform administrators only and attaches existing accounts only.
+- e735892: fix(plugin-auth)!: a locked account is refused on every door that ends in a session for it
+  
+  Clause-②: no (narrowing) — while an account's lock holds (ADR-0069 D2, `lockoutThreshold` on), every door that ends in a session for that account refuses it with the answer password sign-in gives under the deployment's `lockoutRefusal`, and every password door counts its refused attempts toward that one lock and checks it before the password. No request, response or metadata shape is added, removed or re-shaped; an unlocked account, an expired lock and a deployment with the lockout off sign in exactly as before.
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. What moves is which answer a locked account gets at the sign-in doors, the existing lockout refusal, so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** sign-in narrowing for locked accounts (`@objectstack/plugin-auth`): a locked account is refused on every door that ends in a session for it, with the answer password sign-in gives.
+  
+  - **Now.** While the lock holds, every door that ends in a new session for the account issues none and answers as `POST /sign-in/email` does: `403 ACCOUNT_LOCKED` under `lockoutRefusal: 'explicit'`, `401 INVALID_EMAIL_OR_PASSWORD` otherwise. That is `POST /phone-number/verify`; `GET /magic-link/verify` (JSON and `callbackURL` lanes); `GET /verify-email` when it signs the caller in, an address-change confirmation opened without a session included; the second-factor step (`/two-factor/verify-totp`, `/two-factor/verify-otp`, `/two-factor/verify-backup-code`); sign-in through an identity provider (social and generic-OAuth callbacks and the ID-token sign-in, enterprise SSO over OIDC and SAML); and the device grant (`POST /device/token`). `POST /sign-in/phone-number` checks the lock before the password and answers a locked account the same whatever password it is sent: `403 ACCOUNT_LOCKED` under `'explicit'`, that door's own wrong-password answer (`401 INVALID_PHONE_NUMBER_OR_PASSWORD`) otherwise. Its wrong passwords count toward the account's one lock and a correct one resets the count, as at `/sign-in/email`. Each refused attempt writes its `login_failed` row with the reason `ACCOUNT_LOCKED`. Not sign-ins, and unchanged: an administrator's impersonation, a new session for the account whose live session of record made the request (enrolling a second factor, a password change that ends the other sessions), and the server's in-process principal session. A session for a locked account made any other way is refused.
+  - **Who moves.** A client that signs an account in through a one-time code, a sign-in link, an address-change confirmation without a session, the second-factor step, an identity provider, the device grant or the phone-number password door: while the account is locked it now receives the lockout refusal. That includes accounts with no password at all, which the lock now reaches on doors that never asked for one, and phone-number password failures now lock the account after `lockoutThreshold` attempts. An administrator clears a lock early with the **Unlock** action, as before.
+  
+  `@objectstack/runtime`: the dispatcher error-vocabulary ledger classifies the `INVALID_EMAIL_OR_PASSWORD` stamp in `@objectstack/plugin-auth` as better-auth's own vocabulary; no behaviour changes.
+- 6feea4e: fix(plugin-auth)!: an origin an SSO register or update body names is trusted for that provider's discovery only, never as the request's `Origin`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches trusted origins or SSO provider registration; `content/docs/permissions/sso.mdx` gains the rule in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: the change is which origins one request's origin check accepts, so there is nothing stored for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a deployment with the SSO relying party wired (`OS_SSO_ENABLED` / `plugins.sso`). An origin taken from a `POST /sso/register` or `POST /sso/update-provider` body (its `issuer` and any explicit `oidcConfig` endpoint) is trusted only for the server-side discovery fetch and validation of that provider. It never becomes an accepted `Origin` for the request itself: that request's origin check reads the deployment's configured trusted origins alone, as on any other POST, and a request whose `Origin` is not one of them is refused `403 INVALID_ORIGIN` and writes nothing. The auth instance's `trustedOrigins` option is now the configured list with the SSO relying party wired too, never a per-request function.
+  
+  Who moves: a client that registers or updates an SSO provider from a browser page served on an origin the deployment does not trust. Send the request from a configured origin (the Console, or a server-side call), or add that page's origin to the deployment's trusted origins (`OS_TRUSTED_ORIGINS`, or the auth plugin's `trustedOrigins` option).
+  
+  Who moves, too: a registration or an update that turns "sign out of the company sign-in too" on (`signOutOfIdp`) for an OpenID Connect identity provider on a private network. The origins that request names are trusted for the verdict on the provider's logout endpoint only; the discovery document read to find that endpoint is held to the deployment's configured trusted origins, so such a provider's switch is refused `400 VALIDATION_FAILED` on `signOutOfIdp` until its origin is listed there: add it to `OS_TRUSTED_ORIGINS` (or the auth plugin's `trustedOrigins` option), as `content/docs/permissions/sso.mdx` says.
+  
+  Unchanged, for a request from a configured origin: a registration still discovers and registers an identity provider whose issuer and named endpoints are on hosts the deployment does not list; a registration or an update that turns "sign out of the company sign-in too" on (`signOutOfIdp`) for a publicly reachable identity provider still accepts a logout endpoint on an origin that request names; an update still validates and saves the endpoints it names. Also unchanged: Microsoft Entra ID's companion origin, the `discovery_untrusted_origin` refusal and its remedy, and every other request.
+- c1ec627: fix(auth): a TOTP code is accepted once
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A TOTP code that `/api/v1/auth/two-factor/verify-totp` accepts is remembered for its user and secret for as long as the verifier's window could still accept it. Any later presentation of that code is refused, whether it arrives on another sign-in challenge, from another client, on another server node or on the session lane (RFC 6238 §5.2). A code from a time step at or before the last accepted step for that user and secret is refused too. A refused code gets the answer a wrong code gets (`401 INVALID_CODE`) and counts toward the challenge's attempt budget and the account lockout in the same way. The same rule covers the code that confirms an enrolment, and every later code. A code from a later time step is accepted as before.
+  
+  The spent steps are kept as short-lived `sys_verification` rows, one per step, reserved under a primary key derived from the user, the secret and the step. Two presentations of one code that arrive together therefore admit exactly one, across processes and nodes. A store error while recording a step fails that verification. A client that signs in with TOTP more than once inside the same 30-second step needs the code of a later step for its second sign-in.
+- Updated dependencies [e53e02e]
+- Updated dependencies [661ede2]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [66f6638]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [d1ab592]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [021abd4]
+- Updated dependencies [61ded62]
+- Updated dependencies [0d1443d]
+- Updated dependencies [d3bea96]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [6cc3f97]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [c9ef653]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [89d5a41]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [c81f498]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [b85dff0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [2f656af]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/platform-objects@18.6.0
+  - @objectstack/spec@18.6.0
+  - @objectstack/rest@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/service-messaging@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Minor Changes

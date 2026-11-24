@@ -68,6 +68,8 @@ import {
   DEFAULT_BASE_REF,
   DEFAULT_BASE_REMOTE,
   DURABILITY_SEAM_GATE,
+  EFFORT_ABOVE_TABLE,
+  EFFORT_BY_SIZE,
   ESCAPABLE_LITERAL_LEDGER,
   GENERATED_MODULE_SOURCES,
   GIT_MAX_BUFFER_BYTES,
@@ -93,6 +95,7 @@ import {
   SELF_TEST_VERDICT,
   SUSPECT_TIER_GLOBS,
   TIER_CEILING,
+  TIER_SIZING_RULEBOOK,
   USAGE_LINE,
   absentDeclaredPaths,
   absentPathVerdict,
@@ -114,6 +117,7 @@ import {
   changedPathsFromGit,
   checkFamilyCoverageGaps,
   ciOnlyMeasurement,
+  claimTierWriteRefusal,
   classifyEntry,
   collapseHint,
   commandsFor,
@@ -185,6 +189,7 @@ import {
   isInRootTsProgram,
   isNonPathNamespace,
   isPlainTopLevelDir,
+  isShippedPackageSource,
   isTestFilePath,
   isTypeCheckInvocation,
   jobFilterOutputRefs,
@@ -210,6 +215,7 @@ import {
   maskShellComments,
   metadataFormModulePaths,
   metadataFormsSurfaceIsExtracted,
+  mkdtempCompleteness,
   liveDerivationInputs,
   narrowToDerivationInputs,
   notRunnableCommandSet,
@@ -229,6 +235,7 @@ import {
   populationReasonContinuation,
   populationReasonCutRefusal,
   reachesMetadataFormModule,
+  readClaimEffort,
   readContainerModelLine,
   readPopulationDeclaration,
   readPopulationMarker,
@@ -286,6 +293,9 @@ import {
   zeroSegmentForms,
   readByUiScriptsSuite,
   UI_SCRIPTS_SUITE_ROOTS,
+  readBySpecMigrationEntryConsumers,
+  SPEC_MIGRATION_ENTRY_ROOTS,
+  packageTestSubsetFile,
   adrAnchorTargets,
   breaksAnAdrAnchor,
   carriesACliCommandLiteral,
@@ -5542,6 +5552,86 @@ export function selfTest({ tier = 'full' } = {}) {
   t('…and so does one whose name does not narrow its runner',
     (() => { try { bindChangeKindRows([{ kind: 'k', matches: 'test-file', gates: [{ name: 'pnpm vitest run', ciJob: 'Test UI', ciRunner: 'pnpm --dir ui exec vitest run', why: 'w' }] }]); return false; } catch (e) { return String(e.message).includes('CI-job binding that is not whole'); } })());
 
+  // ── The cli guidance test a migration-entry change owes (#34760) ───────────
+  //
+  // `packages/cli/test/migrate-meta-engine-guidance.test.ts` holds every semantic
+  // entry's printed block to carry no tracker number, and CI runs it only inside
+  // Test Core's package test task, so an entry edit learned of a red one a CI
+  // round after a green local ledger. The entry stands in for that job as a
+  // PACKAGE-TEST subset (`ciSubset`): pinned here are the predicate on the entries
+  // tree and beside it, the rendering and the runnable union, the `--ran` verdict
+  // without it, the STALE branch, the name's one spelling, and the binding and the
+  // file against the live tree.
+  const GUIDE = 'pnpm --filter @objectstack/cli exec vitest run test/migrate-meta-engine-guidance.test.ts';
+  const GUIDE_SPECIMENS = Object.freeze([
+    'packages/spec/src/migrations/entries/retired-defs/17.api__CreateViewRequest.ts',
+    'packages/spec/src/migrations/entries',
+    './packages/spec/src/migrations/entries/semantic/x.ts',
+  ]);
+  const GUIDE_CONTROLS = Object.freeze([
+    'packages/spec/src/ui/view.zod.ts',
+    'packages/spec/src/migrations/registry.ts.template',
+    'packages/spec/src/migrations/entries-other/x.ts',
+    'packages/cli/test/migrate-meta-engine-guidance.test.ts',
+  ]);
+  const guideEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === GUIDE));
+  const guideGate = guideEntry[0]?.gates.find((g) => g.name === GUIDE) ?? {};
+  t('⭐ exactly one entry in the table names the cli guidance test, bound to the Test Core job and the spec-migration-entry predicate',
+    guideEntry.length === 1 && guideGate.ciJob === 'Test Core'
+      && CHANGE_KIND_ROWS.filter((r) => r.gates.some((g) => g.name === GUIDE)).map((r) => r.matches).join() === 'spec-migration-entry');
+  t('the roots are the entries directory and its subtree, in the trigger language',
+    SPEC_MIGRATION_ENTRY_ROOTS.includes('packages/spec/src/migrations/entries/**') && SPEC_MIGRATION_ENTRY_ROOTS.includes('packages/spec/src/migrations/entries'));
+  for (const specimen of GUIDE_SPECIMENS) {
+    t(`a migration-entry surface reaches the guidance test (${specimen})`, readBySpecMigrationEntryConsumers(specimen));
+  }
+  for (const control of GUIDE_CONTROLS) {
+    t(`CONTROL: ${control} is outside the entries tree`, !readBySpecMigrationEntryConsumers(control));
+  }
+  const guideResolved = (name, gate = null) => (gate?.ciJob ? name : `pnpm ${name}`);
+  const throughTableGuide = (p) => changeKindLines([p], guideResolved).some((l) => l.includes(`- ${GUIDE}   —`));
+  for (const specimen of GUIDE_SPECIMENS) {
+    t(`through the whole table, ${specimen} derives the guidance test, anchored on the delimiter`, throughTableGuide(specimen));
+    t(`…and the runnable union carries it for ${specimen}`, commandsFor({ kindGroups: changeKindGates([specimen], guideResolved) }).includes(GUIDE));
+  }
+  for (const control of GUIDE_CONTROLS) {
+    t(`…and ${control} derives no guidance line and no guidance command`,
+      !throughTableGuide(control) && !commandsFor({ kindGroups: changeKindGates([control], guideResolved) }).includes(GUIDE));
+  }
+  const guideLine = changeKindLines([GUIDE_SPECIMENS[0]], guideResolved, guideEntry).find((l) => l.includes(`- ${GUIDE}   —`)) ?? '';
+  t('the guidance line states its build prerequisite, runnably', guideLine.includes("pnpm --filter '@objectstack/cli^...' build"));
+  t('…and carries no tracker number in the text a dev is shown', guideLine !== '' && !/#\d{4,5}\b/.test(guideLine));
+  const guideDerived = commandsFor({ kindGroups: changeKindGates([GUIDE_SPECIMENS[0]], guideResolved) });
+  const guideWithout = runReconciliation({
+    derived: guideDerived,
+    record: parseRunRecord(guideDerived.filter((c) => c !== GUIDE).map((c) => `${c} :: exit 0`).join('\n')),
+  });
+  t('⭐ a run record carrying every derived command BUT the guidance test is NOT ok, and names it unrun',
+    !guideWithout.ok && guideWithout.unrun.some((u) => u.command === GUIDE));
+  const guideWith = runReconciliation({ derived: guideDerived, record: parseRunRecord(guideDerived.map((c) => `${c} :: exit 0`).join('\n')) });
+  t('CONTROL: the same record WITH the guidance test is ok', guideWith.ok);
+  const guideStale = changeKindLines([GUIDE_SPECIMENS[0]], () => null, guideEntry);
+  t('an unresolvable package-test binding renders STALE, naming the job, the runner and the file it lost',
+    guideStale.filter((l) => l.includes(`⚠ ${GUIDE}: STALE`) && l.includes("job named 'Test Core…'") && l.includes(guideGate.ciSubset ?? '\u0000')).length === 1);
+  // The name's one spelling, and the load-time refusals it backs.
+  t('the package-test subset spelling reads its FILE', packageTestSubsetFile(GUIDE) === 'test/migrate-meta-engine-guidance.test.ts');
+  t('…and refuses a second argument or another runner',
+    packageTestSubsetFile(`${GUIDE} --project unit`) === null && packageTestSubsetFile('pnpm --filter @objectstack/cli run test') === null);
+  const bindRefuses = (gate) => {
+    try { bindChangeKindRows([{ kind: 'k', matches: 'test-file', gates: [{ why: 'w', ...gate }] }]); return false; } catch (e) { return String(e.message).includes('CI-job binding that is not whole'); }
+  };
+  t('a package-test subset whose ciSubset names another file REFUSES at load',
+    bindRefuses({ name: GUIDE, ciJob: 'Test Core', ciRunner: 'set -- pnpm turbo run test', ciSubset: 'packages/cli/test/other.test.ts' }));
+  t('…and so does one without its job half', bindRefuses({ name: GUIDE, ciSubset: guideGate.ciSubset }));
+  t('CONTROL: the live row binds whole', !bindRefuses({ name: GUIDE, ciJob: guideGate.ciJob, ciRunner: guideGate.ciRunner, ciSubset: guideGate.ciSubset }));
+  // Against the LIVE tree: the job still runs the package test task, and the file the name runs is the
+  // file `ciSubset` names, inside the package `--filter` names.
+  t('⭐ the binding resolves against the LIVE workflows — Test Core still runs the package test task', ciJobRunsRunner(guideGate, discoverFamilies().workflowEntries));
+  t('⭐ the named test file exists on this tree', typeof guideGate.ciSubset === 'string' && existsSync(nodePath.join(ROOT, guideGate.ciSubset)));
+  t('…inside the package the name filters on', (() => {
+    const pkgDir = guideGate.ciSubset?.slice(0, -('/' + packageTestSubsetFile(GUIDE)).length) ?? '';
+    try { return JSON.parse(readFileSync(nodePath.join(ROOT, pkgDir, 'package.json'), 'utf8')).name === '@objectstack/cli'; } catch { return false; }
+  })());
+
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
   // The bundles' OTHER producer, and the half no owning-package test can reach:
@@ -8242,7 +8332,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 738 -> 744 (#30763): the ADR anchor corpus import and its comment.
       // 744 -> 748 (#31257): the two imported gate readers and their comment.
       // 748 -> 751 (#31292): the workspace-enumerator import and its comment.
-      'scripts/pm/dispatch-gates.mjs:751 inherited-population',
+      // 751 -> 753 (#34760): the data import and its re-export each gained SPEC_MIGRATION_ENTRY_ROOTS.
+      'scripts/pm/dispatch-gates.mjs:753 inherited-population',
       // Ninth row, added with the declaration it names: the recogniser's mailbox
       // doorbell battery pins the seven key templates verbatim in the pm-dispatch
       // references' project-forms.md, a population claim on a governed file, so
@@ -10810,7 +10901,7 @@ export function selfTest({ tier = 'full' } = {}) {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
+  t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/l1-review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
   t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('.claude/agents/os-dev.md'));
@@ -10921,6 +11012,30 @@ export function selfTest({ tier = 'full' } = {}) {
   t('the key is read at the START of a line, decoration tolerated — and off the line start it is prose, not a declaration', readContainerModelLine('Claim: x\n- **Container & model:** `M`, `mode:cloud`, `model: opus`').tier === 'opus' && readContainerModelLine(`Claim: x\nas said, Container & model: model: ${TIER_CEILING} earlier`).present === false);
   t('⛔ ABSENCE is nobody\'s refusal: no `Container & model:` line, or a `model:` slot reading no token, declares no ceiling', readContainerModelLine('Claim: x\nSeat: domain:skills#1').present === false && containerModelRefusal('Claim: x') === null && readContainerModelLine(CM('model:')).tier === null && containerModelRefusal(CM('model:')) === null);
   t('⛔ NOT a claim reader\'s business what a claim is — the reader reads any body; scoping to `Claim:` comments is post-stamped\'s', readContainerModelLine(`Round report\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``).ceiling === true);
+  // The citation is read inside the `model:` slot only (up to the next `effort:` key): the
+  // effort slot carries citations of its own, spelled like the model slot's, and a whole-line
+  // match let them satisfy the tier check by accident.
+  t('⛔ a ceiling `model:` slot citing nothing, with a `reason:` only in the `effort:` slot after it, is REFUSED', (() => { const body = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\`, \`effort: xhigh, reason: the timing reading, 41 min\``); const r = readContainerModelLine(body); return r.ceiling && r.reasonCited === false && containerModelRefusal(body)?.key === 'Container & model'; })());
+  t('⛔ the same with `MANDATORY` only in the `effort:` slot — the mandate is not cited, and the claim is refused', (() => { const body = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\`, \`effort: xhigh (MANDATORY per the standing order)\``); const r = readContainerModelLine(body); return r.ceiling && r.mandateCited === false && containerModelRefusal(body)?.key === 'Container & model'; })());
+  t('⭐ the positive twin: a citation INSIDE the `model:` slot, commas and parentheses included, still reads with an `effort:` slot after it', (() => { const mandate = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (\`--tier\` at \`abc1234\`: MANDATORY, SKILL.md), \`effort: high\``); const reason = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME} (reason: ruled on the card, 2026-11-20)\`, \`effort: xhigh, reason: timing\``); return readContainerModelLine(mandate).mandateCited && containerModelRefusal(mandate) === null && readContainerModelLine(reason).reasonCited && containerModelRefusal(reason) === null; })());
+
+  // ── 定档 at claim WRITE time: the effort table is the rulebook's, and absence is a refusal ──
+  //
+  // FRESHNESS first: `EFFORT_BY_SIZE` is a copy of one row of 定档, so the row is re-read from
+  // the rulebook here and compared — an edit to either side alone reds this case, never forks.
+  const sizingText = readFileSync(nodePath.join(ROOT, TIER_SIZING_RULEBOOK), 'utf8');
+  const sizingSection = sizingText.slice(Math.max(0, sizingText.indexOf('### 定档')));
+  const sizingRow = /^- S [^`\n]*`([a-z]+)`;M、L、XL `([a-z]+)`/m.exec(sizingSection);
+  t('⭐ FRESHNESS: 定档\'s own row still reads S ⇒ medium and M、L、XL ⇒ high, and `EFFORT_BY_SIZE` equals it — XS riding on S', sizingRow !== null && EFFORT_BY_SIZE.S === sizingRow[1] && EFFORT_BY_SIZE.XS === sizingRow[1] && ['M', 'L', 'XL'].every((k) => EFFORT_BY_SIZE[k] === sizingRow[2]) && Object.keys(EFFORT_BY_SIZE).length === 5, JSON.stringify({ row: sizingRow?.slice(1) ?? null, table: EFFORT_BY_SIZE }));
+  t('⭐ FRESHNESS: 定档 still caps effort at the table\'s top and gives the one value above it to the ADR-revision row, never to a claim\'s adversarial re-read', sizingSection.includes(`- effort 最高 \`${EFFORT_BY_SIZE.XL}\``) && sizingSection.includes(`- ADR 修订(改 \`${EFFORT_ABOVE_TABLE.surface}**\` 的卡)effort 照常设令 \`${EFFORT_ABOVE_TABLE.value}\``) && sizingSection.includes('⛔ 不写进认领'));
+  const SZ = (value, surface = 'scripts/pm/**') => `Claim: PM loop round 1\nFile surface: \`${surface}\`\nContainer & model: ${value}`;
+  t('readClaimEffort: the size is the FIRST token, the effort the first after its key, decoration stripped and case folded', (() => { const r = readClaimEffort(SZ('`S 级机械卡`, `mode:subagent`, `model: opus`, `effort: Medium`')); return r.present && r.size === 'S' && r.effort === 'medium' && r.reasonCited === false && readClaimEffort(SZ('XL, mode:cloud, model: opus, effort: high')).size === 'XL' && readClaimEffort(SZ('`Small`, effort: high')).size === null && readClaimEffort('Claim: x').present === false; })());
+  t('readClaimEffort: a `reason:` counts inside the effort slot only — the model slot\'s, before or after it, is its own', readClaimEffort(SZ('`S`, `model: opus (reason: quota)`, `effort: high`')).reasonCited === false && readClaimEffort(SZ('`S`, `effort: high`, `model: opus (reason: quota)`')).reasonCited === false && readClaimEffort(SZ('`S`, `model: opus`, `effort: high, reason: design judgement`')).reasonCited === true);
+  t('⭐ claimTierWriteRefusal: every size at its table value passes, and so does a reasoned exception', Object.entries(EFFORT_BY_SIZE).every(([size, effort]) => claimTierWriteRefusal(SZ(`\`${size}\`, \`model: opus\`, \`effort: ${effort}\``)) === null) && claimTierWriteRefusal(SZ('`S`, `model: opus`, `effort: high, reason: not mechanical`')) === null);
+  t('⛔ THE MEASURED SHAPES: S at `high` with no reason, no `effort:` value, and no line at all are each refused, naming 定档\'s file', [SZ('`S`, `mode:subagent`, `model: opus`, `effort: high`'), SZ('`M`, `mode:subagent`, `model: opus`'), 'Claim: PM loop round 1\nSeat: domain:skills#1'].every((b) => { const r = claimTierWriteRefusal(b); return r?.key === 'Container & model' && r.why.includes(TIER_SIZING_RULEBOOK); }) && claimTierWriteRefusal(SZ('`S`, `model: opus`, `effort: high`')).why.includes('size S reads `effort: medium`'));
+  t('⛔ a line opening with no size, and a value 定档 gives no card, are refused — both problems named in ONE row', (() => { const r = claimTierWriteRefusal(SZ('`mode:cloud`, `model: opus`, `effort: max, reason: hard`')); return r !== null && r.why.includes('no size token') && r.why.includes('`effort: max` is no value') && claimTierWriteRefusal(SZ('`M`, `effort: low, reason: lookup`')) !== null; })());
+  t('`xhigh` in a claim: refused off the ADR surface whatever the reason, refused on it without one, read on it with the standing order cited', claimTierWriteRefusal(SZ('`M`, `effort: xhigh, reason: adversarial re-read`'))?.why.includes('never into a claim') === true && claimTierWriteRefusal(SZ('`M`, `effort: xhigh`', 'docs/adr/0087-x.md')) !== null && claimTierWriteRefusal(SZ('`M`, `effort: xhigh, reason: the standing order`', 'docs/adr/0087-x.md')) === null);
+  t('⛔ control: the READ-time reader is untouched — a claim with no line, or no effort, still earns no `containerModelRefusal`', containerModelRefusal('Claim: x') === null && containerModelRefusal(SZ('`S`, `model: opus`')) === null);
 
   // Hoisted out of the slow sections that used to declare them: a later section reads each one.
   const CLI = fileURLToPath(ENGINE_URL);
@@ -10955,7 +11070,7 @@ export function selfTest({ tier = 'full' } = {}) {
   );
   t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
   t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
-  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/l1-review-checklist.md')));
   // The frame-copy half of the mandate is DEFINED by check:skill-frame-sync's
   // COPIES table (the 2026-08-20 ruling's own wording), so the coupling is
   // pinned mechanically: a copy added to that gate without a matching mandate
@@ -11362,6 +11477,97 @@ export function selfTest({ tier = 'full' } = {}) {
     wrapperBodyScan,
   );
 
+  // ── Which UNRESOLVED mkdtempSync site fails completeness: the FILE ─────────
+  //
+  // The live completeness case in the slow section below fails an unresolved
+  // mkdtempSync site in a test file or repo tooling, and REPORTS one in shipped
+  // package source, whose base the user names at run time (ruling record
+  // 7075362923). The boundary is pinned here, in the fast tier a pull request's
+  // lane runs, on the exact spelling that redded main: a staging directory
+  // beside a caller's directory. Each arm has a control one step away.
+  const callerDirSource = 'const staging = mkdtempSync(join(dir, SKILLS_STAGING_PREFIX));';
+  const tmpdirSource = 'const staging = mkdtempSync(join(tmpdir(), SKILLS_STAGING_PREFIX));';
+  const completenessPackages = [{ dir: 'packages/cli', manifest: { name: '@objectstack/cli' } }];
+  const completenessOf = (rel, source = callerDirSource, members = completenessPackages) =>
+    mkdtempCompleteness(scratchDirSitesInSource(rel, source).unresolved, { members });
+  const verdictIs = (v, failing, reported) => v.failing.length === failing && v.reported.length === reported;
+  const shippedVerdict = completenessOf('packages/cli/src/utils/skills-install-state.ts');
+  t(
+    "a caller's-directory mkdtempSync base in shipped package source is REPORTED, not failed",
+    verdictIs(shippedVerdict, 0, 1) && shippedVerdict.reported[0].file === 'packages/cli/src/utils/skills-install-state.ts',
+    shippedVerdict,
+  );
+  t(
+    'CONTROL: the same file in a directory that holds no workspace package still FAILS',
+    verdictIs(
+      completenessOf('packages/cli/src/utils/skills-install-state.ts', callerDirSource, [{ dir: 'packages/core', manifest: {} }]),
+      1,
+      0,
+    ),
+  );
+  t(
+    "CONTROL: and in the package but outside its own src/ (one directory up), it still FAILS",
+    verdictIs(completenessOf('packages/cli/utils/skills-install-state.ts'), 1, 0),
+  );
+  // A src/ segment of the member's that is NOT its own src/: product source by
+  // name (so `isProductSource` alone would pass it), under the member, and red
+  // the day the member prefix is loosened from MEMBER/src/ to MEMBER/.
+  t(
+    "CONTROL: under the member but in a src/ that is not the member's own (packages/cli/scripts/src/), it still FAILS",
+    verdictIs(completenessOf('packages/cli/scripts/src/staging.ts'), 1, 0)
+      && runnerEnvIsProductSource('packages/cli/scripts/src/staging.ts'),
+  );
+  // A private member is not published code: its src/ is code this checkout
+  // runs (an example app, a QA harness), so the same site there FAILS. The
+  // control is the published arm above, the same path with the flag absent.
+  t(
+    "a private: true member's src/ is not shipped source — the same site there FAILS",
+    verdictIs(
+      completenessOf('packages/cli/src/utils/skills-install-state.ts', callerDirSource, [
+        { dir: 'packages/cli', manifest: { name: '@objectstack/cli', private: true } },
+      ]),
+      1,
+      0,
+    ),
+  );
+  t(
+    'the same site in a test file FAILS — beside the shipped file, by name',
+    verdictIs(completenessOf('packages/cli/src/utils/skills-install-state.test.ts'), 1, 0),
+  );
+  t(
+    'and in a test helper under src/__tests__/, by directory — the stricter test predicate holds it',
+    verdictIs(completenessOf('packages/cli/src/__tests__/staging-helper.ts'), 1, 0),
+  );
+  t(
+    'CONTROL: the test file with a base the scan CAN read (the system temp directory) is in neither list',
+    verdictIs(completenessOf('packages/cli/src/utils/skills-install-state.test.ts', tmpdirSource), 0, 0),
+  );
+  t(
+    'the same site in repo tooling FAILS — the tooling population is not dropped with the test predicate',
+    verdictIs(completenessOf('scripts/pm/stage-skills.mjs'), 1, 0) && !isTestFilePath('scripts/pm/stage-skills.mjs'),
+  );
+  t(
+    'CONTROL: the tooling file with a base the scan CAN read is in neither list',
+    verdictIs(completenessOf('scripts/pm/stage-skills.mjs', tmpdirSource), 0, 0),
+  );
+  t(
+    'and an unresolved mkdirSync site is in neither list — that half was never held to completeness',
+    verdictIs(completenessOf('scripts/pm/stage-skills.mjs', 'mkdirSync(join(dir, SKILLS_STAGING_PREFIX));'), 0, 0)
+      && scratchDirSitesInSource('scripts/pm/stage-skills.mjs', 'mkdirSync(join(dir, SKILLS_STAGING_PREFIX));').unresolved.length === 1,
+  );
+  // The default member list is THIS tree's workspace, read from its manifest
+  // globs and manifests: the arms above hold on it too, not only on a
+  // hand-built list — packages/qa/dogfood is a private member of this tree.
+  const liveDefault = (rel) => mkdtempCompleteness(scratchDirSitesInSource(rel, callerDirSource).unresolved);
+  t(
+    "on this tree's own workspace, the shipped arm is REPORTED, the tooling and private-member arms FAIL",
+    verdictIs(liveDefault('packages/cli/src/utils/skills-install-state.ts'), 0, 1)
+      && verdictIs(liveDefault('scripts/pm/stage-skills.mjs'), 1, 0)
+      && verdictIs(liveDefault('packages/qa/dogfood/src/staging.ts'), 1, 0)
+      && JSON.parse(readFileSync(nodePath.join(ROOT, 'packages/qa/dogfood/package.json'), 'utf8')).private === true
+      && isShippedPackageSource('packages/cli/src/utils/skills-install-state.ts', completenessPackages),
+  );
+
   slow("the change set derived from git — temporary repositories with real history", () => {
   // ── The change set derived from git (#9320) ───────────────────────────────
   //
@@ -11761,14 +11967,21 @@ export function selfTest({ tier = 'full' } = {}) {
       }`,
       liveScratch.exposed.length === 0,
     );
-    const unreadableTempSites = liveScratch.unresolved.filter((s) => s.call === 'mkdtempSync');
+    // Completeness holds in test files and repo tooling; an unresolved site in
+    // shipped package source is REPORTED on this line and not failed, because
+    // its base is the user's run-time choice (`mkdtempCompleteness`, pinned in
+    // the fast tier; ruling record 7075362923).
+    const completeness = mkdtempCompleteness(liveScratch.unresolved);
+    const siteList = (sites) => sites.map((s) => `${s.file}:${s.line} (${s.why})`).join(', ');
     t(
-      `no mkdtempSync site in this tree takes a base the scan cannot read${
-        unreadableTempSites.length
-          ? ` — UNRESOLVED: ${unreadableTempSites.map((s) => `${s.file}:${s.line} (${s.why})`).join(', ')}`
+      `no mkdtempSync site in a test file or repo tooling takes a base the scan cannot read${
+        completeness.failing.length ? ` — UNRESOLVED: ${siteList(completeness.failing)}` : ''
+      }${
+        completeness.reported.length
+          ? ` — reported, not failed (shipped package source, base chosen at run time): ${siteList(completeness.reported)}`
           : ''
       }`,
-      unreadableTempSites.length === 0,
+      completeness.failing.length === 0,
     );
   } finally {
     rmSync(gitTmp, { recursive: true, force: true });

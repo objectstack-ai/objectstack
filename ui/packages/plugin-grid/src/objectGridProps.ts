@@ -142,4 +142,20 @@ export interface ObjectGridExternalPaginationProps
    * escalation.
    */
   findParams?: Record<string, unknown> | null;
+  /**
+   * objectstack#35554 — the host loads its rows window by window (a list with
+   * no declared `pagination`): the grid draws no pager and asks for the next
+   * window through this as the table's scroll box nears its end. `rowCount`
+   * stays the whole match total, so 「选择全部 M 条」 and the count beside the
+   * view name read it.
+   */
+  onLoadMore?: () => void;
+  /** objectstack#35554 — more rows match than the host has loaded. Read only with `onLoadMore`. */
+  hasMoreRows?: boolean;
+  /**
+   * objectstack#35554 — where the table's scroll position is kept across a
+   * return to the list (session storage, under this key). The host names the
+   * list it shows; absent ⇒ nothing is kept.
+   */
+  scrollRestoreKey?: string;
 }

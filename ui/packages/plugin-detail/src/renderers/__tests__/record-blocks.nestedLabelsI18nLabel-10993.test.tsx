@@ -87,6 +87,8 @@ const objectSchema = {
 const record = { industry: 'Retail' };
 
 const makeDataSource = () => ({
+  // The picker's add is one transactional batch (objectstack#35601); a source without it offers no picker.
+  batchTransaction: vi.fn(async () => ({ results: [] })),
   find: vi.fn(async () => ({ data: [{ id: 't1', name: 'Call back' }], total: 1 })),
   findOne: vi.fn(async () => record),
   getObjectSchema: vi.fn(async (name: string) => ({ name, fields: { name: { type: 'text', label: 'Name' } } })),

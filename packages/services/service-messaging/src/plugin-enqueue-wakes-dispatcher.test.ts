@@ -25,11 +25,15 @@
  *
  * #17623 put `HttpDispatcher` on the same loop, woken by `enqueueHttp()`. Its
  * leg below has the same shape — the plugin's own wiring, a real engine, a
- * negative control on the same boot — with `globalThis.fetch` stubbed, since
- * that is what the plugin's HTTP dispatcher sends through.
+ * negative control on the same boot — against a real loopback receiver that
+ * counts what arrives, which the suite allowlists through the environment the
+ * way an operator does: the plugin's HTTP dispatcher sends through the
+ * outbound-request guard, which judges every connection itself.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -61,6 +65,7 @@ async function until(predicate: () => boolean, budgetMs: number): Promise<void> 
 
 const openKernels: ObjectKernel[] = [];
 const openDrivers: Array<{ disconnect?: () => Promise<void> }> = [];
+const openReceivers: Server[] = [];
 
 afterEach(async () => {
     // Kernels first, drivers second: the kernel's own teardown still wants a
@@ -71,7 +76,13 @@ afterEach(async () => {
     while (openDrivers.length) {
         try { await openDrivers.pop()?.disconnect?.(); } catch { /* noop */ }
     }
+    while (openReceivers.length) {
+        const receiver = openReceivers.pop()!;
+        receiver.closeAllConnections?.();
+        await new Promise<void>((resolve) => receiver.close(() => resolve()));
+    }
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
 });
 
 async function bootMessagingKernel() {
@@ -173,11 +184,17 @@ describe('#17623 MessagingServicePlugin — enqueueHttp() wakes the backed-off H
     it('POSTs an enqueued delivery at once, while a row nobody announced stays pending', async () => {
         const posted: string[] = [];
         // The plugin constructs its HttpDispatcher without a fetchImpl, so it
-        // sends through `globalThis.fetch`.
-        vi.stubGlobal('fetch', async (url: string) => {
-            posted.push(url);
-            return { ok: true, status: 200, async text() { return 'ok'; } };
+        // sends through the outbound-request guard: a real receiver on
+        // loopback, allowlisted the way an operator lists an internal target.
+        const receiver = createServer((req, res) => {
+            posted.push(req.url ?? '');
+            res.writeHead(200, { 'content-type': 'text/plain' });
+            res.end('ok');
         });
+        await new Promise<void>((resolve) => receiver.listen(0, '127.0.0.1', resolve));
+        const base = `http://127.0.0.1:${(receiver.address() as AddressInfo).port}`;
+        openReceivers.push(receiver);
+        vi.stubEnv('OS_EGRESS_ALLOWED_TARGETS', '127.0.0.1');
         const { engine, messaging } = await bootMessagingKernel();
 
         // NEGATIVE CONTROL — a ready `pending` row written straight into the
@@ -188,7 +205,7 @@ describe('#17623 MessagingServicePlugin — enqueueHttp() wakes the backed-off H
             source: 'flow',
             ref_id: 'ref_quiet',
             dedup_key: 'quiet',
-            url: 'https://receiver.example/quiet',
+            url: `${base}/quiet`,
             method: 'POST',
             payload_json: '{}',
             partition_key: hashPartition('ref_quiet', PARTITIONS),
@@ -207,12 +224,12 @@ describe('#17623 MessagingServicePlugin — enqueueHttp() wakes the backed-off H
             source: 'flow',
             refId: 'ref_loud',
             dedupKey: 'loud',
-            url: 'https://receiver.example/loud',
+            url: `${base}/loud`,
             payload: { title: 'loud' },
         });
 
         await until(() => posted.length === 2, DELIVERY_BUDGET_MS);
-        expect([...posted].sort()).toEqual(['https://receiver.example/loud', 'https://receiver.example/quiet']);
+        expect([...posted].sort()).toEqual(['/loud', '/quiet']);
         await eventually(
             async () => (await httpStatusOf(engine, id)) === 'success'
                 && (await httpStatusOf(engine, 'hdl_unannounced')) === 'success',

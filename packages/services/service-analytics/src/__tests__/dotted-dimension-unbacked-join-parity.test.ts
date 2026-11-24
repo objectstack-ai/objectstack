@@ -23,6 +23,15 @@
  *   undeclared plain dimension (`bogus`, #28201) keeps its own refusal. A
  *   `runtimeFilter` member through an unbacked path is refused by the same
  *   gate since #28557 (pinned in that file too).
+ *
+ * [ADR-0149 D1] On `queryDataset` a SELECTED dimension is one of the dataset's
+ * declared names, so every dotted spelling above, backed or not, and the plain
+ * `bogus` are refused by the closed-member rule on every face, ahead of the
+ * relationship-path gate, with one message. That gate stays pinned through
+ * what still reaches it: a `runtimeFilter` member (filter keys are fields, not
+ * members) and the cube faces further down this file. The served case stays
+ * pinned as a DECLARED dimension over the backed path (`account_name`, which
+ * reads `account.name`), on both live strategies.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -58,6 +67,17 @@ const shape = {
 const UNBACKED = DatasetSchema.parse({ name: 'os28258_deals', ...shape });
 /** Declares `account`, and nothing past it. */
 const BACKED = DatasetSchema.parse({ name: 'os28258_deals_by_account', include: ['account'], ...shape });
+/**
+ * Declares `account` AND a dimension over it (`account_name` reads
+ * `account.name`): the backed relationship path, spelled the way a dataset
+ * query may select it — by its declared name.
+ */
+const BACKED_DECLARED = DatasetSchema.parse({
+  name: 'os28258_deals_by_account_name',
+  include: ['account'],
+  ...shape,
+  dimensions: [...shape.dimensions, { name: 'account_name', field: 'account.name', type: 'string' }],
+});
 
 type Face = 'native' | 'objectql' | 'preview';
 const FACES: readonly Face[] = ['native', 'objectql', 'preview'];
@@ -148,10 +168,13 @@ describe('[#28258] a dotted dimension through a relationship path the dataset do
     try { await engine?.destroy(); } catch { /* noop */ }
   });
 
-  for (const [label, dataset, member, path] of [
-    ["'os28258_deal.bogus' (the object's own name as a hop)", UNBACKED, 'os28258_deal.bogus', 'os28258_deal'],
-    ["'account.name' (a real lookup the dataset does not include)", UNBACKED, 'account.name', 'account'],
-    ["'account.owner.name' (one hop past the included 'account')", BACKED, 'account.owner.name', 'account.owner'],
+  for (const [label, dataset, member] of [
+    ["'os28258_deal.bogus' (the object's own name as a hop)", UNBACKED, 'os28258_deal.bogus'],
+    ["'account.name' (a real lookup the dataset does not include)", UNBACKED, 'account.name'],
+    ["'account.owner.name' (one hop past the included 'account')", BACKED, 'account.owner.name'],
+    ["'account.name' (backed by 'include', but not a declared dimension)", BACKED, 'account.name'],
+    ["'os28258_deal.region' (a spelling of the declared 'region')", UNBACKED, 'os28258_deal.region'],
+    ["'bogus' (a plain name the dataset does not declare)", UNBACKED, 'bogus'],
   ] as const) {
     it(`refuses ${label} INVALID_FIELD / 400 with one message on every face`, async () => {
       const refusals = await Promise.all(
@@ -163,7 +186,7 @@ describe('[#28258] a dotted dimension through a relationship path the dataset do
         expect(err.param).toBe('dimensions');
         expect(err.member).toBe(member);
         expect(err.cube).toBe(dataset.name);
-        expect(err.message).toContain(`Dimension '${member}' on cube '${dataset.name}' traverses relationship path '${path}'`);
+        expect(err.message).toContain(`The dataset "${dataset.name}" does not declare the dimension "${member}".`);
       }
       const [native, objectql, preview] = refusals;
       expect(objectql.message).toBe(native.message);
@@ -184,40 +207,19 @@ describe('[#28258] a dotted dimension through a relationship path the dataset do
     expect(refusals[2].message).toBe(refusals[0].message);
   });
 
-  it("CONTROL: a backed 'account.name' serves on both live strategies, the same groups", async () => {
+  it("CONTROL: a DECLARED dimension over the backed 'account.name' serves on both live strategies, the same groups", async () => {
     const expected = [{ key: 'Acme', total: 130 }, { key: 'Globex', total: 50 }];
     for (const face of ['native', 'objectql'] as const) {
-      const result = await ask(face, BACKED, { dimensions: ['account.name'], measures: ['total'] });
-      expect(groupsOf(result.rows, 'account.name'), face).toEqual(expected);
+      const result = await ask(face, BACKED_DECLARED, { dimensions: ['account_name'], measures: ['total'] });
+      expect(groupsOf(result.rows, 'account_name'), face).toEqual(expected);
     }
     // [#28555] The preview joins nothing, so it refuses the backed path with
-    // its own refusal rather than this gate's (which judges only unbacked ones).
-    const err = await refusalOf(ask('preview', BACKED, { dimensions: ['account.name'], measures: ['total'] }));
+    // its own refusal — neither this gate's nor the closed-member rule's.
+    const err = await refusalOf(ask('preview', BACKED_DECLARED, { dimensions: ['account_name'], measures: ['total'] }));
     expect(err.code, err.message).toBe('INVALID_FIELD');
     expect(err.status).toBe(400);
     expect(err.message).not.toContain('which the dataset does not declare');
-  });
-
-  it("CONTROL: '<object>.region', which resolves to the declared 'region', still serves on every face", async () => {
-    const expected = [{ key: 'amer', total: 150 }, { key: 'emea', total: 30 }];
-    for (const face of ['native', 'objectql'] as const) {
-      const result = await ask(face, UNBACKED, { dimensions: ['os28258_deal.region'], measures: ['total'] });
-      expect(groupsOf(result.rows, 'os28258_deal.region'), face).toEqual(expected);
-    }
-    const preview = await ask('preview', UNBACKED, { dimensions: ['os28258_deal.region'], measures: ['total'] });
-    expect(Array.isArray(preview.rows)).toBe(true);
-  });
-
-  it("CONTROL: an undeclared plain 'bogus' (#28201) keeps its own refusal on every face", async () => {
-    const refusals = await Promise.all(
-      FACES.map((face) => refusalOf(ask(face, UNBACKED, { dimensions: ['bogus'], measures: ['total'] }))),
-    );
-    for (const err of refusals) {
-      expect(err.code, err.message).toBe('INVALID_FIELD');
-      expect(err.status).toBe(400);
-      expect(err.field).toBe('bogus');
-      expect(err.message).toContain("Dimension 'bogus' on cube 'os28258_deals' groups by field 'bogus'");
-    }
+    expect(err.message).not.toContain('does not declare the dimension');
   });
 
   it("CONTROL: a measure mistake beside an unbacked dotted dimension is answered about the measure on every face", async () => {

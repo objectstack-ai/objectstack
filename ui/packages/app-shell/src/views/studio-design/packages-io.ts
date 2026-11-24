@@ -23,8 +23,11 @@
  * why the client cannot compute this and a "missing scope means read-only" rule
  * would have flipped every Studio base read-only.
  *
- * Kernel packages (scope `system` / `cloud`) are hidden here whatever their
- * verdict says: that filter is about visibility, not writability.
+ * Kernel packages (scope `system` / `cloud`) are hidden from the Studio
+ * landing whatever their verdict says: that filter is about visibility, not
+ * writability. A manifest-scoped one is left out of this list; a flat-scoped
+ * one stays in it, tagged `kernel`, and the landing hides it (`BuilderLanding`,
+ * ADR-0016 §3.8).
  */
 
 import { EnsureCustomizationPackageResponseSchema } from '@objectstack/spec/api';
@@ -35,6 +38,7 @@ import {
   validateObjectNamespacePrefix,
 } from '@objectstack/spec/kernel';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
+import { whenQuiet } from '../../observability/settleSignal.js';
 
 export interface PkgEntry {
   id: string;
@@ -58,10 +62,10 @@ export interface PkgEntry {
   /**
    * #27356 row 12 — set (only ever `true`) on a row the registry half serves
    * flat with a kernel `scope` (`system` / `cloud`) at the top level. Such a
-   * row stays in the list (the switcher's visibility reads the manifest's
-   * `scope` alone, see {@link parsePackages}), but the app → Studio entries
+   * row stays in the list, because the app → Studio entries read this tag to
    * draw nothing for it (`useStudioEntryGate`), as for the manifest-scoped
-   * kernel packages this list leaves out.
+   * kernel packages this list leaves out. The Studio landing does not offer
+   * it (`BuilderLanding`, ADR-0016 §3.8).
    */
   kernel?: true;
 }
@@ -88,9 +92,10 @@ export interface PkgEntry {
  * is the server's own computed verdict (see the module doc), a field the
  * manifest does not and should not carry.
  *
- * `scope` is deliberately left manifest-only: widening it would change which
- * packages the switcher HIDES, which is a different question from what it
- * NAMES and is not this card's.
+ * `scope` is read in both positions, for two different answers: a manifest
+ * kernel scope drops the row here, while a flat one keeps the row and tags it
+ * `kernel` — the app → Studio entry gate reads that tag, and the Studio
+ * landing hides the tagged row (`BuilderLanding`).
  */
 export function parsePackages(payload: unknown): PkgEntry[] {
   const root = (payload as { data?: unknown })?.data ?? payload;
@@ -317,9 +322,8 @@ export async function ensureCustomizationPackage(baseId: string): Promise<Ensure
  *
  * ⛔ The fallback stays `HTTP <status>`, unchanged and deliberately so: it is
  * what a body-less or unparseable failure (a proxy's HTML 502) still says, and
- * `StudioDesignSurface.packageListErrorPosture` / `manageSnapshotRefresh` pin
- * that the three-state switcher and the refresh report keep working when the
- * wire answers with nothing readable.
+ * `StudioDesignSurface.packageListErrorPosture` pins that the Studio top bar
+ * keeps working when the wire answers with nothing readable.
  *
  * Concurrent callers share one request — see {@link readPackagesPayload}.
  */
@@ -445,6 +449,14 @@ interface HeldPackageList {
 
 const heldPackageLists = new WeakMap<typeof fetch, HeldPackageList>();
 
+/**
+ * objectstack#35416 — how long the page's counted requests must stay quiet
+ * before {@link fetchSessionPackages} starts its read, and the longest it
+ * waits for that (a page that never goes quiet still gets its entries).
+ */
+export const SESSION_PACKAGE_READ_QUIET_MS = 750;
+export const SESSION_PACKAGE_READ_MAX_WAIT_MS = 8_000;
+
 /** Bumped by every forget, so a read asked before a write never becomes the hold. */
 let heldPackageListEpoch = 0;
 
@@ -461,9 +473,23 @@ function forgetHeldPackageList(): void {
  */
 export async function fetchSessionPackages(session: string, packageId: string): Promise<PkgEntry[]> {
   const transport = globalThis.fetch;
-  const held = heldPackageLists.get(transport);
-  if (held && held.session === session && (held.listed.has(packageId) || held.unlisted.has(packageId))) {
-    return parsePackages(held.payload);
+  const heldAnswer = (): PkgEntry[] | null => {
+    const held = heldPackageLists.get(transport);
+    return held && held.session === session && (held.listed.has(packageId) || held.unlisted.has(packageId))
+      ? parsePackages(held.payload)
+      : null;
+  };
+  const fromHold = heldAnswer();
+  if (fromHold) return fromHold;
+  // objectstack#35416 — the list is the largest response an app page reads
+  // (megabytes unpacked), and the entries it gates are a shortcut, absent
+  // while it is unread. So a read it starts waits until the page's own
+  // requests have gone quiet, instead of sharing the link with the record
+  // or list the page is opening. A read already on the wire is joined at once.
+  if (!pendingPackageReads.has(transport)) {
+    await whenQuiet(SESSION_PACKAGE_READ_QUIET_MS, SESSION_PACKAGE_READ_MAX_WAIT_MS);
+    const heldSince = heldAnswer();
+    if (heldSince) return heldSince;
   }
   const epoch = heldPackageListEpoch;
   const payload = await readPackagesPayload();

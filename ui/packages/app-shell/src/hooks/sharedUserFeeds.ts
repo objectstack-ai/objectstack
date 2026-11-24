@@ -106,7 +106,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { errorCodeIs } from '@object-ui/types';
 // The refused-read verdict the record activity panel reads (objectui#11195),
 // so a refused `sys_activity` read means the same thing on Home (objectui#12843).
-import { isRefusedFeedRead } from '@object-ui/plugin-detail';
+import { isRefusedFeedRead } from '@object-ui/plugin-detail/core';
 // Re-exported from `@object-ui/react` — import it through the provider module
 // so a consumer that stubs the provider stubs this too.
 import { useAdapter } from '../providers/AdapterProvider.js';
@@ -831,6 +831,15 @@ export interface PendingApprovalRequest {
   /** The flow's machine name, as served. */
   processName?: string;
   createdAt?: string;
+  /**
+   * The request row as the approvals list served it, carrying the
+   * server-computed `viewer` block (`can_act`, `can_override`). It is the
+   * dispatch record the inbox panel hands `DeclaredActionsBar`, so an inline
+   * Approve / Reject runs the request's own declared action, gated by its own
+   * `visible` predicate, and resolves `{id}` from this row (objectstack#34589).
+   * Optional so a surface that only lists titles builds the shape without it.
+   */
+  row?: Record<string, unknown>;
 }
 
 /**
@@ -903,7 +912,7 @@ function str(v: unknown): string | undefined {
  * spelling as an alias is what ADR-0090 D3 forbids, and `packages/auth/src/
  * types.ts` says so on the declaration itself.
  */
-function approverIdentities(user: unknown): string[] {
+export function approverIdentities(user: unknown): string[] {
   const u = user as { id?: string; email?: string; positions?: string[] } | null | undefined;
   const identities: string[] = [];
   if (u?.id) identities.push(u.id);
@@ -976,53 +985,79 @@ export function useSharedPendingApprovalRequests(): SharedFeedSnapshot<{
   const key = user?.id && identities.length > 0 ? identities.join(',') : null;
 
   return useSharedFeed(approvalsFeed, key, async ({ markUnavailable, markFailed }) => {
-    const serverUrl = (import.meta.env?.VITE_SERVER_URL || '').replace(/\/$/, '');
-    const qs = new URLSearchParams({
-      status: 'pending',
-      approverId: identities.join(','),
-      limit: String(APPROVALS_PAGE_ROWS),
-    });
-    const res = await fetch(`${serverUrl}/api/v1/approvals/requests?${qs}`, {
+    const answer = await fetchPendingApprovalPage(identities, APPROVALS_PAGE_ROWS);
+    if (answer.status === 'unavailable') {
+      markUnavailable();
+      return undefined;
+    }
+    if (answer.status === 'failed') {
+      markFailed();
+      return undefined;
+    }
+    return answer.page;
+  });
+}
+
+/** One read of the pending approvals: the page, or why there is none. */
+export type PendingApprovalPageAnswer =
+  | { status: 'ok'; page: PendingApprovalPage }
+  | { status: 'unavailable' }
+  | { status: 'failed' };
+
+/**
+ * One page of the requests waiting on `identities`, newest first, with the
+ * route's exact `total` — the read the shared feed polls with a page of
+ * `APPROVALS_PAGE_ROWS`, and the full-page inbox (objectstack#36741) with a
+ * page of its own size. `unavailable` is the approvals service missing (404),
+ * nothing waiting; `failed` is every other failure, and a page of rows with no
+ * count (how many are waiting is then unknown).
+ */
+export async function fetchPendingApprovalPage(
+  identities: readonly string[],
+  limit: number,
+): Promise<PendingApprovalPageAnswer> {
+  const serverUrl = (import.meta.env?.VITE_SERVER_URL || '').replace(/\/$/, '');
+  const qs = new URLSearchParams({
+    status: 'pending',
+    approverId: identities.join(','),
+    limit: String(limit),
+  });
+  let res: Response;
+  try {
+    res = await fetch(`${serverUrl}/api/v1/approvals/requests?${qs}`, {
       credentials: 'include',
       // Bearer too — see utils/authToken (#2548 split-origin fix).
       headers: bearerAuthHeaders(),
     });
-    if (res.status === 404) {
-      markUnavailable();
-      return undefined;
-    }
-    if (!res.ok) {
-      markFailed();
-      return undefined;
-    }
-    const payload = await res.json().catch(() => null);
-    const rows = (Array.isArray(payload?.data) ? payload.data : []) as Record<string, unknown>[];
-    const served = payload?.total;
-    let total: number;
-    if (typeof served === 'number' && Number.isFinite(served) && served >= 0) total = served;
-    else if (rows.length === 0) total = 0; // the empty first page — an exact zero
-    else {
-      // A page of rows with no count: how many are waiting is unknown.
-      markFailed();
-      return undefined;
-    }
-    // One entry per request id on the page.
-    const seen = new Set<string>();
-    const requests: PendingApprovalRequest[] = [];
-    for (const row of rows) {
-      const id = String(row.id);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      requests.push({
-        id,
-        processLabel: str(row.process_label),
-        recordTitle: str(row.record_title),
-        processName: str(row.process_name),
-        createdAt: str(row.created_at),
-      });
-    }
-    return { requests, total };
-  });
+  } catch {
+    return { status: 'failed' };
+  }
+  if (res.status === 404) return { status: 'unavailable' };
+  if (!res.ok) return { status: 'failed' };
+  const payload = await res.json().catch(() => null);
+  const rows = (Array.isArray(payload?.data) ? payload.data : []) as Record<string, unknown>[];
+  const served = payload?.total;
+  let total: number;
+  if (typeof served === 'number' && Number.isFinite(served) && served >= 0) total = served;
+  else if (rows.length === 0) total = 0; // the empty first page — an exact zero
+  else return { status: 'failed' }; // a page of rows with no count
+  // One entry per request id on the page.
+  const seen = new Set<string>();
+  const requests: PendingApprovalRequest[] = [];
+  for (const row of rows) {
+    const id = String(row.id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    requests.push({
+      id,
+      processLabel: str(row.process_label),
+      recordTitle: str(row.record_title),
+      processName: str(row.process_name),
+      createdAt: str(row.created_at),
+      row,
+    });
+  }
+  return { status: 'ok', page: { requests, total } };
 }
 
 // ── Recent activity ──────────────────────────────────────────────────────────
@@ -1491,48 +1526,71 @@ function listedNotificationIds(rows: readonly unknown[]): string[] {
   return [...ids];
 }
 
+/** The `mine` window: how many messages the inbox read lists, newest first. */
+const INBOX_WINDOW = 20;
+
+/**
+ * Whether the last window this feed answered for `key` listed anything a
+ * receipt can belong to. No hint for a key not yet answered — the page load,
+ * where the receipt read must not wait — and reset with the feeds.
+ */
+let inboxJoinableHint: { key: string; joinable: boolean } | null = null;
+
+/**
+ * The receipts of the listed `ids` that `got` does not carry. A receipt is
+ * unique per `(notification_id, user_id, channel)`, so an id that `got`
+ * carries is answered exactly; only the rest still need asking.
+ */
+function idsWithoutReceipt(ids: readonly string[], got: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  for (const raw of got) {
+    const nid = (raw as Record<string, unknown> | null)?.notification_id;
+    if (nid != null) seen.add(String(nid));
+  }
+  return ids.filter((id) => !seen.has(id));
+}
+
 /**
  * The signed-in user's 20 most recent in-app inbox messages, joined with their
  * read-state receipts (ADR-0030 L5, the `mine` materialization).
  *
- * Two scoped reads, joined client-side, polled at `INBOX_POLL_MS` (the 60 s
+ * Scoped reads, joined client-side, polled at `INBOX_POLL_MS` (the 60 s
  * fallback of a push channel, objectstack#27626) — the store's cadence:
  *   - `sys_inbox_message` filtered by `user_id`, newest first, `$top: 20`.
- *   - `sys_notification_receipt` filtered by `user_id` + `channel:'inbox'`,
- *     narrowed to the notification ids that message read just listed
- *     (objectui#7392). Best-effort: if receipts are unavailable the inbox
- *     still renders (everything shows unread) rather than erroring.
+ *   - IN PARALLEL with it, `sys_notification_receipt` filtered by `user_id` +
+ *     `channel:'inbox'`, newest first, `$top: 20` — the same window over the
+ *     receipts. The inbox channel writes each message's `delivered` receipt
+ *     right after the message, so this read normally carries exactly the
+ *     listed messages' receipts, and the receipt read no longer waits for the
+ *     message read to answer (objectstack#35410).
+ *   - Only for a listed notification id that read did NOT carry, a follow-up
+ *     read narrowed to those ids, `$top` = their count (objectui#7392's exact
+ *     read). A message whose receipt was written later than its delivery, or
+ *     never, lands here.
  *
- * The receipt read used to ask for `$top: 200` of the user's receipts whatever
- * was listed, and `mergeInboxRows` then dropped every row that did not belong
- * to one of the 20 — a steady-state payload two orders of magnitude wider than
- * the answer it decorated, re-fetched in full at the 10s foreground cadence.
- * Its `$top` is now the id count, and that bound is EXACT rather than a guess:
- * `sys_notification_receipt` declares its key `{ fields: ['notification_id',
- * 'user_id', 'channel'], unique: true }`, so this filter can match at most one
- * row per id it names.
+ * The answer is exact, not approximate: `sys_notification_receipt` declares its
+ * key `{ fields: ['notification_id', 'user_id', 'channel'], unique: true }`,
+ * so a listed id either has its one receipt in the parallel read or is asked
+ * for by name. Rows per tick are bounded by the window (20) plus the ids the
+ * window read missed — never the user's whole receipt history.
  *
- * ⚠️ The two reads are SEQUENTIAL where they used to be a `Promise.all`: the
- * receipt query cannot be written until the message read says which
- * notifications are in the window. That is one extra round trip per tick, on a
- * background poll, against ~200 rows saved on each of them.
+ * Receipts are best-effort: if the receipt read fails, the inbox still
+ * renders (everything shows unread) rather than erroring, and no follow-up is
+ * sent. A window with nothing joinable needs no receipt read, so once a key
+ * has answered such a window the next tick reads the messages first and asks
+ * for receipts only if it now lists something joinable.
  *
- * ⛔ What this does NOT change is the bell's unread number, and that is the
- * one thing a narrowing here could have broken silently. The badge is
+ * ⛔ What this does NOT change is the bell's unread number. The badge is
  * `unreadTopics + pendingApprovalsCount` (`InboxPopover`), and `unreadTopics`
- * folds THIS feed's rows — which are `mergeInboxRows`' output, one per
- * `sys_inbox_message` row. So the inbox addend has been "unread within the
- * `$top: 20` window" since #4225 gave the two surfaces one feed; the receipt
- * set never contributed a row to it, only a read-state to rows the message
- * query had already chosen. Home's `unreadTopicCount` folds the same rows the
- * same way (#4329). A receipt outside the window changed no number before this
- * change and changes none after it.
+ * folds THIS feed's rows — `mergeInboxRows`' output, one per
+ * `sys_inbox_message` row. The receipt set never contributes a row, only a
+ * read-state to rows the message query already chose; Home's
+ * `unreadTopicCount` folds the same rows the same way (#4329).
  *
  * This is the SUPERSET both consumers cut from. The bell lists all 20 and
  * badges the unread topics; Home's action centre takes the unread ones, newest
  * first, capped at its own smaller limit. Neither issues a read of its own, so
- * the two cannot disagree about a row's read-state — the #4316 defect is not
- * merely fixed here, it is unreachable.
+ * the two cannot disagree about a row's read-state (#4316).
  *
  * Degrades to empty when the messaging pipeline is absent (404 /
  * `OBJECT_NOT_FOUND`) and retires the poll; every other failure is reported as
@@ -1549,34 +1607,54 @@ export function useSharedInboxFeed(): SharedFeedSnapshot<InboxNotification[]> {
   const key = adapter && userId ? `${adapter}:${userId}` : null;
 
   return useSharedFeed(inboxFeed, key, async ({ markUnavailable, markFailed }) => {
-    if (!dataSource || !userId) return undefined;
-    try {
-      const inboxRes = await Promise.resolve(
-        dataSource.find('sys_inbox_message', {
-          $filter: { user_id: userId },
-          $orderby: { created_at: 'desc' },
-          $top: 20,
-        }) as Promise<{ data?: unknown[] }>,
+    if (!dataSource || !userId || !key) return undefined;
+    const readReceipts = (query: Record<string, unknown>) =>
+      Promise.resolve(
+        dataSource.find('sys_notification_receipt', query) as Promise<{ data?: unknown[] }>,
+      ).then(
+        (res) => (Array.isArray(res?.data) ? res.data : []),
+        () => null,
       );
+    try {
+      // `undefined` = not asked; `null` = the read failed, so receipts are
+      // unavailable this tick.
+      const windowReceipts: Promise<unknown[] | null | undefined> =
+        inboxJoinableHint?.key === key && !inboxJoinableHint.joinable
+          ? Promise.resolve(undefined)
+          : readReceipts({
+              $filter: { user_id: userId, channel: 'inbox' },
+              $orderby: { created_at: 'desc' },
+              $top: INBOX_WINDOW,
+            });
+      const [inboxRes, recent] = await Promise.all([
+        Promise.resolve(
+          dataSource.find('sys_inbox_message', {
+            $filter: { user_id: userId },
+            $orderby: { created_at: 'desc' },
+            $top: INBOX_WINDOW,
+          }) as Promise<{ data?: unknown[] }>,
+        ),
+        windowReceipts,
+      ]);
       const rows = Array.isArray(inboxRes?.data) ? inboxRes.data : [];
       const notificationIds = listedNotificationIds(rows);
-      // Nothing in this window can carry a receipt ⇒ no receipt read at all.
-      // Every row the old query would have returned here is one the merge
-      // discards, so the cheapest correct request is the one not sent.
-      const receiptRes =
-        notificationIds.length === 0
-          ? { data: [] as unknown[] }
-          : await Promise.resolve(
-              dataSource.find('sys_notification_receipt', {
-                $filter: {
-                  user_id: userId,
-                  channel: 'inbox',
-                  notification_id: { $in: notificationIds },
-                },
-                $top: notificationIds.length,
-              }) as Promise<{ data?: unknown[] }>,
-            ).catch(() => ({ data: [] as unknown[] }));
-      return mergeInboxRows(rows, Array.isArray(receiptRes?.data) ? receiptRes.data : []);
+      inboxJoinableHint = { key, joinable: notificationIds.length > 0 };
+      if (recent === null) return mergeInboxRows(rows, []);
+      const got = recent ?? [];
+      // Nothing left unanswered ⇒ no follow-up read at all.
+      const missing = idsWithoutReceipt(notificationIds, got);
+      const rest =
+        missing.length === 0
+          ? []
+          : ((await readReceipts({
+              $filter: {
+                user_id: userId,
+                channel: 'inbox',
+                notification_id: { $in: missing },
+              },
+              $top: missing.length,
+            })) ?? []);
+      return mergeInboxRows(rows, [...got, ...rest]);
     } catch (err: unknown) {
       // No inbox object ⇒ no messaging pipeline in this deployment, so nothing
       // is waiting: an answer. A denial / outage / malformed reply is not.
@@ -1585,6 +1663,58 @@ export function useSharedInboxFeed(): SharedFeedSnapshot<InboxNotification[]> {
       return undefined;
     }
   });
+}
+
+/**
+ * The signed-in user's inbox messages OLDER than the shared window: `top`
+ * messages after the first `skip`, newest first, joined with their receipts
+ * exactly as {@link useSharedInboxFeed} joins its window (one narrowed receipt
+ * read for the listed notification ids). The full-page inbox
+ * (objectstack#36741) pages its history with it, which the 20-row window the
+ * bell badges from does not hold. Throws what the reads throw: the caller
+ * owns the failure it draws.
+ */
+export async function readEarlierInboxMessages(
+  dataSource: { find: (object: string, query: Record<string, unknown>) => unknown } | null | undefined,
+  userId: string,
+  skip: number,
+  top: number,
+): Promise<InboxNotification[]> {
+  if (!dataSource) return [];
+  const res = (await Promise.resolve(
+    dataSource.find('sys_inbox_message', {
+      $filter: { user_id: userId },
+      $orderby: { created_at: 'desc' },
+      $skip: skip,
+      $top: top,
+    }),
+  )) as { data?: unknown[] } | null | undefined;
+  const rows = Array.isArray(res?.data) ? res.data : [];
+  const ids = listedNotificationIds(rows);
+  if (ids.length === 0) return mergeInboxRows(rows, []);
+  const receipts = await Promise.resolve(
+    dataSource.find('sys_notification_receipt', {
+      $filter: { user_id: userId, channel: 'inbox', notification_id: { $in: ids } },
+      $top: ids.length,
+    }) as Promise<{ data?: unknown[] }>,
+  ).then(
+    (r) => (Array.isArray(r?.data) ? r.data : []),
+    () => [] as unknown[],
+  );
+  return mergeInboxRows(rows, receipts);
+}
+
+/** How many messages the shared inbox window lists (the first page the inbox page shows). */
+export const SHARED_INBOX_WINDOW = INBOX_WINDOW;
+
+/**
+ * Read the inbox once, now: a read-state written in this tab changed it, so
+ * every bell cut from the feed drops the row without waiting for the next poll
+ * (objectstack#36741 — the full-page inbox and the sidebar's bell are two
+ * consumers). Same refresh {@link notifyUserFeedPushed} runs. Package-internal.
+ */
+export function refreshSharedInbox(): void {
+  inboxFeed.pushedChange();
 }
 
 // ── Push channel seam (objectstack#27626) ────────────────────────────────────
@@ -1616,6 +1746,16 @@ export function notifyUserFeedPushed(feed: 'inbox' | 'approvals'): void {
 }
 
 /**
+ * Read the pending approvals once, now: a decision taken in this tab changed
+ * them, so the bell badge and every list cut from the feed must not wait for
+ * the next poll to drop the decided request (objectstack#34589). Same refresh
+ * {@link notifyUserFeedPushed} runs for a pushed change. Package-internal.
+ */
+export function refreshSharedPendingApprovals(): void {
+  approvalsFeed.pushedChange();
+}
+
+/**
  * Test seam: drop every shared feed's cached value, key and in-flight state so
  * cases do not inherit each other's reads. Not part of the public surface.
  */
@@ -1628,4 +1768,5 @@ export function __resetSharedUserFeeds(): void {
   approvalsFeed.reset();
   activityFeed.reset();
   inboxFeed.reset();
+  inboxJoinableHint = null;
 }

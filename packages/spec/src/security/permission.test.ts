@@ -896,6 +896,53 @@ describe('FieldPermissionSchema', () => {
       }
     });
   });
+
+  // [#34664] The authoring-time acknowledgement `os lint` reads on a summary column's entry.
+  describe('`rollupSourceUnreadableReason` — a meant roll-up read, acknowledged', () => {
+    const REASON = 'Service staff read account totals but not invoice rows';
+
+    it('accepts a reason beside the default `readable`, and keeps it on the parsed entry', () => {
+      expect(FieldPermissionSchema.parse({ rollupSourceUnreadableReason: REASON })).toEqual({
+        readable: true,
+        editable: false,
+        rollupSourceUnreadableReason: REASON,
+      });
+      expect(FieldPermissionSchema.safeParse({ readable: true, rollupSourceUnreadableReason: REASON }).success).toBe(true);
+    });
+
+    it('an entry without it parses exactly as before (no key materialises)', () => {
+      expect(FieldPermissionSchema.parse({})).not.toHaveProperty('rollupSourceUnreadableReason');
+    });
+
+    it('refuses a blank reason, and a non-string', () => {
+      for (const rollupSourceUnreadableReason of ['', '   ', '\n']) {
+        const result = FieldPermissionSchema.safeParse({ rollupSourceUnreadableReason });
+        expect(result.success).toBe(false);
+        expect(result.error!.issues[0]!.message).toContain('A blank `rollupSourceUnreadableReason` acknowledges nothing');
+      }
+      expect(FieldPermissionSchema.safeParse({ rollupSourceUnreadableReason: true }).success).toBe(false);
+    });
+
+    it('refuses a reason beside `readable: false` — the column is hidden, there is no read to acknowledge', () => {
+      const result = FieldPermissionSchema.safeParse({ readable: false, rollupSourceUnreadableReason: REASON });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'rollupSourceUnreadableReason');
+      expect(issue?.message).toContain('refused beside `readable: false`');
+    });
+
+    it('rides on a permission set under the summary column key', () => {
+      const ps = PermissionSetSchema.parse({
+        name: 'service_staff',
+        objects: { crm_account: { allowRead: true } },
+        fields: { 'crm_account.invoiced_amount': { readable: true, rollupSourceUnreadableReason: REASON } },
+      });
+      expect(ps.fields!['crm_account.invoiced_amount']).toEqual({
+        readable: true,
+        editable: false,
+        rollupSourceUnreadableReason: REASON,
+      });
+    });
+  });
 });
 
 describe('PermissionSetSchema', () => {
@@ -1579,5 +1626,33 @@ describe('findHierarchyScopeGrants', () => {
     for (const input of [undefined, null, {}, 'x', [null], [{ objects: null }]]) {
       expect(findHierarchyScopeGrants(input)).toEqual([]);
     }
+  });
+});
+
+describe('[field-axis split, ruling 6912661484] ObjectPermission.viewAllFields', () => {
+  it('parses on an object entry and on the wildcard, with no unrecognized_keys', () => {
+    const parsed = PermissionSetSchema.safeParse({
+      name: 'field_reader',
+      objects: { crm_account: { allowRead: true, viewAllFields: true }, '*': { allowRead: true, viewAllFields: true } },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.objects?.crm_account?.viewAllFields).toBe(true);
+    expect(parsed.data?.objects?.['*']?.viewAllFields).toBe(true);
+  });
+
+  it('is optional with no default: an entry that omits it parses without the key', () => {
+    const entry = ObjectPermissionSchema.parse({ allowRead: true, viewAllRecords: true });
+    expect('viewAllFields' in entry).toBe(false);
+  });
+
+  it('is a boolean, and grants no object verb on its own', () => {
+    expect(ObjectPermissionSchema.safeParse({ viewAllFields: 'yes' }).success).toBe(false);
+    const entry = ObjectPermissionSchema.parse({ viewAllFields: true });
+    expect(objectPermissionGrants(entry, 'allowRead')).toBe(false);
+    expect(objectPermissionGrants(entry, 'allowEdit')).toBe(false);
+  });
+
+  it('rides the wire shape too (EffectiveObjectPermission)', () => {
+    expect(EffectiveObjectPermissionSchema.parse({ allowRead: true, viewAllFields: true }).viewAllFields).toBe(true);
   });
 });

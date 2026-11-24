@@ -13,8 +13,9 @@
  *    the exact qualifier the protocol judges (`admitExactQualifier`): the
  *    package's item with its bound overlay, or `409 RESOURCE_CONFLICT` naming
  *    every holder;
- *  - `_env`: the environment's own item, or `409` naming every holder
- *    (`admitEnvironmentQualifier`), read as a caller with no package.
+ *  - `_env`: the environment's own item, or `409` naming every served
+ *    holder (`admitEnvironmentQualifier`), read as a caller with no package;
+ *    a name only disabled packages hold answers that read's `404` (#33385).
  *
  * D5's order, as the runtime dispatcher's `/meta` domain reads the same path:
  * a sub-resource literal in the last position keeps its route — registered
@@ -29,16 +30,20 @@
  * (#32310).
  */
 
+import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
 import { sendError } from '@objectstack/types';
 import { handleRouteError } from './error-response.js';
+import { wantsMetaItemLayers } from './meta-item-read-gate.js';
 import type { MetaRouteScope } from './meta-collection-routes.js';
 import type { MetaItemReadHandler } from './meta-item-read-routes.js';
-import type { RestServer } from './rest-server.js';
+import { mayReadPendingDrafts, type RestServer } from './rest-server.js';
 
 /** The `RestServer` members {@link registerMetaQualifiedItemRoute} reads. */
 export interface MetaQualifiedItemRouteHost {
     readonly routeManager: RestServer['routeManager'];
     resolveProtocol: RestServer['resolveProtocol'];
+    /** [#33385, review S1] The caller, asked only to judge an admitted draft switch at `_env`. */
+    resolveExecCtx: RestServer['resolveExecCtx'];
 }
 
 /**
@@ -54,6 +59,51 @@ type MetaItemAddress =
 interface QualifiedAddressProtocol {
     resolveMetaItemAddress?(request: { type: string; segment: string; name: string }): MetaItemAddress | undefined;
     admitEnvironmentQualifier?(request: { type: string; name: string; member?: string }): void;
+    getMetaItem?(request: { type: string; name: string; member?: string }): Promise<{ item?: unknown } | undefined>;
+}
+
+/**
+ * [#33385, #32183 row 17] The `Symbol.for` key of the mark
+ * `admitEnvironmentQualifier` sets on its refusal of a name only disabled
+ * packages hold (`DISABLED_HOLDERS_ONLY_REFUSAL` in
+ * `@objectstack/metadata-protocol`; this package reaches the protocol as a
+ * service, never as an import). The runtime dispatcher reads the same key.
+ */
+const DISABLED_HOLDERS_ONLY_REFUSAL = Symbol.for('objectstack.metadata-protocol.disabledHoldersOnlyRefusal');
+
+/**
+ * Admit `_env` for `request`, or throw the protocol's refusal. A refusal
+ * marked {@link DISABLED_HOLDERS_ONLY_REFUSAL} is admitted when the read
+ * naming no package withholds the name: a disabled package holds no name,
+ * so `_env` answers the read's own 404, naming no package. When that read
+ * serves an item or refuses, a package holds the name through a stored row
+ * the registry has not read, and the refusal stands.
+ *
+ * [#33385, review S1] Only the read that judged the name is admitted this
+ * way. An admitted draft read (`?state=draft`, `?preview=draft`) or the
+ * deprecated layered view (`?layers=`) reads other rows than the plain read,
+ * so for it the marked refusal stands, as on `main` (`readsAsJudged`, asked
+ * only once the refusal is marked).
+ */
+async function admitEnvironmentAddress(
+    p: QualifiedAddressProtocol,
+    request: { type: string; name: string; member?: string },
+    readsAsJudged: () => Promise<boolean>,
+): Promise<void> {
+    try {
+        p.admitEnvironmentQualifier?.(request);
+    } catch (refusal) {
+        if ((refusal as Record<symbol, unknown> | null)?.[DISABLED_HOLDERS_ONLY_REFUSAL] !== true
+            || typeof p.getMetaItem !== 'function'
+            || !(await readsAsJudged())) throw refusal;
+        let withheld: boolean;
+        try {
+            withheld = (await p.getMetaItem(request))?.item == null;
+        } catch {
+            throw refusal;
+        }
+        if (!withheld) throw refusal;
+    }
 }
 
 /** What the host answered this path before the route existed: its unmatched 404. */
@@ -111,7 +161,16 @@ export function registerMetaQualifiedItemRoute(
                     query.package = address.packageId;
                 } else {
                     const member = typeof query.member === 'string' && query.member !== '' ? query.member : undefined;
-                    p.admitEnvironmentQualifier?.({ type: params.type, name: params.name, ...(member ? { member } : {}) });
+                    // [#33385, review S1] The read the item read answers this caller: the
+                    // plain read unless `?layers=` asks for the layered view, or a
+                    // draft switch is sent by a caller `mayReadPendingDrafts` admits.
+                    const readsAsJudged = async (): Promise<boolean> => {
+                        if (wantsMetaItemLayers(query)) return false;
+                        const draft = (value: unknown) => typeof value === 'string' && value.toLowerCase() === 'draft';
+                        if (!draft(query.state) && !draft(query.preview)) return true;
+                        return !mayReadPendingDrafts(await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable));
+                    };
+                    await admitEnvironmentAddress(p, { type: params.type, name: params.name, ...(member ? { member } : {}) }, readsAsJudged);
                 }
                 await readItem(asItemRead(req, params, query), res);
             } catch (error: any) {

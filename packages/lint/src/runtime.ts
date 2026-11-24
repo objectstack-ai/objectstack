@@ -91,3 +91,15 @@ export type { StoredObjectExtension } from './object-graph.js';
 // `RuntimeAuthoringIssueSchema.userMessage`.
 export { findingUserMessage } from './finding-user-text.js';
 export type { UserTextParams } from './finding-user-text.js';
+// [ruling record 6929121584] The same ladder for a producer that keeps its own
+// catalog beside its own findings: the post-publish build probes in
+// `@objectstack/metadata-protocol` compose `RuntimeBuildIssueSchema.userMessage`
+// through it. One ladder for every producer of platform-composed user text.
+export { renderUserText, userTextLocaleOf } from './finding-user-text.js';
+export type { UserTextEntry } from './finding-user-text.js';
+// The wrappers an action body and a hook or job body run in, for the runtime
+// that builds them (`@objectstack/runtime`'s QuickJS runner). The author-time
+// rules `action-body-does-not-compile`, `hook-body-does-not-compile` and
+// `job-body-does-not-compile` compile the body inside the same expression, so
+// the check and the run cannot disagree about a wrapper.
+export { actionBodyFunctionExpression, hookBodyFunctionExpression } from './action-body-wrapper.js';

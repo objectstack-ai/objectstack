@@ -189,8 +189,11 @@ describe('a page `list-view` validates in the spec spelling, in its `properties`
   it.each(SpecListViewSchema.shape.type.removeDefault().options.map((kind) => [kind] as const))(
     'the bag\'s `type` takes the spec\'s list kind `%s`',
     (kind) => {
-      // A `chart` list names its dataset binding: the spec's own check (section 5) requires one.
-      const chart = kind === 'chart' ? { chart: { chartType: 'bar', dataset: 'deal_ds', values: ['total'] } } : {};
+      // A `chart` list names its dataset binding, and a `timesheet` list its weekly-grid
+      // binding: the spec's own checks (section 5) require each.
+      const chart = kind === 'chart' ? { chart: { chartType: 'bar', dataset: 'deal_ds', values: ['total'] } }
+        : kind === 'timesheet' ? { timesheet: { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' } }
+        : {};
       for (const [face, parse] of FACES) {
         const result = parse({ ...RULED, properties: { ...RULED.properties, type: kind, kanban: undefined, ...chart } });
         expect(result.success, `${face}: ${JSON.stringify(result.error?.issues)}`).toBe(true);
@@ -373,6 +376,7 @@ describe('the spec\'s list view checks run in the bag, with the spec\'s own issu
   it.each([
     ['`checkListViewCalendarVisualization`: a calendar offered with no `calendar` block', { appearance: { allowedVisualizations: ['calendar'] } }, 'calendar'],
     ['`checkListViewChartBinding`: a `chart` list with no dataset binding', { type: 'chart' }, 'chart'],
+    ['`checkListViewTimesheetBinding`: a `timesheet` list with no `timesheet` block', { type: 'timesheet' }, 'timesheet'],
   ] as const)('%s', (_label, props, path) => {
     const expected = specIssue(props, path);
     expect(expected?.code, 'the spec refuses the same list view (lit control)').toBe('custom');
@@ -382,10 +386,11 @@ describe('the spec\'s list view checks run in the bag, with the spec\'s own issu
     }
   });
 
-  it('controls: a declared calendar block, and a dataset-bound chart, pass on both faces', () => {
+  it('controls: a declared calendar block, a dataset-bound chart, and a bound timesheet, pass on both faces', () => {
     for (const props of [
       { appearance: { allowedVisualizations: ['calendar'] }, calendar: { startDateField: 'starts_at' } },
       { type: 'chart', chart: { chartType: 'bar', dataset: 'deal_ds', dimensions: ['stage'], values: ['total'] } },
+      { type: 'timesheet', timesheet: { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' } },
     ]) {
       expect(SpecListViewSchema.safeParse({ columns: ['name'], ...props }).success).toBe(true);
       for (const [face, parse] of FACES) expect(parse(page(props)).success, face).toBe(true);

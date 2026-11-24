@@ -131,7 +131,6 @@ function renderGrid(c: Case = {}) {
     type: 'object-grid',
     objectName: OBJECT,
     editable: true,
-    singleClickEdit: true,
     columns: [{ field: 'name', label: 'Name', type: 'text' }],
     data: { provider: 'value', items: [OWN_ROW, OTHER_ROW] },
     pageSize: 50,
@@ -140,6 +139,7 @@ function renderGrid(c: Case = {}) {
     <ActionProvider>
       <SchemaRendererProvider dataSource={dataSource} apiFetch={apiFetch}>
         <ObjectGrid
+          cellSelection={false}
           schema={schema}
           dataSource={dataSource}
           {...(kebab ? { onEdit: () => {}, onDelete: () => {} } : {})}
@@ -274,5 +274,29 @@ describe('fail OPEN — no answer keeps the object-level behaviour (objectstack#
       await Promise.allSettled(server.responses);
     });
     expect(await clickOpensEditor(OTHER_ROW.name)).toBe(false);
+  });
+});
+
+/**
+ * [objectstack#34208] A list asks the record verdicts only once its row actions
+ * are reached for — but the inline cells read `update` while they render, so an
+ * inline-editable grid still asks `update` when its rows arrive. `delete` is
+ * read only by the row menus, and waits for them.
+ */
+describe('[objectstack#34208] an inline-editable grid asks `update` on first render, `delete` on first use', () => {
+  it('the first paint asks `update` for the page and nothing else; opening a kebab then asks `delete` once', async () => {
+    renderGrid();
+    await settle();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(server.calls.map((call) => call.operation)).toEqual(['update']);
+    expect([...(server.calls[0].recordIds ?? [])].sort()).toEqual([OTHER_ROW.id, OWN_ROW.id].sort());
+
+    expect(await kebabOffersEdit(OWN_ROW.name)).toBe(true);
+    await act(async () => {
+      await Promise.allSettled(server.responses);
+    });
+    expect(server.calls.map((call) => call.operation)).toEqual(['update', 'delete']);
   });
 });

@@ -58,6 +58,19 @@ export * from './readable-ids';
 // [ADR-0139 D3] Canonical conformance cases for the composed `ReadableIds` leaf
 // — the per-driver case-set a driver compiles (measured) or refuses (recorded).
 export * from './readable-ids-conformance';
+// [ADR-0155 D1] `SharedRecordIds` — the branded comparand value meaning "the
+// ids of object X's records that sys_record_share grants to user U", every
+// level (the read form) or the levels it names (the write form). Its own brand
+// on ADR-0139 D1's device; no operator, so no request can spell it. Nothing
+// writes it until plugin-sharing's switch (ADR-0155 plan step 6).
+export * from './shared-record-ids';
+// [ADR-0155 D4] What `SharedRecordIds` shares with ADR-0147's leaf, built once in
+// the two-leaf shape: the fixed inner read's description, and the brand
+// dispatch the comparand door's `admitFixedReadLeaves` option reads.
+export * from './fixed-read-leaf';
+// [ADR-0155 D4] One conformance case-set for the fixed-read leaves, a set of
+// cases per leaf: what an evaluator answers, and what the engine seam admits.
+export * from './fixed-read-leaf-conformance';
 // [#8371] The FILTER axis' dotted-path verdict — ONE head-type classification
 // consumed by both doors (metadata-protocol's ingress gate and objectql's
 // engine seam), so the two cannot drift into answering one spelling two ways.
@@ -100,6 +113,11 @@ export * from './filter-comparand-type-conformance';
 // door it declares, like `filter-comparand-type`, not as a driver case-set:
 // drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
 export * from './filter-text-operator-declared-type';
+// Which filter operator fits which declared field type: one row per
+// declared-type door that judges an operator class (today the text-operator
+// door above, by reference), read through `filterOperatorFieldTypeFit` by every
+// door that reports a filter a type change leaves unfit.
+export * from './filter-operator-field-type-fit';
 // [#20311] The `$empty` expansion — the ruled per-type 「is empty」 table read
 // off a field DEFINITION (text-like, multi-value, null only) plus the
 // value-level predicate for the faces with no declaration. The operator is
@@ -168,6 +186,13 @@ export * from './date-macros.zod';
 // rule (#8690 C half). `ui/dashboard.zod.ts` re-exports the vocabulary.
 export * from './date-range-presets';
 export * from './calendar-day';
+// [ADR-0157 D11, open point 3] The wall-clock → instant primitive (the one
+// daylight-saving rule), below `@objectstack/formula` so the working-calendar
+// arithmetic there and every other reader convert through one rule;
+// `@objectstack/core` re-exports it. Beside it, the working calendar's codes,
+// column names and resolved-calendar types (the arithmetic is formula's).
+export * from './wall-clock';
+export * from './work-calendar';
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930] The shared `FilterCondition →
 // FilterCondition` lowering the seams run once, after the comparand doors and
 // after filter-token resolution: the `$between` split, the whole-day upper
@@ -189,6 +214,18 @@ export * from './default-value-tokens';
 // check both `defaultValue` authoring gates run (FieldSchema + ActionParam).
 export * from './default-value-shape';
 export * from './object.zod';
+// [#35985] The object colour palette, named once so a renderer draws exactly
+// the names the spec accepts. The `icon` / `color` leaves stay unexported.
+export { OBJECT_COLORS, type ObjectColor } from './object-icon';
+// [#36366] The action layout per scope: the pinned limit, the scopes and their built-ins.
+export {
+  OBJECT_ACTION_LAYOUT_PINNED_LIMIT,
+  OBJECT_ACTION_LAYOUT_SCOPES,
+  OBJECT_ACTION_LAYOUT_BUILTINS,
+  type ObjectActionLayoutScope,
+  type ObjectActionLayout,
+  type ObjectActionLayoutArm,
+} from './object-action-layout';
 // API-method derivation — the single source of truth turning an object's
 // `enable.apiMethods` whitelist into its effective operation set (#3391).
 export * from './api-derivation';
@@ -208,6 +245,11 @@ export * from './field-customization';
 // home currency's CLDR fraction digits with it, from this one table rather
 // than a second copy or a runtime `Intl` probe.
 export * from './currency-fraction-digits';
+// [ADR-0158 U1, U2; Open item 1] The standard unit table: the closed set of
+// UN/ECE Recommendation 20 codes with each one's dimension and its ratio to the
+// dimension's base unit, kept apart from the value-domain vocabulary the way
+// the CLDR digits table is, and the organization unit code namespace (U3).
+export * from './standard-units';
 // The credential read mask (ADR-0100) — the ONE string a masked read serves, in
 // place of the two byte-identical literals objectql and service-settings each
 // declared until #7572. Both now import this one, so the mask a console sees on
@@ -220,6 +262,10 @@ export * from './secret-mask';
 // from it; objectui keeps its interim `MASKED_FIELD_TYPES` copy until its own
 // re-bind card lands, and derives from it after that.
 export * from './masked-field-types';
+// Whether a changed field's old → new values show on the activity timeline, and
+// the no-line types that are off by default (#36290, #36482): one predicate for
+// plugin-audit's writer and the metadata form's "follow the default" choice.
+export * from './field-history-default';
 // The unknown-authoring-key lint's CORE — comparator, finding shape, curated
 // guidance tables (#3786). Kept frontend-safe: the stack WALKER that imports
 // every schema lives in kernel/metadata-authoring-lint.ts, so this subpath's
@@ -409,6 +455,13 @@ export * from './record-surface';
 // to one but cannot load a runtime.
 export * from './injected-system-columns';
 
+// [ruling 7000907189 point 1] Which objects offer the Change Owner action: the
+// structural test (`isTransferEligible`) and the switch `userActions.transfer`
+// resolved onto its sharingModel default (`resolveUserActionTransfer`) — the one
+// answer the server's Change Owner endpoint (#35402) and the console's action
+// (#35403) will read; neither exists yet.
+export * from './user-action-transfer';
+
 // injected-system-column DEFINITIONS + the #7865 provenance marker (#8116) —
 // WHAT each injected column looks like, and whether storage actually backs it
 // on a given object (`external` objects register anchors the platform never
@@ -442,6 +495,7 @@ export * from './record-currency-path';
 // is not. Read by `defineStack`, `@objectstack/lint` and the objectui record page
 // and Studio, so the four cannot drift.
 export * from './related-list-body-table';
+export * from './related-list-entry';
 
 // Feed & Activity Protocol — retains only the UI activity-timeline config enums
 // (FeedItemType / FeedFilterMode); the feed backend contracts were retired (ADR-0052 §5).

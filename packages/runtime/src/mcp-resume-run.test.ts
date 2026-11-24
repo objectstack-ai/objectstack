@@ -453,16 +453,20 @@ describe('MCP resumeRun — (b) a caller who may not resume is refused before th
         expect(h.engine.resume).not.toHaveBeenCalled();
     });
 
-    it('a confirmation-gated action without confirm: ACTION_CONFIRMATION_REQUIRED / 428; with it, the run completes', async () => {
+    it('[#33690] a confirmation-gated action: ACTION_CONFIRMATION_REQUIRED / 428 with confirm and without it (no pending-confirmation service here), and the run stays paused', async () => {
         const h = makeHarness();
-        const runId = await startPaused(h, CONFIRMED.name, 'u1', { confirm: true });
-        const refused = await refusalOf(h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'x' } }));
-        expect(refused).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
-        expect(refused.details).toEqual({ actionName: 'close_lead', objectName: OBJECT, confirmationMember: 'confirm' });
+        // Started as the engine would have it: `run_action` itself hands a
+        // gated call off now, so it starts no run to resume.
+        const started: any = await h.engine.execute(CONFIRMED.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
+        for (const input of [{ values: { subject: 'x' } }, { values: { subject: 'x' }, confirm: true }]) {
+            const refused = await refusalOf(h.bridgeFor('u1').resumeRun(started.runId, input));
+            expect(refused, JSON.stringify(input)).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+            expect(refused.details).toEqual({
+                actionName: 'close_lead', objectName: OBJECT, confirmationMember: 'confirm', reason: 'no_confirmation_service',
+            });
+        }
         expect(h.engine.resume).not.toHaveBeenCalled();
-
-        await h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'x' }, confirm: true });
-        expect(h.engine.tasks).toHaveLength(1);
+        expect(h.engine.tasks).toHaveLength(0);
     });
 
     it('a run paused on something other than a screen: 409, and the engine is not asked', async () => {
@@ -488,7 +492,9 @@ describe('[ADR-0151 D3 rule 3] MCP resumeRun — an AI service account does not 
         for (const input of [{ values: { subject: 'x' }, confirm: true }, { values: { subject: 'x' } }]) {
             const refused = await refusalOf(h.bridgeAs(ACCOUNT_EC).resumeRun(started.runId, input));
             expect(refused, JSON.stringify(input)).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
-            expect(refused.details).toEqual({ actionName: CONFIRMED.name, objectName: OBJECT, confirmationMember: 'confirm' });
+            expect(refused.details).toEqual({
+                actionName: CONFIRMED.name, objectName: OBJECT, confirmationMember: 'confirm', reason: 'service_account',
+            });
             expect(refused.message).not.toMatch(/retry/i);
         }
         expect(h.engine.resume).not.toHaveBeenCalled();
@@ -508,13 +514,15 @@ describe('[ADR-0151 D3 rule 3] MCP resumeRun — an AI service account does not 
         expect(h.invocations).toHaveLength(1);
     });
 
-    it('CONTROL: a delegated agent resumes a gated action as before — refused without the member, completed with it', async () => {
+    it('[#33690] a delegated agent is not an account: its gated resume reaches the hand-off step (no service here: reason no_confirmation_service), with the member and without it', async () => {
         const h = makeHarness();
         const started: any = await h.engine.execute(CONFIRMED.target, { userId: 'u1', object: OBJECT, record: { id: 'lead_1' } });
-        const refused = await refusalOf(h.bridgeAs(DELEGATED_EC).resumeRun(started.runId, { values: { subject: 'x' } }));
-        expect(refused).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
-        await h.bridgeAs(DELEGATED_EC).resumeRun(started.runId, { values: { subject: 'x' }, confirm: true });
-        expect(h.engine.tasks).toHaveLength(1);
+        for (const input of [{ values: { subject: 'x' } }, { values: { subject: 'x' }, confirm: true }]) {
+            const refused = await refusalOf(h.bridgeAs(DELEGATED_EC).resumeRun(started.runId, input));
+            expect(refused).toMatchObject({ code: 'ACTION_CONFIRMATION_REQUIRED', status: 428 });
+            expect(refused.details?.reason).toBe('no_confirmation_service');
+        }
+        expect(h.engine.tasks).toHaveLength(0);
     });
 });
 

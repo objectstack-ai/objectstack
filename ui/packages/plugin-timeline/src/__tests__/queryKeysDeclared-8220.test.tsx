@@ -212,3 +212,15 @@ describe('objectui#8220 — both timeline registrations honour the keys they dec
     expect(params.$orderby).toBeUndefined();
   });
 });
+
+describe('both timeline registrations decline the total they never draw', () => {
+  it.each(TIMELINE_TAGS)('$tagLabel — the paged read carries `$count: false`, so the server skips its `count(*)`', async ({ type }) => {
+    // The rail draws the rows it was handed and never a record count; a paged
+    // read without the opt-out pays for a total nothing on screen shows.
+    const [object, params] = await firstQuery({ type });
+    expect(object).toBe(OBJECT);
+    expect(params.$count).toBe(false);
+    // Reachability: it is still a paged read, the case the server counts.
+    expect(typeof params.$top).toBe('number');
+  });
+});

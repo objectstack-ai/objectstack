@@ -265,8 +265,8 @@ describe('silent where the set cannot see the roll-up, or can see its source', (
     expect(viaRegistry(stackOf(set({ objects: {} })))).toEqual([]);
   });
 
-  it('View All or Modify All on the child makes a hidden child field readable', () => {
-    for (const bit of ['viewAllRecords', 'modifyAllRecords']) {
+  it('Modify All on the child makes a hidden child field readable', () => {
+    for (const bit of ['modifyAllRecords']) {
       const findings = viaRegistry(
         stackOf(
           set({
@@ -504,20 +504,20 @@ describe('the fields a roll-up filter tests are judged like the aggregated field
   });
 });
 
-describe('a View All parent makes the summary mask inert', () => {
-  it('is still reported, and the hint says the bypass must go first', () => {
+describe('a Modify All parent makes the summary mask inert', () => {
+  it('is still reported, and the hint says Modify All must go first', () => {
     const findings = viaRegistry(
       stackOf(
         set({
-          objects: { invoice: { ...READ, viewAllRecords: true } },
+          objects: { invoice: { ...READ, modifyAllRecords: true } },
           fields: { 'invoice.total': { readable: false } },
         }),
       ),
     );
     expect(findings.map((f) => f.where)).toContain(W_TOTAL);
     const f = findings.find((x) => x.where === W_TOTAL)!;
-    expect(f.hint).toContain('first remove View All and Modify All on "invoice" from it');
-    expect(f.hint).toContain('does not hide a field from a set holding either');
+    expect(f.hint).toContain('first remove Modify All on "invoice" from it');
+    expect(f.hint).toContain('does not hide a field from a set holding it');
   });
 });
 
@@ -565,11 +565,11 @@ describe('the verdict text (the rule the author is told)', () => {
       ]
     `);
 
-    const viewAllParent = validateRollupSourceVisibility(
-      stackOf(set({ objects: { invoice: { ...READ, viewAllRecords: true } } })),
+    const modifyAllParent = validateRollupSourceVisibility(
+      stackOf(set({ objects: { invoice: { ...READ, modifyAllRecords: true } } })),
     );
-    expect(viewAllParent.map((f) => f.hint)[0]).toMatchInlineSnapshot(
-      `"If its value should not be visible to this set, first remove View All and Modify All on "invoice" from it, since fields["invoice.total"]: { readable: false } does not hide a field from a set holding either, then set fields["invoice.total"]: { readable: false } on it. That hides "invoice.total" from every holder of the set, and a co-held set with no entry for it does not restore it (View All or Modify All on "invoice" does); to keep it for some holders, declare fields["invoice.total"]: { readable: true } in the sets they hold"`,
+    expect(modifyAllParent.map((f) => f.hint)[0]).toMatchInlineSnapshot(
+      `"If its value should not be visible to this set, first remove Modify All on "invoice" from it, since fields["invoice.total"]: { readable: false } does not hide a field from a set holding it, then set fields["invoice.total"]: { readable: false } on it. That hides "invoice.total" from every holder of the set, and a co-held set with no entry for it does not restore it (View All or Modify All on "invoice" does); to keep it for some holders, declare fields["invoice.total"]: { readable: true } in the sets they hold"`,
     );
 
     const scoped = validateRollupSourceVisibility(

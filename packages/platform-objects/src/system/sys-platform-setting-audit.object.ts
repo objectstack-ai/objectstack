@@ -176,6 +176,7 @@ export const SysPlatformSettingAudit = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     // [ADR-0103] Engine-owned: appended by the settings service (SYSTEM_CTX),
     // never via the generic data API. Reads stay open for compliance review.
     apiMethods: ['get', 'list'],

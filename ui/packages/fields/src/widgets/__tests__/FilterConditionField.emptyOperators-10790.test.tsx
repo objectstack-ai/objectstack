@@ -138,6 +138,20 @@ async function addRow() {
   fireEvent.click(add);
 }
 
+/**
+ * The `amount` comparand box once the object schema has typed its column.
+ *
+ * A stored criteria seeds its rows before `getObjectSchema` resolves, and until
+ * then `amount` is untyped: its box is a text input and an edit is emitted as
+ * the string `"6"`. A number input's role is `spinbutton`, so waiting for that
+ * role waits for the typed render, not for whichever box is drawn first.
+ */
+async function findTypedAmountBox() {
+  const box = await screen.findByRole('spinbutton');
+  expect(box).toHaveValue(5);
+  return box;
+}
+
 /** Drive a REAL Radix dropdown by its trigger's index in the document. */
 async function pickFrom(index: number, label: string) {
   const triggers = screen.getAllByRole('combobox');
@@ -179,7 +193,7 @@ const TYPES: ReadonlyArray<{ type: string; field: string; label: string }> = [
   { type: 'multiselect', field: 'tags', label: 'Tags' },
 ];
 
-/** A fresh row on `label`'s column, still on the seed operator (`equals`). */
+/** A fresh row on `label`'s column, still on its seed operator (`equals`; `contains` on a multi-value column). */
 async function freshRowOn(label: string) {
   const utils = renderWidget('');
   await addRow();
@@ -212,7 +226,20 @@ describe('WRITER — each operator on each offered field type writes `$empty` (o
     expectAcceptedByTheFaces(stored);
   });
 
-  it.each(TYPES)('CONTROL: the seed "equals" row on a $type column is untouched', async ({ field, label }) => {
+  // A multi-value column no longer seeds "equals": the server refuses equality on
+  // its JSON column (objectstack#35559), so the shared builder seeds "contains"
+  // there, which writes nothing until a member is picked. The equality CONTROL
+  // therefore runs on the single-value columns, and the multi-value seed is
+  // pinned on its own below.
+  const SINGLE_VALUE_TYPES = TYPES.filter(({ type }) => type !== 'multiselect');
+
+  it('CONTROL: a fresh row on a multiselect column seeds "Contains" and writes nothing yet', async () => {
+    const { onChange } = await freshRowOn('Tags');
+    await waitFor(() => expect(screen.getAllByRole('combobox')[1]).toHaveTextContent('Contains'));
+    expect(lastEmitted(onChange)).toBe('');
+  });
+
+  it.each(SINGLE_VALUE_TYPES)('CONTROL: the seed "equals" row on a $type column is untouched', async ({ field, label }) => {
     // Green before and after: the same harness and the same faces answer
     // "accepted" for an arm this change does not touch, so a red operator row
     // above is about the operator and not about the harness.
@@ -262,7 +289,7 @@ describe('RE-SAVE — a legacy rule is written as `$empty` once it is edited (ob
     { name: 'objectui#10790 "is not empty"', old: legacyIsNotEmpty('name'), fresh: isNotEmpty('name') },
   ])('a $name row is rewritten when ANOTHER row is edited', async ({ old, fresh }) => {
     const { onChange } = renderWidget(JSON.stringify({ ...old, amount: 5 }));
-    const box = await screen.findByDisplayValue('5');
+    const box = await findTypedAmountBox();
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(box, { target: { value: '6' } });
     const stored = lastEmitted(onChange);
@@ -315,7 +342,7 @@ describe('GROUPS — the "is empty" row round-trips inside a group (objectui#108
     const stored = { $or: [{ amount: 5 }, isEmpty('name')] };
     expectAcceptedByTheFaces(JSON.stringify(stored));
     const { onChange } = renderWidget(JSON.stringify(stored));
-    const box = await screen.findByDisplayValue('5');
+    const box = await findTypedAmountBox();
     expect(screen.getAllByRole('combobox').map((t) => t.textContent)).toEqual([
       'Amount', 'Equals', 'Name', 'Is empty',
     ]);
@@ -326,7 +353,7 @@ describe('GROUPS — the "is empty" row round-trips inside a group (objectui#108
   it('a legacy entry inside an OR group is re-written as `$empty` once the group is edited', async () => {
     const stored = { $or: [{ amount: 5 }, legacyIsEmpty('name')] };
     const { onChange } = renderWidget(JSON.stringify(stored));
-    const box = await screen.findByDisplayValue('5');
+    const box = await findTypedAmountBox();
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(box, { target: { value: '6' } });
     expect(lastEmitted(onChange)).toBe(JSON.stringify({ $or: [{ amount: 6 }, isEmpty('name')] }));

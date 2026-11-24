@@ -161,7 +161,7 @@ export const MePermissionsAnonymousResponseSchema = lazySchema(() => z.object({
  *
  * - **full** — a stack with SecurityPlugin: every key present;
  * - **closed** — the server knew the caller but failed to compute the grants:
- *   every key present and empty, `hasAnyQueue: false`;
+ *   every key present and empty, `hasAnyQueue: false`, `objectsUsingQueues: []`;
  * - **degraded** — no SecurityPlugin (or no metadata service): `systemPermissions`
  *   and `tabPermissions` are ABSENT on purpose. Absent means "unknown", which
  *   the console fails open on, because there the server enforces nothing
@@ -204,6 +204,19 @@ export const MePermissionsAuthenticatedResponseSchema = lazySchema(() => z.objec
     + 'has not switched off, or a `sys_queue` row of the organization. Resolved server-side through the '
     + 'ownership-queue service, so a member who may not read `sys_queue` still gets the answer; no names and no '
     + 'counts are disclosed. False when no ownership-queue service is registered, and on the closed body.',
+  ),
+  objectsUsingQueues: z.array(z.string()).describe(
+    'The objects, by name, on which a queue filter can find something in the caller\'s organization: a record of '
+    + 'the object sits in an ownership queue now (no owner, a queue set), or an active assignment rule of the '
+    + 'organization or of an installed package routes the object\'s new records into a queue. Resolved server-side '
+    + 'through the ownership-queue service and listed only for objects the caller may read, except on the degraded '
+    + 'body, where no object permissions resolved and the list is not narrowed; no queue names and no counts are '
+    + 'disclosed. Empty when `hasAnyQueue` is false, for a person outside every organization, for a caller with '
+    + 'no active organization on a deployment that walls organizations apart (`isolated` or `group`; under '
+    + '`single` that caller is answered environment-wide), when the '
+    + 'ownership-queue service is not registered '
+    + 'or cannot answer, and on the closed body. Read once per session, so a record that starts sitting in a queue '
+    + 'later shows here from the next read on.',
   ),
 }).strict());
 

@@ -29,6 +29,10 @@ a public surface; until then no door binds a set to `guest`, and the record carr
 [`6413975861`](https://github.com/objectstack-ai/objectstack/issues/26020#issuecomment-6413975861),
 maintainer 「26020 Q1 A Q2 B 26001 A」) — D2: the signed-out invitation preview is admitted as a
 class-2-shaped door ([the dated note under D2's table](#d2--the-closed-list-of-doors)).
+· **Amended** (2026-11-20, ruling A on [#35848](https://github.com/objectstack-ai/objectstack/issues/35848),
+recorded on the card in [`7043884056`](https://github.com/objectstack-ai/objectstack/issues/35848#issuecomment-7043884056))
+— D2: the restriction profile `os validate --target` reads is admitted to the control-plane discovery role
+([the dated note under D2's table](#d2--the-closed-list-of-doors)).
 **Decided by**: the maintainer's ruling on [#22146](https://github.com/objectstack-ai/objectstack/issues/22146)
 (comment [`6054113537`](https://github.com/objectstack-ai/objectstack/issues/22146#issuecomment-6054113537),
 decision batch #290 item 1, 2026-10-08, 「22146 同意」): **A on all eight questions, and G2 on the
@@ -299,6 +303,76 @@ which the control-plane allowlist exempts as a whole; the sweep's classification
 under class 2, ahead of the allowlist, so it is judged as this door and not as control-plane
 infrastructure. The same ruling's Q2 B leaves the verification posture as it was: an
 invitation-link sign-up still owes the verification mail.
+
+**Amended 2026-11-16 — the one-step invitation acceptance and the OAuth client-name read, class-2-shaped doors.** Card
+[#34257](https://github.com/objectstack-ai/objectstack/issues/34257) admits one more door of class 2's shape, not a
+seventh class: `POST /api/v1/auth/organization/accept-invitation-one-step`. What admits the request: the mailbox proof
+the invitation mail carries, a capability token minted per send. The invitation id alone, which the copied link and
+the invitation row carry, admits nothing. What it runs as: after validation, the creation of the invited address's
+account (or the replacement of the password of an unverified account the rule below admits, revoking its sessions),
+the address marked verified, the invitation accepted through the vendor's own accept route, and a session for that
+account. The proof is never at rest in clear, the stored mail row never holds it, and it is bound to the invitation,
+its address and its expiry; a resend retires the old one. It is spent only by a request that passed every gate, and
+one server process serializes concurrent redemptions of it; across processes, single use is as strong as the store's
+consume. Every proof that does not admit gets one refusal that does not say which check failed. The door sets a
+password on an existing account only when it reads all of these: the address is not verified; the account's only
+sign-in account is its email and password one, or it has none; it has no second factor, enabled or enrolled; its user
+row holds no phone number, verified or not; it holds no standing grant (an API key, an OAuth client consent, an OAuth
+access or refresh token, an OAuth client, a device authorization, an SSO provider, a SCIM credential or a link to an
+identity provider's directory, revoked or expired ones included); its identity source is local; and the server allows
+a local password here (not SSO-only, email and password on). Every other account answers `sign_in`, including one in a
+state no rule names and one whose reading fails, and the proof stays unspent. Every reading is taken again once the
+account's sessions are revoked and before the password is written; an account that no longer passes then answers
+`sign_in` with its sessions revoked, and the proof stays unspent. Every store this plugin mounts that is
+keyed by a user, and every column of the vendor's user model with every plugin this plugin can mount, is classified as
+a claim the judge reads or as no claim, and a test holds each classification to what is mounted. The classification
+covers what this plugin mounts and nothing another package mounts. A cloud-managed environment sets no local password,
+so there the door refuses every request that carries a proof. It carries a rate limit per client network address and
+per invitation, as ADR-0121 D6 requires. Enforced by
+`packages/plugins/plugin-auth/src/invitation-mailbox-proof.ts#buildInvitationProofDoorPlugin`, ledgered in
+`packages/plugins/plugin-auth/src/auth-route-ledger.ts`. It is a better-auth endpoint, so it rides the `/auth`
+catch-all, which no route table lists door by door: the anonymous sweep's classification names it under class 2 as a
+door the catch-all serves, and probes it by its own path.
+
+The same amendment admits a second door of class 2's shape, added by
+[#34168](https://github.com/objectstack-ai/objectstack/issues/34168):
+`GET /api/v1/auth/oauth2/client-name`, a public read. What admits the request: a request the server
+itself signed, which names one OAuth client. What it answers: that client's display name and nothing
+else, and only for the client the signed request names. Every request with a well-formed query that is
+not served a name gets one uniform 404; a malformed query answers 400, and a caller over the rate limit
+429. It is rate-limited per client network address on the counter the invitation preview above uses, as
+ADR-0121 D6 requires. Mounted ahead of the catch-all like the preview, it is classified under class 2 by
+its route.
+
+This note states a refinement of ruling
+[`6413975861`](https://github.com/objectstack-ai/objectstack/issues/26020#issuecomment-6413975861) Q2 B, recorded
+above as "an invitation-link sign-up still owes the verification mail": a proof-carrying invitation link proves the
+mailbox, so a sign-up through it owes no verification mail, and a copied link, which carries no proof, still owes the
+verification mail, as Q2 B states. The refinement is the maintainer's to approve, on this note's Tier H hand-off;
+until that approval it binds nothing. The vendor accept route is unchanged by this note.
+
+**Amended 2026-11-20 — the restriction profile, in the control-plane discovery role.** Ruling A on
+[#35848](https://github.com/objectstack-ai/objectstack/issues/35848)
+(recorded on the card in [`7043884056`](https://github.com/objectstack-ai/objectstack/issues/35848#issuecomment-7043884056);
+the review record it answers is [`7038862149`](https://github.com/objectstack-ai/objectstack/pull/35838#issuecomment-7038862149),
+finding F1) admits one more route into the **discovery** role of the control-plane family below, not a door class:
+`GET {basePath}/discovery/restriction-profile`, and its environment-scoped twin
+`GET {basePath}/environments/:environmentId/discovery/restriction-profile` where environment scoping mounts it. What
+it serves: a constant open profile, a `RestrictionProfileSchema` value that restricts nothing, with
+`versions { spec, skills }`. Its `allowedFlowNodeTypes` is the profile's whole node-type vocabulary, the approvals
+plugin's `approval` / `approval_revise` included; it is not a statement of which plugins this kernel runs, so
+`os validate --target` against a self-hosted runtime does not check whether an approval flow has an executor there.
+The spec-side reader rule that says otherwise is spec-lane card [#36081](https://github.com/objectstack-ai/objectstack/issues/36081).
+The one fact it adds to what an anonymous caller already reads is the `@objectstack/spec`
+version the runtime runs, which `/discovery`'s anonymous `version` states too unless an operator stamp
+(`OS_RUNTIME_VERSION`) replaces it. It reads no query parameter, and `api.enableDiscovery: false` unmounts it with the
+rest of discovery. Why: `os validate --target <url>` reads it without a credential, so a developer can check a build
+against what a self-hosted runtime accepts before deploying, and the cloud already serves the same route without
+authentication ([#31240](https://github.com/objectstack-ai/objectstack/issues/31240#issuecomment-6716619631)). The
+carrier is the anonymous-door sweep's `discovery` row alone, as for the REST root. There is no `ALLOW_ROUTES` row:
+the handler (`packages/rest/src/discovery-routes.ts#registerDiscoveryEndpoints`) never calls `enforceAuth`, so a row in
+`isAuthGateAllowlisted` would change no answer and would only add a standing exemption, on every mount base, from the
+ADR-0069 held-user gate and from `shouldDenyAnonymous`. Ledgered in `packages/rest/src/rest-route-ledger.ts`.
 
 **Outside the guest model by construction**, and not on the list:
 
@@ -769,7 +843,8 @@ This record moved from Proposed to Accepted when all four held. All four hold:
          literally: the REST root (`packages/rest/src/rest-server.ts#RestServer.registerDiscoveryEndpoints`)
          and the dispatcher's well-known document
          (`packages/runtime/src/dispatcher-plugin.ts#createDispatcherPlugin`). They play the
-         allowlist's discovery role.
+         allowlist's discovery role, as does the restriction profile beside them
+         (`packages/rest/src/discovery-routes.ts#registerDiscoveryEndpoints`, the dated D2 note).
        - The local storage adapter's signed byte URLs
          (`packages/services/service-storage/src/local-storage-adapter.ts#LocalStorageAdapter.verifyToken`):
          the signed, expiring token an authorized upload or download mints is the credential, the

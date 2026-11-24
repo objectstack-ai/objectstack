@@ -41,7 +41,7 @@ async function confirm(question: string): Promise<boolean> {
 
 /** One row as the report shows it, in both faces. */
 function describeRow(row: SecurityCatalogOverlayRow): string {
-  const label = row.catalogType === 'permission' ? 'permission set' : 'position';
+  const label = row.catalogType === 'permission' ? 'permission set' : row.catalogType;
   const spelling = row.storedType === row.catalogType ? '' : ` (stored under the legacy type '${row.storedType}')`;
   const binding = row.packageId ? `bound to ${row.packageId}` : 'bound to no package';
   return `${label} "${row.name}"${spelling}, ${binding}, row ${row.id} — held by ${row.heldBy.join(', ')}`;
@@ -64,7 +64,7 @@ function jsonRow(row: SecurityCatalogOverlayRow, outcome?: SecurityCatalogOverla
 /**
  * `os migrate security-catalog-overlays` — list, and with `--apply` delete, the
  * environment-wide `sys_metadata` rows a v18 cold boot refuses: an active,
- * environment-wide `permission` / `position` row (the legacy plurals included)
+ * environment-wide `permission` / `position` / `capability` row (the plurals included)
  * whose name a configured package holds (ADR-0048 N.3).
  *
  * ## Why an offline step
@@ -120,7 +120,7 @@ function jsonRow(row: SecurityCatalogOverlayRow, outcome?: SecurityCatalogOverla
  */
 export default class MigrateSecurityCatalogOverlays extends Command {
   static override description =
-    'List, and with --apply delete, the environment-wide permission-set and position rows (legacy plurals '
+    'List, and with --apply delete, the environment-wide permission-set, position and capability rows (plurals '
     + 'included) over a name a configured package holds — the rows a v18 cold boot refuses. Run before the first '
     + 'v18 boot.';
 
@@ -216,7 +216,7 @@ export default class MigrateSecurityCatalogOverlays extends Command {
         return;
       }
       const ok = await confirm(
-        chalk.bold('\nDelete the environment-wide rows over package-held permission-set and position names? [y/N] '),
+        chalk.bold('\nDelete the environment-wide rows over package-held permission-set, position and capability names? [y/N] '),
       );
       if (!ok) {
         printInfo('Aborted — nothing deleted.');
@@ -323,7 +323,7 @@ export default class MigrateSecurityCatalogOverlays extends Command {
     console.log('');
     if (rows.length === 0) {
       printSuccess(
-        'No environment-wide permission-set or position row is stored over a package-held name — '
+        'No environment-wide permission-set, position or capability row is stored over a package-held name — '
         + `nothing here refuses the cold boot ${chalk.dim(`(${timer.display()})`)}`,
       );
       return exitCode;

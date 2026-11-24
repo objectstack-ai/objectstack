@@ -206,6 +206,9 @@ export function registerApprovalNode(
           // `vars.*` root for `expression` approvers; `record` above doubles as
           // their `trigger.*` snapshot root.
           variables: nestVariables(variables),
+          // The node object this run executes: a step naming the platform
+          // administrators opens only when it belongs to the armed body.
+          node,
         }, {
           ...SYSTEM_CTX,
           userId: context?.userId,

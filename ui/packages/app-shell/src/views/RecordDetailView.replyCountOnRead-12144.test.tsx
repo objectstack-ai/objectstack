@@ -20,6 +20,13 @@
  * `onAddReply` for, replies or not. Its reply LIST still shows only under a
  * `replyCount` above zero, the one gate it had.
  *
+ * Since objectstack#36075 the default page draws the record's comments in its
+ * comment panel, opened from the header's comments icon: a thread folds its
+ * replies to 「N replies」 there and opens them in place, and a comment's Reply
+ * opens the thread's reply box. The same read, the same counts and the same
+ * grant decide what it offers; an authored page's feed block (the control
+ * below) is as it was.
+ *
  * Real subjects: `RecordDetailView` rendering the SYNTHESIZED default record
  * page (no authored page, so `buildDefaultPageSchema` composes
  * `record:discussion`), over a fake data source answering the `sys_comment`
@@ -155,6 +162,7 @@ function answer(bits: Record<string, unknown>): MePermissionsAuthenticatedRespon
     tenantId: null,
     positions: ['member'],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member'],
     objects: { [OBJECT_NAME]: FULL, [COMMENT]: bits },
     fields: {},
@@ -181,7 +189,7 @@ async function mount(comments: Record<string, unknown>[], options: MountOptions 
           onEdit={() => {}}
           objectNameOverride={OBJECT_NAME}
           recordIdOverride={RECORD_ID}
-          embedded
+          /* objectstack#36150 — not `embedded`: an authored page draws on the full page only. */
         />
       </MetadataCtx.Provider>
     </MemoryRouter>
@@ -189,6 +197,15 @@ async function mount(comments: Record<string, unknown>[], options: MountOptions 
   const perms = options.perms ?? null;
   const rendered = render(perms ? <MePermissionsProvider initialPermissions={perms}>{page}</MePermissionsProvider> : page);
   const view = within(rendered.container);
+  if (!options.pages?.length) {
+    // The default page: its comments are the comment panel's.
+    const button = await waitFor(() => {
+      const el = rendered.container.querySelector('[data-comments-button]');
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(button);
+  }
   await view.findByText(String(comments[0].body));
   await waitFor(() => expect(view.queryByTestId('activity-loading')).toBeNull());
   await act(async () => {});
@@ -197,22 +214,38 @@ async function mount(comments: Record<string, unknown>[], options: MountOptions 
 
 type View = Awaited<ReturnType<typeof mount>>['view'];
 
-const replyInputs = (view: View) => view.queryAllByPlaceholderText(REPLY_PLACEHOLDER);
+/**
+ * Open every comment's 「回复」: since the dense activity rows (objectstack#35602)
+ * the offered reply input opens behind that toggle instead of standing open.
+ */
+const openReplies = () =>
+  document
+    .querySelectorAll<HTMLButtonElement>('[data-feed-reply-toggle][aria-expanded="false"]')
+    .forEach((toggle) => fireEvent.click(toggle));
+
+const replyInputs = (view: View) => {
+  openReplies();
+  return view.queryAllByPlaceholderText(REPLY_PLACEHOLDER);
+};
 /** The reply-count toggle `ThreadedReplies` draws above a comment's replies. */
 const replyToggles = (view: View) => view.queryAllByRole('button', { name: /\d+ repl/ });
 
-/**
- * The feed row a body sits in: the element the timeline keys per root item,
- * which holds the item's own row and, after it, its `ThreadedReplies`.
- */
-function rootRowOf(view: View, body: string): HTMLElement {
-  const rows = view.getByText(body).closest('.space-y-4')!.children;
-  const row = Array.from(rows).find((r) => r.textContent?.includes(body));
-  if (!row) throw new Error(`no feed row holds ${JSON.stringify(body)}`);
-  return row as HTMLElement;
+/** The comment panel, and one thread in it by its first comment's text. */
+const panelOf = () => document.querySelector('[data-comments-panel]') as HTMLElement;
+function threadOf(body: string): HTMLElement {
+  const thread = within(panelOf()).getByText(body).closest('[data-comment-thread]');
+  if (!thread) throw new Error(`no thread holds ${JSON.stringify(body)}`);
+  return thread as HTMLElement;
 }
+/** A comment's own Reply in its action row, or `null` where none is offered. */
+const replyActionOf = (body: string) => {
+  const item = within(panelOf()).getByText(body).closest('[data-comment-item]') as HTMLElement;
+  return item.querySelector(':scope > [data-comment-actions] [data-comment-action="reply"]') as HTMLButtonElement | null;
+};
+const panelReplyActions = () => panelOf().querySelectorAll('[data-comment-action="reply"]');
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.stubGlobal(
     'fetch',
     vi.fn(async () =>
@@ -228,70 +261,75 @@ afterEach(() => {
 });
 
 describe('a stored reply shows under its parent on the default record page (objectui#12144)', () => {
-  it('a read with a parent and one child shows the child under the parent, not as a row of its own', async () => {
-    const { view } = await mount([PARENT, CHILD]);
-    const parentRow = rootRowOf(view, PARENT_BODY);
-    // Collapsed until asked: the reply is not on screen yet, and not as a root row either.
-    expect(view.queryByText(CHILD_BODY)).toBeNull();
-    const toggle = within(parentRow).getByRole('button', { name: /1 reply/ });
-    fireEvent.click(toggle);
-    expect(within(parentRow).getByText(CHILD_BODY)).toBeInTheDocument();
-    expect(replyToggles(view)).toHaveLength(1);
+  it('a read with a parent and one child shows the child under the parent, not as a thread of its own', async () => {
+    await mount([PARENT, CHILD]);
+    const thread = threadOf(PARENT_BODY);
+    // Collapsed until asked: the reply is not on screen yet, and not as a thread either.
+    expect(within(panelOf()).queryByText(CHILD_BODY)).toBeNull();
+    expect(panelOf().querySelectorAll('[data-comment-thread]')).toHaveLength(1);
+    fireEvent.click(within(thread).getByRole('button', { name: /1 reply/ }));
+    expect(within(thread).getByText(CHILD_BODY)).toBeInTheDocument();
   });
 
   it('the count is the children in the read: two stored replies read as two', async () => {
     const second = { ...CHILD, id: 'c-child-2', body: 'Second stored reply', created_at: '2026-10-01T09:30:00.000Z' };
-    const { view } = await mount([PARENT, CHILD, second]);
-    const parentRow = rootRowOf(view, PARENT_BODY);
-    fireEvent.click(within(parentRow).getByRole('button', { name: /2 replies/ }));
-    expect(within(parentRow).getByText(CHILD_BODY)).toBeInTheDocument();
-    expect(within(parentRow).getByText('Second stored reply')).toBeInTheDocument();
+    await mount([PARENT, CHILD, second]);
+    const thread = threadOf(PARENT_BODY);
+    fireEvent.click(within(thread).getByRole('button', { name: /2 replies/ }));
+    expect(within(thread).getByText(CHILD_BODY)).toBeInTheDocument();
+    expect(within(thread).getByText('Second stored reply')).toBeInTheDocument();
   });
 });
 
-describe('a comment read from the server offers the reply input where the caller may post one (objectui#12144)', () => {
-  it('under a create grant on sys_comment every comment row offers it, a comment with no replies included', async () => {
-    const { view } = await mount([PARENT, CHILD, LONE], { perms: answer(CREATE_ONLY) });
-    expect(within(rootRowOf(view, LONE_BODY)).queryByPlaceholderText(REPLY_PLACEHOLDER)).not.toBeNull();
-    expect(within(rootRowOf(view, PARENT_BODY)).queryByPlaceholderText(REPLY_PLACEHOLDER)).not.toBeNull();
-    expect(replyInputs(view)).toHaveLength(2);
+describe('a comment read from the server offers Reply where the caller may post one (objectui#12144)', () => {
+  it('under a create grant on sys_comment every comment offers it, a comment with no replies included', async () => {
+    await mount([PARENT, CHILD, LONE], { perms: answer(CREATE_ONLY) });
+    expect(replyActionOf(LONE_BODY)).not.toBeNull();
+    expect(replyActionOf(PARENT_BODY)).not.toBeNull();
+    // Reply opens the thread with its reply box.
+    fireEvent.click(replyActionOf(LONE_BODY)!);
+    expect(within(threadOf(LONE_BODY)).getByPlaceholderText(REPLY_PLACEHOLDER)).toBeInTheDocument();
   });
 
-  it('a row that is not a comment offers none: a reply is stored as a sys_comment under a comment', async () => {
+  it('a row that is not a comment is not the panel\'s: a reply is stored as a sys_comment under a comment', async () => {
     const { view } = await mount([LONE], { activities: [UPDATED] });
     await view.findByText(ACTIVITY_BODY);
-    expect(within(rootRowOf(view, ACTIVITY_BODY)).queryByPlaceholderText(REPLY_PLACEHOLDER)).toBeNull();
-    expect(replyInputs(view)).toHaveLength(1);
+    expect(within(panelOf()).queryByText(ACTIVITY_BODY)).toBeNull();
+    expect(panelReplyActions()).toHaveLength(1);
   });
 
   it('the first reply on a comment posts from the page, under that comment, and then shows there', async () => {
-    const { view, dataSource } = await mount([LONE], { perms: answer(CREATE_ONLY) });
-    const loneRow = rootRowOf(view, LONE_BODY);
-    fireEvent.change(within(loneRow).getByPlaceholderText(REPLY_PLACEHOLDER), { target: { value: NEW_REPLY } });
+    const { dataSource } = await mount([LONE], { perms: answer(CREATE_ONLY) });
+    fireEvent.click(replyActionOf(LONE_BODY)!);
+    const box = within(threadOf(LONE_BODY)).getByPlaceholderText(REPLY_PLACEHOLDER);
+    fireEvent.change(box, { target: { value: NEW_REPLY } });
     await act(async () => {
-      fireEvent.click(within(loneRow).getByRole('button', { name: 'Send reply' }));
+      fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
     });
     expect(dataSource.create).toHaveBeenCalledTimes(1);
     expect(dataSource.create.mock.calls[0][0]).toBe(COMMENT);
     expect(dataSource.create.mock.calls[0][1]).toMatchObject({ thread_id: THREAD, parent_id: 'c-lone', body: NEW_REPLY });
-    fireEvent.click(within(loneRow).getByRole('button', { name: /1 reply/ }));
-    expect(within(loneRow).getByText(NEW_REPLY)).toBeInTheDocument();
+    await waitFor(() => expect(within(threadOf(LONE_BODY)).getByText(NEW_REPLY)).toBeInTheDocument());
   });
 
-  it('without the create grant no row offers it, and a stored reply still shows under its parent', async () => {
-    const { view } = await mount([PARENT, CHILD, LONE], { perms: answer(READ_ONLY) });
-    expect(replyInputs(view)).toHaveLength(0);
-    const parentRow = rootRowOf(view, PARENT_BODY);
-    fireEvent.click(within(parentRow).getByRole('button', { name: /1 reply/ }));
-    expect(within(parentRow).getByText(CHILD_BODY)).toBeInTheDocument();
+  it('without the create grant no comment offers it, and a stored reply still shows under its parent', async () => {
+    await mount([PARENT, CHILD, LONE], { perms: answer(READ_ONLY) });
+    expect(panelReplyActions()).toHaveLength(0);
+    expect(panelOf().querySelector('[data-comments-composer]')).toBeNull();
+    const thread = threadOf(PARENT_BODY);
+    fireEvent.click(within(thread).getByRole('button', { name: /1 reply/ }));
+    expect(within(thread).getByText(CHILD_BODY)).toBeInTheDocument();
   });
 });
 
 describe('CONTROL: with threading off the list is unchanged (objectui#12144)', () => {
   it('a reply is a row of its own in read order, with no reply toggle and no reply input', async () => {
     const { view } = await mount([PARENT, CHILD, LONE], { pages: [PAGE_THREADING_OFF] });
-    const list = view.getByText(PARENT_BODY).closest('.space-y-4')!;
-    const rows = Array.from(list.children).map((r) => r.textContent ?? '');
+    // The feed's root rows in order, across its day groups (objectstack#35602).
+    const list = view.getByText(PARENT_BODY).closest('[data-stream-list]')!;
+    const rows = Array.from(list.querySelectorAll('[data-stream-comment-row],[data-stream-row]'))
+      .filter((r) => !r.parentElement?.closest('[data-stream-comment-row],[data-stream-row]'))
+      .map((r) => r.textContent ?? '');
     expect(rows).toHaveLength(3);
     expect(rows[0]).toContain(PARENT_BODY);
     expect(rows[1]).toContain(CHILD_BODY);

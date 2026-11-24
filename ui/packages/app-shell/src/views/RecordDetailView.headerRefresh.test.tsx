@@ -137,7 +137,11 @@ function renderDetail(dataSource: any, opts?: { embedded?: boolean }) {
   );
 }
 
-const moreTrigger = () => document.querySelector('header [aria-label="More actions"]') as HTMLElement | null;
+// The record's header: its own row, or, on a page, what it draws into the top
+// bar's one row (objectstack#35593).
+const HEADER = 'header, [data-record-header-title]';
+const moreTrigger = () =>
+  document.querySelector('header [aria-label="More actions"], [data-record-top-bar-actions] [aria-label="More actions"]') as HTMLElement | null;
 
 /** Open the header's `⋯` and answer its Refresh item (objectstack#27055). */
 async function openRefreshItem(): Promise<HTMLElement> {
@@ -204,7 +208,7 @@ describe('RecordDetailView — the header ⟳ refetches in place (objectui#3460)
     renderDetail(dataSource);
 
     await waitFor(() => expect(dataSource.findOne).toHaveBeenCalledTimes(1));
-    const headerBefore = document.querySelector('header');
+    const headerBefore = document.querySelector(HEADER);
     expect(headerBefore).toBeTruthy();
 
     fireEvent.click(await openRefreshItem());
@@ -214,7 +218,7 @@ describe('RecordDetailView — the header ⟳ refetches in place (objectui#3460)
     // …and the header is the same DOM node it was before the click. A `key=`
     // bump would have refetched too, while throwing away tab/scroll/inline-edit
     // state (AGENTS.md #8).
-    expect(document.querySelector('header')).toBe(headerBefore);
+    expect(document.querySelector(HEADER)).toBe(headerBefore);
   });
 });
 
@@ -226,7 +230,7 @@ describe('RecordDetailView — embedded hosts opt out of the ⟳ (objectui#3460 
     // Wait for the record read to settle so this is "the header rendered and
     // has no ⟳", not "the header hasn't rendered yet".
     await waitFor(() => expect(dataSource.findOne).toHaveBeenCalled());
-    await waitFor(() => expect(document.querySelector('header')).toBeTruthy());
+    await waitFor(() => expect(document.querySelector(HEADER)).toBeTruthy());
     // The ⋯ may still hold the host's other system actions; Refresh is not one.
     const trigger = moreTrigger();
     if (trigger) {

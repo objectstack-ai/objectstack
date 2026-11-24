@@ -57,6 +57,17 @@ const DEFAULT_ORG = 'org_default';
 /** The AI service account check `session.create.before` runs first (ADR-0151 D2). */
 const PRINCIPAL_KIND_READ = ['sys_user', expect.objectContaining({ where: { id: USER }, limit: 1 })];
 
+/**
+ * The development seed credential check on the same user's row
+ * (`dev-seed-credential.ts`), which a server outside development mode runs
+ * before any membership logic: this suite runs under `NODE_ENV=test`.
+ */
+const DEV_SEED_STAMP_READ = [
+  'sys_user',
+  expect.objectContaining({ where: { id: USER, dev_seed_credential: { $null: false } }, limit: 1 }),
+  expect.anything(),
+];
+
 interface MemberRow {
   id: string;
   organization_id: string;
@@ -227,9 +238,10 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
       // is refused by the reconciler before it touches the store, and the
       // re-read never runs because nothing was bound.
       expect(engine.findOne).toHaveBeenCalledTimes(2);
-      // The one `find` is the AI service account check on the user's own row
-      // (ADR-0151 D2), which runs before any membership logic.
-      expect(engine.find.mock.calls).toEqual([PRINCIPAL_KIND_READ]);
+      // The two `find`s are the AI service account check on the user's own row
+      // (ADR-0151 D2) and the development seed credential check, both before
+      // any membership logic.
+      expect(engine.find.mock.calls).toEqual([PRINCIPAL_KIND_READ, DEV_SEED_STAMP_READ]);
     });
   });
 
@@ -331,7 +343,7 @@ describe("[#8247 rule 2] a user's FIRST session settles the membership before re
       const hooks = hooksFor({ engine, defaultOrgId: DEFAULT_ORG });
       await hooks.session.create.before({ userId: USER }, {});
       expect(engine.findOne).toHaveBeenCalledTimes(2);
-      expect(engine.find.mock.calls).toEqual([PRINCIPAL_KIND_READ]);
+      expect(engine.find.mock.calls).toEqual([PRINCIPAL_KIND_READ, DEV_SEED_STAMP_READ]);
     });
 
     it('a creation staged in ANOTHER request does not reach this sign-in', async () => {

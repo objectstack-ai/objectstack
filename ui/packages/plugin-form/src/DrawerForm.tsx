@@ -78,6 +78,7 @@ import {
 } from './loadFailure';
 import { hasInlineFieldSource, noSubmitTargetError } from './submitTarget';
 import { useRecordInvalidation } from './recordInvalidation';
+import { FormDirtyReportContext } from './formDirtyReport';
 import { useInitialFieldFocus } from './initialFieldFocus';
 
 // Localized strings for the unsaved-changes guard and, since objectui#11039,
@@ -264,7 +265,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   const { userId: currentUserId } = perms;
   // ADR-0144 D8 rule 4 — the organization currency a record-currency code
   // field opens on in create mode.
-  const { currency: homeCurrency } = useLocalization();
+  const { currency: homeCurrency, timezone: homeTimeZone } = useLocalization();
   const { t } = useDiscardTranslation();
   // The heading of the trailing ungrouped-fields bucket (`deriveFieldGroupSections`).
   const ungroupedLabel = t('common.ungroupedSection');
@@ -421,7 +422,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
         // Declared static defaults are this form's opening values (#4047) —
         // see `schemaDefaults` for the create-only boundary and for why
         // runtime defaults are left to the server.
-        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency }));
+        setFormData(seedCreateValues(objectSchema, resolveInitialRecord(schema), { currentUserId, homeCurrency, homeTimeZone }));
         // Not a read, so no earlier record read's failure describes the form.
         run.commit();
         setLoading(false);
@@ -798,7 +799,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
     if (error) {
       return (
         <div className="p-4 border border-red-300 bg-red-50 rounded-md">
-          <h3 className="text-red-800 font-semibold">{t('form.errorLoading')}</h3>
+          <h3 className="text-red-800 font-medium">{t('form.errorLoading')}</h3>
           <p className="text-red-600 text-sm mt-1">{error.message}</p>
         </div>
       );
@@ -953,9 +954,13 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   ) : null;
 
   // Master-detail in a drawer: render the master-detail form (it owns its Save
-  // bar) when the schema declares inline child collections; saved atomically.
+  // bar, pinned to the bottom of this drawer's scroll frame) when the schema
+  // declares inline child collections; saved atomically. It reports its unsaved
+  // input into this drawer's close guard (`formDirtyReport.ts`), so the close
+  // paths prompt as they do for the flat body (objectstack#34599).
   const subforms = (schema as any).subforms as any[] | undefined;
   const drawerBody = subforms?.length && schema.mode !== 'view' ? (
+    <FormDirtyReportContext.Provider value={setIsDirty}>
     <MasterDetailForm
       schema={{
         type: 'object-master-detail-form',
@@ -973,6 +978,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
       }}
       dataSource={dataSource}
     />
+    </FormDirtyReportContext.Provider>
   ) : (
     <>
       {closedAffordanceNotice}
@@ -989,7 +995,7 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
       <div className="@container rounded-md border bg-card p-4">
         {(schema.title || schema.description) && (
           <div className="mb-3 space-y-0.5">
-            {schema.title && <div className="text-sm font-semibold">{schema.title}</div>}
+            {schema.title && <div className="text-sm font-medium">{schema.title}</div>}
             {schema.description && <p className="text-xs text-muted-foreground">{schema.description}</p>}
           </div>
         )}

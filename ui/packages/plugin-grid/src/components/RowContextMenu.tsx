@@ -14,7 +14,7 @@ import {
   LazyIcon,
   toKebabIconName,
 } from '@object-ui/components';
-import { ExternalLink, PanelRightOpen, Trash2, X } from 'lucide-react';
+import { ClipboardPaste, Copy, Eraser, ExternalLink, History, PanelRightOpen, Trash2, X } from 'lucide-react';
 import type { BulkActionDef } from '@object-ui/types';
 import { useObjectTranslation } from '@object-ui/react';
 import {
@@ -23,7 +23,7 @@ import {
   useRowActionPlan,
   type RowActionMenuProps,
 } from './RowActionMenu';
-import { isDestructiveBulkDef, useBulkActionItems } from './BulkActionBar';
+import { orderSelectionMenuItems, useBulkActionItems, type OrderedBulkItem } from './BulkActionBar';
 import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '../bulkSelectAllMatchingCap';
 
 /**
@@ -37,6 +37,10 @@ import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '.
 const CONTEXT_MENU_FALLBACKS: Record<string, string> = {
   'table.open': 'Open',
   'detail.openInNewTab': 'Open in new tab',
+  'detail.fieldHistory': 'Change history',
+  'table.copyCell': 'Copy',
+  'table.pasteCell': 'Paste',
+  'table.clearCell': 'Clear',
 };
 
 function useContextMenuTranslation() {
@@ -48,11 +52,31 @@ function useContextMenuTranslation() {
 }
 
 /**
- * ONE row's context menu: Open, Open in new tab, then every action the row's
- * cell offers — the "⋮" items and the inline primaries the cell's width budget
- * keeps out of the "⋮". Same resolver ({@link useRowActionPlan}), same items
- * ({@link RowActionMenuItems}), same handlers (so the same confirm dialogs);
- * the only input read differently is the inline budget, `0` here.
+ * What the table does with the data cell the menu opened on
+ * (objectstack#36289): the `cell` member of `renderRowContextMenu`'s context.
+ * An absent action is one the table refuses on this cell.
+ */
+export interface RowContextMenuCell {
+  copy?: () => void;
+  paste?: () => void;
+  clear?: () => void;
+  /**
+   * Whether the field's type takes pasted text at all; `false` draws Paste
+   * unavailable even where the cell may be edited.
+   */
+  pasteable: boolean;
+}
+
+/**
+ * ONE row's context menu, in two sections (objectstack#36289). Above, when
+ * the menu opened on a data cell: that cell's Copy, Paste, Clear and Change
+ * history, each drawn unavailable (or, for Change history, left out) where
+ * the cell refuses it. Below, the row's: Open, Open in new tab, then every
+ * action the row's cell offers — the "⋮" items and the inline primaries the
+ * cell's width budget keeps out of the "⋮". Same resolver
+ * ({@link useRowActionPlan}), same items ({@link RowActionMenuItems}), same
+ * handlers (so the same confirm dialogs); the only input read differently is
+ * the inline budget, `0` here.
  */
 export const RowContextMenuItems: React.FC<{
   /** Exactly the props the row's "⋮" cell renders with. */
@@ -61,12 +85,58 @@ export const RowContextMenuItems: React.FC<{
   onOpen?: () => void;
   /** The record URL the row links to. Absent ⇒ no Open in new tab item. */
   newTabHref?: string | null;
-}> = ({ menu, onOpen, newTabHref }) => {
+  /**
+   * Open the change history of the field whose cell the menu opened on
+   * (objectstack#36290), at the point the item was chosen. Absent ⇒ no
+   * Change history item.
+   */
+  onFieldHistory?: (at: { x: number; y: number }) => void;
+  /** The data cell the menu opened on. Absent ⇒ no Copy, Paste or Clear item. */
+  cell?: RowContextMenuCell;
+}> = ({ menu, onOpen, newTabHref, onFieldHistory, cell }) => {
   const t = useContextMenuTranslation();
   const plan = useRowActionPlan(menu, 0);
   const hasOpen = !!onOpen || !!newTabHref;
+  const hasCellSection = !!cell || !!onFieldHistory;
+  const hasRowSection = hasOpen || plan.menuCount > 0;
   return (
     <>
+      {cell && (
+        <>
+          <DropdownMenuItem disabled={!cell.copy} onClick={() => cell.copy?.()} data-testid="row-context-cell-copy">
+            <Copy className="mr-2 h-4 w-4" />
+            {t('table.copyCell')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!cell.paste || !cell.pasteable}
+            onClick={() => cell.paste?.()}
+            data-testid="row-context-cell-paste"
+          >
+            <ClipboardPaste className="mr-2 h-4 w-4" />
+            {t('table.pasteCell')}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={!cell.clear} onClick={() => cell.clear?.()} data-testid="row-context-cell-clear">
+            <Eraser className="mr-2 h-4 w-4" />
+            {t('table.clearCell')}
+          </DropdownMenuItem>
+        </>
+      )}
+      {onFieldHistory && (
+        <DropdownMenuItem
+          onClick={(e) => {
+            // A pointer click opens the card where it was; the keyboard has no
+            // pointer, so the card opens at the item.
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const pointer = e.clientX !== 0 || e.clientY !== 0;
+            onFieldHistory(pointer ? { x: e.clientX, y: e.clientY } : { x: rect.left, y: rect.top });
+          }}
+          data-testid="row-context-field-history"
+        >
+          <History className="mr-2 h-4 w-4" />
+          {t('detail.fieldHistory')}
+        </DropdownMenuItem>
+      )}
+      {hasCellSection && hasRowSection && <DropdownMenuSeparator data-testid="row-context-cell-separator" />}
       {onOpen && (
         <DropdownMenuItem onClick={() => onOpen()} data-testid="row-context-open">
           <PanelRightOpen className="mr-2 h-4 w-4" />
@@ -86,6 +156,52 @@ export const RowContextMenuItems: React.FC<{
     </>
   );
 };
+
+/**
+ * A selection's actions as menu items, in {@link orderSelectionMenuItems}'s
+ * order (objectstack#35554): the destructive entries close the list, after a
+ * separator, in the danger colour — the order one row's menu has. Read by the
+ * selection's context menu and by the page bar's "⋮".
+ */
+export const SelectionActionMenuEntries: React.FC<{
+  entries: OrderedBulkItem[];
+  selectedRows: any[];
+  onAction?: (action: string, selectedRows: any[]) => void;
+  onActionDef?: (def: BulkActionDef, selectedRows: any[]) => void;
+}> = ({ entries, selectedRows, onAction, onActionDef }) => (
+  <>
+    {entries.map((entry, index) => (
+      <React.Fragment key={entry.key}>
+        {entry.destructive && index > 0 && !entries[index - 1].destructive && (
+          <DropdownMenuSeparator data-testid="row-context-destructive-separator" />
+        )}
+        {entry.kind === 'def' ? (
+          <DropdownMenuItem
+            onClick={() => onActionDef?.(entry.def, selectedRows)}
+            data-testid={`row-context-bulk-${entry.def.name}`}
+            className={entry.destructive ? 'text-destructive focus:text-destructive' : undefined}
+          >
+            {entry.def.icon ? (
+              <LazyIcon name={toKebabIconName(entry.def.icon)} className="mr-2 h-4 w-4" />
+            ) : entry.destructive ? (
+              <Trash2 className="mr-2 h-4 w-4" />
+            ) : null}
+            {entry.def.label ?? formatActionLabel(entry.def.name)}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem
+            onClick={() => onAction?.(entry.legacy.name, selectedRows)}
+            data-testid={`row-context-bulk-${entry.legacy.name}`}
+            className={entry.destructive ? 'text-destructive focus:text-destructive' : undefined}
+          >
+            {entry.destructive && <Trash2 className="mr-2 h-4 w-4" />}
+            {entry.legacy.label}
+          </DropdownMenuItem>
+        )}
+      </React.Fragment>
+    ))}
+  </>
+);
 
 /**
  * The context menu of a row inside a selection of two or more: the selection's
@@ -117,6 +233,7 @@ export const SelectionContextMenuItems: React.FC<{
   const t = useContextMenuTranslation();
   const items = useBulkActionItems({ selectedRows, actions, actionDefs, objectFields });
   const hasActions = items.defs.length > 0 || items.legacy.length > 0;
+  const ordered = orderSelectionMenuItems(items);
   return (
     <>
       <DropdownMenuLabel className="text-xs font-medium tabular-nums text-muted-foreground" data-testid="row-context-selection-count">
@@ -131,36 +248,12 @@ export const SelectionContextMenuItems: React.FC<{
           : t('grid.bulkSelected', { count: selectedRows.length, defaultValue: '{{count}} selected' })}
       </DropdownMenuLabel>
       {hasActions && <DropdownMenuSeparator />}
-      {items.defs.map((def) => {
-        const destructive = isDestructiveBulkDef(def);
-        const iconName = def.icon ? toKebabIconName(def.icon) : null;
-        return (
-          <DropdownMenuItem
-            key={def.name}
-            onClick={() => onActionDef?.(def, selectedRows)}
-            data-testid={`row-context-bulk-${def.name}`}
-            className={destructive ? 'text-destructive focus:text-destructive' : undefined}
-          >
-            {iconName ? (
-              <LazyIcon name={iconName} className="mr-2 h-4 w-4" />
-            ) : destructive ? (
-              <Trash2 className="mr-2 h-4 w-4" />
-            ) : null}
-            {def.label ?? formatActionLabel(def.name)}
-          </DropdownMenuItem>
-        );
-      })}
-      {items.legacy.map(({ name, label, destructive }) => (
-        <DropdownMenuItem
-          key={name}
-          onClick={() => onAction?.(name, selectedRows)}
-          data-testid={`row-context-bulk-${name}`}
-          className={destructive ? 'text-destructive focus:text-destructive' : undefined}
-        >
-          {destructive && <Trash2 className="mr-2 h-4 w-4" />}
-          {label}
-        </DropdownMenuItem>
-      ))}
+      <SelectionActionMenuEntries
+        entries={ordered}
+        selectedRows={selectedRows}
+        onAction={onAction}
+        onActionDef={onActionDef}
+      />
       <DropdownMenuSeparator />
       <DropdownMenuItem onClick={() => onClearSelection?.()} data-testid="row-context-clear-selection">
         <X className="mr-2 h-4 w-4" />

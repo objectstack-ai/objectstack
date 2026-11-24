@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#29520 codemod] The top-level declarations ahead of `SqlDriver` in
-// `sql-driver.ts` that moved out whole by
-// `scripts/codemod-split-sql-driver.mjs` (lever (b) of ruling 6591753301).
+// `sql-driver.ts` that moved out whole
+// (split by #29598; lever (b) of ruling 6591753301).
 //
 // A MOVE, not a redesign: each declaration below is its `sql-driver.ts` text
 // exactly, with the comments above it, in the order it stood there. A LEAF:
@@ -1342,6 +1342,46 @@ function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], 
   ) as Error & { code?: string; status?: number };
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
+  throw err;
+}
+
+/**
+ * [#33697] An `aggregate()` query carries a reference `timezone` for its date
+ * buckets (`DriverAggregateQuery.timezone`, ADR-0053 Phase 2 D2 as amended)
+ * that this face does not bucket in the database.
+ *
+ * Two causes, two classes, mirroring {@link refuseDateBucketedGroupBy}:
+ *
+ * - `dialect` — the dialect has no tz database to read the zone from
+ *   (SQLite), or this driver declares no zone-aware bucket for it (MySQL, SQL
+ *   Server, Oracle). A capability gap in the backend: NOT_IMPLEMENTED / 501.
+ *   `supports.zonedDateBucketing` publishes it, and the engine buckets such a
+ *   zone in memory, so reaching this means a caller went around that bit.
+ * - `unresolved` — the string is not the runtime's resolved IANA area/location
+ *   name for itself (`CST`, `+08:00`, `US/Eastern`, `Bogus/Zone`). The
+ *   database and the runtime read such spellings differently, some silently
+ *   (an abbreviation is a fixed offset to PostgreSQL and a DST zone to `Intl`),
+ *   so this face buckets only the name the engine resolves and sends:
+ *   INVALID_QUERY / 400, the fix being to send the resolved name.
+ *
+ * Either way the zone is never read as UTC: a silent UTC bucket is the
+ * plausible wrong answer this refusal exists to prevent.
+ */
+function refuseZonedDateBucket(zone: string, cause: 'dialect' | 'unresolved', face: string): never {
+  const err = new Error(
+    cause === 'dialect'
+      ? `Date bucketing in the reference timezone '${zone}' is not supported by this backend (${face}). ` +
+        `This is a capability gap in the backend, not a mistake in the query, which is why it answers ` +
+        `NOT_IMPLEMENTED/501. A driver publishes zone-aware bucketing as \`supports.zonedDateBucketing\`; ` +
+        `the engine buckets a non-UTC zone in memory on every driver without it, which is always correct.`
+      : `Date bucketing in the reference timezone '${zone}' is refused: this face buckets only a zone ` +
+        `given as the runtime's resolved IANA area/location name (the resolvedOptions().timeZone of an ` +
+        `Intl.DateTimeFormat built with it, containing '/'), because the database and the runtime read ` +
+        `other spellings differently. Send the resolved name (for example 'America/Chicago' for 'CST'); ` +
+        `the engine does this itself and buckets every other spelling in memory.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = cause === 'dialect' ? StandardErrorCode.enum.NOT_IMPLEMENTED : StandardErrorCode.enum.INVALID_QUERY;
+  err.status = cause === 'dialect' ? 501 : 400;
   throw err;
 }
 
@@ -4054,7 +4094,7 @@ export {
   insertedRowsNotReadBackError, invalidWindowFunctionQueryError, isDeclaredFieldType, isDeferredDdlLockWaitRefusal,
   isEmptyFieldConstraint, isUpsertFenceRefusal, jsonColumnOperatorError, normalizeSqliteDatetimeOutput, nowAnchorOf,
   presentAuditTimestampOutput, reclaimBetterSqlite3, reduceFilterKey, reduceFilterNode, refusalSubtree,
-  refuseAggregateFunction, refuseCrossRowIdentityMerge, refuseDateBucketedGroupBy,
+  refuseAggregateFunction, refuseCrossRowIdentityMerge, refuseDateBucketedGroupBy, refuseZonedDateBucket,
   refuseDistinctAggregateWithoutField, refuseRejectedReferenceAlias, refuseUndeclaredFieldType,
   retiredFilterOperatorError, uniqueProbeNotNullClause, unsupportedAggregationFilterError,
   unsupportedFilterOperatorError,

@@ -48,6 +48,7 @@ let appsFixture: any[] = [];
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
   useParams: () => ({ appName: routeAppNameFixture }),
+  useLocation: () => ({ pathname: '/', search: '' }),
 }));
 
 vi.mock('../../context/NavigationContext', () => ({
@@ -69,7 +70,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
   }),
 }));
 
-// Passthrough primitives, as in the sibling suites — except `Popover`, which
+// Passthrough primitives, as in the sibling suites — except `Sheet`, which
 // here REPORTS the controlled `open` prop and exposes an opener that drives
 // `onOpenChange`. The sibling mocks swallow both, which is fine for asserting a
 // navigation target but makes "the popover closes" unobservable, and staying
@@ -77,7 +78,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 vi.mock('@object-ui/components', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   Button: ({ children, ...p }: any) => <button type="button" {...p}>{children}</button>,
-  Popover: ({ open, onOpenChange, children }: any) => (
+  Sheet: ({ open, onOpenChange, children }: any) => (
     <div data-testid="popover" data-open={String(Boolean(open))}>
       <button type="button" data-testid="open-popover" onClick={() => onOpenChange?.(true)}>
         open inbox popover
@@ -85,8 +86,9 @@ vi.mock('@object-ui/components', async (importOriginal) => ({
       {children}
     </div>
   ),
-  PopoverTrigger: ({ children }: any) => <div>{children}</div>,
-  PopoverContent: ({ children }: any) => <div>{children}</div>,
+  SheetTrigger: ({ children }: any) => <div>{children}</div>,
+  SheetContent: ({ children }: any) => <div>{children}</div>,
+  SheetTitle: ({ children }: any) => <div>{children}</div>,
   Tabs: ({ children }: any) => <div>{children}</div>,
   TabsList: ({ children }: any) => <div>{children}</div>,
   TabsTrigger: ({ children }: any) => <button type="button">{children}</button>,
@@ -200,7 +202,10 @@ describe('A linkless bell notification opens the full inbox (objectui#5190)', ()
       notif({ id: 'n1', action_url: '/showcase_task/t_42' }),
     );
     expect(target).toBe('/apps/crm/showcase_task/t_42');
-    expect(isOpen).toBe(false);
+    // A followed link leaves the panel open beside the page, on the next row
+    // (objectstack#34589); only the linkless fallback, a drill into the full
+    // inbox, closes it.
+    expect(isOpen).toBe(true);
   });
 });
 

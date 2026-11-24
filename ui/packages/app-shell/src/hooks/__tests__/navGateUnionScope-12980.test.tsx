@@ -24,6 +24,11 @@
  * CONTROL: a package app whose entries live in `navigation` asks exactly what
  * it asked before. Outside an app (the home feeds) the gate reads the same
  * union by name, without views (objectstack#29121); it read the whole registry.
+ *
+ * objectstack#34244 — no `requiresObject` is asked by name any more: inside a
+ * package-less app the union is asked in `?names=` presence reads, as outside
+ * one, and a packaged app asks its required names outside the package in one.
+ * A presence read that fails leaves every entry it asked shown.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -61,7 +66,7 @@ const CRM_APP = {
   navigation: [entry('crm_account'), entry('legacy_gone')],
 };
 
-type Behaviour = { failName?: string; failWholeList?: boolean };
+type Behaviour = { failName?: string; failWholeList?: boolean; failNamesRead?: boolean };
 
 function makeAdapter(calls: string[], apps: unknown[], behaviour: Behaviour = {}) {
   return {
@@ -85,6 +90,9 @@ function makeAdapter(calls: string[], apps: unknown[], behaviour: Behaviour = {}
                 ? `${type}?names=${options.names.join(',')}`
                 : type,
           );
+          if (type === 'object' && options?.names && behaviour.failNamesRead) {
+            return Promise.reject(Object.assign(new Error('upstream'), { httpStatus: 502 }));
+          }
           if (type === 'object' && !options?.packageId && !options?.names && behaviour.failWholeList) {
             return Promise.reject(Object.assign(new Error('unavailable'), { httpStatus: 503 }));
           }
@@ -193,9 +201,13 @@ describe('package-less app: the nav gate reads the union of required objects by 
     const scoped = answers(read(), NOTES_APP, APPS);
 
     expect(objectCalls(calls)).not.toContain('object');
-    expect([...objectCalls(calls)].sort()).toEqual(
-      ['object/area_gone', 'object/crm_account', 'object/legacy_gone', 'object/note', 'object/notes_gone'].sort(),
-    );
+    // objectstack#34244 — every name of the union in `?names=` presence reads,
+    // each asked once, and none by name.
+    expect(objectCalls(calls).filter((c) => c.startsWith('object/'))).toEqual([]);
+    const presenceNames = objectCalls(calls)
+      .filter((c) => c.startsWith('object?names='))
+      .flatMap((c) => c.slice('object?names='.length).split(','));
+    expect([...presenceNames].sort()).toEqual(['area_gone', 'crm_account', 'legacy_gone', 'note', 'notes_gone']);
 
     // The same tree, once the whole registry is loaded: the gate reads it.
     await loadWholeRegistry(read);
@@ -205,13 +217,14 @@ describe('package-less app: the nav gate reads the union of required objects by 
     expect(scoped).toEqual(whole);
   });
 
-  it('(b) a by-name read that fails leaves its entry shown, as a failed whole-registry read does', async () => {
+  it('(b) a presence read that fails leaves its entries shown, as a failed whole-registry read does', async () => {
     const calls: string[] = [];
-    const read = mount(NOTES_APP, APPS, calls, { behaviour: { failName: 'notes_gone' } });
-    await waitFor(() => expect(objectCalls(calls)).toContain('object/notes_gone'));
-    await waitFor(() => expect(answers(read(), NOTES_APP, APPS).sidebarAreas).toEqual(['nav_crm_account']));
+    const read = mount(NOTES_APP, APPS, calls, { behaviour: { failNamesRead: true } });
+    await waitFor(() => expect(objectCalls(calls).some((c) => c.startsWith('object?names='))).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(answers(read(), NOTES_APP, APPS).sidebar).toEqual(['nav_note', 'nav_notes_gone']);
+    expect(answers(read(), NOTES_APP, APPS).sidebarAreas).toEqual(['nav_crm_account', 'nav_area_gone']);
     expect(read().gates.checkCapability('object', 'notes_gone')).toBe(true);
     expect(objectCalls(calls)).not.toContain('object');
 
@@ -249,19 +262,22 @@ describe('package app: an area entry requiring an object outside the package is 
   it('(c) the area entry whose object the deployment lacks is hidden; the present one is shown', async () => {
     const calls: string[] = [];
     const read = mount(AREA_APP, [AREA_APP], calls, { url: '/apps/crm/crm_account' });
-    await waitFor(() => expect(objectCalls(calls)).toContain('object/area_gone'));
     await waitFor(() => expect(read().gates.checkCapability('object', 'area_gone')).toBe(false));
 
     expect(answers(read(), AREA_APP, [AREA_APP]).sidebarAreas).toEqual(['nav_sys_user']);
     expect(objectCalls(calls)).not.toContain('object');
+    // objectstack#34244 — asked in the presence read, never by name.
+    expect(objectCalls(calls)).not.toContain('object/area_gone');
+    expect(objectCalls(calls)).toContain('object?names=sys_user,area_gone');
   });
 
-  it('CONTROL (d): a package app whose entries live in `navigation` asks what it asked before, and gates them the same', async () => {
+  it('CONTROL (d): a package app whose entries live in `navigation` asks its package list and one presence read, and gates them the same', async () => {
     const calls: string[] = [];
     const read = mount(CRM_APP, [CRM_APP], calls, { url: '/apps/crm/crm_account' });
     await waitFor(() => expect(read().gates.checkCapability('object', 'legacy_gone')).toBe(false));
 
-    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object/legacy_gone']);
+    // objectstack#34244 — the name outside the package in the presence read, not by name.
+    expect(objectCalls(calls)).toEqual([`object?package=${CRM}`, 'object?names=legacy_gone']);
     expect(answers(read(), CRM_APP, [CRM_APP]).sidebar).toEqual(['nav_crm_account']);
     // A name nobody asked reads as registered inside a package app, as objectui#12811 left it.
     expect(read().gates.checkCapability('object', 'never_asked')).toBe(true);

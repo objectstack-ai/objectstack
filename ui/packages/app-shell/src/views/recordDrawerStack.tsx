@@ -16,16 +16,14 @@
  * the path (each ancestor returns to its level), `←` / `Esc` go back one
  * level, `Esc` at the root closes and `✕` closes the whole stack. `↑` `↓`
  * step through the current level's sibling set — the rows its list showed
- * beside it — and never cross a level. `⤢` maximizes the pane in place at
- * any level (objectstack#27545); the record header's 「Open as full page」
- * opens that record's page with the ancestors as its `?from=` trail. A page
- * the list row's `↗` opened offers 「Collapse to drawer」, which returns to the
- * list with the record open (and the stack, when one is handed back).
+ * beside it — and never cross a level. The bar's one `⤢` opens the level
+ * shown as the full page (objectstack#35854), with the ancestors as its
+ * `?from=` trail; the root's page keeps its list as its origin. The drawer
+ * has no wider state of its own: it is a floating card at its own width.
  *
  * **What survives a reload.** Only the root is addressable: on an object list
  * it is `?recordId=`, which a reload reopens. The levels above it live in
- * component memory (and, across the ⤢ round trip, in the router's history
- * state, consumed once on return), so a reload shows the root record.
+ * component memory, so a reload shows the root record.
  *
  * **`?tab=`.** Every level reads the one record-tab URL parameter, so a level
  * that is left keeps the tab it showed and gets it back when the stack returns
@@ -56,23 +54,23 @@ import {
 } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
-import { ChevronRight, Minimize2 } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import {
   NavigationOverlay,
-  RecordTopBarButton,
-  cn,
   type NavigationOverlayMode,
   type RecordTopBarStepper,
+  RecordHeaderBarContext,
+  type RecordHeaderBar,
+  ObjectIconTile,
+  Skeleton,
 } from '@object-ui/components';
-import { overlayWidthFor } from '@object-ui/plugin-view/core';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
-import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail';
+import { prefetchRelatedCounts, relatedCountTargetsIn } from '@object-ui/plugin-detail/core';
 import { useFilterScope } from '@object-ui/react';
 import {
   RECORD_DETAIL_TAB_PARAM,
-  RECORD_DRAWER_PARAM,
   RECORD_RELATED_ENLARGE_PARAM,
   RECORD_RELATED_ENLARGE_PUSHED_STATE,
   RECORD_TRAIL_PARAM,
@@ -88,6 +86,8 @@ import {
   type RecordDrawerApi,
   type RecordPaneApi,
   type RecordPaneBarApi,
+  recordPaneWidth,
+  recordPreviewWidthKey,
 } from './recordDrawerContext.js';
 
 export {
@@ -112,23 +112,20 @@ export interface RecordDrawerLevel {
    * in place of the list's.
    */
   scope?: string;
+  /**
+   * How many records the level's list matched (objectstack#35853): the M of
+   * 「第 N 条，共 M 条」 when the list has loaded fewer rows than it matched.
+   * Absent: the sibling set's own length.
+   */
+  total?: number;
   /** The record's title, learned when a level above it was opened from it. */
   title?: string;
   /** The `?tab=` the level showed when a level above it was opened. */
   tab?: string | null;
 }
 
-/** The history-state key the ↗ round trip carries the stack under. */
-const RETURN_STATE_KEY = 'recordDrawerReturn';
+/** The history-state key a handed-back stack rides under (consumed once). */
 const RESTORE_STATE_KEY = 'recordDrawerRestore';
-
-/** Where the record page's 「Collapse to drawer」 goes, written by the row's ↗. */
-interface RecordDrawerReturn {
-  pathname: string;
-  search: string;
-  state: unknown;
-  path: RecordDrawerLevel[];
-}
 
 function isLevel(value: unknown): value is RecordDrawerLevel {
   const v = value as RecordDrawerLevel | null | undefined;
@@ -140,14 +137,6 @@ function isLevel(value: unknown): value is RecordDrawerLevel {
 export function readRestoredPath(state: unknown): RecordDrawerLevel[] | undefined {
   const path = (state as Record<string, unknown> | null | undefined)?.[RESTORE_STATE_KEY];
   return Array.isArray(path) && path.length > 0 && path.every(isLevel) ? path : undefined;
-}
-
-function readReturn(state: unknown): RecordDrawerReturn | undefined {
-  const value = (state as Record<string, unknown> | null | undefined)?.[RETURN_STATE_KEY] as
-    | RecordDrawerReturn
-    | undefined;
-  if (!value || typeof value.pathname !== 'string' || !Array.isArray(value.path)) return undefined;
-  return value.path.length > 0 && value.path.every(isLevel) ? value : undefined;
 }
 
 /** History state without the restore key — the restore is consumed once. */
@@ -441,7 +430,7 @@ export function useRecordDrawerStack({
     return {
       onPrevious: index > 0 ? go(current.siblings[index - 1], -1) : undefined,
       onNext: index < current.siblings.length - 1 ? go(current.siblings[index + 1], 1) : undefined,
-      position: { index, total: current.siblings.length },
+      position: { index, total: Math.max(current.total ?? 0, current.siblings.length) },
     };
   }, [current, depth, onRootStep]);
 
@@ -489,6 +478,7 @@ export function RecordStackDrawer({
   storageKey,
   objects,
   mainContent,
+  listObjectName,
   stepScope,
   onClose,
   onOpenAsPage,
@@ -502,6 +492,12 @@ export function RecordStackDrawer({
   objects: ReadonlyArray<unknown>;
   /** The list the pane opens from (`NavigationOverlay.mainContent`). */
   mainContent?: ReactNode;
+  /**
+   * The object of the list's rows (objectstack#36015): the root marks its row
+   * in the list only when it is a record of that object, not a record a lookup
+   * chip opened. Absent ⇒ the root is always the list's row.
+   */
+  listObjectName?: string;
   /**
    * The root level's set by name — the list view it came from — for the
    * counter's tooltip, unless the level names its own set (its group).
@@ -526,6 +522,18 @@ export function RecordStackDrawer({
   // that was not opened with a title is still named by the one it reported.
   const [toggleSlot, setToggleSlot] = useState<HTMLElement | null>(null);
   const [titles, setTitles] = useState<Readonly<Record<string, string>>>({});
+  // objectstack#35593 / objectstack#35853 — the record header draws the
+  // record's name and tags, and its button group, into the bar's record row
+  // (these two slots). While it holds them the bar draws no name of its own.
+  const [headerTitleSlot, setHeaderTitleSlot] = useState<HTMLElement | null>(null);
+  const [headerActionSlot, setHeaderActionSlot] = useState<HTMLElement | null>(null);
+  const [headerClaimed, setHeaderClaimed] = useState(false);
+  // objectstack#36149 / objectstack#36201 — the pane is the side preview: the
+  // record's name first, one labelled action, Edit and the id's copy in `⋯`.
+  const headerBar = useMemo<RecordHeaderBar>(
+    () => ({ titleSlot: headerTitleSlot, actionSlot: headerActionSlot, claim: setHeaderClaimed, preview: true }),
+    [headerTitleSlot, headerActionSlot],
+  );
   const currentObject = current?.objectName;
   const bar = useMemo<RecordPaneBarApi>(
     () => ({
@@ -551,9 +559,48 @@ export function RecordStackDrawer({
       : objectName;
   };
   const shortId = (recordId: string) => `#${recordId.length > 12 ? `${recordId.slice(0, 8)}…` : recordId}`;
-  const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);
+  const knownTitleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title;
+  // An ancestor was the shown record before, so its page reported its name (or
+  // its short id, for a record with none); the short id is left only for an
+  // ancestor never drawn, which a deep link opens under the shown one.
+  const titleOf = (level: RecordDrawerLevel) => knownTitleOf(level) || shortId(level.recordId);
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  // The record row's icon: the object's tile, as the full page draws it
+  // (objectstack#35985 — white glyph on the object's colour, gray without one).
+  const rootDef = current ? (defOf(current.objectName) as { icon?: unknown; color?: unknown } | undefined) : undefined;
+  const rootIcon = typeof rootDef?.icon === 'string'
+    ? <ObjectIconTile icon={rootDef.icon} color={typeof rootDef.color === 'string' ? rootDef.color : undefined} />
+    : null;
+  // objectstack#35853 — the bar's record row: the icon, then the record's
+  // name and tags as the record header draws them into the slot; until it
+  // does (a record with no header, a read in flight), the bar's own name.
+  // objectstack#36235 — the page reports that name once it holds the record
+  // (the short id only for a record with nothing to be named by); while the
+  // read is in flight the row draws a placeholder, never the raw id.
+  const currentTitle = current ? knownTitleOf(current) : undefined;
+  const recordRow = current ? (
+    <>
+      {rootIcon}
+      {!headerClaimed && (currentTitle ? (
+        <span className="min-w-0 truncate text-base font-medium text-foreground" data-record-drawer-title="">
+          {currentTitle}
+        </span>
+      ) : (
+        <Skeleton className="h-5 w-32 shrink-0" data-record-drawer-title-pending="" aria-hidden="true" />
+      ))}
+      <span ref={setHeaderTitleSlot} className="flex min-w-0 items-center empty:hidden" data-record-bar-title="" />
+    </>
+  ) : undefined;
+  const rootScope = current?.scope ?? stepScope;
+  const scopedStepper = stepper && depth === 0 && rootScope
+    // The view's name returns to the list, which is under the drawer: closing is the way back.
+    ? { ...stepper, scope: rootScope, onScope: onClose }
+    : stepper;
+  // objectstack#35853 — the navigation row's left end: one level down the
+  // ancestors, each returning to its level, then the shown record's object;
+  // at the root with a list context nothing (↑ ↓ and 「第 N 条，共 M 条 · 视图名」
+  // say where it is), and with none the object's name.
   const trail = !current ? undefined : depth > 0 ? (
     <nav className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground" data-testid="record-drawer-trail">
       {path.slice(0, depth).map((level, index) => (
@@ -567,23 +614,15 @@ export function RecordStackDrawer({
       ))}
       <span className="truncate" aria-current="page">{labelOf(current.objectName)}</span>
     </nav>
-  ) : (
+  ) : scopedStepper ? undefined : (
     <nav
       aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
       className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
       data-testid="record-drawer-crumb"
     >
-      <button type="button" onClick={onClose} className={cn(crumbClass, 'shrink-0')} data-record-crumb-object="">
-        {pluralLabelOf(current.objectName)}
-      </button>
-      <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 truncate px-1 font-medium text-foreground" aria-current="page">
-        {titleOf(current)}
-      </span>
+      <span className="min-w-0 truncate px-1" data-record-crumb-object="">{pluralLabelOf(current.objectName)}</span>
     </nav>
   );
-  const rootScope = current?.scope ?? stepScope;
-  const scopedStepper = stepper && depth === 0 && rootScope ? { ...stepper, scope: rootScope } : stepper;
   return (
     <NavigationOverlay
       isOpen={open && !!current}
@@ -595,19 +634,22 @@ export function RecordStackDrawer({
       setIsOpen={(next: boolean) => {
         if (!next) onClose();
       }}
-      maximizable
       mainContent={mainContent}
-      activeListRecordId={path[0]?.recordId ?? null}
+      activeListRecordId={path[0] && (listObjectName === undefined || path[0].objectName === listObjectName) ? path[0].recordId : null}
       storageKey={storageKey}
       onBack={depth > 0 ? () => popTo(depth - 1) : undefined}
       trail={trail}
       stepper={scopedStepper}
+      actionSlotRef={setHeaderActionSlot}
+      recordRow={recordRow}
+      onExpand={pane ? () => pane.openAsPage() : undefined}
       toggles={<span ref={setToggleSlot} className="contents" data-record-pane-toggles="" />}
     >
       {() => (
         <RecordDrawerContext.Provider value={api}>
           <RecordPaneContext.Provider value={pane}>
             <RecordPaneBarContext.Provider value={bar}>
+              <RecordHeaderBarContext.Provider value={headerBar}>
               <RecordDrawerUpcomingContext.Provider value={upcoming}>
                 {/* Keyed by level and object: a step to a sibling swaps the record
                     in place (the view follows `recordIdOverride`), while a level
@@ -616,6 +658,7 @@ export function RecordStackDrawer({
                   {current ? renderRecord(current) : null}
                 </Fragment>
               </RecordDrawerUpcomingContext.Provider>
+              </RecordHeaderBarContext.Provider>
             </RecordPaneBarContext.Provider>
           </RecordPaneContext.Provider>
         </RecordDrawerContext.Provider>
@@ -664,24 +707,6 @@ export function expandedRecordPath(
 }
 
 /**
- * The history state the row's ↗ writes on the page it opens: everything the
- * page's 「Collapse to drawer」 needs to return to this host with that record
- * open (objectstack#27545).
- */
-export function recordDrawerReturnState(
-  from: { pathname: string; search: string; state: unknown },
-  path: RecordDrawerLevel[],
-): Record<string, unknown> {
-  const back: RecordDrawerReturn = {
-    pathname: from.pathname,
-    search: from.search,
-    state: withoutRestore(from.state),
-    path,
-  };
-  return { [RETURN_STATE_KEY]: back };
-}
-
-/**
  * Take a ↗ return's restored stack out of the history state, once: it is
  * handed to the host as state of its own, and the history entry is rewritten
  * without it, so a later reload or Back shows the root alone. The host clears
@@ -724,24 +749,52 @@ function siblingRecordPath(pathname: string, from: string, to: string): string |
   return null;
 }
 
+/**
+ * Where a page opened from a list's rows (its `from` siblings) goes to show
+ * the sibling `toId` in place of `fromId`: the same route with the record
+ * segment renamed, the same `?tab=`, an open related tab left behind, and the
+ * history state carried along. `null` when the pathname names no `fromId`
+ * record. The counter's ↓ ↑ navigate here with `replace`; so does the
+ * approvals queue's 「open the next one」 after a decision
+ * (`approval-decision/approvalQueueAdvance.tsx`), with its own `from`.
+ */
+export function siblingRecordStep(
+  location: { pathname: string; search: string; state: unknown },
+  fromId: string,
+  toId: string,
+): { to: { pathname: string; search: string }; state: Record<string, unknown> } | null {
+  const pathname = siblingRecordPath(location.pathname, fromId, toId);
+  if (pathname === null) return null;
+  const pageSearch = new URLSearchParams(location.search);
+  pageSearch.delete(RECORD_RELATED_ENLARGE_PARAM);
+  const qs = pageSearch.toString();
+  return {
+    to: { pathname, search: qs ? `?${qs}` : '' },
+    state: withoutKeys(location.state, [RECORD_RELATED_ENLARGE_PUSHED_STATE]),
+  };
+}
+
 /** What a page opened from a list knows about that list. */
 export interface RecordPageReturn {
   /**
-   * The counter and ↓ ↑ over the list's rows (objectstack#27524, Target 7):
-   * a step replaces the page with the sibling's, the way back following it.
+   * The counter and ↓ ↑ over the list's rows (objectstack#27524, Target 7;
+   * objectstack#35853): a step replaces the page with the sibling's, the way
+   * back following it.
    */
   stepper?: RecordTopBarStepper;
-  /** ⤡ 「Collapse to drawer」: the list, with the record shown open in its pane. */
-  collapse?: () => void;
-  /** The object crumb: the list as it was left, with no record open. */
+  /**
+   * The list the page came from, as it was left — its view, filters, sort,
+   * search and grouping ride in its URL — for the bar's ✕ (objectstack#35854).
+   * Absent on a page opened any other way.
+   */
   toList?: () => void;
 }
 
 /**
- * The rows a list showed, handed in the page's `from` state by a list whose
- * rows open as pages (objectstack#27524): its row click and its record links.
+ * The rows a list showed, handed in the page's `from` state by the list that
+ * opened it (objectstack#27524): its name click and its record links.
  */
-function readFromSiblings(state: unknown): readonly string[] | undefined {
+export function readFromSiblings(state: unknown): readonly string[] | undefined {
   const from = (state as { from?: { siblings?: unknown } } | null | undefined)?.from;
   const siblings = from?.siblings;
   return Array.isArray(siblings) && siblings.every((id) => typeof id === 'string')
@@ -755,118 +808,60 @@ function readFromScope(state: unknown): string | undefined {
   return typeof scope === 'string' && scope !== '' ? scope : undefined;
 }
 
+/** How many records that list matched — the M of 「第 N 条，共 M 条」 (objectstack#35853). */
+function readFromTotal(state: unknown): number | undefined {
+  const total = (state as { from?: { total?: unknown } } | null | undefined)?.from?.total;
+  return typeof total === 'number' && Number.isSafeInteger(total) && total > 0 ? total : undefined;
+}
+
+/** The list's own URL, which the page's ✕ returns to (objectstack#35854). */
+function readFromPathname(state: unknown): string | undefined {
+  const pathname = (state as { from?: { pathname?: unknown } } | null | undefined)?.from?.pathname;
+  return typeof pathname === 'string' && pathname.startsWith('/') ? pathname : undefined;
+}
+
 /**
- * The record page's list context (objectstack#27524, Target 7). A page the
- * list row's ↗ opened carries the way back to that list in its history state
- * (`recordDrawerReturnState`, objectstack#27545), and with it the rows the
- * list showed: it gets the counter, ↓ ↑ and ⤡. A page a list opened as a page
- * (a row click or a record link on an object whose rows open as pages) carries
- * those rows in its `from` state: it gets the counter and ↓ ↑, and no ⤡, since
- * that list opens no pane; so does the pane root's 「Open as full page」.
- * Empty on a page opened any other way — a direct link, a link opened in a
- * new tab, a level above the pane's root — which therefore draws no counter,
- * no ↓ ↑ and no ⤡.
+ * The record page's list provenance (objectstack#35854) and its step set
+ * (objectstack#27524, Target 7; objectstack#35853). A page a list opened — the
+ * record's name, the drawer's ⤢, a record link — carries that list in its
+ * history `from` state: the list's URL, its name, the rows it showed and the
+ * count it matched. History state survives a reload of the tab, so the page
+ * keeps it. The page gets the counter and ↓ ↑ over those rows, and a ✕ that
+ * returns to the list's URL, where the list's own scroll memory puts the
+ * reader back. A page opened any other way — a direct link, a notification, a
+ * search, a new tab — carries none: no counter, no ↓ ↑.
  */
 export function useRecordPageReturn(recordId: string | undefined): RecordPageReturn {
   const location = useLocation();
   const navigate = useNavigate();
   return useMemo<RecordPageReturn>(() => {
-    const back = readReturn(location.state);
-    if (!back) {
-      const siblings = readFromSiblings(location.state);
-      const scope = readFromScope(location.state);
-      const index = recordId && siblings ? siblings.indexOf(recordId) : -1;
-      if (!recordId || !siblings || index < 0) return {};
-      // The `from` state goes along unchanged: the next page has the same list.
-      const go = (nextId: string) => () => {
-        const to = siblingRecordPath(location.pathname, recordId, nextId);
-        if (to === null) return;
-        const pageSearch = new URLSearchParams(location.search);
-        pageSearch.delete(RECORD_RELATED_ENLARGE_PARAM);
-        const qs = pageSearch.toString();
-        navigate(
-          { pathname: to, search: qs ? `?${qs}` : '' },
-          { replace: true, state: withoutKeys(location.state, [RECORD_RELATED_ENLARGE_PUSHED_STATE]) },
-        );
-      };
-      return {
-        stepper: {
-          onPrevious: index > 0 ? go(siblings[index - 1]) : undefined,
-          onNext: index < siblings.length - 1 ? go(siblings[index + 1]) : undefined,
-          position: { index, total: siblings.length },
-          ...(scope ? { scope } : {}),
-        },
-      };
-    }
-    const top = back.path[back.path.length - 1];
-    const collapse = () => {
-      const restoreState = { ...withoutKeys(back.state, []), [RESTORE_STATE_KEY]: back.path };
-      navigate({ pathname: back.pathname, search: back.search }, { state: restoreState });
-    };
-    const toList = () => {
-      const sp = new URLSearchParams(back.search);
-      sp.delete(RECORD_DRAWER_PARAM);
-      const qs = sp.toString();
-      navigate({ pathname: back.pathname, search: qs ? `?${qs}` : '' }, { state: back.state });
-    };
-    if (!recordId || top.recordId !== recordId) return { collapse, toList };
-    const siblings = top.siblings ?? [];
-    const index = siblings.indexOf(recordId);
-    if (index < 0) return { collapse, toList };
+    const listPath = readFromPathname(location.state);
+    const toList = listPath ? () => navigate(listPath) : undefined;
+    const siblings = readFromSiblings(location.state);
+    const scope = readFromScope(location.state);
+    const total = readFromTotal(location.state);
+    const index = recordId && siblings ? siblings.indexOf(recordId) : -1;
+    if (!recordId || !siblings || index < 0) return toList ? { toList } : {};
+    // The `from` state goes along unchanged: the next page has the same list.
     const go = (nextId: string) => () => {
-      const to = siblingRecordPath(location.pathname, recordId, nextId);
-      if (to === null) return;
-      const path = [...back.path.slice(0, -1), { ...top, recordId: nextId }];
-      // At the list's own level the way back opens the record stepped to.
-      let search = back.search;
-      if (back.path.length === 1) {
-        const sp = new URLSearchParams(back.search);
-        sp.set(RECORD_DRAWER_PARAM, nextId);
-        search = `?${sp.toString()}`;
-      }
-      // The sibling opens on the same `?tab=`; an open related tab is the
-      // record's own, and the history entry it pushed is the previous page's.
-      const pageSearch = new URLSearchParams(location.search);
-      pageSearch.delete(RECORD_RELATED_ENLARGE_PARAM);
-      const qs = pageSearch.toString();
-      const state = {
-        ...withoutKeys(location.state, [RECORD_RELATED_ENLARGE_PUSHED_STATE]),
-        [RETURN_STATE_KEY]: { ...back, search, path } satisfies RecordDrawerReturn,
-      };
-      navigate({ pathname: to, search: qs ? `?${qs}` : '' }, { replace: true, state });
+      const step = siblingRecordStep(
+        { pathname: location.pathname, search: location.search, state: location.state },
+        recordId,
+        nextId,
+      );
+      if (step === null) return;
+      navigate(step.to, { replace: true, state: step.state });
     };
     return {
-      collapse,
-      toList,
+      ...(toList ? { toList } : {}),
       stepper: {
         onPrevious: index > 0 ? go(siblings[index - 1]) : undefined,
         onNext: index < siblings.length - 1 ? go(siblings[index + 1]) : undefined,
-        position: { index, total: siblings.length },
-        ...(top.scope ? { scope: top.scope } : {}),
+        position: { index, total: Math.max(total ?? 0, siblings.length) },
+        ...(scope ? { scope } : {}),
       },
     };
   }, [location.state, location.pathname, location.search, recordId, navigate]);
-}
-
-/**
- * The record page's 「Collapse to drawer」 (objectstack#26679), the ⤡ of its
- * top bar (objectstack#27524, Target 7): drawn on a page the list row's ↗
- * opened (objectstack#27545), it returns to that list with the record open.
- */
-export function RecordDrawerReturnLink({ collapse }: { collapse?: () => void } = {}) {
-  const own = useRecordPageReturn(undefined);
-  const { t } = useObjectTranslation();
-  const onCollapse = collapse ?? own.collapse;
-  if (!onCollapse) return null;
-  return (
-    <RecordTopBarButton
-      label={t('detail.collapseToDrawer', { defaultValue: 'Collapse to drawer' })}
-      onClick={onCollapse}
-      data-testid="record-drawer-return"
-    >
-      <Minimize2 className="h-3.5 w-3.5" />
-    </RecordTopBarButton>
-  );
 }
 
 /**
@@ -964,9 +959,10 @@ export function RecordPageDrawerHost({
   );
 
   const rootDef = root ? objects.find((o) => (o as { name?: unknown } | null)?.name === root.objectName) : undefined;
-  // The pane's own width (objectstack#27545): an authored one, else `md`.
-  const rootWidth = (rootDef as { navigation?: { width?: string | number } } | undefined)?.navigation?.width
-    ?? overlayWidthFor('md', rootDef);
+  // The pane's own width (objectstack#27545): an authored width or size
+  // bucket, else the side preview's 460 (`recordPaneWidth`, objectstack#36149).
+  const rootNavigation = (rootDef as { navigation?: unknown } | undefined)?.navigation;
+  const rootWidth = recordPaneWidth(rootNavigation, rootDef);
 
   return (
     <RecordDrawerContext.Provider value={api}>
@@ -975,7 +971,7 @@ export function RecordPageDrawerHost({
         stack={stack}
         open={!!root}
         width={rootWidth}
-        storageKey={root ? `drawer-width:${root.objectName}` : undefined}
+        storageKey={root ? recordPreviewWidthKey(root.objectName, rootNavigation) : undefined}
         objects={objects}
         onClose={close}
         onOpenAsPage={openAsPage}

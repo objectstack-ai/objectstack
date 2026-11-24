@@ -25,7 +25,8 @@
  * the list's own budget and not a smaller number reached by asking nothing.
  */
 import { describe, it, expect, vi, afterEach, beforeAll, beforeEach } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
+import { render, cleanup, screen, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -105,6 +106,19 @@ async function settled(ds: ReturnType<typeof makeDataSource>, finds: number) {
   await new Promise((resolve) => setTimeout(resolve, 15 * PERIODS.length + 200));
 }
 
+/**
+ * objectstack#34208 — the grid asks nothing until a row's actions are reached
+ * for, so each pin first holds that the paint asked nothing, then reaches for
+ * the first row's "⋮" and counts what that one use costs.
+ */
+async function reachRowActions() {
+  expect(explainAsks(calls)).toEqual([]);
+  await userEvent.hover(screen.getAllByTestId('row-action-trigger')[0]);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
 let calls: ExplainDoubleCall[];
 beforeEach(() => {
   __clearRecordCrudVerdictCache();
@@ -120,6 +134,7 @@ describe('a grouped grid asks the row write verdict once per operation (objectst
     const ds = makeDataSource();
     renderGrid(ds, { grouping: { fields: [{ field: 'period_label' }] } });
     await settled(ds, PERIODS.length);
+    await reachRowActions();
 
     expect(explainAsks(calls)).toEqual([
       { operation: 'update', ids: ALL_IDS },
@@ -131,6 +146,7 @@ describe('a grouped grid asks the row write verdict once per operation (objectst
     const ds = makeDataSource();
     renderGrid(ds, {});
     await settled(ds, 1);
+    await reachRowActions();
 
     expect(explainAsks(calls)).toEqual([
       { operation: 'update', ids: ALL_IDS },

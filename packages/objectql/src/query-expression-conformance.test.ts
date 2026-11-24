@@ -52,6 +52,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { isComposedReadableIds } from '@objectstack/spec/data';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
@@ -162,7 +163,16 @@ function makeStubDriver() {
             }
             if (k.startsWith('$')) continue;
             if (v && typeof v === 'object' && '$in' in (v as any)) {
-                if (!(v as any).$in.map(String).includes(String(row[k]))) return false;
+                // A composed `ReadableIds` leaf (the semi-join form of a
+                // single-valued nested-relation condition): the ids of the
+                // parent's rows its scope matches, evaluated in process.
+                const comparand = (v as any).$in;
+                const ids: unknown[] = isComposedReadableIds(comparand)
+                    ? Array.from(storeFor(comparand.object).values())
+                        .filter((parent) => matchesWhere(parent, comparand.scope))
+                        .map((parent) => parent.id)
+                    : comparand;
+                if (!ids.map(String).includes(String(row[k]))) return false;
                 continue;
             }
             // [#7641] Keyed on `$icontains` since the compiler emits it. The
@@ -204,7 +214,10 @@ function makeStubDriver() {
     const driver: any = {
         name: 'memory',
         version: '0.0.0',
-        supports: {} as any,
+        // [#33876] It evaluates a composed `ReadableIds` leaf (above), and says
+        // so: a nested-relation condition on a read verb is refused up front
+        // on a driver without the bit.
+        supports: { readableIdsLeaf: true } as any,
         async connect() {},
         async disconnect() {},
         async checkHealth() { return true; },
@@ -1232,8 +1245,9 @@ describe('#4226 — sort / select / expand on the list path (real ObjectQL engin
         // INVALID_FIELD, that verdict has started judging comparand VALUES,
         // which is a different (and wrong) gate. [#20745] The engine refused
         // the form itself for a while — no driver served it. [#20802] It is
-        // SERVED now: the engine reads the related object with the condition
-        // and hands the driver `$in` on its ids, so both doors answer the rows
+        // SERVED now: the engine plans the related object's read with the
+        // condition and hands the driver `$in` on a semi-join leaf scoped by
+        // it, so both doors answer the rows
         // the undotted `{ project_id: 'p1' }` control answers.
         const byFk: any = await protocol.findData({ object: 'showcase_task', query: { where: { project_id: 'p1' } } });
         const wanted = byFk.records.map((r: any) => r.id).sort();

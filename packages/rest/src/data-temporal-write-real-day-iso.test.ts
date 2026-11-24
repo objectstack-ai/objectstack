@@ -68,6 +68,18 @@
  * and the memory driver's half is
  * `packages/drivers/driver-memory/src/memory-20671-time-write-zone-less.test.ts`.
  *
+ * ## [#34938] A period key on a temporal field
+ *
+ * `{current_iso_week}` resolves to an ISO week key (`2026-W47`), which is
+ * text. Measured on SQLite through `engine.find` before the comparand door
+ * judged it as written, the clock at 2026-11-19: `placed_on` / `opened_at`
+ * `$eq` and `$gte` answered 200 `[]` and `$lt` answered every row, while the
+ * literal key was already refused. (InMemoryDriver answered as SQLite.) Each is
+ * `400 INVALID_FILTER` naming the field now, before any read, on `slot` too;
+ * the key still finds its row on a text field, and `{current_week_start}`
+ * still resolves on a date field. The engine-level pin is
+ * `packages/objectql/src/engine-temporal-comparand-door.test.ts`.
+ *
  * ## The dialect axis of THIS file
  *
  * The SQLite cell always runs. The PostgreSQL cell runs where
@@ -80,7 +92,7 @@
  * `packages/drivers/driver-memory/src/memory-20525-temporal-write-real-day-iso.test.ts`.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -368,6 +380,47 @@ for (const cell of CELLS) {
         expect(await ids({ opened_at: { $eq: '2026-07-15 14:00' } }), 'zone-naive ISO is UTC, not the host zone').toEqual(['q-jul15']);
         expect(await ids({ opened_at: { $gte: '2026-03-02', $lt: '2026-03-03' } }), 'bare days as bounds').toEqual(['q-mar2']);
         expect(await ids({ placed_on: { $eq: '2026-03-02' } }), 'the day February 30 was rolled onto').toEqual(['q-mar2']);
+      });
+
+      it('[#34938] {current_iso_week} on a date, a datetime and a time field is 400 INVALID_FILTER naming the field, before any read — and it still finds the week-47 row on a text field', async () => {
+        // The text column holds week keys; the temporal columns hold the same week's day, instant and wall clock.
+        for (const [id, week, placed_on, opened_at, slot] of [
+          ['k-w47', '2026-W47', '2026-11-19', '2026-11-19T10:00:00Z', '10:00'],
+          ['k-w46', '2026-W46', '2026-11-12', '2026-11-12T10:00:00Z', '09:00'],
+        ] as const) {
+          const created = await call('POST', '/api/v1/data/:object', { object: OBJECT }, { id, customer_id: week, placed_on, opened_at, slot });
+          expect(created.status, JSON.stringify(created.body)).toBe(201);
+        }
+        const query = (where: Record<string, unknown>) =>
+          call('POST', '/api/v1/data/:object/query', { object: OBJECT }, { where: { $and: [{ customer_id: { $in: ['2026-W47', '2026-W46'] } }, where] } });
+        // The process clock the resolver reads, on a Thursday of ISO week 47. Date only: the SQL pool keeps real timers.
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-11-19T12:00:00.000Z'));
+        try {
+          const before = reads.n;
+          for (const field of ['placed_on', 'opened_at', 'slot'] as const) {
+            for (const token of ['{current_iso_week}', '${current_iso_week}']) {
+              for (const op of ['$eq', '$lt', '$gte'] as const) {
+                const res = await query({ [field]: { [op]: token } });
+                expect(res.status, `${field} ${op} ${token}: ${JSON.stringify(res.body)}`).toBe(400);
+                expect(res.body.code, `${field} ${op} ${token}`).toBe('INVALID_FILTER');
+                expect(JSON.stringify(res.body), `${field} ${op} ${token} names the field`).toContain(field);
+              }
+            }
+          }
+          expect(reads.n - before, 'no read of the object — every refusal precedes the driver').toBe(0);
+
+          const ids = async (where: Record<string, unknown>) => {
+            const res = await query(where);
+            expect(res.status, `${JSON.stringify(where)}: ${JSON.stringify(res.body)}`).toBe(200);
+            return (res.body.records as Array<{ id: string }>).map((r) => r.id).sort();
+          };
+          expect(await ids({ customer_id: { $eq: '{current_iso_week}' } }), 'text $eq').toEqual(['k-w47']);
+          expect(await ids({ customer_id: { $contains: '${current_iso_week}' } }), 'text $contains').toEqual(['k-w47']);
+          expect(await ids({ placed_on: { $gte: '{current_week_start}' } }), 'a date macro on a date field').toEqual(['k-w47']);
+        } finally {
+          vi.useRealTimers();
+        }
       });
     },
   );

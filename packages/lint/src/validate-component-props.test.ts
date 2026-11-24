@@ -105,8 +105,8 @@ describe('validateComponentProps — undeclared keys', () => {
   });
 
   // #23650 — `PageHeaderProps.showStar` is a retiredKey tombstone, the
-  // `breadcrumb` route one key over: the reference console draws no star, and
-  // the record's favorites entry is the header's ⋯ menu. It replaces the
+  // `breadcrumb` route one key over: the star follows the host's favorites
+  // toggle, never metadata. It replaces the
   // acceptance this file used to pin for `showStar: false` (#6776, below).
   it('refuses a retired page-header `showStar` as an error carrying the prescription, for `true` and `false`', () => {
     for (const showStar of [true, false]) {
@@ -119,7 +119,7 @@ describe('validateComponentProps — undeclared keys', () => {
       expect(f.severity).toBe('error');
       expect(f.path).toBe('pages[0].regions[0].components[0].properties.showStar');
       expect(f.message).toContain('`page:header` property `showStar` was removed in @objectstack/spec 18');
-      expect(f.message).toContain('the record\'s favorites entry is the header\'s ⋯ menu, and metadata does not control it');
+      expect(f.message).toContain('the console draws the record\'s star from the host\'s favorites toggle, never from metadata');
     }
   });
 

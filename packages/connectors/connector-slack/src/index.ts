@@ -16,6 +16,8 @@
 
 export {
     createSlackConnector,
+    createSlackClientService,
+    type SlackClientService,
     type SlackConnectorOptions,
     type SlackConnectorBundle,
     type SlackPostMessageInput,

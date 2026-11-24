@@ -138,8 +138,9 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       ],
       approvals: { node: { currentUserId: 'u_1' } },
     };
-    // A declared strip, so the `record:highlights` node is among them (the
-    // strip is the declared list only, objectstack#28868).
+    // Declared highlights and a stage field: since objectstack#35891 the page
+    // still emits neither `record:highlights` nor `record:path` (the strip
+    // sub-builder that emits them is parsed in the next case).
     const filesDef = { ...leadDef, highlightFields: ['email'], enable: { files: true } };
     // One page: the synthesizer emits no reference rail any more
     // (objectstack#27055), so every branch it has co-occurs here.
@@ -161,8 +162,6 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       'record:approvals',
       'record:attachments',
       'record:details',
-      'record:highlights',
-      'record:path',
       'record:related_list',
     ]);
     for (const node of nodes) {
@@ -231,10 +230,11 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
       related: [{ objectName: 'task', relationshipField: 'lead_id', title: 'Tasks' }],
     });
     const parsed = PageTabsProps.parse(tabs.properties) as any;
-    expect(parsed.items.map((i: any) => i.label)).toEqual(['Details', 'Activity stream', 'Related']);
-    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'timeline', 'related']);
+    // objectstack#35595 — 概览, a tab per side list; 动态 closes the strip (objectstack#34590).
+    expect(parsed.items.map((i: any) => i.label)).toEqual(['Overview', 'Tasks', 'Activity stream']);
+    expect(parsed.items.map((i: any) => i.value)).toEqual(['details', 'related:task.lead_id', 'timeline']);
     expect(parsed.items[0].children[0].type).toBe('record:details');
-    expect(parsed.items[2].children[0].properties.objectName).toBe('task');
+    expect(parsed.items[1].children[0].properties.objectName).toBe('task');
   });
 
   it('the tab items survive the whole-page parse the server runs', () => {
@@ -243,7 +243,8 @@ describe('the accepted shape still carries the semantics (objectui#4232)', () =>
     });
     const page = PageSchema.parse(body) as any;
     const tabs = page.regions[0].components.find((c: any) => c.type === 'page:tabs');
-    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'timeline', 'related']);
-    expect(tabs.properties.items[2].children[0].properties.relationshipField).toBe('lead_id');
+    // objectstack#35595 — a tab per side list; 动态 closes the strip (objectstack#34590).
+    expect(tabs.properties.items.map((i: any) => i.value)).toEqual(['details', 'related:task.lead_id', 'timeline']);
+    expect(tabs.properties.items[1].children[0].properties.relationshipField).toBe('lead_id');
   });
 });

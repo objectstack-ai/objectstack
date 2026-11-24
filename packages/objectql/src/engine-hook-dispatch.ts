@@ -40,7 +40,7 @@
  * move.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30415),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  */
@@ -71,7 +71,13 @@ export interface HookDispatchHost {
   transaction: ObjectQL['transaction'];
 }
 
-/** [#22782] The unit {@link opensAfterAbortUnit} asked for; `write` re-enters the door, which joins it. */
+/**
+ * [#22782] The unit {@link opensAfterAbortUnit} asked for. `write` is the write
+ * door's engine body — the executor `insert`, `update` and `delete` each hand
+ * the middleware chain (#35142, #35167) — so the chain, the authorization gate
+ * included, runs before the unit opens and after it closes, and the `before*`
+ * hooks' `ctx.api` writes, the row and the `after*` chain run inside it.
+ */
 export async function inAfterAbortUnit<T>(
   this: Pick<HookDispatchHost, 'transaction'>,
   write: () => Promise<T>,

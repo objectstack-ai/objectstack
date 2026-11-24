@@ -26,6 +26,15 @@
  * its loading state across the waits, this one keeps rendering throughout and
  * simply fills the value in if and when an attempt succeeds.
  *
+ * ## One request per cold load (objectstack#35455)
+ *
+ * On a device's first visit `seedTenantLanguage()` asks this endpoint before
+ * React mounts, and its request usually settles inside the seed's race —
+ * before this provider mounts, so the in-flight sharing above no longer
+ * covers it. The boot read's first attempt therefore takes that settled answer
+ * (`takeSettledSeedAnswer`), once, when it answered this very request for the
+ * browser's current owner; otherwise it asks as before.
+ *
  * ## Read again after the signed-in user's own row changes (objectstack#27498)
  *
  * The answer's `locale` is the caller's language: their own `sys_user.locale`
@@ -66,16 +75,21 @@
  * one still in flight under the old language: the in-flight key includes the
  * headers.
  *
- * ## With no choice, state the app's declared default (objectstack#33231)
+ * ## With no choice, state a supported browser language (objectstack#33985, objectstack#34392)
  *
- * The browser's header answered the `Accept-Language` rung for a user with no
- * `sys_user.locale`, so both the dates here and the language seed this read
- * refreshes followed the browser, never the app's declared default (discovery
- * `locale.default`). With no explicit choice on the device, this read states
- * that default instead, the same value `seedTenantLanguage()` states, so the
- * two still share one request on a first visit. Only when no default is
- * served (discovery failed, or never asked, as outside the console's boot)
- * does the browser's own header go out.
+ * With no explicit choice on the device, this read states the browser's
+ * language when the app lists it in discovery `locale.supported` — the rung
+ * the maintainer's ruling (letter B, record 6915665005) puts right below the
+ * user's own `sys_user.locale`. It is the same value `seedTenantLanguage()`
+ * states (`loadPreferredLocale`), so the two still share one request on a
+ * first visit.
+ *
+ * Otherwise it states nothing: the app does not list the browser's language,
+ * or discovery failed or was never asked (outside the console's boot). The
+ * browser's own header goes out, and the server answers it only when the app
+ * lists that language; else the organization's `localization.locale`, then
+ * the app's declared default, decide — the rungs the same ruling puts below
+ * the browser's language, which only the server can read.
  */
 import { useEffect, useState } from 'react';
 import {
@@ -86,7 +100,7 @@ import {
   type LocalizationValue,
 } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount, useAuth } from '@object-ui/auth';
-import { startedAppDefaultLocale } from './languageSeed';
+import { startedPreferredLocale, takeSettledSeedAnswer } from './languageSeed';
 import { useDataInvalidation } from '@object-ui/react';
 import {
   HttpFetchError,
@@ -126,8 +140,8 @@ export function LocalizationFetchProvider({
   // Bumps on every write to the signed-in user's own row (objectstack#27498).
   const userRowWrites = useDataInvalidation(userId ? 'sys_user' : undefined, userId);
   // The device's chosen UI language, stated as this read's `Accept-Language`
-  // (objectstack#27625); none chosen, the app's declared default is stated
-  // inside the effect (objectstack#33231).
+  // (objectstack#27625); none chosen, a supported browser language is stated
+  // inside the effect (objectstack#33985), else nothing (objectstack#34392).
   const { language } = useObjectTranslation();
   const statedLanguage = readStoredLanguage() ? language : undefined;
 
@@ -140,12 +154,13 @@ export function LocalizationFetchProvider({
 
     // Read when the effect runs, not at render: `seedTenantLanguage()` starts it
     // before the app mounts, and nothing in it is React state.
-    const appDefaultRead = statedLanguage ? null : startedAppDefaultLocale();
+    const preferredRead = statedLanguage ? null : startedPreferredLocale();
 
     void (async () => {
-      // No explicit choice ⇒ the app's declared default decides the rung below
-      // the user's own locale; none served, the browser's own header goes out.
-      const preference = statedLanguage ?? (appDefaultRead ? await appDefaultRead : undefined);
+      // No explicit choice ⇒ a supported browser language decides the rung
+      // below the user's own locale; otherwise the browser's own header goes
+      // out and the server's deployment default decides (objectstack#34392).
+      const preference = statedLanguage ?? (preferredRead ? await preferredRead : undefined);
       if (cancelled) return;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         // Whose answer this attempt will be (objectui#10193). The request
@@ -162,14 +177,21 @@ export function LocalizationFetchProvider({
           // before — including `Retry-After` — so the retry policy below is
           // untouched, and a shared 503 reaches BOTH callers rather than
           // resolving one of them empty.
-          const json = await sharedGetJson<MeLocalizationResponse>(endpoint, {
+          const init: RequestInit = {
             credentials: 'include',
             headers: {
               Accept: 'application/json',
               ...(preference ? { 'Accept-Language': preference } : {}),
             },
             signal: reread?.signal,
-          });
+          };
+          // The boot read's first attempt takes the seed's answer to this very
+          // request when it settled earlier in this page load
+          // (objectstack#35455); a re-read never does.
+          const handed = !reread && attempt === 0
+            ? (takeSettledSeedAnswer(endpoint, init) as MeLocalizationResponse | null)
+            : null;
+          const json = handed !== null ? handed : await sharedGetJson<MeLocalizationResponse>(endpoint, init);
           // Refresh the UI-language seed cache (objectui#4035) — the
           // "revalidate" half of stale-while-revalidate. This boot has already
           // committed to a language; what this write buys is the NEXT one, so a

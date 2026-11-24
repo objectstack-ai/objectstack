@@ -24,7 +24,7 @@ import type { DashboardComponentSchema, DashboardWidgetSchema, I18nLabel, PageVa
 import { liftLegacyGlobalFilterDefault } from '@object-ui/types';
 import { DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName } from '@objectstack/spec/data';
 import { DATE_RANGE_PRESETS, DashboardSchema as SpecDashboardSchema } from '@objectstack/spec/ui';
-import { resolveDateMacros } from './date-macros.js';
+import { resolveDateMacros, resolvePeriodKeyTokens } from './date-macros.js';
 
 /** Reserved filter name for the dashboard's built-in date range. */
 export const DATE_RANGE_FILTER_NAME = 'dateRange';
@@ -383,6 +383,32 @@ function normalizeDateDefault(type: DashboardFilterDef['type'], defaultValue: un
 }
 
 /**
+ * Resolve a non-date filter's default when it is a period-key placeholder
+ * (`PERIOD_KEY_TOKENS` in `@objectstack/spec/data`): `{current_iso_week}`
+ * seeds the filter with the current ISO week's key, `2026-W47`, each time the
+ * defs are resolved, which is each time the dashboard opens.
+ *
+ * Resolved HERE, before the value seeds the filter variable, because the
+ * variable is what the control displays: seeding the token would show the
+ * text `{current_iso_week}` in the filter box, and a user who edits it would
+ * be editing a placeholder rather than a week. Resolved, the box shows the
+ * key, the user can change it, and the condition built from it is the
+ * `$contains` any typed text gets.
+ *
+ * A `date` / `dateRange` default is never resolved here: a week key is not a
+ * date. The spec refuses the placeholder on a date filter, and one that
+ * reaches this module anyway stays as written, which `buildFilterCondition`
+ * skips with a warning rather than compare a date against it. A literal key
+ * (`'2026-W47'`), any other placeholder and any non-string default pass
+ * through unchanged.
+ */
+function resolvePeriodKeyDefault(type: DashboardFilterDef['type'], defaultValue: unknown): unknown {
+  if (type === 'date' || type === 'dateRange') return defaultValue;
+  if (typeof defaultValue !== 'string') return defaultValue;
+  return resolvePeriodKeyTokens(defaultValue);
+}
+
+/**
  * Normalize a filter's static `options` declaration to `{ value, label }`
  * pairs — the @objectstack/spec `GlobalFilterSchema.options` form, and the
  * only form this function emits. Rendering an un-normalized option crashes
@@ -562,8 +588,9 @@ export function resolveDashboardFilterDefs(
       optionsFrom: f.optionsFrom,
       // framework#4475 — same preset-name lifting the built-in `dateRange`
       // above already does; see normalizeDateDefault for why a bare string is
-      // the only thing an author can declare here.
-      defaultValue: normalizeDateDefault(type, f.defaultValue),
+      // the only thing an author can declare here. A non-date default that is
+      // `{current_iso_week}` seeds the resolved key (resolvePeriodKeyDefault).
+      defaultValue: resolvePeriodKeyDefault(type, normalizeDateDefault(type, f.defaultValue)),
       targetWidgets: f.targetWidgets,
     });
   }
@@ -666,6 +693,81 @@ export function buildFilterCondition(
 }
 
 /**
+ * The operators one bound field takes when it is stored as a JSON column, or
+ * `undefined` for every other field (and for a field whose definition is not
+ * known). The renderer answers it with `jsonColumnFilterOperators` from
+ * `@object-ui/components`, the one helper every filter surface reads, over the
+ * field definitions of the widget's object: this module does not restate that
+ * operator table, and `@object-ui/core` cannot import the components package.
+ */
+export type DashboardFilterJsonColumnOperators = (field: string) => readonly string[] | undefined;
+
+/** A filter whose value names members (`select` / `lookup`): `=` or `$in` today. */
+function isMemberFilter(def: DashboardFilterDef): boolean {
+  return def.type === 'select' || def.type === 'lookup';
+}
+
+/**
+ * Lower a `select` / `lookup` filter bound to a field stored as a JSON column.
+ *
+ * A field holding several values takes `contains` (`$contains`, ONE member per
+ * condition) and the empty checks; `=` and `$in` are refused. So one selected
+ * member is `{ field: { $contains: member } }`, and several (any of them) are
+ * `$or` over one `$contains` each.
+ *
+ * Only a field that takes `contains` reaches here. A field stored as a JSON
+ * column without it (a structured value such as `json` or `address`, empty
+ * checks only) holds no members, so the caller keeps the `=` / `$in` lowering
+ * for it, as before.
+ */
+function buildJsonColumnMemberClause(
+  field: string,
+  value: unknown,
+): Record<string, unknown> | undefined {
+  const members = (Array.isArray(value) ? value : [value]).filter(
+    (m) => m !== undefined && m !== null && m !== '',
+  );
+  if (members.length === 0) return undefined;
+  if (members.length === 1) return { [field]: { $contains: members[0] } };
+  return { $or: members.map((m) => ({ [field]: { $contains: m } })) };
+}
+
+/**
+ * The names of the `select` / `lookup` filters that hold a value AND bind this
+ * widget — the filters whose lowering depends on the bound field's definition
+ * (see `jsonColumnOperators` on {@link buildWidgetScopedFilter}). Empty when
+ * no such filter applies, so a renderer that waits for the definition before
+ * querying waits only when the answer can change the query.
+ */
+export function boundMemberFilterNames(
+  widget: Pick<DashboardWidgetSchema, 'id' | 'filterBindings'>,
+  defs: DashboardFilterDef[],
+  values: Record<string, unknown>,
+): string[] {
+  const names: string[] = [];
+  for (const def of defs) {
+    if (!isMemberFilter(def) || isEmptyValue(def, values[def.name])) continue;
+    if (resolveBoundField(widget, def)) names.push(def.name);
+  }
+  return names;
+}
+
+/**
+ * The dashboard filters that never reach this widget's query: each `def` the
+ * widget is not bound to, in `defs` order. It asks the binding
+ * {@link buildWidgetScopedFilter} asks (`resolveBoundField`), so a card's
+ * "this filter does not apply here" mark and the query the card sends cannot
+ * disagree: a filter listed here contributes no condition for any value, and
+ * one left out contributes one for every value it lowers.
+ */
+export function dashboardFiltersNotApplied(
+  widget: Pick<DashboardWidgetSchema, 'id' | 'filterBindings'>,
+  defs: DashboardFilterDef[],
+): DashboardFilterDef[] {
+  return defs.filter((def) => resolveBoundField(widget, def) === undefined);
+}
+
+/**
  * Resolve which of the widget's fields a filter binds to.
  * Returns `undefined` when the widget is not bound to this filter.
  *
@@ -700,12 +802,21 @@ function resolveBoundField(
  * field, so a typo surfaces as a visible (fixable) empty widget rather than
  * being silently dropped. Callers omit `knownFields` when metadata is not
  * (yet) available, preserving the previous behaviour.
+ *
+ * `jsonColumnOperators` answers, per bound field, the operators the field
+ * takes when it is stored as a JSON column (a field holding several values,
+ * `multiple: true` or a `multiselect`-like type). A `select` / `lookup` filter
+ * bound to such a field is lowered by {@link buildJsonColumnMemberClause}
+ * instead of to `=` / `$in`, which the server refuses there. Callers omit it
+ * when the field definitions are not known, which keeps the `=` / `$in`
+ * lowering of {@link buildFilterCondition}.
  */
 export function buildWidgetScopedFilter(
   widget: Pick<DashboardWidgetSchema, 'id' | 'filterBindings'>,
   defs: DashboardFilterDef[],
   values: Record<string, unknown>,
   knownFields?: ReadonlySet<string>,
+  jsonColumnOperators?: DashboardFilterJsonColumnOperators,
 ): Record<string, unknown> | undefined {
   const conditions: Record<string, unknown>[] = [];
 
@@ -723,6 +834,11 @@ export function buildWidgetScopedFilter(
             `map it with filterBindings: { "${def.name}": "<field>" } or opt out with false`,
         );
       }
+      continue;
+    }
+    if (isMemberFilter(def) && jsonColumnOperators?.(field)?.includes('contains')) {
+      const clause = buildJsonColumnMemberClause(field, value);
+      if (clause) conditions.push(clause);
       continue;
     }
     const condition = buildFilterCondition(def, value);

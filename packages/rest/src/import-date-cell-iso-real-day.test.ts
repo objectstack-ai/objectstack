@@ -248,7 +248,8 @@ describe.each(HOST_ZONES)('[#20534] /import date cells, host TZ=$tz', ({ tz, jul
   it('round-trips the export shape: an exported row re-imports as the same day and instant', async () => {
     await ctx.engine.insert(OBJECT, { id: 'src', d: '2026-07-15', dt: '2026-07-15T10:00:00.000Z', t: '10:00:00' });
     const exported = await ctx.exportCsv();
-    const lines = exported._text().split('\r\n').filter((l: string) => l.length > 0);
+    // [#34163] Past the one UTF-8 byte-order mark a csv export opens with.
+    const lines = exported._text().replace(/^\uFEFF/, '').split('\r\n').filter((l: string) => l.length > 0);
     expect(lines[0]).toBe('ID,Day,At,Clock');
     expect(lines[1]).toBe('src,2026-07-15,2026-07-15 10:00:00,10:00:00');
 

@@ -2,43 +2,51 @@
  * ConsoleLayout
  *
  * Root layout shell for the console application. Composes the AppShell
- * with the UnifiedSidebar, header, and main content area.
- * Includes the global floating chatbot (FAB) widget.
- * Sets navigation context to 'app' for app-specific routes.
+ * with the UnifiedSidebar, header, and main content area, and hosts the AI
+ * assistant's drawer (objectstack#34608: the right rail, opened by the top-bar
+ * robot). Sets navigation context to 'app' for app-specific routes.
  * @module
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { AppShell } from '@object-ui/layout';
-import { useIsMobile } from '@object-ui/components';
+import { cn } from '@object-ui/components';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 
-// Lightweight FAB stub — the heavy chat chunk graph (plugin-chatbot,
-// shiki, streamdown, mermaid, @ai-sdk, ~20MB) only downloads on first
-// hover/click. See ConsoleChatbotFab.tsx.
-import { ConsoleChatbotFab } from './ConsoleChatbotFab.js';
-import { useChatDockState, ChatDockPanel, ChatDockMobileSheet } from './ChatDock.js';
+// The drawer's chrome is eager; the chat graph (plugin-chatbot, shiki,
+// streamdown, mermaid, @ai-sdk) loads with its body, when it first opens.
+import { useConsoleChatDock } from './useConsoleChatDock.js';
+import { ChatDockControlProvider } from './chatDockControl.js';
 import { consoleChatSurface } from './chatSurfaceContext.js';
-import {
-  matchChatDockShortcut,
-  rememberDockReturnLocation,
-  DOCK_EXPANDED_STORAGE_KEY,
-} from './chatDockState.js';
 import { DraftPreviewBar } from '../preview/DraftPreviewBar.js';
 import { UnpublishedAppBar } from '../preview/UnpublishedAppBar.js';
 import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
+import { PhoneAppNavBar, isPhoneTabRoute } from './PhoneAppNavBar.js';
+import { PhoneAppHomeSlotProvider } from './PhoneAppHome.js';
+import { PhonePageBarProvider } from './PhonePageBar.js';
+import { useLastApp } from '../context/LastAppProvider.js';
+import { rememberAppReturnPage } from '../utils/appReturnPage.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { appAddressSegment } from '../utils/appRoute.js';
+import { ShellPageActionsScope, ShellSidebarExpandFallback } from './ShellPageActions.js';
+import { ChromeBannerHost } from './chromeBannerHost.js';
+import { ConnectionBanner } from './ConnectionBanner.js';
+import { useGoHomeShortcut } from '../chrome/goHomeShortcut.js';
+import { useHomePath } from '../hooks/useHomePath.js';
 import { AppHeader } from './AppHeader.js';
+import { DesignModeProvider, useDesignModeController } from './designMode.js';
+import { DesignModeBar } from './DesignModeBar.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
 import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
-import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
+import { isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
+import { SIDEBAR_TOGGLE_CHORD, primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
 import { servedObjectLabel } from '../hooks/servedObjectLabel.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { CommandPaletteProvider } from '../context/CommandPaletteProvider.js';
-import { confirmUnsavedLeave } from '../chrome/unsavedEdits.js';
 import {
   useAdvertiseShortcut,
   type AdvertisedShortcut,
@@ -75,16 +83,18 @@ interface ConsoleLayoutProps {
 }
 
 /**
- * `⌘B` / `Ctrl+B` toggles the sidebar. The listener is `SidebarProvider`'s own
- * (`@object-ui/components`' synced Shadcn primitive, mounted by `AppShell`):
- * it matches `b` with ⌘ or Ctrl, and a bare `B` does nothing. That code is not
- * ours to edit, so the shortcut is advertised from inside the provider it
- * belongs to, by {@link ConsoleLayoutInner} (objectui#11674).
+ * `⌘B` / `Ctrl+B` toggles the sidebar: it matches `b` with ⌘ or Ctrl, and a
+ * bare `B` does nothing. From 768 px up the console sidebar answers it as a
+ * press on its expand / collapse button (`useConsoleSidebarRailPanel`, ruling
+ * 7074574380 on objectstack#36112); on a phone the listener is
+ * `SidebarProvider`'s own (`@object-ui/components`' synced Shadcn primitive,
+ * mounted by `AppShell`). The shortcut is advertised from inside that
+ * provider, by {@link ConsoleLayoutInner} (objectui#11674).
  */
 const TOGGLE_SIDEBAR_SHORTCUT: AdvertisedShortcut = {
   id: 'toggle-sidebar',
   group: 'navigation',
-  chord: { key: 'b', mod: true },
+  chord: SIDEBAR_TOGGLE_CHORD,
   label: (t: ShortcutLabelTranslate) => t('console.shortcuts.toggleSidebar'),
 };
 
@@ -128,14 +138,8 @@ function SkipToContentLink({ targetRef }: { targetRef: React.RefObject<HTMLDivEl
   );
 }
 
-/**
- * Is `pathname` a record page, the console route `RecordDetailView` draws:
- * `/apps/APP/OBJECT/record/ID`, or the same record on a named record page
- * (`.../page/PAGE`)? The record's edit form (`.../edit`) is not one.
- */
-export function isRecordPagePath(pathname: string): boolean {
-  return /^\/apps\/[^/]+\/[^/]+\/record\/[^/]+(?:\/page\/[^/]+)?\/?$/.test(pathname);
-}
+// objectstack#35981 — shared with the boot frame, which draws the same shape.
+export { isAppDocsPath, isRecordPagePath } from './consoleRoutePaths.js';
 
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {
@@ -160,7 +164,7 @@ export function ConsoleLayout({
   // cookie: a narrow window's first frame is already the rail.
   useState(primeConsoleSidebarOpen);
   // Runtime, server-pushed AI gating (shared with the `/ai` route guard and the
-  // top-bar AI link): show the chatbot only when the server actually serves AI,
+  // top-bar robot): the drawer exists only when the server actually serves AI,
   // or when an explicit `VITE_AI_BASE_URL` opt-in points at an external server.
   const { enabled: showChatbot } = useAiSurfaceEnabled();
   // ADR-0057 P2: the AI-Studio-off downgrade (a `build` default falls back to
@@ -172,22 +176,10 @@ export function ConsoleLayout({
   // objectui#13130 — the skip link's target (see `SkipToContentLink`).
   const mainContentRef = useRef<HTMLDivElement>(null);
 
-  // ADR-0057 P3 — the right-docked chat rail, the console's canonical chat
-  // presentation (rollout complete; the FAB below is its launcher). Gated on
-  // the same AI-surface signal as every entry point, so it renders nothing on
-  // OSS / agent-less runtimes. The expanded state round-trips through
-  // sessionStorage so the rail survives in-tab navigation, and so the `/ai`
-  // page's collapse-to-dock affordance can arm it before navigating back here
-  // (the maximize ⇄ tuck loop).
-  const dock = useChatDockState({ persistExpandedKey: DOCK_EXPANDED_STORAGE_KEY });
-  const dockEnabled = showChatbot;
-  const navigate = useNavigate();
   const location = useLocation();
-  // Under `md` there is no horizontal room for the rail — the dock presents as
-  // a bottom sheet instead (same conversation, chrome only). The hook (not the
-  // rail's `hidden md:` classes alone) decides which one MOUNTS, so the phone
-  // never pays for an invisible rail's chat graph.
-  const isMobile = useIsMobile();
+  // ⌘⇧H home from any app page, at every width (objectui#12605).
+  const homePath = useHomePath();
+  useGoHomeShortcut(true, homePath);
   // objectstack#28483 (ruling letter A) — on a phone a record page has one
   // bar, its own top bar (「‹ <object plural>」 and the stepper), so the app
   // bar is not mounted there. The app menu, search, notifications and account
@@ -196,6 +188,36 @@ export function ConsoleLayout({
   // page draws its phone face at, so the two never disagree for a frame.
   const phone = usePhoneViewport();
   const recordPageOwnsTopBar = phone && isRecordPagePath(location.pathname);
+  // objectstack#35882 — on a phone the bottom bar (Home, Notifications,
+  // Approvals, search) is drawn on the three pages it opens and on no page
+  // below them: a list, a record or a form has the page to itself, and 「‹」 at
+  // the top left goes back. The route slot leaves the bar's height free at its
+  // end.
+  const phoneNavBar = phone && isPhoneTabRoute(location.pathname);
+  // objectstack#35424 — a docs page draws its own left column (the app's
+  // books and a way back to the app), so the app menu is not mounted there.
+  const docsPage = isAppDocsPath(location.pathname);
+  // objectstack#35881 — the app this person last had open, where a phone
+  // lands after sign-in. Recorded at every width: it is the person's last app.
+  const { rememberApp } = useLastApp();
+  useEffect(() => {
+    if (activeAppName) rememberApp(activeAppName);
+  }, [activeAppName, rememberApp]);
+  // objectstack#36501 — and the app page in view, where Studio's 「‹ Back to
+  // app」 returns: an app → Studio entry leaves from the page recorded last.
+  useEffect(() => {
+    if (!activeAppName) return;
+    rememberAppReturnPage({
+      path: `${location.pathname}${location.search}${location.hash}`,
+      app: activeAppName,
+      label: appLabel,
+    });
+  }, [activeAppName, appLabel, location.pathname, location.search, location.hash]);
+  const { apps: metadataApps } = useMetadata();
+  const appBasePath = `/apps/${appAddressSegment(metadataApps, activeApp) ?? activeAppName}`;
+  // objectstack#36362 — the app's design mode, held here so it stays on from
+  // page to page of the app; never on a phone, which has no 「Design layout」.
+  const designMode = useDesignModeController({ appName: activeAppName, appBasePath, enabled: !phone });
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object
   // and record id of a record page, the dashboard, report or page. Read off the
@@ -218,27 +240,19 @@ export function ConsoleLayout({
     const def = (objects as ConsoleObject[] | undefined)?.find((o) => o?.name === artifact.name);
     return def ? servedObjectLabel(def, language, objectLabel) || undefined : undefined;
   }, [dockSurface, objects, objectLabel, language]);
-  // "/ai = the dock maximized": record where we maximized FROM at click time,
-  // so the page's collapse-to-dock returns exactly here (history-back could
-  // land on a prior /ai URL after in-page conversation switches).
-  // objectui#10926 — a build thread bound to this app maximizes to that app's
-  // build surface, which resolves the same `app:PKG:build` thread.
-  // objectui#13253 — maximizing leaves the page from a dock button, which no
-  // page's link guard sees, so it asks first while the page holds unsaved
-  // edits. On Cancel nothing is recorded and the page stays.
-  const openDockFullPage = useCallback(
-    (boundPackageId?: string) => {
-      confirmUnsavedLeave(() => {
-        rememberDockReturnLocation(`${location.pathname}${location.search}`);
-        if (!boundPackageId) {
-          navigate('/ai');
-          return;
-        }
-        navigate(`/ai/build?package=${encodeURIComponent(boundPackageId)}`);
-      });
-    },
-    [location.pathname, location.search, navigate],
-  );
+  // objectstack#34608 — the console's one chat container. Same AI-surface gate
+  // as every entry point, so it renders nothing on OSS / agent-less runtimes.
+  // The dock honors the app's own default agent through the ONE resolver
+  // (bounded to ask/build there); a build thread binds to this app when its
+  // package is authorable (objectui#10926, the dock decides).
+  const chatDock = useConsoleChatDock({
+    enabled: showChatbot,
+    userId,
+    defaultAgent: activeApp?.defaultAgent,
+    appPackageId: activeApp?._packageId,
+    surfaceContext: dockSurface,
+    surfaceArtifactLabel: dockSurfaceLabel,
+  });
 
   // Set navigation context to 'app' when this layout mounts
   useEffect(() => {
@@ -246,34 +260,44 @@ export function ConsoleLayout({
     setCurrentAppName(activeAppName);
   }, [setContext, setCurrentAppName, activeAppName]);
 
-  // ⌘/Ctrl+Shift+I toggles the dock (composer-safe; see matchChatDockShortcut).
-  useEffect(() => {
-    if (!dockEnabled) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (matchChatDockShortcut(e) !== 'toggle') return;
-      e.preventDefault();
-      dock.toggle();
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [dockEnabled, dock]);
-
   return (
-    // One shared, URL-addressable command-palette open state for both the
-    // AppHeader trigger (navbar) and the CommandPalette (children) — ADR-0054.
+    // The drawer's handle, for the top-bar robot and the pages (objectstack#34608).
+    <ChatDockControlProvider value={chatDock.control}>
+    {/* One shared, URL-addressable command-palette open state for both the
+        AppHeader trigger (navbar) and the CommandPalette (children) — ADR-0054. */}
     <CommandPaletteProvider>
     {/* objectui#13130 — first in the DOM, so it is the first Tab stop. */}
     <SkipToContentLink targetRef={mainContentRef} />
+    {/* objectstack#35881 — the phone app home's slot, shared by the sidebar
+        (which draws the menu into it) and the route (which holds it). */}
+    <PhoneAppHomeSlotProvider>
+    {/* objectstack#35883 — a page's own phone top row, drawn by the app bar. */}
+    <PhonePageBarProvider>
+    <DesignModeProvider value={designMode}>
     <AppShell
       sidebar={
+        docsPage ? undefined : (
          <UnifiedSidebar
            activeAppName={activeAppName}
            onAppChange={onAppChange}
            railOverlay
          />
+        )
       }
-      showHeader={!recordPageOwnsTopBar}
+      // objectstack#36112 — from 768 px up an app draws no top bar: the app
+      // menu, search, bell and account are the sidebar's, the page's buttons
+      // its own header's. A phone keeps its bar (and its record page draws its
+      // own instead, objectstack#28483). An app's docs pages keep it at every
+      // width: they mount no sidebar (objectstack#35424), so the bar is still
+      // where their account, search and bell are.
+      //
+      // objectstack#36362 — while the design mode is on, its bar takes the
+      // top slot instead, across the whole window, on every route.
+      showHeader={designMode.active || ((phone || docsPage) && !recordPageOwnsTopBar)}
       navbar={
+        designMode.active ? (
+          <DesignModeBar mode={designMode} />
+        ) : (
           <AppHeader
             variant="app"
             appName={appLabel}
@@ -282,6 +306,7 @@ export function ConsoleLayout({
             activeAppName={activeAppName}
             onAppChange={onAppChange}
           />
+        )
       }
       // objectui#12463 — from `lg` up the inset is a flex column: the banners
       // box (`shrink-0`, below) keeps its height and the route slot (below)
@@ -291,29 +316,18 @@ export function ConsoleLayout({
       // overflowed the inset by the banner's height: a second scroller over
       // the table's, the record-count footer below the fold. The phone keeps
       // block layout.
-      className="!p-0 overflow-y-auto overflow-x-hidden bg-muted/5 lg:flex lg:flex-col"
-      rightRail={
-        dockEnabled && dock.expanded && !isMobile ? (
-          <ChatDockPanel
-            dock={dock}
-            userId={userId}
-            // The dock honors the app's own default agent exactly like the FAB
-            // did — through the ONE resolver (bounded to ask/build there).
-            defaultAgent={activeApp?.defaultAgent}
-            // objectui#10926 — the app a build thread binds to (authorable
-            // packages only; the dock decides).
-            appPackageId={activeApp?._packageId}
-            surfaceContext={dockSurface}
-            surfaceArtifactLabel={dockSurfaceLabel}
-            // ADR-0057 P3c — "/ai = the dock maximized": the maximize button
-            // opens the full-page surface on THE SAME THREAD this rail shows —
-            // `/ai` for an app-less thread (canonicalized to the default agent,
-            // same `(user, product)` scope), `/ai/build?package=PKG` for one
-            // bound to this app.
-            onMaximize={openDockFullPage}
-          />
-        ) : undefined
-      }
+      //
+      // objectstack#34594 — while the phone bottom bar is drawn, the inset keeps
+      // the bar's height (h-12, its 4 px padding each side, plus the safe
+      // area; objectstack#35882) free at its bottom: a page
+      // that bounds itself to the inset ends above the bar (the inset's
+      // content box is that much shorter), and a taller page scrolls its last
+      // row out from under the bar (a scroll container's end padding scrolls).
+      className={cn(
+        '!p-0 overflow-y-auto overflow-x-hidden bg-muted/5 lg:flex lg:flex-col',
+        phoneNavBar && '!pb-[calc(3.5rem+env(safe-area-inset-bottom))]',
+      )}
+      rightRail={chatDock.rail}
       branding={
         activeApp?.branding
           ? {
@@ -328,11 +342,21 @@ export function ConsoleLayout({
       }
     >
       <ConsoleLayoutInner>
+        {/* objectstack#36111 — the pages under the shell draw its top-right
+            button group; objectstack#36112 — and the sidebar's expand button
+            at their headers' left edge while it is collapsed. */}
+        <ShellPageActionsScope sidebarExpand={!docsPage}>
         {/* ADR-0037: unmistakable watermark while rendering the draft overlay
             (?preview=draft) — with one-click exit and one-click Publish. */}
         {/* objectui#12463 — the banners sit in one non-shrinking box, so in
             the `lg` flex column above only the route page gives up height. */}
         <div data-testid="console-banners" className="shrink-0">
+        {/* objectstack#36112 — from 768 px up the shell's standing banners
+            (impersonation, read rate, storage) and the connection notice sit
+            here, the content's width, since no top bar carries them. */}
+        {!phone && <ChromeBannerHost />}
+        {/* A docs page's bar draws the connection state itself. */}
+        {!phone && !docsPage && <ConnectionBanner state={connectionState} />}
         <DraftPreviewBar />
         {/* ADR-0045: materialized-but-unlisted app — real and interactive,
             invisible to end users until the Publish visibility flip. */}
@@ -361,38 +385,22 @@ export function ConsoleLayout({
           data-testid="console-route"
           className="h-full lg:min-h-0 focus:outline-none"
         >
+        <ShellSidebarExpandFallback />
         {children}
         </div>
+        </ShellPageActionsScope>
       </ConsoleLayoutInner>
 
-      {/* The dock's launcher — rendered when AI service is available OR when
-          `VITE_AI_BASE_URL` has been explicitly configured. Dependency-free;
-          the chat graph loads with the dock, on demand.
-          It is the dock's COLLAPSED affordance (ADR-0057 open question 2), so
-          it leaves while the dock is open: a fixed bottom-right button over an
-          expanded rail sat on the composer's send button (objectui#10899). The
-          rail and the sheet carry their own collapse / close controls. */}
-      {showChatbot && !dock.expanded && (
-        <ConsoleChatbotFab appLabel={appLabel} onOpenDock={dock.expand} />
-      )}
+      {/* objectstack#35882 — the phone's bottom bar, after the page in reading order. */}
+      {phoneNavBar && <PhoneAppNavBar basePath={appBasePath} activeAppName={activeAppName} />}
 
-      {/* Under `md` the FAB opens the dock as a bottom sheet (no room for a
-          rail on a phone) — same conversation, chrome only. */}
-      {dockEnabled && isMobile && (
-        <ChatDockMobileSheet
-          open={dock.expanded}
-          onOpenChange={(open) => (open ? dock.expand() : dock.collapse())}
-          userId={userId}
-          defaultAgent={activeApp?.defaultAgent}
-          appPackageId={activeApp?._packageId}
-          surfaceContext={dockSurface}
-          surfaceArtifactLabel={dockSurfaceLabel}
-          // Bridge to full-page /ai (history + share live there on mobile). The
-          // sheet defers the navigation until it has cleanly closed.
-          onMaximize={openDockFullPage}
-        />
-      )}
+      {/* Under `md` the drawer is a bottom sheet (no room for a rail on a phone). */}
+      {chatDock.sheet}
     </AppShell>
+    </DesignModeProvider>
+    </PhonePageBarProvider>
+    </PhoneAppHomeSlotProvider>
     </CommandPaletteProvider>
+    </ChatDockControlProvider>
   );
 }

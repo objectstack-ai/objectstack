@@ -94,9 +94,9 @@ function renderColumns(columns: unknown[], extra: Record<string, unknown> = {}) 
   );
 }
 
-/** Every rendered header, in order. `#` is the built-in row-number column. */
+/** Every rendered header, in order. No row-number column: a grid draws none unless its host opts in (objectstack#35663). */
 const headers = (): string[] =>
-  screen.getAllByRole('columnheader').map((h) => (h.textContent ?? '').trim());
+  screen.queryAllByRole('columnheader').map((h) => (h.textContent ?? '').trim());
 
 /** The header cell whose text is `label`. */
 function headerCell(label: string): HTMLElement {
@@ -107,12 +107,12 @@ function headerCell(label: string): HTMLElement {
   return cell as HTMLElement;
 }
 
-/** The first body cell of the column at `index` (0-based, row-number column excluded). */
+/** The first body cell of the column at `index` (0-based; no row-number column, objectstack#35663). */
 function bodyCell(index: number): HTMLElement {
   const row = document.querySelectorAll('tbody tr')[0];
   expect(row, 'first body row').toBeDefined();
   const cells = row!.querySelectorAll('td');
-  const cell = cells[index + 1];
+  const cell = cells[index];
   expect(cell, `body cell ${index}`).toBeDefined();
   return cell as HTMLElement;
 }
@@ -154,7 +154,7 @@ describe('object-grid `columns` members — identity and legibility (objectui#80
     // authored columns at all, every "member X changes the column" assertion
     // would pass for the wrong reason.
     renderColumns([{ field: 'name' }]);
-    expect(headers()).toEqual(['#', 'Name']);
+    expect(headers()).toEqual(['Name']);
     expect(screen.getByText('Ada')).toBeInTheDocument();
   });
 
@@ -171,11 +171,11 @@ describe('object-grid `columns` members — identity and legibility (objectui#80
 
   it('`label` OUTRANKS the machine name, and its absence is what prettifies', () => {
     renderColumns([{ field: 'name', label: 'Full Name' }]);
-    expect(headers()).toEqual(['#', 'Full Name']);
+    expect(headers()).toEqual(['Full Name']);
     cleanup();
     renderColumns([{ field: 'first_name' }]);
     // The prettifier is the fallback, not a second labelling mechanism.
-    expect(headers()).toEqual(['#', 'First name']);
+    expect(headers()).toEqual(['First name']);
   });
 
   it('`hidden: true` removes the column SILENTLY — authored intent, not a fault', () => {
@@ -189,7 +189,7 @@ describe('object-grid `columns` members — identity and legibility (objectui#80
       .filter((line) => line.startsWith('[ObjectUI] ObjectGrid columns:'));
     warn.mockRestore();
 
-    expect(headers()).toEqual(['#', 'Name']);
+    expect(headers()).toEqual(['Name']);
     // The other way a column vanishes IS reported (objectui#5349), so the
     // silence here is a member disposition rather than a missing diagnostic.
     expect(lines).toEqual([]);

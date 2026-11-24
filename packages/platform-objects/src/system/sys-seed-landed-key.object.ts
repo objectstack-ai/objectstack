@@ -28,11 +28,14 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Writer and reader: `SeedLoaderService` (`@objectstack/metadata-protocol`)
  * alone, under the seed write context, on the loads that ask for this record
  * (`landedKeys`): the boot seed, the per-organization replay and the dev
- * hot-reload seeder of `@objectstack/runtime`'s AppPlugin. Internal state,
+ * hot-reload seeder of `@objectstack/runtime`'s AppPlugin, and the install,
+ * upgrade, restart heal, reseed and per-organization replay of
+ * `@objectstack/cloud-connection`'s install-local door. Internal state,
  * not a setting: ⛔ no data API, no settings key, no environment variable.
  *
  * Clearing it is never needed for a re-seed: the deliberate re-seed (the
- * `seed-replayer` service called with `{ reseed: true }`) inserts every
+ * `seed-replayer` service called with `{ reseed: true }`, or install-local's
+ * sample-data reseed) inserts every
  * missing row whatever this table says and records them again, and a new
  * database starts with no rows. Deleting an organization deletes its rows.
  *
@@ -103,6 +106,7 @@ export const SysSeedLandedKey = ObjectSchema.create({
 
   enable: {
     trackHistory: false,
+    fieldHistory: false, // [#36290] keeps this object's "no history": values off in the activity stream
     searchable: false,
     // Internal state — no data API at all. The seed loader reads and writes
     // it in process, under the seed write context.

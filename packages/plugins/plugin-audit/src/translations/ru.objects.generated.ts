@@ -45,7 +45,8 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Использование учётных данных",
           scim_refused: "Запрос SCIM отклонён",
           audit_signing_key_change: "Изменение ключа подписи аудита",
-          dataset_query: "Запрос к набору данных"
+          dataset_query: "Запрос к набору данных",
+          scim_manager_unresolved: "Руководитель SCIM не найден"
         }
       },
       user_id: {
@@ -264,6 +265,18 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "Изменено"
+      },
+      is_resolved: {
+        label: "Решено",
+        help: "Решена ли ветка, которую начинает этот комментарий верхнего уровня; для ответа не допускается"
+      },
+      resolved_by: {
+        label: "Кем решено",
+        help: "Кто решил ветку — записывается платформой, авторы не заполняют"
+      },
+      resolved_at: {
+        label: "Когда решено",
+        help: "Когда ветка была решена — записывается платформой, авторы не заполняют"
       },
       created_at: {
         label: "Создано"

@@ -5,11 +5,10 @@
  * One `NavigationOverlay` draws both: the list in the same place and at its
  * full width whether or not a record is open — and whatever the object
  * declares, so a view switch never remounts it — and the opened record's
- * `RecordDetailView` in the drawer over it. The pane beside the list retired
- * (objectstack#28915); a reader who prefers the full page gets it from a row
- * click instead (`utils/recordOpenPreference.ts`, objectstack#26677). An
- * object that declares `page` (or `new_window` / `none`) draws no record
- * here. Every value is passed in as a prop.
+ * `RecordDetailView` in the drawer over it — the floating card the name
+ * cell's 「在侧边打开」 icon opens (objectstack#35854); the record's name opens
+ * the full page instead. A list whose rows open nothing (`none`) draws no
+ * record here. Every value is passed in as a prop.
  *
  * Since objectstack#26679 the pane is the in-place stack of
  * `./recordDrawerStack.tsx`: its root is the list row `?recordId=` names, a
@@ -22,6 +21,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import type { NavigationOverlayMode } from '@object-ui/components';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { RecordStackDrawer, useRecordDrawerStack } from './recordDrawerStack.js';
+import { RECORD_PREVIEW_WIDTH_KEY } from './recordDrawerContext.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
@@ -34,6 +34,7 @@ const RecordDetailView = lazy(() => import('./RecordDetailView.js').then((m) => 
 export function ObjectViewRecordOverlay({
     navOverlay,
     mode,
+    widthKey = RECORD_PREVIEW_WIDTH_KEY,
     list,
     handleDrawerClose,
     objectDef,
@@ -49,6 +50,11 @@ export function ObjectViewRecordOverlay({
     navOverlay: RecordNavigation['navOverlay'];
     /** The object's resolved mode: `drawer` draws the record over the list. */
     mode: NavigationOverlayMode;
+    /**
+     * Where the drawer remembers a dragged width (`recordPreviewWidthKey`,
+     * objectstack#36149). Absent: the side preview's shared key.
+     */
+    widthKey?: string;
     /** The list, drawn whether or not a record is open; pass a stable element. */
     list: ReactNode;
     handleDrawerClose: RecordNavigation['handleDrawerClose'];
@@ -72,10 +78,13 @@ export function ObjectViewRecordOverlay({
                  mode={mode}
                  width={navOverlay.width}
                  mainContent={list}
+                 listObjectName={objectDef.name}
                  onClose={handleDrawerClose}
                  onOpenAsPage={handleOpenAsPage}
                  stepScope={stepScope}
-                 storageKey={`drawer-width:${objectDef.name}`}
+                 // objectstack#36149 — one remembered width for every object
+                 // whose width is not authored.
+                 storageKey={widthKey}
                  objects={objects}
                  renderRecord={(level) => (
                      <Suspense fallback={<SkeletonDetail />}>

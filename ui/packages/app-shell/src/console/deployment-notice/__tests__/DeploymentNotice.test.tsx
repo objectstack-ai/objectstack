@@ -27,7 +27,8 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 
 import { DeploymentNotice } from '../DeploymentNotice';
-import { HIDDEN_KEY_PREFIX, deploymentVariablesText, parseDeploymentNotice } from '../deploymentNotice';
+import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../../runtime-config';
+import { HIDDEN_KEY_PREFIX, deploymentVariablesText, parseDeploymentNotice } from '../deploymentNoticeState';
 
 const NOTICE = {
   production: true,
@@ -277,5 +278,63 @@ describe('deploymentNotice helpers', () => {
         t,
       ),
     ).toBe('');
+  });
+});
+
+describe('DeploymentNotice — asked only of a host that serves it (objectstack#34186)', () => {
+  /**
+   * A hosted environment mounts the settings routes without the notice and
+   * answers it `503`; its runtime config says `features.deploymentNotice: false`.
+   * The console reads the runtime config the way it boots (`initRuntimeConfig`
+   * over the same stubbed `fetch`), then mounts the notice for an administrator.
+   */
+  const NOTICE_PATH = /\/api\/settings\/deployment\/notice$/;
+  let noticeAsks: number;
+
+  async function boot(features: Record<string, unknown>) {
+    resetRuntimeConfigForTesting();
+    noticeAsks = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).endsWith('/api/v1/runtime/config')) {
+          return json(200, { cloudUrl: '', singleEnvironment: true, features, branding: { productName: 'ObjectOS' } });
+        }
+        if (NOTICE_PATH.test(String(url))) noticeAsks += 1;
+        return json(200, envelope(NOTICE));
+      }),
+    );
+    await initRuntimeConfig();
+    render(<DeploymentNotice placement="home" />);
+    await settle();
+  }
+
+  beforeEach(() => {
+    adminStatus = admin;
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    resetRuntimeConfigForTesting();
+  });
+
+  it('a host that composes the notice says so, and the notice is read and drawn', async () => {
+    await boot({ installLocal: false, marketplace: true, deploymentNotice: true });
+    expect(noticeAsks).toBe(1);
+    expect(screen.getByTestId('deployment-notice')).toBeInTheDocument();
+  });
+
+  it('a host that does not compose it says false, and no notice request is made', async () => {
+    await boot({ installLocal: false, marketplace: true, deploymentNotice: false });
+    expect(noticeAsks).toBe(0);
+    expect(screen.queryByTestId('deployment-notice')).toBeNull();
+  });
+
+  it('CONTROL: a runtime that serves no key (older than it) still has its notice read', async () => {
+    await boot({ installLocal: false, marketplace: true });
+    expect(noticeAsks).toBe(1);
+    expect(screen.getByTestId('deployment-notice')).toBeInTheDocument();
   });
 });

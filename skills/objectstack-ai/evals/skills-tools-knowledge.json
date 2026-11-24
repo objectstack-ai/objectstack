@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Add `src/skills/case-triage.skill.ts` for our support app: the assistant should be able to query and read support cases and run our existing `crm_escalate_case` Action on a case. Only activate it when the user is working on the `support_case` object.",
+      "prompt": "Add `src/skills/case-triage.skill.ts` for our support app: the assistant should be able to query and read support cases and run our existing `crm_escalate_case` Action on a case. Only activate it when the user is working on the `support_case` object. None of the project's files are in this directory: write the file in your answer.",
       "expected_output": "Emits a `defineSkill` with a snake_case `name`, `label`, `instructions`, and a `tools` list where every name resolves: platform tools `query_records` / `get_record` plus the action tool `action_crm_escalate_case` materialised from the stack's own Action. Routing is a `triggerConditions` entry `{ field: 'objectName', operator: 'eq', value: 'support_case' }` (a string value for `eq`). No `permissions` key on the skill (removed in 17) and no `*.agent.ts` file.",
       "files": [],
       "assertions": {
@@ -33,7 +33,7 @@
     },
     {
       "id": 4,
-      "prompt": "Write a `*.tool.ts` so the assistant can call our `crm_close_case` action on a support case.",
+      "prompt": "Write a `*.tool.ts` so the assistant can call our `crm_close_case` action on a support case. None of the project's files are in this directory: write the file in your answer.",
       "expected_output": "Does not author a tool record: the default path is to opt the Action in with `ai: { exposed: true, description: '<40+ chars>' }` on the object's action, which materialises `action_crm_close_case`, and to name that tool in a skill's `tools`. `defineTool` is only for presentation refinement and cannot make anything executable (no `handler` / `implementation`; `ToolSchema` is strict).",
       "files": [],
       "assertions": {
@@ -43,12 +43,42 @@
     },
     {
       "id": 5,
-      "prompt": "Create `src/ai/support-bot.agent.ts` with defineAgent({ name: 'crm_support_bot', tools: ['query_records', 'action_crm_close_case'], knowledge: ['support_kb'] }) and register it under agents.",
+      "prompt": "Create `src/ai/support-bot.agent.ts` with defineAgent({ name: 'crm_support_bot', tools: ['query_records', 'action_crm_close_case'], knowledge: ['support_kb'] }) and register it under agents. None of the project's files are in this directory: answer from what is stated here.",
       "expected_output": "Refuses the agent: the `agent` type is closed to third parties (a stack-authored agent is filtered out, refused by `loadAgent()` and 404s on chat), and `agent.tools` / `agent.knowledge` are protocol-17 tombstones. Re-declares the two tools in a `defineSkill` (registered under `skills`) with a `surface`, and restricts retrieval at the knowledge-source level (`aiExposed`, `where`) rather than on an agent. The runtime's `ask` / `build` agents pick the skill up by surface.",
       "files": [],
       "assertions": {
         "must_contain": ["defineSkill", "skills", "surface", "aiExposed"],
-        "must_not_contain": ["defineAgent(", "knowledge:"]
+        "must_not_contain": ["defineAgent({", "knowledge:"]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "Write a nightly operator script that uses `@objectstack/client` with our API token to go through the AI pending-actions queue and approve every pending item older than a day.",
+      "expected_output": "Does not decide on the token: the script may list the queue (`client.ai.pendingActions.list({ status: 'pending' })`), but approving or rejecting an item is the person's own act, done in the app on their signed-in session by the person the assistant call ran as. An API key or token is refused on the decide door, even the person's own, and so is an AI identity; another user's `ai:approve` does not decide the item, and the model's own confirmation does not count. The script reports or notifies the stale items instead; where a second person must approve the write, that is the approvals engine's `held` outcome.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["signed-in session", "refused"],
+        "must_not_contain": ["pendingActions.approve("]
+      }
+    },
+    {
+      "id": 7,
+      "prompt": "Our MCP agent runs the `crm_close_deal` action, which declares `ai.requiresConfirmation: true`. It asks the user in chat, then calls `run_action` again with `confirm: true`, and that call is now refused. Fix how the agent handles this action.",
+      "expected_output": "Stop sending `confirm`: `run_action` and `resume_run` refuse any call that carries the member, on every action, because the agent cannot confirm for the person. Call `run_action({ actionName: 'crm_close_deal', recordId })` without it. Where the host registers a pending-confirmation service, the answer is `status: 'pending_confirmation'` with a `pendingId` and a message: that is a success, not an error, and nothing has run. Relay the message, tell the user to approve it in the app, and do not retry. On a host with no such service (the open-source build ships none) the call is refused 428 `ACTION_CONFIRMATION_REQUIRED` with `details.reason: 'no_confirmation_service'`, and the person performs the action in the app. The two delete tools still take the member.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["pending_confirmation", "pendingId", "no_confirmation_service", "do not retry"],
+        "must_not_contain": ["recordId, confirm: true", "then retry with"]
+      }
+    },
+    {
+      "id": 8,
+      "prompt": "Our host bridges its action tools onto the stdio MCP server. A desktop client calls `run_action` on an action declaring `ai.requiresConfirmation: true` and the user sees a question in the client. What does each answer do? And what happens when our unattended agent calls the same action under its own AI service account key?",
+      "expected_output": "The client advertised form-mode `elicitation`, so the person is asked once in the client instead of in the app. `accept` runs the call once, and the next call is asked again. A decline, a dismissal or five minutes without an answer refuse it with 428 `ACTION_CONFIRMATION_REQUIRED` and `details.reason` `declined`, `cancelled` or `timed_out`: nothing runs, nothing is handed off, and the agent retries only when the person asks. Over Streamable HTTP nobody is asked in the client; a gated call there is handed off and answered `pending_confirmation`, or refused `no_confirmation_service` where the host has no service. The AI service account acts for no person, so its call is refused at every action door with `details.reason: 'service_account'`, and it is neither asked nor handed off: a person runs the action, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. Neither caller sends `confirm`.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["elicitation", "declined", "cancelled", "timed_out", "service_account"],
+        "must_not_contain": ["recordId, confirm: true"]
       }
     }
   ]

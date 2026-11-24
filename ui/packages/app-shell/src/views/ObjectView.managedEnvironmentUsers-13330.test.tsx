@@ -24,7 +24,10 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, screen, waitFor, within } from '@testing-library/react';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
+import { render, cleanup, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 
@@ -229,7 +232,15 @@ describe('objectui#13330 — Setup → Users on a managed environment', () => {
   it('does not offer the identity import', async () => {
     mountUsers({ admin: true, cloudManaged: true });
     await rowOf('Ada Baseline');
-    expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
+    // objectstack#36113 — Import is an entry of the view bar's
+    // 「Import / Export」, ⋮ More's only on a narrow bar: read both.
+    for (const id of ['object-view-import-export', 'object-view-more-actions']) {
+      const menu = screen.queryByTestId(id);
+      if (!menu) continue;
+      fireEvent.keyDown(menu, { key: 'Enter' });
+      expect(screen.queryByRole('menuitem', { name: 'Import' })).toBeNull();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    }
   });
 });
 
@@ -248,6 +259,8 @@ describe.each([
 
   it('offers the identity import to an admin', async () => {
     mountUsers(features);
-    expect(await screen.findByRole('button', { name: 'Import' }, { timeout: 5000 })).toBeInTheDocument();
+    // objectstack#36113 — Import is an entry of the view bar's 「Import / Export」.
+    fireEvent.keyDown(await screen.findByTestId('object-view-import-export', {}, { timeout: 5000 }), { key: 'Enter' });
+    expect(await screen.findByRole('menuitem', { name: 'Import' })).toBeInTheDocument();
   });
 });

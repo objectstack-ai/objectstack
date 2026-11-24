@@ -97,6 +97,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useMutationInvalidationBridge: () => {},
 }));
 
+// `AppContent` reaches a dynamic `import('@objectstack/lint')` (through
+// `ConsoleLayout` → `DraftPreviewBar`, statically): pay its load at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 import { useActionModal } from '../../hooks/useActionModal';
@@ -146,7 +150,13 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34244 — the `?names=` presence read answers the asked names it holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? (OBJECTS as any[]).filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all = type === 'object' ? OBJECTS : type === 'app' ? server.apps : [];
           const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
@@ -288,7 +298,12 @@ describe('objectstack#27626 — a record drawer reads the registry beside the sc
   it('a deep link to a drawer draws the list on its scope before the registry has landed', async () => {
     server.holdRegistry = true;
     boot('/apps/crm/crm_account?recordId=r1');
-    await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent(SCOPE));
+    // objectstack#34244 — the route's own objects draw before the registry
+    // lands. The lookup target outside the package (`sys_user`) is asked in
+    // the `?names=` presence read, which waits for a whole list already in
+    // flight rather than asking twice (`MetadataProvider`), so it joins once
+    // the registry lands; it is never asked by name.
+    await waitFor(() => expect(screen.getByTestId('object-view')).toHaveTextContent('crm_account,crm_contact'));
     expect(registryReads()).toBe(1);
     expect(screen.getByTestId('object-view')).not.toHaveTextContent('crm_case');
 

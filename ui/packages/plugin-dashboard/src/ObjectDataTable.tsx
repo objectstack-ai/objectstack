@@ -45,6 +45,14 @@ export interface ObjectDataTableProps {
   schema: ObjectDataTableSchema;
   dataSource?: any;
   className?: string;
+  /**
+   * The sentence the error state shows in place of the failed read's own
+   * message: a host that lists records for a viewer (the drill drawer) passes
+   * its localized copy, so a server refusal written for developers is never
+   * what the viewer reads. The error is still logged. Absent, the error's own
+   * message is shown, as before.
+   */
+  failureMessage?: string;
 }
 
 /** A column definition after normalization, with header and accessor key. */
@@ -660,7 +668,7 @@ export function computeLookupExpand(
   return Array.from(out);
 }
 
-export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSource: propDataSource, className }) => {
+export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSource: propDataSource, className, failureMessage }) => {
   // Tenant default currency backstops columns that omit an explicit code.
   const { currency: tenantCurrency } = useLocalization();
   // objectui#4553: percent/number cells are FORMATTED inside the memo below,
@@ -1159,7 +1167,7 @@ export const ObjectDataTable: React.FC<ObjectDataTableProps> = ({ schema, dataSo
             <line x1="12" y1="8" x2="12" y2="12" />
             <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
-          <p className="text-xs">{error}</p>
+          <p className="text-xs">{failureMessage ?? error}</p>
         </div>
       </div>
     );

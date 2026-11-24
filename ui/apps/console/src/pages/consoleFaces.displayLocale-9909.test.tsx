@@ -78,7 +78,13 @@ const { STORED, approvalsApiStub, ADAPTER, AUTH, I18N } = vi.hoisted(() => {
   };
   const ADAPTER = {
     find: async () => ({ data: [{ id: 'po_1' }] }),
-    getObjectSchema: async () => ({ fields: {} }),
+    // The queue row's figure is the object's first numeric `highlightFields`
+    // entry (ADR-0085), so the object declares `amount` as one; without the
+    // declaration the row shows no figure and there is nothing to format.
+    getObjectSchema: async () => ({
+      highlightFields: ['amount'],
+      fields: { amount: { type: 'number' }, quantity: { type: 'number' } },
+    }),
     getClient: () => client,
   };
   const AUTH = { user: { id: 'u_1', email: 'approver@example.com' } };
@@ -131,6 +137,7 @@ function permissions(): MePermissionsAuthenticatedResponse {
     tenantId: 't_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: {},
     fields: {},
@@ -168,6 +175,9 @@ const SURFACES: Surface[] = [
       );
       await screen.findAllByText('Purchase Approval');
       await screen.findAllByText(/Sam Submitter/);
+      // The figure renders once the object's metadata read answers; wait for
+      // it in either locale's spelling, then read the face.
+      await screen.findAllByText(/1[.,]234[.,]5/);
       const text = faceOf(document.body);
       cleanup();
       return text;

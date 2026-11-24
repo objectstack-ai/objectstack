@@ -10,7 +10,7 @@ import React, { useEffect } from 'react';
 import type { ObjectGridSchema, DataSource, ListColumn } from '@object-ui/types';
 import { parseFilterAST, type FilterCondition } from '@objectstack/spec/data';
 import type { useSafeFieldLabel } from '@object-ui/react';
-import { buildCategoryOrder, buildCategoryRank } from '@object-ui/core';
+import { buildCategoryOrder, buildCategoryRank, isExpandableFieldType, referencedRecordTitle } from '@object-ui/core';
 import { useDisplayLocale } from '@object-ui/i18n';
 import type { GridCellFieldLike } from './cellRendererResolution';
 import { temporalCellFaceOf, type TemporalCellFace } from './temporalCellFace';
@@ -19,8 +19,9 @@ import {
   type GroupAggregationConfig, type GroupOptionRanks, type ServerGroupSource, type TemporalAggregateFaces,
 } from './useGroupedData';
 import { groupSearchOf, useServerGroupHeaders, useServerGroupRows, type ServerGroupLeaf } from './useServerGrouping';
+import { useLookupTargetDefs } from './lookupGroupTargets';
 import { normalizeColumns } from './objectGridColumns';
-import { honestGroupAggregations } from './recordCurrencyAggregates';
+import { honestGroupAggregations, honestGroupAggregationsByDepth } from './recordCurrencyAggregates';
 import type { useGridTranslation } from './objectGridTranslations';
 import type { useObjectGridQueryInputs } from './objectGridQueryInputs';
 import type { useObjectGridGroupingDecisions } from './objectGridGroupingDecisions';
@@ -33,7 +34,16 @@ type RowLoad = ReturnType<typeof useObjectGridRowLoad>;
 type GroupingFieldDef = GridCellFieldLike & {
   type?: string;
   options?: Parameters<ReturnType<typeof useSafeFieldLabel>['translateOptions']>[2];
+  reference?: unknown;
+  displayField?: unknown;
 };
+
+/** The object a grouping field points at, when it is a lookup that names one. */
+function lookupTargetOf(def: GroupingFieldDef | undefined): string | undefined {
+  return isExpandableFieldType(def) && typeof def?.reference === 'string' && def.reference !== ''
+    ? def.reference
+    : undefined;
+}
 
 /**
  * The date-family face the cell of `field` paints in this grid: the authored
@@ -76,7 +86,7 @@ export function useObjectGridGrouping({
   schema, dataSource, objectName, objectFields, objectTypesPending, data, setData, setTotalMatching,
   t, translateOptions, groupedPage, setGroupedPage, groupedPageSize, refreshKey, serverPageSize,
   groupRowQuery, groupingKeyReadable, groupingRefusesNothing, unmaskedGroupingFields,
-  serverGroupedFetch, invalidationNonce,
+  serverGroupedFetch, invalidationNonce, savedFigureNonce, regroupNonce,
 }: {
   schema: ObjectGridSchema;
   dataSource: DataSource | undefined;
@@ -99,12 +109,36 @@ export function useObjectGridGrouping({
   unmaskedGroupingFields: GroupingDecisions['unmaskedGroupingFields'];
   serverGroupedFetch: GroupingDecisions['serverGroupedFetch'];
   invalidationNonce: RowLoad['invalidationNonce'];
+  /**
+   * objectstack#35689 — bumped when a select-first save changed a figure but
+   * no group: the server's headers are asked again, the rows on screen stay.
+   */
+  savedFigureNonce: number;
+  /**
+   * objectstack#35689 — bumped when the reader left a row whose save moved it
+   * to another group: the server's headers and the open groups' rows are
+   * asked again.
+   */
+  regroupNonce: number;
 }) {
   // --- Grouping support ---
   // Build a per-field value formatter so group headers display the human
   // readable label for select/boolean fields rather than the raw value
   // (e.g. "In Progress" instead of "in_progress", "Yes" instead of "true").
   // A select value's label is the OBJECT FIELD's option label (objectui#11544).
+  // [objectstack#35053] The objects the client-grouped lookup fields point at:
+  // an expanded record is named by its target's declared `nameField` when the
+  // lookup declares no `displayField`, as the lookup's own cell names it. A
+  // server-grouped grid names its keys in the header read instead.
+  const lookupTargetDefs = useLookupTargetDefs(
+    dataSource,
+    serverGroupedFetch
+      ? []
+      : usableGroupingFields(schema.grouping?.fields).flatMap((gf) => {
+        const target = lookupTargetOf(objectFields?.[gf.field]);
+        return target ? [target] : [];
+      }),
+  );
   const groupValueFormatter = React.useMemo(() => {
     // [objectui#7217] ONE normalized entry list, shared with the
     // `useGroupedDataInOptionOrder` call below. Reading `grouping.fields` raw here threw
@@ -118,7 +152,12 @@ export function useObjectGridGrouping({
 
     // Per-field { value -> label } lookup, plus a per-field type so we can
     // handle booleans / dates / users without dedicated option lists.
-    const lookup = new Map<string, { type?: string; options?: Map<string, string> }>();
+    const lookup = new Map<string, {
+      type?: string;
+      options?: Map<string, string>;
+      target?: string;
+      displayField?: string;
+    }>();
 
     for (const gf of groupingFields) {
       const fieldName = gf.field;
@@ -151,15 +190,24 @@ export function useObjectGridGrouping({
         }
       }
 
+      const target = lookupTargetOf(objectDefField);
+      const displayField = objectDefField?.displayField;
       lookup.set(fieldName, {
         type: type || undefined,
         options: optionsMap.size > 0 ? optionsMap : undefined,
+        ...(target ? { target } : {}),
+        ...(target && typeof displayField === 'string' && displayField !== '' ? { displayField } : {}),
       });
     }
 
     return (field: string, value: any): string | undefined => {
       const meta = lookup.get(field);
       if (!meta) return undefined;
+      // A lookup's expanded record: its `displayField`, then the target's
+      // declared `nameField`, then the shared ladder. Grouped by its id still.
+      if (meta.target && value && typeof value === 'object' && !Array.isArray(value)) {
+        return referencedRecordTitle(lookupTargetDefs?.get(meta.target), value, meta.displayField);
+      }
       // Select / multi-select: resolve from options map first.
       if (meta.options) {
         const label = meta.options.get(String(value));
@@ -176,7 +224,7 @@ export function useObjectGridGrouping({
       }
       return undefined;
     };
-  }, [schema.grouping, schema.columns, schema.objectName, objectFields, translateOptions, t]);
+  }, [schema.grouping, schema.columns, schema.objectName, objectFields, translateOptions, t, lookupTargetDefs]);
 
   // [objectui#13234] Per grouping field whose cell paints a date-family face,
   // that face; `temporalCellText` draws the field's group headings through
@@ -253,33 +301,44 @@ export function useObjectGridGrouping({
       return { error: err instanceof Error ? err : new Error(String(err)) };
     }
   }, [groupRowQueryKey]);
-  const groupReloadKey = `${refreshKey}:${invalidationNonce}`;
-  // [ADR-0144 D6] A money aggregate over a `record`-mode amount stands only in
-  // groups bucketed by that amount's code field; elsewhere it would add
-  // amounts in different currencies, so it is dropped before either the
-  // server or the client bucketing computes it. Keyed on what it reads, so a
+  const groupReloadKey = `${refreshKey}:${invalidationNonce}:${regroupNonce}`;
+  const groupHeaderReloadKey = `${groupReloadKey}:${savedFigureNonce}`;
+  // [ADR-0144 D6, ADR-0158 U7 R1] A measure aggregate over a `record`-mode
+  // amount or quantity stands only in groups bucketed by its code or unit
+  // field; elsewhere it would add amounts in different currencies or
+  // quantities in different units, so it is dropped before either the server
+  // or the client bucketing computes it. Keyed on what it reads, so a
   // host that rebuilds `schema` every render does not re-key the header query.
+  // [objectstack#36276] Judged PER DEPTH, on the levels the grid really
+  // groups by (the server's, or the render grouping's): a depth-`d` group is
+  // bucketed by the first `d` levels only, so a sum over a quantity whose unit
+  // field is the second level stands in the second level's bands and is left
+  // out of the first's. The header query judges its own depths the same way.
   // [objectstack#32119] Per aggregated field whose cell paints a date-family
   // face, that face, resolved as the group headings' faces are: a `min` /
   // `max` over it is a time, drawn as the cell draws it, and a `sum` / `avg`
-  // over it is no figure at all, so it is dropped here with the money
+  // over it is no figure at all, so it is dropped here with the measure
   // aggregates, before either path computes it or the server is asked.
   const groupAggregationKey = JSON.stringify({
     aggregations: schema.aggregations ?? null,
-    grouping: usableGroupingFields(schema.grouping?.fields).map((gf) => gf.field),
+    grouping: usableGroupingFields(serverGroupedFetch ? serverGroupingFields : groupingForRender?.fields).map((gf) => gf.field),
     temporal: temporalFacesOfAggregations(schema.aggregations, normalizeColumns(schema.columns) ?? [], objectFields),
   });
-  const groupAggregations = React.useMemo(() => {
+  const { groupAggregations, groupAggregationsByDepth } = React.useMemo(() => {
     const { aggregations, grouping, temporal } = JSON.parse(groupAggregationKey) as {
       aggregations: ObjectGridSchema['aggregations'] | null;
       grouping: string[];
       temporal: Array<[string, TemporalCellFace]>;
     };
     const temporalFields = new Set(temporal.map(([field]) => field));
-    const honest = honestGroupAggregations(aggregations ?? undefined, objectFields, grouping);
-    if (!honest || temporalFields.size === 0) return honest;
-    const kept = honest.filter(({ field, type }) => !(temporalFields.has(field) && (type === 'sum' || type === 'avg')));
-    return kept.length === honest.length ? honest : kept;
+    const configured = aggregations ?? undefined;
+    const faceable = !configured || temporalFields.size === 0
+      ? configured
+      : configured.filter(({ field, type }) => !(temporalFields.has(field) && (type === 'sum' || type === 'avg')));
+    return {
+      groupAggregations: honestGroupAggregations(faceable, objectFields, grouping),
+      groupAggregationsByDepth: honestGroupAggregationsByDepth(faceable, objectFields, grouping),
+    };
   }, [groupAggregationKey, objectFields]);
   const displayLocale = useDisplayLocale();
   const temporalAggregates = React.useMemo((): TemporalAggregateFaces | undefined => {
@@ -297,7 +356,7 @@ export function useObjectGridGrouping({
     ...groupSearchOf(groupRowQuery),
     aggregations: groupAggregations,
     objectFields,
-    reloadKey: groupReloadKey,
+    reloadKey: groupHeaderReloadKey,
   });
   // Keyed on the hook's STATE values (a stable identity React promises), so
   // the group tree is rebuilt when the server answers, not on every render.
@@ -341,6 +400,7 @@ export function useObjectGridGrouping({
     serverGroupSource,
     groupOptionRanks,
     temporalAggregates,
+    groupAggregationsByDepth,
   );
 
   // Reset grouped pagination to page 1 whenever the grouping config, page size

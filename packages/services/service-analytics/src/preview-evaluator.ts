@@ -9,7 +9,7 @@
 //
 // Scope (deliberately the dataset-query subset, not a general engine):
 //   • Mongo-style `where` filters ($eq implicit, $ne/$gt/$gte/$lt/$lte/
-//     $between/$in/$nin/$contains/$null, $and/$or/$not)
+//     $between/$in/$nin/$contains/$notContains/$null, $and/$or/$not)
 //   • timeDimensions date-range filtering + granularity bucketing
 //     (day/week/month/quarter/year)
 //   • group-by dimensions; count / count_distinct / sum / avg / min / max
@@ -37,9 +37,11 @@ import {
   resolveAnalyticsDateRangeString,
   utcInstantMs,
   compensatedSum,
+  jsonMembershipCandidates,
   temporalComparandKind,
   temporalStorageForm,
   type BucketGranularity,
+  type JsonColumnFieldClass,
   type TemporalComparandKind,
 } from '@objectstack/core';
 import { explicitDateRangeWindow } from './date-range-array-arm.js';
@@ -58,8 +60,10 @@ import type { DurationMeasureSpec } from './strategies/types.js';
 // the same gate, every other arm of the shared comparand-shape face. [#20035]
 // And the comparand-TYPE face, through the same gate again.
 import { invalidFilterError, normalizeWhereComparands } from './strategies/filter-normalizer.js';
+import { comparisonColumnClass, refusePreviewJsonColumnComparisons } from './json-column-comparison-refusal.js';
+import { isJsonStoredShape } from './contains-membership-sql.js';
 import type { AnalyticsQuery, AnalyticsResult } from '@objectstack/spec/contracts';
-import { emptyGroupValueFor, lowerFilterCondition, type Cube, type FilterLoweringOptions } from '@objectstack/spec/data';
+import { emptyGroupValueFor, lowerFilterCondition, type Cube, type FilterLoweringOptions, type ValueShapeFieldDef } from '@objectstack/spec/data';
 
 type Row = Record<string, unknown>;
 
@@ -96,8 +100,49 @@ function compare(a: unknown, b: unknown): number {
   return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
 }
 
-/** One field operator's predicate, over one row's value. */
-type PreviewPredicate = (value: unknown, expected: unknown) => boolean;
+/**
+ * One field operator's predicate, over one row's value. `shape` is the host's
+ * declared value shape of the column the value was read from, when the caller
+ * can name it; only the `$contains` pair reads it.
+ */
+type PreviewPredicate = (value: unknown, expected: unknown, shape?: ValueShapeFieldDef) => boolean;
+
+/**
+ * [#36189] The un-negated test `$contains` asks of one drafted row's value —
+ * `$notContains` is its exact complement — answered as every live face of the
+ * dataset door answers the same filter.
+ *
+ * - **A column declared multi-valued or JSON-stored ({@link isJsonStoredShape},
+ *   the population the native `where` compile and the JSON-column refusal
+ *   read) → MEMBERSHIP**: some element of the drafted array IS a member the
+ *   comparand names. The members are `@objectstack/core`'s
+ *   `jsonMembershipCandidates`, the comparand half every SQL face binds, and an
+ *   element is compared by its JSON text, the text the SQLite construct
+ *   compares (`json_quote` of the element), so `'1'` names the string `'1'` or
+ *   the number `1` here as there. A value that is not an array has no member,
+ *   as on every face (their constructs are array-only).
+ * - **Anything else → the case-EXACT literal substring**, of a stored STRING
+ *   only: the `$contains` family is case-sensitive by ruling (#4706 Q2 = A,
+ *   `FILTER_TEXT_CASES` in `@objectstack/spec`), and a stored value that is not
+ *   a string never contains a substring (#14079, the same table).
+ *
+ * ⛔ It used to be `String(value).toLowerCase().includes(…)` on every column.
+ * On a drafted list that asked about the list's string form, so `'a'` matched
+ * `['ab']`, `'A'` matched `['a']` and `'a,b'` matched `['a', 'b']` — rows the
+ * published dataset does not count; and on a text column it folded case (the
+ * full Unicode fold, wider even than `$icontains`'s ASCII one) and searched a
+ * number's rendering. A host that names no declaration keeps the substring
+ * reading, as the native compile does: without one a list cannot be told
+ * from text.
+ */
+function previewContains(value: unknown, expected: unknown, shape: ValueShapeFieldDef | undefined): boolean {
+  if (isJsonStoredShape(shape)) {
+    if (!Array.isArray(value)) return false;
+    const members = jsonMembershipCandidates(expected);
+    return value.some((element) => members.includes(JSON.stringify(element)));
+  }
+  return typeof value === 'string' && value.includes(String(expected ?? ''));
+}
 
 /**
  * [#19810] The field operators this face EVALUATES — and, because the refusal
@@ -135,7 +180,8 @@ type PreviewPredicate = (value: unknown, expected: unknown) => boolean;
  * list must not land ahead of the evaluators — reads the same in this
  * direction, so an arm joins this table in the PR that measures it against the
  * shared text/temporal conformance kits, not before. Every row below is
- * byte-for-byte the `case` it replaces.
+ * byte-for-byte the `case` it replaces, except the `$contains` pair, which
+ * #36189 measured against `FILTER_TEXT_CASES` (see {@link previewContains}).
  */
 const PREVIEW_FIELD_OPERATORS = new Map<string, PreviewPredicate>([
   ['$eq', (value, expected) => value === expected || String(value) === String(expected)],
@@ -177,7 +223,15 @@ const PREVIEW_FIELD_OPERATORS = new Map<string, PreviewPredicate>([
   ['$null', (value, expected) => (expected === true ? value == null : value != null)],
   ['$in', (value, expected) => Array.isArray(expected) && expected.some((e) => value === e || String(value) === String(e))],
   ['$nin', (value, expected) => Array.isArray(expected) && !expected.some((e) => value === e || String(value) === String(e))],
-  ['$contains', (value, expected) => String(value ?? '').toLowerCase().includes(String(expected ?? '').toLowerCase())],
+  // [#36189] The pair, through ONE test ({@link previewContains}): membership
+  // on a declared multi-valued or JSON-stored column, the case-exact substring
+  // of a stored string elsewhere. `$notContains` joined the table here, measured
+  // against `FILTER_TEXT_CASES` (the shared text kit the note above names) in
+  // `preview-contains-membership-36189.test.ts`; a row with no value reaches it
+  // inside the NULL escape the shared lowering puts around it, and is answered
+  // there by `$null`.
+  ['$contains', (value, expected, shape) => previewContains(value, expected, shape)],
+  ['$notContains', (value, expected, shape) => !previewContains(value, expected, shape)],
 ]);
 
 /**
@@ -317,29 +371,40 @@ function assertPreviewCanEvaluate(where: Record<string, unknown> | undefined, pa
   }
 }
 
-function matchOp(value: unknown, op: string, expected: unknown, field: string): boolean {
+function matchOp(value: unknown, op: string, expected: unknown, field: string, shape?: ValueShapeFieldDef): boolean {
   const evaluate = PREVIEW_FIELD_OPERATORS.get(op);
   if (!evaluate) throw previewUnevaluableOperatorError(op, field);
-  return evaluate(value, expected);
+  return evaluate(value, expected, shape);
 }
 
-export function matchesWhere(row: Row, where: Record<string, unknown> | undefined): boolean {
+/**
+ * Does `row` pass `where`? `shapeOf` names the declared value shape of the
+ * column a filter key reads ([#36189] the `$contains` pair asks membership on
+ * a multi-valued or JSON-stored one); a caller that passes none, or a key it
+ * cannot name, is matched type-blind.
+ */
+export function matchesWhere(
+  row: Row,
+  where: Record<string, unknown> | undefined,
+  shapeOf?: (field: string) => ValueShapeFieldDef | undefined,
+): boolean {
   if (!where) return true;
   for (const [key, cond] of Object.entries(where)) {
     if (key === '$and') {
-      if (!(cond as Row[]).every((c) => matchesWhere(row, c as Row))) return false;
+      if (!(cond as Row[]).every((c) => matchesWhere(row, c as Row, shapeOf))) return false;
     } else if (key === '$or') {
-      if (!(cond as Row[]).some((c) => matchesWhere(row, c as Row))) return false;
+      if (!(cond as Row[]).some((c) => matchesWhere(row, c as Row, shapeOf))) return false;
     } else if (key === '$not') {
-      if (matchesWhere(row, cond as Row)) return false;
+      if (matchesWhere(row, cond as Row, shapeOf)) return false;
     } else if (isEmptyFieldConstraint(cond)) {
       // [#19835] Zero entries would leave the loop below unrun and fall through
       // to a MATCH. Refused here too, so a direct caller of this matcher gets
       // the same answer the row-independent gate gives a whole query.
       throw previewEmptyFieldConstraintError(key, key);
     } else if (cond !== null && typeof cond === 'object' && !Array.isArray(cond)) {
+      const shape = shapeOf?.(key);
       for (const [op, expected] of Object.entries(cond as Row)) {
-        if (!matchOp(row[key], op, expected, key)) return false;
+        if (!matchOp(row[key], op, expected, key, shape)) return false;
       }
     } else if (!(row[key] === cond || String(row[key]) === String(cond))) {
       return false; // implicit equality
@@ -793,6 +858,8 @@ export function lowerPreviewRowFilters(
   cube: Cube,
   declaredType?: (field: string) => string | undefined,
   whereColumns?: Readonly<Record<string, string>>,
+  declaredShape?: (field: string) => ValueShapeFieldDef | undefined,
+  storedJsonClass?: (field: string) => JsonColumnFieldClass | undefined,
 ): PreviewRowFilters {
   const aliased = Object.entries(whereColumns ?? {});
   const whereType =
@@ -836,10 +903,28 @@ export function lowerPreviewRowFilters(
   // text `'null'` or `'undefined'` — onto every driver's answer.
   const lowered = lowerFilterCondition(normalizeWhereComparands(query.where), lowering);
   assertPreviewCanEvaluate(lowered);
+  // [#36168] …then a scalar comparison on a field declared multi-valued or
+  // JSON-stored, refused as the live faces refuse it: a drafted row holds the
+  // list, which never equals a scalar, so `$in` matched no row and `$nin`
+  // matched the row it excludes. Judged once, before any row is read.
+  // [#36190] …and `storedJsonClass`, the storing driver's own answer, which
+  // also names a single-value media column it keeps as JSON: the live faces
+  // refuse that class in the media-column words (`comparisonColumnClass`
+  // decides which class a column meets, from the two inputs).
+  if (declaredShape || storedJsonClass) {
+    const classOf = (column: string) => comparisonColumnClass(declaredShape?.(column), storedJsonClass?.(column));
+    refusePreviewJsonColumnComparisons(lowered, classOf, (member) => whereColumns?.[member] ?? member);
+  }
   // [#21505] …then each value comparison in the temporal STORAGE form, the
   // comparand here and the row value at the match (see {@link previewTemporalKind}).
   const whereKindOf = previewTemporalKind(whereType);
   const where = previewStorageComparands(lowered, whereKindOf);
+  // [#36189] …and each `where` member's declared value shape, read from the
+  // column it binds to as the refusal above reads it, so `$contains` /
+  // `$notContains` ask membership on a multi-valued or JSON-stored field.
+  const whereShape = declaredShape
+    ? (member: string) => declaredShape(whereColumns?.[member] ?? member)
+    : undefined;
   // The time window below names columns, so it reads the declarations as written.
   const windowLowering = declaredPreviewLowering(declaredType);
   const kindOf = previewTemporalKind(declaredType);
@@ -873,7 +958,7 @@ export function lowerPreviewRowFilters(
   }
   return {
     matches: (r) =>
-      matchesWhere(previewStorageRow(whereRow(r), whereKindOf), where)
+      matchesWhere(previewStorageRow(whereRow(r), whereKindOf), where, whereShape)
       && windows.every((window) => matchesWhere(previewStorageRow(r, kindOf), window)),
   };
 }

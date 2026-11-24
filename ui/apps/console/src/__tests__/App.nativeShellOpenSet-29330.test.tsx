@@ -72,7 +72,7 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   DefaultInvitationsPage: stub('invitations-page'),
   DefaultSettingsPage: stub('settings-page'),
   DefaultAcceptInvitationPage: stub('accept-invitation-page'),
-  DefaultAiChatPage: stub('ai-chat-page'),
+  AiAddressRedirect: stub('ai-chat-page'),
   StudioDesignSurface: stub('studio-design-surface'),
   BuilderLanding: stub('builder-landing'),
   getProductName: () => 'ObjectOS',

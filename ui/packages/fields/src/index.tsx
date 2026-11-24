@@ -17,16 +17,19 @@ import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDis
 import { valueSchemaFor, resolveFieldScale } from '@objectstack/spec/data';
 import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
 import { useLocalization, useDisplayLocale, formatDisplayNumber, readHomeAmountSource } from '@object-ui/i18n';
-import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, cn, setFieldReadFaceResolver } from '@object-ui/components';
+import { Badge, Avatar, AvatarImage, AvatarFallback, Button, Checkbox, EmptyValue, ObjectIconTile, cn, setFieldReadFaceResolver } from '@object-ui/components';
 import { Check, Copy, Phone as PhoneIcon, MapPin, CircleQuestionMark, Lock, Star } from 'lucide-react';
 import { useObjectTranslation, classifyLoadError } from '@object-ui/react';
 import { SchemaRendererContext as _SchemaRendererContext } from '@object-ui/react';
 import { useRelatedRecordActions } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { withFieldCarrier } from './withFieldCarrier.js';
+import { recoverableLazy } from './recoverableLazy.js';
 // Pure formatting rule shared with `AddressField`'s readonly branch — no React,
 // so this does not pull the widget out of its lazy chunk (objectui#4037).
 import { formatAddress, type AddressValue } from './widgets/address-format.js';
+import { referenceRecordCache, referenceRecordKey, heldReferenceRecord } from './widgets/referenceRecordCache.js';
+import { getPersonInitials } from './widgets/personDisplay.js';
 import { deriveHexBadgePalette } from './hexBadgePalette.js';
 // The same arrangement for numbers: one formatting call shared with
 // `NumberField`'s read-only branch (objectui#11431), and likewise for currency
@@ -34,21 +37,15 @@ import { deriveHexBadgePalette } from './hexBadgePalette.js';
 import { formatNumberFieldValue, formatCurrency, formatPercentPoints, percentCellScale } from './widgets/number-format.js';
 import { useFieldTranslation } from './widgets/useFieldTranslation.js';
 import { useBooleanValueLabel } from './widgets/booleanValueLabel.js';
+import { GridField } from './widgets/GridField.js';
 import { RecordHoverCard, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
 // Module-level cache so multiple renderers fetching the same lookup ID
-// only trigger one network call. Keyed by `${objectName}:${id}`. It holds the
-// fetched RECORD and the referenced object's schema, not a resolved name: the
-// name is a display value, resolved per render from the row the viewer may
-// read (objectui#10501), so it follows the permission policy of the render
-// that shows it rather than the one in force when the record arrived.
-type LookupCacheEntry =
-  | { state: 'pending'; promise: Promise<void> }
-  | { state: 'ok'; record: Record<string, unknown> | null | undefined; schema: unknown }
-  // The reader's own read was REFUSED (objectstack#29641): settled, not failed.
-  | { state: 'refused' }
-  | { state: 'err' };
-const lookupNameCache: Map<string, LookupCacheEntry> = new Map();
+// only trigger one network call. It holds the fetched RECORD and the
+// referenced object's schema, not a resolved name (objectui#10501); a pick
+// fills it too (objectstack#36046). Its own module, which `LookupField`
+// shares: `./widgets/referenceRecordCache.ts`.
+const lookupNameCache = referenceRecordCache;
 
 /**
  * Pick the most reasonable display name from an arbitrary record object.
@@ -294,7 +291,7 @@ function useLookupName(
   // `displayField`s could share one; the key is left as it was so that this
   // change does not alter how many reads a screen makes.
   const cacheKey = isResolvable
-    ? `${referenceTo}:${String(value)}:${displayField ?? ''}`
+    ? referenceRecordKey(referenceTo!, value as string | number, displayField)
     : '';
 
   React.useEffect(() => {
@@ -445,7 +442,14 @@ export interface CellRendererProps {
   alwaysShowYear?: boolean;
   /**
    * The cell is one of a grid COLUMN's cells, read against the cells above
-   * and below it (objectstack#25884). Read by the `date` cell only.
+   * and below it (objectstack#25884). Read by the `date` cell and the
+   * `markdown` cell.
+   *
+   * The `markdown` cell then draws its value in the cell face
+   * (objectstack#36344): a heading is a bold line at the cell's own text size
+   * instead of a heading element, so a value that starts with `# Heading`
+   * keeps the row's height. The record page does not pass it and keeps the
+   * heading sizes.
    *
    * A `date` field that declares no `format` then paints `formatDate`'s
    * absolute default face instead of `'relative'`, and the relative phrase
@@ -456,10 +460,26 @@ export interface CellRendererProps {
    * tooltip. A declared `format` still wins, `'relative'` included.
    *
    * `ObjectGrid` passes it on every column cell it builds. Absent or `false`
-   * changes nothing, so the record detail body, the highlights strip and the
-   * card surfaces keep the relative default.
+   * changes nothing; the record page asks for the same face through
+   * `absoluteDate` below.
    */
   inGridColumn?: boolean;
+  /**
+   * The cell shows a business date on a record page (objectstack#35745). Read
+   * by the `date` cell only, with exactly `inGridColumn`'s effect: a `date`
+   * field that declares no `format` paints `formatDate`'s absolute face, and
+   * the relative phrase becomes the cell's tooltip.
+   *
+   * The relative default made a record page read "6 days ago" for a meeting
+   * date the list beside it wrote as "Nov 13", and the reader had to work out
+   * the day. A declared `format` still wins, `'relative'` included.
+   *
+   * The record page's field sections and its highlights strip pass it; the
+   * record footer's system times (created, modified) do not, and keep their
+   * relative wording. Absent or `false` changes nothing, so the card surfaces
+   * keep the relative default.
+   */
+  absoluteDate?: boolean;
 }
 
 // `coerceToSafeValue` lives in `./coerceToSafeValue.ts` (objectui#8580) so
@@ -883,6 +903,8 @@ function RatingCellRenderer({ value, field }: CellRendererProps): React.ReactEle
         <Star
           key={i}
           aria-hidden="true"
+          // The star a click on a selected list cell sets (objectstack#36023).
+          data-rating-star={i + 1}
           className={cn(
             'h-3.5 w-3.5 shrink-0',
             i < filled ? 'fill-yellow-400 text-yellow-400' : 'text-muted-foreground/40',
@@ -1264,7 +1286,7 @@ function isOverdueInstant(date: Date, dueLike: boolean): boolean {
 /**
  * Date field cell renderer
  */
-export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear, inGridColumn }: CellRendererProps): React.ReactElement {
+export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear, inGridColumn, absoluteDate }: CellRendererProps): React.ReactElement {
   // `useDisplayLocale()`, NOT `useLocalization().locale` (objectui#4468). The
   // raw tenant locale is `undefined` on any workspace that never configured
   // one, and `Intl` reads the MACHINE's locale from `undefined` — so a `zh`
@@ -1328,10 +1350,13 @@ export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear
   const declaredStyle: string | undefined = dateField.format || undefined;
   // objectstack#25884 — in a grid column the undeclared default is the
   // absolute face (`formatDate`'s default, `undefined`), one face per column;
-  // everywhere else it stays `'relative'`. ⚠️ `ObjectGrid`'s
+  // a record page's field asks for the same (`absoluteDate`); everywhere else
+  // it stays `'relative'`. ⚠️ `ObjectGrid`'s
   // `temporalGroupHeading` restates this selection for its group headings,
   // and `groupDateHeading-13234.test.tsx` holds the two equal.
-  const style = declaredStyle ?? (inGridColumn ? undefined : 'relative');
+  // objectstack#35745 — a record page's business date reads the same way.
+  const absoluteByDefault = inGridColumn || absoluteDate;
+  const style = declaredStyle ?? (absoluteByDefault ? undefined : 'relative');
 
   // Both halves of the affordance come from the shared reads above, so the
   // `datetime` sibling one function down answers this question identically
@@ -1344,7 +1369,7 @@ export function DateCellRenderer({ value, field, deadlineSettled, alwaysShowYear
   // The relative phrase the grid default no longer paints ("Yesterday",
   // "Overdue 3d") is the tooltip instead. Outside the ±7-day window the phrase
   // IS the absolute face, which says nothing new, so the ISO `title` stays.
-  const relative = inGridColumn && declaredStyle === undefined
+  const relative = absoluteByDefault && declaredStyle === undefined
     ? formatDate(safe as string | Date, 'relative', options)
     : undefined;
   const title = relative !== undefined && relative !== formatted ? relative : date.toISOString();
@@ -1935,6 +1960,10 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
         className={cn('max-w-full min-w-0', colorClasses)}
         style={hexBadge?.style}
         title={label}
+        // A print page's stylesheet prints this badge as plain text
+        // (`PRINT_PLAIN_BADGE_ATTRIBUTE` in `@object-ui/components`'s
+        // `page-print.ts`, objectstack#34228). Nothing reads it on screen.
+        data-select-badge=""
       >
         <span className="truncate">{label}</span>
       </Badge>
@@ -2008,8 +2037,11 @@ export function EmailCellRenderer({ value }: CellRendererProps): React.ReactElem
           {safe}
         </a>
       </Button>
+      {/* A select-first grid does not draw this (`data-cell-copy`): there a
+          click selects the cell and Ctrl/Cmd+C copies it (objectstack#36015). */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/email:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyEmail', 'Copy email')}
@@ -2105,8 +2137,10 @@ export function PhoneCellRenderer({ value }: CellRendererProps): React.ReactElem
         <PhoneIcon className="h-3 w-3 shrink-0" />
         <span className="truncate">{safe}</span>
       </a>
+      {/* Not drawn in a select-first grid, as `EmailCellRenderer`'s. */}
       <button
         type="button"
+        data-cell-copy=""
         className="shrink-0 opacity-0 group-hover/phone:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
         onClick={handleCopy}
         aria-label={label('detail.copyPhone', 'Copy phone number')}
@@ -2263,7 +2297,9 @@ function displayableImagesOf(value: unknown): Array<{ url: string; name?: string
  *
  * Clicking a thumbnail opens a full-screen lightbox (single or gallery). The
  * click is `stopPropagation`-guarded so, inside a grid row, enlarging an image
- * doesn't also trigger row navigation.
+ * doesn't also trigger row navigation. Each thumbnail is a `data-cell-opener`:
+ * in a select-first grid a plain click selects the cell, and the cell's open
+ * button or Ctrl/Cmd+Enter opens the lightbox (objectstack#36015).
  */
 export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElement {
   const { t } = useObjectTranslation();
@@ -2326,6 +2362,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
               key={idx}
               src={img.url}
               alt={imageAlt(idx, img.name)}
+              data-cell-opener=""
               onClick={open(idx)}
               className="size-8 cursor-zoom-in rounded-md border-2 border-background object-cover transition-transform hover:scale-110 hover:z-10"
             />
@@ -2333,6 +2370,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
           {imgs.length > 3 && (
             <button
               type="button"
+              data-cell-opener=""
               onClick={open(3)}
               className="size-8 rounded-md border-2 border-background bg-muted flex items-center justify-center text-xs font-medium text-muted-foreground hover:bg-muted/80"
             >
@@ -2351,6 +2389,7 @@ export function ImageCellRenderer({ value }: CellRendererProps): React.ReactElem
       <img
         src={imgs[0].url}
         alt={imageAlt(0, imgs[0].name)}
+        data-cell-opener=""
         onClick={open(0)}
         className="size-10 cursor-zoom-in rounded-md object-cover transition-transform hover:scale-105"
       />
@@ -2440,6 +2479,19 @@ function referencedRecordId(item: unknown): string | number | undefined {
  * link address" behave the way a link is supposed to; a plain left click is
  * handed to the host so navigation stays in-app.
  */
+/**
+ * Whether a referenced record is drawn as a chip (objectstack#36147): the
+ * referenced object's colour tile (`ObjectSchema.color` and `icon`,
+ * objectstack#35985) then the record's name, on a muted pill, the name
+ * wrapping instead of truncating. A record page's field area provides it;
+ * everywhere else a reference keeps its link face. A chip with no host route
+ * is the same pill, not a link.
+ */
+export const ReferenceChipContext = React.createContext(false);
+
+const REFERENCE_CHIP_CLASS =
+  'inline-flex max-w-full items-start gap-1.5 rounded-md bg-muted px-1.5 py-0.5 align-top text-foreground';
+
 function ReferencedRecordLink({
   objectName,
   recordId,
@@ -2458,13 +2510,34 @@ function ReferencedRecordLink({
   children: React.ReactNode;
 }): React.ReactElement {
   const host = useRelatedRecordActions();
+  const chip = React.useContext(ReferenceChipContext);
   const navigable = !!objectName && recordId != null && recordId !== '';
   const href =
     navigable && host?.recordHref
       ? host.recordHref(objectName as string, recordId as string | number)
       : null;
 
-  if (!href) return <>{children}</>;
+  const face = chip ? (
+    <>
+      <ObjectIconTile
+        icon={typeof objectSchema?.icon === 'string' ? objectSchema.icon : undefined}
+        color={typeof objectSchema?.color === 'string' ? objectSchema.color : undefined}
+        size="xs"
+        className="mt-0.5"
+      />
+      <span className="min-w-0 break-words">{label || children}</span>
+    </>
+  ) : children;
+
+  if (!href) {
+    return chip ? (
+      <span className={REFERENCE_CHIP_CLASS} data-record-chip="">
+        {face}
+      </span>
+    ) : (
+      <>{children}</>
+    );
+  }
 
   // Hovering the link (or Space on it) shows the referenced record's card
   // (objectstack#27604): the same reference, a glance instead of a visit.
@@ -2472,7 +2545,20 @@ function ReferencedRecordLink({
     <RecordHoverCard objectName={objectName} recordId={recordId} objectSchema={objectSchema} label={label}>
       <a
         href={href}
-        className={cn('text-primary underline-offset-4 hover:underline', className)}
+        className={cn(
+          chip ? cn(REFERENCE_CHIP_CLASS, 'transition-colors hover:bg-accent') : 'text-primary underline-offset-4 hover:underline',
+          className,
+        )}
+        data-record-chip={chip ? '' : undefined}
+        // A host's list grid draws a referenced record as a small chip led by
+        // the name's first letter (objectstack#35548); these say which link
+        // is one and what its letter is.
+        data-record-link=""
+        data-initial={recordLinkInitial(label)}
+        // The record the chip names: a select-first grid opens it in place on
+        // a single click when its host asks to (objectstack#36015).
+        data-record-object={objectName}
+        data-record-id={String(recordId)}
         onClick={(e) => {
           // The rows this cell sits in carry their own click handlers — the
           // detail row copies the field value, a related-list row opens ITS own
@@ -2487,10 +2573,16 @@ function ReferencedRecordLink({
           host.openRecord(objectName as string, recordId as string | number);
         }}
       >
-        {children}
+        {face}
       </a>
     </RecordHoverCard>
   );
+}
+
+/** The first character of a referenced record's name, upper-cased, or none. */
+function recordLinkInitial(label: string | undefined): string | undefined {
+  const first = Array.from((label ?? '').trim())[0];
+  return first ? first.toLocaleUpperCase() : undefined;
 }
 
 /**
@@ -2874,8 +2966,9 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // A roll-up that declares its currency is money (ADR-0144 D6 as amended):
   // the currency cell draws it, with the parent row as its record, so a
   // `record` roll-up reads the parent's code as its children's amounts do, and
-  // a `dynamic` one (a roll-up of a stored home amount, objectstack#33659)
-  // reads the tenant default, as its home field's own cells do.
+  // a `dynamic` one (a roll-up of a child `currency` field in `dynamic` mode,
+  // a stored home amount included) reads the tenant default, as that child
+  // field's own cells do.
   const declaresMoney = (field as { type?: unknown } | undefined)?.type === 'summary' && summaryDeclaresCurrency(field);
   const valueType = declaresMoney && typeof value === 'number'
     ? 'currency'
@@ -2895,6 +2988,19 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // currency is its row's code field (ADR-0144 D2).
   if (valueType === 'currency') {
     return <CurrencyCellRenderer value={value} field={field} dependentValues={dependentValues} />;
+  }
+
+  // A declared PERCENT is a ratio (objectstack#35047): the spec reads it
+  // "as a `percent` field reads its stored value", so it is drawn by the
+  // percent cell itself, as the percent field it reads like. The cell asks
+  // `resolveFieldScale` by the field's `type`, so the type handed over is
+  // `percent`: a formula's own type has no absent-`scale` row, and an
+  // undeclared width would fall to `formatPercent`'s private default while
+  // the form face read `0`. Everything else is this formula's own — `scale`,
+  // the `max` that says whole-percent storage, `percentDisplay`.
+  // ⛔ No second percent formatter here.
+  if (valueType === 'percent') {
+    return <PercentCellRenderer value={value} field={{ ...(field as object), type: 'percent' } as CellRendererProps['field']} />;
   }
 
   // A declared BOOLEAN reads the locale's Yes / No word (objectui#11748), the
@@ -3214,7 +3320,15 @@ export function UnresolvedReferenceMark({
  * `sys_user` policy, the object the runtime expands it into and the object
  * `UserField` points the picker at. The field's `reference` is not read.
  */
-export function UserCellRenderer({ value }: CellRendererProps): React.ReactElement {
+/**
+ * A person's face in a cell (objectstack#36023): 24 px drawn, 20 px laid out,
+ * so it never makes its row taller than a row of text. A 32 px face made a
+ * list row 41 px tall, and the row dropped back to 33 px while the cell was
+ * edited, so the list jumped.
+ */
+const CELL_AVATAR_CLASS = 'size-6 -my-0.5';
+
+export function UserCellRenderer({ value: stored }: CellRendererProps): React.ReactElement {
   // Called before any early return (rules of hooks). A policy that loads or
   // changes re-renders this cell through the context, and the drawing follows.
   const perms = usePermissions();
@@ -3225,7 +3339,15 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   // avatar-stack branch below and rendered an empty stack (objectui#8481) —
   // and the floor alone would let `0` through to `UnresolvedUserReference`,
   // which is not what a user reference of zero is.
-  if (isEmptyValue(value) || !value) return <EmptyValue />;
+  if (isEmptyValue(stored) || !stored) return <EmptyValue />;
+
+  // objectstack#36046 — a stored id this page already holds the person for
+  // (a pick in this cell, which stores the id and keeps the record it picked)
+  // is drawn as that person, as an expanded value is: never the raw id until
+  // the list is read again. An id nothing here holds stays unresolved, below.
+  const value: CellRendererProps['value'] = Array.isArray(stored)
+    ? stored.map((entry: unknown) => heldReferenceRecord(personObject, entry) ?? entry)
+    : heldReferenceRecord(personObject, stored) ?? stored;
 
   // A primitive is an UNRESOLVED reference, not "the ID/username" (objectui#8434).
   // The comment that stood here stated the branch's premise, and the premise was
@@ -3270,24 +3392,24 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
             );
           }
           const name = user.name || user.username || 'User';
-          const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+          const initials = getPersonInitials(String(name));
           
           return (
             <Avatar
               key={idx}
-              className="size-8 border-2 border-white"
+              className={cn(CELL_AVATAR_CLASS, 'border-2 border-white')}
               title={name}
             >
               {user.image && <AvatarImage src={user.image} alt={name} />}
-              <AvatarFallback className="bg-blue-500 text-white text-xs">
+              <AvatarFallback className="bg-blue-500 text-white text-[10px]">
                 {initials}
               </AvatarFallback>
             </Avatar>
           );
         })}
         {value.length > 3 && (
-          <Avatar className="size-8 border-2 border-white">
-            <AvatarFallback className="bg-gray-200 text-gray-600 text-xs">
+          <Avatar className={cn(CELL_AVATAR_CLASS, 'border-2 border-white')}>
+            <AvatarFallback className="bg-gray-200 text-gray-600 text-[10px]">
               +{value.length - 3}
             </AvatarFallback>
           </Avatar>
@@ -3322,13 +3444,14 @@ export function UserCellRenderer({ value }: CellRendererProps): React.ReactEleme
   }
 
   const name = user.name || user.username || 'User';
-  const initials = name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+  // objectstack#36046 — the initials every person chip draws: letters only.
+  const initials = getPersonInitials(String(name));
   
   return (
     <div className="flex items-center gap-2">
-      <Avatar className="size-8">
+      <Avatar className={CELL_AVATAR_CLASS}>
         {user.image && <AvatarImage src={user.image} alt={name} />}
-        <AvatarFallback className="bg-blue-500 text-white text-xs">
+        <AvatarFallback className="bg-blue-500 text-white text-[10px]">
           {initials}
         </AvatarFallback>
       </Avatar>
@@ -4710,7 +4833,11 @@ const fieldWidgetMap = {
   // Complex data types
   'object': () => import('./widgets/ObjectField.js').then(m => ({ default: m.ObjectField })),
   'vector': () => import('./widgets/VectorField.js').then(m => ({ default: m.VectorField })),
-  'grid': () => import('./widgets/GridField.js').then(m => ({ default: m.GridField })),
+  // The grid's public face, already in this chunk, not its body: the face loads
+  // the body through its one loader (objectstack#36102) and asks again after a
+  // failed load, where a lazy wrapper around the body here would add a second
+  // loader beside the face's own (objectstack#36451).
+  'grid': () => Promise.resolve({ default: GridField }),
   
   // Additional field types from @objectstack/spec
   'color': () => import('./widgets/ColorField.js').then(m => ({ default: m.ColorField })),
@@ -4843,22 +4970,24 @@ export { fieldHelpText } from './fieldHelpText.js';
 // page's compact related rows).
 export { RecordHoverCard, type RecordHoverCardProps, type RecordHoverCardObjectDef } from './RecordHoverCard.js';
 
-/** Cache so each widget type creates one lazy component (and one chunk request). */
+/** Cache so each widget type creates one lazy component (and one chunk request at a time). */
 const lazyFieldWidgets = new Map<string, React.ComponentType<any>>();
 
 /**
  * Lazily-loaded form field widget for a field type. Shares the exact loaders
  * of {@link fieldWidgetMap} (the same components `registerField` registers for
- * forms), wrapped in `React.lazy` and cached per type — so a consumer can
+ * forms), wrapped in `recoverableLazy` and cached per type — so a consumer can
  * render any form-supported field type without eagerly bundling every widget.
  * Render inside a `<Suspense>` boundary. Unknown types resolve to the `text`
- * widget via {@link resolveFormWidgetType}.
+ * widget via {@link resolveFormWidgetType}. A failed chunk load reaches the
+ * nearest error boundary and is not kept: the next mount loads again
+ * (objectstack#36608).
  */
 export function getLazyFieldWidget(fieldType: string): React.ComponentType<any> {
   const key = resolveFormWidgetType(fieldType);
   // A retired key has no loader in `fieldWidgetMap` by construction, so it is
   // answered with the tombstone before the lazy path (which would otherwise
-  // call `React.lazy(undefined)`). The tombstone is BOUND to `key`: a host
+  // call the lazy wrapper with no loader). The tombstone is BOUND to `key`: a host
   // that resolved the key from an authored `widget` hands over a `field` whose
   // `type` is a live type, and the refusal must name what was resolved
   // (objectui#10471) — see {@link retiredFieldTombstoneFor}.
@@ -4866,7 +4995,7 @@ export function getLazyFieldWidget(fieldType: string): React.ComponentType<any> 
   let Widget = lazyFieldWidgets.get(key);
   if (!Widget) {
     // `resolveFormWidgetType` only returns keys the map holds, hence the `!`.
-    Widget = React.lazy(fieldWidgetLoaderByKey[key]!);
+    Widget = recoverableLazy(fieldWidgetLoaderByKey[key]!);
     lazyFieldWidgets.set(key, Widget);
   }
   return Widget;
@@ -4926,7 +5055,7 @@ const FIELD_TYPES_SKIP_FALLBACK = new Set([
   // `kind:'html'` page drew a code editor and dropped its text.
   'code',
   // No other package owns the bare `time`/`address` key, but `registerField`
-  // wraps each call in a fresh `React.lazy(...)`, so re-registration (HMR,
+  // wraps each call in a fresh lazy component, so re-registration (HMR,
   // re-import) fails the registry's identity check every time and logs the
   // same "bare-name fallback overwritten" warning at every boot regardless.
   'time',
@@ -5103,8 +5232,9 @@ export function registerField(fieldType: string): void {
     return;
   }
   
-  // Create lazy component
-  const LazyFieldWidget = React.lazy(loader);
+  // Create lazy component. A failed chunk load is not kept: the next mount
+  // loads again (objectstack#36608).
+  const LazyFieldWidget = recoverableLazy(loader);
 
   // Register with field namespace. No LAYOUT wrapper — the form renderer owns
   // label/description/spacing. The only thing wrapped is the metadata carrier:
@@ -5307,6 +5437,22 @@ export {
 } from './widgets/file-value.js';
 export type { FileValueView, UploadResultLike } from './widgets/file-value.js';
 export * from './FieldEditWidget.js';
+// objectstack#35956 — the in-place fill-in a change opens when it makes other
+// fields required: the pre-evaluation and the dialog, shared by the kanban
+// drop, the list cell and the record page's inline edit.
+export {
+  collectRequiredWhenPromptFields,
+  requiredWhenPromptReads,
+  requiredWhenPromptAsksOn,
+  type RequiredWhenPromptField,
+  type RequiredWhenPromptOptions,
+} from './requiredWhenPrompt.js';
+export {
+  RequiredFieldsDialog,
+  type RequiredFieldsDialogField,
+  type RequiredFieldsDialogChange,
+  type RequiredFieldsDialogProps,
+} from './RequiredFieldsDialog.js';
 export * from './widgets/TextField.js';
 export * from './widgets/NumberField.js';
 export * from './widgets/BooleanField.js';
@@ -5315,6 +5461,10 @@ export * from './widgets/BooleanField.js';
 // highlights chip). `BooleanValueText` stays internal: its only caller is the
 // lookup column renderer in this package.
 export { useBooleanValueLabel, type BooleanValueLabel } from './widgets/booleanValueLabel.js';
+// objectstack#36070 — the up-to-two-character initials a person chip draws
+// when it has no avatar image (PersonRow, the people-field chips). Exported so
+// `@object-ui/plugin-detail`'s comment author avatar draws the same initials.
+export { getPersonInitials } from './widgets/personDisplay.js';
 export * from './widgets/SelectField.js';
 export * from './widgets/DateField.js';
 export * from './widgets/DateTimeField.js';
@@ -5362,6 +5512,12 @@ export * from './widgets/FileField.js';
 export * from './widgets/ImageField.js';
 export { ImageCropperDialog } from './widgets/ImageCropperDialog.js';
 export type { ImageCropperDialogProps } from './widgets/ImageCropperDialog.js';
+// The in-page file preview a record's attachments and a file field open
+// (objectstack#36442), and the delimited-text reader its CSV view shares with
+// the grid's import wizard.
+export { FilePreviewDialog } from './widgets/FilePreviewDialog.js';
+export type { FilePreviewDialogProps, FilePreviewItem } from './widgets/FilePreviewDialog.js';
+export { decodeSpreadsheetText, parseDelimited } from './widgets/delimitedText.js';
 export * from './widgets/LocationField.js';
 export * from './widgets/FormulaField.js';
 export * from './widgets/SummaryField.js';
@@ -5369,8 +5525,11 @@ export * from './widgets/AutoNumberField.js';
 export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
-export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField } from './widgets/GridField.js';
-export type { ColumnCurrencies } from './widgets/GridField.js';
+// `GridField` / `LineItemsField` are the grid's lazy face: the body loads on
+// first use, or earlier through `preloadGridField` (objectstack#36102). The
+// pure helpers beside them are eager. See `widgets/GridField.ts`.
+export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField, preloadGridField, UNTOUCHED_NEW_ROW, isUntouchedNewRow, columnHelpByField } from './widgets/GridField.js';
+export type { ColumnCurrencies, ColumnHelp } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';
 // objectstack#32770 (ADR-0150 D8 R1) — the grant's set-name column and the
@@ -5382,6 +5541,10 @@ export { PERMISSION_SET_GRANT_COLUMNS } from './widgets/permissionSetHolders.js'
 // `permission-ref` field's definition, so the widget recognises the grant's
 // name column by its object and its column, not by its column name alone.
 export { FORM_OBJECT_KEY, withFormObject } from './widgets/permissionSetHolders.js';
+// A record form stamps any lookup whose `lookupFilters` read `{ $record }`: one record is being edited here,
+// with the object each hop points at. Only a field carrying a stamp `withRecordBeingEdited` issued resolves a
+// `{ $record }`; the key written as data is no stamp.
+export { RECORD_BEING_EDITED_KEY, withRecordBeingEdited } from './widgets/lookupRecordReference.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';
 export * from './widgets/SliderField.js';

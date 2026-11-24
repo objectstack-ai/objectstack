@@ -1,70 +1,47 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Approvals QUEUE — the rows, and the amount sort, honour each row's own
- * object `hidden: true` declaration (objectui#6020).
+ * Approvals QUEUE — the figure each row shows beside its object name, and the
+ * amount sort, are the field the row's OWN object DECLARES: the first numeric
+ * entry of its `highlightFields` (ADR-0085) that it did not declare
+ * `hidden: true`. Never a field picked by its NAME; no declaration, no figure.
  *
- * ## The defect
+ * ## Why the fixture is built the way it is
  *
- * objectui#5565 put the filter INSIDE `decisionAmountEntry` behind an optional
- * `hiddenKeys` parameter, and passed it at exactly one of five call sites — the
- * drawer. The desktop row, the mobile card and both halves of the amount
- * comparator called it bare, so a field the author declared `hidden: true`
- * still rendered inline in the queue and still ordered the list. A filter
- * present in a function body but unpassed at the call site reads exactly like a
- * fixed defect, which is why this file measures the CALL SITES.
+ * Every row carries a money-looking key (`total_amount`, `overdue_amount`,
+ * `service_fee`) that a name-based guess would pick, declared BEFORE the field
+ * the object's `highlightFields` names. So each assertion fails on a guess:
  *
- * ## ⚠️ Why the fixture spans TWO objects — the naive fix passes a one-object test
+ *   showcase_purchase — highlightFields [subject, total_amount, freight_cost],
+ *                       `total_amount` declared hidden
+ *   showcase_invoice  — highlightFields [subject, total_score],
+ *                       `overdue_amount` declared first
  *
- * The obvious repair is to thread the page's existing `hiddenPayloadKeys` into
- * the four sites. That set is keyed to the OPEN request (`useHiddenFields(
- * selected?.object_name)`), while the queue is N rows spanning K objects, so it
- * would apply one object's declarations to every row: fields hidden on rows
- * whose object never declared them, fields missed on rows whose object did.
- * A single-object fixture cannot tell that apart from the real fix, so the
- * fixture below is two objects with DIFFERENT declarations and asserts both
- * directions:
+ *   row P  (purchase) → `freight_cost` 320   … the hidden entry is skipped
+ *   row I1 (invoice)  → `total_score` 81     … not `overdue_amount` 80,000
+ *   row I2 (invoice)  → `total_score` 0      … a declared 0 shows; not 250
  *
- *   showcase_purchase — declares `total_amount` hidden
- *   showcase_invoice  — declares `service_fee` hidden, `total_amount` NOT
- *
- *   row P  (purchase) `total_amount` → trimmed   … the reported defect
- *   row I1 (invoice)  `total_amount` → RENDERS   … ⭐ the naive fix hides this
- *   row I2 (invoice)  `service_fee`  → trimmed   … ⭐ a one-object fix misses this
- *
- * ## Why the trimmed row still shows a figure
- *
- * Row P carries a second, undeclared amount key (`freight_cost`) after the
- * hidden one. Trimmed, the row renders THAT — so the drop happens inside the
- * scan, before the field is chosen, and "the amount is gone" cannot be
- * satisfied by a row that simply stopped rendering amounts. It is the same
- * promotion signal the side sheet's `ApprovalsInboxPage.hiddenFieldTrim.test.tsx`
- * used for its 6-field cut, transposed onto the pick; that pin retired with the
- * sheet (objectui#12484), against
- * `approvalRequestsDataSource.servedPageSummary-12483.test.tsx`.
+ * Two objects with DIFFERENT declarations, because the lookup is per object:
+ * one object's answer applied to every row would show the wrong field on the
+ * other object's rows.
  *
  * ## Why every figure is asserted TWICE
  *
  * The queue ships two surfaces — the desktop table row and the `md:hidden`
  * mobile card — and both are in the DOM here (no stylesheet applies media
- * queries). A rendered figure is therefore exactly 2 nodes and a trimmed one
+ * queries). A rendered figure is therefore exactly 2 nodes and an absent one
  * exactly 0, which fails a fix that repairs one surface and forgets the other.
  *
- * ## The sort is the half that leaks without rendering anything
+ * ## The sort orders on exactly the figure it renders
  *
- * Ordering IS disclosure: sorting on a hidden figure tells a viewer who never
- * sees it how it compares to every other row. The posture pinned below is
- * **the queue orders on exactly the figure it renders** — a row left with no
- * renderable amount sinks with the other amount-less rows, which is the
- * behaviour that surface already has for a request with no amount at all.
+ * A row with no declared figure sinks with the other figure-less rows. Ordering
+ * IS disclosure, so a figure the object declares `hidden: true` orders nothing.
  *
  * ## Counter-probes
  *
- * "The figure is gone" and "the row sank" are both satisfiable by breaking the
- * queue. So every denial case asserts the three record titles are still there,
- * and each half has a counter-probe running the SAME fixture with nothing
- * declared hidden, where the figure renders and the row sorts where its amount
- * puts it.
+ * "No figure" and "the row sank" are both satisfiable by breaking the queue.
+ * So every absence case asserts the three record titles are still there, and
+ * the sort has a counter-probe where the same row ranks on a declared figure.
  *
  * No build artifact sits between the edit and this test: the root Vitest config
  * aliases every `@object-ui` specifier at that package's source directory, and
@@ -73,7 +50,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup, within, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, within, waitFor, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
@@ -81,14 +58,18 @@ const APP = 'com.objectstack.account';
 const PURCHASE = 'showcase_purchase';
 const INVOICE = 'showcase_invoice';
 
-/** `showcase_purchase` declares this hidden — must never reach the queue. */
-const HIDDEN_PURCHASE_AMOUNT = 'USD 99,000.00';
-/** Second amount key on the same row: renders ONLY once the hidden one drops. */
-const PROMOTED_PURCHASE_AMOUNT = 'USD 320.00';
-/** `showcase_invoice` does NOT declare `total_amount` hidden — must render. */
-const VISIBLE_INVOICE_AMOUNT = 'USD 5,000.00';
-/** `showcase_invoice` DOES declare `service_fee` hidden — must not render. */
-const HIDDEN_INVOICE_FEE = 'USD 250.00';
+/** Row P's `total_amount` — a highlight entry, but declared hidden. */
+const HIDDEN_PURCHASE_TOTAL = 'USD 99,000.00';
+/** Row P's figure: the next numeric highlight entry, `freight_cost`. */
+const PURCHASE_FIGURE = 'USD 320.00';
+/** Row I1's `overdue_amount` — declared first, money-named, not a highlight. */
+const GUESSED_INVOICE_AMOUNT = 'USD 80,000.00';
+/** Row I1's figure: `total_score`, the invoice's numeric highlight. */
+const INVOICE_FIGURE = '81';
+/** Row I2's figure: a declared `total_score` of 0, shown. */
+const ZERO_INVOICE_FIGURE = '0';
+/** Row I2's `service_fee` — money-named, not a highlight. */
+const GUESSED_INVOICE_FEE = 'USD 250.00';
 
 const TITLES = ['PO-4417', 'INV-8801', 'INV-8802'];
 
@@ -128,8 +109,8 @@ const { approvalsApiStub, getObjectSchema, SCHEMAS, ADAPTER, AUTH, I18N, ROWS } 
       submitter_id: 'u_2',
       submitter_name: 'Sam Submitter',
       submitted_at: '2026-08-20T02:00:00.000Z',
-      payload: { total_amount: 5000, subject: 'Quarterly retainer' },
-      payload_display: { total_amount: 'USD 5,000.00' },
+      payload: { overdue_amount: 80000, total_score: 81, subject: 'Quarterly retainer' },
+      payload_display: { overdue_amount: 'USD 80,000.00' },
     },
     {
       id: 'req_i2',
@@ -144,8 +125,8 @@ const { approvalsApiStub, getObjectSchema, SCHEMAS, ADAPTER, AUTH, I18N, ROWS } 
       submitter_id: 'u_2',
       submitter_name: 'Sam Submitter',
       submitted_at: '2026-08-20T01:00:00.000Z',
-      payload: { service_fee: 250, subject: 'Filing service' },
-      payload_display: { service_fee: 'USD 250.00' },
+      payload: { overdue_amount: 0, total_score: 0, service_fee: 250, subject: 'Filing service' },
+      payload_display: { overdue_amount: 'USD 0.00', service_fee: 'USD 250.00' },
     },
   ];
 
@@ -223,6 +204,7 @@ function permissionsPayload(): MePermissionsAuthenticatedResponse {
     tenantId: 't_1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: {},
     fields: {},
@@ -237,40 +219,38 @@ function declare(objectName: string, schema: unknown): void {
   SCHEMAS[objectName] = schema;
 }
 
-/** Both objects, as the app author wrote them for the defect case. */
-function declareTheReportedHiddenFields(): void {
+const PURCHASE_FIELDS = {
+  total_amount: { type: 'currency', hidden: true },
+  subject: { type: 'text' },
+  freight_cost: { type: 'currency' },
+};
+
+/** `overdue_amount` declared first, so a declaration-order scan meets it first. */
+function invoiceFields(serviceFee: Record<string, unknown> = { type: 'currency' }) {
+  return {
+    overdue_amount: { type: 'currency' },
+    total_score: { type: 'number' },
+    service_fee: serviceFee,
+    subject: { type: 'text' },
+  };
+}
+
+/** Both objects as the header's table declares them. */
+function declareTheFigures(): void {
   declare(PURCHASE, {
-    fields: {
-      total_amount: { type: 'currency', hidden: true },
-      freight_cost: { type: 'currency' },
-      subject: { type: 'text' },
-    },
+    highlightFields: ['subject', 'total_amount', 'freight_cost'],
+    fields: PURCHASE_FIELDS,
   });
   declare(INVOICE, {
-    fields: {
-      total_amount: { type: 'currency' },
-      service_fee: { type: 'currency', hidden: true },
-      subject: { type: 'text' },
-    },
+    highlightFields: ['subject', 'total_score'],
+    fields: invoiceFields(),
   });
 }
 
-/** The same two objects with nothing hidden — the counter-probe. */
-function declareNothingHidden(): void {
-  declare(PURCHASE, {
-    fields: {
-      total_amount: { type: 'currency' },
-      freight_cost: { type: 'currency' },
-      subject: { type: 'text' },
-    },
-  });
-  declare(INVOICE, {
-    fields: {
-      total_amount: { type: 'currency' },
-      service_fee: { type: 'currency' },
-      subject: { type: 'text' },
-    },
-  });
+/** The same fields, no `highlightFields` at all — nothing declares a figure. */
+function declareNoFigure(): void {
+  declare(PURCHASE, { fields: PURCHASE_FIELDS });
+  declare(INVOICE, { fields: invoiceFields() });
 }
 
 function renderQueue() {
@@ -305,6 +285,17 @@ function amountNodes(display: string): HTMLElement[] {
   return screen.queryAllByText((_content, element) => {
     if (!element || element.children.length > 0) return false;
     return element.textContent?.replace(/\s+/g, ' ').trim() === `· ${display}`;
+  });
+}
+
+/**
+ * Wait until every metadata read has settled and React has rendered on it, so
+ * an absence assertion reads the answered queue, not the first paint.
+ */
+async function metadataSettled(): Promise<void> {
+  await act(async () => {
+    await Promise.all(getObjectSchema.mock.results.map((r) => Promise.resolve(r.value).catch(() => undefined)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
@@ -365,55 +356,60 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('Approvals queue rows — per-object `hidden: true` trim (objectui#6020)', () => {
-  it('trims the figure each row’s OWN object declares hidden, and only that one', async () => {
-    declareTheReportedHiddenFields();
+
+describe('Approvals queue rows — the figure is the object’s declared highlight, never a guess', () => {
+  it('shows the first numeric `highlightFields` entry of each row’s OWN object', async () => {
+    declareTheFigures();
     await loadedQueue();
 
-    // The reported defect: the purchase row's hidden amount.
-    await waitFor(() => expect(amountNodes(HIDDEN_PURCHASE_AMOUNT)).toHaveLength(0));
-    // …and the row still carries an amount — its next, undeclared one — so the
-    // drop is inside the scan, not the row giving up on amounts.
-    expect(amountNodes(PROMOTED_PURCHASE_AMOUNT)).toHaveLength(2);
+    // Purchase: `total_amount` is the first numeric highlight but is declared
+    // hidden, so the next one, `freight_cost`, is the figure.
+    await waitFor(() => expect(amountNodes(PURCHASE_FIGURE)).toHaveLength(2));
+    expect(amountNodes(HIDDEN_PURCHASE_TOTAL)).toHaveLength(0);
 
-    // ⭐ The invoice object does NOT declare `total_amount` hidden. A fix that
-    // threads the drawer's single set through the queue hides this figure.
-    expect(amountNodes(VISIBLE_INVOICE_AMOUNT)).toHaveLength(2);
+    // Invoice: the declared `total_score`, not the money-named
+    // `overdue_amount` declared before it.
+    expect(amountNodes(INVOICE_FIGURE)).toHaveLength(2);
+    expect(amountNodes(GUESSED_INVOICE_AMOUNT)).toHaveLength(0);
 
-    // ⭐ The invoice object DOES declare `service_fee` hidden. A fix that reads
-    // only one object's declarations leaves this figure on screen.
-    expect(amountNodes(HIDDEN_INVOICE_FEE)).toHaveLength(0);
+    // A declared 0 is the value of the chosen field, so it shows — and the
+    // money-named keys on the same row do not stand in for it.
+    expect(amountNodes(ZERO_INVOICE_FIGURE)).toHaveLength(2);
+    expect(amountNodes(GUESSED_INVOICE_FEE)).toHaveLength(0);
+    expect(amountNodes('USD 0.00')).toHaveLength(0);
 
     expectQueueIntact();
   });
 
-  it('COUNTER-PROBE: same rows, nothing declared hidden — every figure renders', async () => {
-    declareNothingHidden();
+  it('shows NO figure when the objects declare no `highlightFields`', async () => {
+    declareNoFigure();
     await loadedQueue();
+    await metadataSettled();
 
-    expect(amountNodes(HIDDEN_PURCHASE_AMOUNT)).toHaveLength(2);
-    expect(amountNodes(VISIBLE_INVOICE_AMOUNT)).toHaveLength(2);
-    expect(amountNodes(HIDDEN_INVOICE_FEE)).toHaveLength(2);
-    // Untrimmed, the purchase row leads with the first amount key, so the
-    // second one stays out — the mirror image of the promotion above.
-    expect(amountNodes(PROMOTED_PURCHASE_AMOUNT)).toHaveLength(0);
+    for (const display of [HIDDEN_PURCHASE_TOTAL, PURCHASE_FIGURE, GUESSED_INVOICE_AMOUNT,
+      INVOICE_FIGURE, ZERO_INVOICE_FIGURE, GUESSED_INVOICE_FEE, 'USD 0.00']) {
+      expect(amountNodes(display)).toHaveLength(0);
+    }
     expectQueueIntact();
   });
 
-  it('FAILS OPEN: a source that cannot describe the objects renders today’s figures', async () => {
+  it('shows NO figure when the source cannot describe the objects', async () => {
     declare(PURCHASE, Object.assign(new Error('Forbidden'), { status: 403 }));
     declare(INVOICE, Object.assign(new Error('Forbidden'), { status: 403 }));
     await loadedQueue();
+    await metadataSettled();
 
-    // Unknown is not hidden: the queue must not degrade an approver's decision
-    // surface on a metadata error. See `hiddenFields.ts` on failing open.
-    expect(amountNodes(HIDDEN_PURCHASE_AMOUNT)).toHaveLength(2);
-    expect(amountNodes(HIDDEN_INVOICE_FEE)).toHaveLength(2);
+    // Unknown is not a declaration: nothing is guessed in its place. The
+    // queue itself is not degraded.
+    for (const display of [HIDDEN_PURCHASE_TOTAL, PURCHASE_FIGURE, GUESSED_INVOICE_AMOUNT,
+      INVOICE_FIGURE, GUESSED_INVOICE_FEE]) {
+      expect(amountNodes(display)).toHaveLength(0);
+    }
     expectQueueIntact();
   });
 
   it('costs one metadata read per distinct OBJECT, not one per row', async () => {
-    declareTheReportedHiddenFields();
+    declareTheFigures();
     await loadedQueue();
 
     // Three rows, two objects. Per-row reads would be 3 — and would grow with
@@ -425,18 +421,16 @@ describe('Approvals queue rows — per-object `hidden: true` trim (objectui#6020
   });
 });
 
-describe('Approvals amount sort — ordering is disclosure too (objectui#6020)', () => {
+describe('Approvals amount sort — orders on the declared figure only', () => {
   /**
-   * The hidden figure is deliberately the MIDDLE magnitude, and the three
-   * orders are three DIFFERENT permutations — so "sorted", "not sorted" and
-   * "sorted without the hidden figure" can never be confused for one another:
+   * Three orders, two permutations that never coincide with the default:
    *
-   *   default, newest-first   INV-8802 · INV-8801 · PO-4417
-   *   amount, undeclared      PO-4417(9,000) · INV-8801(5,000) · INV-8802(900)
-   *   amount, declared hidden PO-4417(9,000) · INV-8802(900)   · INV-8801(sunk)
+   *   default, newest-first           INV-8802 · INV-8801 · PO-4417
+   *   invoice figure `total_score`    PO-4417(9,000) · INV-8802(900) · INV-8801(sunk)
+   *   invoice figure `service_fee`    PO-4417(9,000) · INV-8801(5,000) · INV-8802(sunk)
    *
-   * Each row's amount key is one its OWN object leaves visible, except
-   * INV-8801's `service_fee` — the one `showcase_invoice` declares hidden.
+   * INV-8801 carries only `service_fee` 5,000 — the value a name guess ranks
+   * second. It ranks only when its object declares that field as the figure.
    */
   const SORT_ROWS = [
     {
@@ -454,8 +448,8 @@ describe('Approvals amount sort — ordering is disclosure too (objectui#6020)',
     {
       ...ROWS[2],
       submitted_at: '2026-08-20T03:00:00.000Z',
-      payload: { total_amount: 900 },
-      payload_display: { total_amount: 'USD 900.00' },
+      payload: { total_score: 900 },
+      payload_display: {},
     },
   ];
 
@@ -463,27 +457,43 @@ describe('Approvals amount sort — ordering is disclosure too (objectui#6020)',
     approvalsApiStub.listRequests.mockResolvedValue({ data: SORT_ROWS, total: SORT_ROWS.length });
   });
 
-  it('does not order the queue on a figure it declines to render', async () => {
-    declareTheReportedHiddenFields();
+  it('sinks a row whose object’s declared figure it does not carry', async () => {
+    declareTheFigures();
     await loadedQueue();
     await sortByAmount();
 
-    // INV-8801's 5,000 is `service_fee`, which its object hides: it has no
-    // renderable amount, so it sinks with the amount-less rows instead of
-    // sitting second and telling the viewer 900 < it < 9,000.
+    // INV-8801's 5,000 is `service_fee`, which the invoice does not declare as
+    // its figure: it sinks instead of sitting second on a guessed value.
     expect(desktopRowTitles()).toEqual(['PO-4417', 'INV-8802', 'INV-8801']);
+    expect(amountNodes('900')).toHaveLength(2);
     expect(amountNodes('USD 5,000.00')).toHaveLength(0);
     expectQueueIntact();
   });
 
-  it('COUNTER-PROBE: the same fixture, undeclared, orders by that same figure', async () => {
-    declareNothingHidden();
+  it('COUNTER-PROBE: the invoice declares `service_fee` — the same row ranks on it', async () => {
+    declareTheFigures();
+    declare(INVOICE, { highlightFields: ['service_fee'], fields: invoiceFields() });
     await loadedQueue();
     await sortByAmount();
 
-    // Proof the assertion above is the trim and not a broken comparator: here
-    // the very same row sorts into the middle, on the very same value.
     expect(desktopRowTitles()).toEqual(['PO-4417', 'INV-8801', 'INV-8802']);
     expect(amountNodes('USD 5,000.00')).toHaveLength(2);
+  });
+
+  it('does not order the queue on a declared figure the object declares hidden', async () => {
+    declareTheFigures();
+    declare(INVOICE, {
+      highlightFields: ['service_fee'],
+      fields: invoiceFields({ type: 'currency', hidden: true }),
+    });
+    await loadedQueue();
+    await sortByAmount();
+
+    // Ordering IS disclosure: with `service_fee` hidden the invoice has no
+    // figure, so both invoice rows sink in newest-first order instead of
+    // INV-8801 telling the viewer where its hidden 5,000 falls.
+    expect(desktopRowTitles()).toEqual(['PO-4417', 'INV-8802', 'INV-8801']);
+    expect(amountNodes('USD 5,000.00')).toHaveLength(0);
+    expectQueueIntact();
   });
 });

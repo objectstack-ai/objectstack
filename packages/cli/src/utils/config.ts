@@ -816,6 +816,36 @@ export async function bundleConfigModule(
 }
 
 /**
+ * Stop the bundler's long-lived service once a config module has loaded (#34337).
+ *
+ * {@link bundleConfigModule} runs esbuild's async API, and esbuild serves that
+ * API from a CHILD PROCESS (`esbuild --service`) that it keeps for the life of
+ * the calling process. That child only leaves when it reads end-of-file on its
+ * stdin, which is to say a moment AFTER its parent has exited. For `os serve`
+ * that moment is the problem: `os start` waits for its `serve` child and then
+ * exits with its code, so the bundler — `os start`'s grandchild, in its process
+ * group — was still in the process table when `start` exited. A supervisor
+ * that read "stopped" there (a drill reading `kill(-pgid, 0)`, a runtime
+ * waiting on the group) found a member of the group still alive. Measured on
+ * the built entry with a config project: `start` exited 0 at +66 ms with
+ * `[esbuild]` left in its group.
+ *
+ * `os serve` loads its config once, at boot, and asks nothing more of esbuild
+ * after that, so it stops the service as soon as the module is evaluated. The
+ * child then exits while `serve` is still alive to reap it, and the process
+ * group a signal later finds is `start` and `serve` alone. A later esbuild call,
+ * should one ever come, starts a fresh service: `stop()` is esbuild's own
+ * "no more calls for now", not a disabling switch.
+ *
+ * `bundle-require` takes esbuild as a peer dependency, so it runs the copy this
+ * package declares — the instance stopped here.
+ */
+export async function stopConfigBundler(): Promise<void> {
+  const { stop } = await import('esbuild');
+  await stop();
+}
+
+/**
  * Load and bundle a config file using bundle-require.
  * Returns the resolved config object, its load time, and the provenance of
  * whatever named exports were merged into it.

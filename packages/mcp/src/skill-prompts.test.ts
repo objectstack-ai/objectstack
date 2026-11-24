@@ -1,6 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import {
   MCP_OAUTH_SCOPE_ACTIONS,
@@ -436,5 +438,161 @@ describe('a skill is offered only where the connection serves the tools it binds
     expect(skillBindingServed({ tools: ['describe_*'] }, new Set(['query_records']))).toBe(false);
     expect(skillBindingServed({ tools: [] }, new Set())).toBe(true);
     expect(skillBindingServed({ name: 'free_text' }, new Set())).toBe(true);
+  });
+});
+
+/**
+ * [#34167] The binding test above answers whether a connection CAN run a
+ * playbook; it cannot answer whether the playbook is written for MCP. A skill
+ * can bind tools MCP serves under the same names and still teach the
+ * in-product agent loop (its tools, its approval card). Its owner opts it out
+ * with `mcpPrompt: false`: never listed, unknown to `prompts/get`, on every
+ * connection, whatever its binding. Driven through both doors that project
+ * skills: the per-request HTTP server (`registerSkillPrompts`) and the
+ * long-lived stdio server (`MCPServerRuntime.bridgePrompts`).
+ */
+describe('a skill its owner declares in-product only is never an MCP prompt (#34167)', () => {
+  // The card's measured rows: one binds two tools the data door serves by
+  // name, the other the `action_` family `run_action` serves.
+  const RECORD_WRITING = {
+    name: 'record_writing',
+    label: 'Record Writing',
+    instructions: 'Open the record with open_record, then the user confirms on a card.',
+    tools: ['create_record', 'update_record'],
+  };
+  const ACTIONS_EXECUTOR = {
+    name: 'actions_executor',
+    label: 'Actions Executor',
+    instructions: 'Call the action_ tools; fall back on the confirm card.',
+    tools: ['action_*'],
+  };
+  const inProductOnly = <T extends object>(skill: T) => ({ ...skill, mcpPrompt: false });
+
+  const DATA_WRITE: RpcConnection = { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE] };
+  const ACTIONS: RpcConnection = { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_ACTIONS] };
+  const EVERY: RpcConnection = {
+    grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE, MCP_OAUTH_SCOPE_ACTIONS],
+  };
+
+  const listed = async (rows: unknown[], connection: RpcConnection): Promise<string[]> => {
+    const json = await rpc(withSkills(rows), 'prompts/list', undefined, connection);
+    expect(json.error).toBeUndefined();
+    return json.result.prompts.map((p: any) => p.name);
+  };
+  const servedTools = async (connection: RpcConnection): Promise<string[]> => {
+    const json = await rpc(withSkills([]), 'tools/list', undefined, connection);
+    return json.result.tools.map((t: any) => t.name);
+  };
+
+  it('CONTROL (the card\'s reproduction): undeclared, both rows pass the binding test and are listed', async () => {
+    expect(await servedTools(DATA_WRITE)).toEqual(expect.arrayContaining(['create_record', 'update_record']));
+    expect(await servedTools(ACTIONS)).toContain('run_action');
+    expect(await listed([RECORD_WRITING], DATA_WRITE)).toEqual(['record_writing']);
+    expect(await listed([ACTIONS_EXECUTOR], ACTIONS)).toEqual(['actions_executor']);
+  });
+
+  it('declared in-product only, record_writing is not listed on a data:write connection that serves both its tools', async () => {
+    expect(await listed([inProductOnly(RECORD_WRITING)], DATA_WRITE)).toEqual([]);
+    expect(await listed([inProductOnly(RECORD_WRITING)], EVERY)).toEqual([]);
+  });
+
+  it('declared in-product only, actions_executor is not listed on a connection that serves run_action', async () => {
+    expect(await listed([inProductOnly(ACTIONS_EXECUTOR)], ACTIONS)).toEqual([]);
+    expect(await listed([inProductOnly(ACTIONS_EXECUTOR)], EVERY)).toEqual([]);
+  });
+
+  it('prompts/get answers a declared skill exactly as it answers an unknown name', async () => {
+    const rows = [inProductOnly(RECORD_WRITING)];
+    const declared = await rpc(withSkills(rows), 'prompts/get', { name: 'record_writing' }, EVERY);
+    const unknown = await rpc(withSkills(rows), 'prompts/get', { name: 'no_such_skill' }, EVERY);
+    expect(declared.result).toBeUndefined();
+    expect(declared.error.code).toBe(-32602);
+    expect(declared.error.data).toBeUndefined();
+    expect(declared.error.message).toBe(unknown.error.message.replace('no_such_skill', 'record_writing'));
+  });
+
+  it('CONTROL: mcpPrompt true projects exactly as an undeclared skill, beside a declared one', async () => {
+    const rows = [{ ...RECORD_WRITING, mcpPrompt: true }, inProductOnly(ACTIONS_EXECUTOR), { ...ACTIONS_EXECUTOR, name: 'mcp_actions' }];
+    expect(await listed(rows, EVERY)).toEqual(['record_writing', 'mcp_actions']);
+    const json = await rpc(withSkills(rows), 'prompts/get', { name: 'record_writing' }, EVERY);
+    expect(json.result.messages[0].content.text).toBe(RECORD_WRITING.instructions);
+    expect(projectSkillPrompt(inProductOnly(RECORD_WRITING))).toBeNull();
+    expect(projectSkillPrompt({ ...RECORD_WRITING, mcpPrompt: true })).toEqual(projectSkillPrompt(RECORD_WRITING));
+  });
+
+  describe('the long-lived stdio server (bridgePrompts), which applies no binding filter', () => {
+    // Its binding names a tool no MCP family serves, so a hidden skill here
+    // cannot be the binding filter's doing: bridgePrompts has none.
+    const OPEN_RECORD = {
+      name: 'record_opening',
+      label: 'Record Opening',
+      instructions: 'Call open_record and wait for the card.',
+      tools: ['open_record'],
+    };
+
+    // `store.rows` is what the metadata service answers NOW: a test swaps it
+    // after boot to model a skill saved while the server runs.
+    const stdioPrompts = async (rows: unknown[], store: { rows: unknown[] } = { rows }) => {
+      const metadataService = { list: async (type: string) => (type === 'skill' ? store.rows : []) };
+      const runtime = new MCPServerRuntime({ name: 'skill-prompts-stdio', version: '0.0.0' });
+      await runtime.bridgePrompts(metadataService as never);
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: 'test-client', version: '0.0.0' });
+      await Promise.all([runtime.server.connect(serverTransport), client.connect(clientTransport)]);
+      return {
+        client,
+        names: (await client.listPrompts()).prompts.map((p) => p.name),
+        close: async () => {
+          await client.close();
+          await runtime.stop().catch(() => {});
+        },
+      };
+    };
+
+    it('CONTROL: undeclared, a skill binding a tool nothing serves is still listed and got', async () => {
+      const stdio = await stdioPrompts([OPEN_RECORD]);
+      expect(stdio.names).toEqual(['record_opening']);
+      const got = await stdio.client.getPrompt({ name: 'record_opening' });
+      expect(got.messages[0].content).toEqual({ type: 'text', text: OPEN_RECORD.instructions });
+      await stdio.close();
+    });
+
+    it('a skill saved in-product only while the server runs is answered as unknown at once', async () => {
+      const sibling = { ...OPEN_RECORD, name: 'mcp_opening' };
+      const store = { rows: [OPEN_RECORD, sibling] as unknown[] };
+      const stdio = await stdioPrompts(store.rows, store);
+      expect(stdio.names).toEqual(['record_opening', 'mcp_opening']);
+
+      store.rows = [inProductOnly(OPEN_RECORD), sibling];
+      const optedOut = await stdio.client.getPrompt({ name: 'record_opening' }).catch((e) => e);
+      const unknown = await stdio.client.getPrompt({ name: 'no_such_skill' }).catch((e) => e);
+      expect(optedOut.code).toBe(-32602);
+      expect(optedOut.message).toBe(unknown.message.replace('no_such_skill', 'record_opening'));
+      // The sibling still serves; the list is the boot snapshot until restart.
+      expect((await stdio.client.getPrompt({ name: 'mcp_opening' })).messages).toHaveLength(1);
+      await stdio.close();
+    });
+
+    it('CONTROL: a skill gone from the store since boot is still served from the snapshot, as before', async () => {
+      const store = { rows: [OPEN_RECORD] as unknown[] };
+      const stdio = await stdioPrompts(store.rows, store);
+      store.rows = [];
+      const got = await stdio.client.getPrompt({ name: 'record_opening' });
+      expect(got.messages[0].content).toEqual({ type: 'text', text: OPEN_RECORD.instructions });
+      await stdio.close();
+    });
+
+    it('declared in-product only, the same skill is neither listed nor got', async () => {
+      // An undeclared sibling keeps the prompt surface up: the SDK declares no
+      // prompts capability on a server that registers no prompt at all.
+      const stdio = await stdioPrompts([
+        inProductOnly(OPEN_RECORD),
+        inProductOnly(RECORD_WRITING),
+        { ...OPEN_RECORD, name: 'mcp_opening' },
+      ]);
+      expect(stdio.names).toEqual(['mcp_opening']);
+      await expect(stdio.client.getPrompt({ name: 'record_opening' })).rejects.toMatchObject({ code: -32602 });
+      await stdio.close();
+    });
   });
 });

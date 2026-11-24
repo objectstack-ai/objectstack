@@ -114,6 +114,7 @@ const metadata = await client.meta.getItem('object', 'task');
 | `$orderby` | `sort` | Sort order |
 | `$skip` | `skip` | Pagination offset |
 | `$top` | `top` | Limit records |
+| `$count: false` | `count=false` | Decline the total: the server skips its `count(*)` and the result carries no `total` |
 
 ### Filter Conversion
 
@@ -145,6 +146,7 @@ of going unnoticed.
 | MongoDB Operator | ObjectStack Operator | Example |
 |------------------|---------------------|---------|
 | plain value (no operator) | `=` | `{ status: 'active' }` → `['status', '=', 'active']` |
+| nested relation condition (an object with no operator key) | `=` | `{ account: { owner: 'u1' } }` → `['account', '=', { owner: 'u1' }]` |
 | `$eq` | `=` | `{ status: { $eq: 'active' } }` → `['status', '=', 'active']` |
 | `$ne` | `!=` | `{ status: { $ne: 'archived' } }` → `['status', '!=', 'archived']` |
 | `$gt` | `>` | `{ age: { $gt: 18 } }` → `['age', '>', 18]` |
@@ -1068,8 +1070,8 @@ for the full design.
 ### Key families
 
 Some state is one row per subject, and which subjects exist is only known
-from the rows: the console keeps each object's list state under
-`ui.list.<object>`. `createObjectStackUserPreferenceFamily` loads every row
+from the rows: the console keeps each object's record-page state under
+`ui.record.<object>`. `createObjectStackUserPreferenceFamily` loads every row
 whose key starts with a prefix, and writes one key's row at a time:
 
 ```typescript
@@ -1078,14 +1080,14 @@ import { createObjectStackUserPreferenceFamily, type ObjectStackAdapter } from '
 declare const dataSource: ObjectStackAdapter;
 declare const user: { id: string };
 
-const lists = createObjectStackUserPreferenceFamily<{ viewOrder?: string[] }>({
+const records = createObjectStackUserPreferenceFamily<{ showEmptyFields?: boolean }>({
   dataSource,
   userId: user.id,
-  prefix: 'ui.list.',
+  prefix: 'ui.record.',
 });
 
-const rows = await lists.load();                 // { 'ui.list.account': { viewOrder: [...] }, ... }
-await lists.save('ui.list.account', { viewOrder: ['account.mine', 'account.all'] });
+const rows = await records.load();               // { 'ui.record.account': { showEmptyFields: true }, ... }
+await records.save('ui.record.account', { showEmptyFields: false });
 ```
 
 A family's `load()` joins the same shared read as the per-key adapters' loads

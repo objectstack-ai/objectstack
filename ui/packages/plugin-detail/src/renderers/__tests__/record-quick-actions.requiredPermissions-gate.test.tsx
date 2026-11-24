@@ -139,6 +139,7 @@ function me(systemPermissions: string[] | undefined, objectBits?: Record<string,
     tenantId: 't1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     ...(systemPermissions === undefined ? {} : { systemPermissions }),
     objects: {

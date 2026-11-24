@@ -102,7 +102,7 @@ const CONFIG = {
   dryRun: false,
   haltOnError: false,
   multiPass: true,
-  defaultMode: 'insert',
+  defaultMode: 'ignore',
   batchSize: 1000,
   transaction: false,
 } as any;
@@ -111,7 +111,7 @@ const SEEDS = [
   {
     object: 'my_app_employee',
     externalId: 'name',
-    mode: 'insert',
+    mode: 'ignore',
     env: ['prod', 'dev', 'test'],
     records: [{ name: 'Alice' }, { name: 'Bob' }],
   },
@@ -169,7 +169,7 @@ describe('seed batched path — idempotent retry after commit-then-lost-response
       seeds: [{
         object: 'my_app_widget',
         externalId: 'sku',
-        mode: 'insert',
+        mode: 'ignore',
         env: ['prod', 'dev', 'test'],
         records: [{ name: 'Widget A', sku: 'W-A' }, { name: 'Widget B', sku: 'W-B' }],
       }] as any,
@@ -211,7 +211,7 @@ describe('seed batched path — partial-success engine (framework#3172)', () => 
       seeds: [{
         object: 'my_app_widget',
         externalId: 'sku',
-        mode: 'insert',
+        mode: 'ignore',
         env: ['prod', 'dev', 'test'],
         records: [
           { name: 'Good A', sku: 'W-A' },
@@ -265,7 +265,7 @@ describe('seed batched path — a recompute failure is recovered, not re-written
       seeds: [{
         object: 'my_app_widget',
         externalId: 'sku',
-        mode: 'insert',
+        mode: 'ignore',
         env: ['prod', 'dev', 'test'],
         records: [{ name: 'A', sku: 'W-A' }, { name: 'B', sku: 'W-B' }],
       }] as any,

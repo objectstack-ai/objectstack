@@ -1242,6 +1242,9 @@ describe('[#33905] the bare entries of a flow whose only holder\'s package is di
         expect(engine.flowSlotKey(P1, 'solo')).toBe('solo');
         expect(engine.flowDispatchHolder('solo')).toEqual({ packageId: P1, claimBare: true });
         expect(engine.getFlowVersionHistory('solo')).toHaveLength(1);
+        // [#34145] The write doors' read over every holder answers the slot's body.
+        expect(engine.getHeldFlow('solo')).toBe(engine.getFlowSlot(P1, 'solo'));
+        expect(engine.getHeldFlow('solo')).toMatchObject({ name: 'solo' });
 
         registry.enablePackage(P1);
         expect((await engine.execute('solo')).success).toBe(true);
@@ -1398,6 +1401,15 @@ describe('[#33893] the served holder of a name a disabled package co-holds keeps
             expect(await fireAll()).toEqual([tagOf(on)]);
             expect(refusedBodyWarned()).toEqual([]);
             expect(engine.flowDispatchHolder(`${on}/t`)).toEqual({ packageId: on, claimBare: false, name: 't' });
+            // [#34145] The read over every holder still refuses the name, naming
+            // both holders, while the served read reaches `on`'s flow: the
+            // runtime's write doors read such a name on that served holder.
+            let held: unknown;
+            try { engine.getHeldFlow('t'); } catch (e) { held = e; }
+            expect(held).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+            expect((held as Error).message).toContain(P1);
+            expect((held as Error).message).toContain(P2);
+            expect(await engine.getFlow('t')).toMatchObject({ name: 't' });
 
             registry.enablePackage(off);
             pull(off, triggered('t', tagOf(off)));
@@ -1506,6 +1518,14 @@ describe('[#33893] the served holder of a name a disabled package co-holds keeps
             expect(engine.flowSlotKey(P1, 't')).toBe('t');
             expect([...armed.keys()]).toEqual(['t']);
             expect(await fireAll()).toEqual(['alpha']);
+        });
+
+        it('[#34145] the read over every holder settles the name too: it answers the one holder\'s flow and folds the slot back, and a package-less registration is accepted', () => {
+            uninstalled();
+            expect(engine.getHeldFlow('t')).toMatchObject({ name: 't' });
+            expect(engine.flowSlotKey(P1, 't')).toBe('t');
+            expect(() => engine.registerFlow('t', triggered('t', 'alpha'))).not.toThrow();
+            expect(engine.getFlowSlots('t')).toHaveLength(1);
         });
 
         it('first touched by a bare entry: each one serves the name (FROM: no flow under the bare name)', async () => {

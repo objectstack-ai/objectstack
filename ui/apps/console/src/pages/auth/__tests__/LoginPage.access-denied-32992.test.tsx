@@ -135,3 +135,51 @@ describe('LoginPage — an access_denied return (objectstack#32992)', () => {
     expect(screen.queryByTestId('sso-access-denied-actions')).toBeNull();
   });
 });
+
+const NOT_MEMBER_SENTENCE =
+  "The account you signed in with is not a member of this environment's organization. Sign in with an account that is, or ask an administrator of the organization to invite you.";
+const INVITATION_PENDING_SENTENCE =
+  "You have been invited to this environment's organization, but the invitation has not been accepted yet. Accept the invitation from your email, then sign in again.";
+
+/** An `access_denied` return carrying the host's reason (objectstack#34168). */
+function returnWith(reason: string, error = 'access_denied'): string {
+  return `?${new URLSearchParams({
+    error,
+    error_description: PROVIDER_DESCRIPTION,
+    objectstack_error_reason: reason,
+    state: 'abc',
+  })}`;
+}
+
+describe("LoginPage — the host's refusal reason (objectstack#34168)", () => {
+  it('not_member: says the account is not a member of the organization', async () => {
+    renderLogin(returnWith('not_member'), MANAGED);
+
+    expect((await screen.findByRole('alert')).textContent).toBe(NOT_MEMBER_SENTENCE);
+    // The ways on and the technical cause are as for any access_denied return.
+    expect(await screen.findByTestId('sso-access-denied-actions')).toBeTruthy();
+    expect(screen.getByTestId('sso-callback-refusal-detail').textContent).toBe(
+      `access_denied: ${PROVIDER_DESCRIPTION}`,
+    );
+  });
+
+  it('invitation_pending: says the invitation is not accepted yet', async () => {
+    renderLogin(returnWith('invitation_pending'), MANAGED);
+
+    expect((await screen.findByRole('alert')).textContent).toBe(INVITATION_PENDING_SENTENCE);
+    expect(await screen.findByTestId('sso-access-denied-actions')).toBeTruthy();
+  });
+
+  it('a reason this page has no sentence for keeps the access_denied sentence', async () => {
+    renderLogin(returnWith('suspended'), MANAGED);
+
+    expect((await screen.findByRole('alert')).textContent).toBe(ACCESS_DENIED_SENTENCE);
+  });
+
+  it('a reason beside another error code is not read', async () => {
+    renderLogin(returnWith('not_member', 'invalid_provider'), MANAGED);
+
+    expect((await screen.findByRole('alert')).textContent).toBe(GENERIC);
+    await screen.findByLabelText('Email');
+  });
+});

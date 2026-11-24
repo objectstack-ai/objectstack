@@ -4,7 +4,7 @@
  * sql-driver-split-source -- `SqlDriver`'s text read back as ONE source, for
  * the readers that take it by path (#30147).
  *
- * `scripts/codemod-split-sql-driver.mjs` leaves each moved method on the class
+ * The sql-driver codemod (split by #30139) leaves each moved method on the class
  * as a one-call stub and puts its body, byte for byte, on a static method of a
  * facet class in a `sql-driver-*.ts` module; the top-level declarations ahead
  * of the class go whole to the leaf, `sql-driver-top-level.ts`. A reader that

@@ -13,7 +13,8 @@
  *
  * Pins:
  *   (a) a root that stays on screen (its only entry is a link, so it has no
- *       landing) asks the object its entry requires by name, and no list;
+ *       landing) answers the object its entry requires from the bundle, through
+ *       the presence read (objectstack#34211, objectstack#35306), and asks no list;
  *   (b) a root whose landing is a page lands on it, and no list is asked on
  *       the way;
  *   (c) CONTROL: with the lists already loaded, the root asks nothing by name;
@@ -44,6 +45,7 @@ vi.mock('../../layout/ConsoleLayout', async () => {
       return (
         <div data-testid="console-layout">
           <span data-testid="gone-entry">{String(gates.checkCapability('object', 'gone_obj'))}</span>
+          <span data-testid="note-entry">{String(gates.checkCapability('object', 'note'))}</span>
           {children}
         </div>
       );
@@ -95,6 +97,10 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   };
 });
 
+// `AppContent` reaches a dynamic `import('@objectstack/lint')` (through
+// `ConsoleLayout` → `DraftPreviewBar`, statically): pay its load at collection,
+// never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { AppContent } from '../AppContent';
 import { MetadataProvider, useMetadata } from '../../providers/MetadataProvider';
 
@@ -176,7 +182,13 @@ function makeAdapter() {
     },
     getClient: () => ({
       meta: {
-        getItems: (type: string, options?: { packageId?: string }) => {
+        getItems: (type: string, options?: { packageId?: string; names?: readonly string[] }) => {
+          // objectstack#34244 — the `?names=` presence read answers the asked names it holds and leaves an absent one out, as the list door does.
+          if (options?.names) {
+            server.calls.push(`${type}?names=${options.names.join(',')}`);
+            const named: any[] = type === 'object' ? (OBJECTS as any[]).filter((o: any) => options.names!.includes(o.name)) : [];
+            return Promise.resolve({ type, items: structuredClone(named) });
+          }
           server.calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
           const all: Doc[] =
             type === 'object' ? OBJECTS : type === 'view' ? VIEWS : type === 'page' ? PAGES : type === 'app' ? [NOTES_APP, CRM_APP, LINKS_APP, HOME_FIRST_APP] : [];
@@ -239,6 +251,9 @@ function boot(url: string, options: { listsLoaded?: boolean } = {}) {
 /** The calls that read a whole list of one of the three types. */
 const listCalls = () => server.calls.filter((c) => c === 'object' || c === 'view' || c === 'page');
 const byNameCalls = () => server.calls.filter((c) => c.startsWith('object/') || c.startsWith('page/'));
+/** Every object read that names `note`: by name, or in a `?names=` presence read. */
+const noteReads = () =>
+  server.calls.filter((c) => c === 'object/note' || (c.startsWith('object?names=') && c.slice('object?names='.length).split(',').includes('note')));
 
 beforeEach(() => {
   server.calls = [];
@@ -253,11 +268,16 @@ afterEach(() => {
 });
 
 describe('a package-less app’s root reads the objects it requires by name (objectstack#29552)', () => {
-  it('(a) a root with no landing asks the object its entry requires by name, and no list', async () => {
+  it('(a) a root with no landing answers the object its entry requires from the bundle, and asks no list', async () => {
     boot('/apps/links');
     await waitFor(() => expect(screen.getByTestId('gone-entry')).toHaveTextContent('false'));
-    await waitFor(() => expect(byNameCalls()).toContain('object/note'));
+    await waitFor(() => expect(screen.getByTestId('note-entry')).toHaveTextContent('true'));
     await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // objectstack#34211 — the bundle holds `note`, so the presence read answers
+    // it with no request; objectstack#35306 — and that answer is its definition,
+    // so it is not asked by name either.
+    expect(noteReads()).toEqual([]);
 
     expect(screen.queryByTestId('object-view')).toBeNull();
     expect(listCalls()).toEqual([]);
@@ -268,7 +288,9 @@ describe('a package-less app’s root reads the objects it requires by name (obj
     await waitFor(() => expect(screen.getByTestId('page-blocks')).toHaveTextContent('Notes home'));
     await waitFor(() => expect(screen.getByTestId('gone-entry')).toHaveTextContent('false'));
 
-    expect(byNameCalls()).toContain('object/note');
+    // objectstack#35306 — the bundle answers it through the presence read: no request of its own.
+    expect(screen.getByTestId('note-entry')).toHaveTextContent('true');
+    expect(noteReads()).toEqual([]);
     expect(listCalls()).toEqual([]);
   });
 

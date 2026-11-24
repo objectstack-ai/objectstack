@@ -74,3 +74,34 @@ describe('strandedDecisionFailure / strandedDecisionDetails (#13807)', () => {
             .toEqual(['decision', 'finalized', 'repairable', 'runId']);
     });
 });
+
+describe('the refusal that stranded the run rides the same envelope (#34579)', () => {
+    const facts = { finalized: true, decision: 'approve', runId: 'run_1', repairable: true } as const;
+    const innerRefusal = { code: 'VALIDATION_FAILED', message: "hook 'h' threw: Error: over_capacity" } as const;
+    const userMessage = '产能已被其他订单占用。';
+
+    it('round-trips innerRefusal and userMessage beside the four facts', () => {
+        const err = strandedDecisionFailure('RESUME_FAILED: …', { ...facts, innerRefusal, userMessage });
+        expect(strandedDecisionDetails(err)).toEqual({ ...facts, innerRefusal, userMessage });
+    });
+
+    it('⛔ a malformed refusal member is DROPPED, and the four facts still stand', () => {
+        // The four facts are all-or-nothing; the refusal is not one of them. A
+        // WHY that is not in the declared shape must not reach the wire, and
+        // must not take the truthful WHAT down with it.
+        const carrying = (extra: Record<string, unknown>) =>
+            strandedDecisionDetails({ strandedDecision: { ...facts, ...extra } });
+        expect(carrying({ innerRefusal: { code: 'NOT_A_LEDGER_CODE', message: 'x' } })).toEqual(facts);
+        expect(carrying({ innerRefusal: { code: 'VALIDATION_FAILED' } })).toEqual(facts);
+        expect(carrying({ innerRefusal: 'VALIDATION_FAILED: x' })).toEqual(facts);
+        expect(carrying({ userMessage: '   ' })).toEqual(facts);
+        expect(carrying({ userMessage: 42 })).toEqual(facts);
+        // REVERSE CONTROL: the well-formed members on the same path resolve.
+        expect(carrying({ innerRefusal, userMessage })).toEqual({ ...facts, innerRefusal, userMessage });
+    });
+
+    it('⛔ a refusal member never rescues a partial envelope', () => {
+        expect(strandedDecisionDetails({ strandedDecision: { ...facts, runId: '', innerRefusal, userMessage } }))
+            .toBeUndefined();
+    });
+});

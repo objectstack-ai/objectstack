@@ -111,8 +111,13 @@ describe('MCP delete_record takes run_action\'s confirmation gate; REST DELETE s
     expect(Object.keys(d)).toEqual(Object.keys(a));
     expect(d.details.confirmationMember).toBe(a.details.confirmationMember);
     // The action is object-less, so its details carry no `objectName`; every
-    // key it does carry, the delete refusal carries too.
-    expect(Object.keys(d.details)).toEqual(expect.arrayContaining(Object.keys(a.details)));
+    // key it does carry, the delete refusal carries too, save `reason`:
+    // [#33690] `run_action` hands a gated call to the person and, with no
+    // pending-confirmation service, says so in `details.reason`, while the
+    // delete gate still reads `confirm: true` and names no reason.
+    expect(a.details.reason).toBe('no_confirmation_service');
+    expect(d.details).not.toHaveProperty('reason');
+    expect(Object.keys(d.details)).toEqual(expect.arrayContaining(Object.keys(a.details).filter((k) => k !== 'reason')));
     expect(await readStatus(id)).toBe(200);
   }, 60_000);
 

@@ -43,6 +43,7 @@ const envelope = (bits: Record<string, boolean>): MePermissionsAuthenticatedResp
   userId: USER,
   tenantId: null,
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits },

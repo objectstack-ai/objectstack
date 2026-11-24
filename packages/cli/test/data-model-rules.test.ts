@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authoringRulesFor, lintDataModel, lintUniqueDeclarations, lintUnscopedDeclaredIndexes, lintLegacyOrganizationComposites } from '@objectstack/lint';
+import { authoringRulesFor, lintDataModel, lintInlineEditBulk, lintUniqueDeclarations, lintUnscopedDeclaredIndexes, lintLegacyOrganizationComposites, runAuthoringRules } from '@objectstack/lint';
 import { FieldSchema } from '@objectstack/spec/data';
 import { lintConfig } from '../src/commands/lint';
 
@@ -50,16 +50,21 @@ describe('lintDataModel — relationships', () => {
     expect(db?.message).toContain('(cascade/restrict');
   });
 
-  it('suggests inlineEdit on master_detail line-item children', () => {
-    const issues = lintDataModel([
-      { name: 'order_line', fields: { order: { type: 'master_detail', reference: 'order', required: true, deleteBehavior: 'cascade' } } },
-    ]);
-    expect(has(issues, 'relationship/line-items-inline-edit')).toBe(true);
+  // objectstack#35889: the parent's field group, not the FK's inlineEdit, inlines a child.
+  it('suggests a parent field group for master_detail line-item children, inlineEdit or not', () => {
+    for (const inlineEdit of [undefined, true]) {
+      const issues = lintDataModel([
+        { name: 'order', fields: { name: { type: 'text' } } },
+        { name: 'order_line', fields: { order: { type: 'master_detail', reference: 'order', required: true, deleteBehavior: 'cascade', ...(inlineEdit ? { inlineEdit } : {}) } } },
+      ]);
+      expect(has(issues, 'relationship/line-items-inline-edit')).toBe(true);
+    }
   });
 
-  it('does NOT suggest inlineEdit when already set', () => {
+  it('does NOT suggest a group when the parent already places the line items', () => {
     const issues = lintDataModel([
-      { name: 'order_line', fields: { order: { type: 'master_detail', reference: 'order', required: true, deleteBehavior: 'cascade', inlineEdit: true } } },
+      { name: 'order', fields: { name: { type: 'text' } }, fieldGroups: [{ key: 'lines', relatedList: 'order_line' }] },
+      { name: 'order_line', fields: { order: { type: 'master_detail', reference: 'order', required: true, deleteBehavior: 'cascade' } } },
     ]);
     expect(has(issues, 'relationship/line-items-inline-edit')).toBe(false);
   });
@@ -71,9 +76,10 @@ describe('lintDataModel — relationships', () => {
     expect(has(issues, 'relationship/line-item-should-be-master-detail')).toBe(true);
   });
 
-  it('warns when an association child is inlineEdit', () => {
+  it('warns when a parent field group places an association child', () => {
     const issues = lintDataModel([
-      { name: 'ticket_comment', fields: { ticket: { type: 'master_detail', reference: 'ticket', required: true, deleteBehavior: 'cascade', inlineEdit: true } } },
+      { name: 'ticket', fields: { name: { type: 'text' } }, fieldGroups: [{ key: 'comments', relatedList: 'ticket_comment' }] },
+      { name: 'ticket_comment', fields: { ticket: { type: 'master_detail', reference: 'ticket', required: true, deleteBehavior: 'cascade' } } },
     ]);
     const assoc = issues.find((i) => i.rule === 'relationship/association-inline-edit');
     expect(assoc?.severity).toBe('warning');
@@ -81,9 +87,82 @@ describe('lintDataModel — relationships', () => {
 
   it('does NOT treat a line-item child as an association', () => {
     const issues = lintDataModel([
-      { name: 'invoice_line', fields: { invoice: { type: 'master_detail', reference: 'invoice', required: true, deleteBehavior: 'cascade', inlineEdit: true } } },
+      { name: 'invoice', fields: { name: { type: 'text' } }, fieldGroups: [{ key: 'lines', relatedList: 'invoice_line' }] },
+      { name: 'invoice_line', fields: { invoice: { type: 'master_detail', reference: 'invoice', required: true, deleteBehavior: 'cascade' } } },
     ]);
     expect(has(issues, 'relationship/association-inline-edit')).toBe(false);
+  });
+});
+
+// The parent's form saves parent + inline children in ONE cross-object
+// `/api/v1/batch`, which gates every op as `bulk` on the op's own object. A
+// declared `enable.apiMethods` without `bulk` on either side is warned about,
+// naming the object to edit and the value to add; an undeclared list is open.
+// A registry rule (`lintInlineEditBulk`), so all three commands report it.
+describe('lintInlineEditBulk — relationship/inline-edit-needs-bulk', () => {
+  const RULE = 'relationship/inline-edit-needs-bulk';
+  const OPEN = ['get', 'list', 'create', 'update', 'delete'];
+  // objectstack#35889: the parent's field group naming the lines is what inlines them in its form.
+  const budget = (enable?: unknown, placed = true) => ({
+    name: 'project_budget',
+    ...(enable ? { enable } : {}),
+    ...(placed ? { fieldGroups: [{ key: 'lines', relatedList: 'project_budget_line' }, { key: 'items', relatedList: 'project_budget_item' }] } : {}),
+    fields: { title: { type: 'text' } },
+  });
+  const line = (inlineEdit: unknown, enable?: unknown) => ({
+    name: 'project_budget_line',
+    ...(enable ? { enable } : {}),
+    fields: {
+      project_budget: { type: 'master_detail', reference: 'project_budget', required: true, deleteBehavior: 'cascade', ...(inlineEdit === undefined ? {} : { inlineEdit }) },
+      amount: { type: 'currency' },
+    },
+  });
+  const hits = (objects: any[]) => lintInlineEditBulk(objects).filter((i) => i.rule === RULE);
+
+  it.each([undefined, true, 'grid', 'form'])('warns on the parent when a group places the lines (inlineEdit %s) and its apiMethods omit bulk', (inlineEdit) => {
+    const [issue, ...rest] = hits([budget({ apiMethods: OPEN }), line(inlineEdit)]);
+    expect(rest).toEqual([]);
+    expect(issue?.severity).toBe('warning');
+    expect(issue?.path).toBe('objects[0].enable.apiMethods');
+    expect(issue?.where).toBe('object "project_budget"');
+    expect(issue?.fix).toBe("add 'bulk' to project_budget.enable.apiMethods");
+    expect(issue?.message).toContain('OBJECT_API_METHOD_NOT_ALLOWED');
+  });
+
+  it('warns on the child when the child declares apiMethods without bulk', () => {
+    const [issue, ...rest] = hits([budget(), line('grid', { apiMethods: OPEN })]);
+    expect(rest).toEqual([]);
+    expect(issue?.path).toBe('objects[1].enable.apiMethods');
+    expect(issue?.fix).toBe("add 'bulk' to project_budget_line.enable.apiMethods");
+  });
+
+  it('treats an empty apiMethods (deny-all) as withholding bulk', () => {
+    expect(hits([budget({ apiMethods: [] }), line(true)])).toHaveLength(1);
+  });
+
+  it('reports a parent once however many inline children it has', () => {
+    const second = { ...line('grid'), name: 'project_budget_item' };
+    expect(hits([budget({ apiMethods: OPEN }), line('grid'), second])).toHaveLength(1);
+  });
+
+  it('is silent when apiMethods include bulk, are undeclared, or no group places the lines', () => {
+    expect(hits([budget({ apiMethods: [...OPEN, 'bulk'] }), line('grid', { apiMethods: [...OPEN, 'bulk'] })])).toEqual([]);
+    expect(hits([budget(), line('grid')])).toEqual([]);
+    expect(hits([budget({ apiMethods: OPEN }, false), line('grid')])).toEqual([]);
+    expect(hits([budget({ apiMethods: OPEN }, false), line(true)])).toEqual([]);
+  });
+
+  it('reaches os lint, os validate and os build through the registry, as a warning, once', () => {
+    const objects = [budget({ apiMethods: OPEN }), line('grid')];
+    for (const command of ['lint', 'validate', 'build'] as const) {
+      expect(authoringRulesFor(command).map((r) => r.name), command).toContain('lintInlineEditBulk');
+      const found = runAuthoringRules(command, { normalized: { objects }, parsed: { objects } }).filter((f) => f.rule === RULE);
+      expect(found.map((f) => [f.severity, f.path, f.hint]), command).toEqual([
+        ['warning', 'objects[0].enable.apiMethods', "add 'bulk' to project_budget.enable.apiMethods"],
+      ]);
+    }
+    // Not a second copy in `os lint`'s best-practice sweep.
+    expect(lintDataModel(objects).filter((i) => i.rule === RULE)).toEqual([]);
   });
 });
 

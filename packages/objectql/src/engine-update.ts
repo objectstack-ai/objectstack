@@ -2,7 +2,7 @@
 
 /**
  * [#29986 codemod] The "Update" section of `ObjectQL`: the bodies of `update`
- * moved out of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * moved out of `engine.ts` whole (split by #32046).
  *
  * A MOVE, not a redesign. {@link UpdateFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -32,11 +32,18 @@
  * this module.
  */
 
+import { formulaWorkCalendarsFor } from './formula-work-calendars.js';
 import type { DroppedFieldsEvent, EngineUpdateOptions, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import { collectComposableReadableIds } from './filter-comparand-shape.js';
+import { refuseHookSyncProvenanceWrite, refuseSyncProvenanceWrite, snapshotSyncKeys } from './sync-provenance-write.js';
+// [ADR-0155 D4] The fixed-read leaf seam reads the engine through the security
+// resolvers' host, built once per engine, which carries every member it reads.
+import { securityResolversHost } from './engine-facet-hosts.js';
+import { atFixedReadLeafDoor, passFixedReadLeaves } from './fixed-read-leaf-seam.js';
 import { retiredSecretSlots, secretFieldsWritten } from './engine-secret-internal-fields.js';
 import type { PendingSecretRow, SecretHandleSlot } from './engine-secret-internal-fields.js';
+import { sealedSecretsNamedBy, secretKeysHoldingCallerValues, suppliedOverSealedSecrets } from './engine-update-sealed-secrets.js';
 import { referencesCheckedBeforeRules } from './engine-referential-integrity.js';
 import { mergeDriverOptionsIntoHookView } from './engine-driver-options.js';
 import { recordNotFoundError } from '@objectstack/core';
@@ -50,30 +57,46 @@ import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertUnitCodes, organizationUnitRowsOf, readOrganizationUnits, touchesUnitCodes } from './validation/unit-code-membership.js';
 import { homeAmountsTouched, planHomeAmounts, projectHomeAmounts, settleBulkHomeAmounts } from './home-amount-projection.js';
 import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { stripSearchCompanion } from './search-companion.js';
 import { declaredOptionLabels } from './formula-option-labels.js';
-import { ValidationError, coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFields, normalizeNumericStringValues, validateRecord, validateRecordInScope } from './validation/record-validator.js';
+import { ValidationError, coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFields, normalizeNumericStringValues, validateRecordInScope } from './validation/record-validator.js';
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, hasReadonlyWhenInPayload, needsPriorRecord, stripReadonlyFields, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti } from './validation/rule-validator.js';
+import type { ReferentialClearExemption } from './validation/rule-validator.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
+import { createPredicateUpdateSummaryFold, loadPredicateUpdateSummaryBases, summaryPatchCanMove } from './summary-batch-accumulation.js';
+import type { BatchSummaryAccumulator, SummaryDependents, SummaryFoldStandDownSink } from './summary-batch-accumulation.js';
+import type { RelatedRecordBinding } from './validation/rule-validator.js';
+import { SUMMARY_GROUPED_AGGREGATE_CHUNK } from './summary-aggregate.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external-driver-floor.js';
 import { ENGINE_UPDATE_REJECT_MESSAGE, engineUpdateDispatchRejectError, resolveEngineUpdateDispatch } from './engine-update-dispatch.js';
 import type { EngineUpdateDispatchData, EngineUpdateDispatchInput } from './engine-update-dispatch.js';
 import {
-  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyStoredExpressionsToPatch,
-  computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, hydrateWriteFormulas,
-  lowerWhereFilterArray, masterIdOf, planStoredExpressions, rejectUnknownEngineOptions,
+  ENGINE_UPDATE_OPTION_KEYS, ENGINE_WHERE_SLOTS, WRITE_PRECONDITION_OPTION, applyFormulaPlan, applyStoredExpressionsToPatch,
+  computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, formulaValuesFor, hydrateWriteFormulas,
+  lowerWhereFilterArray, masterIdOf, planFormulaProjection, planStoredExpressions, rejectUnknownEngineOptions,
+  storedExpressionsReading,
   replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
   stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, writeFailureLogMeta,
   callerInputRefusalLogMeta,
 } from './engine-top-level.js';
-import type { OperationContext, StoredExpressionServing } from './engine-top-level.js';
+import type { OperationContext, ReferentialClearOption, StoredExpressionServing } from './engine-top-level.js';
+import { REFERENTIAL_CLEAR_OPTION } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
+
+/**
+ * [#34746] The columns the platform stamps on every update, and nothing a
+ * caller asked to change: the builtin `sys_stamp_audit_update` `beforeUpdate`
+ * hook (`plugin.ts`) writes them because a write is happening. A payload the
+ * strips leave holding only these is an update that changes nothing.
+ */
+const UPDATE_STAMP_COLUMNS: ReadonlySet<string> = new Set(['updated_at', 'updated_by']);
 
 /**
  * The `ObjectQL` members the bodies of {@link UpdateFacet} read — every one of
@@ -134,6 +157,7 @@ export interface UpdateHost {
   resolveOptionPermissions: ObjectQLClass['resolveOptionPermissions'];
   resolvePredicateRelated: ObjectQLClass['resolvePredicateRelated'];
   settleMasterDetailLanding: ObjectQLClass['settleMasterDetailLanding'];
+  summaryDescriptorsReadByRules: ObjectQLClass['summaryDescriptorsReadByRules'];
   summaryForeignKeyColumns: ObjectQLClass['summaryForeignKeyColumns'];
   triggerHooks: ObjectQLClass['triggerHooks'];
   update: ObjectQLClass['update'];
@@ -146,14 +170,31 @@ export interface UpdateHost {
 /** The bodies of the "Update" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
 export class UpdateFacet {
   /** The body of `ObjectQL#update`; the method's docblock there is its contract. */
-  static async update(this: Pick<UpdateHost, '_registry' | 'admittedViolationSink' | 'assertBulkPerRowHookBudget' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildReferentialFieldClear' | 'buildSession' | 'buildUser' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'hasHooksFor' | 'homeAmountServing' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'priorMasterIdsCallerReads' | 'projectHomeAmountsOntoPatch' | 'publishBulkDataEvent' | 'publishDataEvent' | 'readUpdatePriorRow' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParent' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'settleMasterDetailLanding' | 'summaryForeignKeyColumns' | 'triggerHooks' | 'update' | 'updateByIdExpecting' | 'validationMessageContext' | 'valueShapeStrictFor' | 'withResolvedWhere'>, object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
+  static async update(this: Pick<UpdateHost, '_registry' | 'admittedViolationSink' | 'assertBulkPerRowHookBudget' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildPerRowAfterContexts' | 'buildProvenance' | 'buildReferentialFieldClear' | 'buildSession' | 'buildUser' | 'dispatchPerRowBeforeHooks' | 'dispatchUnscopedMultiWriteHooks' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'hasHooksFor' | 'homeAmountServing' | 'inAfterAbortUnit' | 'invalidateOrganizationProbe' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'priorMasterIdsCallerReads' | 'projectHomeAmountsOntoPatch' | 'publishBulkDataEvent' | 'publishDataEvent' | 'readUpdatePriorRow' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'relatedSchemaOf' | 'releaseSecretHandles' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParent' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'settleMasterDetailLanding' | 'summaryDescriptorsReadByRules' | 'summaryForeignKeyColumns' | 'triggerHooks' | 'update' | 'updateByIdExpecting' | 'validationMessageContext' | 'valueShapeStrictFor' | 'withResolvedWhere'>, object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
      object = this.resolveObjectName(object);
-     // [#22782] An aborting `afterUpdate` rolls this write back — see `opensAfterAbortUnit`.
-     if (this.opensAfterAbortUnit('afterUpdate', object, options?.context)) {
-       return this.inAfterAbortUnit(() => this.update(object, data, options));
-     }
+     // [#22782, #34412] An aborting `afterUpdate`, or a refusal after a `beforeUpdate` hook's
+     // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
+     //
+     // [#35142] The unit opens around the ENGINE BODY (the executor below), not
+     // around the door: the middleware chain runs first, outside it, as it does
+     // for a write that opens no unit. Opened around the door, the unit enclosed
+     // the authorization gate's reads too, and on a single-connection store
+     // (SQLite) a second writer's whole write then waited for the first one's
+     // commit: the loser of a claim race (ADR-0142 D4) read the claimed row in
+     // its gate and was refused there as not found or forbidden, never reaching
+     // the conditional write whose 0-row answer is `ConcurrentUpdateError`.
+     // Everything the unit exists for — the `before*` hooks' `ctx.api` writes,
+     // the row, the `after*` chain — runs inside the executor.
+     const ownUnit = this.opensAfterAbortUnit('afterUpdate', object, options?.context);
+     const inOwnUnit = <T>(body: () => Promise<T>): (() => Promise<T>) =>
+       ownUnit ? () => this.inAfterAbortUnit(body) : body;
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
+     // [ADR-0153 D4] The insert face's rule: a `_sync_` provenance column is the
+     // sync-in pull's alone, judged on the caller's payload before anything
+     // runs, and the pull's mark does not travel past this write.
+     const syncJudgedContext = refuseSyncProvenanceWrite(object, data, options?.context, 'update');
+     if (syncJudgedContext !== options?.context) options = { ...options, context: syncJudgedContext } as typeof options;
      // [#8844] See the insert face — an organization row that changes identity
      // invalidates the memo just as one that appears does.
      if (object === ORGANIZATION_OBJECT) this.invalidateOrganizationProbe();
@@ -161,7 +202,7 @@ export class UpdateFacet {
      // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
      // carve an append-only system ledger out of the transaction. Before any
      // hook, default or validation runs, so a refusal costs nothing.
-     this.enforceTransactionOrigin(object, driver, 'update');
+     this.enforceTransactionOrigin(object, driver, 'update', options?.context?.transaction);
 
      // Fold the `filter` alias into `where` FIRST (#4346): everything below —
      // token resolution, the by-id fast path, the #2982 AST seeding — reads
@@ -172,7 +213,7 @@ export class UpdateFacet {
      // [#5158] Lower before the by-id extraction below reads `where.id`: on an
      // array that read is `undefined` whatever the caller wrote, so an
      // `update({ where: [['id','=',x]] })` used to route to the multi-row path.
-     options = lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf);
+     options = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(object, 'update', options, this._registry.getObject(object), this.relatedSchemaOf));
      // [ADR-0100] A predicate write is judged like a read: a non-system
      // caller's `where` evaluates no `secret` / `password` column.
      rejectCredentialEvaluation(object, 'update', options, options?.context, this.relatedSchemaOf);
@@ -274,6 +315,27 @@ export class UpdateFacet {
      const suppliedValues: Readonly<Record<string, unknown>> = {
        ...((opCtx.data ?? {}) as Record<string, unknown>),
      };
+
+     // The engine's referential write to one lookup — the `set_null` delete
+     // walk's clear (`cascadeDeleteRelations`) or the recycle-bin restore's
+     // re-link and its undo (ADR-0148 D2): the one key the read-only strips
+     // below leave to the engine, at the value this write received — see
+     // `ReferentialClearExemption`. Read off the engine's module-private option
+     // only, never off the context: a caller (or
+     // a hook's `ctx.api` write, which inherits the cleanup context) carrying
+     // `__referentialFieldClear` gets nothing here. And only on the by-id write
+     // of the row and field the writer named, so the option forwarded into any
+     // other write exempts nothing there.
+     const referentialClearOption = (options as Record<symbol, unknown> | undefined)?.[REFERENTIAL_CLEAR_OPTION] as
+       ReferentialClearOption | undefined;
+     const referentialClear: ReferentialClearExemption | undefined =
+       referentialClearOption !== undefined
+       && id !== undefined && id !== null
+       && referentialClearOption.object === object
+       && referentialClearOption.id === String(id)
+       && Object.prototype.hasOwnProperty.call(suppliedValues, referentialClearOption.field)
+         ? { field: referentialClearOption.field, value: suppliedValues[referentialClearOption.field] }
+         : undefined;
 
      // [#3407] Structured strip observability. The readonly/readonlyWhen strips
      // below — and, since #6437, the primary-key strip at each branch's head —
@@ -385,18 +447,51 @@ export class UpdateFacet {
        id !== undefined && id !== null
        && Object.prototype.hasOwnProperty.call(suppliedValues, 'id')
        && Object.is(suppliedValues.id, id);
+     // [#34746] Every key a strip took on this call, recorded whether or not
+     // anyone listens: `everyCallerKeyDropped` below asks it of every write.
+     const engineDroppedKeys = new Set<string>();
      const reportDroppedFields = (
        before: Record<string, unknown> | null | undefined,
        after: Record<string, unknown> | null | undefined,
        reason: DroppedFieldsEvent['reason'],
      ): void => {
-       if ((!onFieldsDropped && !strictReadonlyWrites) || before === after || !before) return;
+       if (before === after || !before) return;
        const afterObj = (after ?? {}) as Record<string, unknown>;
        const fields = Object.keys(before).filter(
          // [#8093] The address the caller wrote to is not a field it lost.
          (k) => !(k in afterObj) && !(idAddressesThisRow && k === 'id'),
        );
+       for (const k of fields) engineDroppedKeys.add(k);
+       if (!onFieldsDropped && !strictReadonlyWrites) return;
        emitDrop(fields, reason);
+     };
+     /**
+      * [#34746] Whether the strips took EVERY key the caller supplied, so the
+      * update is a no-op: no driver write, no stamps, no `afterUpdate`, and the
+      * answer is the current record (by-id) or zero written rows (predicate),
+      * with the drops reported as always. Asked once per branch, of the payload
+      * both read-only strips leave. True only when all three hold:
+      *
+      *  - the caller supplied at least one key, the row's own address aside
+      *    (ADDRESSING IS NOT PAYLOAD, #8093) — an empty payload is not this;
+      *  - every one of them was taken by a strip on this call (read-only,
+      *    `readonlyWhen`, computed, primary key) — a key a hook deleted is not;
+      *  - the payload left holds nothing but the platform's update stamps
+      *    ({@link UPDATE_STAMP_COLUMNS}) and, by-id, the address. A key a
+      *    `beforeUpdate` hook wrote survives, and the write goes ahead as before.
+      *
+      * Strict mode is untouched: it refuses any drop before the driver call, so
+      * this verdict never reaches a write there. An engine precondition
+      * (ADR-0142 D4) keeps its conditional write and its conflict answer.
+      */
+     const everyCallerKeyDropped = (payload: Record<string, unknown> | null | undefined): boolean => {
+       if (opCtx.writePrecondition && Object.keys(opCtx.writePrecondition).length > 0) return false;
+       const callerKeys = Object.keys(suppliedValues).filter((k) => !(idAddressesThisRow && k === 'id'));
+       if (callerKeys.length === 0 || !callerKeys.every((k) => engineDroppedKeys.has(k))) return false;
+       const left = (payload ?? {}) as Record<string, unknown>;
+       return Object.keys(left).every(
+         (k) => UPDATE_STAMP_COLUMNS.has(k) || (k === 'id' && id !== undefined && id !== null && Object.is(left[k], id)),
+       );
      };
      /** One drop to the channel this write reports through: the strict refusal, or the listener. */
      const emitDrop = (fields: string[], reason: DroppedFieldsEvent['reason']): void => {
@@ -431,12 +526,17 @@ export class UpdateFacet {
        throw new ReadonlyFieldRejectedError(object, fields, strictDrops);
      };
 
-     await this.executeWithMiddleware(opCtx, async () => {
+     await this.executeWithMiddleware(opCtx, inOwnUnit(async () => {
        // [ADR-0139 D1] A write's predicate never carries a `ReadableIds` leaf.
        // The door refused the caller's; this refuses one the middleware chain
        // wrote — here, at the executor's entry, because the prior-row reads
        // below reach the driver before `updateMany` does.
        collectComposableReadableIds(object, 'update', opCtx.ast?.where, 'where');
+       // [ADR-0155 D4, ③ ruled A] The fixed-read leaves on the same AST, at the
+       // same point: the write form passes through in a predicate update's
+       // where, judged once, as the update, for its prior-row read and its
+       // write alike; every other leaf is refused before either runs.
+       passFixedReadLeaves(securityResolversHost.of(this.facade), object, 'update', opCtx.ast?.where, opCtx.context);
        // [#20082] The write's ONE permission resolution, shared by its option
        // gates and the formula fields on its response — asked at most once, and
        // only by the first of them that needs the map.
@@ -471,6 +571,7 @@ export class UpdateFacet {
          onFault: this.formulaFaultSink(object),
          relatedFor: (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
          optionLabelsFor: (plan) => declaredOptionLabels(updateSchema, plan),
+         workCalendarsFor: (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, opCtx.context),
        };
        const undeclared = undeclaredWriteFieldErrors(
          object,
@@ -573,9 +674,10 @@ export class UpdateFacet {
            delete suppliedDataOnly.id;
            // No logger, deliberately: this pass is SILENT by construction. The
            // strip below owns every word said about these keys.
+           // The walk's referential clear is stored, so its hooks see it.
            const hidden = stripReadonlyFields(
              readonlyUpdateSubject as any, preHookPayload, suppliedDataOnly, undefined,
-             { preserveAudit: opCtx.context?.preserveAudit === true },
+             { preserveAudit: opCtx.context?.preserveAudit === true, referentialClear },
            ) as Record<string, unknown>;
            if (hidden !== preHookPayload) {
              readonlyHiddenFromHooks = {};
@@ -624,6 +726,8 @@ export class UpdateFacet {
          opCtx.data !== null && typeof opCtx.data === 'object'
            ? recordHookPayloadWrites(opCtx.data as Record<string, unknown>)
            : undefined;
+       // [ADR-0153 D4] The payload's `_sync_` keys before the hooks, judged after the seal.
+       const syncBeforeHooks = snapshotSyncKeys(opCtx.data);
 
        const hookContext: HookContext = {
           object,
@@ -825,7 +929,7 @@ export class UpdateFacet {
            // Scope: the BY-ID branch only. A `multi: true` predicate update
            // that matches zero rows is legitimately "0 rows affected", not a
            // missing record — same line both siblings draw.
-           if (!priorRecord) throw recordNotFoundError(object, id);
+           if (!priorRecord) throw recordNotFoundError(object, id, opCtx.context);
            // Never fabricate: a row that is not there leaves `previous`
            // UNBOUND rather than `{}`/`null`, so a condition reading it
            // faults loudly instead of answering for a record nobody read
@@ -1003,6 +1107,9 @@ export class UpdateFacet {
        const sealedHookWrites = hookWrites?.seal(hookContext.input.data);
        if (sealedHookWrites) hookContext.input.data = sealedHookWrites.data as any;
        let hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+       // [ADR-0153 D4] A `_sync_` key a hook assigned, changed or removed is refused,
+       // the pull's own write included (sync-provenance-write.ts, "The hooks' own writes").
+       refuseHookSyncProvenanceWrite(object, syncBeforeHooks, hookContext.input.data, 'update');
 
        // ── [#16344] HAND BACK what was hidden from the hooks ────────────────
        //
@@ -1137,6 +1244,10 @@ export class UpdateFacet {
            // as the write leaves it (`next`). `null` when no roll-up aggregates
            // this object, and on the by-id branch, which passes its own row.
            let summaryRows: { previous: Record<string, unknown>[]; next: Record<string, unknown>[] } | null = null;
+           // [#34746] Set by each branch right after its read-only strips
+           // (`everyCallerKeyDropped`); true skips the driver write, the
+           // `afterUpdate` dispatch, the roll-up recompute and the change event.
+           let noOpUpdate = false;
            const mediaValueShapeStrict = await this.mediaValueShapeStrictFor(updateSchema);
            const valueShapeStrict = await this.valueShapeStrictFor(updateSchema);
            const updateMsgCtx = this.validationMessageContext(object, opCtx.context);
@@ -1159,7 +1270,10 @@ export class UpdateFacet {
            // this write.
            const judgeStrippedPayload = (payload: Record<string, unknown>): void => {
                normalizeMultiValueFields(updateSchema, payload, 'skip');
-               validateRecord(updateSchema, payload, 'update', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+               // [ADR-0113 D1, as amended] `'deferred'`: a clear of a field
+               // required only when shown is judged by `evaluateValidationRules`
+               // (both branches below), against its visibility and the prior row.
+               validateRecordInScope(updateSchema, payload, 'update', 'skip', { mediaValueShapeStrict, valueShapeStrict, messages: updateMsgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues }, 'deferred');
            };
            // [#19887] A `readonlyWhen` predicate's `record` is the payload the
            // write STORES, so it reads each multi-valued field in its stored
@@ -1261,8 +1375,14 @@ export class UpdateFacet {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
+               // A field the caller may not write keeps its stored value, whatever
+               // its type: which `secret` keys hold the caller's value is read
+               // here, before the pass below seals them, and both read-only strips
+               // judge `judgedSupplied` (see `engine-update-sealed-secrets.ts`).
+               const callerSecretKeys = secretKeysHoldingCallerValues(updateSchema, hookContext.input.data as Record<string, unknown>, suppliedValues);
                // [#27582] This record's own stored row is the pre-image read above.
                sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, driverOptions, async () => [priorRecord]);
+               const judgedSupplied = suppliedOverSealedSecrets(suppliedValues, callerSecretKeys, hookContext.input.data as Record<string, unknown>, sealedSecrets);
                // The multi-value wrap and the first value judgement wait for
                // both read-only strips (`judgeStrippedPayload`, below them).
                // [#5284] Demand-driven, and the demand is asked PER OBJECT.
@@ -1364,13 +1484,13 @@ export class UpdateFacet {
                // [#24822] ...with the wall's flag read once above, so the views
                // these consumers read agree with the strip below about
                // `organization_id`.
-               const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys, wallJudgesOrganization };
+               const staticStrip = { runs: staticReadonlyStripRuns, preserveAudit: opCtx.context?.preserveAudit === true, hookWrittenKeys, wallJudgesOrganization, referentialClear };
                const landing = wantsParentBinding
                    ? await this.settleMasterDetailLanding({
-                       schema: updateSchema, data: preRoWhen, supplied: suppliedValues,
+                       schema: updateSchema, data: preRoWhen, supplied: judgedSupplied,
                        staticStrip,
                        resolve: (view) => this.resolveMasterDetailParent(updateSchema, view, priorRecord, opCtx.context),
-                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: suppliedValues, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhen, suppliedValues, staticStrip)) }) as Record<string, unknown>,
+                       judgeFkLock: (named, fk) => stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, named, { supplied: judgedSupplied, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhen, judgedSupplied, staticStrip)), referentialClear }) as Record<string, unknown>,
                      })
                    : undefined;
                const roWhenParent = landing?.header;
@@ -1422,7 +1542,7 @@ export class UpdateFacet {
                // so a value forged for a static `readonly` field (stripped
                // below) cannot unlock a field whose predicate reads it.
                const roWhenSubject = landing?.subject ?? preRoWhen;
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? suppliedValues, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubject, suppliedValues, staticStrip)) }) as any;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, roWhenSubject, priorRecord, this.logger, roWhenParent, { supplied: landing?.supplied ?? judgedSupplied, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubject, judgedSupplied, staticStrip)), referentialClear }) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -1463,9 +1583,12 @@ export class UpdateFacet {
                    // taken with the row's own organization kept; it is not
                    // reported, and not refused under `strictReadonlyWrites`,
                    // which refuses exactly what this strip takes.
-                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
+                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRo, judgedSupplied, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys, referentialClear }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
+               // [#34746] Both strips are done: did they take everything the
+               // caller sent? Asked here, before any later pass adds a key.
+               noOpUpdate = everyCallerKeyDropped(hookContext.input.data as Record<string, unknown>);
                // Both strips are done: wrap and judge what is left.
                judgeStrippedPayload(hookContext.input.data as Record<string, unknown>);
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -1547,6 +1670,18 @@ export class UpdateFacet {
                    object, currencyFields, followCodes ? followCodes(currencyImage) : currencyImage,
                    'update', currencyPayload, hookContext.input.id, updateMsgCtx, parentCodeFieldServingOf(this._registry),
                  );
+                 // [ADR-0158 U5, Open item 9] …and on the same image, each unit
+                 // code the payload writes, or rests beside a quantity it writes,
+                 // is a member of the row's organization; no written quantity
+                 // stands beside a blank code. Free unless the payload touches one.
+                 if (touchesUnitCodes(currencyFields, currencyPayload)) {
+                   const unitOrganization = ObjectQL.homeAmountOrganizationOf(currencyImage, opCtx.context);
+                   const organizationUnits = await readOrganizationUnits(
+                     currencyFields, [{ image: currencyImage, touched: currencyPayload, organizationId: unitOrganization }], 'update',
+                     organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never) }, opCtx.context as Record<string, unknown> | undefined),
+                   );
+                   assertUnitCodes(object, currencyFields, currencyImage, 'update', currencyPayload, hookContext.input.id, unitOrganization, organizationUnits);
+                 }
                }
                // [ADR-0144 D2, amended] …and a record a child row follows the
                // currency of keeps its code field: a change of it is refused
@@ -1615,7 +1750,7 @@ export class UpdateFacet {
                  async () => [priorRecord],
                );
                if (referencesFirst) await checkReferences();
-               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
+               emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate, formulaValues: formulaValuesFor(updateSchema, opCtx.context, permissionsForUpdate) }), this.logger, object);
                if (!referencesFirst) await checkReferences();
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
@@ -1632,14 +1767,20 @@ export class UpdateFacet {
                // call inside a hook to THIS object.
                // [#27495] The credential row is written now, after every pass that
                // can refuse this write and immediately before the statement; a
-               // statement that fails takes it back (the outer `catch`).
-               await this.persistSecretRows(sealedSecrets, writtenSecrets);
+               // statement that fails takes it back (the outer `catch`). Only the
+               // rows the payload still names: a key a strip took out takes its row.
+               await this.persistSecretRows(sealedSecretsNamedBy(sealedSecrets, hookContext.input.data as Record<string, unknown>), writtenSecrets);
                try {
                    // [ADR-0142 D4] A write under a precondition is the driver's
                    // conditional update plus a readback — see
                    // `OperationContext.writePrecondition`.
                    const precondition = opCtx.writePrecondition;
-                   result = precondition && Object.keys(precondition).length > 0
+                   // [#34746] A no-op answers the current record: the prior
+                   // row read above under the not-found gate, never a second
+                   // fetch. Nothing reaches the driver, so no stamp lands.
+                   result = noOpUpdate
+                     ? { ...priorRecord }
+                     : precondition && Object.keys(precondition).length > 0
                      ? await this.updateByIdExpecting(driver, object, hookContext.input.id, hookContext.input.data as Record<string, unknown>, precondition, driverOptions)
                      : await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, driverOptions);
                } catch (driverError) {
@@ -1721,9 +1862,12 @@ export class UpdateFacet {
                // [#8559] Password half of the credential write door, then the
                // secret channel (which carries the secret-arm refusal).
                this.refuseEmptyPasswordFields(object, hookContext.input.data as Record<string, unknown>);
+               // The same authorship read as the by-id branch, before the same pass.
+               const callerSecretKeysMulti = secretKeysHoldingCallerValues(updateSchema, hookContext.input.data as Record<string, unknown>, suppliedValues);
                // [#27582] The rows this write lands on are the matched rows: the
                // D7 memo, read here only when a non-system payload carries a ref.
                sealedSecrets = await this.encryptSecretFields(object, hookContext.input.data as Record<string, unknown>, opCtx.context, driverOptions, readPriorRows);
+               const judgedSuppliedMulti = suppliedOverSealedSecrets(suppliedValues, callerSecretKeysMulti, hookContext.input.data as Record<string, unknown>, sealedSecrets);
                // The multi-value wrap and the first value judgement wait for
                // both read-only strips (`judgeStrippedPayload`, below them).
                // [#2982] The middleware-composed AST — asserted present and
@@ -1791,10 +1935,10 @@ export class UpdateFacet {
                    hasParentScopedReadonlyWhenInPayload(updateSchema as any, preRoWhenMulti) ||
                    schemaHasParentRequiredWhenMulti
                        ? await this.settleMasterDetailLanding({
-                           schema: updateSchema, data: preRoWhenMulti, supplied: suppliedValues,
+                           schema: updateSchema, data: preRoWhenMulti, supplied: judgedSuppliedMulti,
                            staticStrip: staticStripMulti,
                            resolve: (view) => this.resolveMasterDetailParents(updateSchema, view, priorRows, opCtx.context),
-                           judgeFkLock: (named, fk) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: suppliedValues, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhenMulti, suppliedValues, staticStripMulti)) }) as Record<string, unknown>,
+                           judgeFkLock: (named, fk) => stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, named, { supplied: judgedSuppliedMulti, only: fk, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, preRoWhenMulti, judgedSuppliedMulti, staticStripMulti)) }) as Record<string, unknown>,
                          })
                        : undefined;
                const parentForRow = landingMulti?.header;
@@ -1827,7 +1971,7 @@ export class UpdateFacet {
                    // [#19887] Nor read a different payload: each matched row's
                    // `record` is the payload the write stores, over that row.
                    const roWhenSubjectMulti = landingMulti?.subject ?? preRoWhenMulti;
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, roWhenSubjectMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? suppliedValues, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubjectMulti, suppliedValues, staticStripMulti)) }) as any;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, roWhenSubjectMulti, priorRows, this.logger, parentForRow, { supplied: landingMulti?.supplied ?? judgedSuppliedMulti, stored: inStoredMultiValueShape(staticReadonlyStoredView(updateSchema, roWhenSubjectMulti, judgedSuppliedMulti, staticStripMulti)) }) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —
@@ -1851,9 +1995,11 @@ export class UpdateFacet {
                    // branch: the wall's seam judges every matched row merged
                    // with this payload, so an admitted re-point is stored as
                    // sent on every one of them.
-                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
+                   hookContext.input.data = stripReadonlyFields(readonlyUpdateSubject as any, preRoMulti, judgedSuppliedMulti, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
+               // [#34746] The by-id branch's question, at the same point.
+               noOpUpdate = everyCallerKeyDropped(hookContext.input.data as Record<string, unknown>);
                // Both strips are done: wrap and judge what is left, as on the
                // by-id branch.
                judgeStrippedPayload(hookContext.input.data as Record<string, unknown>);
@@ -1955,6 +2101,24 @@ export class UpdateFacet {
                        );
                        for (const { row, image } of images) {
                            assertRecordCurrencyCodes(object, currencyFields, followCodes(image), 'update', currencyPayload, row?.id, updateMsgCtx, parentCodeFieldServingOf(this._registry));
+                       }
+                   }
+                   // [ADR-0158 U5, Open item 9] The predicate-path twin of the unit
+                   // check: every matched row with the payload over it, one
+                   // organization-unit read per organization for the whole set.
+                   if (touchesUnitCodes(currencyFields, currencyPayload)) {
+                       const unitImages = ((await readPriorRows()) ?? [])
+                         .filter((row) => row != null && typeof row === 'object')
+                         .map((row) => {
+                           const image = { ...row, ...currencyPayload };
+                           return { row, image, touched: currencyPayload, organizationId: ObjectQL.homeAmountOrganizationOf(image, opCtx.context) };
+                         });
+                       const organizationUnits = await readOrganizationUnits(
+                         currencyFields, unitImages, 'update',
+                         organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never) }, opCtx.context as Record<string, unknown> | undefined),
+                       );
+                       for (const { row, image, organizationId } of unitImages) {
+                           assertUnitCodes(object, currencyFields, image, 'update', currencyPayload, row?.id, organizationId, organizationUnits);
                        }
                    }
                    // [ADR-0144 D2, amended] The predicate-path twin of the
@@ -2060,10 +2224,48 @@ export class UpdateFacet {
                  readPriorRows,
                );
                if (referencesFirst) await checkReferences();
+               // One formula closure for the batch: its plan is built once.
+               const bulkFormulaValues = formulaValuesFor(updateSchema, opCtx.context, bulkPermissions);
                if (rulesNeedRows) {
-                   for (const row of priorRows ?? []) {
+                   // [#34465] Batch equals one-by-one for a rule that reads a
+                   // roll-up of a parent: each matched row is judged against
+                   // the value the rows judged before it move that roll-up to,
+                   // as consecutive by-id updates would read it (ruling
+                   // 6377847361, C; ruling record 6928862195, B). Only when a
+                   // rule reads one and more than one row matched; still all
+                   // rows judged before the one `updateMany`.
+                   const matchedRows = priorRows ?? [];
+                   // [#34821] A roll-up the patch cannot move (it writes no
+                   // foreign key, source or filter field of it) is not folded:
+                   // its rules read the stored value, as the by-id update does.
+                   const readSummaries = matchedRows.length > 1
+                     ? this.summaryDescriptorsReadByRules(object).filter((desc) => summaryPatchCanMove(desc, bulkPatch))
+                     : [];
+                   const matchedStates = readSummaries.length > 0
+                     ? matchedRows.map((row) => ({ previous: row ?? {}, next: { ...(row ?? {}), ...bulkPatch } }))
+                     : [];
+                   // [#34821] A roll-up left unfolded leaves one trace, naming it and why.
+                   const standDown: SummaryFoldStandDownSink = (desc, reason) => this.logger.debug('Roll-up left unfolded in a predicate update: its rules read the stored value', {
+                     object, parentObject: desc.parentObject, field: desc.summaryField, reason,
+                   });
+                   const summaryFold = readSummaries.length > 0
+                     ? createPredicateUpdateSummaryFold(
+                         await loadPredicateUpdateSummaryBases(this.facade, readSummaries, matchedStates, { ...(opCtx.context ?? {}), isSystem: true }, standDown),
+                         matchedStates,
+                         (updateSchema as any)?.fields,
+                         standDown,
+                       )
+                     : undefined;
+                   if (summaryFold) {
+                       summaryFold.setDependents(await loadSummaryFoldDependents(this, summaryFold.foldedSummaries(), opCtx.context));
+                   }
+                   const foldMaster = summaryFold && parentForRow ? resolveMasterDetailRelation(updateSchema as any)?.master : undefined;
+                   for (const [i, row] of matchedRows.entries()) {
                        try {
-                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: parentForRow?.(row), previousParent: previousParentForRow?.(row), related: bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch }), permissions: bulkPermissions }), this.logger, object);
+                           const header = parentForRow?.(row);
+                           const related = bulkRelatedForRow?.({ ...(row ?? {}), ...bulkPatch });
+                           emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: row, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: foldMaster ? summaryFold!.overlayRow(foldMaster, header) : header, previousParent: foldMaster ? summaryFold!.overlayRow(foldMaster, previousParentForRow?.(row)) : previousParentForRow?.(row), related: summaryFold ? summaryFold.overlay(related) : related, permissions: bulkPermissions, formulaValues: bulkFormulaValues }), this.logger, object);
+                           summaryFold?.advance(i);
                        } catch (err) {
                            if (err instanceof ValidationError && row?.id != null) {
                                throw new ValidationError(err.fields.map((f) => ({ ...f, message: `${f.message} (record ${String(row.id)})` })));
@@ -2079,7 +2281,7 @@ export class UpdateFacet {
                    // every such object down the per-row branch above, where the
                    // binding is supplied. This branch only ever runs for the
                    // rule families that never read a header.
-                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions }), this.logger, object);
+                   emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: null, logger: this.logger, currentUser: bulkEvalUser, skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, permissions: bulkPermissions, formulaValues: bulkFormulaValues }), this.logger, object);
                }
                if (!referencesFirst) await checkReferences();
                // `updateMany` presence is part of the ladder verdict resolved above.
@@ -2100,7 +2302,7 @@ export class UpdateFacet {
                // read serves instead when a consumer above already made it. An
                // object no roll-up aggregates reads nothing here.
                const summaryKeyColumns = this.summaryForeignKeyColumns(object);
-               if (summaryKeyColumns.length > 0) {
+               if (summaryKeyColumns.length > 0 && !noOpUpdate) {
                    const previous = priorRowsRead
                      ? ((await readPriorRows()) ?? [])
                      : (((await driver.find(object, { ...ast, fields: summaryKeyColumns }, driverOptions)) ?? []) as Record<string, unknown>[]);
@@ -2118,9 +2320,14 @@ export class UpdateFacet {
                  : priorRowsRead
                    ? ((await readPriorRows()) ?? [])
                    : (((await driver.find(object, { ...ast, fields: ['id', ...movedSecretColumns] }, driverOptions)) ?? []) as Record<string, unknown>[]);
-               await this.persistSecretRows(sealedSecrets, writtenSecrets);
+               // Only the rows the payload still names, as on the by-id branch.
+               await this.persistSecretRows(sealedSecretsNamedBy(sealedSecrets, hookContext.input.data as Record<string, unknown>), writtenSecrets);
                try {
-                   result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, driverOptions);
+                   // [#34746] A no-op writes no row: zero, the count this
+                   // branch answers.
+                   result = noOpUpdate
+                     ? 0
+                     : await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, driverOptions);
                } catch (driverError) {
                    throw envelopeDriverWriteRefusal(driverError, object, this.getSchema(object), 'update', updateMsgCtx);
                }
@@ -2148,6 +2355,7 @@ export class UpdateFacet {
                this.formulaFaultSink(object),
                (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
                (plan) => this.formulaOptionLabels(updateSchema, plan, opCtx.context),
+               (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, opCtx.context),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view
@@ -2158,7 +2366,10 @@ export class UpdateFacet {
              ? result.map((r) => coerceBooleanFields(updateSchema as any, r as any))
              : coerceBooleanFields(updateSchema as any, result as any);
            if (priorRecord) hookContext.previous = coerceBooleanFields(updateSchema as any, priorRecord as any);
-           if (bulkPerRowRows) {
+           // [#34746] A no-op changed no record, so no `afterUpdate` runs.
+           if (noOpUpdate) {
+             // Nothing to dispatch.
+           } else if (bulkPerRowRows) {
              // [#5038] N record changes ⇒ N `afterUpdate` dispatches, each on a
              // single-record-shaped context (see `buildPerRowAfterContexts`).
              // The batch `hookContext` still carries the affected COUNT as
@@ -2208,7 +2419,10 @@ export class UpdateFacet {
            // Roll-up: recompute parent summaries; pass priorRecord too so a child
            // that moved to a different parent updates BOTH old and new parent.
            // [#26950] A predicate write passes its matched rows, old and new.
-           const summaryFailures = summaryRows
+           // [#34746] A no-op moved no roll-up.
+           const summaryFailures = noOpUpdate
+             ? []
+             : summaryRows
              ? await this.recomputeSummaries(object, summaryRows.next, summaryRows.previous, opCtx.context)
              : await this.recomputeSummaries(object, result, priorRecord, opCtx.context);
 
@@ -2216,7 +2430,8 @@ export class UpdateFacet {
            // honour: per-record `data.record.updated` (#4626), or the aggregate
            // `data.records.updated` for a predicate write, whose driver call
            // returns an affected count and names no row (#4639).
-           if (this.realtimeService) {
+           // [#34746] A no-op changed nothing, so it publishes nothing.
+           if (this.realtimeService && !noOpUpdate) {
              if (isPredicateWrite) {
                await this.publishBulkDataEvent('updated', object, {
                  matched: result,
@@ -2306,8 +2521,182 @@ export class UpdateFacet {
           await this.releaseSecretHandles(object, writtenSecrets, opCtx.context, 'refused');
           throw e;
        }
-     });
+     }));
 
      return opCtx.result;
   }
+}
+
+/**
+ * [#34465] What computes, for the parents a predicate update's summary fold
+ * moves, their fields calculated from the folded roll-ups: a `formula`
+ * (computed on read) or a stored computed field (an `expression` on a field
+ * that is not a formula, computed on the recompute's write), directly or
+ * through another such field (`remaining = budget - spent`, `spent` a
+ * roll-up). A rule reading `record.project.remaining` reads such a field, and
+ * one by one it would read it over the roll-up the earlier rows moved.
+ * [#34821] A multi-row insert's accumulator reads the same, for the roll-ups
+ * its admitted rows move (`engine-insert.ts`).
+ *
+ * Read the way a by-id update's rule reads the parent: the values as SYSTEM
+ * (`resolvePredicateRelated` reads related rows under system authority). So
+ * the parents' stored rows, the plan's permission map (with the SYSTEM
+ * context's own permission resolution), its one-hop related rows and its
+ * option labels are all resolved under the SYSTEM context, ONCE over the
+ * stored parents: none of them moves while the update is judged, only the
+ * roll-ups do.
+ *
+ * Computed as one by one computes them, in two passes over each parent:
+ *
+ * 1. the stored computed fields, as the recompute's write computes them:
+ *    over the stored image (the row WITHOUT its formula fields, which a write's
+ *    image never carries, so a stored field reading a formula computes
+ *    `null` here as it does on every write), in their own plan order, with the
+ *    DECLARED option labels, and TWICE: a by-id write computes them before its
+ *    `beforeUpdate` hooks, moves the changed values onto the patch, and
+ *    computes them again over the row with that patch before the statement.
+ *    So a stored field declared BEFORE the stored field it reads (`flag` over
+ *    `headroom`, `headroom` over the roll-up) is written over the moved value,
+ *    and the second evaluation here reads it the same way;
+ * 2. then the formulas, as the next read computes them: over that row with
+ *    the stored fields just computed and the stored row's values of the
+ *    formulas the plan does not hold back on it, in the read plan's order,
+ *    with the option labels the SYSTEM read of the parent uses. A formula
+ *    outside the plan reads no folded roll-up, so it does not move while the
+ *    update is judged, and the SYSTEM read of the stored parent already
+ *    computed it: a planned formula reading one (`room = ceiling - total`,
+ *    `ceiling = budget + extra`) reads it as the by-id rule's read does.
+ *
+ * The stored pass carries one image per parent through the update, as one by
+ * one does: after each matched row is judged, the parents it names are
+ * written again (`advance`), from the row the previous write stored, and the
+ * next row reads that row. A stored computed field reading its own stored
+ * value (a high-water mark) or a chain of them declared against their reading
+ * order then holds what one by one holds at every row, not only the second.
+ *
+ * Each pass runs synchronously, with the read path's own evaluator
+ * ({@link applyFormulaPlan}). An object no such field reads a folded roll-up
+ * of reads nothing.
+ */
+/**
+ * [#34821] Hand a multi-row insert's accumulator what computes its parents'
+ * fields calculated from the roll-ups it moves ({@link loadSummaryFoldDependents}),
+ * for the parents a rule of the batch reads: a related row bound for a row
+ * (`relatedFor`) or the master-detail header (`master`, through `headerFor`).
+ * An insert no rule of which reads a parent reads nothing here. One door for
+ * the write (`insert()`) and its preview (`validate()`, mode insert), so the
+ * preview judges the batch the way the write does. `skip(i)` names a row the
+ * door already refused.
+ */
+export async function attachInsertSummaryDependents(
+  host: Parameters<typeof loadSummaryFoldDependents>[0],
+  accumulator: BatchSummaryAccumulator,
+  rows: readonly Record<string, unknown>[],
+  relatedFor: (row: Record<string, unknown>) => RelatedRecordBinding | undefined,
+  master: string | undefined,
+  headerFor: ((i: number) => unknown) | undefined,
+  context: Parameters<typeof loadSummaryFoldDependents>[2],
+  skip: (i: number) => boolean = () => false,
+): Promise<void> {
+  const readParents = new Set<string>();
+  for (let i = 0; i < rows.length; i++) {
+    if (skip(i)) continue;
+    for (const entry of Object.values(relatedFor(rows[i]!) ?? {})) if (entry?.row) readParents.add(entry.object);
+    if (master && headerFor?.(i)) readParents.add(master);
+  }
+  if (readParents.size === 0) return;
+  const folded = accumulator.foldedSummaries(rows, readParents);
+  if (folded.size > 0) accumulator.setDependents(await loadSummaryFoldDependents(host, folded, context));
+}
+
+export async function loadSummaryFoldDependents(
+  host: Pick<UpdateHost, 'facade' | 'getSchema' | 'permissionResolution' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'formulaOptionLabels'>,
+  folded: Map<string, { fields: Set<string>; parentIds: Set<string> }>,
+  context: Parameters<UpdateHost['resolveFormulaPermissions']>[3],
+): Promise<SummaryDependents> {
+  type Plan = ReturnType<typeof planStoredExpressions>;
+  const served = new Map<string, {
+    storedPlan: Plan;
+    formulaPlan: Plan;
+    formulaFields: string[];
+    unplannedFormulas: string[];
+    rows: Map<string, Record<string, unknown>>;
+    permissions: Awaited<ReturnType<UpdateHost['resolveFormulaPermissions']>>;
+    related: Awaited<ReturnType<UpdateHost['resolveFormulaRelated']>>;
+    storedLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+    formulaLabels: ReturnType<UpdateHost['formulaOptionLabels']>;
+    calendars: Awaited<ReturnType<typeof formulaWorkCalendarsFor>>;
+  }>();
+  const systemCtx = { ...(context ?? {}), isSystem: true } as typeof context;
+  const systemResolution = host.permissionResolution(systemCtx);
+  for (const [object, { fields, parentIds }] of folded) {
+    const schema = host.getSchema(object) as any;
+    if (!schema) continue;
+    const storedAll = planStoredExpressions(schema);
+    const formulaAll = planFormulaProjection(schema, undefined).plan;
+    const readers = new Set(storedExpressionsReading([...storedAll, ...formulaAll], fields));
+    const storedPlan = storedAll.filter((entry) => readers.has(entry));
+    const formulaPlan = formulaAll.filter((entry) => readers.has(entry));
+    if (storedPlan.length + formulaPlan.length === 0 || parentIds.size === 0) continue;
+    const rows = new Map<string, Record<string, unknown>>();
+    const ids = [...parentIds];
+    for (let start = 0; start < ids.length; start += SUMMARY_GROUPED_AGGREGATE_CHUNK) {
+      const found = await host.facade.find(object, { where: { id: { $in: ids.slice(start, start + SUMMARY_GROUPED_AGGREGATE_CHUNK) } }, context: systemCtx }) as Array<Record<string, unknown>>;
+      for (const row of found ?? []) if (row?.id != null) rows.set(String(row.id), row);
+    }
+    if (rows.size === 0) continue;
+    const storedRows = [...rows.values()];
+    const plan = [...storedPlan, ...formulaPlan];
+    served.set(object, {
+      storedPlan,
+      formulaPlan,
+      formulaFields: formulaAll.map((entry) => entry.name),
+      unplannedFormulas: formulaAll.filter((entry) => !readers.has(entry)).map((entry) => entry.name),
+      rows,
+      permissions: await host.resolveFormulaPermissions(object, plan, storedRows, systemCtx, systemResolution),
+      related: await host.resolveFormulaRelated(schema, plan, storedRows, systemCtx),
+      storedLabels: declaredOptionLabels(schema, storedPlan),
+      formulaLabels: host.formulaOptionLabels(schema, formulaPlan, systemCtx),
+      calendars: await formulaWorkCalendarsFor(host.facade, plan, storedRows, systemCtx),
+    });
+  }
+  type Served = NonNullable<ReturnType<typeof served.get>>;
+  /** What the recompute's write stores from `from` with the folded roll-ups `moved`: no formula on it, the stored fields computed. */
+  const written = (entry: Served, from: Record<string, unknown>, moved: Readonly<Record<string, number | null>>): Record<string, unknown> => {
+    const scratch: Record<string, unknown> = { ...from, ...moved };
+    for (const name of entry.formulaFields) delete scratch[name];
+    // Twice, as the write computes them: before its hooks, then over the row with the moved values.
+    for (let pass = 0; pass < 2 && entry.storedPlan.length > 0; pass += 1) {
+      applyFormulaPlan(entry.storedPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.storedLabels, entry.calendars);
+    }
+    return scratch;
+  };
+  /** Parent (`object|id`) → the row the last recompute the fold carried for it stored. */
+  const images = new Map<string, Record<string, unknown>>();
+  const dependents = ((object, parentId, moved) => {
+    const entry = served.get(object);
+    const stored = entry?.rows.get(parentId);
+    if (!entry || !stored) return undefined;
+    // The row the rule reads: the one the previous row's recompute stored, or, before any, the
+    // write's image over the stored row.
+    const image = images.get(`${object}|${parentId}`);
+    const scratch = image ? { ...image, ...moved } : written(entry, stored, moved);
+    // The read's row: the formulas the plan does not recompute back at their stored values.
+    for (const name of entry.unplannedFormulas) if (name in stored) scratch[name] = stored[name];
+    if (entry.formulaPlan.length > 0) applyFormulaPlan(entry.formulaPlan, [scratch], systemCtx, entry.permissions, undefined, entry.related, entry.formulaLabels, entry.calendars);
+    const values: Record<string, unknown> = {};
+    for (const step of [...entry.storedPlan, ...entry.formulaPlan]) values[step.name] = scratch[step.name];
+    return values;
+  }) as SummaryDependents;
+  // After each matched row, the recompute writes the parents it names: the next write starts from that row.
+  dependents.advance = (object, parentId, moved) => {
+    const entry = served.get(object);
+    const stored = entry?.rows.get(parentId);
+    if (!entry || !stored || entry.storedPlan.length === 0) return;
+    const key = `${object}|${parentId}`;
+    images.set(key, written(entry, images.get(key) ?? stored, moved));
+  };
+  // [#34821] The parent as stored: the base a bulk insert's accumulator moves a roll-up from.
+  dependents.stored = (object, parentId) => served.get(object)?.rows.get(parentId);
+  return dependents;
 }

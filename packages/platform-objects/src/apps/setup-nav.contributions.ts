@@ -26,9 +26,10 @@ import type { NavigationContribution } from '@objectstack/spec/ui';
 
 const BASE_PRIORITY = 100;
 
-// Marketplace entries (browse / installed) moved to
-// @objectstack/cloud-connection's marketplace plugins (cloud ADR-0009:
-// the nav lives and dies with the capability — no plugin, no entry).
+// The marketplace's Browse entry lives in @objectstack/cloud-connection's
+// marketplace plugins (cloud ADR-0009: the nav lives and dies with the
+// capability — no plugin, no entry). What is installed is listed by this
+// package's own Packages entry below (objectstack#36834).
 export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
   {
     app: 'setup',
@@ -39,52 +40,51 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
     ],
   },
   {
-    // No unfiltered Packages entry here (#25098, ruling 甲 amending #23892 B):
-    // the full `developer:packages` list is a development surface, so its one
-    // unfiltered door is Studio's Overview → Packages (`studio.app.ts`). Setup
-    // reaches installed packages through the marketplace-filtered "Installed
-    // Apps" door (`nav_marketplace_installed`, `developer:packages` with
-    // `params: { source: 'marketplace' }`), which
-    // `@objectstack/cloud-connection` contributes to this group wherever the
-    // marketplace capability is present. `setup-packages-door.test.ts` pins
-    // both halves.
     app: 'setup',
     group: 'group_apps',
     priority: BASE_PRIORITY,
     items: [
-      // Packaged actions are OPERATIONAL state — on/off per packaged action
-      // (ADR-0126 §7.4: "Studio keeps the editing; Setup gets the operational
-      // state"). ADR-0146 D4 keeps the action switch here while the flow
-      // switch moved onto the flow's item in Studio, and its clone became
-      // Studio's New similar (D11 retired Setup's packaged FLOWS page). The
-      // console binds `automation:packaged-actions` to the packaged-actions
-      // page (objectui app-shell `builtinComponents`). The entry lives HERE,
-      // not in service-automation: the page's data source is the
-      // `sys_metadata_activation` ledger this package registers (#12419), and
-      // the action switches work on compositions with no automation service —
-      // a nav entry riding that service would hide a page that still works
-      // there.
+      // objectstack#36834 — Setup's one door to what is installed, amending
+      // ruling 甲 of #25098 (which kept the full package list in Studio only,
+      // as a development surface). The entry opens the same
+      // `developer:packages` page with `params: { face: 'admin' }`, which the
+      // sidebar sends as the query string: the page's ADMINISTRATION face —
+      // every package of every source (with a Source filter on the page),
+      // enable / disable, delete with the keep-data choice, and New Package,
+      // which lands in Studio on the new package. The authoring actions
+      // (import, publish, revert, discard drafts, adopt loose items, manifest
+      // edit) stay on the face Studio opens: the landing's "All packages" link
+      // and each package card's Manage, unchanged.
       //
-      // `visible` gives the entry the audience of its page's own data read
-      // (#33224). The page reads `/data/sys_metadata_activation`, and a member
-      // who may not read that ledger was shown an entry whose page renders only
-      // `activation ledger HTTP 403`. Being the first entry the Setup app
-      // serves, it was also their LANDING page: the console's object-read prune
-      // judges `type: 'object'` entries only, so nothing else hid this
-      // `component` one. The console's sidebar and its landing walk ask this
-      // predicate with the member's `/auth/me/permissions` map, so such a member
-      // now neither sees the entry nor lands on it. A member who reads the
-      // ledger is shown it as before.
+      // It replaces the marketplace-filtered "Installed Apps" entry
+      // (`nav_marketplace_installed`, retired from
+      // `@objectstack/cloud-connection`'s `MARKETPLACE_INSTALLED_UI_BUNDLE`):
+      // marketplace installs are this list under Source = marketplace, and an
+      // old `?source=marketplace` link still opens that face filtered.
+      //
+      // Gated like Setup's other administration entries (All Settings, Public
+      // Forms): `manage_platform_settings`. The server's gates on the package
+      // routes stay the authority (`manage_metadata` on every write).
+      // `setup-packages-door.test.ts` pins what this package ships for each app.
       {
-        id: 'nav_packaged_actions',
+        id: 'nav_packages',
         type: 'component',
-        label: 'Packaged Actions',
-        componentRef: 'automation:packaged-actions',
-        icon: 'zap',
-        visible: "current_user.can('sys_metadata_activation', 'read')",
+        label: 'Packages',
+        componentRef: 'developer:packages',
+        params: { face: 'admin' },
+        icon: 'package',
+        requiredPermissions: ['manage_platform_settings'],
       },
     ],
   },
+  // No Packaged Actions entry (objectstack#34724, the ADR-0146 D4
+  // amendment of 2026-11-17): a packaged action's on/off switch for this
+  // deployment is on the action, in its app in Studio (the object's Actions
+  // view, a standalone action's item page), the way D4 put the flow switch on
+  // the flow. The `nav_packaged_actions` entry and its
+  // `automation:packaged-actions` page retired, as `nav_packaged_automation`
+  // did under D11; the console sends the old URL to Studio.
+  // `setup-packaged-actions-nav.test.ts` pins both retirements.
   {
     app: 'setup',
     group: 'group_people_org',
@@ -154,6 +154,18 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `requiredPermissions`: the object grant decides who reads and writes
       // (organization admins), and Setup itself already needs `setup.access`.
       { id: 'nav_exchange_rates', type: 'object', label: 'Exchange Rates', objectName: 'sys_exchange_rate', viewName: 'all_rates', icon: 'arrow-right-left' },
+      // [ADR-0158 U3] The organization's own units of measure, beside the
+      // exchange rates as the other per-organization reference table. No
+      // `requiredPermissions`: the object grant decides (every member reads,
+      // organization admins write), and Setup itself already needs `setup.access`.
+      { id: 'nav_units_of_measure', type: 'object', label: 'Units of Measure', objectName: 'sys_unit', viewName: 'all_units', icon: 'ruler' },
+      // [ADR-0157 D1, D3] Working calendars and their holidays, beside the
+      // other organization reference data Localization governs. The exceptions
+      // get their own entry because their list page is the import door for a
+      // year of holidays; the calendar list's `needs_maintenance` view is the
+      // D8 notice. Access as Exchange Rates: the object grant decides.
+      { id: 'nav_work_calendars', type: 'object', label: 'Working Calendars', objectName: 'sys_work_calendar', viewName: 'all_calendars', icon: 'calendar-clock' },
+      { id: 'nav_work_calendar_exceptions', type: 'object', label: 'Calendar Exceptions', objectName: 'sys_work_calendar_exception', viewName: 'all_exceptions', icon: 'calendar-x' },
       { id: 'nav_settings_company', type: 'url', label: 'Company', url: '/apps/setup/system/settings/company', icon: 'building-2' },
       // `nav_settings_branding` is contributed by `@objectstack/service-settings`
       // with the `branding` namespace, which is offered only where no
@@ -172,7 +184,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // `@objectstack/service-settings` (`setup-nav-hub-parity.test.ts`).
       { id: 'nav_settings_mail', type: 'url', label: 'Mail Delivery', url: '/apps/setup/system/settings/mail', icon: 'mail', requiredPermissions: ['manage_platform_settings'] },
       { id: 'nav_settings_sms', type: 'url', label: 'SMS Delivery', url: '/apps/setup/system/settings/sms', icon: 'message-square', requiredPermissions: ['manage_platform_settings'] },
-      { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'] },
+      // [#33891] A cloud-managed environment's file storage is the hosting
+      // platform's: the settings doors refuse the page there
+      // (`@objectstack/service-settings` `cloud-managed-settings.ts`), so the
+      // entry is not drawn. `features` is a root every nav entry binds.
+      { id: 'nav_settings_storage', type: 'url', label: 'File Storage', url: '/apps/setup/system/settings/storage', icon: 'hard-drive', requiredPermissions: ['manage_platform_settings'], visible: 'features.cloudManaged != true' },
       { id: 'nav_settings_ai', type: 'url', label: 'AI & Embedder', url: '/apps/setup/system/settings/ai', icon: 'sparkles', requiredPermissions: ['manage_platform_settings'] },
       // `nav_settings_knowledge` is contributed by `@objectstack/service-knowledge`
       // with the `knowledge` namespace, which is offered only where that
@@ -186,6 +202,11 @@ export const SETUP_NAV_CONTRIBUTIONS: NavigationContribution[] = [
       // per object (`manageRecycleBin`), and the page lists only the objects
       // whose bin the caller manages.
       { id: 'nav_recycle_bin', type: 'component', label: 'Recycle Bin', componentRef: 'data:recycle-bin', icon: 'trash-2' },
+      // objectstack#36444 — every public form of the environment (a form anyone
+      // fills in without signing in): switch one on or off, copy its address,
+      // open it. Operations only; Studio designs the forms. For system
+      // administrators: the page asks the same capability.
+      { id: 'nav_public_forms', type: 'component', label: 'Public Forms', componentRef: 'forms:public-forms', icon: 'file-text', requiredPermissions: ['manage_platform_settings'] },
     ],
   },
   {

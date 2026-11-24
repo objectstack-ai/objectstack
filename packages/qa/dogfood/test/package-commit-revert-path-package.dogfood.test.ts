@@ -154,33 +154,44 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
     expect(JSON.stringify(rollback.json)).toContain("Package 'app.cmtprobe-nosuch' not found");
   });
 
-  it('an uninstalled package\'s commit is refused 404 through its own revert and rollback path, and writes nothing', async () => {
-    const created = await call('POST', '/packages', {
-      manifest: { id: GONE, name: 'Commit probe gone', version: '0.1.0', type: 'app', namespace: 'cmtpg' },
+  // The uninstalled package and its commit are this case's fixture, built in
+  // the hook so the case's 5 s clock times the uninstall and the two refusals
+  // it pins, never the package create and object publish before them (a cold
+  // object publish is the costliest call this file makes).
+  describe('an uninstalled package', () => {
+    let before: Commit[];
+    let target: Commit;
+    beforeAll(async () => {
+      const created = await call('POST', '/packages', {
+        manifest: { id: GONE, name: 'Commit probe gone', version: '0.1.0', type: 'app', namespace: 'cmtpg' },
+      });
+      expect(created.status, JSON.stringify(created.json)).toBe(201);
+      await publishObject(GONE, 'cmtpg_first', 'Gone first');
+      before = await commitsOf(GONE);
+      target = before.find((c) => c.operation === 'apply')!;
+    }, 60_000);
+
+    it('an uninstalled package\'s commit is refused 404 through its own revert and rollback path, and writes nothing', async () => {
+      expect(target).toBeDefined();
+
+      const uninstalled = await call('DELETE', `/packages/${GONE}`);
+      expect(uninstalled.status, JSON.stringify(uninstalled.json)).toBe(200);
+      expect(await isServed('cmtpg_first')).toBe(false);
+      // The trail outlives the package's registry entry.
+      expect(await commitsOf(GONE)).toEqual(before);
+
+      const revert = await call('POST', `/packages/${GONE}/commits/${target.id}/revert`, {});
+      expect(revert.status, JSON.stringify(revert.json)).toBe(404);
+      expect(revert.json?.error?.code, JSON.stringify(revert.json)).toBe('RESOURCE_NOT_FOUND');
+      expect(revert.json?.error?.message).toBe(`Package '${GONE}' not found`);
+      const rollback = await call('POST', `/packages/${GONE}/rollback`, { commitId: target.id });
+      expect(rollback.status, JSON.stringify(rollback.json)).toBe(404);
+      expect(rollback.json?.error?.code, JSON.stringify(rollback.json)).toBe('RESOURCE_NOT_FOUND');
+      expect(rollback.json?.error?.message).toBe(`Package '${GONE}' not found`);
+
+      expect(await commitsOf(GONE)).toEqual(before);
+      expect(await isServed('cmtpg_first')).toBe(false);
     });
-    expect(created.status, JSON.stringify(created.json)).toBe(201);
-    await publishObject(GONE, 'cmtpg_first', 'Gone first');
-    const before = await commitsOf(GONE);
-    const target = before.find((c) => c.operation === 'apply')!;
-    expect(target).toBeDefined();
-
-    const uninstalled = await call('DELETE', `/packages/${GONE}`);
-    expect(uninstalled.status, JSON.stringify(uninstalled.json)).toBe(200);
-    expect(await isServed('cmtpg_first')).toBe(false);
-    // The trail outlives the package's registry entry.
-    expect(await commitsOf(GONE)).toEqual(before);
-
-    const revert = await call('POST', `/packages/${GONE}/commits/${target.id}/revert`, {});
-    expect(revert.status, JSON.stringify(revert.json)).toBe(404);
-    expect(revert.json?.error?.code, JSON.stringify(revert.json)).toBe('RESOURCE_NOT_FOUND');
-    expect(revert.json?.error?.message).toBe(`Package '${GONE}' not found`);
-    const rollback = await call('POST', `/packages/${GONE}/rollback`, { commitId: target.id });
-    expect(rollback.status, JSON.stringify(rollback.json)).toBe(404);
-    expect(rollback.json?.error?.code, JSON.stringify(rollback.json)).toBe('RESOURCE_NOT_FOUND');
-    expect(rollback.json?.error?.message).toBe(`Package '${GONE}' not found`);
-
-    expect(await commitsOf(GONE)).toEqual(before);
-    expect(await isServed('cmtpg_first')).toBe(false);
   });
 
   it('control: a member without manage_metadata is refused 403 first', async () => {
@@ -367,16 +378,25 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
     expect(await servedLabel()).toBe(shipped);
   });
 
-  it('[#29414] control: a writable package\'s edit commit restores its own row in place', async () => {
-    await publishObject(A, 'cmtpa_edited', 'A edited 1');
-    await publishObject(A, 'cmtpa_edited', 'A edited 2');
-    const edit = (await commitsOf(A))[0] as any;
-    expect(edit.items).toEqual([expect.objectContaining({ type: 'object', name: 'cmtpa_edited', existedBefore: true })]);
-    const res = await call('POST', `/packages/${A}/commits/${edit.id}/revert`, {});
-    expect(res.status, JSON.stringify(res.json)).toBe(200);
-    expect(res.json?.data).toMatchObject({
-      success: true, revertedCount: 1, reverted: [{ type: 'object', name: 'cmtpa_edited', action: 'restored' }],
+  // The edit commit is this case's fixture: its two object publishes (a create,
+  // then the edit) run in the hook, so the case's 5 s clock times the revert it
+  // pins, never the publishes that build the commit.
+  describe('[#29414] a writable package\'s edit commit', () => {
+    let edit: any;
+    beforeAll(async () => {
+      await publishObject(A, 'cmtpa_edited', 'A edited 1');
+      await publishObject(A, 'cmtpa_edited', 'A edited 2');
+      edit = (await commitsOf(A))[0];
+    }, 60_000);
+
+    it('[#29414] control: a writable package\'s edit commit restores its own row in place', async () => {
+      expect(edit.items).toEqual([expect.objectContaining({ type: 'object', name: 'cmtpa_edited', existedBefore: true })]);
+      const res = await call('POST', `/packages/${A}/commits/${edit.id}/revert`, {});
+      expect(res.status, JSON.stringify(res.json)).toBe(200);
+      expect(res.json?.data).toMatchObject({
+        success: true, revertedCount: 1, reverted: [{ type: 'object', name: 'cmtpa_edited', action: 'restored' }],
+      });
+      expect((await call('GET', '/meta/object/cmtpa_edited')).json?.item?.label).toBe('A edited 1');
     });
-    expect((await call('GET', '/meta/object/cmtpa_edited')).json?.item?.label).toBe('A edited 1');
   });
 });

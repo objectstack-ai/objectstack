@@ -10,7 +10,14 @@ import type {
   JobRunTrigger,
 } from '@objectstack/spec/contracts';
 import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
-import { skippedTickMessage, type ScheduledFire } from './scheduled-fire.js';
+import {
+  DEFAULT_SHUTDOWN_DRAIN_MS,
+  drainExpiredMessage,
+  drainScheduledFires,
+  openScheduledFire,
+  skippedTickMessage,
+  type ScheduledFire,
+} from './scheduled-fire.js';
 
 /**
  * Monotonic counter that makes every adapter instance's registry prefix unique
@@ -77,6 +84,12 @@ export interface CronJobAdapterOptions {
   namespace?: string;
   /** Surface for registry-level anomalies (a reclaimed job name) and cluster-lock outages. */
   logger?: { warn(msg: string, meta?: unknown): void; info?(msg: string, meta?: unknown): void };
+  /**
+   * How long `destroy()` waits for a scheduled run already in flight before it
+   * returns without it, in milliseconds (default 10000). Keep it inside the
+   * kernel's `shutdownTimeout`, which every plugin's teardown shares.
+   */
+  shutdownDrainMs?: number;
 }
 
 interface CronJobRecord {
@@ -112,6 +125,7 @@ export class CronJobAdapter implements IJobService {
    * (#31811). See {@link CronJobAdapter.runScheduled}.
    */
   private readonly scheduledInFlight = new Map<string, ScheduledFire>();
+  private readonly shutdownDrainMs: number;
 
   /**
    * This instance's prefix in croner's PROCESS-GLOBAL name registry.
@@ -132,6 +146,7 @@ export class CronJobAdapter implements IJobService {
     this.cluster = options.cluster;
     this.leaseMs = options.leaseMs ?? 60_000;
     this.logger = options.logger;
+    this.shutdownDrainMs = options.shutdownDrainMs ?? DEFAULT_SHUTDOWN_DRAIN_MS;
     this.registryNamespace = `${sanitizeNamespaceLabel(options.namespace)}#${++ADAPTER_SEQUENCE}.${Math.random()
       .toString(36)
       .slice(2, 8)}`;
@@ -236,12 +251,25 @@ export class CronJobAdapter implements IJobService {
    * holds. Called from `DbJobAdapter.destroy()` and `JobServicePlugin.destroy()`
    * — i.e. from the kernel eviction chain, which until #8362 stopped one level
    * above this method and left every evicted kernel's timers running forever.
+   *
+   * Then wait for the scheduled fires still in flight, for at most
+   * `shutdownDrainMs`. The kernel destroys the driver AFTER this plugin, so a
+   * fire handed back still running meets a released driver and its run record
+   * is never settled. The registrations are cleared first, so a tick racing
+   * this finds no job and starts nothing; a fire still going when the bound
+   * passes is named in one `warn` and left to finish on its own, and
+   * `DbJobAdapter` settles its run row before the driver goes. Manual
+   * `trigger()` runs are not waited for: their caller awaits them.
    */
   async destroy(): Promise<void> {
     for (const rec of this.jobs.values()) {
       try { rec.task?.stop(); } catch { /* ignore */ }
     }
     this.jobs.clear();
+    const leftRunning = await drainScheduledFires(this.scheduledInFlight, this.shutdownDrainMs);
+    if (leftRunning.length > 0) {
+      this.logger?.warn(drainExpiredMessage('CronJobAdapter', leftRunning, this.shutdownDrainMs));
+    }
   }
 
   /**
@@ -281,12 +309,13 @@ export class CronJobAdapter implements IJobService {
     }
     // Set before the first await, so a tick landing while this one is still
     // asking for the lock reads it too.
-    const fire: ScheduledFire = { startedAt: new Date().toISOString() };
+    const { fire, finish } = openScheduledFire();
     this.scheduledInFlight.set(name, fire);
     try {
       await this.runElected(name, record);
     } finally {
       if (this.scheduledInFlight.get(name) === fire) this.scheduledInFlight.delete(name);
+      finish();
     }
   }
 

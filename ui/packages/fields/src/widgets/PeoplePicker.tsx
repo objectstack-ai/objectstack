@@ -28,7 +28,8 @@ import {
   useIsMobile,
 } from '@object-ui/components';
 import { Search, Loader2, AlertCircle } from 'lucide-react';
-import type { DataSource, LookupFilterDef } from '@object-ui/types';
+import type { DataSource } from '@object-ui/types';
+import type { LookupFilterEntry } from './lookupRecordReference.js';
 import { useRecordQuery } from './useRecordQuery.js';
 // The repo's single filter sink — conjoins filter sources under one `and`
 // instead of spreading them, so an id restriction can never overwrite a
@@ -41,6 +42,7 @@ import { PersonRow } from './PersonRow.js';
 import { SelectionTray } from './SelectionTray.js';
 import { getRecentLookupIds, pushRecentLookupId } from './recentLookups.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
+import { isImeKey } from './imeKey.js';
 
 /**
  * PeoplePicker — the Tier 0, search-first user picker (issue #2112).
@@ -97,7 +99,7 @@ export interface PeoplePickerProps {
   searchFields?: string[];
   pageSize?: number;
   /** Base candidate filters (e.g. exclude banned users). */
-  lookupFilters?: LookupFilterDef[];
+  lookupFilters?: readonly LookupFilterEntry[];
   /**
    * Hard filter constraints in QueryParams.$filter record form — the
    * dependent (cascading) lookup chain (#2215). Always ANDed into the
@@ -120,6 +122,12 @@ export interface PeoplePickerProps {
   inline?: boolean;
   /** The element the inline dropdown/sheet anchors to (the field trigger). */
   trigger?: React.ReactNode;
+  /**
+   * Render the picker's body in place, with no container of its own: a list
+   * cell's editor layer is the container (objectstack#35688). Commits as
+   * `inline` does, and an Enter that picks a row stops there.
+   */
+  embedded?: boolean;
   /**
    * A search term the picker opens with (e.g. a code scanned into a lookup).
    * Applied each time `open` turns true while it is set; the user can edit it
@@ -151,6 +159,7 @@ export function PeoplePicker({
   onSelect,
   onSelectRecords,
   inline = false,
+  embedded = false,
   trigger,
   initialSearch,
 }: PeoplePickerProps) {
@@ -261,8 +270,8 @@ export function PeoplePicker({
 
   // Recent ids captured once per open.
   const recentIds = useMemo(
-    () => (open ? getRecentLookupIds(objectName) : []),
-    [open, objectName],
+    () => (open ? getRecentLookupIds(objectName, perms.userId) : []),
+    [open, objectName, perms.userId],
   );
 
   // The current value's ids, for hydrating the SelectionTray on edit.
@@ -381,10 +390,10 @@ export function PeoplePicker({
     (ids: any[], records: any[]) => {
       onSelect(multiple ? ids : (ids[0] ?? null));
       onSelectRecords?.(records);
-      ids.forEach(id => pushRecentLookupId(objectName, id));
+      ids.forEach(id => pushRecentLookupId(objectName, id, perms.userId));
       onOpenChange(false);
     },
-    [multiple, objectName, onSelect, onSelectRecords, onOpenChange],
+    [multiple, objectName, onSelect, onSelectRecords, onOpenChange, perms.userId],
   );
 
   // Inline mode has no confirm step — push the value out on every change.
@@ -412,11 +421,11 @@ export function PeoplePicker({
       // Inline: commit live (chips live in the field), stay open for more.
       // Modal: stage in the tray until Confirm.
       if (inline) {
-        if (!exists) pushRecentLookupId(objectName, id);
+        if (!exists) pushRecentLookupId(objectName, id, perms.userId);
         commitLive(next);
       }
     },
-    [multiple, idField, commit, selectedRecords, inline, objectName, commitLive],
+    [multiple, idField, commit, selectedRecords, inline, objectName, commitLive, perms.userId],
   );
 
   const handleRemove = useCallback(
@@ -504,6 +513,9 @@ export function PeoplePicker({
 
   const onSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // The input method owns a key pressed while it composes: Enter picks a
+      // candidate there, and the arrows move between candidates, not rows.
+      if (isImeKey(e)) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setActiveIndex(i => (navList.length ? Math.min(navList.length - 1, i + 1) : -1));
@@ -513,6 +525,9 @@ export function PeoplePicker({
       } else if (e.key === 'Enter') {
         if (activeIndex >= 0 && activeIndex < navList.length) {
           e.preventDefault();
+          // The list cell's editor would otherwise commit again with the
+          // value it held before this pick.
+          if (embedded) e.stopPropagation();
           handleRowSelect(navList[activeIndex]);
         }
       } else if (
@@ -524,7 +539,7 @@ export function PeoplePicker({
         handleRemove(getPersonId(selectedRecords[selectedRecords.length - 1], idField));
       }
     },
-    [navList, activeIndex, handleRowSelect, query.search, multiple, selectedRecords, handleRemove, idField],
+    [navList, activeIndex, handleRowSelect, query.search, multiple, selectedRecords, handleRemove, idField, embedded],
   );
 
   // The candidate area's error: the main query's own failure, else the refusal
@@ -588,8 +603,12 @@ export function PeoplePicker({
         )}
       </div>
 
-      {/* Candidate area */}
-      <ScrollArea className="min-h-0 flex-1" data-testid="people-picker-list">
+      {/* Candidate area. `flex flex-col` makes the viewport a flex item that
+          shrinks to the room this area is given: a container capped only by
+          `max-h-*` (the inline popover, the desktop dialog) has no definite
+          height, so the viewport's own `h-full` falls back to its content
+          height and the list is clipped instead of scrolling. */}
+      <ScrollArea className="flex min-h-0 flex-1 flex-col" data-testid="people-picker-list">
         <div
           id="people-picker-list"
           role="listbox"
@@ -679,6 +698,14 @@ export function PeoplePicker({
     </>
   );
 
+  if (embedded) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-2 p-2" data-testid="people-picker-in-cell">
+        {body}
+      </div>
+    );
+  }
+
   // Inline combobox: anchored Popover on desktop, bottom Sheet (opened from the
   // same trigger) on mobile. The trigger is the caller's field control.
   if (inline) {
@@ -699,8 +726,13 @@ export function PeoplePicker({
         </Sheet>
       );
     }
+    // `modal`: the popover is its own scroll-lock layer. It is portalled out of
+    // a modal form's DOM, so a non-modal popover's list sits outside that
+    // dialog's scroll lock, which cancels every wheel and touch move on it; as
+    // the topmost lock its list scrolls. The same treatment as the lookup
+    // popover (objectstack#36825, #36852).
     return (
-      <Popover open={open} onOpenChange={onOpenChange}>
+      <Popover modal open={open} onOpenChange={onOpenChange}>
         <PopoverTrigger asChild>{trigger}</PopoverTrigger>
         <PopoverContent
           align="start"

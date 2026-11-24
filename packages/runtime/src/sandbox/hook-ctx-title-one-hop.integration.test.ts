@@ -20,8 +20,9 @@
 //    book, an `afterUpdate` names the row's state after the write;
 //  - the hop costs one batched read per reference field the title reads
 //    through, and a title over the row's own columns still costs none;
-//  - the hop rides the transaction a body opened (`ctx.api.transaction`), on
-//    the one SQLite connection, instead of asking the pool for a second;
+//  - the hop rides the transaction a body is in (`ctx.api.transaction`, which
+//    joins the write door's unit), on the one SQLite connection, instead of
+//    asking the pool for a second;
 //  - the hop is read as the CALLER: a related record the caller's read does not
 //    return leaves the title absent, as the read of the junction row shows it —
 //    never a partial string, never the hidden name;
@@ -254,26 +255,42 @@ describe('#24197 ctx.title() serves a title formula\'s one hop (real engine, rea
     expect(withTitle).toBe(reads.length);
   }, 30000);
 
-  it('H2 — inside a transaction the BODY opened, the hop rides it on the one SQLite connection', async () => {
-    // A before-hook with no after-hook bound: the write opens no unit of work
-    // of its own, so `ctx.api.transaction` OPENS one, and SQLite's single
-    // pooled connection is held by it until it commits. A hop read on any
-    // other channel would wait for a second connection that never comes.
-    const e = await boot([hook(
-      'lib_loan', ['beforeUpdate'],
-      `await ctx.api.transaction(async () => { ctx.input.note = String(await ctx.title()); });`,
-      ['api.transaction'],
-    )]);
+  it('H2 — a before-hook body\'s ctx.api.transaction JOINS the door\'s unit, and the hop reads on it, on the one SQLite connection', async () => {
+    // A before-hook bound from metadata opens the write door's unit (#34412), so
+    // `ctx.api.transaction` in its body joins that unit instead of opening a
+    // second one. SQLite's single pooled connection is held by the unit until
+    // it commits: a hop read on any other channel would wait for a second
+    // connection that never comes.
+    const txBody = (inner: string) => hook(
+      'lib_loan', ['beforeUpdate'], `await ctx.api.transaction(async () => { ${inner} });`, ['api.transaction'],
+    );
+    const e = await boot([txBody('ctx.input.note = String(await ctx.title());')]);
     await e.insert('lib_loan', { id: 'l1', book: 'b1', reader: 'r1' }, { context: SYS });
     reads.length = 0;
     begins.length = 0;
     const updated: any = await e.update('lib_loan', { id: 'l1', note: 'x' }, { context: LIMITED });
 
     expect(updated.note).toBe('Dune · Ann');
+    // ONE transaction for the whole write: the door's, which the body joined.
     expect(begins).toHaveLength(1);
+    // Every read of the write ran on it — the title's hops among them.
+    expect(reads.length).toBeGreaterThan(0);
+    for (const r of reads) expect(r.trx).toBe(begins[0]);
+    const onUnit = (o: string) => reads.filter((r) => r.trx === begins[0] && r.object === o).length;
+    const withTitle = { book: onUnit('lib_book'), reader: onUnit('lib_reader'), all: reads.length };
+
+    // The same write whose body opens the same transaction and never asks.
+    const e2 = await boot([txBody("ctx.input.note = 'x';")]);
+    await e2.insert('lib_loan', { id: 'l1', book: 'b1', reader: 'r1' }, { context: SYS });
+    reads.length = 0;
+    begins.length = 0;
+    await e2.update('lib_loan', { id: 'l1', note: 'x' }, { context: LIMITED });
+    expect(begins).toHaveLength(1);
+    const baseline = { book: onUnit('lib_book'), reader: onUnit('lib_reader'), all: reads.length };
+
     // The title's two hop reads — one of each related object — and nothing
-    // else ran on the body's transaction.
-    expect(reads.filter((r) => r.trx === begins[0]).map((r) => r.object).sort()).toEqual(['lib_book', 'lib_reader']);
+    // else is what the body added to the unit.
+    expect([withTitle.book - baseline.book, withTitle.reader - baseline.reader, withTitle.all - baseline.all]).toEqual([1, 1, 2]);
   }, 30000);
 
   it('H2 — in an after-hook the body JOINS the write\'s own unit of work, and the hop reads on it', async () => {

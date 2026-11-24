@@ -434,7 +434,7 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'both is usually right, but "usually" is a human judgement, not a merge rule. Not split per-entry '
       + 'alongside the migrations registry by #7297 (the #6957 ruling names two append registries and the '
       + 'other one is `scripts/adr-anchors.json`, #7301); #29987 split it by a codemod '
-      + '(`scripts/codemod-split-conversions-registry.mjs`): each conversion is now a module of its own '
+      + '(split by #29993): each conversion is now a module of its own '
       + 'under `conversions/entries/`, a new file that never conflicts, and what a retirement still edits '
       + 'here is its import line and its list entry — hand-written text a human merges, never regenerated.',
   },
@@ -455,8 +455,10 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'driver runs only in a local merge, never in GitHub\'s server-side one or the queue\'s. What '
       + 'keeps them right is their gates, which hold each region equal to its `--write` output on '
       + 'every PR and queue build in the required `Lint & Repo Gates` job, so a text merge that '
-      + 'leaves a region wrong is red, never silent; and the register carries one line per symbol and '
-      + 'no total, so two read-adding branches text-merge apart. Routing the tree the way its sibling '
+      + 'leaves a region wrong is red, never silent; the register carries one line per symbol and '
+      + 'no total, so two read-adding branches text-merge apart; and the tenant-audit region carries '
+      + 'no population figure since #33942 (its totals live in the ledger\'s per-package shards under '
+      + '`docs/audits/`), so a branch adding a write site does not touch the page at all. Routing the tree the way its sibling '
       + '`content/docs/references/**` is routed reads as symmetry and is not: that sibling is '
       + 'generated whole, this one would defer every prose page to OURS and lose the other side\'s '
       + 'edits silently. Should a page generated WHOLE arrive here, route that FILE and leave its '
@@ -891,12 +893,15 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'generated whole instead. The strictness ledger\'s `.counts/` shards are the ROUTED one, '
       + 'declared above: #5107 split the ledger\'s numbers out precisely so the prose could keep '
       + 'text-merging (it always merged cleanly) while the numbers stopped (they merged clean and '
-      + 'WRONG). `2026-08-tenant-audit-write-call-sites.counts.md` (`node '
-      + 'scripts/tenant-audit-census.mjs --write`) is NOT routed: a row needs a `gen:`/`check:` pair '
+      + 'WRONG). The tenant-audit census ledger — its index `2026-08-tenant-audit-write-call-sites.counts.md` '
+      + 'and, since #33942, its per-package shards under `2026-08-tenant-audit-write-call-sites.counts/` '
+      + '(`node scripts/tenant-audit-census.mjs --write`) — is NOT routed: a row needs a `gen:`/`check:` pair '
       + 'in the manifest it names as owner, and no manifest declares one for that census, which runs '
       + 'straight from the lint workflow; the driver runs only in a local merge anyway, and '
-      + '`check-tenant-audit-census.mjs` holds the file to its `--write` output on every PR, so a '
-      + 'clean-and-wrong text merge is red, never silent (the file\'s own header says the same). '
+      + '`check-tenant-audit-census.mjs` holds the index and every shard to their `--write` output on '
+      + 'every PR, so a clean-and-wrong text merge is red, never silent (the index\'s own header says the '
+      + 'same). No total across packages is committed, so two branches adding sites in different '
+      + 'packages edit different shards and merge apart. '
       + 'Regenerating a ledger would discard evidence, which is the opposite trade — so this '
       + 'exclusion covers the prose and must stay.',
   },
@@ -943,6 +948,18 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   // objectstack#32225: the developer namespace's Traditional Chinese catalogue, same command.
   {
     path: 'ui/packages/i18n/src/namespaces/developer/zh-Hant.ts',
+    gen: 'gen:zh-hant',
+    owner: '@object-ui/i18n',
+    why:
+      'generated WHOLE from the namespace\'s `zh-Hans.ts` by the same `gen:zh-hant` run that writes '
+      + 'the pack, and not routed for the same reason as the marketplace catalogue above: no `check:` '
+      + 'script proves its currency. The proof is the same package test, which walks every generated '
+      + 'target. Line-aligned with its source, so a conflict is resolved by taking either side and '
+      + 'running `pnpm --filter @object-ui/i18n gen:zh-hant`.',
+  },
+  // The timesheet namespace's Traditional Chinese catalogue, same command.
+  {
+    path: 'ui/packages/i18n/src/namespaces/timesheet/zh-Hant.ts',
     gen: 'gen:zh-hant',
     owner: '@object-ui/i18n',
     why:

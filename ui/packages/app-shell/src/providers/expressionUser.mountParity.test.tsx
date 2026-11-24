@@ -54,8 +54,8 @@
  *
  * Restore the hand-rolled descriptor in `RecordFormPage`:
  *   - both parity cases go RED on the missing `id` / `isPlatformAdmin`;
- *   - `hides an isPlatformAdmin-gated field from a non-admin` goes RED as
- *     `toContain` — the fault fails OPEN, so the field is PRESENT;
+ *   - `hides an isPlatformAdmin-gated field from a non-admin` goes RED on the
+ *     form's verdict — the fault fails OPEN, so it reads visible AND faulted;
  *   - the same for the signed-IN `ctx.user.id` case, and for the signed-out
  *     `isPlatformAdmin` case;
  *   - `hides a ctx.user.id-gated field from a signed-out visitor` stays GREEN
@@ -79,6 +79,7 @@ import { I18nProvider } from '@object-ui/i18n';
 // `ExpressionProvider` under test publishes through (the idiom
 // `anonSeedScope-5746.enumeration.test.tsx` uses for the same reason).
 import { usePredicateScope } from '../../../react/src/hooks/useExpression';
+import { resolveFieldRuleState } from '@object-ui/core';
 import { buildExpressionUser } from './expressionUser';
 import { RecordFormPage } from '../views/RecordFormPage';
 
@@ -193,6 +194,27 @@ function renderPage() {
 const lastScope = (): Record<string, any> => publishedScopes[publishedScopes.length - 1];
 const lastFields = (): string[] => formSchemas[formSchemas.length - 1].fields;
 
+/**
+ * The verdict the FORM reaches on a field's `visibleWhen` under the scope this
+ * page publishes. The page's field list reads the static `hidden` only; a
+ * field's `visibleWhen` is evaluated by the form renderer, through
+ * `resolveFieldRuleState`, with the scope its `ExpressionProvider` publishes
+ * (objectstack#35249). So this is the call that decides whether the gate bites,
+ * made with that scope and an empty record (none of these gates reads one).
+ * `faulted` is reported apart from the verdict: a fault fails OPEN, so a
+ * `visible: true` alone cannot tell a granted gate from a broken one.
+ */
+const formVerdict = (field: keyof typeof CONTACTS.fields): { visible: boolean; faulted: boolean } => {
+  const st = resolveFieldRuleState(
+    { visibleWhen: (CONTACTS.fields[field] as any).visibleWhen },
+    {},
+    {},
+    undefined,
+    lastScope(),
+  );
+  return { visible: st.visible, faulted: st.faults.visibleWhen !== undefined };
+};
+
 beforeEach(() => {
   metadataState.objects = [CONTACTS];
   metadataState.loading = false;
@@ -243,13 +265,14 @@ describe('objectui#6515 — the record form page publishes the normaliser’s `c
     renderPage();
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
 
-    // Ungated fields are unaffected — the filter still lets everything else by.
-    expect(lastFields()).toContain('name');
-    // Both were `toContain` before the fix: the key was absent, the predicate
-    // faulted, and `evaluateVisibility` fails OPEN — so the admin-only field
-    // was on screen for a sales clerk.
-    expect(lastFields()).not.toContain('plan');
-    expect(lastFields()).not.toContain('plan_canonical');
+    // The list carries every field that is not statically hidden; the form
+    // judges the predicate (objectstack#35249).
+    expect(lastFields()).toEqual(expect.arrayContaining(['name', 'plan', 'plan_canonical']));
+    // Both answered `visible` before objectui#6515: the key was absent, the
+    // predicate faulted, and a fault fails OPEN — so the admin-only field was
+    // on screen for a sales clerk. Under the published scope it is a clean FALSE.
+    expect(formVerdict('plan')).toEqual({ visible: false, faulted: false });
+    expect(formVerdict('plan_canonical')).toEqual({ visible: false, faulted: false });
   });
 
   it('hides a `ctx.user.id`-gated field from the user it excludes', async () => {
@@ -258,7 +281,7 @@ describe('objectui#6515 — the record form page publishes the normaliser’s `c
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
 
     // `id` was the other dropped key. Same fault, same fail-open.
-    expect(lastFields()).not.toContain('self_note');
+    expect(formVerdict('self_note')).toEqual({ visible: false, faulted: false });
   });
 
   it('hides the `isPlatformAdmin` gate from a signed-out visitor', async () => {
@@ -267,11 +290,11 @@ describe('objectui#6515 — the record form page publishes the normaliser’s `c
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
 
     expect(lastFields()).toContain('name');
-    // Was `toContain` before the fix: the hand-rolled anonymous descriptor
+    // Answered `visible` before the fix: the hand-rolled anonymous descriptor
     // carried no `isPlatformAdmin` key at all, so the gate faulted and failed
     // open for a visitor with no session whatsoever.
-    expect(lastFields()).not.toContain('plan');
-    expect(lastFields()).not.toContain('plan_canonical');
+    expect(formVerdict('plan')).toEqual({ visible: false, faulted: false });
+    expect(formVerdict('plan_canonical')).toEqual({ visible: false, faulted: false });
   });
 
   it('hides a `ctx.user.id`-gated field from a signed-out visitor', async () => {
@@ -289,11 +312,11 @@ describe('objectui#6515 — the record form page publishes the normaliser’s `c
     // ⚠️ The SECOND assertion is the load-bearing one and it is not
     // interchangeable with the first. `'id' in …` only proves the key exists;
     // it says nothing about whether CEL can compare against `null` rather than
-    // faulting on it a second way. Only the rendered field list proves the gate
+    // faulting on it a second way. Only the form's verdict proves the gate
     // actually BITES — that `ctx.user.id == 'u_admin'` resolves to a clean
-    // FALSE for an anonymous visitor and the field is filtered out. If `null`
-    // merely relocated the fault, the first assertion would still pass and this
-    // one would still find the field present.
+    // FALSE for an anonymous visitor, with no fault. If `null` merely relocated
+    // the fault, the first assertion would still pass and this one would find
+    // the fault.
     //
     // Fenced boundary (objectui#6443 / #6487 / #6445): fail-open on a predicate
     // that DOES fault is deliberate and is untouched. This asserts that this
@@ -304,22 +327,22 @@ describe('objectui#6515 — the record form page publishes the normaliser’s `c
 
     expect('id' in buildExpressionUser(null)).toBe(true);
     expect(buildExpressionUser(null).id).toBeNull();
-    // Ungated fields are untouched — this narrowed exactly one gate, and the
-    // filter still lets everything else by. Without this line a change that
-    // dropped ALL fields would pass the assertion below.
+    // Ungated fields are untouched. Without this line a change that dropped
+    // ALL fields would pass the assertion below.
     expect(lastFields()).toContain('name');
-    expect(lastFields()).not.toContain('self_note');
+    expect(formVerdict('self_note')).toEqual({ visible: false, faulted: false });
   });
 
   it('grants the `isPlatformAdmin` gate to a platform admin', async () => {
-    // Control. GREEN before and after — a fault and a true both render the
-    // field, which is exactly why it cannot stand in for the cases above.
+    // Control. A fault and a true both answer `visible`, which is exactly why
+    // `faulted` is asserted beside the verdict.
     authState.user = ADMIN;
     renderPage();
     await waitFor(() => expect(formSchemas.length).toBeGreaterThan(0));
 
-    expect(lastFields()).toContain('plan');
-    expect(lastFields()).toContain('plan_canonical');
-    expect(lastFields()).toContain('self_note');
+    expect(lastFields()).toEqual(expect.arrayContaining(['plan', 'plan_canonical', 'self_note']));
+    expect(formVerdict('plan')).toEqual({ visible: true, faulted: false });
+    expect(formVerdict('plan_canonical')).toEqual({ visible: true, faulted: false });
+    expect(formVerdict('self_note')).toEqual({ visible: true, faulted: false });
   });
 });

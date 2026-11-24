@@ -14,7 +14,7 @@ import { resolveGridCellRendering, gridCellRendererForFixedKey, linkCellRenderer
 import { isWithheldGridColumn } from './maskedColumn';
 import { humanizeLabel, MaskedCellRenderer } from '@object-ui/fields';
 import { Button, EmptyValue } from '@object-ui/components';
-import { isDeadlineSettled, leadWithNameField, columnIdentity } from '@object-ui/core';
+import { isDeadlineSettled, leadWithNameField, columnIdentity, readWithheldFieldNames, refersToWithheldField } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
 import { Type, Hash, Calendar, CheckSquare, User, Tag, Clock } from 'lucide-react';
 import { applyRelationalMeta } from './relationalMetaKeys';
@@ -26,6 +26,20 @@ import { useGridTranslation } from './objectGridTranslations';
 import type { useObjectGridQueryInputs } from './objectGridQueryInputs';
 
 type QueryInputs = ReturnType<typeof useObjectGridQueryInputs>;
+
+const NUMERIC_CELL_TYPES: ReadonlySet<string> = new Set(['number', 'currency', 'percent']);
+
+/**
+ * Whether a column draws a figure, so it aligns right with tabular digits
+ * (objectstack#35548). Read on the renderer key, and for a formula on its
+ * declared `returnType`: a money formula (`expected_revenue`) sits beside its
+ * currency sources and has to line up under them.
+ */
+export function alignsAsNumber(rendererType: string | null | undefined, returnType?: unknown): boolean {
+  if (!rendererType) return false;
+  if (NUMERIC_CELL_TYPES.has(rendererType)) return true;
+  return rendererType === 'formula' && typeof returnType === 'string' && NUMERIC_CELL_TYPES.has(returnType);
+}
 
 /**
  * `ObjectGrid`'s column generator, memoised on the same dependency list as
@@ -226,6 +240,13 @@ export function useObjectGridGenerateColumns({
         if (!Object.prototype.hasOwnProperty.call(objectFields ?? {}, fieldName)) return true;
         return perms.checkField(schema.objectName, fieldName, 'read');
       };
+      // objectstack#34901 — an authored column on a field a disabled package
+      // withholds from the served object (`_withheldFields`) is not drawn: the
+      // row load never asks for it, so it could only draw empty. Derived from
+      // the definition on every call, so it is drawn again once the package is
+      // enabled; nothing is written.
+      const packageWithheld = readWithheldFieldNames(objectSchema);
+      const notWithheld = (entry: unknown): boolean => !refersToWithheldField(columnIdentity(entry), packageWithheld);
       // ObjectStack's DECLARED column spelling is the only one read
       // (objectui#5068). `ObjectGridSchema.columns` is `string[] | ListColumn[]`,
       // and `ListColumnSchema` in `@objectstack/spec/ui` is a STRICT object:
@@ -259,6 +280,7 @@ export function useObjectGridGenerateColumns({
         return (cols as ListColumn[])
           .filter((col) => resolvesToDataColumn(col))
           .filter((col) => passesFieldGate(col))
+          .filter((col) => notWithheld(col))
           .map((col, colIndex, shown) => {
             // The column's own `label` is the spec's "Display label override"
             // (`ListColumnSchema`), so when the author wrote one it IS the
@@ -538,9 +560,8 @@ export function useObjectGridGenerateColumns({
             }
 
             // Auto-infer alignment from field type if not explicitly set
-            const numericTypes = ['number', 'currency', 'percent'];
             const effectiveType = inferredType || col.type;
-            const inferredAlign = col.align || (effectiveType && numericTypes.includes(effectiveType) ? 'right' as const : undefined);
+            const inferredAlign = col.align || (alignsAsNumber(effectiveType, objectDefField?.returnType) ? 'right' as const : undefined);
 
             // Determine if column should be hidden on mobile
             const isEssential = colIndex === 0;
@@ -584,6 +605,7 @@ export function useObjectGridGenerateColumns({
       return (cols as string[])
         .filter((fieldName) => typeof fieldName === 'string' && fieldName.trim().length > 0)
         .filter((fieldName) => passesFieldGate(fieldName))
+        .filter((fieldName) => notWithheld(fieldName))
         .map((fieldName, colIndex) => {
           const fieldDef = objectFields?.[fieldName];
           // objectui#10657 — a bare field name carries no type of its own, so
@@ -653,8 +675,7 @@ export function useObjectGridGenerateColumns({
             fieldMeta.appearance = (fieldDef as any).appearance;
           }
 
-          const numericTypes = ['number', 'currency', 'percent'];
-          const inferredAlign = rendererType && numericTypes.includes(rendererType) ? 'right' as const : undefined;
+          const inferredAlign = alignsAsNumber(rendererType, fieldDef?.returnType) ? 'right' as const : undefined;
 
           // Auto-link primary field (first column) to record detail
           const isPrimaryField = colIndex === 0;
@@ -848,8 +869,7 @@ export function useObjectGridGenerateColumns({
             fieldMeta.appearance = (fieldDef as any).appearance;
           }
 
-          const numericTypes = ['number', 'currency', 'percent'];
-          const inferredAlign = rendererType && numericTypes.includes(rendererType) ? 'right' as const : undefined;
+          const inferredAlign = alignsAsNumber(rendererType, fieldDef?.returnType) ? 'right' as const : undefined;
           // A `referenceVia` pointer column (objectui#12608), as path A.
           const pointerFace = withheld ? null : recordPointerFace(fieldName, declaredType, fieldDef, dataSource);
 
@@ -954,7 +974,6 @@ export function useObjectGridGenerateColumns({
       // inline editor; the renderer comes from the `format`-promoted key, which
       // this path used to skip (objectui#8920).
       const { declaredType: fieldType, rendererType, Renderer: CellRenderer } = resolveGridCellRendering(field);
-      const numericTypes = ['number', 'currency', 'percent'];
       const translatedField = field.options
         ? { ...field, options: translateOptions(schema.objectName, fieldName, field.options) }
         : field;
@@ -971,7 +990,7 @@ export function useObjectGridGenerateColumns({
         ...(fieldType && { type: fieldType }),
         // Aligned on the RENDERER key, like paths A-C: a `text` column with
         // `format: 'currency'` renders as currency, so it aligns as currency.
-        ...(!!rendererType && numericTypes.includes(rendererType) && { align: 'right' as const }),
+        ...(alignsAsNumber(rendererType, field.returnType) && { align: 'right' as const }),
         cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} inGridColumn />,
         sortable: field.sortable !== false,
       });

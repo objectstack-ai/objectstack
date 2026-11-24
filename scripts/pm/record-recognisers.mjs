@@ -20,7 +20,7 @@
  * to release `.claude/**`. This file is what reads it, and nothing else:
  *
  *   locateReviewOfRecord     the record on this head, on the PR thread or its card
- *   deliveredCardNumber      which card thread a pull request's record may sit on
+ *   deliveredCardNumber      which card thread a pull request's record may sit on — and `deliveredCardsAtStrongest` every card a tie holds, for a reader that reads them all
  *   readServedTier           the `Served-tier:` line, and `servedTierStands` on it — at the tier its face maps to
  *   reviewFace / REVIEW_FACES which face made the review owed, and the ONE tier NAME it stands at
  *   reviewScopeHits          the at-tier review's scope floor — `reviewFace`'s `hits`, the record's `Scope:` line
@@ -33,7 +33,7 @@
  *   isOutsideReviewSurface   the prose faces a head may move on and keep its record
  *   contractReviewTemplateLines / contractReviewRecordLines   what `--template` prints
  *   contractReviewBriefLines what `--brief-template` prints — the brief a seat hands its reviewer
- *   readMailboxLine / mailboxEvents / MAILBOX_KEYS   the mailbox DOORBELL — `To: <seat>`, then one key of the table a `pm:mailbox` comment may carry, read; anything else refused; `mailboxKeyLines` is what `--mailbox-keys` prints; `readMailboxComment` / `MAILBOX_KNOCK_AUTHORS` its AUTHOR fence — a knock counts only from the relay or a `GOVERNED_APPROVERS` account, any other author ignored and its body never read; `seatSessionRoster` / `knockSignature` its SIGNATURE LISTING — a relay knock whose signed session the seat it names does not list reads `unlisted` (`unverified seat signature`), never acted on; `listed` is a consistency check inside the fleet's trust root, ⛔ never proof of who rang (a copied signature line reads `listed`)
+ *   readMailboxLine / mailboxEvents / MAILBOX_KEYS   the mailbox DOORBELL — `To: <seat>`, then one key of the table a `pm:mailbox` comment may carry, read; anything else refused; `mailboxKeyLines` is what `--mailbox-keys` prints; `readMailboxComment` / `MAILBOX_KNOCK_AUTHORS` its AUTHOR fence — a knock counts only from the relay or a `GOVERNED_APPROVERS` account, any other author ignored and its body never read; `seatSessionRoster` / `knockSignature` its SIGNATURE LISTING — a relay knock whose signed session the seat it names does not list reads `unlisted` (`unverified seat signature`), never acted on; `listed` is a consistency check inside the fleet's trust root, ⛔ never proof of who rang (a copied signature line reads `listed`); `claimThreadSession` the claim's `Thread session:` line, ONE spelling — the card thread an open card's newest, unreleased claim names joins the roster of the seat that claim is signed by, as its delegate — a claim row read only from the knock's own authors (`MAILBOX_KNOCK_AUTHORS`)
  *
  * Every definition below was MOVED, names unchanged, out of
  * `check-clause2-carriers.mjs` at the ruling's last step, which deleted the
@@ -74,7 +74,7 @@
 // row is `GOVERNED_READ_FLOOR` in `dispatch-gates.data.mjs`). The derivation
 // grades it against the read the self-test really performs, so it cannot be
 // satisfied by deleting either half.
-// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md -- the mailbox doorbell battery pins the key table both ways against project-forms.md's 〈信箱 PR〉 section (every key named there, no other key named there), the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, and the hold-line battery pins the `Contract-review-hold:` template and its listing hours there, so a change to any of those spellings is judged here
+// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md .claude/skills/pm-dispatch/SKILL.md -- the mailbox doorbell battery pins the key table both ways against project-forms.md's 〈信箱 PR〉 section (every key named there, no other key named there), the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, the hold-line battery pins the `Contract-review-hold:` template and its listing hours there, and the card-thread delegate battery pins the claim template's one `Thread session:` line in SKILL.md 〈模板与表〉 against `claimThreadSession`, so a change to any of those spellings is judged here
 
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -85,6 +85,7 @@ import { fileURLToPath } from 'node:url';
 import { gitFreeEnv } from '../git-env.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
 import {
+  CLAIM_COMMENT_MARKER,
   CONTRACT_REVIEW_HEADING_MARKER,
   CONTRACT_REVIEW_SECURITY_TOUCHING_KEY,
   CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES,
@@ -102,9 +103,12 @@ import {
   labelNames,
   readSignatureLine,
   refsTargets,
+  RELEASE_COMMENT_MARKER,
+  releaseAnswersClaim,
   SEAT_SIGNATURE_SESSION_SOURCE,
   seatOnDuty,
   stripSignatureLine,
+  yieldedClaimIndexes,
 } from './check-half-states.mjs';
 // The fleet's one verdict reader, in its counting form, re-exported so the queue guard's lazy loader
 // reaches it: every Tier S entry lands on a record with exactly one `VERDICT:` line reading PASS
@@ -134,7 +138,11 @@ import {
 // The governed-rules face is the governed register itself — the same function the queue guard
 // classifies a merge group's paths with. `dispatch-gates.mjs` already imports this module at module
 // scope, so the edge adds no new module to this file's graph and no cycle.
-import { SELF_REPO_ID, governedPathsIn, lowRiskRowHit } from './check-governed-merges.mjs';
+import { RULE_CHANGE_VALUES, RULE_CHANGE_VERIFIED_KEY, SELF_REPO_ID, governedPathsIn, lowRiskRowHit, readRuleChangeVerified, ruleChangeRowHit } from './check-governed-merges.mjs';
+// The record's `Rule-change-verified:` line — the declaration split's machine line (`.claude/**`, maintainer ruling
+// 2026-11-19 on #35321). Its key and its reader are the register's own, re-exported so the template below prints
+// exactly what the queue guard takes, ⛔ never a second spelling.
+export { RULE_CHANGE_VERIFIED_KEY, readRuleChangeVerified };
 // How an unreadable `Served-tier:` line is quoted back — the declaration
 // line's own quoting helper, one spelling for both. The narrowing face is read
 // with the fleet's ONE reader of that line, imported, ⛔ never a second parser.
@@ -142,7 +150,7 @@ import { quoteLine, readClause2Line } from './clause2-line.mjs';
 // A mailbox message's `To:` line names a SEAT, spelled as the mailbox opener spells a seat — its
 // `seatKey`, imported, ⛔ never a second seat shape. That file imports nothing of this graph's
 // top-level-await half (only the relay validator and `gh-pages.mjs`), so the edge adds no cycle.
-import { MAILBOX_LABEL, mailboxBody, mailboxOwner, seatKey } from './mailbox-open.mjs';
+import { MAILBOX_LABEL, isL2ReviewLane, L2_REVIEW_LANE_WORDS, mailboxBody, mailboxOwner, seatKey } from './mailbox-open.mjs';
 // Who may ring a mailbox: the relay's identity (`RELAY_COMMENT_AUTHOR`, the op table's — that file is already
 // in this graph through `mailbox-open.mjs`) and the maintainers (`GOVERNED_APPROVERS`), judged by the queue
 // guard's own author predicate, ⛔ never a second list of logins. The guard imports nothing of this graph at
@@ -854,20 +862,20 @@ export function localRunsStand(reading) {
 
 /**
  * The `Contract-review-handoff:` key line -- the ONE way a dispatching seat
- * hands its contract review to a review seat or a sibling seat of its lane,
+ * hands its contract review to an L2 seat or a sibling seat of its lane,
  * read with `Reviewed-by:`'s own key discipline.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉): the seat that dispatched the work runs the review in
+ * 〈L2 归属与资格〉): the seat that dispatched the work runs the review in
  * its own seat at the contract-review tier. ONLY when that tier's call is
  * quota-refused does the seat hand the review over -- it never reviews at a
  * lower tier -- and the hand-off is one PR comment carrying this line beside
  * the existing `needs:contract-review` label:
  *
- *   Contract-review-handoff: review#1 — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
+ *   Contract-review-handoff: l2-review#1 — CONTRACT_REVIEW_TIER unavailable (HTTP 429, 2026-10-27T13:00Z) · head 1b03a9c3
  *
- * Three facts, each required: the TARGET (a review seat `review#N`, or a
- * sibling seat of the lane `domain:<lane>#N` while no review seat is seated --
+ * Three facts, each required: the TARGET (an L2 seat `l2-review#N` -- old spelling `review#N`, still read -- or a
+ * sibling seat of the lane `domain:<lane>#N` while no L2 seat is seated --
  * the closed set of two shapes; ⛔ never `triage`, which takes no contract
  * review, so a line naming it is unreadable), the TIER that was unavailable -- the constant's NAME, exactly as `Served-tier:`
  * spells it, ⛔ never a model id -- with its reason and UTC time in the
@@ -885,15 +893,15 @@ export const CONTRACT_REVIEW_HANDOFF_KEY = 'Contract-review-handoff';
  * The line exactly as the rule text prints it, placeholders included. This file's self-test pins it
  * VERBATIM in `references/contract-review.md`, so the text and `HANDOFF_TARGET` cannot drift apart.
  */
-export const CONTRACT_REVIEW_HANDOFF_TEMPLATE = `${CONTRACT_REVIEW_HANDOFF_KEY}: <review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`;
+export const CONTRACT_REVIEW_HANDOFF_TEMPLATE = `${CONTRACT_REVIEW_HANDOFF_KEY}: <l2-review#N|domain:<lane>#N> — CONTRACT_REVIEW_TIER unavailable (<HTTP status / error>, <UTC time>) · head <sha>`;
 const CONTRACT_REVIEW_HANDOFF_LINE = keyLineRegex(CONTRACT_REVIEW_HANDOFF_KEY);
 /** The same key as a MARKER over a whole comment body -- `latestMarkedComment`'s convention (multiline, `g`-less). */
 const CONTRACT_REVIEW_HANDOFF_MARKER = new RegExp(CONTRACT_REVIEW_HANDOFF_LINE.source, 'm');
 /**
- * The target -- `review#N` or `domain:<lane>#N`, the seat number required -- a separator (an em dash, a
+ * The target -- `l2-review#N` (or its old spelling `review#N`: the opener's two L2 lane words) or `domain:<lane>#N`, the seat number required -- a separator (an em dash, a
  * hyphen pair, a hyphen or a colon), then the rest. `triage` and every other seat word match nothing.
  */
-const HANDOFF_TARGET = /^(review#[1-9][0-9]*|domain:[a-z][a-z0-9._-]*#[1-9][0-9]*)(?![0-9])[ \t]*(?:—|--|-|:)?[ \t]*(.*)$/i;
+const HANDOFF_TARGET = new RegExp(`^((?:${L2_REVIEW_LANE_WORDS.join('|')})#[1-9][0-9]*|domain:[a-z][a-z0-9._-]*#[1-9][0-9]*)(?![0-9])[ \\t]*(?:—|--|-|:)?[ \\t]*(.*)$`, 'i');
 /** `(reason, UTC time)` then ` · head SHA` -- the time is the LAST comma-separated item in the parentheses. */
 const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t]+`?([0-9a-fA-F]{7,40})`?[ \t]*$/;
 
@@ -903,7 +911,7 @@ const HANDOFF_TAIL = /^\(([^()]*?)[ \t]*,[ \t]*([^,()]+)\)[ \t]*·[ \t]*head[ \t
  * @returns {{ state: 'missing' }
  *          | { state: 'unreadable', line: string }
  *          | { state: 'read', to: string, tier: string, reason: string, at: string, head: string }}
- *          `to` is the target seat, lower-cased (`review#1`, `domain:ui#2`).
+ *          `to` is the target seat, lower-cased (`l2-review#1`, `review#1`, `domain:ui#2`).
  */
 export function readContractReviewHandoff(text) {
   for (const line of String(text ?? '').split(/\r?\n/)) {
@@ -967,10 +975,10 @@ export function contractReviewHandoff(rows, headSha) {
 
 /**
  * The `Contract-review-claim:` key line -- who has STARTED the contract review
- * of one head, posted by that reviewer before it starts, lane seat or review seat.
+ * of one head, posted by that reviewer before it starts, lane seat or L2 seat.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉): the lane reviews its own; a review seat, or a sibling
+ * 〈L2 归属与资格〉): the lane reviews its own; an L2 seat, or a sibling
  * lane seat, takes one only when it is handed over or nobody is doing it. Before starting, every reviewer reads the PR:
  * a record or a LIVE claim on the current head means do not start. Otherwise it
  * posts ONE comment carrying this line first, then reviews:
@@ -1067,8 +1075,8 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  * Who holds this pull request's current head, read off its comment thread:
  *
  *   live        a live claim names the current head -- `holder` is the claim to respect: the earliest
- *               posted, a review seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
- *               keeps two review seats off one head), except that a legacy `triage#N` claim yields to
+ *               posted, an L2 seat's and a lane seat's alike (the rule's 「先贴者持有」, which is what
+ *               keeps two L2 seats off one head), except that a legacy `triage#N` claim yields to
  *               any other live claim (`tie` true)
  *   lapsed      claims named the current head, and every one has expired
  *   none        no claim names the current head (claims on earlier heads lapsed when it moved)
@@ -1076,7 +1084,7 @@ export function contractReviewClaimLapse(claim, { headSha, now, postedAt } = {})
  *
  * A claim's SIDE is read off its comment's signature line (`readSignatureLine`): a claim signed
  * `triage#N · …` -- posted before triage stopped taking contract reviews -- is the `triage` side,
- * one signed `review#N · …` is the `review` side (`lanes/review.md`), and every other claim -- a
+ * one signed `l2-review#N · …` (or the old spelling `review#N · …`) is the `review` side (the L2 seat's, `lanes/l2-review.md`), and every other claim -- a
  * lane seat's, a sibling lane seat's, an unsigned one -- is the `lane` side. Between the review
  * and lane sides there is no precedence: the earliest posted holds. Unreadable claim lines are
  * returned by comment id and hold nothing.
@@ -1104,7 +1112,7 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
     const stamped = Date.parse(row?.created_at ?? '');
     const postedAt = Number.isFinite(stamped) ? stamped : line.at;
     const signedLane = readSignatureLine(row?.body)?.lane ?? null;
-    const side = signedLane === 'triage' ? 'triage' : signedLane === 'review' ? 'review' : 'lane';
+    const side = signedLane === 'triage' ? 'triage' : isL2ReviewLane(signedLane) ? 'review' : 'lane';
     const lapse = contractReviewClaimLapse(line, { headSha: head, now, postedAt });
     claims.push({ id: row?.id ?? null, session: line.session, head: line.head, time: line.time, postedAt, side, lapse });
   }
@@ -1126,7 +1134,7 @@ export function contractReviewClaims(rows, headSha, { now } = {}) {
  * the triage seat claimed under gap rule (b) and then had to withdraw.
  *
  * ⭐ The rule it makes machine-findable (the skill's contract-review reference,
- * 〈复核归属与资格〉, beside the claim line): the holding lane posts ONE comment
+ * 〈L2 归属与资格〉, beside the claim line): the holding lane posts ONE comment
  * carrying this line --
  *
  *   Contract-review-hold: session_01QSeKYmhU5KEj1nukYhp1Tg · head 3beee64f · the stack still lands under it · until the last sibling merges
@@ -1347,13 +1355,13 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * or a patrol takes; nothing here changes an exit.
  */
 export const MAILBOX_KEYS = Object.freeze([
-  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'a review seat (`review#N`), or a sibling seat of the lane while none is seated', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
+  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'an L2 seat (`l2-review#N`; a seat seated under the old spelling keeps `review#N`), or a sibling seat of the lane while none is seated', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
   { id: 'request:triage', kind: 'Request', key: 'triage', from: 'lane', to: 'triage', when: 'a question about a card\'s fate, route or grade', template: 'Request: triage · #n · ONE-LINE-QUESTION' },
   { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', when: 'a p0 suspect, main red, a deterministic queue red', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
   { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'triage, or the director when triage is absent', when: 'the anchor card is filed', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
   { id: 'notify:main-red', kind: 'Notify', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'the seat that landed the breaking PR, and the anchor card\'s lane', when: 'the anchor card is filed', template: 'Notify: main-red · anchor #n · breaking PR #m or none' },
   { id: 'notify:main-green', kind: 'Notify', key: 'main-green', from: 'triage, or the director when triage is absent', to: 'the seat of each open PR whose body carries a line-leading `Waits-on: main-red #n` naming the closed anchor', when: 'the main-red anchor card closes: one knock per held PR, all in the same round, the count in the round record; the seat merges `origin/main`, drops the line and resumes its landing', template: 'Notify: main-green · anchor #n · PR #m' },
-  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the review seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
+  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'the L2 seat or sibling lane seat that rendered the record', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
   { id: 'notify:release-blocker', kind: 'Notify', key: 'release-blocker', from: 'the release-board producer (the director seat in this repository; the whole-repository seat in cloud)', to: 'the lane the card sits in', when: 'a card is raised to `priority:p0` as a release blocker inside the release window (the only release-blocker mark; ⛔ never a `target:` label)', template: 'Notify: release-blocker · #n' },
   { id: 'notify:unblocked', kind: 'Notify', key: 'unblocked', from: 'the seat that moved the card to `pm:queue` (triage or an epic seat)', to: 'the card\'s lane seats', when: 'a p0/p1 card\'s `Blocked-by` target closed', template: 'Notify: unblocked · #n · p0 or p1' },
   { id: 'notify:ruling', kind: 'Notify', key: 'ruling', from: 'the seat that recorded a maintainer ruling', to: 'the seat whose card or draft it changes', when: 'the ruling is recorded', template: 'Notify: ruling · #n · LETTER · record ID' },
@@ -1770,11 +1778,81 @@ function mailboxOpeningSession(body) {
   return MAILBOX_OPENING_FOOTER.exec(lines.at(-1) ?? '')?.[1] ?? null;
 }
 
+/** The claim template's `Thread session:` line (pm-dispatch SKILL.md 〈模板与表〉), its ONE spelling: one backticked id, nothing after it. */
+const CLAIM_THREAD_SESSION_LINE = new RegExp(`^Thread session: \`(${SEAT_SIGNATURE_SESSION_SOURCE})\`[ \\t]*$`, 'u');
+/** Any line that reads as that key, however decorated — what makes a second or a misspelt `Thread session:` line count. */
+const CLAIM_THREAD_SESSION_KEY = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?thread[ _-]?session`?(?:\*\*)?[ \t]*[:：]/iu;
+
 /**
- * The sessions each seat LISTS — the roster a knock's signature line is compared with. Read off the two records a
- * seat keeps of who sits it (`seat-post-protocol.md`; `project-forms.md` 〈信箱 PR〉), both bodies only the relay
- * writes — so any fleet session can write them too, and their authors are not read: the roster is the fleet's own
- * word about itself, the trust root a `listed` reading stands inside (`readMailboxComment`, ⛔ never proof):
+ * The card thread a `Claim:` names on its `Thread session:` line — the session that implements the card in
+ * `mode:thread` and knocks the seat's mailbox as the seat's DELEGATE — or null. ONE key, ONE spelling, the
+ * template's: the line starts the line, the value is one backticked session id (`SEAT_SIGNATURE_SESSION_SOURCE`,
+ * the signature's own session shape), and nothing follows it. ⛔ Everything else reads null, never a guess: a
+ * bare or decorated key, a value with prose around it, a session written in prose on the `Session:` line (the
+ * first session there is `claimSessionId`'s, another reader's question), no key at all, and TWO lines that read as
+ * the key — one claim naming two threads cannot say which one knocks. A null adds nothing to the roster and never
+ * fails it. Pure.
+ *
+ * @param {string} body — a claim comment's body
+ * @returns {string | null}
+ */
+export function claimThreadSession(body) {
+  const keyed = String(body ?? '').split(/\r?\n/).filter((line) => CLAIM_THREAD_SESSION_KEY.test(line));
+  if (keyed.length !== 1) return null;
+  return CLAIM_THREAD_SESSION_LINE.exec(keyed[0])?.[1] ?? null;
+}
+
+/**
+ * The card-thread delegate one OPEN card's thread lists, or null: `{ seat, session, where }` when the thread's
+ * NEWEST claim (`latestMarkedComment` over `CLAIM_COMMENT_MARKER`, the recency rule every claim reader shares;
+ * a claim its own session yielded, `yieldedClaimIndexes`, is not a claim) is signed by a seat
+ * (`readSignatureLine`, `seatKey`) and names its card thread (`claimThreadSession`), and no `Release:` answers it
+ * (`releaseAnswersClaim`). So a released claim, a claim a newer one superseded — another seat's included — and a
+ * closed card list nobody.
+ *
+ * ⛔ AUTHOR RULE FIRST: only the rows whose author the knock's own fence trusts (`MAILBOX_KNOCK_AUTHORS`, read
+ * with `recordAuthorTrusted` as `readMailboxComment` reads it — ⛔ no second author list) are read at all. A row
+ * that names no author, or one outside that rule, is not the fleet's word: it lists nobody, and it neither
+ * supersedes, yields nor releases a claim — the claim, yield and release readers run on the fenced rows only.
+ *
+ * What it does NOT do, as intended:
+ *   - the signer's session is not compared: the claim's signature names the seat, and its session is not checked
+ *     against what that seat lists elsewhere;
+ *   - a claim does not lapse by age: it lists until it is released, superseded or its card closes (a stale claim
+ *     is the claim-liveness rows' finding, not this roster's);
+ *   - a card closed and REOPENED with its newest claim never released lists that claim's thread again — the card
+ *     is open and the claim is still its newest, the reading every claim reader shares;
+ *   - the seat's post is not consulted: a seat whose post is no longer held keeps its open claims' threads listed
+ *     until each claim is released or superseded — the claim, not the post, is the record of whom it dispatched.
+ * Pure.
+ */
+function claimDelegate(card, rows) {
+  if (!card || card.state !== 'open' || card.pull_request) return null;
+  rows = rows.filter((row) => recordAuthorTrusted(row, MAILBOX_KNOCK_AUTHORS));
+  const yielded = yieldedClaimIndexes(rows);
+  const live = rows.map((row, index) => ({ row, index })).filter(({ index }) => !yielded.has(index));
+  const newest = latestMarkedComment(live.map(({ row }) => row), CLAIM_COMMENT_MARKER);
+  if (!newest) return null;
+  const { row, index } = live[newest.index];
+  if (releaseAnswersClaim(latestMarkedComment(rows, RELEASE_COMMENT_MARKER), { ...newest, index })) return null;
+  const signed = readSignatureLine(row?.body);
+  const seat = signed ? seatKey(`${signed.lane}#${signed.seat}`) : null;
+  const session = claimThreadSession(row?.body);
+  if (!seat || !session) return null;
+  return { seat: seat.key, session, where: `claim on #${card.number} (comment ${row?.id ?? '?'}) Thread session` };
+}
+
+/**
+ * The sessions each seat LISTS — the roster a knock's signature line is compared with. Read off the records a
+ * seat keeps of who sits it (`seat-post-protocol.md`; `project-forms.md` 〈信箱 PR〉) and of whom it dispatched. The
+ * roster is the fleet's own word about itself, the trust root a `listed` reading stands inside
+ * (`readMailboxComment`, ⛔ never proof), and each source holds to it its own way:
+ *
+ *   - a seat post and a mailbox opening are BODIES only the relay writes, so any fleet session can write them too,
+ *     and their authors are not read;
+ *   - a claim is a COMMENT on a card, which any author can post, so its rows' authors ARE read: only a row whose
+ *     author the knock's own fence trusts (`MAILBOX_KNOCK_AUTHORS`) counts, and any other row — no author, or one
+ *     outside the rule — lists nobody and neither supersedes nor releases a claim (`claimDelegate`).
  *
  *   a seat post   an open `pm:seat` issue whose title is 🟢 (`seatOnDuty` — a vacant or paused post lists nobody)
  *                 lists, for the seat its FIRST-LINE signature names (`readSignatureLine`, the one reader), that
@@ -1785,18 +1863,25 @@ function mailboxOpeningSession(body) {
  *   a mailbox     an open `pm:mailbox` pull whose body names its seat (`mailboxOwner`, the opener's own reading)
  *   opening       lists the session its footer names — the session that opened it at seating. So a successor's
  *                 session the post lists reads `listed` on a mailbox its predecessor opened, and the reverse.
+ *   a claim       `{ card, rows }`, an open card and its WHOLE comment thread: the card thread its newest claim
+ *                 names (`claimDelegate`), for the seat that claim's own signature names — the session that knocks
+ *                 as that seat's delegate, listed only while the claim is open: released, superseded or closed,
+ *                 it drops. `claims` omitted lists no card thread (they read `unlisted`, as before).
  *
- * ⛔ Fail closed: either listing not an array reads `{ state: 'unreadable', gaps }`, never an empty roster, and a
- * row lists only when its `state` reads `open` — a closed row, or one with no `state` at all, lists nobody.
+ * ⛔ Fail closed: any listing that is not an array — `claims` handed in as anything but an array or omitted, or
+ * one of its threads not an array — reads `{ state: 'unreadable', gaps }`, never a smaller roster, and a row
+ * lists only when its `state` reads `open` — a closed row, or one with no `state` at all, lists nobody.
  * Rows in, `{ state: 'read', seats }` out — `seats` a Map from a seat's canonical key (`seatKey`) to a Map of each
  * session it lists to where it is listed. Pure.
  *
- * @param {{ posts?: object[], mailboxes?: object[] }} listings — the open `pm:seat` issues and the open pulls
+ * @param {{ posts?: object[], mailboxes?: object[], claims?: { card: object, rows: object[] }[] }} listings — the
+ *   open `pm:seat` issues, the open pulls, and the open claimed cards with their whole threads
  */
-export function seatSessionRoster({ posts, mailboxes } = {}) {
+export function seatSessionRoster({ posts, mailboxes, claims = [] } = {}) {
   const gaps = [];
   if (!Array.isArray(posts)) gaps.push('the open `pm:seat` posts');
   if (!Array.isArray(mailboxes)) gaps.push('the open `pm:mailbox` pulls');
+  if (!Array.isArray(claims) || claims.some((entry) => !Array.isArray(entry?.rows))) gaps.push('the open `pm:dispatched` claim threads');
   if (gaps.length > 0) return { state: 'unreadable', gaps };
   const seats = new Map();
   const list = (seat, session, where) => {
@@ -1819,6 +1904,10 @@ export function seatSessionRoster({ posts, mailboxes } = {}) {
     const seat = mailboxOwner(pr)?.seat ?? null;
     const session = seat ? mailboxOpeningSession(pr.body) : null;
     if (session) list(seat, session, `mailbox opening #${pr.number}`);
+  }
+  for (const { card, rows } of claims) {
+    const delegate = claimDelegate(card, rows);
+    if (delegate) list(delegate.seat, delegate.session, delegate.where);
   }
   return { state: 'read', seats };
 }
@@ -1843,7 +1932,7 @@ export function knockSignature(body, roster) {
   const seat = seatKey(`${signed.lane}#${signed.seat}`)?.key ?? null;
   if (!seat) return unlisted(`\`${signed.lane}#${signed.seat}\` names no seat a mailbox serves`);
   const listed = roster.seats.get(seat);
-  if (!listed || listed.size === 0) return unlisted(`${seat} lists no session (no held seat post signed by it, no open mailbox opening)`);
+  if (!listed || listed.size === 0) return unlisted(`${seat} lists no session (no held seat post signed by it, no open mailbox opening, no open claim naming its card thread)`);
   if (!listed.has(signed.session)) return unlisted(`${signed.session} is not a session ${seat} lists`);
   const also = [...roster.seats].filter(([other, sessions]) => other !== seat && sessions.has(signed.session)).map(([other]) => other);
   if (also.length > 0) return unlisted(`${signed.session} is listed by ${also.join(', ')} too, so it cannot say which seat rang`);
@@ -1860,7 +1949,7 @@ export function mailboxKeyLines() {
     `Mailbox doorbell — the comment's first line is \`To: <seat>\` (LANE#N), the next is ONE of these ${MAILBOX_KEYS.length} keys:`,
     `one event, one line of at most ${MAILBOX_LINE_MAX_BYTES} bytes, keys and numbers only; anything else is a half-state.`,
     `A knock counts only from ${MAILBOX_KNOCK_AUTHORS.join(', ')}; any other author is ${MAILBOX_IGNORED_AUTHOR.replace(/^ignored: /, 'ignored — ')}, its body never read.`,
-    `A relay knock opens with its seat signature (LANE#N · ACCOUNT · SESSION), from a session that seat lists — its held seat post (Successor-of: included) or its open mailbox opening; any other is ${MAILBOX_UNVERIFIED_SIGNATURE}, not acted on. Listed is consistency, not proof: a copied signature line also reads listed.`,
+    `A relay knock opens with its seat signature (LANE#N · ACCOUNT · SESSION), from a session that seat lists — its held seat post (Successor-of: included), its open mailbox opening, or the Thread session: line of its open claim on a card (a card thread, as the seat's delegate; a claim counts only from an author the knock fence trusts); any other is ${MAILBOX_UNVERIFIED_SIGNATURE}, not acted on. Listed is consistency, not proof: a copied signature line also reads listed.`,
     '',
     ...MAILBOX_KEYS.flatMap((k) => [k.template, `    ${k.from} → ${k.to}; ${k.when}`]),
     '',
@@ -1952,6 +2041,48 @@ export function recordCarriesSecurityTouching(face, tierName, scopeHits) {
 export const RECORD_SECURITY_TOUCHING_DEFAULT = CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES[1];
 
 /**
+ * What counts as fleet rule text, in the maintainer's own three heads (ruling 2026-11-19 on #35321): the one
+ * wording the brief and the template legend both print, so the reviewer who writes the line and the seat who
+ * reads the legend judge by the same sentence. Process steps, scripts, wording, slimming and file moves are
+ * the reviewer's, and are named so.
+ */
+export const RULE_CHANGE_VERIFIED_DUTY = Object.freeze([
+  `  Write \`${RULE_CHANGE_VERIFIED_KEY}: none\` ONLY when no changed hunk alters what an agent may do without the maintainer`,
+  '  (merge, bypass a check, change repository settings), what gets done and in what order (grading, dispatch, scope), or',
+  '  what must go to him (decisions, maintainer actions); process steps, scripts, wording, slimming and file moves are not rule',
+  '  changes. Write `ruled` ONLY when every such hunk copies the ruling the PR body quotes on its `Ruling-ref:` line — check the',
+  '  copy against the quoted words, do not re-rule it. Otherwise `yes`: the pull request then waits for the maintainer.',
+]);
+
+const RULE_CHANGE_VERIFIED_LEGEND = Object.freeze([
+  `  · ${RULE_CHANGE_VERIFIED_KEY}  read by the queue guard on a pull request touching \`.claude/**\`: it lands on this record`,
+  '                    with no human approval only when this line equals the `Rule-change:` value the PR body declares.',
+  ...RULE_CHANGE_VERIFIED_DUTY.map((line) => `                  ${line}`),
+  '                    A missing line, a second line, a quoted, fenced or code-indented line, or anything after the value',
+  `                    does not verify. The template ships \`${RULE_CHANGE_VALUES[2]}\`, so an unedited paste never lands the pull request.`,
+]);
+
+/**
+ * Does the record printed for this face carry the `Rule-change-verified:` line — the ONE machine line the
+ * `.claude/**` declaration split stands on (`ruleChangeVerdict`, `check-governed-merges.mjs`)? The same
+ * shape as `recordCarriesSecurityTouching`: with the `hits` known, exactly when one sits under a row that
+ * splits by declaration (`ruleChangeRowHit`); with none known, on every at-tier face a governed path can sit
+ * on. ⛔ Not on the narrowing or the declaration face. Pure.
+ */
+export function recordCarriesRuleChangeVerified(face, tierName, scopeHits) {
+  if (tierName !== CONTRACT_REVIEW_TIER_NAME) return false;
+  if (scopeHits !== undefined) return ruleChangeRowHit(scopeHits);
+  return face?.id !== 'narrowing';
+}
+
+/**
+ * The value the printed record ships on that line: `yes`. It PARSES through the reader that judges the real
+ * thing and it fails closed — a record pasted with it left in verifies neither `none` nor `ruled`, so the pull
+ * request does not land on the record, and `none` or `ruled` is only ever a reviewer's own statement.
+ */
+export const RECORD_RULE_CHANGE_VERIFIED_DEFAULT = RULE_CHANGE_VALUES[2];
+
+/**
  * The record itself — the lines a seat copies, and nothing else.
  *
  * ⭐ Rendered from the same constants the readers compare against
@@ -1996,6 +2127,10 @@ export const RECORD_SECURITY_TOUCHING_DEFAULT = CONTRACT_REVIEW_SECURITY_TOUCHIN
  * and keeps the pull request at Tier H unless it reads `no`. It ships `yes`
  * (`RECORD_SECURITY_TOUCHING_DEFAULT`), so an unedited paste fails closed.
  *
+ * ⭐ `Rule-change-verified:` rides the same block, after it, where `recordCarriesRuleChangeVerified` says so:
+ * the queue guard lands a `.claude/**` pull request on this record only when the line equals the
+ * `Rule-change:` value the PR body declares (`none` or `ruled`). It ships `yes`, so an unedited paste fails closed.
+ *
  * @param {{headSha?: string, implementedBy?: string, reviewedBy?: string, tierName?: string, scopeHits?: string[], faceId?: string}} values
  * @returns {string[]}
  */
@@ -2019,6 +2154,7 @@ export function contractReviewRecordLines(values = {}) {
     'Local-runs: none',
     ...(tierName === CONTRACT_REVIEW_TIER_NAME ? [`Scope: ${scopeHits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}`] : []),
     ...(recordCarriesSecurityTouching(face, tierName, values.scopeHits) ? [`${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}: ${RECORD_SECURITY_TOUCHING_DEFAULT}`] : []),
+    ...(recordCarriesRuleChangeVerified(face, tierName, values.scopeHits) ? [`${RULE_CHANGE_VERIFIED_KEY}: ${RECORD_RULE_CHANGE_VERIFIED_DEFAULT}`] : []),
     '',
     '### ① Derived judgments',
     '',
@@ -2047,9 +2183,9 @@ export const RECORD_TEMPLATE_FENCE_END = '----- to here -----';
  * paraphrased because it IS the operative criterion, and untranslated because
  * rewriting a quoted ruling rewrites the ruling:
  *
- *   > 复核记录 = 一条评论落 PR 或卡，达档与默认档同形
+ *   > L2 记录 = 一条评论落 PR 或卡,席内与各子代理同形
  *
- * — `references/contract-review.md` 〈复核归属与资格〉, with SKILL.md
+ * — `references/contract-review.md` 〈L2 归属与资格〉, with SKILL.md
  * 〈入队与落地〉 saying the same in the same words
  * (「记录 = 同形评论落 PR 或卡」) and the landing check's own ① repeating it
  * (「即 PR 或卡上同形的复核记录」). Two carriers, one record.
@@ -2123,6 +2259,33 @@ export const DELIVERY_EVIDENCE_PRECEDENCE = Object.freeze(['closing-keyword', 'p
  * @returns {{ card: number, evidence: string } | { card: null, reason: string }}
  */
 export function deliveredCardNumber(pr) {
+  const strongest = strongestDeliveredRows(pr);
+  if (strongest.length === 0) {
+    return {
+      card: null,
+      reason:
+        'its body names no card (no closing keyword and no `Part of` declaration) and its branch is not '
+        + 'the protocol dev-branch shape, so no card thread could be located for it',
+    };
+  }
+  if (strongest.length > 1) {
+    return {
+      card: null,
+      reason:
+        `it delivers ${strongest.length} cards at the same strength (${strongest.map((row) => `#${row.card}`).join(', ')}, `
+        + `${deliveryEvidenceNote(strongest[0].evidence)}), so WHICH card thread carries its record is not derivable `
+        + 'from the pull request alone',
+    };
+  }
+  return { card: strongest[0].card, evidence: strongest[0].evidence };
+}
+
+/**
+ * The delivered cards at the STRONGEST grade any of them carries, in the order the body names them — the ONE
+ * enumeration `deliveredCardNumber` and `deliveredCardsAtStrongest` both answer from, so the two can never
+ * disagree on which cards a tie holds. Each row is a card `deliveryEvidence` accepts, with its grade and rank.
+ */
+function strongestDeliveredRows(pr) {
   const body = String(pr?.body ?? '');
   const candidates = new Set([
     ...closingKeywordTargets(body).keys(),
@@ -2135,26 +2298,31 @@ export function deliveredCardNumber(pr) {
     if (evidence === null) continue;
     delivered.push({ card: Number(n), evidence, rank: DELIVERY_EVIDENCE_PRECEDENCE.indexOf(evidence) });
   }
-  if (delivered.length === 0) {
-    return {
-      card: null,
-      reason:
-        'its body names no card (no closing keyword and no `Part of` declaration) and its branch is not '
-        + 'the protocol dev-branch shape, so no card thread could be located for it',
-    };
-  }
+  if (delivered.length === 0) return [];
   const best = Math.min(...delivered.map((row) => row.rank));
-  const strongest = delivered.filter((row) => row.rank === best);
-  if (strongest.length > 1) {
-    return {
-      card: null,
-      reason:
-        `it delivers ${strongest.length} cards at the same strength (${strongest.map((row) => `#${row.card}`).join(', ')}, `
-        + `${deliveryEvidenceNote(strongest[0].evidence)}), so WHICH card thread carries its record is not derivable `
-        + 'from the pull request alone',
-    };
-  }
-  return { card: strongest[0].card, evidence: strongest[0].evidence };
+  return delivered.filter((row) => row.rank === best);
+}
+
+/**
+ * EVERY card a pull request delivers at its strongest grade — the cards `deliveredCardNumber` refuses to choose
+ * between when there is more than one, as numbers in the order the body names them, with that grade.
+ *
+ * ⭐ DERIVED THROUGH `deliveryEvidence` exactly as `deliveredCardNumber` is: the same enumeration
+ * (`strongestDeliveredRows`), so a card here is a card that relation accepts, and one card here is the one card
+ * `deliveredCardNumber` answers. ⛔ Never a second parser.
+ *
+ * ⛔ NOT a tie-break, and NOT for a reader that searches ONE thread. `deliveredCardNumber` stays the answer to
+ * "which thread may this pull request's record sit on", and it still answers `card: null` on a tie. This is for a
+ * reader that reads EVERY tied card and judges over all of them, so its verdict cannot depend on which card is
+ * read first: `label-write.mjs --land`'s dogfood gate on a folded pull whose body carries one closing keyword per
+ * card. The order is the reading order and nothing else; no reader may rank by it.
+ *
+ * @param {object} pr — a REST pull row: `body`, and `head.ref` for the fallback
+ * @returns {{ cards: number[], evidence: string | null }} — `cards` empty and `evidence` null when none is delivered
+ */
+export function deliveredCardsAtStrongest(pr) {
+  const strongest = strongestDeliveredRows(pr);
+  return { cards: strongest.map((row) => row.card), evidence: strongest[0]?.evidence ?? null };
 }
 
 /**
@@ -2282,6 +2450,7 @@ export function contractReviewTemplateLines(values = {}) {
       `                    or anything after the value keeps the PR at Tier H. The template ships \`${RECORD_SECURITY_TOUCHING_DEFAULT}\`, so an unedited paste`,
       '                    never lands on the arm: the seat adds the `security` label only once the reviewer confirms a `yes` was meant.',
     ] : []),
+    ...(recordCarriesRuleChangeVerified(face, tierName, scopeHits) ? RULE_CHANGE_VERIFIED_LEGEND : []),
     '  · ③ Boundary flags  every dev flag and every `open_questions` entry answered, or escalated; and on',
     '                    every face the SQL push-down check:',
     ...TEMPLATE_PUSH_DOWN_LINES,
@@ -2478,6 +2647,12 @@ export function contractReviewBriefLines(values = {}) {
     `  The record says so on its \`${CONTRACT_REVIEW_SECURITY_TOUCHING_KEY}:\` line, and the arm lands on \`no\` alone: write \`no\` ONLY when no changed`,
     '  hunk teaches permission, sharing, credential, token, authentication or other security behaviour, else `yes`.',
   ];
+  // A `hits` path under `.claude/**` lands on this record only when it verifies the PR body's `Rule-change:` line.
+  const ruleChangeLines = !recordCarriesRuleChangeVerified(face, tierName, scopeHits) ? [] : [
+    `Rule change — ${scopeHits !== undefined ? 'a `hits` path sits under `.claude/**`' : 'if a `hits` path is under `.claude/**`'}: the PR body declares \`Rule-change:\` and you verify it against the diff.`,
+    ...RULE_CHANGE_VERIFIED_DUTY,
+    '',
+  ];
   const lowRiskLines = !recordCarriesSecurityTouching(face, tierName, scopeHits) ? [] : scopeHits !== undefined ? [
     'Security — a `hits` path sits on the low-risk skills arm: when the change teaches security, auth or permission',
     securityDuty,
@@ -2510,6 +2685,7 @@ export function contractReviewBriefLines(values = {}) {
     '',
     ...scopeLines,
     ...lowRiskLines,
+    ...ruleChangeLines,
     '⛔ READ-ONLY. No worktree, no checkout, no build, no test run, no gate re-run, no ablation: the check-runs',
     '   on the head already answered every derived gate family, and a local run costs more than it returns.',
     "   If ONE probe is unavoidable, the record's `Local-runs:` line says `probe — REASON`; otherwise `none`.",
@@ -2692,11 +2868,15 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 32 → 38 with the `Security-touching:` line the low-risk skills arm reads: the record line and its
   // shipped `yes`, the whole template read through the record reader, the `no` reading, the faces and hits it
   // prints on, the one predicate, and the legend — six pins.
-  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 38,
+  // Raised 38 → 42 with the `Rule-change-verified:` line the `.claude/**` declaration split reads (maintainer ruling
+  // 2026-11-19 on #35321): the record line and its shipped `yes`, the whole template through the register's reader,
+  // where it prints, and the one duty wording in the legend and the brief — four pins.
+  '#18042: the copyable record TEMPLATE — the one machine-read artefact with nothing to copy': 42,
   // Raised 17 → 19 by #33541: the template record's one `VERDICT:` line read PASS by the guard, and the same record
   // posted by an untrusted author not read — two pins, two cases.
   // Raised 19 → 22 with `namedCardNumbers`, every card a pull names: the low-risk arm reads the label on each.
-  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 22,
+  // Raised 22 → 23 with the unedited-paste pin: the shipped `Rule-change-verified: yes` lands nothing.
+  '#18701: ONE thread set -- what the template STATES is what the queue guard READS': 23,
   'the `Local-runs:` reading — `none` or ONE named probe, judged when present; an absent line is not re-judged': 12,
   // Raised 23 → 24 with ③'s SQL push-down check on every face's brief: one pin.
   'the reviewer BRIEF template — the read-only shape a hand-written brief dropped, built in and printed': 24,
@@ -2722,9 +2902,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 51,
   // The knock signature listing (#34013): a relay knock its named seat does not list is never acted on.
   '⭐ the knock signature listing: a relay knock the seat it names does not list reads `unverified seat signature` — and a listed one is consistency, never proof': 18,
+  // The card-thread delegate (#34013 remainder 2): a claim's `Thread session:` line, one spelling, joins its signing seat's roster.
+  '⭐ the card-thread delegate: the session an open claim names on its `Thread session:` line joins the roster of the seat that signed it — one spelling, dropped when released, superseded or closed': 17,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the earliest live claim holds': 24,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
+  // The tie relation: the cards a fold's equal closing keywords deliver, for the `--land` dogfood gate, which reads
+  // every one of them; `deliveredCardNumber`'s pairing stays refusing on a tie.
+  '⭐ the tie relation: `deliveredCardsAtStrongest` answers every card a tie holds, in body order, from the ONE enumeration `deliveredCardNumber` answers from — which still yields no card on a tie': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2748,7 +2933,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 15 → 16 with the claim-line battery (the maintainer's one-claim-per-head rule): one battery, one row.
 // Raised 16 → 17 with the hold-line battery (the maintainer's lane-hold rule): one battery, one row.
 // Raised 17 → 18 with the knock-signature battery (#33789 item 3, split to #34013): one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 18;
+// Raised 18 → 19 with the card-thread delegate battery (#34013 remainder 2): one battery, one row.
+// Raised 19 → 20 with the tie-relation battery (`deliveredCardsAtStrongest`): one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 20;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3215,7 +3402,8 @@ export async function selfTest() {
   t('⛔ the target is the closed set of two shapes and the tier is the constant\'s NAME — `triage`, `director`, a seat with no number, the default tier or a model id is unreadable', [`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: director — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: domain:ui — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${TIER_DEFAULT_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, `${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`].every((l) => readContractReviewHandoff(l).state === 'unreadable'));
   t('⭐ the line is spelled VERBATIM, in a code span, in the rule text (`references/contract-review.md`) — the template and `HANDOFF_TARGET` cannot drift apart', (() => { const rules = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/contract-review.md', import.meta.url), 'utf8'); return rules.includes(`\`${CONTRACT_REVIEW_HANDOFF_TEMPLATE}\``) && CONTRACT_REVIEW_HANDOFF_TEMPLATE.startsWith(`${CONTRACT_REVIEW_HANDOFF_KEY}: `); })());
   t('⛔ the TEMPLATE sent verbatim is unreadable — a placeholder names no seat and no head', readContractReviewHandoff(CONTRACT_REVIEW_HANDOFF_TEMPLATE).state === 'unreadable' && contractReviewHandoff([HO_ROW(CONTRACT_REVIEW_HANDOFF_TEMPLATE, 4407)], HO_HEAD).state === 'unreadable');
-  t('⭐ a sibling seat of the lane is a target while no review seat is seated: `domain:<lane>#N` reads, lower-cased, and hands the head to it', (() => { const line = `${CONTRACT_REVIEW_HANDOFF_KEY}: Domain:UI#2 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line)], HO_HEAD); return readContractReviewHandoff(line).to === 'domain:ui#2' && r.state === 'handed' && r.to === 'domain:ui#2' && readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#12 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`).to === 'review#12'; })());
+  t('⭐ the L2 seat is a target under its new word and under the old one: `l2-review#N` reads, lower-cased, and hands the head to it; `review#N` still reads; `l2-review` with no number, `l2#1` and `l1-review#1` are unreadable', (() => { const line = (to) => `${CONTRACT_REVIEW_HANDOFF_KEY}: ${to} — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line('L2-Review#2'))], HO_HEAD); return r.state === 'handed' && r.to === 'l2-review#2' && readContractReviewHandoff(line('l2-review#12')).to === 'l2-review#12' && readContractReviewHandoff(line('review#1')).to === 'review#1' && ['l2-review', 'l2#1', 'l1-review#1'].every((to) => readContractReviewHandoff(line(to)).state === 'unreadable'); })());
+  t('⭐ a sibling seat of the lane is a target while no L2 seat is seated: `domain:<lane>#N` reads, lower-cased, and hands the head to it', (() => { const line = `${CONTRACT_REVIEW_HANDOFF_KEY}: Domain:UI#2 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`; const r = contractReviewHandoff([HO_ROW(line)], HO_HEAD); return readContractReviewHandoff(line).to === 'domain:ui#2' && r.state === 'handed' && r.to === 'domain:ui#2' && readContractReviewHandoff(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#12 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`).to === 'review#12'; })());
   t('⛔ a line still naming `triage` hands the review to NOBODY: newest on the thread it is unreadable, never handed — triage takes no contract review', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: triage — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429, 2026-10-27T13:00Z) · head ${HO_HEAD}`, 4406)], HO_HEAD); return r.state === 'unreadable' && r.gaps[0].includes('4406'); })());
   t('an unreadable NEWEST line makes the thread unreadable, naming the comment — never absent, never stale', (() => { const r = contractReviewHandoff([HO_ROW(`${CONTRACT_REVIEW_HANDOFF_KEY}: review#1 — ${CONTRACT_REVIEW_TIER_NAME} unavailable (HTTP 429) · head ${HO_HEAD}`, 4405)], HO_HEAD); return r.state === 'unreadable' && r.gaps.length === 1 && r.gaps[0].includes('4405'); })());
   t('a thread that is not an array, or a head too short to match, is a read that could not be made', contractReviewHandoff(null, HO_HEAD).state === 'unreadable' && contractReviewHandoff([], 'abc').state === 'unreadable' && contractReviewHandoff([], HO_HEAD).state === 'absent');
@@ -3261,9 +3449,10 @@ export async function selfTest() {
   const CL_REVIEW2_SESSION = 'session_01ReviewSeatTwoFixt9Zz';
   const CL_REVIEW_SIG = `review#1 · os-zhuang · ${CL_REVIEW_SESSION}`;
   const CL_REVIEW2_SIG = `review#2 · os-tesla · ${CL_REVIEW2_SESSION}`;
-  t('⭐ a `review#N`-signed claim is the review side, and between a review seat and a lane seat the EARLIEST posted holds with no tie — the review seat first ⇒ the review seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
-  t('…and the lane seat first ⇒ the lane seat holds: a review seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
-  t('⭐ two review seats on one head: the EARLIEST posted holds, the later withdraws — the rule the review seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
+  t('⭐ an `l2-review#N`-signed claim is the review side exactly as a `review#N`-signed one is — the L2 seat under either lane word — and it holds against a later lane claim with no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(`l2-review#1 · os-zhuang · ${CL_REVIEW_SESSION}`, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('⭐ a `review#N`-signed claim is the review side, and between an L2 seat and a lane seat the EARLIEST posted holds with no tie — the L2 seat first ⇒ the L2 seat holds', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z')], CL_HEAD, { now: CL_NOW }); return r.state === 'live' && r.holder.side === 'review' && r.holder.session === CL_REVIEW_SESSION && r.tie === false; })());
+  t('…and the lane seat first ⇒ the lane seat holds: an L2 seat has no precedence over a lane seat, only over a legacy triage claim', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_LANE_SIG, CL_LINE(CL_LANE_SESSION)), 1, '2026-10-28T12:18:56Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION, CL_HEAD, '2026-10-28T12:20Z')), 2, '2026-10-28T12:20:10Z'), CL_ROW(CL_BODY(), 3, '2026-10-28T12:10:00Z')], CL_HEAD, { now: CL_NOW }); return r.holder.side === 'lane' && r.holder.session === CL_LANE_SESSION && r.tie === true; })());
+  t('⭐ two L2 seats on one head: the EARLIEST posted holds, the later withdraws — the rule the L2 seats share with every other pair, no tie', (() => { const r = contractReviewClaims([CL_ROW(CL_BODY(CL_REVIEW2_SIG, CL_LINE(CL_REVIEW2_SESSION, CL_HEAD, '2026-10-28T12:25Z')), 2, '2026-10-28T12:25:10Z'), CL_ROW(CL_BODY(CL_REVIEW_SIG, CL_LINE(CL_REVIEW_SESSION)), 1, '2026-10-28T12:18:56Z')], CL_HEAD, { now: CL_NOW }); return r.holder.id === 1 && r.holder.side === 'review' && r.tie === false && r.claims.every((c) => c.side === 'review'); })());
   t('⭐ the head MOVED past every claim ⇒ none; every claim on this head expired ⇒ lapsed; nothing holds either way', (() => { const moved = contractReviewClaims([CL_ROW(CL_BODY())], 'a'.repeat(40), { now: CL_NOW }); const old = contractReviewClaims([CL_ROW(CL_BODY())], CL_HEAD, { now: Date.parse('2026-10-28T14:19:00Z') }); return moved.state === 'none' && moved.holder === null && old.state === 'lapsed' && old.holder === null && old.claims[0].lapse === 'expired'; })());
   t('an unreadable claim line holds nothing and is returned by comment id', (() => { const r = contractReviewClaims([CL_ROW(`${CL_TRIAGE_SIG}\n${CL_LINE(CL_SESSION, CL_HEAD.slice(0, 8))}`, 77)], CL_HEAD, { now: CL_NOW }); return r.state === 'none' && r.unreadable.length === 1 && r.unreadable[0].id === 77; })());
   t('a thread that is not an array, an abbreviated head, or no clock is a read that could not be made', contractReviewClaims(null, CL_HEAD, { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD.slice(0, 12), { now: CL_NOW }).state === 'unreadable' && contractReviewClaims([], CL_HEAD, {}).state === 'unreadable' && contractReviewClaims([], CL_HEAD, { now: CL_NOW }).state === 'none');
@@ -3483,7 +3672,7 @@ export async function selfTest() {
     t('⛔ ANOTHER seat\'s session signing as this seat is unlisted and NOT consistent — seat 2 ringing as seat 1, though its own post names seat 1\'s session in prose — while its vocabulary reading still reads', (() => { const r = read(KNOCK('domain:skills#1', S2)); return r.state === 'read' && r.consistent === false && r.signature.state === 'unlisted' && r.signature.reason.startsWith(MAILBOX_UNVERIFIED_SIGNATURE) && r.signature.reason.includes(`${S2} is not a session domain:skills#1 lists`) && read(KNOCK('domain:skills#2', S1)).signature.state === 'unlisted'; })());
     t('⛔ a session no seat lists — a card thread ringing under its seat\'s signature — is unlisted', why(KNOCK('domain:skills#1', STRAY)).includes(`${STRAY} is not a session domain:skills#1 lists`));
     t('⛔ a knock with NO signature line is unlisted — `To:` first, or the signature below the key line', [why(DB_ROW(MSG('Notify: landed · #28562'))), why(DB_ROW(`${MSG('Notify: landed · #28562')}\n${SIG('domain:skills#1', S1)}`))].every((w) => w === `${MAILBOX_UNVERIFIED_SIGNATURE} — the knock opens with no seat signature line`));
-    t('⛔ a vacant or paused post lists NOBODY — its last session signing as it reads `lists no session` — and so does a seat with neither a post nor an opening', SAME([why(KNOCK('domain:skills#3', S3)), why(KNOCK('domain:ui#9', S3)), seatSessionRoster({ posts: [POST(29747, '[PM seat] domain:skills · seat 3 — ⏸️ paused', `${SIG('domain:skills#3', S3)}\n`)], mailboxes: [] }).seats.size].join('|'), `${MAILBOX_UNVERIFIED_SIGNATURE} — domain:skills#3 lists no session (no held seat post signed by it, no open mailbox opening)|${MAILBOX_UNVERIFIED_SIGNATURE} — domain:ui#9 lists no session (no held seat post signed by it, no open mailbox opening)|0`));
+    t('⛔ a vacant or paused post lists NOBODY — its last session signing as it reads `lists no session` — and so does a seat with neither a post nor an opening', SAME([why(KNOCK('domain:skills#3', S3)), why(KNOCK('domain:ui#9', S3)), seatSessionRoster({ posts: [POST(29747, '[PM seat] domain:skills · seat 3 — ⏸️ paused', `${SIG('domain:skills#3', S3)}\n`)], mailboxes: [] }).seats.size].join('|'), `${MAILBOX_UNVERIFIED_SIGNATURE} — domain:skills#3 lists no session (no held seat post signed by it, no open mailbox opening, no open claim naming its card thread)|${MAILBOX_UNVERIFIED_SIGNATURE} — domain:ui#9 lists no session (no held seat post signed by it, no open mailbox opening, no open claim naming its card thread)|0`));
     t('⛔ FAIL CLOSED with no roster: none handed in, an unreadable one (either listing not an array) and a malformed one all read unlisted — never an empty roster, never a pass', SAME([readMailboxComment(KNOCK('domain:skills#1', S1)).signature.reason, read(KNOCK('domain:skills#1', S1), seatSessionRoster({ posts: null, mailboxes })).signature.reason, read(KNOCK('domain:skills#1', S1), seatSessionRoster({ posts })).signature.reason, read(KNOCK('domain:skills#1', S1), { state: 'read', seats: {} }).signature.state, seatSessionRoster().state], [`${MAILBOX_UNVERIFIED_SIGNATURE} — no seat roster was read (none was handed in)`, `${MAILBOX_UNVERIFIED_SIGNATURE} — no seat roster was read (the open \`pm:seat\` posts)`, `${MAILBOX_UNVERIFIED_SIGNATURE} — no seat roster was read (the open \`pm:mailbox\` pulls)`, 'unlisted', 'unreadable']));
     t('⛔ a session TWO seats list cannot say which rang — unlisted for each of them', (() => { const r = seatSessionRoster({ posts, mailboxes: [...mailboxes, MAILBOX(33921, 'domain:skills#2', S1)] }); return why(KNOCK('domain:skills#1', S1), r).includes(`${S1} is listed by domain:skills#2 too`) && why(KNOCK('domain:skills#2', S1), r).includes(`${S1} is listed by domain:skills#1 too`) && read(KNOCK('domain:skills#2', S2), r).signature.state === 'listed'; })());
     t('⛔ what lists nothing: a post with no signature line, one not labelled `pm:seat`, a closed post, a pull row, a closed or seat-less mailbox, an opening with the bare footer — and a signature naming no seat a mailbox serves', (() => { const r = seatSessionRoster({ posts: [POST(1, '[PM seat] domain:ui — 🟢 os-pm', `## Current PM\n\n\`${STRAY}\``), POST(2, '[PM seat] domain:ui · seat 2 — 🟢 os-pm', SIG('domain:ui#2', STRAY), { labels: [] }), POST(3, '[PM seat] domain:ui · seat 3 — 🟢 os-pm', SIG('domain:ui#3', STRAY), { state: 'closed' }), POST(4, '[PM seat] domain:ui · seat 4 — 🟢 os-pm', SIG('domain:ui#4', STRAY), { pull_request: {} })], mailboxes: [MAILBOX(5, 'domain:ui#5', STRAY, { state: 'closed' }), MAILBOX(6, 'domain:ui#6', STRAY, { body: 'To: os-pm\n\nlegacy' }), MAILBOX(7, 'domain:ui#7', null)] }); return r.state === 'read' && r.seats.size === 0 && why(KNOCK('coordinator#1', S1)) === `${MAILBOX_UNVERIFIED_SIGNATURE} — \`coordinator#1\` names no seat a mailbox serves`; })());
@@ -3495,6 +3684,60 @@ export async function selfTest() {
     t('⛔ RESIDUAL, pinned: a fleet session that COPIES a seat\'s whole public signature line reads `listed` — byte-identical to that seat\'s own knock — so `listed` is a consistency reading inside the fleet\'s trust root, never proof of who rang', (() => { const line = posts[0].body.split('\n')[0]; const forged = DB_ROW(`${line}\n${MSG('Notify: landed · #28562', 'domain:skills#2')}`, 9001); const own = KNOCK('domain:skills#1', S1); return line === SIG('domain:skills#1', S1) && forged.body === own.body && SAME(read(forged), read(own)) && read(forged).signature.state === 'listed'; })());
     t('⛔ a row lists only when its `state` READS `open` — a seat post or a mailbox with no `state` at all lists nobody, failing closed', (() => { const { state: _p, ...noStatePost } = posts[1]; const { state: _m, ...noStateBox } = mailboxes[1]; const r = seatSessionRoster({ posts: [noStatePost], mailboxes: [noStateBox] }); return r.state === 'read' && r.seats.size === 0 && read(KNOCK('domain:skills#2', S2), r).signature.state === 'unlisted' && read(KNOCK('triage#1', TRI), r).signature.state === 'unlisted'; })());
     t('`--mailbox-keys` tells a sender the signature rule, naming the unlisted reading and that a listed one is no proof', mailboxKeyLines().some((l) => l.includes('Successor-of:') && l.includes(MAILBOX_UNVERIFIED_SIGNATURE) && l.includes('not proof')));
+    // H72's signature row (check-half-states.mjs), driven end-to-end: the REAL roster read off the listings the sweep
+    // hands it (`h72RosterListings`), the REAL reader, and the patrol's predicate over what they made.
+    const NOW_H72 = Date.parse('2026-10-28T08:00:00Z');
+    const ROWS_H72 = [{ ...KNOCK('domain:skills#1', S1), id: 8201 }, { ...KNOCK('domain:skills#1', STRAY), id: 8202 }, DB_ROW(DB.ut, 8203, '2026-10-28T07:00:00Z', GOVERNED_APPROVERS[0]), DB_ROW(DRIVE_BY, 8204, '2026-10-28T07:00:00Z', 'drive-by-commenter')];
+    t('⭐ H72 lists the REAL reader\'s `unlisted` knock for the seat the mailbox serves — by comment id, naming the stray session — and not the listed knock, the maintainer\'s or the drive-by', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings([...posts, { number: 1, state: 'open', labels: [{ name: 'pm:queue' }] }], [...mailboxes, { number: 2, state: 'open', labels: [] }])); const row = String(hs.h72UnlistedKnockLines(mailboxEvents(ROWS_H72, r), r, NOW_H72) ?? ''); return r.state === 'read' && row.includes('1 knock(s)') && row.includes('comment 8202') && row.includes(`${STRAY} is not a session domain:skills#1 lists`) && !['comment 8201', 'comment 8203', 'comment 8204'].some((c) => row.includes(c)); })());
+    t('⛔ …and a TRUNCATED `pm:seat` listing makes the real roster unreadable, so the reader reads every relay knock `unlisted` (fail closed) while H72 lists NONE of them — unjudged, never a finding against a roster nobody read', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings(posts, mailboxes, [hs.H72_ROSTER_LISTINGS.posts])); const reading = mailboxEvents(ROWS_H72, r); return r.state === 'unreadable' && SAME(reading.unlisted, [8201, 8202]) && hs.h72UnlistedKnockLines(reading, r, NOW_H72) === null; })());
+
+    // -- the card-thread delegate (#34013 remainder 2, seat ruling: option A) ------------------------------------
+    //
+    // A card thread knocks its seat's mailbox as the seat's DELEGATE, so the seat's roster lists the session its
+    // open claim names on the template's ONE `Thread session:` spelling — only while that claim is the card's
+    // newest, unreleased claim on an open card, and only for the seat the claim's own signature names.
+    battery('⭐ the card-thread delegate: the session an open claim names on its `Thread session:` line joins the roster of the seat that signed it — one spelling, dropped when released, superseded or closed');
+    {
+      const T = 'session_01CardThreadDelegateGggg';
+      const T2 = 'session_01CardThreadSecondHhhhhh';
+      const S_UI = 'session_01UiSeatTwoIiiiiiiiiiiii';
+      const CARD = (number, o = {}) => ({ number, state: 'open', labels: [{ name: 'pm:dispatched' }], ...o });
+      const CLAIM = (id, at, seat, seatSession, lines, signed = true) => ({ id, created_at: at, user: { login: RELAY_COMMENT_AUTHOR }, body: `${signed ? `${SIG(seat, seatSession)}\n\n` : ''}Claim: PM loop round 1\n${lines.join('\n')}\nAccount: \`os-pm\`\nBranch: \`claude/project-thread-x\`\nSeat: \`${seat}\`\n` });
+      const OWN = (thread) => [`Session: \`${S2}\``, thread];
+      const TEMPLATE = `Thread session: \`${T}\``;
+      const R = (claims, more = {}) => seatSessionRoster({ posts, mailboxes, claims, ...more });
+      const ONE = (rows, card = CARD(34013)) => R([{ card, rows }]);
+      const DELEGATE = (r, seat = 'domain:skills#2', session = T) => read(KNOCK(seat, session), r).signature;
+      const BASE = [CLAIM(1, '2026-11-16T03:16:00Z', 'domain:skills#2', S2, OWN(TEMPLATE))];
+      t('⭐ the template\'s spelling, with a real id, reads its session — the key starting the line, the backticked id, nothing after it but blanks', claimThreadSession(TEMPLATE) === T && claimThreadSession(`${TEMPLATE}  `) === T && claimThreadSession(`Claim: x\r\n${TEMPLATE}\r\nSeat: y`) === T);
+      t('⭐ the GOVERNED template (pm-dispatch SKILL.md 〈模板与表〉) carries exactly ONE line that reads as the key, the backticked placeholder directly after it, its note saying nothing follows the id — and that spelling with a real id is the one the reader reads', (() => { const skill = readFileSync(new URL('../../.claude/skills/pm-dispatch/SKILL.md', import.meta.url), 'utf8'); const keyed = skill.split(/\r?\n/).filter((line) => CLAIM_THREAD_SESSION_KEY.test(line)); const head = 'Thread session: `session_<id>`'; return keyed.length === 1 && keyed[0].startsWith(`${head} (`) && keyed[0].includes('nothing after the id') && claimThreadSession(head.replace('session_<id>', T)) === T && claimThreadSession(keyed[0].replace('session_<id>', T)) === null; })());
+      t('⭐ the template spelling JOINS the roster: the card thread ringing under its seat\'s signature reads `listed`, via the claim it was named on', (() => { const s = DELEGATE(ONE(BASE)); return s.state === 'listed' && s.seat === 'domain:skills#2' && s.session === T && s.via === 'claim on #34013 (comment 1) Thread session'; })());
+      const OTHER = {
+        'a bare id': [`Session: \`${S2}\``, `Thread session: ${T}`],
+        'a list bullet': [`Session: \`${S2}\``, `- Thread session: \`${T}\``],
+        'a bold key': [`Session: \`${S2}\``, `**Thread session:** \`${T}\``],
+        'a prose tail': [`Session: \`${S2}\``, `Thread session: \`${T}\` (card thread, dev)`],
+        'a hyphenated key': [`Session: \`${S2}\``, `Thread-session: \`${T}\``],
+        'the session in prose on the `Session:` line': [`Session: \`${T}\` (card thread, dev) · seat \`${S2}\``],
+        'no session at all': [`Session: a card thread opened under seat \`${S2}\``],
+        'two key lines': [`Session: \`${S2}\``, TEMPLATE, `Thread session: \`${T2}\``],
+        'the template placeholder': [`Session: \`${S2}\``, 'Thread session: `session_<id>` (mode:thread only)'],
+      };
+      t('⛔ every OTHER spelling reads null — a bare id, a bullet, a bold key, a prose tail, a hyphenated key, the measured prose on the `Session:` line, no session, two key lines, the template\'s placeholder', Object.values(OTHER).every((lines) => claimThreadSession(CLAIM(1, 'x', 'domain:skills#2', S2, lines).body) === null));
+      t('⛔ …and each joins NOTHING: the thread\'s knock reads unlisted, never a guess at a session in prose', Object.values(OTHER).every((lines) => { const r = ONE([CLAIM(1, '2026-11-16T03:16:00Z', 'domain:skills#2', S2, lines)]); return r.state === 'read' && DELEGATE(r).state === 'unlisted' && DELEGATE(r, 'domain:skills#2', T2).state === 'unlisted' && DELEGATE(r, 'domain:skills#2', S2).state === 'listed'; }));
+      t('⛔ a RELEASED claim drops its thread — and a release OLDER than a fresh claim does not', (() => { const rel = { id: 2, created_at: '2026-11-16T04:00:00Z', user: { login: RELAY_COMMENT_AUTHOR }, body: `${SIG('domain:skills#2', S2)}\n\nRelease: \`${S2}\` · premise moved · back to pm:queue` }; return DELEGATE(ONE([...BASE, rel])).state === 'unlisted' && DELEGATE(ONE([{ ...rel, created_at: '2026-11-16T03:00:00Z' }, ...BASE])).state === 'listed'; })());
+      t('⛔ a SUPERSEDED claim drops its thread — a newer claim by another seat lists ITS thread for ITS seat, a newer claim by the same seat lists only the newer thread', (() => { const ui = ONE([...BASE, CLAIM(3, '2026-11-16T05:00:00Z', 'domain:ui#2', S_UI, [`Session: \`${S_UI}\``, `Thread session: \`${T2}\``])]); const same = ONE([...BASE, CLAIM(3, '2026-11-16T05:00:00Z', 'domain:skills#2', S2, OWN(`Thread session: \`${T2}\``))]); return DELEGATE(ui).state === 'unlisted' && DELEGATE(ui, 'domain:ui#2', T2).state === 'listed' && DELEGATE(same).state === 'unlisted' && DELEGATE(same, 'domain:skills#2', T2).state === 'listed'; })());
+      t('⛔ a CLOSED card drops its thread — and so does a pull row', DELEGATE(ONE(BASE, CARD(34013, { state: 'closed' }))).state === 'unlisted' && DELEGATE(ONE(BASE, CARD(34013, { pull_request: {} }))).state === 'unlisted');
+      t('⭐ a claim its OWN session yielded is no claim: the race loser\'s newer claim lists nothing and the winner\'s older claim still lists its thread', (() => { const lose = CLAIM(3, '2026-11-16T05:00:00Z', 'domain:ui#2', S_UI, [`Session: \`${S_UI}\``, `Thread session: \`${T2}\``]); const yieldRow = { id: 4, created_at: '2026-11-16T05:01:00Z', user: { login: RELAY_COMMENT_AUTHOR }, body: `${SIG('domain:ui#2', S_UI)}\n\nalready claimed — yielding \`${S_UI}\`` }; const r = ONE([...BASE, lose, yieldRow]); return DELEGATE(r).state === 'listed' && DELEGATE(r, 'domain:ui#2', T2).state === 'unlisted'; })());
+      t('⛔ a claim signed by ANOTHER seat adds nothing to this one: ui#2\'s thread knocking as skills#2 is unlisted, as ui#2 listed — and a claim with no signature line lists nobody', (() => { const r = ONE([CLAIM(1, '2026-11-16T03:16:00Z', 'domain:ui#2', S_UI, [`Session: \`${S_UI}\``, TEMPLATE])]); const bare = ONE([CLAIM(1, '2026-11-16T03:16:00Z', 'domain:skills#2', S2, OWN(TEMPLATE), false)]); return why(KNOCK('domain:skills#2', T), r).includes(`${T} is not a session domain:skills#2 lists`) && DELEGATE(r, 'domain:ui#2', T).state === 'listed' && DELEGATE(bare).state === 'unlisted' && [...bare.seats.values()].every((m) => !m.has(T)); })());
+      t('⭐ AUTHOR RULE: a claim the relay posted lists its thread, and so does one a `GOVERNED_APPROVERS` account posted — the knock fence\'s own authors, ⛔ no second list', DELEGATE(ONE(BASE)).state === 'listed' && DELEGATE(ONE([{ ...BASE[0], user: { login: GOVERNED_APPROVERS[0] } }])).state === 'listed');
+      t('⛔ AUTHOR RULE: a claim posted by any OTHER author, or naming no author at all, lists nobody — whatever its signature and `Thread session:` line say', [{ login: 'drive-by' }, {}, undefined, { login: '' }].every((user) => { const r = ONE([{ ...BASE[0], user }]); return r.state === 'read' && DELEGATE(r).state === 'unlisted' && [...r.seats.values()].every((m) => !m.has(T)); }));
+      t('⛔ AUTHOR RULE: a row outside it neither SUPERSEDES nor RELEASES nor YIELDS — a newer drive-by claim naming another thread lists nothing and the relay claim still lists; a drive-by `Release:` or yield leaves it listed', (() => { const by = { login: 'drive-by' }; const newer = ONE([...BASE, { ...CLAIM(3, '2026-11-16T05:00:00Z', 'domain:skills#2', S2, OWN(`Thread session: \`${T2}\``)), user: by }]); const rel = ONE([...BASE, { id: 2, created_at: '2026-11-16T04:00:00Z', user: by, body: `${SIG('domain:skills#2', S2)}\n\nRelease: \`${S2}\` · premise moved · back to pm:queue` }]); const yieldRow = ONE([...BASE, { id: 4, created_at: '2026-11-16T05:01:00Z', user: by, body: `${SIG('domain:skills#2', S2)}\n\nalready claimed — yielding \`${S2}\`` }]); return DELEGATE(newer).state === 'listed' && DELEGATE(newer, 'domain:skills#2', T2).state === 'unlisted' && DELEGATE(rel).state === 'listed' && DELEGATE(yieldRow).state === 'listed'; })());
+      t('⛔ FAIL CLOSED: claims that are not an array, or a thread that is not one, read the roster UNREADABLE, naming the claim threads — and omitting `claims` lists no card thread, as before', (() => { const gap = 'the open `pm:dispatched` claim threads'; const a = R(null); const b = R([{ card: CARD(1), rows: null }]); const c = seatSessionRoster({ posts, mailboxes }); return a.state === 'unreadable' && a.gaps.includes(gap) && b.state === 'unreadable' && b.gaps.includes(gap) && c.state === 'read' && DELEGATE(c).state === 'unlisted'; })());
+      t('⛔ one thread on TWO seats\' claims cannot say which rang — unlisted for each', (() => { const r = R([{ card: CARD(1), rows: BASE }, { card: CARD(2), rows: [CLAIM(5, '2026-11-16T03:16:00Z', 'domain:ui#2', S_UI, [`Session: \`${S_UI}\``, TEMPLATE])] }]); return why(KNOCK('domain:skills#2', T), r).includes(`${T} is listed by domain:ui#2 too`) && DELEGATE(r, 'domain:ui#2', T).state === 'unlisted'; })());
+      t('⭐ H72 end to end: the claimed card\'s WHOLE thread the sweep holds joins the REAL roster — the delegate\'s knock is not listed, a stray beside it is', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings([...posts, CARD(34013)], mailboxes, [], new Map([[34013, { rows: BASE, complete: true }]]))); const rows = [{ ...KNOCK('domain:skills#2', T), id: 8301 }, { ...KNOCK('domain:skills#2', STRAY), id: 8302 }]; const row = String(hs.h72UnlistedKnockLines(mailboxEvents(rows, r), r, NOW_H72) ?? ''); return r.state === 'read' && row.includes('1 knock(s)') && row.includes('comment 8302') && !row.includes('comment 8301'); })());
+      t('⛔ …and a claimed card whose thread is NOT held whole makes that roster unreadable, so H72 lists nothing — unjudged, never the delegate accused', await (async () => { const hs = await import('./check-half-states.mjs'); const r = seatSessionRoster(hs.h72RosterListings([...posts, CARD(34013)], mailboxes, [], new Map([[34013, { rows: BASE, complete: false }]]))); const reading = mailboxEvents([{ ...KNOCK('domain:skills#2', T), id: 8301 }], r); return r.state === 'unreadable' && SAME(reading.unlisted, [8301]) && hs.h72UnlistedKnockLines(reading, r, NOW_H72) === null; })());
+    }
   }
 
   // -- the signature line (#27113) ----------------------------------------------
@@ -3601,15 +3844,23 @@ export async function selfTest() {
   t('the printed location is the ONE thread set\'s own words', says(TPL_TEXT, `ONE comment on ${REVIEW_OF_RECORD_LOCATION};`));
   // -- the `Security-touching:` line: the low-risk skills arm's machine line, printed where an arm PR can sit --
   const ST_LINE = (value) => `Security-touching: ${value}`;
+  const RV_LINE = (value) => `Rule-change-verified: ${value}`;
+  const rvOf = (text) => JSON.stringify(readRuleChangeVerified(text));
+  const RULE_PATH = ['.claude', 'skills', 'pm-dispatch', 'SKILL.md'].join('/');
   const stOf = (text) => contractReviewRecordReading(text)?.securityTouching;
   const ARM_PATHS = [['skills', 'objectstack-data', 'SKILL.md'].join('/'), ['ui', 'skills', 'objectui-forms', 'SKILL.md'].join('/'), ['docs', 'adr', '0001-x.md'].join('/')];
   const OFF_ARM_PATH = ['.claude', 'agents', 'os-dev.md'].join('/');
-  t('⭐ the bare record carries ONE `Security-touching:` line, right after `Scope:`, and it ships `yes` — read by the fleet\'s record reader as `yes`, never as `no`', (() => { const rec = contractReviewRecordLines(); const i = rec.indexOf(ST_LINE('yes')); return i > 0 && rec[i - 1].startsWith('Scope: ') && rec[i + 1] === '' && rec.filter((l) => l.startsWith('Security-touching')).length === 1 && JSON.stringify(stOf(TPL_RECORD)) === '{"state":"read","value":"yes"}' && RECORD_SECURITY_TOUCHING_DEFAULT === 'yes'; })());
+  t('⭐ the bare record carries ONE `Security-touching:` line, right after `Scope:`, and it ships `yes` — read by the fleet\'s record reader as `yes`, never as `no`', (() => { const rec = contractReviewRecordLines(); const i = rec.indexOf(ST_LINE('yes')); return i > 0 && rec[i - 1].startsWith('Scope: ') && rec[i + 1] === RV_LINE('yes') && rec[i + 2] === '' && rec.filter((l) => l.startsWith('Security-touching')).length === 1 && JSON.stringify(stOf(TPL_RECORD)) === '{"state":"read","value":"yes"}' && RECORD_SECURITY_TOUCHING_DEFAULT === 'yes'; })());
   t('⭐ the WHOLE printed template reads that one line too — the legend around the fence carries no second declaration, on any face that prints it', [{}, { face: 'rules' }, { face: 'schema' }, ...ARM_PATHS.map((path) => ({ paths: [path] }))].every((v) => JSON.stringify(stOf(contractReviewTemplateLines(v).join('\n'))) === '{"state":"read","value":"yes"}'));
   t('…and a reviewer who writes `no` over it is read as `no` — the one value the arm stands on', JSON.stringify(stOf(TPL_RECORD.replace(ST_LINE('yes'), ST_LINE('no')))) === '{"state":"read","value":"no"}' && TPL_RECORD.includes(`\n${ST_LINE('yes')}\n`));
   t('⛔ the line prints exactly where an arm PR can sit: with the `hits` known, under a low-risk row (skills, ui/skills, an ADR) and nowhere else; with none known, on the bare, rules and schema faces — never the narrowing or declaration face', ARM_PATHS.every((path) => fenced(contractReviewTemplateLines({ paths: [path] })).includes(`\n${ST_LINE('yes')}\n`)) && !contractReviewTemplateLines({ paths: [OFF_ARM_PATH] }).join('\n').includes('Security-touching') && !contractReviewTemplateLines({ paths: MIXED }).join('\n').includes('Security-touching') && ['rules', 'schema'].every((id) => contractReviewRecordLines({ faceId: id }).includes(ST_LINE('yes'))) && ['narrowing', 'declaration'].every((id) => !contractReviewTemplateLines({ face: id }).join('\n').includes('Security-touching')) && !contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).join('\n').includes('Security-touching'));
   t('the predicate is ONE function over face, tier and hits — below tier never, a narrowing never, known hits by the register\'s own low-risk row test', recordCarriesSecurityTouching(null, CONTRACT_REVIEW_TIER_NAME, undefined) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, undefined) && !recordCarriesSecurityTouching(reviewFaceById('narrowing'), CONTRACT_REVIEW_TIER_NAME, undefined) && recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [ARM_PATHS[0]]) && !recordCarriesSecurityTouching(reviewFaceById('rules'), CONTRACT_REVIEW_TIER_NAME, [OFF_ARM_PATH]) && !recordCarriesSecurityTouching(null, TIER_DEFAULT_NAME, [ARM_PATHS[0]]));
   t('the notes explain the line where the record carries it — who reads it, when `no` may be written, what keeps Tier H — and the key and values are the reader\'s own constants', ['· Security-touching  read by the low-risk skills arm alone', 'only when this line reads `no`', 'Write `no` ONLY when no changed hunk teaches permission, sharing, credential, token,', 'the key inside a code span', 'keeps the PR at Tier H', 'The template ships `yes`', 'adds the `security` label only once the reviewer confirms a `yes` was meant'].every((frag) => says(TPL_TEXT, frag)) && CONTRACT_REVIEW_SECURITY_TOUCHING_KEY === 'Security-touching' && CONTRACT_REVIEW_SECURITY_TOUCHING_VALUES.join() === 'no,yes');
+  // -- the `Rule-change-verified:` line: the `.claude/**` declaration split's machine line (maintainer ruling 2026-11-19 on #35321) --
+  t('⭐ the bare record carries ONE `Rule-change-verified:` line, in the header block, and it ships `yes` — read by the register\'s own reader as `yes`, never as a value that verifies', (() => { const rec = contractReviewRecordLines(); return rec.filter((l) => l.startsWith('Rule-change-verified')).length === 1 && rec.indexOf(RV_LINE('yes')) < rec.indexOf('### ① Derived judgments') && rvOf(TPL_RECORD) === '{"state":"read","value":"yes"}' && RECORD_RULE_CHANGE_VERIFIED_DEFAULT === 'yes' && RULE_CHANGE_VERIFIED_KEY === 'Rule-change-verified'; })());
+  t('⭐ the WHOLE printed template reads that one line too, on every face that prints it, and a reviewer who writes `none` or `ruled` over it is read as that', [{}, { face: 'rules' }, { face: 'schema' }, { paths: [RULE_PATH] }].every((v) => rvOf(contractReviewTemplateLines(v).join('\n')) === '{"state":"read","value":"yes"}') && ['none', 'ruled'].every((value) => rvOf(TPL_RECORD.replace(RV_LINE('yes'), RV_LINE(value))) === `{"state":"read","value":"${value}"}`));
+  t('⛔ the line prints exactly where a split PR can sit: with the `hits` known, under `.claude/**` and nowhere else; with none known, on the bare, rules and schema faces — never the narrowing or declaration face, never below tier', fenced(contractReviewTemplateLines({ paths: [RULE_PATH] })).includes(`\n${RV_LINE('yes')}\n`) && fenced(contractReviewTemplateLines({ paths: [OFF_ARM_PATH] })).includes(`\n${RV_LINE('yes')}\n`) && ARM_PATHS.every((path) => !contractReviewTemplateLines({ paths: [path] }).join('\n').includes('Rule-change-verified')) && !contractReviewTemplateLines({ paths: ['AGENTS.md'] }).join('\n').includes('Rule-change-verified') && ['rules', 'schema'].every((id) => contractReviewRecordLines({ faceId: id }).includes(RV_LINE('yes'))) && ['narrowing', 'declaration'].every((id) => !contractReviewTemplateLines({ face: id }).join('\n').includes('Rule-change-verified')) && !contractReviewRecordLines({ tierName: TIER_DEFAULT_NAME }).join('\n').includes('Rule-change-verified') && recordCarriesRuleChangeVerified(null, CONTRACT_REVIEW_TIER_NAME, undefined) && !recordCarriesRuleChangeVerified(null, TIER_DEFAULT_NAME, [RULE_PATH]) && !recordCarriesRuleChangeVerified(reviewFaceById('narrowing'), CONTRACT_REVIEW_TIER_NAME, undefined));
+  t('the legend and the brief hand the SAME duty where the record carries the line — the maintainer\'s three heads, the ruled copy checked not re-ruled, `yes` the fail-closed value — and neither names it where it does not', ['· Rule-change-verified  read by the queue guard', 'what an agent may do without the maintainer', 'what gets done and in what order (grading, dispatch, scope)', 'what must go to him (decisions, maintainer actions)', 'check the', 'copy against the quoted words, do not re-rule it', 'The template ships `yes`'].every((frag) => says(TPL_TEXT, frag)) && RULE_CHANGE_VERIFIED_DUTY.every((line) => says(TPL_TEXT, line) && says(contractReviewBriefLines().join('\n'), line) && says(contractReviewBriefLines({ paths: [RULE_PATH] }).join('\n'), line)) && says(contractReviewBriefLines({ paths: [RULE_PATH] }).join('\n'), 'a `hits` path sits under `.claude/**`') && says(contractReviewBriefLines().join('\n'), 'if a `hits` path is under `.claude/**`') && [{ paths: ARM_PATHS }, { face: 'declaration' }, { face: 'narrowing' }].every((v) => !says(contractReviewBriefLines(v).join('\n'), 'Rule-change-verified') && !says(contractReviewTemplateLines(v).join('\n'), 'Rule-change-verified')));
   // -- item ④: the owner's full-review order rides THIS record as a fourth section ------------
   const DJ = '### ④ Design judgment';
   const headings = (lines) => lines.filter((line) => line.startsWith('### '));
@@ -3714,13 +3965,16 @@ export async function selfTest() {
     id: 7701,
     created_at: '2026-09-16T10:00:00Z',
     user: { login: PIN_RELAY },
-    body: contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n'),
+    // …with the ONE line a reviewer must write over filled in: the template ships `Rule-change-verified: yes`, which
+    // verifies nothing (the pin below drives the unedited paste), so the reviewer's own `none` is what lands the record.
+    body: contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n').replace(`${RULE_CHANGE_VERIFIED_KEY}: ${RECORD_RULE_CHANGE_VERIFIED_DEFAULT}`, `${RULE_CHANGE_VERIFIED_KEY}: none`),
   };
-  // A Tier S path (the register's `.claude/**` row since #19133). The control
-  // below asks the register, so a row moving tiers reddens here instead of
-  // silently driving the approval leg.
+  const PIN_BODY = `Fixes #${PIN_CARD}\n\nRule-change: none`;
+  // A Tier S path (the register's `.claude/**` row since #19133) — Tier S on the declared body alone since the
+  // row splits by declaration (maintainer ruling 2026-11-19 on #35321), which is the reading the queue leg hands in.
+  // The control below asks the register, so a row moving tiers reddens here instead of silently driving the approval leg.
   const TIER_S_PATH = '.claude/skills/pm-dispatch/references/contract-review.md';
-  t('⛔ CONTROL: the fixture path is Tier S under the register, so the record leg is the one being driven', GUARD.governedTierFor([TIER_S_PATH], GUARD_REPO) === GUARD.TIER_S);
+  t('⛔ CONTROL: the fixture path is Tier S under the register, so the record leg is the one being driven', GUARD.governedTierFor([TIER_S_PATH], GUARD_REPO, undefined, null, { measured: true, body: PIN_BODY, recordLeg: 'deferred' }) === GUARD.TIER_S && GUARD.governedTierFor([TIER_S_PATH], GUARD_REPO) === GUARD.TIER_H);
   const pinRun = async (where) => {
     const threadsRead = [];
     const verdict = await GUARD.runGuard({
@@ -3728,7 +3982,7 @@ export async function selfTest() {
       repo: GUARD_REPO,
       rows: [{ sha: 'e'.repeat(40), subject: `x (#${PIN_PR})`, pr: PIN_PR, paths: [TIER_S_PATH] }],
       fetchReviews: async () => [],
-      fetchPull: async () => ({ sha: PIN_HEAD, body: `Fixes #${PIN_CARD}`, headRef: `claude/issue-${PIN_CARD}-x` }),
+      fetchPull: async () => ({ sha: PIN_HEAD, body: PIN_BODY, headRef: `claude/issue-${PIN_CARD}-x` }),
       fetchComments: async (n) => {
         threadsRead.push(n);
         return (n === PIN_PR ? 'PR' : 'card') === where ? [PIN_RECORD] : [];
@@ -3761,6 +4015,7 @@ export async function selfTest() {
     }
   })());
   t('⛔ #33541: the same template record posted by an author outside the relay and GOVERNED_APPROVERS is not read -- refused as no record', await (async () => { const saved = PIN_RECORD.user; PIN_RECORD.user = { login: 'drive-by-commenter' }; try { const r = await pinRun('PR'); return r.verdict.exitCode !== GUARD.EXIT_CLEAR && r.record?.state === 'absent'; } finally { PIN_RECORD.user = saved; } })());
+  t('⛔ #35321: the template pasted UNEDITED — `Rule-change-verified: yes` left in — does not land the pull request; the reviewer\'s own `none` is what the guard reads', await (async () => { const saved = PIN_RECORD.body; PIN_RECORD.body = contractReviewRecordLines({ headSha: PIN_HEAD, reviewedBy: 'session_01PINSEAT' }).join('\n'); try { const r = await pinRun('PR'); return saved.includes('\nRule-change-verified: none\n') && PIN_RECORD.body.includes('\nRule-change-verified: yes\n') && r.verdict.exitCode !== GUARD.EXIT_CLEAR && r.record?.state === 'not-pass' && /declaration split is not verified/.test(r.record?.verdictReason ?? ''); } finally { PIN_RECORD.body = saved; } })());
   t('⛔ CONTROL: with the record on NEITHER thread the same run is refused -- the pin can fail', await (async () => { const none = await pinRun('nowhere'); return none.verdict.exitCode !== GUARD.EXIT_CLEAR && none.record?.state === 'absent'; })());
   t('the guard prints the location in the WORDS this file owns, so a seat is told one thing', GUARD.REVIEW_OF_RECORD_LOCATION === REVIEW_OF_RECORD_LOCATION && TEMPLATE_TEXT.includes(`ONE comment on ${REVIEW_OF_RECORD_LOCATION}`));
   t('⭐ the record the guard cleared carries the at-tier `Scope:` line — the guard reads past it, unchanged (ruling record 6184805932)', PIN_RECORD.body.includes(`\nScope: ${RECORD_SCOPE_PLACEHOLDERS.hits} + ${RECORD_SCOPE_PLACEHOLDERS.cited}\n`) && readSet === THREAD_SET);
@@ -3791,6 +4046,22 @@ export async function selfTest() {
   t('namedCardNumbers names nothing a relation spelling does not: a bare mention, a spelling in a code span or a fence, and a branch outside the protocol shape name no card', namedCardNumbers(PIN_PULL('see #4444 and `Fixes #5555`\n```\nPart of #6666\n```\nRefs: #7777', 'feat/8888-x')).join() === '7777' && namedCardNumbers(PIN_PULL('nothing here')).length === 0 && namedCardNumbers(null).length === 0);
   t('⛔ CONTROL: the ranking belongs to `deliveryEvidence` -- every grade it answers is ranked here, none invented', DELIVERY_EVIDENCE_PRECEDENCE.every((kind) => deliveryEvidenceNote(kind) !== 'evidence unread') && new Set(DELIVERY_EVIDENCE_PRECEDENCE).size === DELIVERY_EVIDENCE_PRECEDENCE.length);
   t('…and it is ranked in the order that function applies, measured pair by pair', DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '1')) < DELIVERY_EVIDENCE_PRECEDENCE.indexOf(deliveryEvidence(PIN_PULL(`Fixes #1\nPart of #2`), '2')) && DELIVERY_EVIDENCE_PRECEDENCE.indexOf('part-of') < DELIVERY_EVIDENCE_PRECEDENCE.indexOf('branch-name'));
+
+  // `deliveredCardsAtStrongest` -- the cards a tie holds, for a reader that reads them ALL (the `--land` dogfood
+  // gate). It answers from the same enumeration as `deliveredCardNumber`, which still refuses to choose.
+  battery('⭐ the tie relation: `deliveredCardsAtStrongest` answers every card a tie holds, in body order, from the ONE enumeration `deliveredCardNumber` answers from — which still yields no card on a tie');
+  {
+    const tie = (body, ref) => deliveredCardsAtStrongest(PIN_PULL(body, ref));
+    const same = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+    t('⭐ two closing keywords: BOTH cards, at that grade, in the order the body names them -- never sorted', same(tie('Fixes #5555\nFixes #4444'), { cards: [5555, 4444], evidence: 'closing-keyword' }), JSON.stringify(tie('Fixes #5555\nFixes #4444')));
+    t('⛔ …and on that same body `deliveredCardNumber` still yields NO card: the record pairing is unchanged on a tie', (() => { const r = deliveredCardNumber(PIN_PULL('Fixes #5555\nFixes #4444')); return r.card === null && r.reason.includes('same strength') && r.reason.indexOf('#5555') < r.reason.indexOf('#4444'); })());
+    t('two `Part of` declarations and no keyword are a tie at `part-of`', same(tie('Part of #4444\nPart of #5555'), { cards: [4444, 5555], evidence: 'part-of' }), JSON.stringify(tie('Part of #4444\nPart of #5555')));
+    t('a STRONGER grade still leaves one card: a `Part of` beside a keyword is not in the tie', same(tie('Fixes #4444\nPart of #5555'), { cards: [4444], evidence: 'closing-keyword' }), JSON.stringify(tie('Fixes #4444\nPart of #5555')));
+    t('a branch named for a third card adds nothing once the body speaks', same(tie('Fixes #4444\nFixes #5555', 'claude/issue-6666-x'), { cards: [4444, 5555], evidence: 'closing-keyword' }), JSON.stringify(tie('Fixes #4444\nFixes #5555', 'claude/issue-6666-x')));
+    t('⛔ a body naming NO card is no tie: no cards and no grade', same([tie('nothing here'), deliveredCardsAtStrongest(null)], [{ cards: [], evidence: null }, { cards: [], evidence: null }]), JSON.stringify([tie('nothing here'), deliveredCardsAtStrongest(null)]));
+    t('⛔ CONTROL: one card here is exactly the card `deliveredCardNumber` answers, and none here is its null -- on every fixture above', ['Fixes #5555\nFixes #4444', 'Part of #4444\nPart of #5555', 'Fixes #4444\nPart of #5555', `Part of #${PIN_CARD}`, 'nothing here'].every((body) => { const all = deliveredCardsAtStrongest(PIN_PULL(body)); const one = deliveredCardNumber(PIN_PULL(body)); return all.cards.length === 1 ? one.card === all.cards[0] && one.evidence === all.evidence : one.card === null; }) && deliveredCardNumber(PIN_PULL('nothing', `claude/issue-${PIN_CARD}-x`)).card === tie('nothing', `claude/issue-${PIN_CARD}-x`).cards[0]);
+    t('structural: both relations answer from the ONE enumeration, and neither grades evidence itself', (() => { const own = readFileSync(fileURLToPath(import.meta.url), 'utf8'); const body = (name) => own.slice(own.indexOf(`export function ${name}(`), own.indexOf('\n}\n', own.indexOf(`export function ${name}(`))); return ['deliveredCardNumber', 'deliveredCardsAtStrongest'].every((name) => body(name).includes('strongestDeliveredRows(pr)') && !body(name).includes('deliveryEvidence(')); })());
+  }
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
@@ -3854,7 +4125,7 @@ export async function selfTest() {
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; the mailbox '
       + 'doorbell — `To: <seat>` then each of the table\'s keys read, the table named both ways in the protocol text and printed by `--mailbox-keys`, and a key with no `To:`, a `To:` naming a login, free text, an acknowledgement, '
-      + 'a key outside the table, a second line and an over-long line refused; the knock signature listing — `listed` only for a session the seat it names lists on its held post (`Successor-of:` included) or its open mailbox opening, a copied signature line `listed` too (consistency, never proof), a maintainer\'s knock exempt, everything else `unverified seat signature` and failing closed; the review claim line — read signed and unsigned, '
+      + 'a key outside the table, a second line and an over-long line refused; the knock signature listing — `listed` only for a session the seat it names lists on its held post (`Successor-of:` included), its open mailbox opening or its open newest claim\'s `Thread session:` line (one spelling; released, superseded and closed claims drop), a copied signature line `listed` too (consistency, never proof), a maintainer\'s knock exempt, everything else `unverified seat signature` and failing closed; the review claim line — read signed and unsigned, '
       + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the earliest live claim holding; the review hold '
       + 'line — read signed and unsigned, spelled verbatim in the rule text, per head and cleared only by a new head, an unreadable '
       + 'line listed and voiding nothing, its 24-hour age a reading '

@@ -102,7 +102,7 @@
  * not move.
  */
 
-import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
+import { rethrowAuthzStoreUnavailable, userTextLocalesOf } from '@objectstack/core';
 // [ADR-0106 / #3682] Metadata-plane FLS — the item read's half of it; see
 // `rest-server.ts`' import of the same module for why the normalizer lives in
 // `@objectstack/metadata-core`.
@@ -366,7 +366,12 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     }
                     await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);
                 } catch (error: any) {
-                    handleRouteError(res, error);
+                    // [#32622, ADR-0150 D5] A package-scoped refusal of the
+                    // layered read carries its holders as `details.candidates`,
+                    // as the plain read's catch answers it (#32201) and the
+                    // deprecated `?layers=` spelling, which that catch serves,
+                    // already did; anything else answers as before.
+                    handleRouteError(res, error, undefined, { packageScopedCandidates: true });
                 }
             },
             metadata: {
@@ -1080,8 +1085,40 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                             ...(previewDrafts ? { previewDrafts: true } : {}),
                             // [#22877] The member, read once above.
                             ...memberSelector,
+                            // [#34818] A draft read folds the publish's
+                            // advisories into `_diagnostics.warnings` in their
+                            // user sentence: the request's locale, then the
+                            // workspace default, read off the resolved
+                            // context, never the query.
+                            ...(isDraftRead ? { userTextLocales: userTextLocalesOf(readCtx) } : {}),
                         };
-                        const envelope = await measureMetaRead(() => p.getMetaItem(itemRequest)) as Record<string, any>;
+                        // [ruling 6917064203 on #34398] The read gate answers
+                        // before the `not-held-by-qualifier` refusal names any
+                        // holder (`gateHolderNamingRefusal`, the one both
+                        // transports ask).
+                        const readPolicyFor: MetaReadGatePolicy = isDraftRead
+                            ? this.STORED_VERSION_DOOR_POLICY
+                            : { arms: 'all', app: 'gate' };
+                        let envelope: Record<string, any>;
+                        try {
+                            envelope = await measureMetaRead(() => p.getMetaItem(itemRequest)) as Record<string, any>;
+                        } catch (readError) {
+                            const gated = await metaReadGate.gateHolderNamingRefusal(
+                                this.metaItemAnswerSources(environmentId, req, p, readPolicyFor),
+                                metaType, req.params.name, readPolicyFor, readError,
+                                // A holder's item, read at its own address.
+                                async (holder) => (await p.getMetaItem({
+                                    type: req.params.type, name: req.params.name,
+                                    ...(holder.kind === 'package' ? { packageId: holder.packageId } : {}),
+                                    ...memberSelector,
+                                }) as { item?: unknown } | undefined)?.item,
+                            );
+                            if (gated) {
+                                this.sendMetaReadRefusal(res, gated);
+                                return;
+                            }
+                            throw readError;
+                        }
 
                         // [#20408] Everything this read does to the envelope
                         // after the store read is ONE chain,
@@ -1116,9 +1153,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         // other caller" is every other caller who may READ
                         // drafts: one who may not never reaches this branch
                         // (`isDraftRead` is false for them).
-                        const readPolicy: MetaReadGatePolicy = isDraftRead
-                            ? this.STORED_VERSION_DOOR_POLICY
-                            : { arms: 'all', app: 'gate' };
+                        const readPolicy: MetaReadGatePolicy = readPolicyFor;
                         const answer = await metaReadGate.createMetaItemAnswer(
                             this.metaItemAnswerSources(environmentId, req, p, readPolicy),
                             { metaType, name: req.params.name, policy: readPolicy, maskPosture },

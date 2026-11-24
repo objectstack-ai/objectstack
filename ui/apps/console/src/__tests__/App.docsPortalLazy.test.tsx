@@ -94,6 +94,8 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   // is pinned by `packages/app-shell/src/chrome/RedirectWithSplash.test.tsx`.
   RedirectWithSplash: stub('redirect-with-splash'),
   RequireAiSurface: passthrough,
+  // objectstack#35424: `/docs` sits under the organization gate with `/home` and `/apps`.
+  RequireOrganization: passthrough,
   SystemRedirect: () => null,
   DefaultHomeLayout: passthrough,
   DefaultHomePage: stub('home-page'),
@@ -104,7 +106,7 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   DefaultInvitationsPage: stub('invitations-page'),
   DefaultSettingsPage: stub('settings-page'),
   DefaultAcceptInvitationPage: stub('accept-invitation-page'),
-  DefaultAiChatPage: stub('ai-chat-page'),
+  AiAddressRedirect: stub('ai-chat-page'),
   StudioDesignSurface: stub('studio-design-surface'),
   BuilderLanding: stub('builder-landing'),
   getProductName: () => 'ObjectOS',

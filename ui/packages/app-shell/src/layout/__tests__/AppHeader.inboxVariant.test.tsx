@@ -80,9 +80,10 @@ vi.mock('@object-ui/components', async (importOriginal) => {
     Avatar: Pass,
     AvatarImage: () => null,
     AvatarFallback: Pass,
-    Popover: Pass,
-    PopoverTrigger: Pass,
-    PopoverContent: Pass,
+    Sheet: Pass,
+    SheetTrigger: Pass,
+    SheetContent: Pass,
+    SheetTitle: Pass,
     Tabs: Pass,
     TabsList: Pass,
     TabsTrigger: ({ children }: any) => <button type="button">{children}</button>,
@@ -267,6 +268,18 @@ import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAu
 import { AppHeader } from '../AppHeader';
 import { useHomeInbox } from '../../hooks/useHomeInbox';
 import { __resetSharedUserFeeds, __markFirstPainted } from '../../hooks/sharedUserFeeds';
+
+// From 768 px up the bell opens the full-page inbox instead of a panel
+// (objectstack#36741); the panel these pins read is the phone's, so the
+// header is drawn at phone width.
+let widthBeforePhone = 0;
+beforeEach(() => {
+  widthBeforePhone = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 375 });
+});
+afterEach(() => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: widthBeforePhone });
+});
 
 /** Every URL passed to `fetch`, in order — the approvals reads are counted here. */
 let fetchUrls: string[] = [];
@@ -827,6 +840,7 @@ describe('AppHeader — the Activity tab asks only a caller who may read sys_act
     tenantId: null,
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: ['member_default'],
     objects: {
       sys_inbox_message: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },

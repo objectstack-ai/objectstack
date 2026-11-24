@@ -8,7 +8,7 @@
 
 import { ObjectStackClient, type QueryOptions as ObjectStackQueryOptions } from '@objectstack/client';
 import type { DroppedFieldsEvent, EngineAggregateOptions } from '@objectstack/spec/data';
-import type { ListViewGroupHeaderRow } from '@objectstack/spec/ui';
+import type { Dataset, ListViewGroupHeaderRow } from '@objectstack/spec/ui';
 // objectui#11013 — a VALUE import: the keys `listViews` carries off a stored
 // ViewItem record are the spec's own record of the console's round-trip keys,
 // read off the pin rather than hand-listed (see `VIEW_ITEM_ROUND_TRIP_KEYS`).
@@ -94,8 +94,10 @@ import {
 import { MetadataCache } from './cache/MetadataCache';
 import { AppBundleStore, indexAppBundle, type AppBundleAnswer, type AppBundlePeek } from './app-bundle';
 import { MetadataClient } from './metadata-client';
+import { authoredPublished, type AuthoredLayers } from './authored-layers';
 import { formatMetadataError } from './metadata-error';
 import { getSharedDiscovery } from './sharedDiscovery';
+import { authoredBuffer } from './authored-layers';
 import {
   ObjectStackError,
   MetadataNotFoundError,
@@ -4068,10 +4070,17 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // We use a raw request because the client SDK's data.find() QueryOptions
       // interface does not include populate/expand fields.
       if ((params?.$expand && params.$expand.length > 0)
-          || (params?.$search != null && String(params.$search).trim() !== '')) {
+          || (params?.$search != null && String(params.$search).trim() !== '')
+          || params?.$count === false) {
         // The client SDK's data.find() QueryOptions drops `$search`; route through
         // the raw GET so the term reaches protocol.findData → the metadata-driven
         // search executor (ADR-0061).
+        //
+        // It drops `$count` as well, so a caller that declines the total
+        // (`$count: false`) takes this route too: the GET sends `count=false`,
+        // and the server skips the `count(*)` it otherwise runs beside every
+        // paged read. Only an explicit `false` routes here — an absent
+        // `$count` already gets the total, and `true` asks for nothing more.
         const result = await this.rawFindWithPopulate(resource, params);
         return this.normalizeQueryResult(result, params);
       }
@@ -5632,7 +5641,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
 
     const resultObj = result as { records?: T[]; total?: number; value?: T[]; count?: number; hasMore?: boolean };
     const records = resultObj.records || resultObj.value || [];
-    const total = resultObj.total ?? resultObj.count ?? records.length;
+    // A caller that sent `$count: false` declined the total, and the server
+    // answers that request with no `total` at all. The page length is not a
+    // stand-in for it: filling it in would hand back a plausible number for a
+    // question nobody asked, which is how a page size ends up rendered as a
+    // record count. So the declined total stays absent (`QueryResult.total` is
+    // optional — "if requested").
+    const declined = params?.$count === false;
+    const total = declined ? resultObj.total : (resultObj.total ?? resultObj.count ?? records.length);
     // Prefer the server's `hasMore` (real server-side pagination, framework
     // issue objectstack-ai/objectstack#2212). Fall back to the page-local estimate (a full page implies
     // there may be more) only when the server doesn't report it.
@@ -5641,7 +5657,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       : (params?.$top ? records.length === params.$top : false);
     return {
       data: records,
-      total,
+      ...(total === undefined ? {} : { total }),
       // Calculate page number safely
       page: params?.$skip && params.$top ? Math.floor(params.$skip / params.$top) + 1 : 1,
       pageSize: params?.$top,
@@ -5669,6 +5685,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
     if (params.$skip !== undefined) {
       queryParams.set('skip', String(params.$skip));
+    }
+
+    // The declined total (`$count: false`, see `find`). Only the explicit
+    // opt-out is sent: an absent `count` already gets the total.
+    if (params.$count === false) {
+      queryParams.set('count', 'false');
     }
 
     // Full-text search (ADR-0061). The server resolves which fields to match
@@ -6459,6 +6481,11 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         // unpublished view (ADR-0037). The overlay tags the item, not its
         // nested spec, so read from either.
         const isDraft = v._draft === true || spec?._draft === true;
+        // objectstack#35933 — the package the server served the row under
+        // (the item's `_packageId`, which the overlay stamps on the item,
+        // not on a nested spec), carried as served on both arms, so the list
+        // can tell a view a read-only package ships from one it may save.
+        const packageId = typeof v._packageId === 'string' && v._packageId !== '' ? v._packageId : undefined;
         // Canonical ViewItem (ADR-0017) carries its body under `config`;
         // the display `type` (grid/kanban/gallery/…) lives at `config.type`,
         // and only the list/form *family* sits at the top level (`viewKind`).
@@ -6493,10 +6520,20 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
             if (spec[key] !== undefined) row[key] = spec[key];
           }
           row.isDefault = !!spec.isDefault;
+          // objectstack#36011 — the record's override declaration (ADR-0146
+          // D2, on the record's top level), so the list can tell a view a
+          // package's customization overrides from the package's own.
+          if (spec.overrides !== undefined) row.overrides = spec.overrides;
           if (isDraft) row._draft = true;
+          if (packageId !== undefined) row._packageId = packageId;
           return row;
         }
-        return isDraft ? { ...spec, _draft: true } : spec;
+        if (!isDraft && (packageId === undefined || spec?._packageId === packageId)) return spec;
+        return {
+          ...spec,
+          ...(isDraft ? { _draft: true } : {}),
+          ...(packageId !== undefined ? { _packageId: packageId } : {}),
+        };
       });
     } catch (err) {
       // Kept verbatim, on every arm. The console breadcrumb was never the
@@ -6654,6 +6691,37 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   }
 
   /**
+   * The published item of `type`/`name` as its author stored it, or `null`
+   * when no layer holds one (objectstack#35054, route D).
+   *
+   * A writer that sends a whole document back through the metadata door must
+   * start from this, never from the served read (`meta.getItem`, the metadata
+   * list): the served read of a translatable type is translated for the
+   * console's locale, and the door stores a body verbatim, so a zh-CN round
+   * trip stored the translations as the item's source text. This reads the
+   * untranslated `/layers` and answers the published layer as authored
+   * ({@link authoredPublished}: an object's `overlay ?? code`, every other
+   * type's `effective ?? code`), the base every writer of the LIVE row edits.
+   * A draft writer starts from the layers' `draft` through `authoredBuffer`.
+   *
+   * `packageId` reads at that package (`?package=`), the address the write
+   * names. A refused read throws; nothing is guessed.
+   */
+  async getAuthoredItem(
+    type: string,
+    name: string,
+    options: { packageId?: string } = {},
+  ): Promise<Record<string, unknown> | null> {
+    const layers = await this.metadataClient().layered<Record<string, unknown>>(
+      type,
+      name,
+      options.packageId ? { packageId: options.packageId } : {},
+    );
+    const body = authoredPublished(type, layers as AuthoredLayers);
+    return Object.keys(body).length > 0 ? body : null;
+  }
+
+  /**
    * List registered import `mapping` artifacts targeting a given object
    * (objectstack-ai/objectstack#2611). Reads the `mapping` metadata kind via the overlay API
    * and filters by `targetObject` client-side (the metadata index is
@@ -6807,6 +6875,22 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * over-invalidation is the seam's uniform rule rather than a per-branch
    * decision this method has to keep re-making.
    *
+   * **Both halves merge onto the view as its author STORED it**
+   * (objectstack#35054, route D). The served reads (`?state=draft` and
+   * `client.meta.getItem`) are translated for the console's locale: a view's
+   * `label`, a form's section titles and thank-you text. This method writes
+   * the merged body back whole, and the door stores a body verbatim, so a
+   * Pin, a Set as Default or a Rename of anything but the label, made in a
+   * zh-CN session, stored the translations as the view's source text. The
+   * body is the layered read's instead, through the one reading the Studio
+   * editors share (`authoredBuffer`): the stored `draft` layer while a draft
+   * is pending, else the published view as authored. The served reads still
+   * decide which home is written and, for the published home, where
+   * ({@link viewCustomizationHome} reads the served `_packageId`). A pending
+   * draft whose stored copy the layers do not serve (`unserved`), or a
+   * published view with nothing stored to read, is refused: ⛔ never merged
+   * onto the served copy.
+   *
    * @throws when the view resolves in neither home, or when either read fails
    *   for any other reason (network, permission). Both used to be swallowed
    *   and converted into the bad partial write above; a caller that wants a
@@ -6824,11 +6908,25 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // `MetadataClient.get` answers `null` on 404 (no draft pending) and throws
     // on anything else, so a transport failure here is NOT read as "published".
     const metaClient = this.metadataClient();
-    const draft = unwrapViewDraft(
-      await metaClient.get('view', viewName, { state: 'draft' }),
-    );
-    if (draft) {
-      const mergedDraft = mergeViewPatch(draft, partial, viewName, objectName);
+    const [servedDraft, layers] = await Promise.all([
+      metaClient.get('view', viewName, { state: 'draft' }).then(unwrapViewDraft),
+      metaClient.layered('view', viewName),
+    ]);
+    const authored = authoredBuffer('view', layers, servedDraft);
+    if (authored.kind === 'unserved') {
+      throw new Error(
+        `updateView: view "${viewName}" has a pending draft whose stored copy was not served,` +
+          ' so it cannot be edited from here: the served draft is translated for this locale. Nothing was written.',
+      );
+    }
+    // The stored body, read the way the served one is: decorations off, the
+    // `{list: {...}}` artifact wrapper unwrapped.
+    const stored = unwrapViewDraft(authored.body);
+    if (authored.fromDraft) {
+      if (!stored) {
+        throw new Error(`updateView: the pending draft of view "${viewName}" is empty. Nothing was written.`);
+      }
+      const mergedDraft = mergeViewPatch(stored, partial, viewName, objectName);
       await metaClient.save('view', viewName, mergedDraft, { mode: 'draft' });
       this.invalidateViewKeys(objectName, viewName);
       return mergedDraft;
@@ -6858,7 +6956,13 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       throw err;
     }
 
-    const merged = mergeViewPatch(current, partial, viewName, objectName);
+    if (!stored) {
+      throw new Error(
+        `updateView: view "${viewName}" on object "${objectName}" has no stored body to read` +
+          ' (the layered read served none), so it is not written from the served, translated copy. Nothing was written.',
+      );
+    }
+    const merged = mergeViewPatch(stored, partial, viewName, objectName);
     // A view a read-only package ships is written into that package's
     // customization pair, declaring the override ({@link viewCustomizationHome}).
     // Every other view is written where it always was, naming no package.
@@ -7052,6 +7156,71 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     }
   }
 
+  /**
+   * Restore the factory version of a view a read-only package ships: remove
+   * the override its customization pair holds (ADR-0146 D2, "Restore package
+   * original" = delete the overriding item from `.custom`), so every user of
+   * the view is served the package's own view again.
+   *
+   * The override is the one {@link updateView} writes
+   * ({@link viewCustomizationHome}): the served read names the shipping
+   * package (`_packageId`) and carries the declaration (`overrides` naming
+   * that package). The pair is the ensure door's answer for that package, the
+   * same home `updateView` wrote into; the pair's draft of the view, then its
+   * row, are deleted there (`DELETE /meta/view/NAME?package=PAIR`, the door
+   * Studio's restore takes). Nothing is deleted at the package that ships the
+   * view, and the pair package itself stays.
+   *
+   * @throws when the served view is not an override of the package it is
+   *   served under (nothing is sent); when a delete is refused, with the
+   *   server's reason on the message's next line (`formatMetadataError`);
+   *   and when the pair held no row of the view, so nothing was restored.
+   */
+  async restoreFactoryView(
+    objectName: string,
+    viewName: string,
+  ): Promise<DeleteViewResult> {
+    await this.connect();
+    const read: any = await this.client.meta.getItem('view', viewName);
+    const current: Record<string, any> = (read && (read.item || read)) || {};
+    const base = current._packageId;
+    const declared = current.overrides;
+    if (typeof base !== 'string' || base === '' || !declared || declared.package !== base) {
+      throw new Error(
+        `restoreFactoryView: view "${viewName}" on object "${objectName}" is not a customization of a package's view,` +
+          ' so it has no factory version to restore. Nothing was removed.',
+      );
+    }
+    const pair = (await this.client.packages.ensureCustomization(base)).packageId;
+    const metaClient = this.metadataClient();
+    try {
+      let draft: ViewHomeDeleteOutcome;
+      let published: ViewHomeDeleteOutcome;
+      try {
+        draft = readViewDeleteReceipt(await metaClient.reset('view', viewName, { state: 'draft', packageId: pair }));
+        published = readViewDeleteReceipt(await metaClient.reset('view', viewName, { packageId: pair }));
+      } catch (err) {
+        throw Object.assign(
+          new Error(
+            `restoreFactoryView: the factory version of view "${viewName}" was NOT restored:` +
+              ` removing its customization from "${pair}" failed.\n` +
+              formatMetadataError(err),
+          ),
+          { cause: err },
+        );
+      }
+      if (!published.removed) {
+        throw new Error(
+          `restoreFactoryView: the factory version of view "${viewName}" was NOT restored:` +
+            ` "${pair}" holds no customization of it, so nothing was removed.`,
+        );
+      }
+      return { deleted: true, draft, published };
+    } finally {
+      this.invalidateViewKeys(objectName, viewName);
+    }
+  }
+
 
   /**
    * Get an application definition by name or ID.
@@ -7221,6 +7390,42 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
       // Server doesn't support page metadata — return null to fall back to static config
       return null;
     }
+  }
+
+  /**
+   * Get a semantic-layer dataset definition (`DataSource.getDataset`).
+   *
+   * Reads `GET /api/v1/meta/dataset/:name` through the client's
+   * `meta.getItem`, with the reader's package as `callerPackage` when the
+   * caller names one (ADR-0150 D3), so the name resolves the way the
+   * dataset query that follows resolves it.
+   *
+   * No such dataset is `null`, in both answers a server gives for it: the
+   * envelope with no `item` ({@link metaEnvelopeCarriesItem}) and the `404`
+   * ({@link is404Error}). Every other failure rejects, unlike {@link getPage}:
+   * the dashboard reports a definition it could not read, and a swallowed
+   * failure would read as "no dataset".
+   *
+   * Cached per name and reader package; `invalidateCache` / `clearCache`
+   * drop it like every other metadata read here.
+   */
+  async getDataset(datasetName: string, options?: { callerPackage?: string }): Promise<Dataset | null> {
+    await this.connect();
+    const callerPackage = options?.callerPackage;
+    const cacheKey = `dataset:${datasetName}${callerPackage ? `@${callerPackage}` : ''}`;
+    return this.metadataCache.get(cacheKey, async () => {
+      try {
+        const envelope: unknown = await this.client.meta.getItem(
+          'dataset',
+          datasetName,
+          callerPackage ? { callerPackage } : undefined,
+        );
+        return metaEnvelopeCarriesItem(envelope) ? ((envelope as { item: Dataset }).item) : null;
+      } catch (error: unknown) {
+        if (is404Error(error)) return null;
+        throw error;
+      }
+    });
   }
 
   /**

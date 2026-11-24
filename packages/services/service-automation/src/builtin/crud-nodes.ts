@@ -5,6 +5,7 @@ import {
     defineActionDescriptor,
     flowFilterOperands,
     isExpressionEnvelopeShaped,
+    isFlowTextEnvelopeShaped,
     GetRecordConfigSchema,
     CreateRecordConfigSchema,
     UpdateRecordConfigSchema,
@@ -20,6 +21,7 @@ import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts
 import { isAcceptedFilterComparand, isListComparandOperator, type DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
+import { flowRecordFieldTextKey } from '@objectstack/spec/system';
 import {
     collectStoredMetadataFilterFields,
     ephemeralStoredHashDigest,
@@ -31,11 +33,12 @@ import {
     type StoredHashDigest,
 } from '@objectstack/metadata-protocol';
 import type { AutomationEngine } from '../engine.js';
-import type { VariableMap } from './template.js';
-import { resolveValueSlotMap } from './value-slot-map.js';
+import { renderTextSlot, type VariableMap } from './template.js';
+import { resolveValueSlot, resolveValueSlotMap } from './value-slot-map.js';
 import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { resolveRunDataContext, stampSystemInsertOwner } from '../runtime-identity.js';
+import { dryRunDataEngine } from '../dry-run.js';
 import { refusalCarriedBy } from '../inner-refusal.js';
 import { staleSummaryAnswerLines, staleSummaryRefusalOrThrow } from '@objectstack/types';
 
@@ -315,14 +318,80 @@ function writtenRowCount(result: unknown): number {
  * recursed into an envelope as plain data: a text or JSON column received the
  * literal `{"dialect":"cel","source":"…"}` with the run reporting success, and
  * a number column was refused by the data engine.
+ *
+ * [ruling 6913660232] A value MARKED as text — a text envelope — is written
+ * in the organization's language (see the body); a map that marks none
+ * resolves exactly as before, with no read of that language. Answers
+ * `{ error }`, a runtime failure, when that language could not be read.
  */
-function resolveFieldValues(
+async function resolveFieldValues(
     engine: AutomationEngine,
+    node: { id: string },
+    nodeType: 'create_record' | 'update_record',
     fields: Record<string, unknown> | undefined,
     variables: VariableMap,
     context: AutomationContext,
-): Record<string, unknown> {
-    return resolveValueSlotMap(engine, fields, variables, 'fields', context);
+): Promise<{ fields: Record<string, unknown> } | { error: string }> {
+    const entries = Object.entries(fields ?? {});
+    if (!entries.some(([, value]) => isFlowTextEnvelopeShaped(value))) {
+        return { fields: resolveValueSlotMap(engine, fields, variables, 'fields', context) };
+    }
+    // [ruling 6913660232] A value MARKED as text — `{ dialect: 'template',
+    // source }` (`FlowRecordFieldValueSchema`) — is a sentence the record keeps
+    // for the whole organization to read, so it is written in the
+    // ORGANIZATION's language (parameter 2: never the starter's, so the run's
+    // own `locale` is replaced, not consulted): the translated template is
+    // picked at `flowRecordFieldTextKey` first, then its `{{ }}` holes are
+    // filled (parameter 1, the #22507 rule through `renderFlowTextSlot`, the one
+    // text renderer and the one `i18n` channel). No translation, or no language
+    // to pick, writes the authored text and the run goes on (parameter 5).
+    // Read once per node, and only for a map that marks text.
+    let locale: string | undefined;
+    try {
+        locale = await engine.organizationLocale(context);
+    } catch (err: unknown) {
+        // The organization's language could not be READ — not "it has none".
+        // Writing the authored text would store another language over a choice
+        // that may exist, with the run reporting success, so the node fails:
+        // a runtime failure a `fault` edge routes, and a re-run succeeds once
+        // the read does.
+        return {
+            error:
+                `${nodeType}: the organization's language could not be read `
+                + `(${err instanceof Error ? err.message : String(err)}), so nothing was written: the text marked for `
+                + `${entries.filter(([, v]) => isFlowTextEnvelopeShaped(v)).map(([k]) => `'${k}'`).join(', ')} `
+                + 'would otherwise be stored in a language the organization may not use. Re-run the flow once the '
+                + 'Localization setting can be read.',
+        };
+    }
+    const flowName = typeof context.flowName === 'string' && context.flowName.length > 0 ? context.flowName : undefined;
+    const textContext: AutomationContext = { ...context, locale };
+    const out: Record<string, unknown> = {};
+    for (const [field, value] of entries) {
+        if (!isFlowTextEnvelopeShaped(value)) {
+            out[field] = resolveValueSlot(engine, value, variables, `fields.${field}`, context);
+            continue;
+        }
+        const authored = (value as { source?: unknown }).source;
+        // An executor driven outside a run has no flow name, so no key: the
+        // authored text renders, as on a screen.
+        const text = flowName === undefined
+            ? renderTextSlot(authored, variables, context.currency)
+            : engine.renderFlowTextSlot(
+                {
+                    key: flowRecordFieldTextKey(flowName, node.id, field),
+                    authored,
+                    subject: `flow '${flowName}' ${nodeType} '${node.id}' field '${field}'`,
+                    shownAs: 'the field',
+                },
+                variables,
+                textContext,
+            );
+        // A sentence whose every hole came out empty renders no text: the
+        // field is written empty (`null`), never with its holes as written.
+        out[field] = text ?? null;
+    }
+    return { fields: out };
 }
 
 /**
@@ -547,11 +616,17 @@ function storedMetadataWriteRefusal(
  */
 export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext): void {
         const getData = (): IDataEngine | undefined => {
+            let real: IDataEngine | undefined;
             try {
-                return ctx.getService<IDataEngine>('data') ?? ctx.getService<IDataEngine>('objectql');
+                real = ctx.getService<IDataEngine>('data') ?? ctx.getService<IDataEngine>('objectql');
             } catch {
-                return undefined;
+                real = undefined;
             }
+            // [#33661] Inside a dry run (`AutomationEngine.dryRun`) the node
+            // reaches the dry run's stand-in: live reads, simulated writes.
+            // Outside one this is `undefined` and the node reaches `real`.
+            const dry = dryRunDataEngine(real, () => ctx.getService('security')) as IDataEngine | undefined;
+            return dry ?? real;
         };
 
         // ── get_record ────────────────────────────────────────
@@ -705,7 +780,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // #19938 / #11182 ruling D — a CEL value envelope in `fields.*` is
                 // evaluated; every other value is a literal (#19939 retired the
                 // `{…}` dialect there — `parseNodeConfig` above refused it).
-                const fields = resolveFieldValues(engine, cfg.fields, variables, context);
+                const resolvedFields = await resolveFieldValues(engine, node, 'create_record', cfg.fields, variables, context);
+                if ('error' in resolvedFields) return { success: false, error: resolvedFields.error };
+                const fields = resolvedFields.fields;
                 const outputVariable = cfg.outputVariable;
 
                 const data = getData();
@@ -884,7 +961,9 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 // #19938 / #11182 ruling D — a CEL value envelope in `fields.*` is
                 // evaluated; every other value is a literal (#19939 retired the
                 // `{…}` dialect there — `parseNodeConfig` above refused it).
-                const fields = resolveFieldValues(engine, cfg.fields, variables, context);
+                const resolvedFields = await resolveFieldValues(engine, node, 'update_record', cfg.fields, variables, context);
+                if ('error' in resolvedFields) return { success: false, error: resolvedFields.error };
+                const fields = resolvedFields.fields;
 
                 const data = getData();
                 if (!data) {

@@ -57,6 +57,13 @@ import {
 import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 import { authorWarnedProperties, lintLivenessProperties } from '@objectstack/lint';
 
+/**
+ * The `flows.<flow>.nodes.<node_id>.label` family (ruling 7076440876) is
+ * demanded beside this file's own and pinned by `i18n-flow-node-coverage.test.ts`;
+ * these pins measure their family, so they read every key but that one.
+ */
+const notNodeLabel = (key: string) => !/^flows\.[^.]+\.nodes\./.test(key);
+
 const leadConversion = {
   name: 'lead_conversion',
   label: 'Convert Lead',
@@ -114,7 +121,7 @@ const app = (withFlowCopy: boolean) => ({
 });
 
 const flowDemands = (config: any) =>
-  computeI18nCoverage(config).issues.filter((i) => i.source === 'flow');
+  computeI18nCoverage(config).issues.filter((i) => i.source === 'flow' && notNodeLabel(i.key));
 const flowWarnings = (config: any) =>
   lintLivenessProperties(config).filter((f) => f.message.includes('`flows`'));
 
@@ -210,6 +217,7 @@ describe('the liveness gate on the i18n coverage walk', () => {
     const keys = collectExpectedEntries(app(false), UNGATED)
       .filter((e) => e.path[0] === 'flows')
       .map((e) => e.path.join('.'))
+      .filter(notNodeLabel)
       .sort();
 
     expect(keys).toEqual([

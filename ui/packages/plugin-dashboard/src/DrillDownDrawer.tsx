@@ -2,12 +2,18 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * DrillDownDrawer — opens a side drawer (or dialog) that lists the
- * underlying records behind a clicked pivot cell / chart segment.
+ * DrillDownDrawer — lists the underlying records behind a clicked pivot
+ * cell / chart segment / metric tile, in a centred dialog (or a side drawer).
  *
- * Composition: <Sheet> + <ObjectDataTable>. The data table receives
- * the merged filter (widget filter ∧ drill filter) and the data source
- * inherited from the schema renderer context.
+ * The dialog (objectstack-ai/objectstack#36256) floats over the page about
+ * 70% wide and 65% tall with the shared dialog card, and dims and blurs
+ * nothing behind it: it is non-modal, so the page stays readable, and a
+ * click outside it closes it. A phone keeps the side drawer. Either way the
+ * body is the standard list (`DrillRecordList`) when the renderer has one
+ * registered; a renderer without `@object-ui/plugin-list` lists the records
+ * in `ObjectDataTable`. A record's name opens its page through the host
+ * (`DrillNavigationContext.openRecord`); a host that offers no page (a
+ * page block's metric or pivot) opens the record in a dialog, as before.
  */
 
 import React from 'react';
@@ -21,10 +27,14 @@ import {
   DialogHeader,
   DialogTitle,
   cn,
+  useIsMobile,
 } from '@object-ui/components';
 import { SchemaRenderer, useDrillNavigation } from '@object-ui/react';
+import { useSafeTranslate } from '@object-ui/i18n';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 import { ObjectDataTable } from './ObjectDataTable';
 import { OpenInListButton } from './OpenInListButton';
+import { DrillRecordList, drillListAvailable } from './DrillRecordList';
 
 export interface DrillDownDrawerProps {
   open: boolean;
@@ -46,6 +56,12 @@ export interface DrillDownDrawerProps {
   dataSource?: any;
   /** Optional column whitelist. */
   columns?: string[];
+  /**
+   * The fields the drilled number stands for — its grouped and measured
+   * fields — shown after the record's name when no `columns` whitelist is
+   * given (objectstack-ai/objectstack#36256 item 4). The reader adds the rest.
+   */
+  defaultColumns?: string[];
   /** Optional max rows. */
   maxRows?: number;
   /** Optional className on the inner container. */
@@ -67,7 +83,42 @@ export interface DrillDownDrawerProps {
    * (objectui#11506).
    */
   report?: Record<string, unknown>;
+  /**
+   * Shown in place of the record list when there is no list to read yet, or
+   * none can be read (a dataset drill across a relationship,
+   * `resolveDatasetDrillFilter` in `@object-ui/core`):
+   *
+   * - `'resolving'` — the relationship path is still being checked (one
+   *   schema read per hop; no related id is read);
+   * - `'too-many'` — kept for compatibility: a relationship drill no longer
+   *   produces it, because it reads no related ids to count;
+   * - `'unavailable'` — the relationship cannot be resolved from here;
+   * - `'failed'` — a read on the way failed.
+   *
+   * Each is a localized sentence for the viewer, never a server diagnostic.
+   * A list read the server refuses shows the `'failed'` sentence too.
+   */
+  notice?: DrillDownNotice;
 }
+
+/** What {@link DrillDownDrawer} shows in place of its record list — see `notice`. */
+export type DrillDownNotice = 'resolving' | 'too-many' | 'unavailable' | 'failed';
+
+/** The viewer's sentence for each notice, under `dashboard.drill*`. */
+const DRILL_NOTICE_COPY: Record<Exclude<DrillDownNotice, 'resolving'>, { key: string; fallback: string }> = {
+  'too-many': {
+    key: 'dashboard.drillTooMany',
+    fallback: 'Too many records are related to this value to list them here. Narrow the dashboard filters and try again.',
+  },
+  unavailable: {
+    key: 'dashboard.drillUnavailable',
+    fallback: 'The records behind this value can’t be listed from here.',
+  },
+  failed: {
+    key: 'dashboard.drillFailed',
+    fallback: 'The records behind this value couldn’t be loaded. Try again later.',
+  },
+};
 
 /**
  * Is this drill `report` a dataset-bound report (ADR-0021) — the shape
@@ -107,11 +158,21 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
   filter,
   dataSource,
   columns,
+  defaultColumns,
   maxRows,
   className,
   report,
+  notice: givenNotice,
 }) => {
-  const { openRecordList, canOpenRecordList } = useDrillNavigation();
+  // A filter that is neither an object nor an array (a string, a number)
+  // names no condition any read can carry: every list below would read it as
+  // no filter and list every record (objectstack-ai/objectstack#36256). So no
+  // list is drawn, and no read is sent.
+  const notice: DrillDownNotice | undefined =
+    givenNotice ?? (filter != null && typeof filter !== 'object' ? 'unavailable' : undefined);
+  const phone = useIsMobile();
+  const { openRecordList, canOpenRecordList, openRecord } = useDrillNavigation();
+  const tt = useSafeTranslate();
   const isReportDrill = isDatasetBoundReport(report);
 
   // `target: 'navigate'` skips the in-place view and opens the object's full
@@ -122,6 +183,7 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
   // gracefully to the drawer below.
   const navigateOnly =
     target === 'navigate' &&
+    !notice &&
     !!openRecordList &&
     !isReportDrill &&
     !!objectName &&
@@ -137,13 +199,27 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
 
   // Escape hatch — escalate the peek to the full list page (shown in the header
   // when the host wired navigation and this is a raw-record drill).
-  const escapeHatch = !isReportDrill ? (
+  const escapeHatch = !isReportDrill && !notice ? (
     <OpenInListButton objectName={objectName} filter={filter} onNavigate={onClose} />
   ) : null;
 
   const body = (
     <div className={cn('overflow-auto', className)} data-testid="drill-down-body">
-      {isReportDrill
+      {notice === 'resolving'
+        ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground" role="status" data-testid="drill-down-resolving">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            {tt('dashboard.loading', 'Loading…')}
+          </div>
+        )
+        : notice
+        ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-xs text-muted-foreground" role="alert" data-testid="drill-down-notice" data-notice={notice}>
+            <AlertTriangle className="h-6 w-6 opacity-60" aria-hidden="true" />
+            <p>{tt(DRILL_NOTICE_COPY[notice].key, DRILL_NOTICE_COPY[notice].fallback)}</p>
+          </div>
+        )
+        : isReportDrill
         ? (() => {
             // objectui#11506 — the drill's filter goes into `runtimeFilter`, the
             // key `ReportSchema` declares and the dataset renderer applies. It
@@ -169,6 +245,21 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
             };
             return <SchemaRenderer schema={reportSchema as any} />;
           })()
+        : drillListAvailable()
+        ? (
+          <DrillRecordList
+            // One mount per drill: what the reader changed goes with it (item 8).
+            key={JSON.stringify([objectName, filter ?? null])}
+            objectName={objectName}
+            filter={filter}
+            columns={columns}
+            defaultColumns={defaultColumns}
+            maxRows={maxRows}
+            dataSource={dataSource}
+            onNavigate={onClose}
+            open={open}
+          />
+        )
         : (
           <ObjectDataTable
             schema={{
@@ -179,27 +270,30 @@ export const DrillDownDrawer: React.FC<DrillDownDrawerProps> = ({
               pagination: true,
               searchable: false,
               pageSize: maxRows,
-              // Complete the drill chain: a row in this filtered record list
-              // opens that record. Dialog target so it stacks over this drawer.
-              // Mirrors the chart / KPI drill tables — every drill-through list
-              // (pivot, dataset, chart, metric) lands on a clickable record.
-              drillDown: { enabled: true, mode: 'record', target: 'dialog' },
+              // A host with no record page: the row opens its record in a dialog.
+              ...(openRecord ? {} : { drillDown: { enabled: true, mode: 'record', target: 'dialog' } }),
             }}
             dataSource={dataSource}
+            failureMessage={tt(DRILL_NOTICE_COPY.failed.key, DRILL_NOTICE_COPY.failed.fallback)}
           />
         )}
     </div>
   );
 
-  if (target === 'dialog') {
+  if (target === 'dialog' && !phone) {
+    // Non-modal: Radix draws no overlay for it, so nothing behind is dimmed
+    // or blurred, and an outside click dismisses it like a popover.
     return (
-      <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-        <DialogContent className="max-w-5xl">
-          <DialogHeader className="flex-row items-center justify-between gap-4 pr-8">
-            <DialogTitle>{title}</DialogTitle>
+      <Dialog open={open} modal={false} onOpenChange={(v) => !v && onClose()}>
+        <DialogContent
+          className="flex h-[65vh] w-[70vw] max-w-[70vw] flex-col gap-0 overflow-hidden p-0"
+          data-testid="drill-down-dialog"
+        >
+          <DialogHeader className="flex-row items-center justify-between gap-4 space-y-0 border-b px-4 py-3 pr-12">
+            <DialogTitle className="truncate text-base">{title}</DialogTitle>
             {escapeHatch}
           </DialogHeader>
-          {body}
+          <div className="flex min-h-0 flex-1 flex-col [&>[data-testid=drill-down-body]]:flex-1">{body}</div>
         </DialogContent>
       </Dialog>
     );

@@ -62,7 +62,7 @@ Three similarly-named things, three different jobs — don't mix them up:
 
 | Object | Job |
 |:--|:--|
-| **Business unit** (`sys_business_unit`) | The hierarchy. Drives visibility depth (`unit`, `unit_and_below`) and delegated-admin boundaries |
+| **Business unit** (`sys_business_unit`) | The hierarchy. Drives visibility depth (`unit`, `unit_and_below`; enforced by the enterprise edition, owner-only on the open edition) and delegated-admin boundaries |
 | **Team** (`sys_team`) | Flat collaboration group. Teams *receive* sharing; they never carry capability |
 | **Organization** (`sys_organization`) | The tenant itself — your company's account, not a node inside it |
 
@@ -113,6 +113,22 @@ hand:
   500 records per call to an active user, each as an ordinary edit, so sharing,
   validation rules and hooks apply. It answers what moved, what failed and how
   many remain; call it again until `remaining` is 0.
+
+The owner field of a detail object (`sharingModel: 'controlled_by_parent'`)
+is neither counted nor moved. On a detail the owner records who did the work
+(the person on a timesheet, the spender on an expense line), not who holds
+it; handing it over would make the successor appear to have done that work.
+A detail row that names its master is reached through that master, so hand
+over the master record instead. The detail's other user fields, such as an
+approver, are counted and moved as usual.
+
+One row class has no master to hand over: a detail row whose master reference
+is empty, on a detail whose master is optional (declared `required: false`).
+Its owner reads and writes it, beside holders of View All / Modify All on the
+detail. Its owner is not counted or moved either, so after the ban only View
+All / Modify All holders reach it. To give such rows to someone else, a holder
+of Modify All on the detail filters the detail by owner and edits the owner by
+hand.
 
 The hand-over is optional and never delays the ban. Once a user is banned, a
 new record or edit that sets a user field to them is refused with the field
@@ -233,6 +249,32 @@ Programs and agents send the same message through
 rules. A flow that should message the whole organization uses the `notify`
 step's `org:members` recipient instead
 ([Flows](/docs/automation/flows)).
+
+## Deliver notifications by Slack direct message
+
+On a deployment that composes the Slack connector (`ConnectorSlackPlugin`),
+notifications can also reach people as Slack direct messages, from your
+organization's own Slack app. Without the connector none of this appears:
+the notification settings page lists no Slack channel.
+
+1. **Install Slack (an administrator).** Open Setup's Slack page,
+   `/apps/setup/component/messaging/slack`; it needs `setup.write` in your
+   current organization, as the server does. Paste your Slack app's bot
+   token (it starts with `xoxb-`) and choose **Install**. Slack checks the
+   token before anything is saved; it is stored encrypted and never shown
+   again, so the field is always empty. **Save token** sets it again, for
+   instance after Slack refused it (the page then says **Token refused**).
+2. **Connect (each person).** On **Notification Settings**, the Slack
+   section's **Connect Slack** asks for a proposal: a Slack user of your
+   workspace with the person's verified email, not linked to anyone else.
+   The proposal names no one until the person chooses **Confirm**; **Cancel**
+   drops it. Nothing reaches them on Slack before they confirm.
+   **Disconnect** removes the link.
+3. **Manage links (an administrator).** The same Slack page lists every
+   link (the person, the Slack user once confirmed, and when) and removes
+   one; the person is told by in-app message and email and can connect again.
+   **Remove Slack** removes the install and every link, and tells each linked
+   person the same way.
 
 ## Quick paths
 

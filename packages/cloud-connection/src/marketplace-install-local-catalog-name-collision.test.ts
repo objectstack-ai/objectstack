@@ -44,9 +44,9 @@
  *     holding package still installs. Measured before the fix: `200`,
  *     `hotLoaded: false`, ledgered.
  *
- * A capability is code-only (`allowRuntimeCreate: false`), so no environment
- * save produces one; its case pins that the door judges the refusal, not the
- * type.
+ * A capability is environment-creatable like the other two (an unmanaged copy
+ * carries its app's capabilities); its case pins that the door judges the
+ * refusal the same way for all three catalog types.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

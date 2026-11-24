@@ -1,5 +1,144 @@
 # @objectstack/metadata-core
 
+## 18.6.0
+
+### Patch Changes
+
+- d5e6b20: fix(metadata-core,objectql,cloud-connection,cli)!: the package upgrade plan counts the fields a package adds through `objectExtensions`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped and no stored row changes: what moves is which fields the package upgrade comparison reads from each version, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for an upgrade that changes a field the package adds to an object through `objectExtensions`. Four kinds of upgrade that installed without a question before are now refused, exactly as the same change to a field of an object the package declares is:
+  
+  - an extension field retyped to a `needs_confirm` or `destructive` type: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`;
+  - an extension field dropped while another stored extension field of the same object is added, with no `renamedFrom` linking them: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, as a suspected rename;
+  - a stored field dropped from an object's own declaration in the upgraded version while an extension of the same object adds a stored field, or an extension field dropped while the object's own declaration adds one: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, as a suspected rename. The owned and the extension fields of one object are now one field map, so the two pair; before, they were never compared;
+  - an extension field that declares `renamedFrom` and whose new type stores no column (a `formula`, for example): `422 VALIDATION_ERROR` with `details.refusals[].reason: 'destructive_type'`, before anything is written, as for an owned field. No token answers this refusal.
+  
+  The package upgrade plan (`comparePackageVersions`) read only a version's `objects` and `data`. A field an `objectExtensions` entry adds, retypes or drops was therefore missing from the upgrade preview, from the rows counted per touched column, and from the schema upgrade verdict. A preview of an upgrade that added seven columns through extensions listed no added field, and its rollback listed no removed one.
+  
+  Now each side of the comparison is the objects as the registry serves them from that version: the owner's declaration, with every extension's `fields` merged over it by name, in ascending `priority` (`200` when none is declared). The existing rules then apply to an extension field unchanged:
+  
+  - an extension field added is listed in `plan.fields.added`, and one dropped in `plan.fields.removed`, with the rows holding a value counted in `environment.columns`;
+  - an extension field retyped is a type change; `needs_confirm` and `destructive` changes need the confirmation, and a `safe` one does not;
+  - an extension field dropped while another stored field of the same object is added, with no `renamedFrom` linking them, is a suspected rename and needs the confirmation; a field dropped alone is listed and refused by nothing, as an owned one is.
+  
+  An object a version reaches only through an extension (another package owns it) is compared by the fields the extension adds. It is never listed in `plan.objects.added` or `plan.objects.removed`, because the upgrade neither creates nor drops it. `os diff` prints the field changes of such an object under `objects.<name>.fields`.
+  
+  `PackageUpgradeSide` (`@objectstack/metadata-core`) gains an optional `objectExtensions` list. A caller that builds a side itself passes the version's `objectExtensions` beside its `objects`, read with the same collection reader; a side without the key compares as before.
+  
+  Who moves, and the fix for each:
+  
+  - An installer upgrading a package whose new version retypes an extension field, or drops a field of an object while another stored field of the same object is added (extension or owned, in either pairing): the `409`. Confirm the findings with the token the refusal names (`--confirm-upgrade <token>` on `os deploy` and `os package install`); for a suspected rename the refusal names the other way forward too.
+  - A package author whose new version renames an extension field with `renamedFrom` into a type that stores no column: the `422`. `--confirm-upgrade` does not answer it. Keep a stored type for the renamed field, or carry the values by hand, as the refusal's message says.
+  
+  Unchanged: a plan over packages that declare no `objectExtensions` is the same plan as before; seed datasets are compared as before; `fieldPatches` changes display properties only and stays out of the comparison.
+- 2487242: fix(objectql, metadata-protocol, console): a list view column on a field a disabled package adds no longer fails the whole list
+  
+  Clause-②: yes (widening: the view save door accepts withheld names; one spec read-decoration member; one locale key; one optional security-service member, add-only)
+  Metadata-protocol: none
+  
+  A package can add fields to another package's object. While that package is disabled, the platform leaves those fields out of the served object, and the data door refuses every request that names one (`400 INVALID_FIELD`, or `400 INVALID_SORT` for a sort). The owner's views still named the field, so a view with such a column, sort, filter, grouping level or searchable field failed for everyone. Saving the view (a rename, a pin, a Studio edit) was refused too (`422`, `list-view-field-unknown` / `sort-field-unknown`).
+  
+  - **The served object read names what is withheld.** `GET /api/v1/meta/object/:name` and the object list read carry `_withheldFields: { [field]: { packageId } }` when a disabled package withholds a field from the object. It is a read decoration (`METADATA_READ_DECORATIONS`), so the save door strips it, and the execution face and the layered editor read do not carry it. The registry gains `getWithheldExtensionFields(name)`.
+  - **A caller who may not read a withheld field is not told it exists.** The object-schema projection (ADR-0106) keeps a `_withheldFields` entry only for a caller the security service admits. `ISecurityService` gains an optional member, `getMetadataReadableWithheldFields(object, context)`, which answers the withheld names the caller may read; `@objectstack/plugin-security` implements it from each field's stored definition: the permission set's field entry, the field's own `requiredPermissions`, the fallback set for a caller with no set, and the on-behalf-of delegator. A security service without the member, an `undefined` answer or a throw drops every entry. Each dropped entry moves the caller's ETag, so two callers who are told different things never share a `304`. A caller exempt from the projection (a platform admin, a system context) is served every entry, as before.
+  - **The view save door judges a view against the stored object.** A `view` write is judged against the object with every disabled package's extension folded in (the new fold option `includeDisabledExtensions`). A withheld field is a real stored field, so the view saves and keeps its column and sort. A misspelled field is still refused. Other writes are still judged against the served object, so a page or flow that names a withheld field is still refused while the package is off. A served view's `_diagnostics` is judged against the same stored object, so it no longer warns `list-view-field-unknown` or `form-field-unknown` on a withheld name the save door accepts; a misspelled field still warns.
+  - **The console leaves withheld names out.** The list view and the grid leave a withheld field out of `$select`, `$filter`, `$orderby`, `$searchFields` and `groupBy`, and do not draw its column. A line above the rows names it (`list.withheldFieldsLeftOut`). Nothing is written to the view or to the user's list preferences, and a sort the user saves keeps the withheld entry. Once the package is enabled, the column, the sort and the grouping come back without any write.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [bb17350]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [2487242]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [1354d2a]
+- Updated dependencies [a2bb7d5]
+  - @objectstack/spec@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

@@ -71,7 +71,7 @@
  * cycle does not exist.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30341),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  */
@@ -352,6 +352,55 @@ export function collectCascadeDeleteObjects(
 }
 
 /**
+ * [ruling 6893104201 c1] The dependents probes a cascade's collection walk
+ * ({@link collectCascadeDeleteSet}) made, kept for its deleting walk: one entry
+ * per probe, keyed by the referenced object, the relation and the ids asked
+ * about, holding the probe's answer as {@link probeReferencingRowsOfSet} gave
+ * it. Keyed by the set, beside it rather than on it: the set is the cascade's
+ * own, so the probes it collected die with it.
+ *
+ * The deleting walk asks the identical question of the root set's cascading
+ * relations (same relation, same ids, same context, same system-identity
+ * engine read), and between the two nothing writes: the root's `beforeDelete`
+ * has run before the collection, and what runs between them, the in-cascade
+ * restrict judge and the recycle bin's snapshot, only reads. So the walk takes
+ * a kept answer instead of reading again ({@link takeCollectedProbe}), and only
+ * until its first write ({@link forgetCollectedProbes}): a `set_null` clear or
+ * a cascaded child's delete runs hooks, and a hook may write a row the next
+ * probe must see. Every probe after that reads as before.
+ */
+const collectedProbes = new WeakMap<CascadeDeleteSet, Map<string, Map<string, any[]>>>();
+
+/** The key of one kept probe: the ids as the probe was asked, order and type included. */
+function collectedProbeKey(target: string, childName: string, fieldName: string, ids: ReadonlyArray<string | number>): string {
+  return JSON.stringify([target, childName, fieldName, ids]);
+}
+
+/**
+ * [ruling 6893104201 c1] The answer the collection walk got to this exact
+ * probe, if it made it and the set's walk has not written since; taken once.
+ * `undefined` means read: the probe was never made here, or a write may have
+ * changed its answer.
+ */
+export function takeCollectedProbe(set: CascadeDeleteSet, target: string, childName: string, fieldName: string, ids: ReadonlyArray<string | number>): Map<string, any[]> | undefined {
+  const probes = collectedProbes.get(set);
+  if (!probes) return undefined;
+  const key = collectedProbeKey(target, childName, fieldName, ids);
+  const answer = probes.get(key);
+  if (answer) probes.delete(key);
+  return answer;
+}
+
+/**
+ * [ruling 6893104201 c1] Drop every kept probe of `set`: called before the
+ * deleting walk's first write, so no answer read before a write is reused
+ * after it.
+ */
+export function forgetCollectedProbes(set: CascadeDeleteSet): void {
+  collectedProbes.delete(set);
+}
+
+/**
  * [#22305] Phase 1 of {@link cascadeDeleteRelations}: every record a by-id
  * delete of `object`/`id` removes, the root included, collected READ-ONLY.
  *
@@ -365,7 +414,9 @@ export function collectCascadeDeleteObjects(
  * self-reference, two objects cascading into each other) terminates.
  *
  * The cost is one extra probe per CASCADING relation per member, since the
- * walk probes those relations again as it deletes. `restrict` and
+ * walk probes those relations again as it deletes, except where the walk
+ * takes this walk's answer instead ([ruling 6893104201 c1], the root set's
+ * relations up to the walk's first write: {@link takeCollectedProbe}). `restrict` and
  * `set_null` relations are not read here. Every probe here is an elevated
  * read, so it files its #12166 record before it runs, through the
  * once-per-record ledger the walk shares ({@link fileReferenceCheckElevation}).
@@ -391,6 +442,9 @@ export async function collectCascadeDeleteSet(
   const set: CascadeDeleteSet = {
     members: new Map(), entered: new Map(), elevationsFiled: new Set(), cascadeEdges: new Map(), cleared: new Map(),
   };
+  // [ruling 6893104201 c1] Every probe below, kept for the deleting walk.
+  const probes = new Map<string, Map<string, any[]>>();
+  collectedProbes.set(set, probes);
   let frontier = new Map<string, Array<string | number>>([[object, []]]);
   for (const id of ids) {
     if (cascadeSetAdd(set.members, object, id)) frontier.get(object)!.push(id);
@@ -420,6 +474,7 @@ export async function collectCascadeDeleteSet(
           }
         }
         const referencing = await this.probeReferencingRowsOfSet(childName, fieldName, fdef, targetIds, context);
+        probes.set(collectedProbeKey(target, childName, fieldName, targetIds), referencing);
         for (const id of targetIds) {
           for (const row of referencing.get(String(id)) ?? []) {
             const depId = row?.id;

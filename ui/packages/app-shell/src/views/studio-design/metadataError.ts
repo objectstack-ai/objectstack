@@ -36,7 +36,8 @@ import {
   resolveI18nLabel,
   type I18nLabel,
 } from '@objectstack/spec/ui';
-import type { RegisteredErrorCode } from '@objectstack/spec/api';
+import type { DestructiveChangeIssue, RegisteredErrorCode } from '@objectstack/spec/api';
+import { errorCodeIs } from '@object-ui/types';
 import type { NavTargetLabelResolver } from '@object-ui/layout';
 import type { MetadataSelection } from '../metadata-admin/preview-registry.js';
 import { t, tFormat, translateSchemaFieldLabel, translateValidationMessage } from '../metadata-admin/i18n.js';
@@ -409,6 +410,18 @@ export function objectSaveRefusal(e: unknown, sent: SentBody, locale: string): S
 }
 
 /**
+ * objectstack#34931 — what a refused object save would lose, when the refusal
+ * is the door's `409 DESTRUCTIVE_CHANGE` (its `issues[]`); `null` for every
+ * other refusal, which {@link objectSaveRefusal} reads. Told by code and
+ * status, never by the prose.
+ */
+export function destructiveFindings(e: unknown): DestructiveChangeIssue[] | null {
+  if ((e as { status?: unknown } | null)?.status !== 409 || !errorCodeIs(e, 'DESTRUCTIVE_CHANGE')) return null;
+  const issues = (e as { issues?: unknown }).issues;
+  return Array.isArray(issues) ? (issues as DestructiveChangeIssue[]) : [];
+}
+
+/**
  * The inspector label of the input a node path below the node names, e.g.
  * `['config', 'title']` on a `notify` node → its Title. The node's field table
  * is the one the inspector renders offline; the longest declared path that the
@@ -675,6 +688,23 @@ function publishLocator(type: string, body: SentBody, locale: string): IssueLoca
   if (type === 'flow') return flowNodeLocator(body, locale);
   if (type === 'dataset') return datasetMemberLocator(body, locale);
   return leafIssueLocator(type, body, locale);
+}
+
+/**
+ * objectstack#36511 — a refused single-item publish (`POST /meta/:type/:name/publish`)
+ * as the {@link PublishFailure} a package publish reports per draft, so the
+ * top bar's Save reads it through {@link publishRefusal} as Publish does.
+ */
+export function publishFailureOf(type: string, name: string, e: unknown): PublishFailure {
+  const code = (e as { code?: unknown } | null)?.code;
+  const issues = issuesOf(e);
+  return {
+    type,
+    name,
+    error: formatMetadataError(e),
+    ...(typeof code === 'string' ? { code } : {}),
+    ...(issues.length > 0 ? { issues } : {}),
+  };
 }
 
 /**

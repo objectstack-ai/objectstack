@@ -51,6 +51,13 @@
       "evidence": "cloud @cb8ee7ff: packages/service-ai/src/skill-registry.ts#matchesContext — each condition is evaluated against the turn's SkillContext, and a skill that fails is not attached.",
       "note": "THE activation gate — AND of {field,operator,value}. CLOUD-RUNTIME-ONLY (#3905): MCP has no server-side activation step; a client lists every projected prompt and chooses."
     },
+    "mcpPrompt": {
+      "status": "live",
+      "verifiedAt": "2026-11-16",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/mcp/src/skill-prompts.ts#projectSkillPrompt — a row declaring false is never projected, so registerSkillPrompts (the per-request HTTP prompt surface and any host server that calls it) and MCPServerRuntime.bridgePrompts (the long-lived stdio server) neither list nor get it, whatever its tools binding.",
+      "note": "the owner's opt-out of MCP prompt projection: false = written for the in-product agents only (their tools, their approval card). Absent or true = offered as before, where the server serves the bound tools. The cloud agent runtime does not read it; resolution, binding and activation are unchanged."
+    },
     "active": {
       "status": "live",
       "verifiedAt": "2026-09-15",

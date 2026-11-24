@@ -217,16 +217,28 @@ const ephemeral = {
 };
 /** Nothing references it: the plain, non-cascading delete. */
 const loner = { name: 'loner', label: 'Loner', fields: { id: text('id'), name: text('name') } };
+/** A platform-global business object: no tenant column, so its records name no organization (ADR-0066). */
+const globalNote = { name: 'global_note', label: 'Global note', tenancy: { enabled: false }, fields: { id: text('id'), title: text('title') } };
 
-async function makeEngine(options: { withBin?: boolean; transactional?: boolean; failDeleteOf?: string; removesNothingOf?: { object: string; answer: boolean | number } } = {}) {
+/**
+ * The Default Organization the `single` posture holds from boot (ADR-0131 D3).
+ * A delete whose record and context name no organization stamps its entry with
+ * it, as any system insert is stamped (ADR-0131 D9); a composition that
+ * registers `sys_organization` and holds none is the broken boot invariant D9
+ * refuses, never a shape an entry can land in.
+ */
+const DEFAULT_ORG = 'org_default';
+
+async function makeEngine(options: { withBin?: boolean; transactional?: boolean; failDeleteOf?: string; removesNothingOf?: { object: string; answer: boolean | number }; defaultOrganization?: boolean } = {}) {
   const rec = recordingLogger();
   const engine = new ObjectQL({ logger: rec.logger } as any);
   const driver = makeDriver(options);
   engine.registerDriver(driver, true);
   await engine.init();
-  const objects: any[] = [account, contact, note, task, sysThing, cloudThing, aiThing, organization, ephemeral, loner];
+  const objects: any[] = [account, contact, note, task, sysThing, cloudThing, aiThing, organization, ephemeral, loner, globalNote];
   if (options.withBin !== false) objects.push(bin);
   for (const o of objects) engine.registry.registerObject(o as any, '__test__');
+  if (options.defaultOrganization !== false) driver.seed('sys_organization', { id: DEFAULT_ORG, name: 'Default' });
   return { engine, driver, rec };
 }
 
@@ -448,6 +460,14 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
     expect(binOps(driver).map((w: any) => w.op)).toEqual(['create']);
   });
 
+  // [#35329] The driver's `false` after the pre-image proved the row present
+  // answers `RECORD_NOT_FOUND`, thrown after the withdrawal, so the entry is
+  // withdrawn exactly as before; an off-contract `0` keeps its pass-through.
+  const settle = (p: Promise<unknown>) =>
+    p.then((value) => ({ value }), (e: any) => ({ code: e?.code, status: e?.status }));
+  const answerOf = (answer: boolean | number) =>
+    answer === false ? { code: 'RECORD_NOT_FOUND', status: 404 } : { value: answer };
+
   it.each<[boolean | number, string]>([
     [false, 'not found'],
     [0, 'an off-contract count of none'],
@@ -455,8 +475,8 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
     const { engine, driver, rec } = await makeEngine({ transactional: false, removesNothingOf: { object: 'loner', answer } });
     driver.seed('loner', { id: 'l1', name: 'x' });
     const told: string[] = [];
-    await expect(engine.delete('loner', { where: { id: 'l1' }, onRecycleBinEntry: (id: string) => told.push(id) } as any))
-      .resolves.toBe(answer);
+    expect(await settle(engine.delete('loner', { where: { id: 'l1' }, onRecycleBinEntry: (id: string) => told.push(id) } as any)))
+      .toEqual(answerOf(answer));
     expect(driver.rowsOf('loner')).toHaveLength(1);
     expect(entriesOf(driver)).toHaveLength(0);
     // Written, then withdrawn: not merely never written.
@@ -470,7 +490,7 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
     async (answer) => {
       const { engine, driver } = await makeEngine({ removesNothingOf: { object: 'account', answer } });
       seedAccountTree(driver);
-      await expect(engine.delete('account', { where: { id: 'acc1' } } as any)).resolves.toBe(answer);
+      expect(await settle(engine.delete('account', { where: { id: 'acc1' } } as any))).toEqual(answerOf(answer));
       expect(driver.rowsOf('account')).toHaveLength(1);
       expect(entriesOf(driver)).toHaveLength(0);
       const ops = binOps(driver);
@@ -478,17 +498,23 @@ describe('a delete the driver answers as removing nothing leaves no entry (#3163
       // The withdrawal rides the unit the entry was written in.
       expect(ops[1].transaction).toBeDefined();
       expect(ops[1].transaction).toBe(ops[0].transaction);
+      // [#35329] `RECORD_NOT_FOUND` is thrown inside that unit, so the cascade
+      // the walk ran for a row that was not removed rolls back with it.
+      if (answer === false) {
+        expect(driver.rowsOf('contact')).toHaveLength(2);
+        expect(driver.rowsOf('note')).toHaveLength(1);
+      }
     },
   );
 
-  it('logs at error, and keeps the answer, when the entry cannot be withdrawn', async () => {
+  it('logs at error, and still refuses with RECORD_NOT_FOUND, when the entry cannot be withdrawn', async () => {
     const { engine, driver, rec } = await makeEngine({
       transactional: false,
       removesNothingOf: { object: 'loner', answer: false },
       failDeleteOf: 'sys_recycle_bin',
     });
     driver.seed('loner', { id: 'l1', name: 'x' });
-    await expect(engine.delete('loner', { where: { id: 'l1' } } as any)).resolves.toBe(false);
+    expect(await settle(engine.delete('loner', { where: { id: 'l1' } } as any))).toEqual(answerOf(false));
     expect(entriesOf(driver)).toHaveLength(1);
     // Said once, at `error`: the bin keeps an entry for a row that is still live.
     expect(rec.at('error')).toHaveLength(1);
@@ -518,7 +544,8 @@ describe('the TTL sweep reaps an entry once its stamped deadline has passed (D3)
 
 describe("an organization's delete takes its entries with it (ruling Q4)", () => {
   it('removes the entries of that organization, is not refused by them, and leaves other organizations\' entries', async () => {
-    const { engine, driver } = await makeEngine();
+    // Every delete here names its organization on the context.
+    const { engine, driver } = await makeEngine({ defaultOrganization: false });
     driver.seed('sys_organization', { id: 'org_1', name: 'One' });
     driver.seed('sys_organization', { id: 'org_2', name: 'Two' });
     driver.seed('loner', { id: 'l1', name: 'one' });
@@ -531,6 +558,35 @@ describe("an organization's delete takes its entries with it (ruling Q4)", () =>
 
     expect(driver.rowsOf('sys_organization').map((r: Row) => r.id)).toEqual(['org_2']);
     expect(entriesOf(driver).map((e) => e.organization_id)).toEqual(['org_2']);
+  });
+});
+
+/**
+ * A `cascade` dependent the walk's probe finds but the collect phase never
+ * held (a row a hook of this same cascade wrote after the set was collected)
+ * is no member of the root's entry. It is deleted by id, as the root of its
+ * own cascade, so it keeps an entry of its own; a cascade batch (one predicate
+ * delete per chunk, which opens no entry) takes only the collected members.
+ */
+describe('a cascade dependent written after the set was collected keeps its own entry', () => {
+  it('is deleted by id with an entry of its own, while the collected members stay rows of the root entry', async () => {
+    const { engine, driver } = await makeEngine();
+    seedAccountTree(driver);
+    // The contacts are batched; their before phase runs ahead of their own
+    // walk, which probes the notes: n9 lands between the collect and that probe.
+    engine.on('beforeDelete', 'contact', (ctx: any) => {
+      if (ctx.input?.id === 'c1') driver.seed('note', { id: 'n9', body: 'late', contact: 'c1' });
+    });
+
+    await engine.delete('account', { where: { id: 'acc1' }, ...USER } as any);
+
+    expect(driver.rowsOf('note')).toHaveLength(0);
+    const entries = entriesOf(driver);
+    expect(entries.map((e) => `${String(e.object_name)}/${String(e.record_id)}`).sort()).toEqual(['account/acc1', 'note/n9']);
+    const root = entries.find((e) => e.object_name === 'account')!;
+    expect((root.snapshot as any).rows.map((r: any) => `${r.object}/${r.id}`)).toEqual([
+      'account/acc1', 'contact/c1', 'contact/c2', 'note/n1',
+    ]);
   });
 });
 
@@ -554,5 +610,50 @@ describe('cascadeMembersInOrder', () => {
     };
     expect(cascadeMembersInOrder(set, { object: 'a', id: '1' }).map((m) => `${m.object}/${m.id}`))
       .toEqual(['a/1', 'b/2', 'b/3', 'c/4', 'd/5']);
+  });
+});
+
+/**
+ * [ADR-0131 D9, ADR-0148 D1] A system-door delete of a record that names no
+ * organization, on a store that enforces no NOT NULL (this harness keeps rows
+ * the way `driver-memory` does). Measured before the fix: the delete answered
+ * true and wrote the entry with no organization at all. The entry is a row of
+ * a tenant-column object, so it takes the organization any system insert
+ * takes: the Default Organization under `single`, a refusal under a wall. The
+ * SQL half, where the bin's NOT NULL column used to fail the delete, is pinned
+ * in `packages/runtime/src/recycle-bin-orgless-system-delete.test.ts`.
+ */
+describe('a system-door delete of a record that names no organization (ADR-0131 D9)', () => {
+  const SYSTEM = { context: { isSystem: true } } as any;
+
+  it('under single: answers true, the entry carries the Default Organization, and restore brings the record back', async () => {
+    const { engine, driver } = await makeEngine();
+    driver.seed('global_note', { id: 'g1', title: 'kept' });
+
+    expect(await engine.delete('global_note', { where: { id: 'g1' }, ...SYSTEM })).toBe(true);
+
+    expect(driver.rowsOf('global_note')).toHaveLength(0);
+    const entries = entriesOf(driver);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ object_name: 'global_note', record_id: 'g1', organization_id: DEFAULT_ORG });
+
+    await engine.restore(String(entries[0].id), SYSTEM);
+    expect(driver.rowsOf('global_note')).toMatchObject([{ id: 'g1', title: 'kept' }]);
+    expect(entriesOf(driver)).toHaveLength(0);
+  });
+
+  it('under a wall: refused with ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED before the record is removed, and no entry stays', async () => {
+    const { engine, driver } = await makeEngine();
+    engine.setTenancyPostureProvider(() => 'isolated');
+    driver.seed('global_note', { id: 'g1', title: 'kept' });
+
+    const refusal = await engine.delete('global_note', { where: { id: 'g1' }, ...SYSTEM }).then(
+      () => undefined,
+      (e: unknown) => e as { code?: unknown; status?: unknown },
+    );
+
+    expect(refusal).toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500 });
+    expect(driver.rowsOf('global_note')).toMatchObject([{ id: 'g1', title: 'kept' }]);
+    expect(entriesOf(driver)).toHaveLength(0);
   });
 });

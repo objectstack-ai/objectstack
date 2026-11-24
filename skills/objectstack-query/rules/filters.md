@@ -152,7 +152,6 @@ pages — cannot run code, so they use **date macro tokens** instead
 (defined in `@objectstack/spec` `data/date-macros.zod.ts`):
 
 ```typescript
-// List-view / dashboard filter values
 where: {
   signal_at:    { $gte: '{30_days_ago}' },
   published_at: { $gte: '{last_quarter_start}' }
@@ -164,24 +163,33 @@ where: {
   `{next_year_start}` (and bare aliases like `{month_start}`).
 - **Parameterised tokens:** `{N_<unit>_ago}` / `{N_<unit>_from_now}` with
   units `minute|hour|day|week|month|year` — e.g. `{2_weeks_from_now}`.
-- **Both spellings parse:** `{today}` and `${today}` are the same token
-  (`DATE_MACRO_WRAPPED_RE` is `/^\$?\{([a-zA-Z0-9_]+)\}$/`, and the context
-  tokens share it).
+- **Both spellings parse:** `{today}` and `${today}` are the same token, in
+  every vocabulary here.
+
+**Period key** (`PERIOD_KEY_TOKENS`, not a date macro): `{current_iso_week}`
+is today's ISO week key, `YYYY-Www`, in the workspace time zone — Monday-start
+weeks, the ISO week-year at year edges (2027-01-01 is `2026-W53`). It is text,
+for a text field storing week keys. A `date` / `datetime` / `time` field
+refuses it (`INVALID_FILTER` / 400) like the literal key — use
+`{current_week_start}` / `{current_week_end}` there — as do a date dashboard
+filter's `defaultValue` and `calendar.initialDate`; a text dashboard filter
+may default to it. There is no last- or next-week key.
 
 **Session tokens:** the same value positions accept `{current_user_id}` and
 `{current_org_id}` (defined in `data/context-tokens.zod.ts`) — the signed-in
 user's id and the active organization id.
 
 ```typescript
-where: { owner_id: '{current_user_id}', close_date: { $gte: '{current_year_start}' } }
+where: { owner_id: '{current_user_id}', cost_week: '{current_iso_week}' }
 ```
 
 **Scope:** tokens expand on **both** sides of the wire — client-side by
-`resolveDateMacros()` / `resolveContextTokens()` in `@object-ui/core`,
+`resolveFilterPlaceholders()` in `@object-ui/core` (`resolveDateMacros()`,
+`resolvePeriodKeyTokens()` and `resolveContextTokens()` in one call),
 server-side by `resolveFilterTokens()` in `@objectstack/core`, wired into the
 ObjectQL read AND write paths (`find`/`findOne`/`count`/`aggregate`/`update`/
-`delete`) plus the analytics dataset executor. The driver only ever sees ISO
-strings and concrete ids. So use tokens in a hand-issued engine query too:
+`delete`) plus the analytics dataset executor. The driver only ever sees
+resolved values. So use tokens in a hand-issued engine query too:
 computing "today" at module load freezes the date into the built artifact.
 
 A **flow node's** `config.filter` takes these tokens too. What a dropped
@@ -200,8 +208,7 @@ indistinguishable from "there is no data". Near-misses, not tokens:
 (a real `titleFormat` interpolation) and `{organization_id}` (the column name);
 the error names the correction. A value that merely *contains* braces is left
 untouched — `'user-{current_user_id}'` is a literal. Check a spelling with
-`isDateMacroToken(tok)` / `isContextToken(tok)` from `@objectstack/spec/data`,
-WITHOUT braces.
+`isKnownFilterToken(tok)` from `@objectstack/spec/data`, WITHOUT braces.
 
 **`*_end` is a calendar DAY; an upper bound means the WHOLE day.**
 `<= {current_year_end}` already reaches the final instant of Dec 31

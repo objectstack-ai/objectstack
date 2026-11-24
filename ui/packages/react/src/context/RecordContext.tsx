@@ -153,8 +153,26 @@ export interface RecordContextValue<TData = any, TObjectSchema = any> {
   data?: TData;
   /** Resolved object metadata schema (fields, label, etc.). */
   objectSchema?: TObjectSchema;
-  /** Re-fetch the record from the source. */
+  /**
+   * The host's opt-in to the header's Refresh entry (the first item of its
+   * `⋯` menu): present, `page:header` draws the entry and calls this when it
+   * is picked; absent, the header draws none. A host that keeps the entry off
+   * a surface (a drawer) leaves it out. It also re-reads the record: a
+   * renderer that needs a re-read calls {@link RecordContextValue.reread}
+   * when the host provides one, and this otherwise.
+   */
   refresh?: () => void | Promise<void>;
+  /**
+   * Read the record again from the source, with no affordance of its own.
+   * A renderer that must judge its next write against what is stored calls
+   * it: after a write it made, and after a `409 CONCURRENT_UPDATE` refusal, so
+   * the next write carries the stored version. A host provides it wherever it
+   * reads the record, drawers included, whether or not it offers
+   * {@link RecordContextValue.refresh}; a renderer falls back to `refresh`
+   * when a host provides only that. It may be a notice that returns before
+   * the re-read row lands; the row reaches readers through `data` afterwards.
+   */
+  reread?: () => void | Promise<void>;
   /**
    * Optional system-level header actions (Edit / Share / Delete) that the
    * host (e.g. RecordDetailView) wants to inject into the page header
@@ -235,6 +253,7 @@ export const RecordContextProvider: React.FC<RecordContextProviderProps> = ({
     value.data,
     value.objectSchema,
     value.refresh,
+    value.reread,
     value.embedded,
     value.headerSystemActions,
     value.isFavorite,

@@ -52,6 +52,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Icono",
         helpText: "Nombre de icono Lucide (p. ej. \"building\", \"users\")"
       },
+      color: {
+        label: "Color del icono",
+        helpText: "Color del cuadrado sobre el que se dibuja el icono, de la paleta fija. Si no se define, se usa gris."
+      },
       description: {
         label: "Descripción",
         helpText: "Documentación para desarrolladores"
@@ -70,11 +74,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       highlightFields: {
         label: "Campos destacados",
-        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas de lista predeterminadas, las tarjetas, las vistas previas de registros hijos y la franja destacada del detalle. Un nombre que no sea un campo de este objeto se rechaza al publicar."
+        helpText: "Nombres de campo de este objeto, del más importante al menos; donde solo cabe uno, gana la primera entrada (ADR-0085). Determinan las columnas predeterminadas de las listas y de las listas relacionadas, las tarjetas, las vistas previas de registros hijos, la tarjeta flotante del registro y el selector de registros. Un nombre que no sea un campo de este objeto se rechaza al publicar."
       },
       relatedLists: {
-        label: "Orden de listas relacionadas",
-        helpText: "Orden de negocio de las listas relacionadas de este objeto en su página de registro, de la más importante a la menos. Cada entrada es el nombre de un objeto hijo (p. ej., task), u objeto.campo cuando ese hijo tiene más de una relación con este objeto. Las listas indicadas van primero; el resto sigue en el orden derivado. Un nombre que no coincide con ninguna relación que apunte a este objeto no coloca nada, y se rechaza al guardar o validar el objeto."
+        label: "Pestañas de la página de registro",
+        helpText: "Las pestañas de la página de registro después del resumen, en orden. Cada entrada es el nombre de un objeto hijo (p. ej., task), object.field cuando ese hijo tiene más de una relación con este objeto, una pestaña integrada (sys_attachment, sys_approval_request, sys_activity) o una entrada con su propio título y columnas, definida en la configuración del objeto en Studio. En cuanto se enumera algo, una lista relacionada que ninguna entrada nombra no muestra pestaña, incluida una lista que añade otro paquete, hasta que este objeto la nombre; los adjuntos solo se muestran si se enumeran. Vacío: todas las listas se muestran en el orden predeterminado. Un nombre que no coincide con ninguna relación que apunte a este objeto se rechaza al guardar el objeto."
       },
       searchableFields: {
         label: "Campos buscables",
@@ -86,11 +90,15 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.key": {
         label: "Clave",
-        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos se unen al grupo indicando esta clave, así que renombrarla los deja sin grupo."
+        helpText: "Clave de máquina en snake_case, única dentro de este objeto: el esquema rechaza cualquier otra cosa. Los campos que el grupo lista en Campos siguen en él al renombrar la clave; un campo que se une indicando esta clave en su propio ajuste de grupo queda sin grupo."
       },
       "fieldGroups.label": {
         label: "Etiqueta",
         helpText: "Texto del encabezado de la sección del grupo."
+      },
+      "fieldGroups.fields": {
+        label: "Campos",
+        helpText: "Los campos que muestra este grupo, en orden de visualización (nombres de campo). Si se rellena, fija el orden dentro del grupo sin mover ningún campo. Un campo que esta lista nombra no puede indicar otro grupo en su propio ajuste de grupo, y un campo solo puede figurar en un grupo. No se permite junto con Lista relacionada."
       },
       "fieldGroups.icon": {
         label: "Icono",
@@ -102,11 +110,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.relatedList": {
         label: "Lista relacionada",
-        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo, y también un nombre que no coincide con ninguna relación que apunte a este objeto. La página de registro aún no dibuja esta ubicación."
+        helpText: "Convierte esta entrada en la tabla de una lista relacionada en lugar de una sección de campos: indica el objeto hijo (u objeto.campo) cuya lista se dibuja en esta posición de la columna de detalles del registro. Un grupo así no contiene campos; se rechaza un campo que lo indique como su grupo, y también un nombre que no coincide con ninguna relación que apunte a este objeto. Los formularios de creación y edición del registro padre también incluyen la tabla en línea, y «Editar» en la página de registro guarda el registro y sus filas a la vez."
       },
       "fieldGroups.collapse": {
         label: "Contraer",
-        helpText: "Si la sección se puede contraer, en el formulario de entrada y en la página de detalle del registro. Sin definir: none."
+        helpText: "Si la sección se puede contraer. El formulario de entrada lo aplica tal como está definido. En la página de registro predeterminada el lector puede contraer cualquier grupo con título, así que allí solo fija el estado inicial: Collapsed empieza contraído y los demás, abiertos. Sin definir: none."
       },
       "fieldGroups.visibleWhen": {
         label: "Condición de visibilidad",
@@ -232,6 +240,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Comportamiento al eliminar",
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
       },
+      "fields.transferBehavior": {
+        label: "Comportamiento al cambiar de propietario",
+        helpText: "Indica si «Cambiar propietario» en el registro referenciado también puede mover los registros que apuntan a él mediante este campo"
+      },
       "fields.multiple": {
         label: "Selección múltiple",
         helpText: "Permitir seleccionar varios registros"
@@ -268,9 +280,13 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Idioma",
         helpText: "Lenguaje del editor (p. ej. sql, javascript)"
       },
+      "fields.fieldHistory": {
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Un campo de credenciales nunca muestra valores, y si el propio objeto lo desactiva, manda el objeto."
+      },
       "fields.trackHistory": {
         label: "Seguimiento de historial",
-        helpText: "Resume este campo en la cronología de actividad del registro"
+        helpText: "Hace que un campo multimedia o JSON (imagen, archivo, json, …) muestre valores anterior → nuevo en la cronología de actividad. Los demás campos ya los muestran, y apagarlo no los oculta: use Valores de cambios de campo."
       },
       "fields.visibleWhen": {
         label: "Condición de visibilidad",
@@ -290,6 +306,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "enable.trackHistory": {
         label: "Seguimiento de historial"
+      },
+      "enable.fieldHistory": {
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de los campos modificados en la cronología de actividad del registro. Predeterminado es activado. Desactivado deja de mostrar valores en todo el objeto, diga lo que diga un campo."
       },
       "enable.searchable": {
         label: "Buscable"
@@ -427,7 +447,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       userActions: {
         label: "Acciones de usuario",
-        helpText: "Qué entradas genéricas (Nuevo, Importar, Editar, Eliminar, Exportar) ofrecen los clientes de UI en los registros de este objeto, sustituyendo el valor predeterminado de managedBy entrada por entrada. Una entrada sin definir mantiene ese valor predeterminado: platform ofrece las cinco; config y system-data todas salvo Importar; engine-owned, append-only y better-auth solo Exportar. Un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el valor predeterminado ofrezca la entrada. En un objeto engine-owned o append-only, activar una entrada también permite a los usuarios hacer esa escritura a través de la API de datos. Los usuarios siguen necesitando el permiso correspondiente."
+        helpText: "Qué entradas genéricas (Nuevo, Importar, Editar, Eliminar, Exportar) ofrecen los clientes de UI en los registros de este objeto, sustituyendo el valor predeterminado de managedBy entrada por entrada. Una entrada sin definir mantiene ese valor predeterminado: platform ofrece las cinco; config y system-data todas salvo Importar; engine-owned, append-only y better-auth solo Exportar. Un interruptor que no se ha tocado no escribe nada, así que aparece desactivado aunque el valor predeterminado ofrezca la entrada. En un objeto engine-owned o append-only, activar una entrada también permite a los usuarios hacer esa escritura a través de la API de datos. Los usuarios siguen necesitando el permiso correspondiente. Cambiar propietario no forma parte de esa matriz: su valor predeterminado sigue el modelo de uso compartido (vea su entrada)."
       },
       "userActions.create": {
         label: "Crear",
@@ -448,6 +468,22 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.exportCsv": {
         label: "Exportar CSV",
         helpText: "La entrada de exportación CSV. Sin definir: se muestra, porque todas las categorías de managedBy ofrecen la exportación."
+      },
+      "userActions.transfer": {
+        label: "Cambiar propietario",
+        helpText: "La acción Cambiar propietario, individual y masiva: activada la ofrece, desactivada la oculta. Sin definir: activada, salvo desactivada en un objeto de detalle controlled_by_parent. Solo se ofrece en un objeto cuyos registros tienen un propietario reasignable (ownership user o sin definir, sin managedBy, no es un objeto sys_, owner_id no es de solo lectura y, en un objeto externo, está declarado o mapeado); activarla en cualquier otro objeto se rechaza. Solo controla la acción, no una edición directa de owner_id. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escriba uno en el código fuente para condicionar la acción a cada registro."
+      },
+      actionLayout: {
+        label: "Disposición de acciones",
+        helpText: "El orden de las acciones de este objeto y cuáles son botones, por ámbito: pinned (como máximo 3 botones, en orden) y more (el orden del menú Más; una acción que no aparece en ninguno sigue en su orden predeterminado). Sin definir: cada superficie elige sus botones por el orden de las acciones, como antes."
+      },
+      "actionLayout.list": {
+        label: "Lista",
+        helpText: "La barra de herramientas de la página de lista, como {\"pinned\": [...], \"more\": [...]}: nombres de acciones colocadas en la barra de la lista; $import / $export solo en pinned. Como máximo 3 fijadas. Sin fijar, la página sigue mostrando su propio menú Importar / Exportar. os validate rechaza un nombre que no es una acción de este objeto o que no está en la barra de la lista; ese nombre no dibuja nada."
+      },
+      "actionLayout.record": {
+        label: "Registro",
+        helpText: "El encabezado del registro (página del registro, vista previa lateral, barra inferior del teléfono), como {\"pinned\": [...], \"more\": [...]}: nombres de acciones colocadas en el encabezado del registro o en su menú Más. Como máximo 3 fijadas. os validate rechaza un nombre que no es una acción de este objeto o que no está en la página del registro; ese nombre no dibuja nada."
       },
       editMode: {
         label: "Modo de edición",
@@ -737,6 +773,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Comportamiento al eliminar",
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
       },
+      transferBehavior: {
+        label: "Comportamiento al cambiar de propietario",
+        helpText: "Indica si «Cambiar propietario» en el registro referenciado también puede mover los registros que apuntan a él mediante este campo"
+      },
       relatedListFilter: {
         label: "Filtro de lista relacionada",
         helpText: "Filtro predeterminado para la lista relacionada de esta relación en la página de detalle del registro padre: combinado con AND con la coincidencia del registro padre, y el distintivo de la pestaña cuenta el mismo conjunto"
@@ -783,7 +823,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       inlineColumns: {
         label: "Columnas en línea",
-        helpText: "Columnas de la cuadrícula en línea del formulario del registro padre, en orden de visualización; solo se usan cuando este campo define inlineEdit, que se escribe en el código fuente. Sin definir: se derivan de los campos editables de este objeto y, a partir de seis, el resto empieza en el selector de columnas de la cuadrícula. Una entrada que solo nombra un campo toma de ese campo su tipo, opciones y reglas; las demás claves de columna, empezando por type, se escriben en el código fuente."
+        helpText: "Columnas de la cuadrícula en línea del formulario del registro padre, en orden de visualización; solo se usan cuando un grupo de campos del objeto padre indica este objeto hijo (fieldGroups[].relatedList). Sin definir: se derivan de los campos editables de este objeto y, a partir de seis, el resto empieza en el selector de columnas de la cuadrícula. Una entrada que solo nombra un campo toma de ese campo su tipo, opciones y reglas; las demás claves de columna, empezando por type, se escriben en el código fuente."
       },
       "inlineColumns.name": {
         label: "Nombre",
@@ -853,6 +893,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Oculto",
         helpText: "Oculta el campo en las vistas UI predeterminadas"
       },
+      showOnCreate: {
+        label: "Mostrar al crear",
+        helpText: "Pedir este campo al crear un registro. Desactivado: el diálogo de creación, la creación a página completa y una creación abierta por una acción lo omiten; la edición, la página del registro y las listas lo siguen mostrando. Un campo obligatorio siempre se pide, así que no se puede desactivar."
+      },
       searchable: {
         label: "Buscable",
         helpText: "Incluye en los resultados de búsqueda global"
@@ -885,9 +929,13 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Interno",
         helpText: "Nunca devuelve el valor de este campo por la ruta de datos genérica: el motor omite la clave en los resultados de find/findOne y en los cuerpos de respuesta de creación y actualización, tanto en la proyección predeterminada como cuando un cliente la nombra en ?select=. El almacenamiento, el filtrado y los índices no se ven afectados."
       },
+      fieldHistory: {
+        label: "Valores de cambios de campo",
+        helpText: "Valores anterior → nuevo de este campo en la cronología de actividad del registro. Predeterminado sigue a la plataforma: activado para la mayoría de los tipos, desactivado para un campo multimedia, JSON o de credenciales. Desactivado nombra el cambio solo con la etiqueta; Activado también muestra los valores de un campo multimedia o JSON. Un campo de credenciales nunca muestra valores, y si el propio objeto lo desactiva, manda el objeto."
+      },
       trackHistory: {
         label: "Registrar historial",
-        helpText: "Muestra los cambios de valor de este campo como entradas en la línea de actividad del registro (ADR-0052 §5b). Se activa campo a campo."
+        helpText: "Hace que un campo multimedia o JSON (imagen, archivo, json, …) muestre valores anterior → nuevo en la cronología de actividad. Los demás campos ya los muestran, y apagarlo no los oculta: use Valores de cambios de campo."
       },
       widget: {
         label: "Control del campo",
@@ -988,6 +1036,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "refusals.params": {
         label: "Parámetros",
         helpText: "Nombres que las frases pueden rellenar (p. ej. state): el cuerpo lanza { code, params: { state } } y un marcador {{ state }} muestra su valor. Si se omite: las frases son texto plano"
+      },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que el gancho escribe en los registros, indexadas por la clave snake_case que su código pide con ctx.text (p. ej. follow_up_subject). El gancho recibe el mensaje declarado en el idioma de la organización, traducido, con el mensaje declarado como respaldo. Para un cuerpo JavaScript (L2) o un manejador; se rechaza en un cuerpo de expresión"
+      },
+      "texts.message": {
+        label: "Mensaje",
+        helpText: "La frase que escribe el gancho cuando su código pide esta clave. Texto plano, salvo que la entrada declare params: entonces un marcador {{ name }} se rellena con un parámetro declarado"
+      },
+      "texts.params": {
+        label: "Parámetros",
+        helpText: "Nombres que la frase puede rellenar (p. ej. lead): el código pide ctx.text(key, { lead }) y un marcador {{ lead }} muestra su valor. Si se omite: la frase es texto plano"
       },
       handler: {
         label: "Manejador",
@@ -1331,10 +1391,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       navigation: {
         label: "Navegación",
-        helpText: "Configuración de la navegación al hacer clic en un elemento (panel lateral por defecto; también page, new_window o none)"
+        helpText: "Configuración de la navegación al hacer clic en un elemento: el tamaño del panel lateral y `preventNavigation` para una lista cuyas filas no abren nada (`mode` está obsoleto: el nombre del registro abre la página completa; el icono al pasar el cursor, el panel lateral)"
       },
       "navigation.mode": {
-        label: "Modo"
+        label: "Modo",
+        helpText: "[OBSOLETO] En la lista de un objeto (una vista de lista, los `listViews` de un objeto) ya no decide cómo se abre un registro: en la consola, para todos los lectores, el nombre del registro abre la página completa y el icono que aparece junto a él al pasar el cursor abre el panel lateral. Ahí `drawer`, `page` y `new_window` se siguen analizando y no cambian nada, así que omite la clave; `none` sigue significando que las filas no abren nada (es preferible `preventNavigation: true`). Un bloque de página que lleva `navigation` (un bloque de lista, la línea de tiempo, una vista incrustada) sigue respetando todos los valores."
       },
       "navigation.preventNavigation": {
         label: "Impedir navegación",
@@ -1342,7 +1403,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.openNewTab": {
         label: "Abrir en pestaña nueva",
-        helpText: "Fuerza la apertura en una pestaña nueva (se aplica al modo page)"
+        helpText: "Abre la página completa del registro en una pestaña nueva del navegador al hacer clic en él; las filas que no abren nada siguen así, y en un teléfono la página se abre en la misma pestaña"
       },
       "navigation.size": {
         label: "Tamaño",
@@ -1565,30 +1626,30 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "Nombre",
-        helpText: "Identificador único snake_case"
+        helpText: "Nombre interno único de este panel: letras minúsculas, números y guiones bajos, empezando por una letra (por ejemplo, sales_overview)."
       },
       label: {
         label: "Etiqueta",
-        helpText: "Nombre mostrado"
+        helpText: "El título que ven las personas para este panel."
       },
       description: {
         label: "Descripción"
       },
       columns: {
         label: "Columnas",
-        helpText: "Columnas de cuadrícula (predeterminado 12)"
+        helpText: "En cuántas columnas se colocan los widgets, de 1 a 24. Si lo dejas vacío, el panel elige un ancho que se ajuste a sus widgets."
       },
       gap: {
         label: "Separación",
-        helpText: "Espacio entre widgets, en incrementos de 0.25rem (4 = 1rem)"
+        helpText: "Cuánto espacio dejar entre los widgets. Cuanto mayor es el número, más separados quedan; déjalo vacío para usar el espaciado estándar."
       },
       refreshIntervalSeconds: {
         label: "Intervalo de actualización",
-        helpText: "Actualización automática (segundos)"
+        helpText: "Cada cuántos segundos el panel vuelve a cargar sus datos. Déjalo vacío o escribe 0 para desactivar la recarga automática."
       },
       header: {
         label: "Encabezado",
-        helpText: "Configuración de cabecera del panel (title, subtitle, actions)"
+        helpText: "Lo que se muestra en la parte superior del panel: su título, su descripción y los botones de acción."
       },
       "header.showTitle": {
         label: "Mostrar título",
@@ -1616,7 +1677,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "Widgets del panel",
-        helpText: "Widgets del panel con posición y tamaño"
+        helpText: "Los gráficos, cifras y tablas de este panel, y dónde se sitúa cada uno."
       },
       "widgets.id": {
         label: "ID del widget"
@@ -1671,11 +1732,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "Rango de fechas",
-        helpText: "Selector predeterminado de intervalo de fechas"
+        helpText: "El periodo con el que se abre el panel y si los usuarios pueden elegir sus propias fechas."
       },
       globalFilters: {
         label: "Filtros globales",
-        helpText: "Filtros aplicados a todos los widgets"
+        helpText: "Filtros que los usuarios pueden usar para acotar todos los widgets a la vez, o solo los que elijas."
       },
       "globalFilters.name": {
         label: "Nombre"
@@ -1880,6 +1941,42 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "body.memoryMb": {
         label: "Memoria (MB)",
         helpText: "Límite de memoria por invocación (MB, máx. 256)"
+      },
+      refusals: {
+        label: "Rechazos",
+        helpText: "Catálogo de rechazos, indexado por el código SCREAMING_SNAKE que lanza el cuerpo de la acción (p. ej. SIGN_IN_REQUIRED). Quien llama recibe el mensaje declarado, traducido a su idioma, con el estado declarado. Para el cuerpo JavaScript (L2) de una acción script; se rechaza en un cuerpo de expresión"
+      },
+      "refusals.message": {
+        label: "Mensaje",
+        helpText: "La frase que lee el usuario cuando el cuerpo lanza este código. Texto plano, salvo que la entrada declare params: entonces un marcador {{ name }} se rellena con un parámetro declarado"
+      },
+      "refusals.status": {
+        label: "Estado",
+        helpText: "Estado HTTP del rechazo (400–499). Si se omite: 400"
+      },
+      "refusals.reasons": {
+        label: "Motivos",
+        helpText: "Más frases bajo este mismo código, indexadas por el motivo snake_case que el cuerpo lanza junto al código ({ code, reason }). El código y el estado que se envían siguen siendo los de esta entrada; se rechaza un motivo no declarado aquí. Si se omite: no se lee un motivo lanzado"
+      },
+      "refusals.reasons.message": {
+        label: "Mensaje",
+        helpText: "La frase que lee el usuario cuando el cuerpo lanza este motivo bajo el código. Sus marcadores {{ }} siguen los params de la entrada"
+      },
+      "refusals.params": {
+        label: "Parámetros",
+        helpText: "Nombres que las frases pueden rellenar (p. ej. state): el cuerpo lanza { code, params: { state } } y un marcador {{ state }} muestra su valor. Si se omite: las frases son texto plano"
+      },
+      texts: {
+        label: "Textos",
+        helpText: "Frases que la acción escribe en los registros, indexadas por la clave snake_case que su cuerpo pide con ctx.text (p. ej. email_subject). El cuerpo recibe el mensaje declarado en el idioma de la organización, traducido, con el mensaje declarado como respaldo. Para el cuerpo JavaScript (L2) de una acción script; se rechaza en un cuerpo de expresión"
+      },
+      "texts.message": {
+        label: "Mensaje",
+        helpText: "La frase que escribe la acción cuando su cuerpo pide esta clave. Texto plano, salvo que la entrada declare params: entonces un marcador {{ name }} se rellena con un parámetro declarado"
+      },
+      "texts.params": {
+        label: "Parámetros",
+        helpText: "Nombres que la frase puede rellenar (p. ej. subject): el cuerpo pide ctx.text(key, { subject }) y un marcador {{ subject }} muestra su valor. Si se omite: la frase es texto plano"
       },
       params: {
         label: "Parámetros",
@@ -2101,7 +2198,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Etiqueta"
       },
       description: {
-        label: "Descripción"
+        label: "Descripción",
+        helpText: "Una frase sobre lo que muestra este informe; aparece bajo su nombre."
       },
       type: {
         label: "Tipo",
@@ -2183,9 +2281,33 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rango de fechas",
         helpText: "Periodo predeterminado e interruptor de rango personalizado. La dimensión debe ser una dimensión de fecha del conjunto de datos; déjela vacía cuando el conjunto de datos tenga exactamente una."
       },
+      "dateRange.dimension": {
+        label: "Campo de fecha",
+        helpText: "La agrupación de fecha de la fuente de datos a la que se aplica el período. Déjelo vacío si la fuente de datos solo tiene una."
+      },
+      "dateRange.defaultRange": {
+        label: "Período predeterminado",
+        helpText: "El período con el que se abre el informe."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Permitir rango personalizado",
+        helpText: "Permite que cada persona elija sus propias fechas de inicio y fin."
+      },
       exportOptions: {
         label: "Opciones de exportación",
         helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto del conjunto de datos."
+      },
+      "exportOptions.formats": {
+        label: "Formatos",
+        helpText: "Los formatos de descarga ofrecidos. Sin definir, se ofrecen csv y xlsx; una lista vacía desactiva las descargas."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Incluir encabezados",
+        helpText: "Pone los nombres de columna en la primera fila del archivo descargado."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "Nombre de archivo",
+        helpText: "El inicio del nombre del archivo descargado. Si se deja vacío, el archivo toma la etiqueta del informe, o su nombre si no tiene etiqueta."
       }
     }
   },

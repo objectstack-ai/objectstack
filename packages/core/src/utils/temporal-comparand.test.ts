@@ -22,6 +22,7 @@
 // column still reads the time of day of an instant in 0001..0999.
 
 import { describe, it, expect } from 'vitest';
+import { CONTEXT_TOKENS, PERIOD_KEY_TOKENS, RECORD_CONTEXT_TOKENS } from '@objectstack/spec/data';
 import { isUninterpretableTemporalComparand } from './temporal-comparand.js';
 import { temporalStorageForm } from './temporal-storage-form.js';
 
@@ -388,5 +389,80 @@ describe('[#20771] isUninterpretableTemporalComparand — the wall-clock half is
   it('refuses the hour past the last one, and a time of day with a zone', () => {
     expect(isUninterpretableTemporalComparand('time', '24:00')).toBe(true);
     expect(isUninterpretableTemporalComparand('time', '10:00Z')).toBe(true);
+  });
+});
+
+// [#34938] A period key (`{current_iso_week}`) is judged AS WRITTEN, never
+// stepped around like the other placeholders: it resolves to an ISO week key
+// (`2026-W47`), which no temporal rule reads, so it takes the refusal the
+// literal key takes. Measured before this, the key reached the driver and
+// compared as text against stored days (`$lt` every row, `$eq` none on SQLite
+// and memory) while the literal was refused. The date macros and an unknown
+// placeholder are still stepped around: the first resolve to values the rule
+// reads, the second has the resolver's own loud refusal.
+describe('[#34938] isUninterpretableTemporalComparand — a period key is judged as written, not stepped around', () => {
+  const KINDS = ['date', 'datetime', 'time'] as const;
+
+  it('refuses every period key, in both spellings, on every temporal kind — as it refuses the literal key', () => {
+    expect(PERIOD_KEY_TOKENS.length, 'the list is not empty, so the loop below judges something').toBeGreaterThan(0);
+    for (const kind of KINDS) {
+      for (const token of PERIOD_KEY_TOKENS) {
+        for (const spelling of [`{${token}}`, '$' + `{${token}}`]) {
+          expect(isUninterpretableTemporalComparand(kind, spelling), `${kind} ${spelling}`).toBe(true);
+        }
+      }
+      expect(isUninterpretableTemporalComparand(kind, '2026-W47'), `${kind} the literal key`).toBe(true);
+    }
+  });
+
+  it('still steps around a date macro and an unknown placeholder — the discriminating half', () => {
+    for (const kind of KINDS) {
+      for (const token of ['{current_week_start}', '${current_week_start}', '{today}', '{30_days_ago}']) {
+        expect(isUninterpretableTemporalComparand(kind, token), `${kind} ${token}`).toBe(false);
+      }
+      // A near spelling is not a period key: the resolver refuses it as unknown.
+      expect(isUninterpretableTemporalComparand(kind, '{current_iso_wek}'), `${kind} unknown`).toBe(false);
+    }
+  });
+});
+
+// [#35394] A context token (`{current_user_id}`, `{current_org_id}`) is judged
+// AS WRITTEN too, for the period key's reason: it resolves to the caller's
+// user or organization id, which no temporal rule reads, so it takes the
+// refusal the literal id takes. Measured before this through `engine.find` on
+// SqlDriver (SQLite) and InMemoryDriver alike: `$lt` answered every row and
+// `$eq` / `$gte` none on a `date`, `datetime` and `time` column, while the
+// literal id was refused. The step-around is kept for the kinds whose own
+// layer has the last word: a date macro (judged by its year once resolved),
+// and an unknown or record-context token (refused by name by the resolver).
+describe('[#35394] isUninterpretableTemporalComparand — a context token is judged as written, not stepped around', () => {
+  const KINDS = ['date', 'datetime', 'time'] as const;
+
+  it('refuses every context token, in both spellings, on every temporal kind — as it refuses the literal id', () => {
+    expect(CONTEXT_TOKENS.length, 'the list is not empty, so the loop below judges something').toBeGreaterThan(0);
+    for (const kind of KINDS) {
+      for (const token of CONTEXT_TOKENS) {
+        for (const spelling of [`{${token}}`, '$' + `{${token}}`]) {
+          expect(isUninterpretableTemporalComparand(kind, spelling), `${kind} ${spelling}`).toBe(true);
+        }
+      }
+      expect(isUninterpretableTemporalComparand(kind, 'usr_1'), `${kind} the literal id`).toBe(true);
+    }
+  });
+
+  it('still steps around a date macro, an unknown and a record-context token — the discriminating half', () => {
+    expect(RECORD_CONTEXT_TOKENS.length, 'the list is not empty, so the loop below judges something').toBeGreaterThan(0);
+    for (const kind of KINDS) {
+      for (const token of ['{current_week_start}', '${current_week_start}', '{today}', '{30_days_ago}']) {
+        expect(isUninterpretableTemporalComparand(kind, token), `${kind} ${token}`).toBe(false);
+      }
+      // The resolver refuses these by name (FILTER_TOKEN_UNRESOLVED / FILTER_TOKEN_UNKNOWN).
+      for (const token of RECORD_CONTEXT_TOKENS) {
+        expect(isUninterpretableTemporalComparand(kind, `{${token}}`), `${kind} {${token}}`).toBe(false);
+      }
+      for (const token of ['{current_user}', '{TODAY}', '{current_user_idd}']) {
+        expect(isUninterpretableTemporalComparand(kind, token), `${kind} unknown ${token}`).toBe(false);
+      }
+    }
   });
 });

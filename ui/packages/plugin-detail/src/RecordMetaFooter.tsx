@@ -17,6 +17,11 @@ import { useDetailTranslation } from './useDetailTranslation';
 import { hasCellValue } from './emptiness';
 import { useDefaultRecordPage } from './defaultRecordPage';
 import { deriveHighlightFields } from './synth/buildDefaultPageSchema';
+import { useBodyDrawnFieldNames } from './recordBodyFields';
+import { useRecordFieldList } from './recordFieldList';
+import { RecordPageProvenanceContext } from './recordPageProvenance';
+import { DetailSection } from './DetailSection';
+import type { DetailViewField } from '@object-ui/types';
 
 /**
  * The record's reassignable owner column — the canonical injected
@@ -203,12 +208,19 @@ const MetaEntry: React.FC<MetaEntryProps> = ({ label, user, date, objectSchema, 
     </TooltipProvider>
   ) : null;
 
+  // "· 3d ago" is one unit that never breaks (objectstack#34614): in a narrow
+  // drawer the entry wraps BETWEEN its pieces, so the whole unit moves to the
+  // next line instead of the relative time breaking word by word.
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex flex-wrap items-center gap-x-1.5" data-record-meta-entry="">
       <span className="text-muted-foreground/70">{label}</span>
       {user ? <UserRef value={user} objectSchema={objectSchema} fieldName={userField} /> : null}
-      {user && dateNode ? <span className="text-muted-foreground/40">·</span> : null}
-      {dateNode}
+      {dateNode ? (
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap" data-record-meta-when="">
+          {user ? <span className="text-muted-foreground/40">·</span> : null}
+          {dateNode}
+        </span>
+      ) : null}
     </span>
   );
 };
@@ -239,6 +251,12 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
   // names the record's owner and its id (the v3 meta line: created · updated
   // · owner · id), at the foot of the details column.
   const v3MetaLine = useDefaultRecordPage();
+  // The fields the page's body draws (objectstack#35941), read before the
+  // early return so hook order never varies; `null` outside the laid-out page.
+  const bodyFields = useBodyDrawnFieldNames();
+  // objectstack#36147 — in the record page's field list the provenance is the
+  // list's last group, 「系统信息」, folded until opened, not a line of its own.
+  const fieldList = useRecordFieldList();
   if (!data) return null;
 
   const createdAt = toDate(data[AUDIT_FIELDS.createdAt]);
@@ -256,17 +274,56 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
   const hasUpdated =
     !!(updatedAt || updatedBy) && !(updateIsSameAsCreate && (sameUser || !updatedBy));
 
-  // The owner is named ONCE on the page (objectstack#28868): when the
-  // highlight strip the page draws carries the owner field, the strip names it
-  // and this line leaves it out. The host that draws the strip says which
-  // fields it drew; without that, the strip is the object's declared
-  // highlights, read by the one function every reader of the strip asks.
+  // The owner is named ONCE on the page (objectstack#28868): when the page
+  // already draws the owner field, this line leaves it out. Two places draw
+  // it. The highlight strip: the host that draws the strip says which fields
+  // it drew; without that, the strip is the object's declared highlights,
+  // read by the one function every reader of the strip asks. And the body
+  // (objectstack#35941): a details section of the page's record that draws
+  // the `owner_id` row, where the owner can also be changed, as the sections
+  // themselves report it. A row the reader cannot see (denied, hidden by a
+  // `visibleWhen`, in a collapsed section) is not reported, so the owner
+  // stays here.
   const stripFields = drawnHighlightFields ?? deriveHighlightFields(objectSchema, null);
   const stripNamesOwner = stripFields.includes(OWNER_FIELD);
-  const owner = v3MetaLine && !stripNamesOwner ? actorOrNone(data[OWNER_FIELD]) : undefined;
+  const bodyDrawsOwner = bodyFields?.has(OWNER_FIELD) === true;
+  const owner = v3MetaLine && !stripNamesOwner && !bodyDrawsOwner ? actorOrNone(data[OWNER_FIELD]) : undefined;
   const recordId = v3MetaLine && hasCellValue(data.id) ? String(data.id) : undefined;
 
   if (!hasCreated && !hasUpdated && !owner && !recordId) return null;
+
+  if (fieldList && v3MetaLine) {
+    const actorField = (name: string, label: string): DetailViewField => {
+      const def = objectSchema?.fields?.[name];
+      return { name, label, type: def?.type || 'lookup', reference: def?.reference || 'sys_user', readonly: true } as DetailViewField;
+    };
+    const fields: DetailViewField[] = [];
+    if (createdBy) fields.push(actorField(AUDIT_FIELDS.createdBy, t('detail.createdBy')));
+    if (createdAt) fields.push({ name: AUDIT_FIELDS.createdAt, label: t('detail.createdTime', { defaultValue: 'Created on' }), type: 'datetime', readonly: true } as DetailViewField);
+    if (hasUpdated && updatedBy) fields.push(actorField(AUDIT_FIELDS.updatedBy, t('detail.updatedBy')));
+    if (hasUpdated && updatedAt) fields.push({ name: AUDIT_FIELDS.updatedAt, label: t('detail.updatedTime', { defaultValue: 'Updated on' }), type: 'datetime', readonly: true } as DetailViewField);
+    if (owner) fields.push(actorField(OWNER_FIELD, t('detail.owner', { defaultValue: 'Owner' })));
+    if (recordId) fields.push({ name: 'id', label: t('detail.recordNumber', { defaultValue: 'Record ID' }), type: 'text', readonly: true } as DetailViewField);
+    // Its rows are not the body's: they report no drawn field, so the owner
+    // rule above reads the body alone. No object name, so each row reads the
+    // label given here, and no row offers edit.
+    return (
+      <RecordPageProvenanceContext.Provider value={false}>
+        <div className={className} data-testid="record-meta-footer" data-record-system-info="">
+          <DetailSection
+            section={{
+              title: t('detail.systemInfo', { defaultValue: 'System information' }),
+              collapsible: true,
+              defaultCollapsed: true,
+              fields,
+            }}
+            data={data}
+            objectSchema={objectSchema}
+          />
+        </div>
+      </RecordPageProvenanceContext.Provider>
+    );
+  }
 
   return (
     <div
@@ -309,7 +366,7 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
         </span>
       )}
       {recordId && (
-        <span className="font-mono text-[11px] text-muted-foreground/80" data-record-meta-id="">
+        <span className="font-mono text-xs text-muted-foreground/80" data-record-meta-id="">
           {recordId}
         </span>
       )}

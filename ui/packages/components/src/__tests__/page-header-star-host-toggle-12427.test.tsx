@@ -32,6 +32,9 @@ import { ComponentRegistry } from '@object-ui/core';
 // Registers every renderer at module scope, not in a hook
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../renderers';
+// `page`'s react-page loads it with a dynamic import; paid at collection, not
+// inside a case's clocked window (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 afterEach(() => {
   cleanup();
@@ -104,6 +107,17 @@ describe('page:header record chrome: the favorite star draws only where the host
     ]);
     fireEvent.click(star);
     expect(onToggleFavorite).toHaveBeenCalledTimes(1);
+  });
+
+  it('the star keeps a 44px tap target on a phone, as the copy-id button beside it does (objectstack#36246)', () => {
+    const { header } = renderHeader({ isFavorite: false, onToggleFavorite: () => {} });
+    const [star] = stars(header);
+    const copyId = header.querySelector('button[aria-label="Copy record ID"]')!;
+    for (const cls of ['min-h-[44px]', 'min-w-[44px]', 'sm:min-h-0', 'sm:min-w-0']) {
+      // CONTROL: the copy-id button carries the same phone target.
+      expect(copyId.classList.contains(cls), `copy-id ${cls}`).toBe(true);
+      expect(star.classList.contains(cls), `star ${cls}`).toBe(true);
+    }
   });
 
   it('CONTROL: the star mirrors the host state', () => {

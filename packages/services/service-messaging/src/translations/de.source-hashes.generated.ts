@@ -18,6 +18,8 @@
  */
 
 export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_channel_account.fields.display_name.label": "f25b78f28461e4d7",
+  "objects.sys_channel_account.fields.status.label": "64a420165247654b",
   "objects.sys_http_delivery.fields.partition_key.label": "ff6e8336a279020a",
   "objects.sys_http_delivery.fields.status.help": "e437ecf81dfb4715",
   "objects.sys_http_delivery.fields.status.label": "64a420165247654b",

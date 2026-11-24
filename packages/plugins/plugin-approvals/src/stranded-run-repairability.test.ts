@@ -421,7 +421,7 @@ describe('#15358 · #15222 — a cascade-failed ancestor, reported and now repai
     const decided = await pendingRequest();
     const decidedRunId = decided.flow_run_id as string;
     const err = await service
-      .decide(decided.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX)
+      .decide(decided.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX)
       .then(() => null, (e: Error) => e);
     expect(strandedDecisionDetails(err)).toEqual({
       finalized: true, decision: 'reject', runId: decidedRunId, repairable: true,

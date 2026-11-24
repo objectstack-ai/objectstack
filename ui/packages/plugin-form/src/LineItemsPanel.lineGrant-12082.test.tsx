@@ -65,6 +65,7 @@ const envelope = (bits: Record<string, unknown>): MePermissionsAuthenticatedResp
   userId: 'u-pin',
   tenantId: null,
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['member'],
   permissionSets: ['member'],
   // The parent is fully granted: only the CHILD's grant may decide.

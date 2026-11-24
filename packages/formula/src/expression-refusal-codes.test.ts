@@ -464,6 +464,26 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
     },
   ],
+  // [#34660] A flow value envelope: the run fails when the value is computed, and no condition runs there.
+  'date-text-arithmetic-value-run-may-fail': [
+    {
+      produce: () =>
+        onlyError('value', { dialect: 'cel', source: 'record.end_at - record.start_at' }, {
+          fieldTypes: { start_at: 'datetime', end_at: 'datetime' },
+          flowValueEnvelope: true,
+        }),
+      params: { operands: 'DateText - DateText', reference: 'record.start_at' },
+      message:
+        'date arithmetic `DateText - DateText` — `record.start_at` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: ' +
+        'this faults wherever `record.start_at` holds that text when the value is computed, and ' +
+        'a flow value that cannot be computed fails the run: the flow stops at this step and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Use `daysBetween(a, b)` for the span in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. ' +
+        'For a span in hours or minutes, wrap each side in `datetime(…)` and read the Duration: ' +
+        '`(datetime(b) - datetime(a)).getMinutes()` / `.getHours()`.',
+    },
+  ],
   // [#32595] A call handed a date field's text that no overload accepts.
   'date-text-call': [
     {
@@ -489,6 +509,26 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
         'this faults at runtime, so the field silently evaluates to null. ' +
         'Parse the text into a timestamp first: `date(record.start_date).getFullYear()`.',
+    },
+    {
+      // [#34363] `timestamp()`'s string overload checks clean on a date-only field's text and faults on it.
+      produce: () =>
+        onlyError('value', "isoDate(timestamp(record.borrow_date) + duration('168h'))", {
+          scope: 'record',
+          fieldTypes: { borrow_date: 'date' },
+        }),
+      params: {
+        call: 'timestamp(record.borrow_date)',
+        reference: 'record.borrow_date',
+        rewrite: 'date(record.borrow_date)',
+        shift: 'isoDate(addDays(record.borrow_date, N))',
+      },
+      message:
+        '`timestamp(record.borrow_date)` — `record.borrow_date` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults at runtime, so the field silently evaluates to null. ' +
+        'Parse the text into a timestamp first: `date(record.borrow_date)`. ' +
+        'To shift it by N whole days and keep it a date, write `isoDate(addDays(record.borrow_date, N))`.',
     },
   ],
   'date-text-call-fail-closed': [
@@ -563,6 +603,30 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'a flow condition that cannot be evaluated fails the run: the flow stops at this condition and the work the flow ' +
         'exists to do is not done (it does not read null). ' +
         'Parse the text into a timestamp first: `isoDate(date(start_at))`.',
+    },
+  ],
+  // [#34660] The same call in a flow value envelope, with the optional `shift` clause.
+  'date-text-call-value-run-may-fail': [
+    {
+      produce: () =>
+        onlyError('value', { dialect: 'cel', source: "isoDate(timestamp(record.borrow_date) + duration('168h'))" }, {
+          fieldTypes: { borrow_date: 'date' },
+          flowValueEnvelope: true,
+        }),
+      params: {
+        call: 'timestamp(record.borrow_date)',
+        reference: 'record.borrow_date',
+        rewrite: 'date(record.borrow_date)',
+        shift: 'isoDate(addDays(record.borrow_date, N))',
+      },
+      message:
+        '`timestamp(record.borrow_date)` — `record.borrow_date` is a date field, and the runtime holds a date field as its text ' +
+        '(`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which this call does not accept: ' +
+        'this faults wherever `record.borrow_date` holds that text when the value is computed, and ' +
+        'a flow value that cannot be computed fails the run: the flow stops at this step and the work the flow ' +
+        'exists to do is not done (it does not read null). ' +
+        'Parse the text into a timestamp first: `date(record.borrow_date)`. ' +
+        'To shift it by N whole days and keep it a date, write `isoDate(addDays(record.borrow_date, N))`.',
     },
   ],
   'date-duration-value': [
@@ -776,6 +840,99 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         "label() reads a select field's option label; read any other field directly (record.first).",
     },
   ],
+  // [#36167] A list-valued field compared with a scalar answers a constant.
+  'list-equality': [
+    {
+      produce: () =>
+        onlyError('predicate', "record.labels == 'frontend'", {
+          scope: 'record',
+          fields: ['labels'],
+          fieldTypes: { labels: 'multiselect' },
+        }),
+      params: {
+        reference: 'record.labels',
+        operator: '==',
+        operand: '"frontend"',
+        answer: 'false',
+        rewrite: '(has(record.labels) && record.labels != null && "frontend" in record.labels)',
+      },
+      message:
+        'list compared with a scalar — `record.labels` holds a list (a multi-value field), and `==` compares the whole ' +
+        'list with `"frontend"`, so the expression answers `false` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write ' +
+        '`(has(record.labels) && record.labels != null && "frontend" in record.labels)`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      produce: () =>
+        onlyError('predicate', "'u1' != previous.owners", {
+          scope: 'record',
+          fields: ['owners'],
+          fieldTypes: { owners: 'user' },
+          multiValueFields: ['owners'],
+        }),
+      params: {
+        reference: 'previous.owners',
+        operator: '!=',
+        operand: '"u1"',
+        answer: 'true',
+        rewrite: '(!has(previous.owners) || previous.owners == null || !("u1" in previous.owners))',
+      },
+      message:
+        'list compared with a scalar — `previous.owners` holds a list (a multi-value field), and `!=` compares the whole ' +
+        'list with `"u1"`, so the expression answers `true` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write ' +
+        '`(!has(previous.owners) || previous.owners == null || !("u1" in previous.owners))`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      // A bare field name at a flattened site proven to bind the typed row.
+      produce: () =>
+        onlyError('predicate', "owners != 'u1'", {
+          scope: 'flattened',
+          faultOutcome: 'run-fails',
+          fields: ['owners'],
+          fieldTypes: { owners: 'user' },
+          multiValueFields: ['owners'],
+        }),
+      params: {
+        reference: 'owners',
+        operator: '!=',
+        operand: '"u1"',
+        answer: 'true',
+        rewrite: '(owners == null || !("u1" in owners))',
+      },
+      message:
+        'list compared with a scalar — `owners` holds a list (a multi-value field), and `!=` compares the whole ' +
+        'list with `"u1"`, so the expression answers `true` on every row whatever the list holds: the condition ' +
+        'never changes. Test membership with `in`: write `(owners == null || !("u1" in owners))`. ' +
+        'To test whether the list is set, compare it with `null`.',
+    },
+    {
+      // A source compiled to a query filter (a sharing rule's condition).
+      produce: () =>
+        onlyError('predicate', "record.labels == 'frontend'", {
+          scope: 'record',
+          filterCompiled: true,
+          fields: ['labels'],
+          fieldTypes: { labels: 'multiselect' },
+        }),
+      params: {
+        reference: 'record.labels',
+        operator: '==',
+        operand: '"frontend"',
+        answer: 'false',
+        rewrite: '(record.labels != null && record.labels.contains("frontend"))',
+      },
+      message:
+        'list compared with a scalar — `record.labels` holds a list (a multi-value field), and `==` compares the whole ' +
+        'list with `"frontend"`: as CEL it answers `false` on every row, and this condition compiles to a query ' +
+        'filter, where `==` against a list column is refused, so it never tests membership. Test membership with ' +
+        '`contains`, which compiles to a membership filter: write ' +
+        '`(record.labels != null && record.labels.contains("frontend"))`. To test whether the list is set, compare ' +
+        'it with `null`.',
+    },
+  ],
   'empty-expression': [
     {
       produce: () => rootsRefusal('   '),
@@ -851,6 +1008,8 @@ const SWEEP_SOURCES: readonly string[] = [
   'close_date - close_date > duration("1h")',
   // [#32595] A date field's text handed to a call that refuses text.
   'isoDate(record.close_date)',
+  // [#34363] The string overload over a date-only field: the optional `shift` clause.
+  "timestamp(record.close_date) + duration('24h')",
   'isoDate(close_date) == "2026-01-01"',
   'record.name > 5',
   'record.active + 1 > 5',
@@ -860,6 +1019,8 @@ const SWEEP_SOURCES: readonly string[] = [
   'has(status) && other == 1',
   'daysBetween(record.a, record.b) > 3',
   "label(record.name) + label(record.status)",
+  // [#36167] A list-valued field compared with a scalar.
+  "record.tags == 'frontend'",
 ];
 
 const SWEEP_INPUTS: readonly ExprInput[] = [
@@ -884,7 +1045,7 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
     scope: 'record',
     objectName: 'deal',
     fields: ['amount', 'close_date', 'name', 'active', 'account', 'status'],
-    fieldTypes: { close_date: 'date', name: 'text', active: 'boolean', account: 'lookup' },
+    fieldTypes: { close_date: 'date', name: 'text', active: 'boolean', account: 'lookup', tags: 'multiselect' },
     roleCatalog: ['org_admin', 'sales'],
     optionFields: ['status'],
   },
@@ -932,6 +1093,9 @@ const SWEEP_SCHEMAS: readonly (ExprSchemaHint | undefined)[] = [
   // [#29959] A flattened (flow) condition with no declared outcome reaches
   // `type-mismatch-run-may-fail`, bare and through `record.`.
   { scope: 'flattened', objectName: 'deal', fields: ['amount', 'name', 'active'], fieldTypes: { name: 'text', active: 'boolean' } },
+  // [#34660] A flow value envelope with a date field reaches the date-text
+  // verdicts' `-value-run-may-fail` codes.
+  { fieldTypes: { close_date: 'date' }, flowValueEnvelope: true },
   { fields: ['status'] },
   { fieldTypes: { account: 'lookup' }, traversalHydration: true },
 ];
@@ -989,8 +1153,8 @@ function refusalKey(said: ExprValidationError): string {
 }
 
 /**
- * The validateExpression sweep's budget. The case is synchronous: 5,760
- * validateExpression calls (3 roles x 128 inputs x 15 schemas), most of the
+ * The validateExpression sweep's budget. The case is synchronous: 6,144
+ * validateExpression calls (3 roles x 128 inputs x 16 schemas), most of the
  * time in building a typed CEL environment for each call. Its work is the
  * sweep's breadth, which is the claim, so the breadth stays; only re-judging
  * duplicate refusals was cut (see the case). Readings of the case, in ms:
@@ -1003,6 +1167,11 @@ function refusalKey(said: ExprValidationError): string {
  *   - Local, 4 vCPU, this file alone: 757 to 830 before the cut, 534 to 645
  *     after it. Pinned to one CPU shared with two busy loops: 2542 to 3063
  *     before, 1961 to 2137 after.
+ *   - Local, 4 vCPU, this file alone, when the flow value-envelope schema
+ *     joined (15 schemas to 16): 192 to 225 with it, 186 to 267 for the 15
+ *     in the same session. That schema stands down on every source but a
+ *     date field's value, so the 16th adds nothing measurable and the budget
+ *     stands.
  *
  * The rule follows `packages/cli/test/hook-timeout-override-refusal.test.ts`:
  * 3x the slowest reading, rounded up to the next second. 3 x 5034 = 15102, so

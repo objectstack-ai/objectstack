@@ -44,10 +44,18 @@ let appsFixture: Array<Record<string, unknown>> = [];
 vi.mock('react-router-dom', () => ({
   useNavigate: () => navigateMock,
   useParams: () => ({ appName: routeAppNameFixture }),
+  useLocation: () => ({ pathname: '/', search: '' }),
 }));
 
 vi.mock('../../context/NavigationContext', () => ({
   useNavigationContext: () => ({ currentAppName: currentAppNameFixture }),
+}));
+
+// objectstack#35505 — the person's last used app; `null`, as outside a
+// provider, unless a case names one.
+let lastAppFixture: string | null = null;
+vi.mock('../../context/LastAppProvider', () => ({
+  useLastApp: () => ({ lastApp: lastAppFixture, settled: true, rememberApp: () => {} }),
 }));
 
 vi.mock('../../providers/MetadataProvider', () => ({
@@ -70,9 +78,10 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 vi.mock('@object-ui/components', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   Button: ({ children, ...p }: any) => <button type="button" {...p}>{children}</button>,
-  Popover: ({ children }: any) => <div>{children}</div>,
-  PopoverTrigger: ({ children }: any) => <div>{children}</div>,
-  PopoverContent: ({ children }: any) => <div>{children}</div>,
+  Sheet: ({ children }: any) => <div>{children}</div>,
+  SheetTrigger: ({ children }: any) => <div>{children}</div>,
+  SheetContent: ({ children }: any) => <div>{children}</div>,
+  SheetTitle: ({ children }: any) => <div>{children}</div>,
   Tabs: ({ children }: any) => <div>{children}</div>,
   TabsList: ({ children }: any) => <div>{children}</div>,
   TabsTrigger: ({ children }: any) => <button type="button">{children}</button>,
@@ -120,6 +129,7 @@ describe('InboxPopover approvals link keys on the route segment (objectui#11818)
     cleanup();
     navigateMock.mockReset();
     appsFixture = [SETUP, SHOWCASE];
+    lastAppFixture = null;
   });
 
   describe('inside an app routed by its package id, the link lands on the route segment', () => {
@@ -178,5 +188,38 @@ describe('InboxPopover approvals link keys on the route segment (objectui#11818)
       routeAppNameFixture = 'com.example.showcase';
       expect(await viewApprovals()).toBe('/apps/com.example.showcase/system/approvals');
     });
+  });
+});
+
+describe('InboxPopover approvals open in the current, last used or first app (objectstack#35505)', () => {
+  const CRM = { name: 'crm', label: 'CRM' };
+  beforeEach(() => {
+    cleanup();
+    navigateMock.mockReset();
+    appsFixture = [SHOWCASE, CRM, SETUP];
+    lastAppFixture = null;
+    routeAppNameFixture = undefined;
+    currentAppNameFixture = undefined;
+  });
+
+  it('outside an app with no current app, the last used app ahead of the first', async () => {
+    lastAppFixture = 'crm';
+    expect(await viewApprovals()).toBe('/apps/crm/system/approvals');
+  });
+
+  it('the current app wins over the last used app', async () => {
+    currentAppNameFixture = 'showcase_app';
+    lastAppFixture = 'crm';
+    expect(await viewApprovals()).toBe('/apps/com.example.showcase/system/approvals');
+  });
+
+  it('Setup as the last used app keeps the inbox there', async () => {
+    lastAppFixture = 'setup';
+    expect(await viewApprovals()).toBe('/apps/com.objectstack.setup/system/approvals');
+  });
+
+  it('CONTROL: the "see all" drill keeps the generic host (first app), untouched by the last used app', async () => {
+    lastAppFixture = 'crm';
+    expect(await clickTo('View all notifications', 3)).toBe('/apps/com.example.showcase/sys_inbox_message?view=mine');
   });
 });

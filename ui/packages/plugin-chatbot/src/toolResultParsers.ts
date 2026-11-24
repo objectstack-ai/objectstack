@@ -152,20 +152,40 @@ export function detectPendingApproval(
  * objectstack#25908 — a message with no `data-chart` part reads its charts off
  * its `visualize_data` results instead ({@link chartFromToolResult}), each at
  * the offset of its tool part.
+ *
+ * objectstack#34716 — on that results path, results in this ONE message that
+ * carry the same `chartId` are one chart redrawn: it is drawn once, with the
+ * LAST result's descriptor, at the offset of the FIRST (where the reader first
+ * saw it), mirroring the live stream, where a redraw replaces the `data-chart`
+ * part in place. A result without a `chartId` is its own chart. A `chartId` is
+ * unique within one request only, so this never looks across messages.
  */
 export function extractCharts(parts: AnyPart[], opts: { anchored: boolean }): ChatChart[] | undefined {
   const fromParts: ChatChart[] = [];
   const fromResults: ChatChart[] = [];
+  const resultIndexByChartId = new Map<string, number>();
   let textOffset = 0;
   for (const p of parts) {
     if (p.type === 'text') {
       textOffset += (p.text ?? '').length;
       continue;
     }
-    const isPart = p.type === 'data-chart';
-    const chart = isPart ? chartFromDescriptor(p.data) : chartFromToolResult(p);
-    if (!chart) continue;
-    (isPart ? fromParts : fromResults).push(opts.anchored ? { ...chart, textOffset } : chart);
+    if (p.type === 'data-chart') {
+      const chart = chartFromDescriptor(p.data);
+      if (chart) fromParts.push(opts.anchored ? { ...chart, textOffset } : chart);
+      continue;
+    }
+    const read = chartFromToolResult(p);
+    if (!read) continue;
+    const { chart, chartId } = read;
+    const redrawn = chartId === undefined ? undefined : resultIndexByChartId.get(chartId);
+    if (redrawn !== undefined) {
+      const first = fromResults[redrawn];
+      fromResults[redrawn] = opts.anchored ? { ...chart, textOffset: first.textOffset } : chart;
+      continue;
+    }
+    if (chartId !== undefined) resultIndexByChartId.set(chartId, fromResults.length);
+    fromResults.push(opts.anchored ? { ...chart, textOffset } : chart);
   }
   // objectstack#25908 — a live stream carries BOTH the transient `data-chart`
   // part and the `visualize_data` result that persisted the same chart, so the
@@ -218,11 +238,20 @@ export const VISUALIZE_DATA_TOOL = 'visualize_data';
  * `rows` are a preview cut for the model's narration and are never drawn, and
  * a result persisted before the producer wrote `chart` gets no chart: nothing
  * is rebuilt from its other keys.
+ *
+ * objectstack#34716 — beside `chart`, the envelope's top-level `chartId` names
+ * the chart a result draws; a redraw repeats the id of the chart it replaces.
+ * Only a non-empty string is an id: a result without one keeps `chartId`
+ * undefined and stays its own chart.
  */
-function chartFromToolResult(p: AnyPart): ChatChart | undefined {
+function chartFromToolResult(p: AnyPart): { chart: ChatChart; chartId?: string } | undefined {
   const toolName = p.type === 'dynamic-tool' ? p.toolName : p.type?.replace(/^tool-/, '');
   if (toolName !== VISUALIZE_DATA_TOOL) return undefined;
-  return chartFromDescriptor(parseResultEnvelope(p.output ?? p.result)?.chart);
+  const envelope = parseResultEnvelope(p.output ?? p.result);
+  const chart = chartFromDescriptor(envelope?.chart);
+  if (!chart) return undefined;
+  const chartId = envelope?.chartId;
+  return typeof chartId === 'string' && chartId.length > 0 ? { chart, chartId } : { chart };
 }
 
 /**

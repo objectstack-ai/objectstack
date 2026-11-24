@@ -1,6 +1,6 @@
 # ADR-0137: A predicate's FAULT semantics are part of the protocol — loud at submit, fail-open at render, and a blank predicate is a declared third state
 
-**Status**: Accepted (2026-09-18) — **this record declares; it implements nothing.** D1's authoring refusal is ruled by decision batch #122 item 2 (card #15811, [`5644350409`](https://github.com/objectstack-ai/objectstack/issues/15811#issuecomment-5644350409), 2026-09-12) and lands in PR #18638, which owns the accept-set narrowing across every evaluated slot under one ADR-0087 id — this record's own PR carries **no** schema change, by decision batch #160 item 1 (2026-09-18: 「同意」 to **A**). **D2 / D3 / D4 are declared here and delivered by consumers** — the renderer and submit path in objectui#8069, which is `pm:blocked` on this record. See [Scope boundary](#scope-boundary-what-this-record-does-not-land) for what this record does not land and who lands it.
+**Status**: Accepted (2026-09-18); amended 2026-11-17 (a server row for a `required` field's own `visibleWhen`, under D2) — **this record declares; it implements nothing.** D1's authoring refusal is ruled by decision batch #122 item 2 (card #15811, [`5644350409`](https://github.com/objectstack-ai/objectstack/issues/15811#issuecomment-5644350409), 2026-09-12) and lands in PR #18638, which owns the accept-set narrowing across every evaluated slot under one ADR-0087 id — this record's own PR carries **no** schema change, by decision batch #160 item 1 (2026-09-18: 「同意」 to **A**). **D2 / D3 / D4 are declared here and delivered by consumers** — the renderer and submit path in objectui#8069, which is `pm:blocked` on this record. See [Scope boundary](#scope-boundary-what-this-record-does-not-land) for what this record does not land and who lands it.
 **Deciders**: ObjectStack Protocol Architects (maintainer ruling on objectui#8069, decision batch #119 item 3, 2026-09-12: 「同意」 to **A**, with **Q2 yes** and **Q3 yes**), filed as objectstack#17778 by the director seat
 **Builds on**: [ADR-0058](./0058-expression-and-predicate-surface.md) (the expression & predicate surface — its D5 predicate failure tiers are the table this record writes the field-rule row of), [ADR-0089](./0089-unify-visibility-predicate-naming.md) (unified the `*When` family under one NAME; this record decides what that family does when it cannot RUN), [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (conversion-over-notification — D1 lands as a D3 semantic entry because no D2 conversion exists), [ADR-0124](./0124-server-enforces-client-is-courtesy.md) (D1 server-enforces — why a render-side direction is never the whole answer), [ADR-0078](./0078-no-silently-inert-metadata.md) (no silently-inert metadata — a predicate that cannot run is the purest case), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0032](./0032-unified-expression-layer.md) (the CEL layer these predicates are written in)
 **Consumers**: `@objectstack/spec` (`shared/expression.zod.ts` — the predicate contract; `data/field.zod.ts` — the field-rule triad), `@objectstack/objectql` (`validation/rule-validator.ts` — the server-side enforcer whose three fault directions this record measured), `@objectstack/lint` (`validate-expressions.ts`, `validate-visibility-predicates.ts` — the author-time reporters), and the ObjectUI form renderer + submit path (objectui#8069)
@@ -145,6 +145,36 @@ invents a verdict nor hides that one is missing.
 A blank predicate takes this path too, wherever one is already stored — D1 keeps
 new ones from being authored, and D2 is what a stored one meets. That is what
 makes "blank" a declared **third** state rather than a spelling of "no rule".
+
+> **Amended (2026-11-17) — a new server row: a `required` field's own
+> `visibleWhen` at submit.** Since ADR-0113's amendment of that date (ruling A
+> on #34905, comment 6956761249) the write path evaluates the `visibleWhen` of a
+> field that is also `required`, to decide whether the requirement applies.
+> That row does **not** take D2's refusal: a fault there **counts as shown**,
+> the field keeps the unconditional `required` it carried before, and the fault
+> is logged per D4. D2's reason does not reach it — the fallback invents no
+> verdict the author did not write, it is the requirement the author did write,
+> left in force — and it is D3's direction carried to the server: a faulting
+> `visibleWhen` shows the field, and a shown required field must be filled.
+> A `formula` field the predicate reads whose read value the write path cannot
+> know (it reads through a reference, calls `label()`, calls `can` on a write
+> that resolved no permission map, reads the acting user on a write that has
+> none, or reads such a formula) is such a fault; the acting-user case is
+> logged as `no-acting-user`, as the direct `current_user` spelling is. That
+> mark covers any read of a bare user-scope root (`current_user`, its ADR-0068
+> aliases, or a bare `ctx` / `os` read such as `os.org`), because the engine
+> cannot separate the user-dependent part of such a read; the field then keeps
+> the unconditional `required` it carried before this amendment. A
+> formula calling `can` is computed on a write that picks a permission-gated
+> option, which resolves the map. A formula that faults for a reason a read shares (an
+> empty operand) is not: the predicate is judged on the `null` a read serves. A
+> clean verdict that is not TRUE (FALSE, or `null`) is not a fault: it hides the
+> field, as the form reads it.
+>
+> | slot, at submit | on a fault |
+> |---|---|
+> | `requiredWhen`, `readonlyWhen`, an option's `visibleWhen` | refused (D2) |
+> | a `required` field's own `visibleWhen` (a formula it reads that the write path cannot compute included) | counted as shown: required, logged (D4) |
 
 ### D3 — At RENDER, visibility stays fail-OPEN
 

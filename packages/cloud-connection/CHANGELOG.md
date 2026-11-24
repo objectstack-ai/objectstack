@@ -1,5 +1,339 @@
 # @objectstack/cloud-connection
 
+## 18.6.0
+
+### Patch Changes
+
+- 614b9b5: fix(cloud-connection)!: `POST /api/v1/marketplace/install-local` parses the manifest `namespace` through its declaration, as it already parses the id
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none (the declaration `ManifestSchema.shape.namespace` already refuses these values; this door now enforces it. The dev confirms against the diff.)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The install door now refuses a namespace `ManifestSchema.shape.namespace` already refuses everywhere else, `defineStack` and `objectstack build` included; no stored row, ledger entry or authored value is rewritten (an entry an older build ledgered still rehydrates), so there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING** for a caller of the install-local door whose package declares a `namespace` the manifest declaration refuses: anything but 2–20 characters of lowercase letters, digits and `_` opening with a lowercase letter.
+  
+  - FROM: an inline manifest declaring `namespace: ''`, `'QA_N'` or `'9-Bad Ns!'` answered `200`, was registered and ledgered under that namespace, and `QA_N` installed beside an existing owner of `qa_n` without the install-time namespace gate answering. TO: it answers `400 PLUGIN_MANIFEST_INVALID` with the declaration's own sentence and nothing is registered, synced or written.
+  - FROM: an inline manifest declaring `namespace: null` or a non-string `namespace` was admitted, the key unparsed (a `null` read as no namespace). TO: it answers the same `400 PLUGIN_MANIFEST_INVALID`; only an absent key means no namespace.
+  - FROM: a cloud-fetched snapshot declaring such a namespace installed the same way. TO: it answers `502 PLUGIN_MANIFEST_INVALID`, the status the door already gives an invalid upstream snapshot.
+  
+  **Not moved.** A manifest whose `namespace` key is absent installs as before (the key is optional). A member of a multi-package artifact declaring such a namespace keeps the artifact-entry refusal it already had (`INVALID_ARTIFACT_PACKAGE_ENTRY`, 422). A conforming namespace installs as before, and one another package owns still meets the registry's own namespace gate. A package an older build already installed under such a namespace still rehydrates at boot and can still be uninstalled; it cannot be re-installed until its namespace conforms.
+  
+  The fix for a caller: declare the namespace in lowercase snake form (`qa_n`, not `QA_N`), or omit it.
+- d5e6b20: fix(metadata-core,objectql,cloud-connection,cli)!: the package upgrade plan counts the fields a package adds through `objectExtensions`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped and no stored row changes: what moves is which fields the package upgrade comparison reads from each version, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  **BREAKING** for an upgrade that changes a field the package adds to an object through `objectExtensions`. Four kinds of upgrade that installed without a question before are now refused, exactly as the same change to a field of an object the package declares is:
+  
+  - an extension field retyped to a `needs_confirm` or `destructive` type: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`;
+  - an extension field dropped while another stored extension field of the same object is added, with no `renamedFrom` linking them: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, as a suspected rename;
+  - a stored field dropped from an object's own declaration in the upgraded version while an extension of the same object adds a stored field, or an extension field dropped while the object's own declaration adds one: `409 SCHEMA_UPGRADE_CONFIRMATION_REQUIRED`, as a suspected rename. The owned and the extension fields of one object are now one field map, so the two pair; before, they were never compared;
+  - an extension field that declares `renamedFrom` and whose new type stores no column (a `formula`, for example): `422 VALIDATION_ERROR` with `details.refusals[].reason: 'destructive_type'`, before anything is written, as for an owned field. No token answers this refusal.
+  
+  The package upgrade plan (`comparePackageVersions`) read only a version's `objects` and `data`. A field an `objectExtensions` entry adds, retypes or drops was therefore missing from the upgrade preview, from the rows counted per touched column, and from the schema upgrade verdict. A preview of an upgrade that added seven columns through extensions listed no added field, and its rollback listed no removed one.
+  
+  Now each side of the comparison is the objects as the registry serves them from that version: the owner's declaration, with every extension's `fields` merged over it by name, in ascending `priority` (`200` when none is declared). The existing rules then apply to an extension field unchanged:
+  
+  - an extension field added is listed in `plan.fields.added`, and one dropped in `plan.fields.removed`, with the rows holding a value counted in `environment.columns`;
+  - an extension field retyped is a type change; `needs_confirm` and `destructive` changes need the confirmation, and a `safe` one does not;
+  - an extension field dropped while another stored field of the same object is added, with no `renamedFrom` linking them, is a suspected rename and needs the confirmation; a field dropped alone is listed and refused by nothing, as an owned one is.
+  
+  An object a version reaches only through an extension (another package owns it) is compared by the fields the extension adds. It is never listed in `plan.objects.added` or `plan.objects.removed`, because the upgrade neither creates nor drops it. `os diff` prints the field changes of such an object under `objects.<name>.fields`.
+  
+  `PackageUpgradeSide` (`@objectstack/metadata-core`) gains an optional `objectExtensions` list. A caller that builds a side itself passes the version's `objectExtensions` beside its `objects`, read with the same collection reader; a side without the key compares as before.
+  
+  Who moves, and the fix for each:
+  
+  - An installer upgrading a package whose new version retypes an extension field, or drops a field of an object while another stored field of the same object is added (extension or owned, in either pairing): the `409`. Confirm the findings with the token the refusal names (`--confirm-upgrade <token>` on `os deploy` and `os package install`); for a suspected rename the refusal names the other way forward too.
+  - A package author whose new version renames an extension field with `renamedFrom` into a type that stores no column: the `422`. `--confirm-upgrade` does not answer it. Keep a stored type for the renamed field, or carry the values by hand, as the refusal's message says.
+  
+  Unchanged: a plan over packages that declare no `objectExtensions` is the same plan as before; seed datasets are compared as before; `fieldPatches` changes display properties only and stays out of the comparison.
+- 43dd565: fix(console): the console asks the deployment notice, install-local and a page's lookup targets only of a host that serves them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A hosted environment's console asked three routes its host does not serve, and each answered an error in the network log on every load.
+  
+  - **The deployment notice.** `GET /api/v1/runtime/config` now serves `features.deploymentNotice`. It is true exactly when the deployment notice is composed on this host: `SettingsServicePlugin` registers the notice's door as the kernel service `settings.deployment-notice` when it mounts the settings routes with it, and `RuntimeConfigPlugin` reads that registration per request. A host that mounts the settings routes itself, with no door, answers `GET /api/settings/deployment/notice` with `503` and now reports `false`. The route table is the same on both hosts, so it cannot answer this. A host's `resolveFeatures` policy cannot override the key. The console's home and System Overview read the notice only when the key is true. A runtime that serves no key is older than this change and still serves the notice, so the console keeps reading it there; only an explicit `false` stops the read.
+  - **Install-local on the marketplace catalog.** The catalog's side load reads `GET /api/v1/marketplace/install-local` only when `features.installLocal` is true, the gate the package page already reads. A host without it no longer answers a `404` on every load and Refresh, and the catalog list draws as before.
+  - **A page's lookup targets.** In an app with no package, a page and an object's route asked each lookup target's definition by name, and a target the host does not register (`sys_business_unit` on the control plane's Members page) answered `404` on every open. The targets the route has not asked already are now asked first in one `GET /api/v1/meta/object?names=` read, which leaves an absent object out, and only the ones it serves are then read by name. A registered target still resolves as before. An app with a package reads its lookup targets as before.
+- 857941d: fix(cloud-connection): install-local seeds a composed bundle's package datasets on install, reseed, upgrade and restart
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A composed bundle (`dist/objectstack.json` with `packages[]`, the ADR-0130 D4 publish shape) carries its seed datasets inside each package body and has no top-level `data`. Every seed door of `MarketplaceInstallLocalPlugin` read the top-level `data` only, so such a bundle installed with no sample data: the install, the reseed and an upgrade reported `seeded: { mode: 'skipped', reason: 'no-datasets' }`, nothing was shared for the per-organization replay of new organizations, the restart heal had nothing to seed, the purge answered `NOTHING_TO_PURGE`, the sample-data count answered `0`, and the installed-apps listing answered `withSampleData: false`.
+  
+  Every one of those doors now reads the seed datasets through `resolveStackCollection(body, 'data')` from `@objectstack/core`: the top-level `data` when the body carries one, otherwise each package body's, in the artifact's package order (the dependency order the packages register in). A flat bundle, and a composed artifact that still carries its flattened top-level `data`, read exactly that list, once, as before.
+  
+  An upgrade seeds the incoming version's datasets into the organization the request acts in (or the single-tenant database), the same as a flat bundle's upgrade, so a package an upgrade adds gets its sample rows there. Organizations other than the caller's are not reseeded by an upgrade, for a flat bundle or a composed one.
+- 2becfd6: fix(cloud-connection): uninstalling a composed app through install-local uninstalls every package body it installed
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A composed release artifact (ADR-0130 D4: one `type: app` package and `type: module` packages) installs through `POST /api/v1/marketplace/install-local` as one install entry that registers every package body. When one module declared `objectExtensions` on the app's objects, the app could not be uninstalled: `DELETE /api/v1/marketplace/install-local/APP_ID` answered `409 RESOURCE_CONFLICT` and told the operator to uninstall the module first, but the module has no install entry of its own (`404 RESOURCE_NOT_FOUND`) and the package door refuses it as read-only (`422 WRITABLE_PACKAGE_REQUIRED`). Nothing could be removed, and the only way out was deleting the cached manifest on the host and restarting.
+  
+  The install entry's uninstall now removes the same unit its install registered. Every member is withdrawn from the running kernel, and an extension that one member contributes to another member's object decides the order instead of refusing the uninstall: the extending module goes first, then the package it extends. Each member's uninstall cleanups run for its own package id, so the permission sets of a module go with it.
+  
+  What does not change:
+  
+  - An extension or a paired customization package from a different install still refuses the uninstall with the registry's own `409 RESOURCE_CONFLICT`, naming that package, and nothing is removed.
+  - A single-package install is withdrawn alone, as before.
+  - A module of a composed artifact still has no install entry of its own and is still read-only. It is uninstalled through its artifact's entry.
+- fe19c97: fix(cloud-connection): install-local loads a composed bundle's translations and asks about its installation-wide uniques
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A composed bundle (`dist/objectstack.json` with `packages[]`, the ADR-0130 D4 publish shape) carries its `translations` and its `objects` inside each package body, with no top-level copy. Two readers of `MarketplaceInstallLocalPlugin` read the top level only:
+  
+  - the install's side effects loaded no translations (`translationsLoaded: 0`, on install, reseed, upgrade and restart), so a composed app's labels never reached the i18n service and zh-CN users saw the source language;
+  - the ADR-0120 D5e ceremony on an `isolated` deployment listed none of the package bodies' installation-wide uniques (`unique: 'global'`, a declared index's `unique: 'global'`), so a composed app installed without the confirmation and with no attestation recorded.
+  
+  Both now read through `resolveStackCollection` from `@objectstack/core`, the reader the seed datasets already use: the top-level list when the body carries one, otherwise each package body's, in the artifact's package order. A flat bundle, and a composed artifact that still carries its flattened top-level list, read exactly that list, once, as before. On an `isolated` deployment, a composed artifact whose `packages` the resolver refuses is answered at the ceremony with the resolver's refusal (`422`, its own code, such as `INVALID_ARTIFACT_PACKAGES`), and nothing is installed or written.
+- ecf6a5f: fix(cloud-connection): install-local connects a composed bundle's package-body datasources, judges their names before any write, and names their connector credentials
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A composed bundle (`dist/objectstack.json` with `packages[]`, ADR-0130 D4) carries its datasources, connectors and objects in each package body, and none at the top level. `POST /api/v1/marketplace/install-local` read those three from the top level only. A composed install answered 200, but `connectPackageDatasources` was handed no datasources and no objects, so a datasource declared in a package body was never registered or connected, and the objects bound to it had no driver. The install answer carried no `datasources` and no `credentialRefs`. The held-name check (step 2a) never saw a body's datasource names either.
+  
+  Install, upgrade and the restart's rehydrate now read datasources and objects through `resolveStackCollection`, the reader the seed datasets and translations already use: the top-level list when the bundle carries one, otherwise every package body's, in package order. A composed bundle now hands the runtime the same lists as the same declarations in a flat bundle, and the answer lists the same `datasources` and `credentialRefs`.
+  
+  Step 2a now judges every package body's datasource names. A composed install that declares a name another holder owns is refused `409 RESOURCE_CONFLICT` before any write, as a flat bundle declaring that name already was. Before this, such an install answered 200 and left the name with its holder. A `packages` the artifact resolver refuses is answered at this step with the resolver's own `422`, and nothing is written.
+  
+  The side effects no longer read a top-level array `i18n` as extra translation bundles. `i18n` is a configuration object in the spec, and the boot path never read an array there.
+- c5fd012: fix(cloud-connection): install-local answers a composed artifact the resolver refuses with the resolver's 422 at the declared-rename step, not a 503 telling the author to retry
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The declared-rename step of `POST /api/v1/marketplace/install-local` (step 2c″) reads every package body of a composed artifact through the artifact resolver. When the resolver refused the artifact, the step answered `503 SERVICE_UNAVAILABLE`: "the tables its declared rename(s) carry could not be read … Retry once the database answers." Examples are a `packages` that is not a list, or a package entry that carries a retired bare `indexes[].unique: true`. A retry never helps, and the author looked for the fault in the wrong place.
+  
+  The step now resolves the bodies before it reads any table. A refusal answers with the resolver's own declared status and code: `422 INVALID_ARTIFACT_PACKAGES` or `INVALID_ARTIFACT_PACKAGE_ENTRY`, with the resolver's sentence. Nothing is written. This is the answer the `isolated`-posture unique-scope gate already gives for the same bytes, through the same reader. An undeclared throw out of the resolver, such as a dependency cycle between two packages of one artifact, is rethrown and is not relabelled. The 503 now means only that a table could not be read.
+  
+  The door reaches this step first only on a runtime that predates the install-time code judgements (`collectJobsWithoutBody`, `collectHooksWithoutBody`). A runtime that carries them resolves the packages earlier, so its answer does not change.
+- f02f4f6: fix(core): a composed artifact whose packages depend on each other in a cycle is refused as `422 CYCLIC_ARTIFACT_PACKAGES` naming the cycle, and install-local answers every artifact-resolver refusal instead of a 500
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - `@objectstack/core`: `resolveArtifactPackageEntries` / `resolveArtifactPackageOrder` refuse packages that depend on each other in a cycle with the ADR-0112 envelope their other refusals carry: `code: 'CYCLIC_ARTIFACT_PACKAGES'`, `status: 422`, and `details.cycle` listing the package ids along the cycle (each depends on the next, the first repeated last). Before, the cycle was a bare `Error` with no `code` or `status`. A caller that matched on the old message still finds `Circular dependency detected` in it. `resolvePluginOrder` now throws its cycle as `PluginOrderCycleError`, a new exported `Error` subclass that carries `cycle`. Its message is unchanged and it carries no `code`, so a kernel boot that hits a plugin cycle reads exactly as before.
+  - `@objectstack/spec`: `CYCLIC_ARTIFACT_PACKAGES` is registered in `ERROR_CODE_LEDGER` under `@objectstack/core`, so `ErrorCode` accepts it.
+  - `@objectstack/cloud-connection`: `POST /api/v1/marketplace/install-local` answered `500 INTERNAL_ERROR` with no reason for a composed artifact the resolver refuses: a `packages` that is not a list, a malformed entry, a duplicate package id, or a dependency cycle. On a real runtime, the step that judges the package's jobs and hooks reads the packages first and let the refusal escape. That step now answers the refusal itself, with its own status, code and `details`, and nothing is written. Every other step that reads the packages already did.
+- d947a93: fix(cloud-connection): an install-local re-install whose installed copy the resolver refuses names that copy, not the incoming package
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a re-install, `POST /api/v1/marketplace/install-local` reads the copy its last install stored, to compare the incoming version with it. When this runtime's artifact resolver refuses that stored copy (for example, a package entry that still carries a retired spelling), the answer used to be "Package 'X' cannot be installed: …", which reads as a fault in the incoming package. It now says that the installed copy is refused, that the incoming version was not judged, and what to do: uninstall the package to remove the stored copy, then install this version.
+  
+  The status and code are unchanged: the resolver's own (for example `422 INVALID_ARTIFACT_PACKAGE_ENTRY`), with its `details` when it states any, and nothing is installed or written. A refusal of the incoming package keeps its "Package 'X' cannot be installed" sentence, and when both copies are refused the incoming package's refusal is the answer.
+- d9e05f9: feat(cloud-connection): `RuntimeConfigPlugin` serves a declared `cloudHomeUrl`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `RuntimeConfigPluginConfig` takes a new optional `cloudHomeUrl`: the absolute URL of the control plane's console home page. When a host declares it, `GET /api/v1/runtime/config` serves it verbatim as a top-level `cloudHomeUrl`, beside `cloudUrl` and `upgradeUrl`. It follows the `upgradeUrl` contract:
+  
+  - Host option only. There is no env var: the distribution whose control plane serves the page fills it.
+  - Absent by default. An unset, empty or whitespace-only value serves no key at all, never `""` or a guessed default.
+  - Absolute or refused. A relative path or a non-`http(s)` scheme is not served, and the mount log names the option and the refused value.
+  
+  Nothing changes for a host that does not declare it.
+- a6c2b83: fix(cloud-connection): a sample row a tenant deleted stays deleted when install-local reinstalls, upgrades, heals or replays the package
+  
+  Clause-②: no (the door starts honouring the loader's existing `landedKeys` guard, #31021; no accepted shape or public export widens; the dev confirms)
+  Metadata-protocol: none
+  
+  install-local's seed loads now keep, and honour, the per-organization record of which seed rows landed (`sys_seed_landed_key`, registered by `@objectstack/platform-objects`). Before, the door built its seed loader without the `landedKeys` option, so it neither read nor wrote that record: a seed row a person deleted (a demo account, a demo order) was inserted again by the next reinstall, upgrade, restart heal or per-organization replay.
+  
+  - The install and the upgrade (in the installing person's organization under an organization wall, otherwise in the install's sole organization), the restart heal of an empty database, the per-organization replay of a new organization and an unmanaged copy's first load honour the record: a seed row whose key landed in that organization before and whose row is now gone is not inserted again. A key that never landed still lands, so a row an upgrade adds to the seed is inserted, and a new database, which holds no record, is healed whole. A row the record keeps out is counted in `skipped`.
+  - The sample-data reseed (`POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data`, for a ledgered package and for an unmanaged copy alike) is the deliberate re-seed: it inserts every missing row whatever the record says, and records it again. Its answer is unchanged.
+  - The `seed-replayer` service this door registers when no app has registered one now takes `{ reseed: true }`, as the AppPlugin replayer does: that call inserts every missing row; any other call honours the record.
+  
+  Every row a load lands is recorded, whether it inserted, updated or matched the row. An existing install keeps no record until its next install, upgrade, reseed, replay or restart heal, so a row a person deletes before that load, after this release too, comes back once on it, and stays deleted from then on.
+  
+  A restart heal that withholds every row (a seed a person emptied, or a purge then a reinstall) reports a settled seed: the withheld rows are counted in `skipped` and logged at `info`, not recorded as an empty install, so the boot banner, `objectstack:seed-settled`, `GET /ready` and `os verify` read it as settled. The split reads the loader's `skipped`, which also counts an `update` seed row with no match, so a heal whose only skips are those also reports settled. A heal that lands nothing and skips nothing, or errors, is still the empty install.
+  
+  `@objectstack/spec`: the `mode` description of a seed dataset no longer says a package install keeps no record: a seed publish is the load that keeps none, and the sample-data reseed is named beside `seed-replayer(organizationId, { reseed: true })` as the deliberate re-seed.
+  
+  `@objectstack/platform-objects`: the `sys_seed_landed_key` object's description names install-local's loads among the record's writers and readers, and its sample-data reseed beside `seed-replayer` as the deliberate re-seed.
+  
+  `@objectstack/metadata-protocol`: the seed loader's `info` line for withheld rows names an installed package's sample-data reseed beside `seed-replayer` with `{ reseed: true }` as the way back.
+- Updated dependencies [e53e02e]
+- Updated dependencies [35c9a30]
+- Updated dependencies [9404cb1]
+- Updated dependencies [d0737f6]
+- Updated dependencies [661ede2]
+- Updated dependencies [1f923d7]
+- Updated dependencies [a00b422]
+- Updated dependencies [64c4285]
+- Updated dependencies [36c0e96]
+- Updated dependencies [3cf26c1]
+- Updated dependencies [7d06248]
+- Updated dependencies [b1efa37]
+- Updated dependencies [afba96e]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [69783b7]
+- Updated dependencies [5af956f]
+- Updated dependencies [bb17350]
+- Updated dependencies [66f6638]
+- Updated dependencies [a061708]
+- Updated dependencies [68e726d]
+- Updated dependencies [b109659]
+- Updated dependencies [c59198f]
+- Updated dependencies [568f214]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [9a7f8c1]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [8f052e9]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [54f8e16]
+- Updated dependencies [60fca0f]
+- Updated dependencies [bb3c163]
+- Updated dependencies [3c2fb32]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [4176c95]
+- Updated dependencies [d6b1c2e]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [ef1ebad]
+- Updated dependencies [568d416]
+- Updated dependencies [85f2ac5]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [5092581]
+- Updated dependencies [0bbb211]
+- Updated dependencies [6091b64]
+- Updated dependencies [6844e6b]
+- Updated dependencies [61ded62]
+- Updated dependencies [d3bea96]
+- Updated dependencies [75ab117]
+- Updated dependencies [6080387]
+- Updated dependencies [8fd5004]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [01598d9]
+- Updated dependencies [6cc3f97]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [d5e6b20]
+- Updated dependencies [803f909]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [20bf222]
+- Updated dependencies [162fe54]
+- Updated dependencies [c9ef653]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [1ccb445]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [80cdbd4]
+- Updated dependencies [89d5a41]
+- Updated dependencies [842637a]
+- Updated dependencies [c4c0794]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [c77f8ca]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [1e4656d]
+- Updated dependencies [a8e09bb]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [d0348cf]
+- Updated dependencies [b91cefa]
+- Updated dependencies [4fb8790]
+- Updated dependencies [4ec9cc2]
+- Updated dependencies [a1082f3]
+- Updated dependencies [d9fabb2]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [583bbf3]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [cc5472e]
+- Updated dependencies [a825152]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [4771d66]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b633afe]
+- Updated dependencies [842b468]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [46991d0]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [0465f4a]
+- Updated dependencies [2487242]
+- Updated dependencies [3a78b89]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [0ad377c]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [c37e47a]
+- Updated dependencies [8319820]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [6880b04]
+- Updated dependencies [d18d54b]
+- Updated dependencies [1354d2a]
+- Updated dependencies [0593356]
+- Updated dependencies [e735892]
+- Updated dependencies [a2bb7d5]
+- Updated dependencies [6aeb665]
+- Updated dependencies [6eceb46]
+  - @objectstack/spec@18.6.0
+  - @objectstack/objectql@18.6.0
+  - @objectstack/metadata-protocol@18.6.0
+  - @objectstack/rest@18.6.0
+  - @objectstack/runtime@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/metadata-core@18.6.0
+  - @objectstack/types@18.6.0
+  - @objectstack/observability@18.6.0
+  - @objectstack/service-cluster@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

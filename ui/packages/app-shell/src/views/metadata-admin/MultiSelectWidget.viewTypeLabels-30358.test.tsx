@@ -16,6 +16,12 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
+// The widgets module reaches `celAuthoring.ts`, which loads these two
+// dependencies with a dynamic `import()` inside a function body. Paying the
+// load here at collection keeps it out of a case's clocked window
+// (`check:test-source-alias`, "The source reach").
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 import { WIDGETS } from './widgets';
 import { getListVariantSchema } from './view-schema';
@@ -79,6 +85,8 @@ describe('allowedVisualizations chips read the view-type words (objectstack#3035
       'Map',
       'Chart',
       'Tree',
+      // #34382 added the tenth view type.
+      'Timesheet',
     ]);
   });
 

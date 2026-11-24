@@ -36,7 +36,7 @@ import {
   SidebarInput,
   Badge,
 } from '@object-ui/components';
-import type { AppComponentSchema, NavigationItem, NavigationEntryItem, NavigationArea } from '@object-ui/types';
+import type { AppComponentSchema, NavigationItem, NavigationArea } from '@object-ui/types';
 import { menuItemToNavigationItem } from '@object-ui/types';
 // Aliased on import, following PR #4169's convention: this repo has its OWN
 // `resolveI18nLabel` over a DIFFERENT vocabulary, and neither accepts the
@@ -45,6 +45,7 @@ import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui
 import { AppShell, type AppShellBranding } from './AppShell';
 import {
   NavigationRenderer,
+  drawnNavigationEntries,
   hasVisibleNavigationItems,
   resolveActiveNavItem,
   resolveHref,
@@ -56,8 +57,6 @@ import {
   type CapabilityChecker,
   type DocTargetChecker,
 } from './NavigationRenderer';
-// Internal module, not re-exported by `index.ts` (objectui#11395).
-import { byNavOrder } from './navOrder';
 
 /**
  * The classes this file's sidebar group label carries so that, once the
@@ -301,41 +300,20 @@ function MobileBottomNav({
   onAction?: (item: NavigationItem) => void;
 }) {
   const location = useLocation();
-  // Show up to 5 entries the sidebar draws. Flatten group children so apps that
-  // organise navigation into groups (e.g. Setup → Overview / Administration /
-  // …) still surface real links in the mobile bottom nav.
-  // Separators are skipped, so what comes back is entries only — each carries
-  // the `label` the bottom nav draws (objectui#10867).
+  // Show up to 5 entries the sidebar draws, in the sidebar's reading order:
+  // `drawnNavigationEntries` is the one walk behind every tab bar
+  // (objectstack#34594). It flattens group children, so apps that organise
+  // navigation into groups (e.g. Setup → Overview / Administration / …) still
+  // surface real links here, and skips separators, so each entry carries the
+  // `label` the bottom nav draws (objectui#10867).
   //
-  // objectui#11362: a tab is drawn only when its sidebar row is. Each node asks
-  // `hasVisibleNavigationItems` about itself alone, which is the sidebar's own
-  // per-node answer: `passesNavItemGuards` (`visible`, `requiredPermissions`,
-  // the capability gates, a `doc` entry's target), then a group survives only
-  // through a visible child and an `action` entry only when `onAction` is
-  // wired. A gated group therefore takes its children with it, as it does in
-  // the sidebar, and the guard runs before the five-tab cap, so a hidden entry
-  // never takes a slot. ⛔ No copy of the guard here.
-  //
-  // objectui#11395: each level is sorted by `byNavOrder` before it is walked —
-  // the top level, then each group's children as the walk reaches them — which
-  // is the sidebar's one comparator at the sidebar's two sort sites. The tabs
-  // therefore come out in the sidebar's reading order, and the guard and the cap
-  // run after the sort, so the five tabs are the sidebar's first five drawn
-  // entries. ⛔ No copy of the sort here.
-  const collectLeaves = (list: NavigationItem[]): NavigationEntryItem[] => {
-    const out: NavigationEntryItem[] = [];
-    for (const item of list.slice().sort(byNavOrder)) {
-      if (!hasVisibleNavigationItems([item], guards)) continue;
-      if (item.type === 'separator') continue;
-      if (item.type === 'group') {
-        out.push(...collectLeaves(item.children || []));
-      } else {
-        out.push(item);
-      }
-    }
-    return out;
-  };
-  const leaves = collectLeaves(items).slice(0, 5);
+  // objectui#11362: a tab is drawn only when its sidebar row is — each node
+  // asks the sidebar's own per-node answer, so a gated group takes its children
+  // with it and the guard runs before the five-tab cap. objectui#11395: each
+  // level is sorted by the sidebar's one comparator before it is walked, so the
+  // five tabs are the sidebar's first five drawn entries. ⛔ No copy of the
+  // guard or the sort here.
+  const leaves = drawnNavigationEntries(items, guards).slice(0, 5);
 
   if (leaves.length === 0) return null;
 

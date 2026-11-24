@@ -114,6 +114,12 @@
       "why": "same absent-module mock as dev-plugin.test.ts — the optional stack is forced unavailable so the tenancy posture is the only thing under test."
     },
     {
+      "file": "packages/plugins/plugin-dev/src/dev-i18n-packages-reader.test.ts",
+      "kind": "mock",
+      "axis": "mock-replacement",
+      "why": "an absent-module mock like dev-plugin.test.ts's — every DevPlugin boot in the file passes `driver: false`, so the real driver is never loaded; the mock stands in for the collection-time load check:test-source-alias asks of a test that reaches dev-plugin.ts's lazy driver import."
+    },
+    {
       "file": "packages/services/service-datasource/src/__tests__/datasource-update-kept-pool-stores-nothing.test.ts",
       "kind": "mock",
       "axis": "mock-replacement",

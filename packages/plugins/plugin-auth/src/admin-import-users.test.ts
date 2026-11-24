@@ -797,7 +797,9 @@ describe('runAdminImportUsers — CSV export → import round trip (#25078)', ()
     const csv = await exportUsersCsv(rows);
 
     // The file carried the marks, so the round trip below is not a pass-through.
-    expect(csv.split('\r\n')[0]).toBe('email,name');
+    // [#34163] The file opens with one UTF-8 byte-order mark; the header row follows it,
+    // and the import below receives the file with its mark, as exported.
+    expect(csv.replace(/^\uFEFF/, '').split('\r\n')[0]).toBe('email,name');
     for (const [i, v] of MARKED.entries()) expect(csv).toContain(`user${i + 1}@example.com,'${v}\r\n`);
     expect(csv).toContain(',+86 138 0013 8000\r\n');
     expect(csv).toContain(",'Quoted\r\n");

@@ -1378,7 +1378,18 @@ function refuseUnservedRelationTargetsIn(
 export function refuseUnservedRelationTarget(
     this: Pick<QueryValidationHost, 'engine'>,
     target: string, param: string): void {
-    const enable = this.engine?.registry?.getObject?.(target)?.enable;
+    const registry = this.engine?.registry;
+    // [#35427] A disabled package's object is off the data plane: its own
+    // route answers 404 OBJECT_PACKAGE_DISABLED, so a condition on it through
+    // an enabled object's lookup gets the same refusal (with the position it
+    // was named at), never a yes/no answer on its fields. Same predicate as
+    // the data route's ({@link assertObjectRegistered}).
+    if (isObjectOfDisabledPackage(registry, target)) {
+        const disabled: any = objectPackageDisabledError(target);
+        disabled.param = param;
+        throw disabled;
+    }
+    const enable = registry?.getObject?.(target)?.enable;
     const reason = apiExposureDenialReason(enable, RELATION_CONDITION_TARGET_OPERATION);
     if (reason === null) return;
     const consequence = `, so the condition on it at '${param}' was not evaluated and the query was not run. `
@@ -1430,7 +1441,12 @@ export function servedExpand(
 export function servesExpansionTarget(
     this: Pick<QueryValidationHost, 'engine'>,
     target: string): boolean {
-    const schema: any = this.engine?.registry?.getObject?.(target);
-    return canServeApiOperation(schema?.enable, EXPANSION_TARGET_OPERATION);
+    const registry = this.engine?.registry;
+    const schema: any = registry?.getObject?.(target);
+    // [#35427] A disabled package's object is withheld exactly as an
+    // unexposed one is: the lookup keeps its bare id, as the data route that
+    // answers 404 OBJECT_PACKAGE_DISABLED for it would have it.
+    return canServeApiOperation(schema?.enable, EXPANSION_TARGET_OPERATION)
+        && !isObjectOfDisabledPackage(registry, target);
 }
 

@@ -32,12 +32,28 @@
  * hook's or the body's own write sets off under the same context (a nested
  * hook, a cascade leg, a `sudo()` taken inside the body) is judged as theirs.
  *
+ * ## Where it is taken off — the platform's own rows
+ *
+ * One write set off under a marked context is not theirs: the row a platform
+ * service writes to an object it owns because the hook's or the body's write
+ * happened — the audit writer's `sys_audit_log` row and its `sys_activity`
+ * mirror. That writer derives the platform's own system context from the
+ * write's ({@link withoutAppAutomationElevation}, through objectql's
+ * `platformSystemApi`), so its rows are not judged as an insert the automation
+ * made. The automation's own insert into the same objects — through its
+ * `ctx.api`, its `ctx.api.sudo()` — still carries the mark.
+ *
  * ## Why a symbol, and why it is not an `ExecutionContext` field
  *
  * It is server-constructed by construction: no request body, query string or
  * stored row can spell a symbol, so no caller can claim or shed it. It is an
  * in-process provenance fact, never a principal and never an authorization
- * grant — its only reader narrows (it refuses; it admits nothing). `Symbol.for`
+ * grant. It has two readers, both in plugin-security, and neither admits an
+ * operation. The identity-write and append-only refusals narrow: they refuse.
+ * The owner stamp (`owner-anchor-stamp.ts`) reads the `'action'` mark to give
+ * ownership on an insert: an EMPTY `owner_id` is filled with the context's own
+ * `userId`, the principal a direct create under the same envelope is stamped
+ * with, and never a different one. `Symbol.for`
  * rather than a module-local `Symbol()`, because this package ships an ESM and
  * a CJS build and a process may load both: the mark must be the same key in
  * each.
@@ -70,6 +86,18 @@ export function appAutomationElevationOf(context: unknown): AppAutomationElevati
   if (context === null || typeof context !== 'object') return undefined;
   const mark = (context as { [APP_AUTOMATION_ELEVATION]?: unknown })[APP_AUTOMATION_ELEVATION];
   return mark === 'hook' || mark === 'action' ? mark : undefined;
+}
+
+/**
+ * `context` without the mark: the same object when it carries none, else a
+ * fresh copy with every other own enumerable property. For the platform's own rows (see
+ * the module header); ⛔ never for a write the automation itself makes.
+ */
+export function withoutAppAutomationElevation<T>(context: T): T {
+  if (context === null || typeof context !== 'object') return context;
+  if (!Object.prototype.hasOwnProperty.call(context, APP_AUTOMATION_ELEVATION)) return context;
+  const { [APP_AUTOMATION_ELEVATION]: _taken, ...rest } = context as T & { [APP_AUTOMATION_ELEVATION]?: unknown };
+  return rest as T;
 }
 
 /**

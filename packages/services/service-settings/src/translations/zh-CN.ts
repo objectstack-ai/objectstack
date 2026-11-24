@@ -417,13 +417,26 @@ export const zhCN: PlatformTranslationData = {
         multi_factor: { title: '多因素认证', description: '本组织中哪些人必须用身份验证器应用(TOTP)保护账户。' },
       },
       keys: {
-        allowed_ip_ranges: { label: '允许的 IP 范围' },
-        session_idle_timeout_minutes: { label: '闲置超时(分钟)' },
-        session_absolute_max_hours: { label: '会话最长有效期(小时)' },
-        max_concurrent_sessions_per_user: { label: '每个用户的最大同时会话数' },
+        allowed_ip_ranges: {
+          label: '允许的 IP 范围',
+          help: 'CIDR 段或精确 IP（每行一个，或用逗号分隔），例如 203.0.113.0/24。设置后，成员从这些范围之外无法打开本组织的会话，之后来自范围之外的会话会被登出；服务器无法确定客户端地址的请求同样如此。部署设置了允许的 IP 范围时，每个范围都必须落在其内，且列表必须包含你保存时所用的地址。留空表示只适用部署的范围。平台管理员只受部署范围的约束。',
+        },
+        session_idle_timeout_minutes: {
+          label: '闲置超时(分钟)',
+          help: '成员无活动达到这么多分钟后将其登出。部署设置了闲置超时时，不得长于部署的值。0 表示沿用部署的闲置超时。',
+        },
+        session_absolute_max_hours: {
+          label: '会话最长有效期(小时)',
+          help: '登录后经过这么多小时强制重新认证，与是否活跃无关。部署设置了有效期时，不得长于部署的值。0 表示沿用部署的有效期。',
+        },
+        max_concurrent_sessions_per_user: {
+          label: '每个用户的最大同时会话数',
+          help: '限制成员在本组织中同时登录的会话数；超出上限时其中最旧的会话会被登出，其他组织中的会话既不计入也不会被登出。在登录时以及成员切换到本组织时检查。部署设置了上限时，不得高于部署的上限，而部署的上限仍统计该成员的全部会话。0 表示只适用部署的上限。',
+        },
         mfa_required: {
           label: '要求多因素认证',
           options: { off: '不强制', administrators: '管理员', everyone: '所有人' },
+          help: '哪些人必须使用身份验证器应用：管理员（平台管理员、组织管理员和委派管理员）或所有人。被要求但尚未注册的人，在部署的宽限期结束后将被阻止访问数据。弱于部署要求的级别会被拒绝；「不强制」表示沿用部署的要求。需要本部署已开启两步验证；关闭期间，保存任何要求都会被拒绝。',
         },
       },
     },

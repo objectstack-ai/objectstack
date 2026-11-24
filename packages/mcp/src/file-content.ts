@@ -221,12 +221,28 @@ function startCpuBudget(budgetMs: number): CpuBudget {
   };
 }
 
-/** The note an answer cut by the CPU budget carries. */
-function cpuBudgetNote(budgetMs: number, read: string): string {
-  return (
-    `Reading stopped at the CPU-time budget for one file (${budgetMs} ms) after ${read}, so the text is partial. `
-    + 'Download the file with the link for the rest.'
-  );
+/**
+ * Where reading stopped at the CPU budget: `after` the pages or paragraphs
+ * read ("page 3 of 120", "64 paragraphs"), or `before` the first one ("page 1
+ * of 120", "the first paragraph") when the stop came before any was read.
+ */
+type BudgetStop = { budgetMs: number; after: string } | { budgetMs: number; before: string };
+
+/**
+ * The sentence an answer cut by the CPU budget carries. It calls the text
+ * partial only when some text came back (`gotText`): a stop before the first
+ * page or paragraph says it stopped before any was read, and a stop after
+ * parts that held no text says none was found, so an answer with no text
+ * never claims to hold part of it.
+ */
+function cpuBudgetNote(stop: BudgetStop, gotText: boolean): string {
+  const stopped = `Reading stopped at the CPU-time budget for one file (${stop.budgetMs} ms)`;
+  if ('before' in stop) {
+    return `${stopped} before ${stop.before} was read, so no text came back. Download the file with the link instead.`;
+  }
+  return gotText
+    ? `${stopped} after ${stop.after}, so the text is partial. Download the file with the link for the rest.`
+    : `${stopped} after ${stop.after}, and no text was found in what was read. Download the file with the link instead.`;
 }
 
 /** The images an MCP image block carries; any other image answers its link. */
@@ -471,7 +487,9 @@ export async function extractDocument(
 /**
  * The answer of an extraction stopped part-way at the wall-clock ceiling: the
  * text its progress carried, `truncated: true`, and the CPU-budget note, the
- * same shape an extraction stopped at its budget answers.
+ * same shape an extraction stopped at its budget answers. A stop before the
+ * first page or paragraph came back answers no text, with a note saying the
+ * read stopped before any was read.
  */
 export function stoppedExtractionAnswer(kind: DocumentKind, progress: readonly ExtractionProgress[], budgetMs: number): ExtractedContent {
   if (kind === 'pdf') {
@@ -481,8 +499,11 @@ export function stoppedExtractionAnswer(kind: DocumentKind, progress: readonly E
       if (p.kind === 'pdf-open') numPages = p.numPages;
       else if (p.kind === 'pdf-page') pages.push(p.text);
     }
-    const read = numPages === undefined ? `page ${pages.length}` : `page ${pages.length} of ${numPages}`;
-    return pdfAnswer(pages, numPages ?? pages.length, cpuBudgetNote(budgetMs, read));
+    const of = numPages === undefined ? '' : ` of ${numPages}`;
+    const stop: BudgetStop = pages.length === 0
+      ? { budgetMs, before: `page 1${of}` }
+      : { budgetMs, after: `page ${pages.length}${of}` };
+    return pdfAnswer(pages, numPages ?? pages.length, stop);
   }
   let text = '';
   let paragraphs = 0;
@@ -491,7 +512,10 @@ export function stoppedExtractionAnswer(kind: DocumentKind, progress: readonly E
     text += p.text;
     paragraphs = p.paragraphs;
   }
-  return docxAnswer(text, false, cpuBudgetNote(budgetMs, `${paragraphs} paragraphs`));
+  const stop: BudgetStop = paragraphs === 0
+    ? { budgetMs, before: 'the first paragraph' }
+    : { budgetMs, after: `${paragraphs} paragraphs` };
+  return docxAnswer(text, false, stop);
 }
 
 // ── PDF ──────────────────────────────────────────────────────────────────
@@ -589,14 +613,14 @@ function pdfOpenOptions(): Record<string, unknown> {
  * length cap, `truncated` when fewer than `numPages` were read, and the budget
  * note when reading stopped at the budget (which always truncates).
  */
-function pdfAnswer(parts: readonly string[], numPages: number, budgetNote: string | undefined): ExtractedContent {
+function pdfAnswer(parts: readonly string[], numPages: number, stop: BudgetStop | undefined): ExtractedContent {
   const joined = parts.join('\n\n').trim();
   if (!joined) {
     return {
       kind: 'none',
-      reason:
-        budgetNote ??
-        'This PDF has no text layer (it may be a scan), so there is no text to read. Download it with the link instead.',
+      reason: stop
+        ? cpuBudgetNote(stop, false)
+        : 'This PDF has no text layer (it may be a scan), so there is no text to read. Download it with the link instead.',
     };
   }
   const { text, truncated } = bounded(joined);
@@ -604,8 +628,8 @@ function pdfAnswer(parts: readonly string[], numPages: number, budgetNote: strin
     kind: 'text',
     format: 'application/pdf',
     text,
-    truncated: truncated || parts.length < numPages || budgetNote !== undefined,
-    ...(budgetNote !== undefined ? { note: budgetNote } : {}),
+    truncated: truncated || parts.length < numPages || stop !== undefined,
+    ...(stop !== undefined ? { note: cpuBudgetNote(stop, true) } : {}),
   };
 }
 
@@ -650,8 +674,8 @@ async function extractPdfText(bytes: Uint8Array, budget: CpuBudget, onProgress?:
       length += pageText.length + 2;
       read = n;
     }
-    const budgetNote = outOfBudget ? cpuBudgetNote(budget.budgetMs, `page ${read} of ${doc.numPages}`) : undefined;
-    return pdfAnswer(parts, doc.numPages, budgetNote);
+    const stop = outOfBudget ? { budgetMs: budget.budgetMs, after: `page ${read} of ${doc.numPages}` } : undefined;
+    return pdfAnswer(parts, doc.numPages, stop);
   } catch {
     return {
       kind: 'none',
@@ -791,16 +815,16 @@ function docxXmlText(
  * cut at the length cap, `truncated` when the body was not read to its end,
  * and the budget note when reading stopped at the budget.
  */
-function docxAnswer(read: string, complete: boolean, budgetNote: string | undefined): ExtractedContent {
+function docxAnswer(read: string, complete: boolean, stop: BudgetStop | undefined): ExtractedContent {
   const whole = read.replace(/\n{3,}/g, '\n\n').trim();
-  if (!whole) return { kind: 'none', reason: budgetNote ?? 'This Word document has no text.' };
+  if (!whole) return { kind: 'none', reason: stop ? cpuBudgetNote(stop, false) : 'This Word document has no text.' };
   const { text, truncated } = bounded(whole);
   return {
     kind: 'text',
     format: DOCX_TYPE,
     text,
     truncated: truncated || !complete,
-    ...(budgetNote !== undefined ? { note: budgetNote } : {}),
+    ...(stop !== undefined ? { note: cpuBudgetNote(stop, true) } : {}),
   };
 }
 
@@ -837,8 +861,8 @@ function extractDocxText(bytes: Uint8Array, budget: CpuBudget, onProgress?: Prog
   // bounded by READ_FILE_DOCX_XML_MAX_BYTES. The budget is checked between
   // the body's paragraphs.
   const read = docxXmlText(xml.toString('utf8'), budget, onProgress);
-  const budgetNote = read.outOfBudget ? cpuBudgetNote(budget.budgetMs, `${read.paragraphs} paragraphs`) : undefined;
-  return docxAnswer(read.text, read.complete, budgetNote);
+  const stop = read.outOfBudget ? { budgetMs: budget.budgetMs, after: `${read.paragraphs} paragraphs` } : undefined;
+  return docxAnswer(read.text, read.complete, stop);
 }
 
 // ── The answer ───────────────────────────────────────────────────────────

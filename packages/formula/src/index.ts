@@ -183,6 +183,10 @@ export type { UnknownFunctionCall } from './unknown-function';
 // ADR-0032 — shared validator + introspection (one validator for build,
 // registration, and the agent-callable validate_expression tool).
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';
+// [#36237] The `list-equality` refusal one relationship hop away, for the
+// caller that resolves hop targets (`@objectstack/lint`): the hint describes
+// the root object's fields only.
+export { findHopListEquality } from './validate';
 export type { FieldRole, ExprInput, ExprSchemaHint, ExprFaultOutcome, ExprValidationError, ExprValidationResult, InferredValueType } from './validate';
 // #22727 — the declaration authoring stamps onto a formula field: its
 // `returnType`, and for a provably-money result its currency, copied from the
@@ -195,6 +199,33 @@ export type { FormulaReturnDeclaration, FormulaSourceField } from './formula-ret
 // number the engine stores.
 export { toScaledDecimal, divideToPlaces, formatScaledDecimal, documentDateOf } from './home-amount-arithmetic';
 export type { ScaledDecimal } from './home-amount-arithmetic';
+// ADR-0157 — the working-calendar arithmetic: the calendar service
+// (`@objectstack/objectql`) and the working-day formula functions count with
+// this one copy, through the one daylight-saving rule. The codes, the column
+// names and the `WorkCalendar` shape are `@objectstack/spec/data`'s.
+export {
+  WorkCalendarUnresolvedError,
+  WorkCalendarNotMaintainedError,
+  WorkCalendarInvalidError,
+  isWorkCalendarRefusal,
+  parseWorkPeriods,
+  buildWorkCalendar,
+  exceptionDayOf,
+  calendarDayOf,
+  workingPeriodsOn,
+  isWorkingDay,
+  isWorkingTime,
+  addWorkingDays,
+  workingDaysBetween,
+  addWorkingHours,
+} from './work-calendar';
+// ADR-0157 D4 — the working-day formula functions: their names, and which
+// calendars an expression names, so a caller resolves those calendars before
+// it evaluates (`EvalContext.workCalendars`).
+export { WORKING_DAY_FUNCTIONS, workCalendarsNotLoadedMessage } from './working-day';
+export type { WorkingDayFunction } from './working-day';
+export { callsWorkingDayFunction, workingDayCalendarNeeds, computedCalendarCodeMessage } from './working-day-needs';
+export type { WorkingDayCalendarNeeds } from './working-day-needs';
 // The closed set of refusal codes `validateExpression` and
 // `collectCelRootIdentifiers` carry beside their English message, with the
 // typed params each message interpolates — so a localized author surface keys
@@ -210,4 +241,4 @@ export type {
   ExpressionSourceKind,
 } from './expression-refusal';
 export type { SeedValue, SeedPrimitive } from './seed-eval';
-export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions, EvalOptionLabels } from './types';
+export type { DialectEngine, EvalContext, EvalResult, EvalError, EvalPermissions, EvalSystemPermissions, EvalOptionLabels, EvalWorkCalendar, EvalWorkCalendars } from './types';

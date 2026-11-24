@@ -1,0 +1,21 @@
+---
+'@objectstack/spec': minor
+'@objectstack/metadata-protocol': minor
+---
+
+fix(metadata-protocol)!: a seed never stores a roll-up (summary) value; the children compute it, and the load says what it dropped
+
+Clause-②: no (narrowing)
+Metadata-protocol: narrowed
+
+<!-- adr-0087: registered seed-summary-value-not-stored -->
+
+**BREAKING** for a seed record that supplies a value for a `summary` (roll-up) field, in any seed: a `defineStack({ data })` dataset, `defineSeed`, a `seed` metadata item, or the seed data a package install loads. Every aggregate (`count`, `sum`, `min`, `max`, `avg`) is treated the same, whether or not the field is declared `readonly`.
+
+- FROM: the seed loader writes as the system principal, so the supplied value was stored as written. It stayed wherever no child write came after it: a parent seeded with a total and no children kept the total; a re-seed over existing children wrote it over the computed value; and a keep-current (`upsert`) seed replayed on the next boot stored the computed total on the first load and the supplied one on the second.
+- TO: the loader takes every such value out of the record before the replay compare and the write, on insert and on update, and writes the rest of the record. A created row starts the column at its empty-child-list value (`0` for `count` and `sum`, empty for `min`, `max` and `avg`), and the seeded child rows compute it. A matched row keeps the value it holds, so a replay whose only difference is the roll-up writes nothing. A parent seeded with a total and no children now reads `0`.
+- Reported, not silent: the load logs one warning per dataset naming the object, the fields and how many values it did not write. A dry run (`validate`) logs the same warning. `success` and `errored` do not move, and the load result gains no key. One row counter does: on a replay (`upsert` or `update`), a matched row whose only difference from the seed record was a roll-up value is now counted `skipped`, with nothing written, where it used to be counted `updated`.
+
+Compatibility note for seed authors: to show a total, seed the child rows it is computed from and leave the summary field out of the parent's seed record. A figure no child rows back is not a roll-up: declare it a `number` or `currency` field. A legacy total that must land as written goes through a historical import (`treatAsHistorical: true`), which is unchanged. Rows an earlier load stored a supplied total on are not rewritten by the loader; the next child write recomputes them. A parent with no child rows gets no such write, and `os migrate summary-nulls` backfills only `NULL` columns, so repair one by hand: insert a child row under it and delete that row again, and the recompute leaves the empty-set value.
+
+Not changed: the engine (`packages/objectql`), which still keeps a value an `isSystem` write sends (the roll-up recompute, the backfill, a historical import); the import and REST doors; and the runtime's basic-insert fallback seeder, which runs only when the seed loader is unavailable or throws.

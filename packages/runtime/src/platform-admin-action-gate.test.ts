@@ -165,6 +165,39 @@ describe('[#30771] a hidden action is still refused when called', () => {
     }
 });
 
+describe('sys_user.remove_user_manager: the clear reaches the endpoint as `managerId: null`', () => {
+    // The endpoint clears the link on `managerId: null` and refuses an ABSENT
+    // key, so the null has to survive the door's body assembly: the declared
+    // `bodyExtra` is merged last, after the row id. Driven over the real
+    // declaration; the target is faked so the forwarded body can be read.
+    const forwardOf = (request: ReturnType<typeof boot>['request']) =>
+        (request.mock.calls as unknown as Array<[string, RequestInit]>)[0]!;
+
+    it('the admin\'s click is forwarded to set-user-manager with the row id and the key present and null', async () => {
+        const { dispatcher, request } = boot();
+        const res = await dispatcher.handleActions(`/${OBJECT}/remove_user_manager`, 'POST', { recordId: 'u_target', params: {} }, ADMIN());
+        expect(res?.response?.status).toBe(200);
+        expect(request).toHaveBeenCalledTimes(1);
+        const [url, init] = forwardOf(request);
+        expect(new URL(url).pathname).toBe('/api/v1/auth/admin/set-user-manager');
+        expect(String(init.method).toUpperCase()).toBe('POST');
+        const body = JSON.parse(String(init.body));
+        expect(body.userId).toBe('u_target');
+        expect(Object.prototype.hasOwnProperty.call(body, 'managerId')).toBe(true);
+        expect(body.managerId).toBeNull();
+    });
+
+    it('a plain member is refused 403 at the door with the set action\'s gate, nothing forwarded', async () => {
+        const { dispatcher, request } = boot();
+        const refused = await dispatcher.handleActions(`/${OBJECT}/remove_user_manager`, 'POST', { recordId: 'u_target', params: {} }, MEMBER());
+        expect(refused?.response?.status).toBe(403);
+        // The ADR-0112 envelope code, the one the MCP twin above pins for this gate.
+        expect(refused?.response?.body?.error?.code).toBe('PERMISSION_DENIED');
+        expect(String(refused?.response?.body?.error?.message)).toContain('requires capability [manage_users]');
+        expect(request).not.toHaveBeenCalled();
+    });
+});
+
 describe('[#30771] capabilityRefusal: why the scoped MCP pre-screen finds an action missing', () => {
     it('answers the gate\'s refusal for an exposed action the member cannot run — the one run_action throws by name', async () => {
         const { dispatcher, request } = boot();
@@ -375,9 +408,26 @@ describe('[ruling E] list_actions marks an organization action the caller\'s mem
         }
     });
 
-    // Green before the mark existed too: the mark changes no run.
+    // Green before the mark existed too: the mark changes no run. [#33690] An
+    // action declaring `ai.requiresConfirmation: true` never runs on the MCP
+    // caller's own `confirm: true`: with no pending-confirmation service it is
+    // refused before anything is forwarded, for the admin as for the member.
     it('CONTROL: run_action is unchanged: the member\'s call is forwarded and refused by the endpoint (the marked code); the admin\'s is forwarded and served', async () => {
-        for (const key of [...SET_A, ...SET_B]) {
+        const gated = [...SET_A, ...SET_B].filter((key) => declarationOf(key).ai?.requiresConfirmation === true);
+        for (const key of gated) {
+            const [objectName, name] = key.split('.');
+            for (const [who, ctx] of [['member', MEMBER_P()], ['admin', ADMIN_P()]] as const) {
+                const boot = bootIdentity(who === 'member');
+                const thrown = await refusalOf(boot.dispatcher.buildMcpBridge(ctx).runAction(name!, {
+                    objectName, recordId: 'rec_1', params: paramsFor(key), confirm: true,
+                }));
+                expect(thrown, `${who}: ${key}`).toMatchObject({
+                    code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, details: { reason: 'no_confirmation_service' },
+                });
+                expect(boot.request, `${who}: ${key}`).not.toHaveBeenCalled();
+            }
+        }
+        for (const key of [...SET_A, ...SET_B].filter((k) => !gated.includes(k))) {
             const [objectName, name] = key.split('.');
             const member = bootIdentity(true);
             const thrown = await refusalOf(member.dispatcher.buildMcpBridge(MEMBER_P()).runAction(name!, {

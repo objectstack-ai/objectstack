@@ -41,6 +41,19 @@
  * `II18nService.t()`. ⛔ Nothing here is a second way to do that: it is the
  * sequence `plugin-approvals`'s `reader-locale-labels.ts` uses.
  *
+ * [#35384] The object, field and option LABELS inside the sentence are
+ * metadata `/meta` serves, so they are not read through `t()`: the reader's
+ * object definition is put in its language by `translateObject`
+ * (`@objectstack/spec/system`) over every locale the service holds, with the
+ * metadata route's `ResolveOptions` (the reader's locale, the DECLARED
+ * fallback chain, and the authored language — the declared `sourceLocale`,
+ * else `defaultLocale`), and every label is read off that definition. So a
+ * reader in a deployment's declared `sourceLocale` reads the labels as
+ * authored, never the `defaultLocale` row `t()` falls back to; `t()` carries
+ * the `messages.*` templates. The object's packaged base rides along as
+ * `packagedBase`, as `/meta` hands it, so a renamed packaged object is named
+ * by its rename, never by the bundle's translation of its old label.
+ *
  * The writer composes the stored sentence through the SAME function
  * ({@link composeActivitySummary}), bound to the write locale, with the English
  * catalog as its fallback, so the stored text and a reader's text can never be
@@ -56,7 +69,12 @@
  * is the author's sentence and is never translated (#7290).
  */
 
-import { resolveBundleLocale } from '@objectstack/spec/system';
+import {
+  resolveBundleLocale,
+  translateObject,
+  type ResolveOptions,
+  type TranslationBundle,
+} from '@objectstack/spec/system';
 
 import { enMessages } from './translations/messages.js';
 import { ensureJudgedColumnsProjected, isRecord } from './served-fields.js';
@@ -64,10 +82,27 @@ import { ensureJudgedColumnsProjected, isRecord } from './served-fields.js';
 /** The `metadata` key a row's summary code rides in. Read and stripped by {@link installActivitySummaryLocale}. */
 export const ACTIVITY_SUMMARY_MESSAGE_KEY = 'summary_message';
 
-/** One side of a field change: the writer's text, and the option it matched (a select value). */
+/**
+ * One side of a field change: the writer's text, and the option it matched (a
+ * select value) — or, for a yes/no field that declares no option words, the
+ * boolean itself, worded per locale by `messages.activityValueTrue` /
+ * `messages.activityValueFalse`.
+ */
 export interface ActivitySummaryValue {
   text: string;
   option?: string;
+  boolean?: boolean;
+}
+
+/** The catalogue key a boolean value is worded by. */
+function booleanMessageKey(value: boolean): 'activityValueTrue' | 'activityValueFalse' {
+  return value ? 'activityValueTrue' : 'activityValueFalse';
+}
+
+/** A boolean value in this plugin's ENGLISH catalogue: the writer's text, and every locale's floor. */
+export function englishBooleanWord(value: boolean): string {
+  const word = (enMessages as Record<string, unknown>)[booleanMessageKey(value)];
+  return typeof word === 'string' ? word : String(value);
 }
 
 /** A field change inside a `fieldChanges` summary. */
@@ -93,7 +128,11 @@ export interface ActivitySummaryLocale {
   translate(key: string, params?: Record<string, unknown>): string | undefined;
   /** The locale a list is joined in; `undefined` joins in English. */
   locale: string | undefined;
-  /** The object's registered definition, for its authored labels; `null` when there is none. */
+  /**
+   * The object's definition its labels are read off, `null` when there is
+   * none: the authored one for the writer, and [#35384] for a reader the one
+   * `translateObject` put in the reader's language.
+   */
   getObjectDef(objectName: string): any;
 }
 
@@ -105,8 +144,8 @@ function interpolate(template: string, params: Record<string, unknown> = {}): st
 /**
  * `locale` with this plugin's ENGLISH catalog answering every `messages.*`
  * key: what the stored sentence falls back to when the write locale has no
- * template. Every other key (object, field and option labels) is still asked
- * of `locale`, as the writer always has.
+ * template. Every other key is still asked of `locale`, and the labels are
+ * still read off `locale`'s definitions ([#35384] never a `t()` key).
  */
 export function withEnglishMessages(locale: ActivitySummaryLocale): ActivitySummaryLocale {
   return {
@@ -120,30 +159,35 @@ export function withEnglishMessages(locale: ActivitySummaryLocale): ActivitySumm
   };
 }
 
-/** An object's label: the locale bundle's, then the authored def label, then the name. */
+/**
+ * An object's label: the definition's ({@link ActivitySummaryLocale.getObjectDef},
+ * in the reader's language for a reader), then the name.
+ */
 export function objectLabelIn(locale: ActivitySummaryLocale, objectName: string): string {
   const def = locale.getObjectDef(objectName);
-  return (
-    locale.translate(`objects.${objectName}.label`) ??
-    (typeof def?.label === 'string' && def.label.length > 0 ? def.label : objectName)
-  );
+  return typeof def?.label === 'string' && def.label.length > 0 ? def.label : objectName;
 }
 
 /**
- * A field's label inside an activity summary: the locale bundle's
- * (`objects.<object>.fields.<field>.label`), then the authored def label, then
- * the machine key. One answer for every branch that names a field.
+ * A field's label inside an activity summary: the definition's (in the
+ * reader's language for a reader), then the machine key. One answer for every
+ * branch that names a field.
  */
-export function fieldLabelForSummary(
-  objectName: string,
-  key: string,
-  field: any,
-  translate: (key: string, params?: Record<string, unknown>) => string | undefined,
-): string {
-  return (
-    translate(`objects.${objectName}.fields.${key}.label`) ??
-    (typeof field?.label === 'string' && field.label.length > 0 ? field.label : key)
-  );
+export function fieldLabelForSummary(key: string, field: any): string {
+  return typeof field?.label === 'string' && field.label.length > 0 ? field.label : key;
+}
+
+/** A select value's option label on the definition's field, `undefined` when the field declares none for it. */
+function optionLabelOn(field: any, option: string): string | undefined {
+  const options: unknown = field?.options;
+  if (!Array.isArray(options)) return undefined;
+  for (const candidate of options) {
+    if (candidate && typeof candidate === 'object' && String((candidate as { value?: unknown }).value) === option) {
+      const label = (candidate as { label?: unknown }).label;
+      return typeof label === 'string' && label.length > 0 ? label : undefined;
+    }
+  }
+  return undefined;
 }
 
 /** A locale's conjunction list ("A, B, and C" / "A、B和C"); `", "` where `Intl` cannot answer. */
@@ -194,7 +238,7 @@ export function composeActivitySummary(
         return translate('messages.activityUpdated', frame);
       }
       const fields = locale.getObjectDef(message.object)?.fields;
-      const items = message.fields.map((key) => fieldLabelForSummary(message.object, key, fields?.[key], translate));
+      const items = message.fields.map((key) => fieldLabelForSummary(key, fields?.[key]));
       if (message.more > 0) {
         items.push(
           translate('messages.activityMoreFields', { count: message.more }) ??
@@ -207,12 +251,14 @@ export function composeActivitySummary(
       const fields = locale.getObjectDef(message.object)?.fields;
       const valueIn = (field: string, value: ActivitySummaryValue): string =>
         value.option !== undefined
-          ? (translate(`objects.${message.object}.fields.${field}.options.${value.option}`) ?? value.text)
-          : value.text;
+          ? (optionLabelOn(fields?.[field], value.option) ?? value.text)
+          : typeof value.boolean === 'boolean'
+            ? (translate(`messages.${booleanMessageKey(value.boolean)}`) ?? value.text)
+            : value.text;
       return message.changes
         .map(
           (c) =>
-            `${fieldLabelForSummary(message.object, c.field, fields?.[c.field], translate)}: ` +
+            `${fieldLabelForSummary(c.field, fields?.[c.field])}: ` +
             `${valueIn(c.field, c.from)} → ${valueIn(c.field, c.to)}`,
         )
         .join('; ');
@@ -228,7 +274,10 @@ export function composeStoredSummary(message: ActivitySummaryMessage, locale: Ac
 const SINGLE_TEMPLATE_KEYS: ReadonlySet<string> = new Set(['activityCreated', 'activityDeleted', 'activityUpdated']);
 const isStringList = (v: unknown): v is string[] => Array.isArray(v) && v.every((s) => typeof s === 'string');
 const isValue = (v: unknown): v is ActivitySummaryValue =>
-  isRecord(v) && typeof v.text === 'string' && (v.option === undefined || typeof v.option === 'string');
+  isRecord(v) &&
+  typeof v.text === 'string' &&
+  (v.option === undefined || typeof v.option === 'string') &&
+  (v.boolean === undefined || typeof v.boolean === 'boolean');
 
 /** A stored code, or `null` for anything this version cannot compose (it then stays as stored). */
 export function readActivitySummaryMessage(value: unknown): ActivitySummaryMessage | null {
@@ -251,10 +300,59 @@ export function readActivitySummaryMessage(value: unknown): ActivitySummaryMessa
   return null;
 }
 
-/** The slice of `II18nService` a read asks: `t()`, and `getLocales()` to negotiate when offered. */
+/**
+ * The slice of `II18nService` a read asks: `t()`, `getLocales()` to negotiate
+ * when offered, and [#35384] the members the labels are resolved by, as the
+ * metadata route reads them.
+ */
 export interface ActivitySummaryI18n {
   t(key: string, locale: string, params?: Record<string, unknown>): string;
   getLocales?(): unknown;
+  getTranslations?(locale: string): unknown;
+  getFallbackLocale?(): string | undefined;
+  getSourceLocale?(): string | undefined;
+  getDefaultLocale?(): string;
+}
+
+/**
+ * [#35384] What the metadata route (`GET /meta/object/:name`) translates an
+ * object definition with, for a request in `locale`: the bundle — every locale
+ * `service` holds, keyed by locale (`translationBundleOf` in rest) — and the
+ * `ResolveOptions` that route builds (`metaTranslateOptions` in rest): the
+ * request's locale, the DECLARED fallback chain (`getFallbackLocale()`), and
+ * the authored language — the declared `sourceLocale` (`getSourceLocale()`),
+ * else `defaultLocale` (`getDefaultLocale()`). Each getter is
+ * feature-detected; a service that declares none gets none. The locale is
+ * the negotiated one, as objectql's refusal labels hand `translateObject`.
+ *
+ * `undefined` — the authored labels stand — for a service that cannot hand its
+ * translations over (no `getLocales` / `getTranslations`). A throwing service
+ * is the caller's to survive.
+ */
+function labelTranslationOf(
+  service: ActivitySummaryI18n,
+  locale: string,
+): { bundle: TranslationBundle | undefined; options: ResolveOptions } | undefined {
+  if (typeof service.getLocales !== 'function' || typeof service.getTranslations !== 'function') return undefined;
+  const locales = service.getLocales();
+  if (!Array.isArray(locales)) return undefined;
+  const bundle: Record<string, unknown> = {};
+  for (const code of locales) {
+    if (typeof code !== 'string' || code.length === 0) continue;
+    const data = service.getTranslations(code);
+    if (data && typeof data === 'object') bundle[code] = data;
+  }
+  const fallback = typeof service.getFallbackLocale === 'function' ? service.getFallbackLocale() : undefined;
+  const source = typeof service.getSourceLocale === 'function' ? service.getSourceLocale() : undefined;
+  const authored = typeof source === 'string' && source.length > 0
+    ? source
+    : typeof service.getDefaultLocale === 'function' ? service.getDefaultLocale() : undefined;
+  const options: ResolveOptions = {
+    locale,
+    ...(typeof fallback === 'string' && fallback.length > 0 ? { fallbackChain: [fallback] } : {}),
+    ...(typeof authored === 'string' && authored.length > 0 ? { defaultLocale: authored } : {}),
+  };
+  return { bundle: Object.keys(bundle).length > 0 ? (bundle as TranslationBundle) : undefined, options };
 }
 
 /**
@@ -282,15 +380,47 @@ function negotiatedLocale(service: ActivitySummaryI18n, requested: string): stri
  * The language a reader whose `ExecutionContext.locale` is `requested` reads
  * in, or `undefined` when this read can compose nothing: no locale, or no
  * service with a `t()`.
+ *
+ * [#35384] Its `getObjectDef` answers the definition `translateObject` put in
+ * the reader's language ({@link labelTranslationOf}), built once per object
+ * for the read; the authored definition when there is nothing to translate
+ * with, or the translator throws. `getPackagedObjectBase` answers the object's
+ * packaged base, handed to the translator as `packagedBase`, as `/meta` hands
+ * it ({@link packagedObjectBaseReader}); absent, or answering nothing, no
+ * baseline is known and the catalog applies.
  */
 export function readerSummaryLocale(
   service: ActivitySummaryI18n | undefined,
   requested: unknown,
   getObjectDef: (objectName: string) => any,
+  getPackagedObjectBase?: (objectName: string) => unknown,
 ): ActivitySummaryLocale | undefined {
   if (typeof requested !== 'string' || requested.length === 0) return undefined;
   if (!service || typeof service.t !== 'function') return undefined;
   const locale = negotiatedLocale(service, requested);
+  let translation: { value: ReturnType<typeof labelTranslationOf> } | undefined;
+  const definitions = new Map<string, any>();
+  const translatedObjectDef = (objectName: string): any => {
+    if (definitions.has(objectName)) return definitions.get(objectName);
+    const def = getObjectDef(objectName);
+    let served = def;
+    if (def && typeof def === 'object') {
+      try {
+        translation ??= { value: labelTranslationOf(service, locale) };
+        if (translation.value) {
+          const packagedBase = getPackagedObjectBase?.(objectName);
+          served = translateObject({ ...def, name: objectName }, translation.value.bundle, {
+            ...translation.value.options,
+            ...(packagedBase && typeof packagedBase === 'object' ? { packagedBase } : {}),
+          });
+        }
+      } catch {
+        // A misbehaving i18n service must not fail the read: the authored labels stand.
+      }
+    }
+    definitions.set(objectName, served);
+    return served;
+  };
   return {
     translate: (key, params) => {
       try {
@@ -303,7 +433,7 @@ export function readerSummaryLocale(
       }
     },
     locale,
-    getObjectDef,
+    getObjectDef: translatedObjectDef,
   };
 }
 
@@ -325,6 +455,12 @@ function parseMetadata(raw: unknown): Record<string, unknown> | null {
  * `metadata`: its parameters are parent field values (the record label, a
  * changed value), and the field redaction judges the text columns, not this
  * slot. A row whose `summary` the projection did not ask for is not given one.
+ *
+ * [#36290] One code is served: a field-change code (`fieldChanges`), which the
+ * field redaction has already narrowed change by change for this reader
+ * (`activity-field-redaction.ts`), so the record page can draw one line per
+ * changed field. This middleware is registered OUTSIDE the redaction for that
+ * reason: it composes from the narrowed code, never from the stored one.
  */
 export function localizeActivityRow(
   row: Record<string, unknown>,
@@ -344,10 +480,15 @@ export function localizeActivityRow(
       }
     }
   }
-  if (stripCode) {
+  if (stripCode && !isFieldChangeCode(metadata[ACTIVITY_SUMMARY_MESSAGE_KEY])) {
     delete metadata[ACTIVITY_SUMMARY_MESSAGE_KEY];
     row.metadata = isRecord(row.metadata) ? metadata : JSON.stringify(metadata);
   }
+}
+
+/** [#36290] A code this version reads as a field-change summary — the one code served to a reader. */
+function isFieldChangeCode(value: unknown): boolean {
+  return readActivitySummaryMessage(value)?.key === 'fieldChanges';
 }
 
 /** The engine slice the summary middleware registers on. */
@@ -357,14 +498,38 @@ export interface ActivitySummaryEngine {
     options?: { object?: string },
   ): void;
   getSchema?(objectName: string): unknown;
+  /** [#35384] The schema registry, read for an object's packaged base ({@link packagedObjectBaseReader}). */
+  registry?: unknown;
+}
+
+/**
+ * [#35384] An object's packaged (code-layer) declaration, off `engine`'s
+ * schema registry (`registry.getPackagedObjectBase(name)`): the body the
+ * metadata protocol's `getPackagedObjectBase` reads (`engine.registry`), the
+ * accessor `/meta` hands `translateObject` as `packagedBase` through
+ * (`packagedObjectBaseOf` in rest). `undefined` — no baseline known — for a
+ * registry without the accessor, or one that throws.
+ */
+function packagedObjectBaseReader(engine: ActivitySummaryEngine): (objectName: string) => unknown {
+  return (objectName) => {
+    const registry = engine.registry as { getPackagedObjectBase?: (name: string) => unknown } | undefined;
+    if (!registry || typeof registry.getPackagedObjectBase !== 'function') return undefined;
+    try {
+      return registry.getPackagedObjectBase(objectName);
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 /**
  * Install the `sys_activity` summary middleware. `getI18n` is resolved on every
- * read: the i18n service may register after this plugin. Register it AFTER the
- * field redaction (`installActivityFieldRedaction`), so it runs inside it: the
- * summary is composed from the row as stored, and the redaction then judges
- * the composed text by the same declared sources the stored one had.
+ * read: the i18n service may register after this plugin. Register it BEFORE the
+ * field redaction (`installActivityFieldRedaction`), so the redaction runs
+ * inside it [#36290]: the redaction judges the stored text by its declared
+ * sources and narrows the field-change code first, and this middleware then
+ * composes a kept summary in the reader's language from what the redaction
+ * left — a narrowed code composes only the changes this reader is served.
  */
 export function installActivitySummaryLocale(
   engine: ActivitySummaryEngine,
@@ -378,13 +543,14 @@ export function installActivitySummaryLocale(
       return null;
     }
   };
+  const getPackagedObjectBase = packagedObjectBaseReader(engine);
   engine.registerMiddleware(
     async (ctx, next) => {
       if (ctx.operation !== 'find' && ctx.operation !== 'findOne') return next();
       const added = ensureJudgedColumnsProjected(ctx.ast, ['summary'], ['metadata']);
       await next();
       const list = (Array.isArray(ctx.result) ? ctx.result : ctx.result ? [ctx.result] : []) as unknown[];
-      const locale = readerSummaryLocale(getI18n(), ctx.context?.locale, getObjectDef);
+      const locale = readerSummaryLocale(getI18n(), ctx.context?.locale, getObjectDef, getPackagedObjectBase);
       const stripCode = !!ctx.context && !ctx.context.isSystem;
       for (const row of list) {
         if (!isRecord(row)) continue;

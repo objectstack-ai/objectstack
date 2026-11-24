@@ -45,7 +45,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "Utilisation d’identifiants",
           scim_refused: "Requête SCIM refusée",
           audit_signing_key_change: "Changement de clé de signature d’audit",
-          dataset_query: "Requête de jeu de données"
+          dataset_query: "Requête de jeu de données",
+          scim_manager_unresolved: "Responsable SCIM non résolu"
         }
       },
       user_id: {
@@ -264,6 +265,18 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "Modifié le"
+      },
+      is_resolved: {
+        label: "Résolu",
+        help: "Indique si le fil ouvert par ce commentaire de premier niveau est résolu ; refusé sur une réponse"
+      },
+      resolved_by: {
+        label: "Résolu par",
+        help: "Qui a résolu le fil — enregistré par la plateforme, jamais saisi par les auteurs"
+      },
+      resolved_at: {
+        label: "Résolu le",
+        help: "Quand le fil a été résolu — enregistré par la plateforme, jamais saisi par les auteurs"
       },
       created_at: {
         label: "Créé le"

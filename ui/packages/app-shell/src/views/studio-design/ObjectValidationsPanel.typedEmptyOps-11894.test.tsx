@@ -19,6 +19,11 @@
  * with `{ record, previous }` as objectql's `checkPredicate` calls it.
  */
 
+// The builder reaches a dynamic `import()` of each module below: its first load
+// is paid here, at collection, never inside a case's clocked window
+// (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@object-ui/core';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
@@ -113,7 +118,9 @@ describe('the Rules tab types the condition builder (objectui#11894)', () => {
 
   it('a lookup declared `multiple` builds "is empty" as null or an empty list — the flag reaches the builder', async () => {
     const onPatch = vi.fn();
-    render(<ObjectValidationsPanel draft={draftWith("record.status == 'done' && record.watchers == 'x'")} onPatch={onPatch} />);
+    // A list is offered membership, not `==` (objectstack#36167): a stored
+    // `record.watchers == 'x'` would open in the raw editor.
+    render(<ObjectValidationsPanel draft={draftWith("record.status == 'done' && (record.watchers != null && 'x' in record.watchers)")} onPatch={onPatch} />);
     await pickOp('record.watchers', 'is empty');
     const cel = writtenCondition(onPatch) as string;
     expect(cel).toBe("record.status == 'done' && (record.watchers == null || size(record.watchers) == 0)");

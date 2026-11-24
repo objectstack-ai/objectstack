@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Plugin, PluginContext } from '@objectstack/core';
-import { isFederatedObject } from '@objectstack/core';
+import type { JsonColumnFieldClass, Plugin, PluginContext } from '@objectstack/core';
+import { isFederatedObject, registryObjectPackageDisabled } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction, referenceCarrierOf } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -15,6 +15,8 @@ import {
   assertReadScopeAdmittedByEngine,
   assertReadScopeCannotVacate,
   assertReadScopeComparandsRunnable,
+  READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+  fixedReadLeafRefusalSinkOf,
   assertReadScopePlaceholdersResolvable,
 } from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
@@ -56,13 +58,32 @@ import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.
  * `IObjectQLEngine`, so the `Partial<>` around it is not decoration — it is
  * what keeps this seam usable against an engine that is not ObjectQL.
  * `judgeFilter` (#20157) is optional on the contract itself, by ruling, and
- * the auto-bridge probes it the same way. So is `hasObjectMiddleware`
- * (#21080), whose absence the bridge below reads as "cannot say".
+ * the auto-bridge probes it the same way. So are `hasObjectMiddleware`
+ * (#21080) and `fixedReadLeafClassOf` (ADR-0155 D4, #35946), whose absence
+ * the bridges below read as "cannot say".
  */
+/** One bridged `executeAggregate` call's input (the plugin option's own declaration). */
+type BridgedAggregateInput = Parameters<NonNullable<AnalyticsServicePluginOptions['executeAggregate']>>[1];
+
+/**
+ * [relation group join] The data engine's read-option key for a relation
+ * group request: objectql's `RELATION_GROUP_BY` (`relation-group-join.ts`),
+ * the same `Symbol.for` key — this package does not import the engine at
+ * runtime. A symbol, so no wire request can carry one.
+ */
+const RELATION_GROUP_BY: unique symbol = Symbol.for('objectstack.objectql.relationGroupBy');
+
+/**
+ * [order and cut] The data engine's read-option key for an order-and-cut
+ * request: objectql's `AGGREGATE_ORDER_CUT` (`aggregate-order-cut.ts`), the
+ * same `Symbol.for` key, for the reason `RELATION_GROUP_BY` is spelled here.
+ */
+const AGGREGATE_ORDER_CUT: unique symbol = Symbol.for('objectstack.objectql.aggregateOrderCut');
+
 type DataEngineLike =
   Pick<IDataEngine, 'aggregate'>
   & Partial<Pick<IDataEngine, 'execute' | 'resolveEffectiveDatasource' | 'getDriverForObject'>>
-  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter' | 'hasObjectMiddleware'>>;
+  & Partial<Pick<IObjectQLEngine, 'getObject' | 'judgeFilter' | 'hasObjectMiddleware' | 'fixedReadLeafClassOf'>>;
 
 /**
  * The slice of the `IDataDriver` CONTRACT the analytics layer consumes —
@@ -106,7 +127,17 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  * property of the SQL driver family, not of every driver.
  */
 type DateBucketingDriver = {
-  dateBucketSql?(objectName: string, field: string, granularity: string): unknown;
+  dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): unknown;
+};
+
+/**
+ * [#36190] The slice of a SQL driver that names the CLASS of a JSON column on
+ * its deployment, `SqlDriver.jsonColumnFieldClass`. Read structurally, as
+ * {@link DialectNamingDriver} is and for the same reason: which columns are
+ * JSON on this deployment is a property of the SQL driver family's storage.
+ */
+type JsonColumnClassifyingDriver = {
+  jsonColumnFieldClass?(table: string, field: string): unknown;
 };
 
 /**
@@ -369,6 +400,8 @@ export class AnalyticsServicePlugin implements Plugin {
     //   `new AnalyticsServicePlugin({ cubes })`
     // without re-implementing the bridge in every app.
     let executeAggregate = this.options.executeAggregate;
+    let executeRelationGroupAggregate: AnalyticsServiceConfig['executeRelationGroupAggregate'];
+    let executeOrderCutAggregate: AnalyticsServiceConfig['executeOrderCutAggregate'];
     let autoBridged = false;
     // [#19995, ruling C] The engine's judge-only `where` admission, filled below
     // ONLY when this plugin bridges `executeAggregate` itself, and then to the
@@ -393,15 +426,9 @@ export class AnalyticsServicePlugin implements Plugin {
           'will retry per-query. Register ObjectQLPlugin or pass executeAggregate.',
         );
       }
-      executeAggregate = async (objectName, { groupBy, aggregations, filter, timezone, context }) => {
-        const engine = tryGetDataEngine();
-        if (!engine) {
-          throw new Error(
-            '[Analytics] Cannot execute aggregate: no IDataEngine ("data") service is registered. ' +
-            'Add ObjectQLPlugin to the kernel or supply AnalyticsServicePlugin({ executeAggregate }).',
-          );
-        }
-        const rows = await engine.aggregate(objectName, {
+      // The engine's own query for one bridged call — the shape both the
+      // aggregate below and its relation group twin hand the engine.
+      const engineAggregateQuery = ({ groupBy, aggregations, filter, timezone, context }: BridgedAggregateInput) => ({
           where: filter,
           groupBy,
           // [#10413 phase 2 / #10576] `a.filter` is the per-aggregation
@@ -471,7 +498,70 @@ export class AnalyticsServicePlugin implements Plugin {
           // engine with no principal and plugin-security fell open (#3597).
           context,
         });
+      const requireDataEngine = (): DataEngineLike => {
+        const engine = tryGetDataEngine();
+        if (!engine) {
+          throw new Error(
+            '[Analytics] Cannot execute aggregate: no IDataEngine ("data") service is registered. ' +
+            'Add ObjectQLPlugin to the kernel or supply AnalyticsServicePlugin({ executeAggregate }).',
+          );
+        }
+        return engine;
+      };
+      executeAggregate = async (objectName, input) => {
+        const rows = await requireDataEngine().aggregate(objectName, engineAggregateQuery(input));
         return rows as Record<string, unknown>[];
+      };
+      // [relation group join] …and the same aggregate grouped also by related
+      // records' attributes, which a SQL driver answers as one `LEFT JOIN …
+      // GROUP BY` (objectql `relation-group-join.ts`). The request rides on a
+      // symbol-keyed READ option, so no wire request can carry it; the engine
+      // writes back whether it joined, and on a decline `ObjectQLStrategy`
+      // serves the dimension by its FK-expand. Same engine as the executor
+      // above, by construction.
+      executeRelationGroupAggregate = async (objectName, input, relations) => {
+        const request: { relations: typeof relations; outcome?: { kind: string; reason?: string; error?: unknown } } = { relations };
+        const engine = requireDataEngine();
+        const aggregate = engine.aggregate as unknown as (
+          object: string, query: unknown, options: Record<symbol, unknown>,
+        ) => Promise<unknown>;
+        const rows = await aggregate.call(engine, objectName, engineAggregateQuery(input), {
+          [RELATION_GROUP_BY]: request,
+        });
+        if (request.outcome?.kind === 'joined') return { joined: true, rows: rows as Record<string, unknown>[] };
+        // [#33876] The read's driver compiles no semi-join: the engine's
+        // refusal travels back for the strategy to throw — no FK-expand.
+        if (request.outcome?.kind === 'refused' && request.outcome.error instanceof Error) {
+          return { joined: false, reason: request.outcome.error.message, refusal: request.outcome.error };
+        }
+        return {
+          joined: false,
+          reason: request.outcome?.reason ?? 'the "data" engine does not serve a relation group join',
+        };
+      };
+      // [order and cut] …and the same aggregate ordered, cut and counted by
+      // the driver's own statement. Declinable: where the engine cannot serve
+      // the cut it reads nothing and says so, and `ObjectQLStrategy` reads
+      // every group and cuts in memory. Same engine as the executor above.
+      executeOrderCutAggregate = async (objectName, input, cut) => {
+        const request: {
+          orderBy: typeof cut.orderBy; limit: number; declinable: true;
+          outcome?: { kind?: unknown; totalGroups?: unknown };
+          declined?: { reason?: unknown };
+        } = { orderBy: cut.orderBy, limit: cut.limit, declinable: true };
+        const engine = requireDataEngine();
+        const aggregate = engine.aggregate as unknown as (
+          object: string, query: unknown, options: Record<symbol, unknown>,
+        ) => Promise<unknown>;
+        const rows = await aggregate.call(engine, objectName, engineAggregateQuery(input), {
+          [AGGREGATE_ORDER_CUT]: request,
+        });
+        const totalGroups = request.outcome?.totalGroups;
+        if (request.outcome?.kind === 'served' && typeof totalGroups === 'number') {
+          return { served: true, rows: rows as Record<string, unknown>[], totalGroups };
+        }
+        const reason = request.declined?.reason;
+        return { served: false, reason: typeof reason === 'string' ? reason : 'the "data" engine did not order and cut the groups' };
       };
       autoBridged = true;
 
@@ -1140,7 +1230,15 @@ export class AnalyticsServicePlugin implements Plugin {
         // [ADR-0139 D6] The engine's `ReadableIds` leaf admitted, as at the
         // two merges this door mirrors: the `$and` below hands the scope to
         // `executeAggregate` — the engine — whose boundary composes it.
-        if (scope) assertReadScopeComparandsRunnable(scope, targetObject, { admitReadableIds: true });
+        // [ADR-0155 D4] …and the fixed-read leaf brands, as at those merges.
+        if (scope) {
+          assertReadScopeComparandsRunnable(scope, targetObject, {
+            admitReadableIds: true,
+            admitFixedReadLeaves: READ_SCOPE_FIXED_READ_LEAF_BRANDS,
+            fixedReadLeafRefusal: fixedReadLeafRefusalSinkOf(ctx.logger),
+            object: targetObject,
+          });
+        }
         if (scope) assertReadScopePlaceholdersResolvable(scope, targetObject, context);
         if (scope) assertReadScopeAdmittedByEngine(scope, targetObject, context, { judgeFilter });
         // #3680 — the sort-key pass hands over the PRE-window id set (every
@@ -1387,14 +1485,42 @@ export class AnalyticsServicePlugin implements Plugin {
      * the engine's in-memory bucketing (it answers `null`), a throw. On
      * `undefined` the echo refuses the bucket (#21647): it prints a bucket in
      * no expression but the one answered here.
+     *
+     * [#33697] `timezone`, when given, is the resolved area/location zone the
+     * engine pushes a zoned bucket down with; the driver answers the zoned
+     * expression it groups by, or nothing where it buckets no zone (the engine
+     * buckets that zone in memory there).
      */
-    const dateBucketSql = (objectName: string, field: string, granularity: string): string | undefined => {
+    const dateBucketSql = (objectName: string, field: string, granularity: string, timezone?: string): string | undefined => {
       try {
         const svc = ctx.getService<DataEngineLike>('data');
         const driver = svc?.getDriverForObject?.(objectName) as DateBucketingDriver | undefined;
         if (typeof driver?.dateBucketSql !== 'function') return undefined;
-        const rendered = driver.dateBucketSql(objectName, field, granularity);
+        const rendered = timezone === undefined
+          ? driver.dateBucketSql(objectName, field, granularity)
+          : driver.dateBucketSql(objectName, field, granularity, timezone);
         return typeof rendered === 'string' && rendered !== '' ? rendered : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    /**
+     * [#36190] Which class of JSON column `field` on `objectName` is on this
+     * deployment, asked of the DRIVER that stores the object through the same
+     * `getDriverForObject` seam `sqlDialect` uses: the driver alone knows
+     * whether its single-value media columns are still JSON (the ADR-0104
+     * window). Only the two classes the refusal words are passed on;
+     * `undefined` on every tier that cannot answer (no data engine, a driver
+     * without the member, a throw), which leaves the column unjudged.
+     */
+    const jsonColumnFieldClass = (objectName: string, field: string): JsonColumnFieldClass | undefined => {
+      try {
+        const svc = ctx.getService<DataEngineLike>('data');
+        const driver = svc?.getDriverForObject?.(objectName) as JsonColumnClassifyingDriver | undefined;
+        if (typeof driver?.jsonColumnFieldClass !== 'function') return undefined;
+        const answered = driver.jsonColumnFieldClass(objectName, field);
+        return answered === 'single-value-media' || answered === 'multi-value-or-json' ? answered : undefined;
       } catch {
         return undefined;
       }
@@ -1435,6 +1561,44 @@ export class AnalyticsServicePlugin implements Plugin {
         );
       }
       return undefined;
+    };
+
+    /**
+     * [ADR-0155 D4, plan step 5, #35946] The engine seam's recognition of D4's
+     * two classes for a fixed-read leaf a read scope carries
+     * (`IObjectQLEngine.fixedReadLeafClassOf`), resolved per call like
+     * `hasObjectMiddleware` above, and handed on as the engine gave it: a
+     * class, or `null` for neither, the one answer on which `NativeSQLStrategy`
+     * compiles the leaf.
+     *
+     * It FAILS CLOSED: no engine, a `getService` throw, or an engine without
+     * the member answers `undefined` ("cannot say"). The strategy declines
+     * every answer but `null` to the engine path, so that tier declines, as a
+     * class and a throw do, and so does a member that does not keep the
+     * contract (one answering `undefined` for neither, say). ⛔ No copy of either class here (D4: "restates none"). An engine
+     * without the member is said once, at `warn`: the rows stay correct, only
+     * the native path for a scope carrying the leaf is gone.
+     */
+    let reportedEngineWithoutLeafClassAnswer = false;
+    const fixedReadLeafClassOf: NonNullable<AnalyticsServiceConfig['fixedReadLeafClassOf']> = (leaf) => {
+      let svc: DataEngineLike | undefined;
+      try {
+        svc = ctx.getService<DataEngineLike>('data');
+      } catch {
+        return undefined;
+      }
+      if (!svc) return undefined;
+      if (typeof svc.fixedReadLeafClassOf !== 'function' && !reportedEngineWithoutLeafClassAnswer) {
+        reportedEngineWithoutLeafClassAnswer = true;
+        ctx.logger.warn(
+          '[Analytics] The "data" engine has no fixedReadLeafClassOf (IObjectQLEngine.fixedReadLeafClassOf), so ' +
+            'NativeSQLStrategy cannot ask the engine whether it may compile a SharedRecordIds leaf in a read scope. It ' +
+            'declines every query whose read scope carries one, and the ObjectQL strategy serves it through the engine; ' +
+            'a query that strategy cannot serve is refused. Register ObjectQLPlugin\'s engine as "data" to keep the ' +
+            'native path for those scopes. Reported once.',
+        );
+      }
+      return svc.fixedReadLeafClassOf?.(leaf);
     };
 
     const config: AnalyticsServiceConfig = {
@@ -1503,6 +1667,7 @@ export class AnalyticsServicePlugin implements Plugin {
                 currencyField?: string;
                 homeAmount?: { field?: string };
               };
+              unitConfig?: { unitMode?: string; unitField?: string };
             }
           | undefined;
         if (!f) return undefined;
@@ -1520,6 +1685,13 @@ export class AnalyticsServicePlugin implements Plugin {
         const homeAmountField = recordCurrencyField !== undefined
           ? f.currencyConfig?.homeAmount?.field
           : undefined;
+        // [ADR-0158 U7 R1] …and a quantity's `unitField` ONLY under
+        // `unitMode: 'record'` on a `number`, the one shape the spec reads it
+        // under: the cube door's record-unit judgment groups by it.
+        const recordUnitField = f.type === 'number' && f.unitConfig?.unitMode === 'record'
+          && typeof f.unitConfig.unitField === 'string' && f.unitConfig.unitField !== ''
+          ? f.unitConfig.unitField
+          : undefined;
         return {
           type: f.type,
           multiple: f.multiple === true,
@@ -1527,6 +1699,7 @@ export class AnalyticsServicePlugin implements Plugin {
           defaultCurrency: fixedCurrency,
           currencyField: recordCurrencyField,
           homeAmountField,
+          unitField: recordUnitField,
         };
       },
       // #5033 — the datasource an object is bound to, used ONLY to name the
@@ -1550,13 +1723,25 @@ export class AnalyticsServicePlugin implements Plugin {
       // [#21441] The executing driver's own bucket expression — see
       // `dateBucketSql` above.
       dateBucketSql,
+      // [#36190] The storing driver's JSON-column class — see
+      // `jsonColumnFieldClass` above.
+      jsonColumnFieldClass,
       // [#19995, ruling C] The executing engine's own `where` admission — see
       // `judgeFilter` beside the `executeAggregate` auto-bridge above.
       judgeFilter,
+      // [relation group join] The executing engine's relation group join —
+      // see beside the `executeAggregate` auto-bridge above.
+      executeRelationGroupAggregate,
+      // [order and cut] The executing engine's order and cut — see beside
+      // the `executeAggregate` auto-bridge above.
+      executeOrderCutAggregate,
       // [#21080] The data engine's per-object middleware answer — see
       // `hasObjectMiddleware` above. Wired whoever executes raw SQL: the
       // middlewares live in the engine either way.
       hasObjectMiddleware,
+      // [ADR-0155 D4, #35946] The engine seam's class recognition for a
+      // fixed-read leaf — see `fixedReadLeafClassOf` above.
+      fixedReadLeafClassOf,
       // ADR-0062 D6 — a federated object carries an `external` block (ADR-0015).
       // Reported so NativeSQLStrategy declines it (its hand-compiled FROM would
       // hit the wrong physical table) and the driver-correct ObjectQL path runs.
@@ -1609,6 +1794,14 @@ export class AnalyticsServicePlugin implements Plugin {
         }
         return engine.getObject?.(objectName) as { enable?: unknown; fields?: unknown } | undefined;
       },
+      // [#35525] The registry's disabled-package predicate — the ONE the data
+      // route asks (`isObjectOfDisabledPackage`) before it answers `404
+      // OBJECT_PACKAGE_DISABLED` — read through core's accessor over the SAME
+      // engine's registry, per call (a disable is reversible and nothing is
+      // cached). An engine or registry that cannot answer hides nothing, as on
+      // the data route. Every object a query reads is asked, for every caller.
+      isObjectPackageDisabled: (objectName: string) =>
+        registryObjectPackageDisabled((dataEngine() as { registry?: unknown } | undefined)?.registry)(objectName),
       draftRowsResolver,
     };
 

@@ -89,6 +89,7 @@
  *   security service, where `/data` has no field-level security either.
  */
 
+import { operationUserMessage, type UserMessageCaller } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { StandardErrorCode } from '@objectstack/spec/api';
 import { readAdmissionUnresolvedError } from './read-admission.js';
@@ -179,7 +180,7 @@ interface AdmissionLogger {
   warn(message: string): void;
 }
 
-type FieldRefusal = Error & { code?: string; status?: number; object?: string; fields?: string[] };
+type FieldRefusal = Error & { code?: string; status?: number; object?: string; fields?: string[]; userMessage?: string };
 
 /**
  * The refusal, in the ADR-0112 envelope — `PERMISSION_DENIED` / 403 — and in
@@ -189,7 +190,12 @@ type FieldRefusal = Error & { code?: string; status?: number; object?: string; f
  * refused, each the field the member resolved to: the names the engine's
  * refusal carries for the same query.
  */
-export function fieldReadDeniedError(object: string, fields: readonly string[], role: FieldReadRole): Error {
+export function fieldReadDeniedError(
+  object: string,
+  fields: readonly string[],
+  role: FieldReadRole,
+  caller?: UserMessageCaller | null,
+): Error {
   const message = role === 'aggregate'
     ? `[Security] Field read denied: not permitted to aggregate [${fields.join(', ')}] on '${object}'`
     : `[Security] Access denied: query on '${object}' references field(s) not readable by the caller: `
@@ -200,6 +206,8 @@ export function fieldReadDeniedError(object: string, fields: readonly string[], 
   err.status = 403;
   err.object = object;
   err.fields = [...fields];
+  // [#34699] The user's half of the predicate refusal, naming no field.
+  if (role !== 'aggregate') err.userMessage = operationUserMessage('query_field_not_readable', caller);
   return err;
 }
 
@@ -312,7 +320,7 @@ export async function assertNamedFieldsReadable(
           `(user ${String((context as { userId?: unknown } | undefined)?.userId ?? 'unknown')}) — ` +
           `the verdict the engine reaches for the same fields`,
       );
-      throw fieldReadDeniedError(object, refused, role);
+      throw fieldReadDeniedError(object, refused, role, context);
     }
   }
 }

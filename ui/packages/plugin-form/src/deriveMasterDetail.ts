@@ -21,7 +21,7 @@ import {
   deriveInlineGridSortField,
   deriveInlineRowFormFields,
 } from '@objectstack/spec/data';
-import type { BooleanValueLabel, GridColumn } from '@object-ui/fields';
+import { summaryDeclaresCurrency, type BooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 
 /**
@@ -54,9 +54,13 @@ export function fieldTypeToColumnType(type: string | undefined): GridColumn['typ
   switch (type) {
     case 'number':
     case 'percent':
-    case 'rating':
     case 'slider':
       return 'number';
+    // objectstack#36043 — a rating, a check, a person and a list of options
+    // or tags each get the cell the main list edits them with, not a number
+    // box, a yes/no select or a plain text box.
+    case 'rating':
+      return 'rating';
     case 'currency':
       return 'currency';
     // Three distinct controls, NOT one (objectui#3569). Collapsing `datetime`
@@ -74,12 +78,20 @@ export function fieldTypeToColumnType(type: string | undefined): GridColumn['typ
     case 'select':
     case 'picklist':
     case 'radio':
+      return 'select';
     case 'boolean':
     case 'toggle':
-      return 'select';
+      return 'boolean';
+    case 'multiselect':
+    case 'checkboxes':
+      return 'multiselect';
+    case 'tags':
+      return 'tags';
     case 'lookup':
     case 'master_detail':
       return 'lookup';
+    case 'user':
+      return 'user';
     case 'file':
     case 'image':
     case 'avatar':
@@ -87,6 +99,43 @@ export function fieldTypeToColumnType(type: string | undefined): GridColumn['typ
     default:
       return 'text';
   }
+}
+
+/**
+ * The type a child field's VALUE is drawn as, for {@link fieldTypeToColumnType}
+ * (objectstack-ai/objectstack#34286).
+ *
+ * For every type but the two computed ones that is the field's own `type`. A
+ * `formula` or `summary` field holds a value of ANOTHER type, and a column over
+ * it used to map `type: 'formula'` itself, which no case names, so a formula
+ * declaring `returnType: 'currency'` hydrated to a `text` column and printed
+ * `157780` where its form face and its table cell print money.
+ *
+ * The reading is the formula cell's (`FormulaCellRenderer` in
+ * `@object-ui/fields`, objectui#11748 / objectui#12111), applied to the
+ * declaration alone because a column is typed before any value exists:
+ *   - a `summary` that declares its currency (`summaryDeclaresCurrency`, the
+ *     cell's own test, ADR-0144 D6 as amended) is money;
+ *   - otherwise the declared `returnType` decides, as declared;
+ *   - with neither, the field's own type, so the column hydrates as it always
+ *     has (`text`). The cell's last arm, a JS number drawn as a number, reads
+ *     the value, which a column does not have.
+ * ⛔ Nothing is inferred from the expression or from its inputs, as in the cell.
+ *
+ * The declared value type is then a field type like any other, so
+ * {@link fieldTypeToColumnType} maps it with no second table: `number` →
+ * `number`, `currency` → `currency`, `date` → `date`, `boolean` → `boolean`
+ * (a check cell, carrying the two option labels {@link optionsFor} draws for a
+ * boolean field, objectstack#36043),
+ * `text` → `text`. A currency column's code is resolved where every currency
+ * column's is (`GridField`'s `columnCurrencies`, filled from the child field's
+ * own `currencyConfig` by `parentCurrencyFieldsOf`, whatever the field's type).
+ */
+function columnValueType(d: any): string | undefined {
+  const type = d?.type;
+  if (type !== 'formula' && type !== 'summary') return type;
+  if (type === 'summary' && summaryDeclaresCurrency(d)) return 'currency';
+  return typeof d?.returnType === 'string' ? d.returnType : type;
 }
 
 /** Image-flavoured field types whose picker should be restricted to images. */
@@ -112,10 +161,10 @@ function applyFileColumnProps(col: GridColumn, d: any): void {
 }
 
 /**
- * A select column's options, from its child field. A `boolean` / `toggle`
- * field has no options of its own, so it gets two, whose STORED values are
- * `'true'` / `'false'` and whose LABELS are the session's word for each value,
- * drawn by `booleanLabel` (objectui#12924).
+ * A column's options, from its child field. A `boolean` / `toggle` field has
+ * no options of its own, so it gets two, keyed `'true'` / `'false'`, whose
+ * LABELS are the session's word for each value, drawn by `booleanLabel`
+ * (objectui#12924): the words its check cell is read as (objectstack#36043).
  *
  * The labels used to be the literals `Yes` / `No`, so the line-items grid's
  * select and its read-only cells read English on every locale. They now come
@@ -127,7 +176,8 @@ function applyFileColumnProps(col: GridColumn, d: any): void {
  * options in a language the session is not in.
  */
 function optionsFor(def: any, booleanLabel: BooleanValueLabel): GridColumn['options'] | undefined {
-  if (def?.type === 'boolean' || def?.type === 'toggle') {
+  const valueType = columnValueType(def);
+  if (valueType === 'boolean' || valueType === 'toggle') {
     return [
       { label: booleanLabel(true), value: 'true' },
       { label: booleanLabel(false), value: 'false' },
@@ -140,6 +190,26 @@ function optionsFor(def: any, booleanLabel: BooleanValueLabel): GridColumn['opti
       ? { label: String(o.label ?? o.value), value: String(o.value) }
       : { label: String(o), value: String(o) },
   );
+}
+
+/**
+ * The column types that carry the child field's options (objectstack#36043):
+ * the choices of a select or multi-select cell, and the two words a check cell
+ * is read as. A tags cell carries none: like the list view's tags cell, it
+ * offers the tags it holds plus free text, and reads no option list.
+ */
+function takesOptions(type: GridColumn['type']): boolean {
+  return type === 'select' || type === 'multiselect' || type === 'boolean';
+}
+
+/**
+ * The extras a `user` or `rating` cell reads from its child field
+ * (objectstack#36043): whether a person cell holds several people, and how
+ * many stars a rating cell draws. A key the column already carries is kept.
+ */
+function applyPickerColumnProps(col: GridColumn, d: any): void {
+  if (col.type === 'user' && col.multiple == null && d?.multiple === true) col.multiple = true;
+  if (col.type === 'rating' && col.max == null && Number.isInteger(d?.max) && d.max > 0) col.max = d.max;
 }
 
 /**
@@ -211,11 +281,12 @@ function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): Gr
   const col: GridColumn = {
     name,
     label: d?.label || name,
-    type: fieldTypeToColumnType(d?.type),
+    type: fieldTypeToColumnType(columnValueType(d)),
     required: !!d?.required,
   };
   const options = optionsFor(d, booleanLabel);
-  if (col.type === 'select' && options) col.options = options;
+  if (takesOptions(col.type) && options) col.options = options;
+  applyPickerColumnProps(col, d);
   if (col.type === 'lookup') {
     col.reference = d?.reference;
     // The display pointer is read in `@objectstack/spec`'s spelling,
@@ -326,7 +397,8 @@ function reportCurrencyColumnScale(
  *
  * `booleanLabel` is required for the same reason as on {@link deriveColumns}:
  * an untyped column over a `boolean` / `toggle` child field hydrates into a
- * select whose two option labels it draws (objectui#12924).
+ * check cell whose two option labels it draws (objectui#12924; a check cell
+ * since objectstack#36043).
  */
 export function hydrateColumns(
   columns: GridColumn[] | undefined,
@@ -343,13 +415,16 @@ export function hydrateColumns(
     }
     const d = (fields as any)[col.name];
     if (!d) return col; // unknown field — leave as-is (grid falls back to text)
-    const type = fieldTypeToColumnType(d?.type);
+    // A formula / summary column takes the type its VALUE is declared as
+    // (objectstack-ai/objectstack#34286), see `columnValueType`.
+    const type = fieldTypeToColumnType(columnValueType(d));
     if (type === 'currency') reportCurrencyColumnScale(col, childSchema?.name, true);
     const next: GridColumn = { ...col, type };
     if (next.label == null) next.label = d?.label || col.name;
     if (next.required == null) next.required = !!d?.required;
     const options = optionsFor(d, opts.booleanLabel);
-    if (type === 'select' && options && !next.options) next.options = options;
+    if (takesOptions(type) && options && !next.options) next.options = options;
+    applyPickerColumnProps(next, d);
     if (type === 'lookup') {
       if (next.reference == null) next.reference = d?.reference;
       // The same read as `deriveColumns` above (objectui#11070 round 6).

@@ -97,7 +97,7 @@ export async function judgeFieldWriteLock(
   const context = options?.context;
   const visible = await this.findOne(object, { where: { id }, context } as EngineQueryOptions);
   const prior = visible && typeof visible === 'object' ? await this.readUpdatePriorRow(object, id, context) : null;
-  if (!prior) throw recordNotFoundError(object, id as string);
+  if (!prior) throw recordNotFoundError(object, id as string, context);
 
   const payload: Record<string, unknown> = { [field]: Object.prototype.hasOwnProperty.call(prior, field) ? prior[field] : null };
   const parent = hasParentScopedReadonlyWhenInPayload(schema as never, payload)

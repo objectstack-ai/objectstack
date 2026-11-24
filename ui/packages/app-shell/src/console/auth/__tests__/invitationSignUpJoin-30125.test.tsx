@@ -29,7 +29,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { AuthProvider } from '@object-ui/auth';
@@ -56,7 +56,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function createMockClient({ signedInOnArrival = false, refuseRecipient = false } = {}) {
+function createMockClient({ signedInOnArrival = false, refuseRecipient = false, refuseUnverified = false } = {}) {
   let signedIn = signedInOnArrival;
   let member = false;
   let active: typeof ORG | null = null;
@@ -84,6 +84,13 @@ function createMockClient({ signedInOnArrival = false, refuseRecipient = false }
       return { id, organizationId: ORG.id, email: USER.email, role: 'member', status: 'pending' };
     }),
     acceptInvitation: vi.fn(async () => {
+      if (refuseUnverified) {
+        // The server's answer to an account whose address is not verified.
+        throw Object.assign(new Error('Email verification required before accepting or rejecting invitation'), {
+          status: 403,
+          code: 'EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION',
+        });
+      }
       member = true;
     }),
     listOrganizations: vi.fn(async () => (member ? [ORG] : [])),
@@ -107,11 +114,18 @@ function renderRegister(client: AuthClient) {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/accept-invitation/:invitationId" element={<p>accept page</p>} />
             <Route path="/" element={<p>home</p>} />
+            <Route path="/verify-email-prompt" element={<VerifyPromptProbe />} />
           </Routes>
         </MemoryRouter>
       </AuthProvider>
     </I18nProvider>,
   );
+}
+
+/** The verification-mail screen's stand-in: shows the query it was opened with. */
+function VerifyPromptProbe() {
+  const location = useLocation();
+  return <p data-testid="verify-prompt">{location.search}</p>;
 }
 
 async function signUpOnTheForm() {
@@ -145,6 +159,20 @@ describe('DefaultRegisterPage — a sign-up from an invitation link joins it (#3
 
     expect(await screen.findByText('accept page')).toBeInTheDocument();
     expect(client.acceptInvitation).not.toHaveBeenCalled();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it('accepting needs a verified address: an unverified account goes straight to the verification mail, which returns to the accept page', async () => {
+    const client = createMockClient({ refuseUnverified: true });
+    renderRegister(client);
+    await signUpOnTheForm();
+
+    const prompt = await screen.findByTestId('verify-prompt');
+    const sp = new URLSearchParams(prompt.textContent ?? '');
+    expect(sp.get('email')).toBe(USER.email);
+    expect(sp.get('redirect')).toBe(ACCEPT_PATH);
+    expect(client.acceptInvitation).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('accept page')).toBeNull();
     expect(assign).not.toHaveBeenCalled();
   });
 

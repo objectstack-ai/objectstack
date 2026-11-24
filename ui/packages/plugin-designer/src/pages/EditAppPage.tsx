@@ -7,7 +7,7 @@
  * @module
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AppCreationWizard, navObjectNames } from '../AppCreationWizard';
 import { wizardDraftToAppSchema } from '@object-ui/types';
@@ -17,6 +17,7 @@ import { useMetadata } from '@object-ui/react';
 import { useAdapter } from '@object-ui/react';
 // Declares the ObjectStackAdapter this page reads `getClient` off.
 import '../adapter-context-register';
+import { owningPackage, useAuthoredObjectReader } from './authoredObjectReader';
 import { toast } from 'sonner';
 
 /**
@@ -52,11 +53,47 @@ export function EditAppPage() {
   const { appName, editAppName } = useParams();
   const { apps, objects, refresh } = useMetadata();
   const adapter = useAdapter();
+  // objectstack#35101 — the generated nav entries' labels come from the
+  // objects as authored, never from the served (translated) list.
+  const readAuthoredObject = useAuthoredObjectReader(adapter, objects);
 
   const targetAppName = editAppName || appName;
 
-  // Find the app to edit
-  const appToEdit = apps.find((a: any) => a.name === targetAppName);
+  // Find the app to edit. The served list only says the app exists and where
+  // it is served from: its words are translated for the console's locale.
+  const servedApp = apps.find((a: any) => a.name === targetAppName);
+  // objectstack#35115 — the app's package is its address for the read below
+  // AND the save: a packaged app is saved with `{ packageId }` (`?package=`),
+  // the row the read came from. A package-less app is read and saved with no
+  // package, as before. A managed package's sealed app (ADR-0131 D6) is still
+  // refused by the server at either address; naming its package writes
+  // nothing the package-less save did not.
+  const servedPackageId = owningPackage(servedApp);
+
+  // objectstack#35054 (route D) — the wizard edits the app as its author
+  // stored it, read from the untranslated layers (`getAuthoredItem`). The
+  // served app is translated for the console's locale (its label and every
+  // navigation label), and the save below sends a whole document the door
+  // stores verbatim, so seeding the wizard with it stored the translations as
+  // the app's source text. A read that fails or finds nothing opens nothing.
+  const [authored, setAuthored] = useState<
+    { for: string; app: Record<string, any> | null; error?: string } | null
+  >(null);
+  useEffect(() => {
+    if (!servedApp?.name) return;
+    let cancelled = false;
+    const name = servedApp.name as string;
+    const read = adapter?.getAuthoredItem
+      ? adapter.getAuthoredItem('app', name, servedPackageId ? { packageId: servedPackageId } : {})
+      : Promise.reject(new Error('No metadata client'));
+    read.then(
+      (app) => { if (!cancelled) setAuthored({ for: name, app }); },
+      (err: any) => { if (!cancelled) setAuthored({ for: name, app: null, error: String(err?.message ?? err) }); },
+    );
+    return () => { cancelled = true; };
+  }, [adapter, servedApp?.name, servedPackageId]);
+  const appToEdit: Record<string, any> | undefined =
+    authored && authored.for === servedApp?.name && authored.app ? authored.app : undefined;
 
   // Map metadata objects to ObjectSelection format. An object is selected when
   // the stored navigation has an object entry for it ANYWHERE, a group's
@@ -111,7 +148,9 @@ export function EditAppPage() {
         // Persist app metadata to backend
         const client = adapter?.getClient();
         if (client) {
-          await client.meta.saveItem('app', draft.name, merged);
+          await (servedPackageId
+            ? client.meta.saveItem('app', draft.name, merged, { packageId: servedPackageId })
+            : client.meta.saveItem('app', draft.name, merged));
         }
         toast.success(`Application "${draft.title}" updated successfully`);
         await refresh?.();
@@ -120,7 +159,7 @@ export function EditAppPage() {
         toast.error(err?.message || 'Failed to update application');
       }
     },
-    [navigate, refresh, adapter, appToEdit],
+    [navigate, refresh, adapter, appToEdit, servedPackageId],
   );
 
   const handleCancel = useCallback(() => {
@@ -140,6 +179,20 @@ export function EditAppPage() {
     }
   }, [targetAppName]);
 
+  if (servedApp && (!authored || authored.for !== servedApp.name)) {
+    return <div className="mx-auto max-w-4xl py-8 px-4" data-testid="edit-app-loading" />;
+  }
+
+  if (servedApp && !appToEdit) {
+    return (
+      <div className="mx-auto max-w-4xl py-8 px-4 text-center" data-testid="edit-app-load-failed">
+        <p className="text-muted-foreground">
+          Application &quot;{targetAppName}&quot; could not be read for editing{authored?.error ? `: ${authored.error}` : '.'}
+        </p>
+      </div>
+    );
+  }
+
   if (!appToEdit) {
     return (
       <div className="mx-auto max-w-4xl py-8 px-4 text-center" data-testid="edit-app-not-found">
@@ -156,6 +209,7 @@ export function EditAppPage() {
         onComplete={handleComplete}
         onCancel={handleCancel}
         onSaveDraft={handleSaveDraft}
+        readAuthoredObject={readAuthoredObject}
       />
     </div>
   );

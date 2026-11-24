@@ -9,7 +9,7 @@
  * The slot replaced the whole synthesized tab strip — the related lists, the
  * approvals, attachments and history tabs were dropped unless re-added by hand —
  * and opted the page out of the record page's column tiers. A page that needs
- * its own strip is a `kind: 'full'` page, drawn as authored.
+ * its own strip is a `kind: 'full'` page, drawn as authored on the desktop full record page.
  *
  * Bookkeeping shapes, pinned below:
  *   1. A `retiredKey()` tombstone on the slot map, so the parse refuses the slot

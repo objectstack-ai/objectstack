@@ -46,11 +46,13 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { render, waitFor, cleanup, screen, act, fireEvent } from '@testing-library/react';
+import { render, waitFor, cleanup, screen, act, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, BrowserRouter } from 'react-router-dom';
+import { toast } from 'sonner';
 import { RelatedCountStore } from '@object-ui/components';
 import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider, LocalizationProvider, createI18n } from '@object-ui/i18n';
+import { builtInLocales } from '@object-ui/i18n/locales';
 import { PermissionProvider, MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { MetadataCtx } from '@object-ui/react';
 import { PageSchema as SpecPageSchema } from '@objectstack/spec/ui';
@@ -59,6 +61,7 @@ import { recentItemObject } from '../console/home/recentItemTypeLabel';
 import { NavigationProvider, useNavigationContext } from '../context/NavigationContext';
 import { RecentItemsProvider, useRecentItems, type RecentItem } from '../context/RecentItemsProvider';
 import { RecordDetailView } from './RecordDetailView';
+import { usePageCommands, type PublishedPageCommand } from '../chrome/paletteCommands';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -709,14 +712,14 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   /**
    * The rendered diff line for `close_date`, under an ENGLISH UI with `locale` as
    * the display locale. Since objectstack#27055 the record page draws the audit
-   * entries in the one 动态 stream, each change as one compact line
-   * (`data-stream-change`).
+   * entries in the one 动态 stream; since objectstack#36290 each changed field
+   * is its own line under the entry (`data-field-change`).
    */
   async function diffLine(locale: string): Promise<string> {
     renderHistory(locale);
     let text = '';
     await waitFor(() => {
-      const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
+      const line = Array.from(document.querySelectorAll('[data-field-change]')).find((el) =>
         (el.textContent ?? '').startsWith('Close date'),
       );
       expect(line).toBeTruthy();
@@ -727,7 +730,7 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   }
 
   const expected = (locale: string) =>
-    `Close date ${new Date(`${FROM_DATE}T00:00:00Z`).toLocaleDateString(locale)} → ${new Date(`${TO_DATE}T00:00:00Z`).toLocaleDateString(locale)}`;
+    `Close date: ${new Date(`${FROM_DATE}T00:00:00Z`).toLocaleDateString(locale)} → ${new Date(`${TO_DATE}T00:00:00Z`).toLocaleDateString(locale)}`;
 
   beforeEach(() => {
     // Unrelated chrome on this view reaches for the platform API; answering it
@@ -752,13 +755,13 @@ describe('RecordDetailView.auditDisplayLocale-10442', () => {
   describe('RecordDetailView — the audit history dates follow the display locale (objectui#10442)', () => {
     it('formats the date diff as de-CH under an English UI with a de-CH display locale', async () => {
       const text = await diffLine('de-CH');
-      expect(text, `got: ${text}`).toBe('Close date 3.3.2020 → 4.3.2020');
+      expect(text, `got: ${text}`).toBe('Close date: 3.3.2020 → 4.3.2020');
       expect(text).toBe(expected('de-CH'));
     });
 
     it('control: formats the date diff as en-US under an en-US display locale', async () => {
       const text = await diffLine('en-US');
-      expect(text, `got: ${text}`).toBe('Close date 3/3/2020 → 3/4/2020');
+      expect(text, `got: ${text}`).toBe('Close date: 3/3/2020 → 3/4/2020');
       expect(text).toBe(expected('en-US'));
     });
 
@@ -890,17 +893,16 @@ describe('RecordDetailView.auditTenantCurrency-27640', () => {
         </LocalizationProvider>
       </I18nProvider>,
     );
-    // One audit entry draws its changes as one compact line (`data-stream-change`),
-    // joined with `; `, so each field's part is split out and keyed by label.
+    // One audit entry draws each changed field as its own line under the entry
+    // (`data-field-change`, objectstack#36290), keyed here by label.
     const lines: Record<string, string> = {};
     await waitFor(() => {
-      const line = Array.from(document.querySelectorAll('[data-stream-change]')).find((el) =>
-        (el.textContent ?? '').includes('Amount'),
+      const parts = Array.from(document.querySelectorAll('[data-field-change]')).map((el) =>
+        (el.textContent ?? '').replace(/\s+/g, ' ').trim(),
       );
-      expect(line, 'no History diff line').toBeTruthy();
-      const parts = (line!.textContent ?? '').replace(/\s+/g, ' ').trim().split('; ');
+      expect(parts.length, 'no History diff line').toBeGreaterThan(0);
       for (const label of ['Amount', 'List price']) {
-        const part = parts.find((p) => p.startsWith(`${label} `));
+        const part = parts.find((p) => p.startsWith(`${label}: `));
         expect(part, `no change for ${label} in: ${parts.join(' | ')}`).toBeTruthy();
         lines[label] = part!;
       }
@@ -932,17 +934,17 @@ describe('RecordDetailView.auditTenantCurrency-27640', () => {
   describe('RecordDetailView — a dynamic currency diff reads in the tenant currency (objectstack#27640)', () => {
     it('formats a dynamic-mode change from 1500 to 2500 with the EUR face under an EUR tenant', async () => {
       const lines = await diffLines('EUR');
-      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount €1,500.00 → €2,500.00');
+      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount: €1,500.00 → €2,500.00');
     });
 
     it('keeps a record-mode change a plain number: the tenant currency is not its fallback', async () => {
       const lines = await diffLines('EUR');
-      expect(lines['List price'], `got: ${lines['List price']}`).toBe('List price 1,500.00 → 2,500.00');
+      expect(lines['List price'], `got: ${lines['List price']}`).toBe('List price: 1,500.00 → 2,500.00');
     });
 
     it('control: with no tenant currency, the dynamic change reads as a plain number', async () => {
       const lines = await diffLines(undefined);
-      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount 1,500.00 → 2,500.00');
+      expect(lines['Amount'], `got: ${lines['Amount']}`).toBe('Amount: 1,500.00 → 2,500.00');
     });
   });
 });
@@ -993,6 +995,7 @@ describe('RecordDetailView.setupManagedByChip-13385', () => {
       tenantId: null,
       positions: [],
       hasAnyQueue: false,
+      objectsUsingQueues: [],
       permissionSets: [],
       ...(held === undefined ? {} : { systemPermissions: held }),
       objects: { '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
@@ -1303,15 +1306,15 @@ describe('RecordDetailView.pageHeaderTitleFls-10499', () => {
       // email, and the readable name was on screen nowhere. The H1 now reads the
       // same row: it shows the name, and the hidden `name` row is its duplicate,
       // as on a backend that strips `email`. The name is in the record once, in
-      // the H1; it does not come back as a body row. The top bar's crumb
-      // 「对象 › 记录名」 (objectstack#27524) names the record with the same
-      // gated title, never the denied email.
+      // the H1; it does not come back as a body row. The H1 is the top bar's
+      // record name (objectstack#35593: one header row, 「对象 / 记录名」), with
+      // the same gated title, never the denied email.
       await renderRecordPage({ titleFormat: '{email}' }, denying('email'), 'Ada Lovelace');
       const bar = document.querySelector('[data-record-top-bar]');
-      expect(bar?.textContent).toContain('Ada Lovelace');
+      await waitFor(() => expect(bar?.querySelector('h1')?.textContent).toContain('Ada Lovelace'));
       expect(bar?.textContent).not.toContain(EMAIL);
       const text = document.body.textContent ?? '';
-      expect(text.split('Ada Lovelace').length - 1 - ((bar?.textContent ?? '').split('Ada Lovelace').length - 1)).toBe(1);
+      expect(text.split('Ada Lovelace').length - 1).toBe(1);
       expect(text).toContain('555-0100');
     });
 
@@ -1574,7 +1577,8 @@ describe('RecordDetailView.relatedListTitlePlural-11733', () => {
  *      for it; since objectstack#29188 it shows the load-failure notice, not
  *      the empty state;
  *   5. a refused `sys_comment` read beside an answered `sys_activity` read
- *      keeps the activity rows and says the comments are withheld.
+ *      keeps the activity rows and says the comments are withheld (since
+ *      objectstack#36075 in the comment panel, which holds the comments).
  *
  * The harness is `RecordDetailView.feedLoading.test.tsx`'s: the synthesized
  * record page composes `record:discussion`, so the panel arrives through the
@@ -1645,9 +1649,9 @@ describe('RecordDetailView.feedRefusal-11195', () => {
     } as any;
   }
 
-  function renderDetail(dataSource: any) {
+  function renderDetail(dataSource: any, { embedded = true }: { embedded?: boolean } = {}) {
     return render(
-      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?tab=timeline`]}>
+      <MemoryRouter initialEntries={[`/app/demo/${OBJECT_NAME}/${RECORD_ID}?related=timeline`]}>
         <MetadataCtx.Provider value={makeMetadata()}>
           <RecordDetailView
             dataSource={dataSource}
@@ -1655,7 +1659,7 @@ describe('RecordDetailView.feedRefusal-11195', () => {
             onEdit={() => {}}
             objectNameOverride={OBJECT_NAME}
             recordIdOverride={RECORD_ID}
-            embedded
+            embedded={embedded}
           />
         </MetadataCtx.Provider>
       </MemoryRouter>,
@@ -1806,14 +1810,26 @@ describe('RecordDetailView.feedRefusal-11195', () => {
           }),
       });
 
-      renderDetail(dataSource);
+      window.localStorage.clear();
+      // objectstack#36225 — the comment panel is the full page's: a preview has none.
+      renderDetail(dataSource, { embedded: false });
 
       expect(await screen.findByText('Stage moved to qualified')).toBeTruthy();
-      const notice = await screen.findByTestId('activity-access-denied');
-      expect(notice.textContent).toContain(COMMENTS_DENIED);
-      expect(notice.textContent).not.toContain(ACTIVITY_DENIED);
-      expect(notice.querySelector('[data-denied-source="comments"]')).not.toBeNull();
-      expect(notice.querySelector('[data-denied-source="activity"]')).toBeNull();
+      // The 动态 stream holds no comments, so their refusal is not its to say.
+      expect(screen.queryByTestId('activity-access-denied')).toBeNull();
+      const button = await waitFor(() => {
+        const el = document.querySelector('[data-comments-button]');
+        expect(el).not.toBeNull();
+        return el as HTMLElement;
+      });
+      // The icon names no count for comments it may not read.
+      expect(button.querySelector('[data-comments-count]')).toBeNull();
+      fireEvent.click(button);
+      const panel = document.querySelector('[data-comments-panel]') as HTMLElement;
+      expect(panel.querySelector('[data-comments-note="denied"]')).not.toBeNull();
+      expect(panel.textContent).toContain(COMMENTS_DENIED);
+      expect(panel.textContent).not.toContain(ACTIVITY_DENIED);
+      expect(panel.querySelector('[data-comments-composer]')).toBeNull();
     });
   });
 });
@@ -1846,12 +1862,14 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
       ...(relatedLists ? { relatedLists } : {}),
       fields: BASE_FIELDS,
     },
+    // `relatedList: true` keeps the owned child a side card here
+    // (objectstack#35597: a master_detail with no relatedList is a body table).
     {
       name: 'showcase_task',
       label: 'Task',
       pluralLabel: 'Tasks',
       managedBy: 'platform',
-      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project', relatedList: true } },
     },
     {
       name: 'showcase_note',
@@ -1903,10 +1921,11 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
     );
   }
 
+  // objectstack#35595 — every side list is a tab of its own, in this order.
   const cardOrder = (container: HTMLElement) =>
-    Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
-      el.getAttribute('data-related-card-id'),
-    );
+    Array.from(container.querySelectorAll('[role="tab"][data-record-tab]'))
+      .map((el) => el.getAttribute('data-record-tab'))
+      .filter((id): id is string => !!id && id.includes('.'));
 
   beforeEach(() => {
     cleanup();
@@ -1930,15 +1949,21 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
     vi.restoreAllMocks();
   });
 
-  describe('RecordDetailView — the related cards follow the object\'s relatedLists (objectstack#27069)', () => {
+  describe('RecordDetailView — the related lists\' tabs follow the object\'s relatedLists (objectstack#27069, objectstack#35595)', () => {
     it('without relatedLists: the derived order — the owned child first, then the lookups in declaration order', async () => {
       const { container } = renderPage(objectsWith());
       await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
       expect(cardOrder(container)).toEqual(['showcase_task.project', 'showcase_note.project', 'showcase_call.project']);
     });
 
-    it('with relatedLists: the declared lists first in that order, the rest after them in the derived order', async () => {
+    it('with relatedLists: only the declared lists, in that order; an unlisted side list draws nothing (objectstack#35897)', async () => {
       const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project']));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project']);
+    });
+
+    it('with relatedLists listing every list: the declared order, nothing dropped (control)', async () => {
+      const { container } = renderPage(objectsWith(['showcase_call', 'showcase_note.project', 'showcase_task']));
       await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
       expect(cardOrder(container)).toEqual(['showcase_call.project', 'showcase_note.project', 'showcase_task.project']);
     });
@@ -1952,12 +1977,11 @@ describe('RecordDetailView.relatedListsOrder-27241', () => {
  * record page draws as BODY TABLES is `@objectstack/spec`'s
  * `isBodyTableRelationship`, the predicate the spec's refusal of a field group
  * naming a side card reads too: `relatedList: 'primary'`, or a `master_detail`
- * FK that sets `inlineEdit` and declares no `relatedList`.
+ * FK declaring no `relatedList` that a field group of the parent names
+ * (objectstack#35889: unnamed, it is a tab; `inlineEdit` plays no part).
  *
- * Behaviour change pinned here: an inline-edited `master_detail` FK that
- * declares `relatedList: true` is a SIDE CARD, as the key's description says
- * ("write true to keep it a side card"). The page used to draw it as a body
- * table, because its own copy of the rule ignored `relatedList`.
+ * objectstack#35889 item 4: a body table a group places keeps its tab, with
+ * its count. `relatedList: true` keeps a list a tab even when a group names it.
  *
  * Measured from a real `RecordDetailView` mount at 1440 px, details beside
  * the right column (the `relatedListsOrder-27241` harness).
@@ -1970,7 +1994,7 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
   const RECORD_ID = 'q-1';
   const BASE_FIELDS = { id: { type: 'text', label: 'Id' }, name: { type: 'text', label: 'Name' } };
 
-  const objectsWith = (taskFk: Record<string, unknown>) => [
+  const objectsWith = (taskFk: Record<string, unknown>, { placeTask = false }: { placeTask?: boolean } = {}) => [
     {
       name: PARENT,
       label: 'Quote',
@@ -1980,6 +2004,7 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
       fieldGroups: [
         { key: 'basic', label: 'Basic' },
         { key: 'lines', label: 'Lines', relatedList: 'showcase_line' },
+        ...(placeTask ? [{ key: 'tasks', label: 'Tasks', relatedList: 'showcase_task' }] : []),
       ],
     },
     {
@@ -2039,10 +2064,11 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
     );
   }
 
+  // objectstack#35595 — every side list is a tab of its own, in this order.
   const cardOrder = (container: HTMLElement) =>
-    Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
-      el.getAttribute('data-related-card-id'),
-    );
+    Array.from(container.querySelectorAll('[role="tab"][data-record-tab]'))
+      .map((el) => el.getAttribute('data-record-tab'))
+      .filter((id): id is string => !!id && id.includes('.'));
 
   beforeEach(() => {
     cleanup();
@@ -2069,21 +2095,68 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
   const detailsText = (container: HTMLElement) =>
     container.querySelector('[data-record-column="details"]')?.textContent ?? '';
 
-  describe('RecordDetailView — body tables are the spec predicate\'s verdict (objectstack#27478)', () => {
-    it('an inline-edited master_detail with no relatedList is a body table; one with relatedList: true is a side card', async () => {
-      const { container } = renderPage(objectsWith({ relatedList: true }));
-      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
-      expect(cardOrder(container)).toEqual(['showcase_task.quote', 'showcase_note.quote']);
+  describe('RecordDetailView — body tables are the spec predicate\'s verdict (objectstack#27478, objectstack#35889)', () => {
+    it('a group-placed master_detail is a body table that keeps its tab; one with relatedList: true is a tab only, even named by a group', async () => {
+      const { container } = renderPage(objectsWith({ relatedList: true }, { placeTask: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_task.quote', 'showcase_note.quote']);
       expect(detailsText(container)).toContain('Lines');
       expect(detailsText(container)).not.toContain('Tasks');
     });
 
-    it('control: the same FK with no relatedList is a body table, not a card', async () => {
-      const { container } = renderPage(objectsWith({}));
-      await waitFor(() => expect(cardOrder(container)).toHaveLength(1), { timeout: 5000 });
-      expect(cardOrder(container)).toEqual(['showcase_note.quote']);
+    it('control: the same FK with no relatedList, named by a group, is a body table and keeps its tab', async () => {
+      const { container } = renderPage(objectsWith({}, { placeTask: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_task.quote', 'showcase_note.quote']);
       await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
       expect(detailsText(container)).toContain('Lines');
+    });
+  });
+
+  describe('RecordDetailView — the parent field group decides, not the relation type or inlineEdit (objectstack#35889)', () => {
+    it('a master_detail no group names is a tab with its count, not a body table — inlineEdit or not', async () => {
+      for (const taskFk of [{ inlineEdit: undefined }, {}]) {
+        cleanup();
+        RelatedCountStore._reset();
+        const { container } = renderPage(objectsWith(taskFk));
+        await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+        expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_task.quote', 'showcase_note.quote']);
+        await waitFor(() => expect(detailsText(container)).toContain('Lines'), { timeout: 5000 });
+        expect(detailsText(container)).not.toContain('Tasks');
+      }
+    });
+
+    it('CONTROL — the same FK with NO inlineEdit, named by a group, is drawn in the details even with no rows', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined }, { placeTask: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
+      expect(container.querySelectorAll('[data-record-column="details"] [data-body-table-empty]').length).toBe(2);
+    });
+
+    it('relatedList: false hides it: neither a body table nor a tab, even named by a group', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: false }, { placeTask: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_note.quote']);
+      await waitFor(() => expect(detailsText(container)).toContain('Lines'), { timeout: 5000 });
+      expect(detailsText(container)).not.toContain('Tasks');
+    });
+
+    it("CONTROL — relatedList: 'primary' is a body table with no tab, as before, whether or not a group positions it", async () => {
+      for (const placeTask of [false, true]) {
+        cleanup();
+        RelatedCountStore._reset();
+        const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: 'primary' }, { placeTask }));
+        await waitFor(() => expect(cardOrder(container)).toHaveLength(2), { timeout: 5000 });
+        expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_note.quote']);
+        await waitFor(() => expect(detailsText(container)).toContain('Tasks'), { timeout: 5000 });
+      }
+    });
+
+    it('relatedList: true keeps it a tab', async () => {
+      const { container } = renderPage(objectsWith({ inlineEdit: undefined, relatedList: true }));
+      await waitFor(() => expect(cardOrder(container)).toHaveLength(3), { timeout: 5000 });
+      expect(cardOrder(container)).toEqual(['showcase_line.quote', 'showcase_task.quote', 'showcase_note.quote']);
+      expect(detailsText(container)).not.toContain('Tasks');
     });
   });
 });
@@ -2091,19 +2164,14 @@ describe('RecordDetailView.bodyTablePredicate-27478', () => {
 // ── RecordDetailView.relatedCountsFirst-27056 ───────────────────────────────
 
 /**
- * objectstack#27056 — the record page's related panels load counts first,
- * then the first rows of only the cards in view, and never blocks the details.
- *
- * The REAL page, at a desktop width (the column tiers), over a data source
- * that holds every related read until the test answers it. The record has six
- * related lists. Measured:
+ * objectstack#27056, as objectstack#35890 lays the page out — the related
+ * lists load counts first and never block the details. Every list is a tab
+ * (the right rail that previewed their first rows is retired). Measured:
  *
  *  - the details draw from the record read alone, while every related read is
- *    still out, and the right column shows one placeholder per card;
+ *    still out, with every list's tab drawn (no number yet) and no rail card;
  *  - the six counts go out as ONE request set, before any of them answers;
- *  - once they answer, rows are read for the two counted cards in view only,
- *    three rows each — never for a card counted at 0 (in view too), never for
- *    the cards below the fold.
+ *  - once they answer, no list's rows are read while its tab is closed.
  */
 
 describe('RecordDetailView.relatedCountsFirst-27056', () => {
@@ -2232,7 +2300,6 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
   }
 
   const isCount = (r: HeldRead) => r.query.$count === true && r.query.$skip === undefined;
-  const isRows = (r: HeldRead) => r.query.$skip !== undefined;
   const column = (container: HTMLElement, name: string) =>
     container.querySelector(`[data-record-column="${name}"]`) as HTMLElement | null;
 
@@ -2260,8 +2327,12 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
     vi.restoreAllMocks();
   });
 
-  describe('RecordDetailView — the related column loads counts first (objectstack#27056)', () => {
-    it('draws the details before any related read answers, with one placeholder per card', async () => {
+  describe('RecordDetailView — the related lists load counts first (objectstack#27056, objectstack#35596)', () => {
+    const tabIds = (container: HTMLElement) =>
+      Array.from(container.querySelectorAll('[role="tab"][data-record-tab]')).map((el) => el.getAttribute('data-record-tab'));
+    const isRowRead = (r: HeldRead) => r.query.$count !== true;
+
+    it('draws the details and every list\'s tab before any related read answers', async () => {
       const { container } = renderPage();
       await idle();
       expect(reads.length).toBeGreaterThan(0);
@@ -2271,46 +2342,36 @@ describe('RecordDetailView.relatedCountsFirst-27056', () => {
       expect(container.textContent).toContain('Acme');
       expect(container.textContent).toContain('Retail');
       expect(column(container, 'details')?.textContent).toContain(RECORD_ID);
-      const related = column(container, 'right')!;
-      expect(related.querySelectorAll('[data-related-card-pending]')).toHaveLength(CHILDREN.length);
-      expect(related.querySelector('[data-related-card-row]')).toBeNull();
+      // Every list has its tab already, with no number yet.
+      expect(tabIds(container).filter((id) => id?.includes('.'))).toEqual(CHILDREN.map((c) => `${c}.account`));
+      for (const c of CHILDREN) {
+        expect(container.querySelector(`[data-record-tab="${c}.account"] [data-record-tab-count]`)).toBeNull();
+      }
+      // No rail card for a list before its count says it has records.
+      expect(container.querySelector('[data-record-summary-other]')).toBeNull();
     });
 
-    it('asks the six counts as one request set, then the rows of the two counted cards in view only', async () => {
+    it('asks the six counts as one request set, and no list\'s rows while its tab is closed (objectstack#35890: no rail)', async () => {
       const { container } = renderPage();
       await idle();
       // One request set: every list's count, all out before any answered, and
       // nothing else of theirs.
       expect(reads.filter(isCount).map((r) => r.object).sort()).toEqual([...CHILDREN].sort());
-      expect(reads.filter(isRows)).toEqual([]);
+      expect(reads.filter(isRowRead)).toEqual([]);
       expect(reads.filter(isCount).every((r) => r.query.$top === 1)).toBe(true);
 
       await act(async () => {
         for (const r of reads.filter((read) => !read.answered)) r.answer();
       });
       await idle();
-      const rowReads = reads.filter(isRows);
-      // The counted cards in view: the first and the third. The second is in
-      // view but counted at 0; the last three are below the fold.
-      expect(rowReads.map((r) => r.object).sort()).toEqual([C1, C3].sort());
-      for (const r of rowReads) {
-        expect(r.query.$top).toBe(3);
-        expect(r.query.$select).toEqual(['id', 'name', 'status']);
-      }
-      // Two round trips in all: the counts, then the rows.
-      expect(reads).toHaveLength(CHILDREN.length + 2);
-
-      await act(async () => {
-        for (const r of reads.filter((read) => !read.answered)) r.answer();
-      });
-      await idle();
-      const related = column(container, 'right')!;
-      expect(related.querySelector(`[data-related-card-id="${C1}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(3);
-      expect(related.querySelector(`[data-related-card-id="${C3}.account"]`)?.querySelectorAll('[data-related-card-row]')).toHaveLength(2);
-      expect(related.querySelector('[data-related-card-pending]')).toBeNull();
-      // Still nothing for the empty card, nor for the cards out of view.
-      expect(reads.filter(isRows).map((r) => r.object).sort()).toEqual([C1, C3].sort());
-      expect(reads.some((r) => r.object === C2 && isRows(r))).toBe(false);
+      // objectstack#35890 — the rail that drew three rows of each list is
+      // retired: on 「详情」 no list's rows are read, counted above 0 or not.
+      expect(reads.filter(isRowRead)).toEqual([]);
+      expect(column(container, 'right')).toBeNull();
+      expect(container.querySelector('[data-record-summary-card]')).toBeNull();
+      // CONTROL: the list counted at 0 keeps its tab, marked empty.
+      expect(container.querySelector(`[data-record-tab="${C2}.account"]`)?.hasAttribute('data-record-tab-empty')).toBe(true);
+      expect(container.querySelector(`[data-record-tab="${C1}.account"]`)?.hasAttribute('data-record-tab-empty')).toBe(false);
     });
   });
 });
@@ -2377,7 +2438,9 @@ describe('RecordDetailView.recordTabRowUrl-27524', () => {
       label: 'Task',
       pluralLabel: 'Tasks',
       managedBy: 'platform',
-      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project' } },
+      // `relatedList: true` keeps it a side list with a tab: a plain
+      // master_detail FK is an overview body table since objectstack#35597.
+      fields: { ...BASE_FIELDS, project: { type: 'master_detail', reference: PARENT, label: 'Project', relatedList: true } },
     },
     {
       name: 'showcase_note',
@@ -2566,7 +2629,8 @@ describe('RecordDetailView.recordTabRowUrl-27524', () => {
  *   - the premise, re-read live: the spec refuses each such page at `regions`;
  *   - a `full` page whose region places nothing, and one with no `regions`,
  *     draw the explanation naming the page, and no page body at all;
- *   - the record drawer draws the same explanation;
+ *   - the record drawer draws the standard page, with no explanation: an
+ *     authored page applies on the desktop full page only (objectstack#36150);
  *   - CONTROLS: the same page placing a component draws that page; a `slotted`
  *     page with no slots, and no assigned page, draw the default record page.
  */
@@ -2699,10 +2763,11 @@ describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
     expect(panel.textContent).not.toContain('"{{name}}"');
   });
 
-  it('the record drawer explains it the same way', async () => {
+  it('the record drawer draws the standard page and no explanation: the authored page does not apply there (objectstack#36150)', async () => {
     const { container } = await mount([PLACES_NOTHING], true);
-    expect((await screen.findByTestId('record-page-places-no-component')).textContent).toContain(PAGE);
-    expect(container.querySelector('[data-page-type]')).toBeNull();
+    await waitFor(() => expect(container.querySelector('[data-page-type="record"]')).not.toBeNull());
+    expect(container.querySelector(`[aria-label="${PAGE}"]`)).toBeNull();
+    expect(screen.queryByTestId('record-page-places-no-component')).toBeNull();
   });
 
   it('CONTROL: the same page placing a component draws that page, and no explanation', async () => {
@@ -2720,5 +2785,935 @@ describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
     await waitFor(() => expect(container.querySelector('[data-page-type="record"]')).not.toBeNull());
     expect(container.querySelector(`[aria-label="${PAGE}"]`)).toBeNull();
     expect(screen.queryByTestId('record-page-places-no-component')).toBeNull();
+  });
+});
+
+// ── RecordDetailView.objectRouteAbsence-34740 ───────────────────────────────
+
+/**
+ * objectstack-ai/objectstack#34740 — the record route answers an object the
+ * reader cannot open with the same neutral sentence as the list, data and create
+ * routes (`objectRouteAbsence-34740.test.tsx`): `console.objectView.objectNotFoundDescription`,
+ * which neither asserts nor reveals whether the object exists. The server leaves
+ * a withheld object out of the served list exactly as it leaves out a missing
+ * name (ruling 6787890900), so both reach this view as absence.
+ */
+describe('RecordDetailView.objectRouteAbsence-34740', () => {
+  restoreAfterBlock();
+
+  const READABLE = { name: 'crm_account', label: 'Account', fields: { name: { type: 'text', label: 'Name' } } };
+  const WITHHELD = 'crm_lead';
+  const MISSING = 'no_such_object';
+  type Lang = 'en' | 'zh-CN';
+  const PACK: Record<Lang, 'en' | 'zh-Hans'> = { en: 'en', 'zh-CN': 'zh-Hans' };
+
+  function sentence(lang: Lang, objectName: string): string {
+    const pack = builtInLocales[PACK[lang]] as { console: { objectView: { objectNotFoundDescription: string } } };
+    return pack.console.objectView.objectNotFoundDescription.replace('{{objectName}}', objectName);
+  }
+
+  const metadata = {
+    objects: [READABLE], pages: [], loading: false, error: null,
+    refresh: async () => {}, invalidate: () => {},
+    ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
+  } as never;
+
+  async function faceText(lang: Lang, objectName: string): Promise<string> {
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => null),
+      create: vi.fn(async () => ({})),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => null,
+    };
+    const i18n = createI18n({ defaultLanguage: lang, detectBrowserLanguage: false });
+    expect(i18n.language).toBe(lang);
+    render(
+      <I18nProvider instance={i18n} persistLanguage={false}>
+        <MemoryRouter initialEntries={[`/apps/crm/${objectName}/record/r1`]}>
+          <MetadataCtx.Provider value={metadata}>
+            <NavigationProvider>
+              <Routes>
+                <Route
+                  path="/apps/:appName/:objectName/record/:recordId"
+                  element={<RecordDetailView dataSource={ds as never} objects={[READABLE] as never} onEdit={() => {}} />}
+                />
+              </Routes>
+            </NavigationProvider>
+          </MetadataCtx.Provider>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+    const text = (await screen.findByTestId('object-not-found')).textContent ?? '';
+    cleanup();
+    return text;
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200, json: async () => ({ data: [] }), text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it.each(['en', 'zh-CN'] as const)('%s: a withheld object and a missing name read the same sentence', async (lang) => {
+    const withheld = await faceText(lang, WITHHELD);
+    const missing = await faceText(lang, MISSING);
+    expect(withheld).toContain(sentence(lang, WITHHELD));
+    expect(missing).toContain(sentence(lang, MISSING));
+    expect(withheld.replaceAll(WITHHELD, 'NAME')).toBe(missing.replaceAll(MISSING, 'NAME'));
+  });
+});
+
+// ── RecordDetailView.recordEditState-35599 ──────────────────────────────────
+
+/**
+ * objectstack#35599 — the record page's EDIT STATE, on a page that draws
+ * master-detail body tables: Edit turns the fields into inputs and the body
+ * tables into editable lines, the header shows Cancel / Save, and ONE Save
+ * writes the record and every table in one `batchTransaction` (one
+ * `POST /api/v1/batch`). A refused batch keeps every edit and places the
+ * reason on the line it is about; Cancel puts everything back.
+ *
+ * Also pinned: ruling B (「全部保留」, recorded on the card) — inline edit stays
+ * on a page with body tables and saves the record alone through the save bar;
+ * the two modes run one at a time (the edit state offers no inline edit, and
+ * Edit over unsaved inline changes asks to discard them first, CONTROL: no
+ * changes, no question); ruling A's client half — a record an approval locks
+ * draws no New on its master-detail body table (CONTROL: the same page
+ * unlocked does); item 5 — a child without `bulk` keeps its table read-only
+ * in the edit state, with a notice saying why.
+ *
+ * Fixtures: the `bodyTablePredicate-27478` harness at 1440 px.
+ */
+describe('RecordDetailView.recordEditState-35599', () => {
+  restoreAfterBlock();
+
+  const PARENT = 'showcase_quote';
+  const RECORD_ID = 'q-1';
+  const fk = { type: 'master_detail', reference: PARENT, label: 'Quote' };
+
+  const objectsWith = ({ lineEnable }: { lineEnable?: Record<string, unknown> } = {}) => [
+    {
+      name: PARENT,
+      label: 'Quote',
+      pluralLabel: 'Quotes',
+      fields: {
+        id: { type: 'text', label: 'Id', group: 'basic' },
+        name: { type: 'text', label: 'Name', group: 'basic' },
+        summary: { type: 'text', label: 'Summary', group: 'basic' },
+      },
+      // objectstack#35889: a master-detail child is a body table only where a
+      // field group of the parent names it.
+      fieldGroups: [
+        { key: 'basic', label: 'Basic' },
+        { key: 'lines', label: 'Lines', relatedList: 'showcase_line' },
+        { key: 'tasks', label: 'Tasks', relatedList: 'showcase_task' },
+      ],
+    },
+    {
+      name: 'showcase_line',
+      label: 'Line',
+      pluralLabel: 'Lines',
+      ...(lineEnable ? { enable: lineEnable } : {}),
+      fields: { id: { type: 'text', label: 'Id' }, product: { type: 'text', label: 'Product' }, quantity: { type: 'number', label: 'Quantity' }, quote: fk },
+    },
+    {
+      name: 'showcase_task',
+      label: 'Task',
+      pluralLabel: 'Tasks',
+      fields: { id: { type: 'text', label: 'Id' }, subject: { type: 'text', label: 'Subject' }, quote: fk },
+    },
+    {
+      name: 'showcase_note',
+      label: 'Note',
+      pluralLabel: 'Notes',
+      fields: { id: { type: 'text', label: 'Id' }, body: { type: 'text', label: 'Body' }, quote: { type: 'lookup', reference: PARENT, label: 'Quote' } },
+    },
+  ];
+
+  const ROWS: Record<string, Array<Record<string, unknown>>> = {
+    showcase_line: [
+      { id: 'l1', product: 'Anvil', quantity: 1, quote: RECORD_ID },
+      { id: 'l2', product: 'Bolt', quantity: 2, quote: RECORD_ID },
+    ],
+    showcase_task: [{ id: 't1', subject: 'Call', quote: RECORD_ID }],
+  };
+
+  /** `i18n`: under the real English provider, so a notice reads as the pack writes it. */
+  function renderPage(objects: ReturnType<typeof objectsWith>, opts: { emptyTables?: boolean; i18n?: boolean } = {}) {
+    const metadata = {
+      objects, pages: [], loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => [], getItem: async () => null, getItemsByType: () => [],
+    } as never;
+    const dataSource = {
+      find: vi.fn(async (o: string) => {
+        const data = opts.emptyTables ? [] : (ROWS[o] ?? []).map((r) => ({ ...r }));
+        return { data, total: data.length };
+      }),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      findOne: vi.fn(async (_o: string, recordId: string) => ({ id: recordId, name: `Quote ${recordId}`, summary: 'First' })),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: vi.fn(async (o: string) => objects.find((d) => d.name === o) ?? null),
+      batchTransaction: vi.fn(async (ops: unknown[]) => ({ results: ops.map(() => ({})) })),
+    };
+    const onEdit = vi.fn();
+    const page = (
+      <MemoryRouter initialEntries={[`/apps/demo/${PARENT}/record/${RECORD_ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <NavigationProvider>
+            <Routes>
+              {/* The app route: the related-record bridge offers New only under an app. */}
+              <Route
+                path="/apps/:appName/:objectName/record/:recordId"
+                element={<RecordDetailView dataSource={dataSource as never} objects={objects} onEdit={onEdit} />}
+              />
+            </Routes>
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>
+    );
+    const view = render(
+      opts.i18n
+        ? <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>{page}</I18nProvider>
+        : page,
+    );
+    return { ...view, dataSource, onEdit };
+  }
+
+  const jsonResponse = (status: number, body: unknown) =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+  /** `locked`: the approvals read answers a pending `lock_record` request (the `approvalLock-25934` shape). */
+  function stubApi({ locked = false }: { locked?: boolean } = {}) {
+    const request = {
+      id: 'req-1', process_name: 'flow:quote_review', object_name: PARENT, record_id: RECORD_ID,
+      status: 'pending', submitter_id: 'u_submitter', current_step: 'manager_review',
+      pending_approvers: ['u_manager'], lock_record: true,
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      if (locked && u.includes('/approvals/requests?object=')) return jsonResponse(200, { data: [request] });
+      if (locked && u.endsWith('/approvals/requests/req-1')) return jsonResponse(200, request);
+      return jsonResponse(200, { data: [] });
+    }));
+  }
+
+  beforeEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    RelatedCountStore._reset();
+    stubApi();
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
+      return { x: 0, y: 0, top: 0, left: 0, right: 1440, bottom: 800, width: 1440, height: 800, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const headerButton = (label: string) =>
+    (Array.from(document.querySelectorAll('button')).find((b) => (b.textContent ?? '').trim() === label) as HTMLButtonElement | undefined) ?? null;
+  // The field list's pencil is named for a click (objectstack#36147), every other face's for a double-click.
+  const pencils = (container: HTMLElement) =>
+    container.querySelectorAll('button[aria-label="Double-click to edit"], button[aria-label="Click to edit"]').length;
+  const editor = (container: HTMLElement, id: string) => container.querySelector(`[data-body-table-editor="${id}"]`) as HTMLElement | null;
+  const cells = (scope: HTMLElement, label: string) => Array.from(scope.querySelectorAll(`input[aria-label="${label}"]`)) as HTMLInputElement[];
+  const summaryInput = (container: HTMLElement) =>
+    (Array.from(container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).find((i) => i.value === 'First') ?? null;
+
+  async function enterEditState(view: ReturnType<typeof renderPage>) {
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_line.quote')!, 'Product').length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_task.quote')!, 'Subject').length).toBeGreaterThanOrEqual(1), { timeout: 5000 });
+  }
+
+  /** Edit the record and both tables: one changed line, one new line, one removed line, one changed task. */
+  function editEverything(container: HTMLElement) {
+    fireEvent.change(summaryInput(container)!, { target: { value: 'Second' } });
+    const lines = editor(container, 'showcase_line.quote')!;
+    fireEvent.change(cells(lines, 'Quantity')[0], { target: { value: '5' } });
+    fireEvent.click(lines.querySelectorAll('button[aria-label="Remove row"]')[1] as HTMLElement);
+    // The new line comes from Add: the grid draws no blank entry line beside it (objectstack#35507).
+    fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
+    const products = cells(lines, 'Product');
+    fireEvent.change(products[products.length - 1], { target: { value: 'Crate' } });
+    const tasks = editor(container, 'showcase_task.quote')!;
+    fireEvent.change(cells(tasks, 'Subject')[0], { target: { value: 'Visit' } });
+  }
+
+  /**
+   * The pencil of the Summary field (the inline-edit entry), on the details
+   * column: the keyboard's way in on the field list, named for a click
+   * (objectstack#36147).
+   */
+  const summaryPencil = (container: HTMLElement) =>
+    (Array.from(container.querySelectorAll('[data-record-column="details"] button[aria-label="Click to edit"]')) as HTMLElement[])
+      .find((b) => (b.closest('.group')?.textContent ?? '').includes('Summary')) ?? null;
+  const saveBar = () => document.querySelector('[role="region"][aria-label="Edit fields"]') as HTMLElement | null;
+
+  /** The Summary field's in-place editor (objectstack#36475): a layer over the value, outside the column. */
+  const summaryInPlace = () =>
+    document.querySelector('[data-field-in-place-editor="summary"] input') as HTMLInputElement | null;
+  /** Press a header button as a pointer does: the press lands outside an open in-place editor first. */
+  const pressHeader = (label: string) => {
+    const button = headerButton(label)!;
+    fireEvent.pointerDown(button);
+    fireEvent.mouseDown(button);
+    fireEvent.click(button);
+  };
+
+  it('ruling B (「全部保留」): a page drawing body tables keeps editing a field in place, which saves the record alone; the edit state offers none', async () => {
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInPlace()).not.toBeNull(), { timeout: 5000 });
+    // The field alone (objectstack#36475): no save bar, the body tables stay tables.
+    expect(saveBar()).toBeNull();
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+    fireEvent.change(summaryInPlace()!, { target: { value: 'Inline' } });
+    await act(async () => { fireEvent.keyDown(summaryInPlace()!, { key: 'Enter' }); });
+    await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update.mock.calls[0].slice(0, 3)).toEqual([PARENT, RECORD_ID, { summary: 'Inline' }]);
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+    // The edit state: Edit opens it (not the record form), and there inline edit is not offered.
+    await waitFor(() => expect(summaryInPlace()).toBeNull(), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    expect(view.onEdit).not.toHaveBeenCalled();
+    expect(pencils(view.container)).toBe(0);
+    expect(saveBar()).toBeNull();
+    expect(headerButton('Save')).not.toBeNull();
+    expect(headerButton('Cancel')).not.toBeNull();
+    expect(headerButton('Edit')).toBeNull();
+  });
+
+  it('a field edited in place is saved when Edit is pressed, and the edit state opens without asking (objectstack#36475)', async () => {
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInPlace()).not.toBeNull(), { timeout: 5000 });
+    fireEvent.change(summaryInPlace()!, { target: { value: 'Inline' } });
+    const nativeConfirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', nativeConfirm);
+    await act(async () => { pressHeader('Edit'); });
+    // The press outside the editor saved the field alone, through the plain update.
+    await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update.mock.calls[0].slice(0, 3)).toEqual([PARENT, RECORD_ID, { summary: 'Inline' }]);
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull();
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(summaryInPlace()).toBeNull();
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL — a field opened in place with no change writes nothing: Edit enters the edit state without asking', async () => {
+    const view = renderPage(objectsWith());
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(summaryPencil(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(summaryPencil(view.container)!);
+    await waitFor(() => expect(summaryInPlace()).not.toBeNull(), { timeout: 5000 });
+    await act(async () => { pressHeader('Edit'); });
+    await waitFor(() => expect(editor(view.container, 'showcase_line.quote')).not.toBeNull(), { timeout: 5000 });
+    expect(document.querySelector('[data-record-edit-discard-inline]')).toBeNull();
+    expect(view.dataSource.update).not.toHaveBeenCalled();
+  });
+
+  it('one Save sends ONE batch carrying the record and both body tables', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update).not.toHaveBeenCalled();
+    expect(view.dataSource.create).not.toHaveBeenCalled();
+    expect(view.dataSource.delete).not.toHaveBeenCalled();
+    const ops = view.dataSource.batchTransaction.mock.calls[0][0] as Array<Record<string, any>>;
+    expect(ops[0]).toEqual({ object: PARENT, action: 'update', id: RECORD_ID, data: { summary: 'Second' } });
+    const rest = ops.slice(1).map((o) => [o.object, o.action, o.id ?? null]);
+    expect(rest).toEqual(expect.arrayContaining([
+      ['showcase_line', 'create', null],
+      ['showcase_line', 'update', 'l1'],
+      ['showcase_line', 'delete', 'l2'],
+      ['showcase_task', 'update', 't1'],
+    ]));
+    expect(rest).toHaveLength(4);
+    expect(ops.find((o) => o.action === 'create')?.data).toMatchObject({ product: 'Crate', quote: RECORD_ID });
+    expect(ops.find((o) => o.id === 'l1')?.data).toEqual({ quantity: 5 });
+    expect(ops.find((o) => o.id === 't1')?.data).toEqual({ subject: 'Visit' });
+    // Saved: the page leaves its edit state.
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+  });
+
+  it('a refused batch keeps every edit and places the reason on its line; Cancel then restores', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    view.dataSource.batchTransaction.mockRejectedValueOnce(
+      Object.assign(new Error('Validation failed'), {
+        details: { error: 'Validation failed', fields: [{ field: 'product', message: 'Unknown product' }] },
+      }),
+    );
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.container.querySelector('[data-body-table-row-error]')).not.toBeNull(), { timeout: 5000 });
+    expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1);
+    const lines = editor(view.container, 'showcase_line.quote')!;
+    const rowError = lines.querySelector('[data-body-table-row-error]')!;
+    // The new line is the second line drawn (the removed one is gone).
+    expect(rowError.getAttribute('data-body-table-row-error')).toBe('1');
+    expect(rowError.textContent).toContain('Unknown product');
+    expect(view.container.querySelector('[data-record-edit-error]')?.textContent).toBe('Validation failed');
+    // Every edit is still there, still in the edit state.
+    expect(summaryInput(view.container)).toBeNull();
+    expect((Array.from(view.container.querySelectorAll('[data-record-column="details"] input')) as HTMLInputElement[]).some((i) => i.value === 'Second')).toBe(true);
+    expect(cells(lines, 'Quantity')[0].value).toBe('5');
+    expect(cells(lines, 'Product').map((i) => i.value)).toContain('Crate');
+    expect(headerButton('Save')).not.toBeNull();
+
+    fireEvent.click(headerButton('Cancel')!);
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(editor(view.container, 'showcase_line.quote')).toBeNull();
+    expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1);
+    // Back in: the lines and the record read as stored, not as edited.
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(cells(editor(view.container, 'showcase_line.quote') ?? document.body, 'Product').length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
+    const again = editor(view.container, 'showcase_line.quote')!;
+    expect(cells(again, 'Quantity')[0].value).toBe('1');
+    expect(cells(again, 'Product').map((i) => i.value)).toEqual(expect.arrayContaining(['Anvil', 'Bolt']));
+    expect(cells(again, 'Product').map((i) => i.value)).not.toContain('Crate');
+    expect(summaryInput(view.container)).not.toBeNull();
+  });
+
+  it('objectstack#35940 (ruling 7056413638): a line Add started and nobody edited is not written, and the save says so', async () => {
+    const view = renderPage(objectsWith(), { i18n: true });
+    await enterEditState(view);
+    vi.mocked(toast.info).mockClear();
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
+    const lines = editor(view.container, 'showcase_line.quote')!;
+    const before = cells(lines, 'Product').length;
+    fireEvent.click(lines.querySelector('[data-testid="line-items-add"]') as HTMLElement);
+    await waitFor(() => expect(cells(lines, 'Product').length).toBe(before + 1), { timeout: 5000 });
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    // The record's update alone: the untouched line is not created.
+    const ops = view.dataSource.batchTransaction.mock.calls[0][0] as Array<Record<string, any>>;
+    expect(ops.map((o) => [o.object, o.action])).toEqual([[PARENT, 'update']]);
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(toast.info).toHaveBeenCalledTimes(1);
+    expect(toast.info).toHaveBeenCalledWith('1 blank line was not saved');
+  });
+
+  it('CONTROL — a save that skips no untouched line says nothing more', async () => {
+    const view = renderPage(objectsWith());
+    await enterEditState(view);
+    vi.mocked(toast.info).mockClear();
+    editEverything(view.container);
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.batchTransaction).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('item 5: a child without bulk keeps its table read-only in the edit state, with the notice', async () => {
+    const view = renderPage(objectsWith({ lineEnable: { apiMethods: ['get', 'list', 'create', 'update', 'delete'] } }));
+    await waitFor(() => expect(headerButton('Edit')).not.toBeNull(), { timeout: 5000 });
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    fireEvent.click(headerButton('Edit')!);
+    await waitFor(() => expect(view.container.querySelector('[data-record-edit-tables-read-only]')).not.toBeNull(), { timeout: 5000 });
+    expect(view.container.querySelector('[data-body-table-editor]')).toBeNull();
+    // The record's own fields still edit and save, through the plain update.
+    await waitFor(() => expect(summaryInput(view.container)).not.toBeNull(), { timeout: 5000 });
+    fireEvent.change(summaryInput(view.container)!, { target: { value: 'Second' } });
+    await act(async () => { fireEvent.click(headerButton('Save')!); });
+    await waitFor(() => expect(view.dataSource.update).toHaveBeenCalledTimes(1), { timeout: 5000 });
+    expect(view.dataSource.update.mock.calls[0]).toEqual([PARENT, RECORD_ID, { summary: 'Second' }]);
+    expect(view.dataSource.batchTransaction).not.toHaveBeenCalled();
+  });
+
+  it('ruling A client half: a locked record\'s body table draws no New; the same page unlocked does (CONTROL)', async () => {
+    const control = renderPage(objectsWith(), { emptyTables: true });
+    await waitFor(() => expect(control.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-add]').length).toBe(2), { timeout: 5000 });
+    cleanup();
+    stubApi({ locked: true });
+    const view = renderPage(objectsWith(), { emptyTables: true });
+    await waitFor(() => expect(view.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-row]').length).toBe(2), { timeout: 5000 });
+    // The lock has been read (no Edit is drawn on a locked record) before the absence is read.
+    await waitFor(() => expect(view.container.querySelector('[data-record-column="details"]')?.textContent).toContain('Tasks'), { timeout: 5000 });
+    await waitFor(() => expect(headerButton('Edit')).toBeNull(), { timeout: 5000 });
+    expect(view.container.querySelectorAll('[data-record-column="details"] [data-body-table-empty-add]').length).toBe(0);
+  });
+});
+
+// ── RecordDetailView.approvalSubjectTitle-35415 ─────────────────────────────
+
+/**
+ * objectstack#35415 — an approval request's page is named by the business
+ * record the request asks a decision on, and the name opens that record.
+ *
+ * The request's own declared title is its flow's label (`process_label`, the
+ * object's `nameField`), which lists and search keep. On the request's page
+ * the H1 reads the subject's title the approvals get serves (`record_title`).
+ * Where the get serves none, or serves the bare record id, the H1 keeps the
+ * flow's label: the subject is never named by a raw id.
+ *
+ * The name links to the subject only once one of the page's own reads of it
+ * returned the record (`recordReadReport.ts`). This synthesized page draws no
+ * reader of the subject, so here the name is plain text; the link and its
+ * click are pinned on the served page, where the record card reads it
+ * (`approvalRequestsDataSource.servedPageRecordLink-12557.test.tsx`), and on
+ * the title itself (`approvalSubjectTitle.test.tsx`).
+ *
+ * Measured on the real `RecordDetailView` and the real `page:header` of the
+ * synthesized page, in the desktop top bar. Direction, written before the run:
+ * with the host's title not handed to the header, the subject case REDs
+ * (`Invoice Sign-off`), every other case GREEN.
+ */
+describe('RecordDetailView.approvalSubjectTitle-35415', () => {
+  restoreAfterBlock();
+
+  const REQUEST_OBJECT = 'sys_approval_request';
+  const REQ = 'req_35415';
+  const FLOW_LABEL = 'Invoice Sign-off';
+  const SUBJECT = 'Acceptance T-002 (mail thread link)';
+
+  const REQUEST_DEF = {
+    name: REQUEST_OBJECT,
+    label: 'Approval Request',
+    nameField: 'process_label',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      process_label: { label: 'Flow', type: 'text' },
+      object_name: { label: 'Object', type: 'text' },
+      record_id: { label: 'Record', type: 'text' },
+      status: { label: 'Status', type: 'text' },
+    },
+  };
+
+  const SERVED = {
+    id: REQ,
+    process_label: FLOW_LABEL,
+    object_name: 'purchase_request',
+    record_id: 'PR-2549',
+    status: 'pending',
+  };
+
+  function makeMetadata() {
+    const pages: any[] = [];
+    return {
+      objects: [], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+  }
+
+  const h1 = () => document.querySelector('h1');
+
+  /** The subject's object, so the page's record route reaches it. */
+  const SUBJECT_DEF = {
+    name: 'purchase_request',
+    label: 'Purchase Request',
+    nameField: 'name',
+    fields: { id: { label: 'Id', type: 'text' }, name: { label: 'Name', type: 'text' } },
+  };
+
+  function renderRequestPage(row: Record<string, unknown>, objectDef: Record<string, unknown> = REQUEST_DEF) {
+    const objectName = objectDef.name as string;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => ({ ...row })),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => objectDef,
+    } as Record<string, any>;
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${objectName}/record/${REQ}`]}>
+        <MetadataCtx.Provider value={makeMetadata()}>
+          <NavigationProvider>
+            <Routes>
+              <Route
+                path="/apps/:appName/:objectName/record/:recordId"
+                element={(
+                  <RecordDetailView
+                    dataSource={ds as never}
+                    objects={[objectDef, SUBJECT_DEF] as never}
+                    onEdit={() => {}}
+                    objectNameOverride={objectName}
+                    recordIdOverride={REQ}
+                  />
+                )}
+              />
+            </Routes>
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds };
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  describe('RecordDetailView — the approval request page is named by its record, which the name opens (objectstack#35415)', () => {
+    it('the H1 reads the served subject title, not the flow label; unread by the page, it links nowhere', async () => {
+      const { ds } = renderRequestPage({ ...SERVED, record_title: SUBJECT });
+      await waitFor(() => expect(h1()?.textContent).toBe(SUBJECT));
+      expect(h1()!.querySelector('a')).toBeNull();
+      // The title reads nothing itself.
+      expect(ds.findOne.mock.calls.some((call: unknown[]) => call[0] === 'purchase_request')).toBe(false);
+    });
+
+    it('no subject title served: the H1 keeps the flow label, with no link', async () => {
+      renderRequestPage({ ...SERVED });
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+      expect(h1()!.querySelector('a')).toBeNull();
+    });
+
+    it('a subject title that is the bare record id: the H1 keeps the flow label and never prints the id', async () => {
+      renderRequestPage({ ...SERVED, record_title: 'PR-2549' });
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+      expect(h1()!.textContent).not.toContain('PR-2549');
+    });
+
+    it('CONTROL — another object with the same fields keeps its own declared title', async () => {
+      const other = { ...REQUEST_DEF, name: 'flow_ticket_35415', label: 'Ticket' };
+      renderRequestPage({ ...SERVED, record_title: SUBJECT }, other);
+      await waitFor(() => expect(h1()?.textContent).toBe(FLOW_LABEL));
+    });
+  });
+});
+
+// ── RecordDetailView.embeddedStageReread-36309 ──────────────────────────────
+
+/**
+ * objectstack#36309 — the header's stage menu draws in a drawer too (the list
+ * drawer, and the drawer a record page opens over itself, both mount this view
+ * `embedded`). A 409 on a Move there re-reads the record, so the next Move
+ * carries the version that is stored. The drawer still draws no Refresh entry:
+ * showing the entry and re-reading the record are two context members.
+ */
+describe('RecordDetailView.embeddedStageReread-36309', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_deal_36309';
+  const ID = 'd1';
+  const DEF = {
+    name: OBJECT,
+    label: 'Deal',
+    nameField: 'name',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      name: { label: 'Name', type: 'text' },
+      stage: {
+        label: 'Stage',
+        type: 'select',
+        options: [
+          { value: 'prospecting', label: 'Prospecting' },
+          { value: 'negotiation', label: 'Negotiation' },
+        ],
+      },
+    },
+  };
+  const versionAt = (read: number) => `2026-11-22T0${read}:00:00.000Z`;
+
+  function makeMetadata() {
+    const pages: any[] = [];
+    return {
+      objects: [DEF], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+  }
+
+  /** Every read answers a newer version; the first Move is refused with a 409. */
+  function renderDeal(embedded: boolean) {
+    let reads = 0;
+    const conflict = Object.assign(new Error('CONCURRENT_UPDATE'), { code: 'CONCURRENT_UPDATE', status: 409 });
+    let writes = 0;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => {
+        reads += 1;
+        return { id: ID, name: 'Wayne deal', stage: 'prospecting', updated_at: versionAt(reads) };
+      }),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => {
+        writes += 1;
+        if (writes === 1) throw conflict;
+        return {};
+      }),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => DEF,
+    } as Record<string, any>;
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${ID}`]}>
+        <MetadataCtx.Provider value={makeMetadata()}>
+          <NavigationProvider>
+            <RecordDetailView
+              dataSource={ds as never}
+              objects={[DEF] as never}
+              onEdit={() => {}}
+              objectNameOverride={OBJECT}
+              recordIdOverride={ID}
+              embedded={embedded}
+            />
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds };
+  }
+
+  const stageMenu = () => document.querySelector('[data-record-stage-menu]') as HTMLElement | null;
+  const moreTrigger = () =>
+    document.querySelector('header [aria-label="More actions"], [data-record-top-bar-actions] [aria-label="More actions"]') as HTMLElement | null;
+
+  async function pickNegotiation() {
+    await waitFor(() => expect(stageMenu()).toBeTruthy());
+    fireEvent.pointerDown(stageMenu()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const option = await waitFor(() => {
+      const el = document.querySelector('[data-record-stage-menu-list] [data-stage-value="negotiation"]') as HTMLElement | null;
+      expect(el).toBeTruthy();
+      return el!;
+    });
+    fireEvent.click(option);
+    return screen.findByRole('dialog');
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('in a drawer, a 409 on Move re-reads the record and the second Move carries the new version', async () => {
+    const { ds } = renderDeal(true);
+    const dialog = await pickNegotiation();
+    expect(ds.findOne).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(1) });
+    // The refusal re-reads the record in place.
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(2));
+    expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(2) });
+  });
+
+  it('CONTROL — the drawer still draws no Refresh entry in the header', async () => {
+    const { ds } = renderDeal(true);
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
+    await waitFor(() => expect(stageMenu()).toBeTruthy());
+    const trigger = moreTrigger();
+    if (trigger) {
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      await waitFor(() => expect(document.querySelector('[role="menu"]')).toBeTruthy());
+    }
+    expect(document.querySelector('[data-page-refresh]')).toBeNull();
+  });
+
+  it('CONTROL — on the record page the same 409 re-reads too, and the page keeps its Refresh entry', async () => {
+    const { ds } = renderDeal(false);
+    const dialog = await pickNegotiation();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalledTimes(2));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move' }));
+    await waitFor(() => expect(ds.update).toHaveBeenLastCalledWith(OBJECT, ID, { stage: 'negotiation' }, { ifMatch: versionAt(2) }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    await waitFor(() => expect(moreTrigger()).toBeTruthy());
+    fireEvent.pointerDown(moreTrigger()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    await waitFor(() => expect(document.querySelector('[data-page-refresh]')).toBeTruthy());
+  });
+});
+
+describe('RecordDetailView.paletteEdit-36286', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_deal_36286';
+  const ID = 'd1';
+  const defWith = (extra: Record<string, unknown> = {}) => ({
+    name: OBJECT,
+    label: 'Deal',
+    nameField: 'name',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      name: { label: 'Name', type: 'text' },
+      status: { label: 'Status', type: 'text' },
+    },
+    ...extra,
+  });
+
+  /** What the ⌘K palette reads: the commands the page publishes. */
+  let published: readonly PublishedPageCommand[] = [];
+  function CommandsProbe() {
+    const commands = usePageCommands();
+    React.useEffect(() => {
+      published = commands;
+    });
+    return null;
+  }
+
+  function renderDeal({ embedded = false, def = defWith() }: { embedded?: boolean; def?: ReturnType<typeof defWith> } = {}) {
+    const pages: any[] = [];
+    const metadata = {
+      objects: [def], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => ({ id: ID, name: 'Wayne deal', status: 'new' })),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => def,
+    } as Record<string, any>;
+    const onEdit = vi.fn();
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <NavigationProvider>
+            <CommandsProbe />
+            <RecordDetailView
+              dataSource={ds as never}
+              objects={[def] as never}
+              onEdit={onEdit}
+              objectNameOverride={OBJECT}
+              recordIdOverride={ID}
+              embedded={embedded}
+            />
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds, onEdit };
+  }
+
+  /** The header row's Edit, as the page draws it. */
+  async function headerEdit(): Promise<HTMLButtonElement> {
+    return waitFor(
+      () => {
+        const header = document.querySelector('[data-record-top-bar-actions]') as HTMLElement | null;
+        expect(header).toBeTruthy();
+        const edit = within(header!).getAllByRole('button').find((b) => b.textContent?.trim() === 'Edit');
+        expect(edit).toBeTruthy();
+        return edit as HTMLButtonElement;
+      },
+      { timeout: 5000 },
+    );
+  }
+  const editCommand = () => published.find((command) => command.id === 'edit-record');
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+  });
+
+  beforeEach(() => {
+    published = [];
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('the record page publishes the header\'s Edit, and running it runs what the button runs', async () => {
+    const { onEdit } = renderDeal();
+    const button = await headerEdit();
+    await waitFor(() => expect(editCommand()).toBeTruthy());
+    expect(editCommand()?.disabled).toBe(false);
+    expect(button.disabled).toBe(false);
+
+    act(() => editCommand()!.run());
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenLastCalledWith({ id: ID }, OBJECT);
+    fireEvent.click(button);
+    expect(onEdit).toHaveBeenCalledTimes(2);
+    expect(onEdit.mock.calls[1]).toEqual(onEdit.mock.calls[0]);
+  });
+
+  it('off exactly when the header\'s Edit is off (edit.disabledWhen holds on the record)', async () => {
+    renderDeal({ def: defWith({ userActions: { edit: { disabledWhen: "record.status == 'new'" } } }) });
+    const button = await headerEdit();
+    await waitFor(() => expect(button.disabled).toBe(true));
+    await waitFor(() => expect(editCommand()?.disabled).toBe(true));
+  });
+
+  it('CONTROL: a disabledWhen that does not hold leaves both pressable', async () => {
+    renderDeal({ def: defWith({ userActions: { edit: { disabledWhen: "record.status == 'closed'" } } }) });
+    const button = await headerEdit();
+    await waitFor(() => expect(editCommand()).toBeTruthy());
+    expect(button.disabled).toBe(false);
+    expect(editCommand()?.disabled).toBe(false);
+  });
+
+  it('CONTROL: a record in a drawer or pane publishes nothing (the page behind it is the list)', async () => {
+    const { ds } = renderDeal({ embedded: true });
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getAllByText('Wayne deal').length).toBeGreaterThan(0), { timeout: 5000 });
+    await act(async () => {});
+    expect(editCommand()).toBeUndefined();
   });
 });

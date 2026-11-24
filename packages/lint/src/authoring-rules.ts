@@ -104,6 +104,7 @@ import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
+import { validateDatasetMemberVocabulary } from './validate-dataset-member-vocabulary.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
 import { validateDashboardWidgetOptions } from './validate-dashboard-widget-options.js';
 import { validateFilterTokens } from './validate-filter-tokens.js';
@@ -122,16 +123,18 @@ import { validatePageSourceStyling } from './validate-page-source-styling.js';
 import { validateCapabilityReferences } from './validate-capability-references.js';
 import {
   validateFlowApiTriggerSecret,
+  validateFlowSubflowTargets,
   validateFlowTriggerReadiness,
 } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
 import { validateRecordTitle, validateTitleFormatRetired } from './validate-record-title.js';
+import { validateRecordPageHeader } from './validate-record-page-header.js';
 import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
+import { validateInternalFormViews } from './validate-internal-form-views.js';
 import { validatePublicFormFileFields } from './validate-public-form-file-fields.js';
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
-import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
@@ -148,8 +151,14 @@ import {
   type MembershipKeyOwners,
 } from './validate-membership-key-declarations.js';
 import { validateRuleCompilability } from './validate-rule-compilability.js';
+import { validateActionBodyCompiles } from './validate-action-body-compiles.js';
+import { validateHookAndJobBodyCompiles } from './validate-hook-body-compiles.js';
 import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
+import { validateObjectActionLayout } from './validate-object-action-layout.js';
+import { validateActionObjectBinding } from './validate-action-object-binding.js';
+import { validateFlowNodeExecutors } from './validate-flow-node-executors.js';
+import { validateInertObjectDeclarations } from './validate-inert-object-declarations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
 import { validateFlowRegionShape } from './validate-flow-region-shape.js';
@@ -157,7 +166,7 @@ import { lintConnectorCredentialLiterals } from './lint-connector-credential-lit
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
-import { lintDuplicateFieldLabels } from './lint-duplicate-field-labels.js';
+import { duplicateFieldLabelFindings } from './lint-duplicate-field-labels.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
@@ -169,6 +178,7 @@ import {
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
+  lintInlineEditBulk,
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -356,15 +366,32 @@ export interface AuthoringRuleContext {
    * so a name it does not carry is refused there; on the CLI commands they are
    * one app's declaration, and the object-reference ladder (sibling packages,
    * platform names, a platform-prefixed name advised at `warning`) applies.
+   *
+   * [#33644] `lintDuplicateFieldLabels` reads `object_extension` only, on the
+   * argument `validateStackExpressions` gives for the same write: there the
+   * snapshot's objects are the registry's served definitions, carrying the
+   * injected columns as declared fields, so the rule reads them back to the
+   * authored shape the build judges (`stripInjectedSystemColumns`); and it
+   * leaves out a label group every member of which already shared the label on
+   * the target without the written entry, a clash the entry did not create.
+   *
+   * `validateApprovalApprovers` reads its presence only, as
+   * `validateEmailTemplateHoleGrammar` does: a flow written at the publish door is authored in the
+   * deployment, never a package's own code, so a `platform_admin` approver in
+   * it is refused there; the CLI commands read a package's source and cannot
+   * know which door will register it, so they refuse nothing.
    */
   runtimeWriteType?: string;
   /**
    * [#33494] Set by the runtime gate on an `object_extension` write only: the
    * written entry's target's other packages' published extensions, as the
-   * host's registry holds them. Read by one rule, `validateStackExpressions`,
-   * whose extension walk folds the written entry among them by priority (the
-   * build's own fold, `objectsAsServed`), so the door judges the definition
-   * the build judges (`StackExpressionOptions.storedObjectExtensions`).
+   * host's registry holds them. Read by two rules, each folding the written
+   * entry among them by priority (the build's own fold, `objectsAsServed`), so
+   * the door judges the definition the build judges:
+   * `validateStackExpressions`' extension walk
+   * (`StackExpressionOptions.storedObjectExtensions`) and (#33644)
+   * `lintDuplicateFieldLabels` (`DuplicateFieldLabelOptions`, read by the
+   * module-internal `duplicateFieldLabelFindings`).
    */
   storedObjectExtensions?: readonly StoredObjectExtension[];
   /**
@@ -471,6 +498,18 @@ export interface AuthoringRuleContext {
    * nobody owns).
    */
   membershipKeyOwners?: MembershipKeyOwners;
+  /**
+   * The node types the deployment's automation engine runs, handed in only
+   * once the host has declared that vocabulary CLOSED
+   * (`AutomationEngine.getSealedNodeTypeVocabulary()`, answered after
+   * `sealNodeTypeVocabulary()` at `kernel:bootstrapped`). Set only by the
+   * runtime publish gate, and only on a sealed engine; ABSENT on the three CLI
+   * commands, whose stack does not say which plugins the deployment loads.
+   * Read by `validateFlowNodeExecutors` only, which judges nothing without it:
+   * a verdict drawn from a vocabulary still filling at boot is one the boot can
+   * contradict (AGENTS.md "Startup registry reads").
+   */
+  flowNodeTypeVocabulary?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -1057,6 +1096,32 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['dataset'],
     run: (stack) => validateDatasetMeasureAggregates(stack),
   },
+  // ADR-0149 D1 — a dataset measure or dimension with neither `synonyms` nor a
+  // `description` answers only to its own name and label, so a question asked
+  // in a user's own words (or in another language) matches nothing and is
+  // answered by an ungoverned object query. Advisory: the dataset is valid and
+  // draws every widget bound to it, and one that only feeds charts loses
+  // nothing. `parsed`, like the two dataset rules above, because the three read
+  // the same positions (`datasets[].dimensions[]` / `.measures[]`) and must be
+  // handed one document; `os lint` judges it on its unparsed stack, which the
+  // rule tolerates (it reads two optional keys and nothing a default fills).
+  //
+  // On the runtime publish door for the type that carries the declaration,
+  // `dataset`, and nothing else: another type's write would only re-judge a
+  // STORED dataset, which the differential cancels as a pre-existing
+  // condition. The rule reads the written dataset's own members and no other
+  // collection, so the per-write snapshot cannot invent a finding. One finding
+  // per member that lacks both keys, on the save response, never a refusal.
+  {
+    name: 'validateDatasetMemberVocabulary',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-dataset-member-vocabulary.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['dataset'],
+    run: (stack) => validateDatasetMemberVocabulary(stack),
+  },
   // ADR-0049 / #3367 — a dashboard header action naming a dead target ships a
   // button that renders and refuses (or does nothing) on click: a `script`
   // target must name a defined action, a `modal` target must name a declared
@@ -1297,9 +1362,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // belongs to the whole-stack rule (ruling `5791822697` on #19527, letter
     // B; ADR-0109 Decision §3). `ai-skill-tool-unresolved` is a verdict of
     // `os validate` / `os lint` / `os build`, and this door NEVER emits it.
-    // `validateAiToolReferences` resolves a skill's tools against a universe of
-    // three limbs — `stack.tools`, the platform registry and the materialised
-    // `action_<name>` family — and a per-write snapshot carries neither
+    // `validateAiToolReferences` resolves a skill's tools against `stack.tools`,
+    // the platform registry, the MCP door's file tools (for a skill offered
+    // over MCP) and the materialised `action_<name>` family — and a per-write
+    // snapshot carries neither
     // `stack.tools` nor `stack.actions`, while a tool a runtime plugin
     // registers outside the registry is invisible to every static universe.
     // So at this door the member has no truthful `unresolved` verdict to give:
@@ -1594,6 +1660,21 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // GET → edit → PUT passes, and a secretless `api` flow is refused at `/meta`
   // with this id instead of being stored for the engine to refuse at
   // registration.
+  // #35143 — a `subflow` / `map` node calling a flow this stack does not
+  // define. CLI only: the runtime gate's flow snapshot holds just the written
+  // flow, so every call to another stored flow would read as unknown there.
+  // Advisory, with the sibling unknown-object hedge: another installed package
+  // may ship the called flow.
+  {
+    name: 'validateFlowSubflowTargets',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-trigger-readiness.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateFlowSubflowTargets(stack),
+  },
   {
     name: 'validateFlowApiTriggerSecret',
     tier: 'gating',
@@ -1627,7 +1708,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // `approver.value` is just a string to Zod. It is not just a string here.
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['flow'],
-    run: (stack) => validateApprovalApprovers(stack),
+    // At the runtime door a flow is authored in the deployment, so a
+    // `platform_admin` approver in it is refused there (`atSaveDoor`, read off
+    // `runtimeWriteType`'s presence; see that field).
+    run: (stack, ctx) => validateApprovalApprovers(stack, { atSaveDoor: ctx.runtimeWriteType !== undefined }),
   },
   // ADR-0079 — `titleFormat` is retired in favour of `nameField`, and the
   // ruling of record on #29007 (6574393684, letter B) refuses it: an object
@@ -1663,6 +1747,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateRecordTitle(stack),
+  },
+  // A full record page's hand-written header whose title or action order
+  // differs from what the standard page (the phone, the drawer, the preview)
+  // draws for the same record: the record's name field, and the actions sorted
+  // by their own `order` / `variant`. Advisory: the page renders as written,
+  // and a static read sees neither visibility nor the actions other packages
+  // attach (`validate-record-page-header.ts` lists what it cannot see).
+  //
+  // Runtime publish gate: a `page` write's snapshot carries `objects` as
+  // context, which is every input but the stack-level `actions` collection;
+  // a header naming an action the snapshot does not show on its object is
+  // not judged, so a partial snapshot can only make the rule quieter, never
+  // invent a finding. Both findings ride back on the 2xx `advisories`.
+  {
+    name: 'validateRecordPageHeader',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-record-page-header.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
+    run: (stack) => validateRecordPageHeader(stack),
   },
   // [#15922] A declared field that nothing in the stack reads or displays —
   // the field-level remainder of #4698's "declared but never read" class,
@@ -1735,6 +1841,24 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['view'],
     run: (stack) => validateFormLayout(stack),
   },
+  // #36425 — an internal create / edit form view the app still declares: the
+  // Console's create and edit surfaces no longer load one (they lay out by the
+  // object's field groups), so it installs, runs and steers nothing. Advisory,
+  // once per form. `normalized`: it reads only the authored `views[]` shapes,
+  // so `os lint`, which never parses, runs it too.
+  {
+    name: 'validateInternalFormViews',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-internal-form-views.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Advisory-tier retirement notice for the app author at the check tools (`os lint`, `os validate`, ' +
+      '`os build`): an internal form view still installs and runs, inert, so the runtime door has nothing ' +
+      'to refuse, and the Studio no longer offers internal form views to save.',
+    run: (stack) => validateInternalFormViews(stack),
+  },
   // Ruling C on #25572 (#25650) — a form open to anonymous intake that
   // declares a file field (a `FILE_REFERENCE_TYPES` type on the bound object)
   // is refused: no visitor can upload a file, so the field can never be
@@ -1790,6 +1914,39 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateActionLocations(stack),
   },
+  // [#36366] An object's action layout (`actionLayout`, and an object
+  // extension's) naming no action of the object, or one not placed in the
+  // scope its arm arranges: the name draws nothing. Gating, because the
+  // author's arrangement is lost without a word otherwise. CLI only: the runtime
+  // snapshot carries no stack `actions`, so an action bound by `objectName`
+  // would read as unknown there; the design mode's Save checks the names
+  // against the served object before it writes.
+  {
+    name: 'validateObjectActionLayout',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-object-action-layout.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateObjectActionLayout(stack),
+  },
+  // A standalone action that declares a location but no `objectName` binds to
+  // no object, so the button it declares never renders (every location is an
+  // object's surface). The handler still runs: an object-less action answers
+  // every object's action route (`resolveActionByPackage` falls through to the
+  // global scope). Gating: the placement the declaration names can never work. On the runtime door for an
+  // `action` write, whose snapshot carries the written action itself.
+  {
+    name: 'validateActionObjectBinding',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-object-binding.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action'],
+    run: (stack) => validateActionObjectBinding(stack),
+  },
   // [ADR-0142 D5] An assignment rule naming a user id carries one
   // organization's data in package metadata, and one targeting a declared queue
   // with no member parks every row it matches. Advisory: the engine never
@@ -1805,18 +1962,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateAssignmentRules(stack),
   },
-  // framework#3434 — seeds replay on every boot, so a `mode: 'insert'` dataset
-  // duplicates its table on every restart.
-  {
-    name: 'validateSeedReplaySafety',
-    tier: 'advisory',
-    input: 'parsed',
-    commands: ALL,
-    source: 'packages/lint/src/validate-seed-replay-safety.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
-    run: (stack) => validateSeedReplaySafety(stack),
-  },
+  // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
+  // replay warning) is retired: `SeedMode` itself refuses `insert` and
+  // `replace` at parse (ruling 6942780880), so no stack this rule could flag
+  // gets past the schema.
   // framework#3433 follow-up — #3433 exempts seed writes from the
   // `state_machine` rule, so a seeded status the FSM does not declare is no
   // longer rejected at write time. Re-added at author time; advisory, because
@@ -1830,6 +1979,20 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateSeedStateMachine(stack),
+  },
+  // An active state machine with no (or an empty) `initialStates`: a record
+  // can be born in any state. Gating: the declaration works against its author
+  // on every create. Reads the object's own body alone, so it judges an `object` write
+  // at the runtime door exactly as on the CLI.
+  {
+    name: 'validateInertObjectDeclarations',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-inert-object-declarations.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) => validateInertObjectDeclarations(stack),
   },
   // ADR-0089 D3b — a mis-layered binding root, plus (#6128) the bare-identifier
   // gate and (#6253) the syntax gate. This entry used to read "pre-parse: the
@@ -2019,7 +2182,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `error` gates. Three do today: `flow-runas-unscoped` (#3760 — metadata the
   // runtime REFUSES to execute), plus `flow-branch-label-unmatched` and
   // `flow-default-edge-with-condition` (#4414 — a declaration that is inert, so
-  // the route silently differs from what the author wrote). The bar for
+  // the route silently differs from what the author wrote), and others since,
+  // `flow-approval-decision-unrouted` among them (an approval whose edges do not
+  // claim both decisions runs every branch on either). The bar for
   // promoting one is stated at the top of `lint-flow-patterns.ts`.
   {
     name: 'lintFlowPatterns',
@@ -2038,10 +2203,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         severity: f.severity ?? 'warning',
         rule: f.rule,
         where: f.where,
-        path: f.where,
+        // [#34818] A finding placed on a node carries its document path, so a
+        // draft's `_diagnostics` entry resolves onto that node; the rest keep
+        // `where` as before.
+        path: f.path ?? f.where,
         message: f.message,
         hint: f.hint,
+        // The user sentence's names ride through the re-map, so the doors can
+        // render this finding in the request's language.
+        ...(f.userTextParams !== undefined ? { userTextParams: f.userTextParams } : {}),
       })),
+  },
+  // A flow node whose `type` no executor runs fails every run with
+  // NO_EXECUTOR. Judged only against the SEALED vocabulary the runtime gate
+  // hands in (`AuthoringRuleContext.flowNodeTypeVocabulary`); the CLI commands
+  // have none, so there the entry runs and judges nothing — the vocabulary is
+  // the deployment's, not the stack's.
+  {
+    name: 'validateFlowNodeExecutors',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-node-executors.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
+    run: (stack, ctx) => validateFlowNodeExecutors(stack, ctx.flowNodeTypeVocabulary),
   },
   // A credential typed as a LITERAL into a flow position every flow reader is
   // served — an `http` node's `headers` or `url` query, a node's
@@ -2370,6 +2556,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // another object; a re-save of that object is judged on its own body, as
   // for every gating rule at this door. No boot or registration path runs
   // this table, so an app already installed keeps loading.
+  //
+  // [#33644] `object_extension` joins: an extension adds fields to an object
+  // it does not own, and the registry folds them onto it, so one can add a
+  // field under a label the target already shows (`owner_id` included). The
+  // door hands the written entry and the target as served without the written
+  // package's own extension; the rule folds the entry among the target's other
+  // packages' extensions by priority (`storedObjectExtensions`, the build's
+  // fold) and reads the served objects back to their authored shape
+  // (`runtimeWriteType`, the expression rule's argument for the same input).
+  // The write is charged with the clash its entry creates and nothing the
+  // target already carried: the gate's differential cancels an unchanged
+  // group, and the rule itself drops a group every member of which already
+  // shared the label on the target (one the entry shrank by taking a member
+  // out), whose message the baseline cannot hold. MEASURED first: the two
+  // first-party `objectExtensions` entries (app-showcase's `showcase_account`
+  // overlay, plugin-auth's `sys_sso_provider` secret) add no clash, as
+  // written or in any locale.
   {
     name: 'lintDuplicateFieldLabels',
     tier: 'gating',
@@ -2377,9 +2580,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/lint-duplicate-field-labels.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['object'],
-    run: (stack) =>
-      lintDuplicateFieldLabels(stack).map((f) => ({
+    runtimeTypes: ['object', 'object_extension'],
+    run: (stack, ctx) =>
+      duplicateFieldLabelFindings(stack, {
+        ...(ctx.storedObjectExtensions !== undefined ? { storedObjectExtensions: ctx.storedObjectExtensions } : {}),
+        ...(ctx.runtimeWriteType === 'object_extension' ? { extensionWrite: true } : {}),
+      }).map((f) => ({
         severity: f.severity,
         rule: f.rule,
         where: f.where,
@@ -2431,6 +2637,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       'twice. This is coverage recorded, not coverage missing: all three commands report the rule.',
     run: (stack) =>
       lintLegacyOrganizationComposites(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
+  // A relationship a parent field group places in the parent's form, whose parent or child declares
+  // `enable.apiMethods` without `bulk` (`relationship/inline-edit-needs-bulk`).
+  // The parent's form saves the rows in one cross-object `/api/v1/batch`, which
+  // asks every object in it for `bulk`, so the form fills and then 405s on save.
+  // Registered rather than left in `lintDataModel`: it forecasts a refusal at run
+  // time, not a style nudge, so all three commands report it. Advisory: a
+  // warning that refuses nothing and never fails `os build`.
+  {
+    name: 'lintInlineEditBulk',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
+    run: (stack) =>
+      lintInlineEditBulk(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.where,
@@ -2788,6 +3019,55 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['object', 'object_extension'],
     run: (stack) => validateRuleCompilability(stack),
+  },
+  // An L2 action body that does not compile in the wrapper the runtime runs it
+  // in (`(async (input, ctx) => { SOURCE })`, built from the same function the
+  // rule compiles inside). Such a body passed every author-time door and then
+  // failed every run, on every door; `const input = ctx.input || {}` is the
+  // shape an AI author writes, a redeclared parameter. Gating: no reading of
+  // the metadata behaves as written, because the body never starts. A
+  // regular-expression pattern the host refuses for a measured dialect gap (a
+  // duplicate named group, a modifier group, a Unicode property name only
+  // QuickJS knows: Node 22's V8 refuses them, QuickJS runs them) is the one
+  // `warning` arm; every other
+  // pattern failure, a literal that never closes and a bad flag set are
+  // refused (see the module). Across the runtime publish gate for `action` writes and for
+  // `object` writes, whose inline `actions[]` the same walk reads; the
+  // differential charges a write only with the bodies it adds. The rule loads
+  // no dependency: compiling goes through the host's `node:vm`.
+  {
+    name: 'validateActionBodyCompiles',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-action-body-compiles.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['action', 'object'],
+    run: (stack) => validateActionBodyCompiles(stack),
+  },
+  // The same compile check over an L2 hook body and an L2 job body, in the
+  // wrapper the runtime runs both in (`(async (ctx) => { SOURCE })`, built from
+  // the same function the rule compiles inside). Gating for the action rule's
+  // reason: the body never starts. Same severity split, read through the one
+  // `judgeBodyCompile`; two ids (`hook-body-does-not-compile`,
+  // `job-body-does-not-compile`). Across the runtime publish gate for `hook`
+  // writes only: a hook is runtime-creatable, a job is not
+  // (`allowRuntimeCreate: false`), so the metadata publish door never takes a
+  // job body, and no object write carries a hook (`hooks` is not an
+  // ObjectSchema key). That is the metadata door only: the boot and
+  // `os package install` bring hook and job bodies in from an artifact and run
+  // no author-time rule, so such a body reaches the runtime unjudged and the
+  // runner's coded compile failure is its answer there. The rule
+  // loads no dependency: compiling goes through the host's `node:vm`.
+  {
+    name: 'validateHookAndJobBodyCompiles',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-hook-body-compiles.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['hook'],
+    run: (stack, ctx) => validateHookAndJobBodyCompiles(stack, ctx),
   },
   // #5178 — the residual half of #5029, which registering `ajv-formats` does
   // NOT close: under `strict: false` a MISSPELLED format name (`emial`) is

@@ -439,7 +439,9 @@
 
 import {
   assertListComparandShapes,
+  isComposedReadableIds,
   isFilterAST,
+  isFixedReadLeaf,
   isRefusedTextComparand,
   normalizeFilterComparandTypes,
   parseFilterAST,
@@ -447,6 +449,7 @@ import {
   textComparandRefusalReason,
   VALID_AST_OPERATORS,
 } from '@objectstack/spec/data';
+import { describeFixedReadLeaf, fixedReadLeafRefusal } from '@objectstack/core';
 // [ADR-0053 D-D1, amended 2026-09-30 — #5930 step 3] The shared lowering, run
 // on what this door admitted, before any face reads the condition — see
 // {@link normalizeAnalyticsFilterTree} (F10) and the draft preview (F11).
@@ -540,6 +543,19 @@ const MONGO_TO_CUBE_OP: Record<string, string> = {
 };
 
 /**
+ * [#36168] The `$` spelling each leaf operator above was lowered from: the
+ * inverse of {@link MONGO_TO_CUBE_OP}, derived from it rather than listed a
+ * second time, so a reader of the normalised tree that has to name an operator
+ * names the spelling the map lowered (`equals` is `$eq`, whether the author
+ * wrote `$eq` or the implicit equality `{ field: value }`; a `$between` reaches
+ * the tree as its `gte` / `lte` bounds). Operators the map does not produce
+ * (`set`, `notSet`, `empty`, `notEmpty`) have no entry.
+ */
+export const CUBE_TO_MONGO_OP: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(Object.entries(MONGO_TO_CUBE_OP).map(([mongo, cube]) => [cube, mongo])),
+);
+
+/**
  * [#20068] The one operator `FILTER_TEXT_CASES` writes comparand REJECTION rows
  * for, in the `$` spelling this door judges. {@link assertCompilableComparand}
  * asks `isRefusedTextComparand` for this operator and no other.
@@ -619,7 +635,27 @@ function comparand(v: unknown): unknown {
  */
 export type NormalizedFilterNode =
   | { kind: 'leaf'; member: string; operator: string; values: unknown[] }
-  | { kind: 'const'; value: boolean }
+  /**
+   * [#34384] `member` is set on ONE constant: the TRUE an empty `$nin` folds to.
+   * It names the field the author wrote the leaf on, because that TRUE is still
+   * a condition on that field: on a member the native compile reads through a
+   * relationship path it holds only for a row whose parent exists ("no parent
+   * never matches, whatever the operator", `cross-object-where.ts`). The member
+   * gates need no second reading of it: the shared lowering
+   * (`lowerFilterCondition`, `@objectstack/spec/data`) always puts a leaf on the
+   * same member beside the `$nin` (see {@link collectFilterLeaves}). Outside a
+   * `$not` it wraps every `$nin` in the NULL escape
+   * (`{ $or: [{ f: { $null: true } }, { f: { $nin: [] } }] }`), whose `notSet`
+   * leaf names the member. Inside a `$not` it takes that escape when a row with
+   * no value satisfies every operator of the field's spec (for example `$nin`
+   * alone, or beside `$null: true` / `$eq: null`); for a mixed spec it takes a `$null:
+   * false` requirement instead, a `set` leaf on the member, as its own conjunct
+   * or the enclosing conjunct that already requires the field. So a `$not`
+   * never meets the constant bare either: {@link notOf} receives the escape's
+   * `$or`, or the conjunction holding the constant. Every other constant names
+   * no member.
+   */
+  | { kind: 'const'; value: boolean; member?: string }
   | { kind: 'and'; children: NormalizedFilterNode[] }
   | { kind: 'or'; children: NormalizedFilterNode[] }
   | { kind: 'not'; child: NormalizedFilterNode }
@@ -1251,8 +1287,14 @@ function fieldLeaves(key: string, raw: unknown): NormalizedFilterNode[] {
         // NULL-safe `$not` rewrite below to stay correct: a dropped conjunct
         // inside a negation flips the whole negation's answer, while `1 = 0`
         // negates to `1 = 1` the way `read-scope-sql.ts` already has it.
+        //
+        // [#34384] The empty `$nin`'s TRUE keeps the member it was written on
+        // (see the `const` row of {@link NormalizedFilterNode}): folded to a bare
+        // TRUE, a related field's `$nin: []` selected the detail rows with no
+        // parent on the native path, which no other operator does. The empty
+        // `$in`'s FALSE selects no row, parent or not, and names nothing.
         if ((opKey === '$in' || opKey === '$nin') && Array.isArray(wrapper[opKey]) && (wrapper[opKey] as unknown[]).length === 0) {
-          out.push({ kind: 'const', value: opKey === '$nin' });
+          out.push(opKey === '$nin' ? { kind: 'const', value: true, member: key } : { kind: 'const', value: false });
           continue;
         }
 
@@ -2102,6 +2144,8 @@ function assertNoRetiredOperators(node: unknown, path = 'where'): void {
  * evaluates the narrowed condition the published one lowers.
  */
 export function normalizeWhereComparands<T>(node: T, path = 'where'): T {
+  // [ADR-0155 D4, plan step 5] A fixed-read leaf first, in its own envelope.
+  refuseFixedReadLeafInWhere(node, path);
   assertWhereComparandShapes(node, path);
   const narrowed = normalizeWhereComparandTypes(node, path);
   // [#20040] Then the null flags' boolean domain, before any node is built —
@@ -2111,6 +2155,61 @@ export function normalizeWhereComparands<T>(node: T, path = 'where'): T {
   // {@link assertNoRetiredOperators} for why it is the last pass.
   assertNoRetiredOperators(node, path);
   return narrowed;
+}
+
+/** The evaluator this module's fixed-read-leaf refusal names. */
+const WHERE_FIXED_READ_LEAF_EVALUATOR = 'service-analytics where';
+
+/**
+ * [ADR-0155 D4, plan step 5: compile surface 2] Refuse a fixed-read leaf
+ * (`SharedRecordIds`) anywhere in an analytics query's `where`, either
+ * spelling, in ADR-0139 D3's envelope (`INTERNAL_ERROR` / 500), before any
+ * other gate reads the condition.
+ *
+ * A leaf reaches analytics only in the read scope (`ctx.getReadScope`), which
+ * its own door judges (`read-scope-sql.ts#assertReadScopeComparandsRunnable`).
+ * A `where` names no brand, and no request can spell the leaf (its brand is a
+ * symbol no JSON keeps), so a leaf here is the in-process code that put it
+ * there. Without this pass the face answered it three ways, none of them the
+ * leaf's own: `{ id: { $in: leaf } }` the shape door's `INVALID_FILTER` / 400,
+ * whose message printed the leaf's inputs; a bare `{ id: leaf }`, and the
+ * array form's `=`, a relation condition on `id` built from the leaf's fields.
+ * The message names the leaf by its name and table only. Unlogged: the face
+ * holds no logger, as `parseFilterAST` holds none.
+ */
+function refuseFixedReadLeafInWhere(node: unknown, path: string): void {
+  const onPath = new Set<object>();
+  const find = (value: unknown, at: string): { at: string; leaf: unknown } | null => {
+    if (isFixedReadLeaf(value)) return { at, leaf: value };
+    if (isComposedReadableIds(value)) return find(value.scope, `${at}.scope`);
+    // Plain objects and lists only: a filter is built from those, and a leaf
+    // inside anything else (a Date, a Buffer) is no position at all.
+    if (value === null || typeof value !== 'object' || onPath.has(value)) return null;
+    const proto = Object.getPrototypeOf(value);
+    if (!Array.isArray(value) && proto !== Object.prototype && proto !== null) return null;
+    onPath.add(value);
+    try {
+      const entries: [string, unknown][] = Array.isArray(value)
+        ? value.map((item, i) => [`${at}[${i}]`, item])
+        : Object.keys(value).map((key) => [`${at}.${key}`, (value as Record<string, unknown>)[key]]);
+      for (const [step, item] of entries) {
+        const found = find(item, step);
+        if (found) return found;
+      }
+      return null;
+    } finally {
+      onPath.delete(value);
+    }
+  };
+  const found = find(node, path);
+  if (found === null) return;
+  throw fixedReadLeafRefusal(
+    WHERE_FIXED_READ_LEAF_EVALUATOR,
+    `${describeFixedReadLeaf(found.at, found.leaf)}, which an analytics query's where admits in no position: ` +
+      'a fixed-read leaf reaches analytics only in the read scope, as { id: { $in: leaf } } (ADR-0155 D1, D4). ' +
+      'The query was NOT run, rather than read the leaf as a comparand or a relation condition. Remove the leaf ' +
+      'from the where and let the read scope carry it.',
+  );
 }
 
 /**
@@ -2140,6 +2239,9 @@ export function lowerAnalyticsWhere(
   if (Array.isArray(where)) {
     // (1) `[]` is "no filter", not a failed filter.
     if (where.length === 0) return null;
+    // [ADR-0155 D4, plan step 5] A fixed-read leaf in either spelling, before
+    // `parseFilterAST` lowers an `=` comparand by reference.
+    refuseFixedReadLeafInWhere(where, 'where');
     // (3) Not a shape `parseFilterAST` can express.
     if (!isFilterAST(where)) throw filterArrayNotLowerableError(where);
     // (2) The declared path.
@@ -2480,7 +2582,14 @@ export function collectFilterLeaves(
   // it are the engine's to judge, as the caller, when it reads that object.
   if (node.kind === 'relation') return [{ member: node.member, operator: 'relation', values: [] }];
   // A boolean constant names no member — it constrains rows, not columns — so
-  // it contributes nothing to the cross-object envelope check.
+  // it contributes nothing to the cross-object envelope check. The empty
+  // `$nin`'s TRUE names its member too, and is not read here: the shared
+  // lowering always puts a leaf on the same member beside the `$nin`, so every
+  // gate already reads that member for it. Outside a `$not` that is the
+  // `notSet` leaf of the NULL escape every `$nin` is wrapped in; inside one it
+  // is that escape's leaf, or for a mixed spec the `set` leaf of a
+  // `$null: false` requirement (its own conjunct, or the enclosing one that
+  // already requires the field). See the `const` arm of `NormalizedFilterNode`.
   if (node.kind === 'const') return [];
   if (node.kind === 'not') return collectFilterLeaves(node.child);
   return node.children.flatMap(collectFilterLeaves);

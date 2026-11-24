@@ -10,6 +10,7 @@ import {
   APPROVAL_APPROVER_TYPE_UNKNOWN,
   APPROVAL_APPROVER_TYPE_UNSUPPORTED,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
+  APPROVAL_ESCALATION_CALENDAR_WITHOUT_WORKING_TIME,
   APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
   APPROVAL_EXPRESSION_INVALID,
   APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
@@ -174,6 +175,30 @@ describe('validateApprovalApprovers', () => {
     expect(findings[0].rule).toBe(APPROVAL_ESCALATION_REASSIGN_NO_TARGET);
     expect(findings[0].path).toBe('flows[0].nodes[1].config.escalation.escalateTo');
     expect(findings[0].hint).toContain('position');
+  });
+
+  it("refuses an escalation.calendar beside the wall clock: nothing reads it (ADR-0157 D9)", () => {
+    const stack = stackWithApprovers([{ type: 'user', value: 'u1' }]);
+    const node = (stack.flows as any)[0].nodes[1];
+    for (const clock of [undefined, 'wall_clock']) {
+      node.config.escalation = { enabled: true, timeoutHours: 4, action: 'notify', calendar: 'cn_standard', ...(clock ? { clock } : {}) };
+      const findings = validateApprovalApprovers(stack);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        severity: 'error',
+        rule: APPROVAL_ESCALATION_CALENDAR_WITHOUT_WORKING_TIME,
+        path: 'flows[0].nodes[1].config.escalation.calendar',
+      });
+    }
+  });
+
+  it("accepts a calendar on 'working_time', and 'working_time' with no calendar: whether a calendar exists is never judged here", () => {
+    const stack = stackWithApprovers([{ type: 'user', value: 'u1' }]);
+    const node = (stack.flows as any)[0].nodes[1];
+    node.config.escalation = { enabled: true, timeoutHours: 4, action: 'notify', clock: 'working_time', calendar: 'no_such_calendar' };
+    expect(validateApprovalApprovers(stack)).toEqual([]);
+    node.config.escalation = { enabled: true, timeoutHours: 4, action: 'notify', clock: 'working_time' };
+    expect(validateApprovalApprovers(stack)).toEqual([]);
   });
 
   it('accepts reassign escalation with a target, and non-reassign actions without one', () => {
@@ -370,7 +395,10 @@ describe('unset-manager dead-end (#16748)', () => {
     // ⛔ The one that is NOT this repo's to offer must be marked as the
     // deployment's own, and the hint must say WHY rather than merely hedging.
     expect(remedy).toContain('a provisioning path your own deployment supplies');
-    expect(remedy).toContain("declares the SCIM 'manager' attribute without projecting it");
+    // SCIM is no longer among them: its `manager` attribute is projected onto
+    // the column (plugin-auth `scim-manager-projection.ts`).
+    expect(remedy).not.toContain('without projecting it');
+    expect(remedy).toContain("Enterprise User 'manager' attribute, whose value is the manager's SCIM resource id");
 
     // ⛔ And they must not be deleted: a deployment running a real directory
     // sync may well populate the column, and the defect was presenting all
@@ -378,8 +406,8 @@ describe('unset-manager dead-end (#16748)', () => {
     // PRECEDENCE — the endpoint refuses an identity a SCIM directory holds, and
     // so does the import's `manager_id` column, which runs the same derivation —
     // so the hint must not read as "use the endpoint instead of your directory".
-    expect(remedy).toContain('SCIM provisioning and directory sync can populate it');
-    expect(remedy).toContain('where a SCIM directory holds an identity the admin operation refuses');
+    expect(remedy).toContain('SCIM provisioning populates it too');
+    expect(remedy).toContain('Where a SCIM directory holds an identity, the admin operation refuses it');
     expect(remedy).toContain("the import's manager_id column included");
     // ⛔ But only where a directory exists: the `idp_provisioned` mark alone
     // also covers a person who only signs in through SSO, whose manager the

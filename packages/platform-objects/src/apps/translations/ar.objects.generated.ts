@@ -72,6 +72,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         label: "يجب تغيير كلمة المرور",
         help: "عند التفعيل، يجب على المستخدم تغيير كلمة المرور قبل أن يتمكن من المتابعة. يُفعَّل عندما ينشئ المسؤول الحساب أو يستورده أو يعيد تعيين كلمة مروره؛ يديره النظام."
       },
+      dev_seed_credential: {
+        label: "بيانات اعتماد البذرة التطويرية",
+        help: "يُعيَّن على حساب أنشأته البذرة التطويرية. ما دامت كلمة مروره هي كلمة مرور البذرة، يرفض خادم الإنتاج تسجيل دخوله وأي جلسة جديدة؛ يعيّن os user set-password كلمة مرور جديدة ويمسحه. يُديره النظام؛ ولا يُعاد عند القراءة أبدًا."
+      },
       mfa_required_at: {
         label: "تاريخ فرض المصادقة متعددة العوامل",
         help: "وقت تطبيق المصادقة متعددة العوامل الإلزامية على هذا المستخدم لأول مرة (بداية مهلة السماح). يستند إليه mfa_required؛ يديره النظام."
@@ -155,7 +159,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "أُرسلت الدعوة إلى {{ result.email }}",
         outcomeMessages: {
           sent: "أُرسلت الدعوة إلى {{ result.email }}",
-          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         },
         params: {
           role: {
@@ -172,7 +176,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       ban_user: {
         label: "حظر المستخدم",
-        description: "هل تريد حظر هذا المستخدم؟ سيُسجَّل خروجه ولن يتمكن من تسجيل الدخول، وستُرفض مفاتيح API الخاصة به إلى أن يُلغى الحظر، وكذلك رموز الوصول عبر OAuth وتحديثات الرموز. تعود المفاتيح للعمل بعد إلغاء الحظر.",
+        description: "هل تريد حظر هذا المستخدم؟ سيُسجَّل خروجه ولن يتمكن من تسجيل الدخول، وستُرفض مفاتيح API الخاصة به إلى أن يُلغى الحظر، وكذلك رموز الوصول عبر OAuth وتحديثات الرموز. تعود المفاتيح للعمل بعد إلغاء الحظر. يؤدي الحظر أيضًا إلى تعليق حسابات خدمة الذكاء الاصطناعي التي يكون مسؤولًا عنها، وتعطيل تطبيقات OAuth التي سجّلها، وإلغاء بيانات اعتماد SCIM التي أصدرها؛ ولا يعيد رفع الحظر أيًا من ذلك.",
         successMessage: "تم حظر المستخدم",
         params: {
           banReason: {
@@ -240,6 +244,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "تم",
           fields: {
             email: "البريد الإلكتروني",
+            pendingAgain: "معلّق بالفعل",
             notApplied: "معلّق بالفعل، لذا لم يُطبَّق (عيّنه في السجل)",
             managerError: "المدير",
             "host.reason": "لم تُرسَل الدعوة"
@@ -260,11 +265,29 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "تم",
           fields: {
             "summary.added": "تمت الإضافة",
-            "summary.alreadyPending": "معلّق بالفعل، أُبلغ مجددًا",
+            "summary.alreadyPending": "معلّق بالفعل",
             "summary.failed": "لم تتم الإضافة",
             rows: "النتيجة لكل صف"
+          },
+          columns: {
+            rows: {
+              row: "الصف",
+              email: "البريد الإلكتروني",
+              ok: "نجح",
+              alreadyPending: "معلّق بالفعل",
+              "host.notified": "أُبلغت المؤسسة المستضيفة",
+              "host.reason": "سبب عدم الإبلاغ",
+              "error.message": "لم تتم الإضافة بسبب",
+              notApplied: "لم يُطبَّق (اضبطه في السجل)",
+              managerError: "المدير"
+            }
           }
         }
+      },
+      remove_sso_user: {
+        label: "Remove Pending User",
+        confirmText: "Remove this person, who has not signed in yet, and cancel their invitation? If they have signed in meanwhile, or the hosting organization cannot be reached, no one is removed.",
+        successMessage: "Pending user removed"
       },
       set_user_password: {
         label: "تعيين كلمة المرور",
@@ -304,6 +327,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
             helpText: "المستخدم الذي يتبع له هذا الشخص. يرفض الخادم مديرًا من خارج مؤسسته، وتعيين الشخص مديرًا لنفسه، وأي ربط من شأنه أن يُغلق سلسلة التبعية الإدارية في حلقة أو يزيد عمقها عن الحد."
           }
         }
+      },
+      remove_user_manager: {
+        label: "إزالة المدير",
+        confirmText: "هل تريد إزالة مدير هذا المستخدم؟ لن يتبع أحدًا حتى يُعيَّن مدير من جديد، ويتبع توجيه الموافقات ونطاق السجلات own_and_reports هذا التغيير.",
+        successMessage: "تمت إزالة المدير"
       },
       list_platform_admins: {
         label: "مسؤولو المنصة",
@@ -468,6 +496,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       revoke_reason: {
         label: "سبب الإلغاء",
         help: "سبب إلغاء الجلسة (idle_timeout، absolute_max، concurrent_cap، ip_not_allowed، user_revoked، admin، organization_membership_ended، admin_password_reset، password_reset، …)."
+      },
+      sso_provider_id: {
+        label: "مزوّد SSO",
+        help: "مزوّد SSO الذي سُجّل الدخول من خلاله في هذه الجلسة، إن وُجد. حذف ذلك المزوّد يُنهي الجلسة. يُدار من قِبل النظام."
       },
       active_organization_id: {
         label: "المؤسسة النشطة"
@@ -691,7 +723,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "أُرسلت الدعوة إلى {{ result.email }}",
         outcomeMessages: {
           sent: "أُرسلت الدعوة إلى {{ result.email }}",
-          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         },
         params: {
           role: {
@@ -797,7 +829,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "أُرسلت الدعوة إلى {{ result.email }}",
         outcomeMessages: {
           sent: "أُرسلت الدعوة إلى {{ result.email }}",
-          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         },
         params: {
           role: {
@@ -949,7 +981,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "أُرسلت الدعوة إلى {{ result.email }}",
         outcomeMessages: {
           sent: "أُرسلت الدعوة إلى {{ result.email }}",
-          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "أُنشئت دعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         },
         params: {
           role: {
@@ -976,7 +1008,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "تمت إعادة إرسال الدعوة",
         outcomeMessages: {
           sent: "أُعيد إرسال الدعوة إلى {{ result.email }}",
-          link_only: "جُدِّدت الدعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. استخدم «نسخ رابط الدعوة» في الدعوة لمشاركتها."
+          link_only: "جُدِّدت الدعوة لـ {{ result.email }}. البريد غير مُهيَّأ على هذا الخادم، لذا لم تُرسَل أي رسالة. يتطلب قبول الدعوة عنوان بريد إلكتروني موثَّقًا: من دون البريد، لا يستطيع القبول إلا مدعو يوثّق تسجيلُ دخوله الاجتماعي أو عبر SSO عنوانَه. لأي شخص آخر، ينشئ مسؤول المنصة الحساب."
         }
       },
       copy_invitation_link: {
@@ -4396,6 +4428,202 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
         emptyState: {
           title: "لا توجد أسعار صرف بعد",
           message: "أضف صفًا واحدًا لكل عملة عن كل تاريخ يتغيّر فيه سعرها، مثلًا صفًا لكل عملة في بداية كل شهر."
+        }
+      }
+    }
+  },
+  sys_unit: {
+    label: "Unit of Measure",
+    pluralLabel: "Units of Measure",
+    description: "The organization's own units of measure, beside the standard units every organization has — one row per unit, named by a code in the organization namespace.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      code: {
+        label: "Code",
+        help: "The code a quantity stores, in exact uppercase: letters, digits and underscores, at least 4 characters or containing an underscore (BOX_12, JIN1). Standard codes such as KGM and H87 are available to every organization and are not added here. The code cannot be changed after the unit is created."
+      },
+      label: {
+        label: "Label",
+        help: "The name shown beside a quantity in this unit, in the organization's own language."
+      },
+      dimension: {
+        label: "Dimension",
+        help: "What the unit measures. A package unit (a box, a bag) has no fixed ratio. The dimension cannot be changed after the unit is created.",
+        options: {
+          mass: "Mass",
+          length: "Length",
+          area: "Area",
+          volume: "Volume",
+          time: "Time",
+          count: "Count",
+          package: "Package"
+        }
+      },
+      ratio: {
+        label: "Ratio",
+        help: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio. Changing the ratio affects only records saved afterwards; records already saved keep the quantity and conversion they were saved with. A changed specification is a new unit, not an edited ratio."
+      },
+      decimal_places: {
+        label: "Decimal Places",
+        help: "How many decimal places a quantity in this unit displays with by default. It never rounds a stored value, and a field's own decimal places still limit what is stored."
+      },
+      retired: {
+        label: "Retired",
+        help: "A retired unit stays on file so its code can never be reused, and records that already use it keep showing it. New records cannot use a retired unit. Retiring cannot be undone."
+      }
+    },
+    _views: {
+      all_units: {
+        label: "All",
+        description: "1 of this unit = Ratio × the base unit of its dimension (mass KGM, length MTR, area MTK, volume MTQ, time SEC, count H87). Example: a unit of half a kilogram in the mass dimension has ratio 0.5. A package unit takes no ratio.",
+        emptyState: {
+          title: "No units of measure yet",
+          message: "Standard units such as kilogram (KGM) and piece (H87) are available already. Add a unit here only when your organization needs one they do not cover."
+        }
+      }
+    },
+    _validations: {
+      unit_code_organization_namespace: {
+        message: "A unit code is uppercase letters, digits and underscores, at least 4 characters long or containing an underscore (for example BOX_12 or JIN1). Shorter codes are reserved for the standard units."
+      },
+      unit_code_immutable: {
+        message: "A unit's code cannot be changed after it is created. Create a new unit with the new code instead."
+      },
+      unit_dimension_immutable: {
+        message: "A unit's dimension cannot be changed after it is created. Create a new unit with the new dimension instead."
+      },
+      unit_ratio_required: {
+        message: "Enter the ratio to the base unit of this dimension."
+      },
+      unit_package_has_no_ratio: {
+        message: "A package unit has no ratio: how much a package holds belongs to the item, not to the unit. Clear the ratio."
+      },
+      unit_retired_one_way: {
+        message: "A retired unit cannot be brought back. Create a unit with a new code instead."
+      }
+    }
+  },
+  sys_work_calendar: {
+    label: "تقويم العمل",
+    pluralLabel: "تقويمات العمل",
+    description: "تقويمات العمل: ساعات العمل الأسبوعية، والمنطقة الزمنية التي تُحسب بها، وإلى أي تاريخ أُدخلت العطلات. تقرؤها تواريخ الاستحقاق المحسوبة بوقت العمل.",
+    fields: {
+      id: {
+        label: "المعرّف"
+      },
+      code: {
+        label: "الرمز",
+        help: "الرمز الآلي الذي تُسمّي به الصيغ وتصعيدات الموافقة والحزم هذا التقويم، مثل cn_standard: أحرف صغيرة وأرقام وشرطات سفلية."
+      },
+      name: {
+        label: "الاسم"
+      },
+      timezone: {
+        label: "المنطقة الزمنية",
+        help: "منطقة IANA الزمنية التي تُحسب بها فترات العمل، مثل Asia/Shanghai. يُفتح نموذج الإنشاء على المنطقة الزمنية للمؤسسة (الإعدادات ← الترجمة والإعدادات المحلية)، وأي إنشاء يتركها فارغة يأخذ المنطقة نفسها."
+      },
+      is_default: {
+        label: "افتراضي",
+        help: "التقويم الذي يستخدمه تاريخ الاستحقاق عندما لا يحدد تقويمًا. واحد لكل مؤسسة."
+      },
+      maintained_from: {
+        label: "مُحدَّث من",
+        help: "أول تاريخ أُدخلت منه العطلات وأيام العمل التعويضية. يُرفض أي حساب يحتاج إلى تاريخ أسبق."
+      },
+      maintained_through: {
+        label: "مُحدَّث حتى",
+        help: "آخر تاريخ أُدخلت حتى نهايته العطلات وأيام العمل التعويضية. يُرفض أي حساب يحتاج إلى تاريخ لاحق: أدخل عطلات العام التالي، ثم انقل هذا التاريخ."
+      },
+      monday_periods: {
+        label: "الاثنين",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      tuesday_periods: {
+        label: "الثلاثاء",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      wednesday_periods: {
+        label: "الأربعاء",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      thursday_periods: {
+        label: "الخميس",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      friday_periods: {
+        label: "الجمعة",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      saturday_periods: {
+        label: "السبت",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      sunday_periods: {
+        label: "الأحد",
+        help: "فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      }
+    },
+    _views: {
+      all_calendars: {
+        label: "الكل",
+        emptyState: {
+          title: "لا توجد تقويمات عمل بعد",
+          message: "أضف تقويمًا بساعات عمله الأسبوعية وحدّد أحدها تقويمًا افتراضيًا، ثم أدخل عطلاته وأيام العمل التعويضية."
+        }
+      },
+      needs_maintenance: {
+        label: "بحاجة إلى تحديث",
+        emptyState: {
+          title: "جميع التقويمات محدَّثة مسبقًا",
+          message: "يظهر التقويم هنا عندما تنتهي عطلاته المُدخلة خلال الـ 60 يومًا القادمة؛ وتُرفض تواريخ الاستحقاق التي تتجاوز ذلك التاريخ."
+        }
+      }
+    },
+    _validations: {
+      work_calendar_code_shape: {
+        message: "يجب أن يبدأ الرمز بحرف صغير وأن يحتوي فقط على أحرف صغيرة وأرقام وشرطات سفلية، مثل cn_standard."
+      }
+    }
+  },
+  sys_work_calendar_exception: {
+    label: "استثناء تقويم",
+    pluralLabel: "استثناءات التقويم",
+    description: "استثناءات مؤرّخة لتقويم العمل: العطلات الرسمية وأيام العمل التعويضية وأيام الإغلاق. يحمل يوم العمل فترات عمله كاملة.",
+    fields: {
+      id: {
+        label: "المعرّف"
+      },
+      calendar: {
+        label: "التقويم"
+      },
+      date: {
+        label: "التاريخ"
+      },
+      kind: {
+        label: "النوع",
+        help: "يوم إجازة: التاريخ كله إجازة. يوم عمل: يُعمل في التاريخ وفق الفترات أدناه، مثل يوم عمل تعويضي.",
+        options: {
+          off: "يوم إجازة",
+          on: "يوم عمل"
+        }
+      },
+      periods: {
+        label: "الفترات",
+        help: "ليوم العمل، كل ساعات ذلك التاريخ؛ ولا تُؤخذ أبدًا من يوم الأسبوع. فترات العمل في ذلك اليوم بالمنطقة الزمنية للتقويم، بصيغة HH:mm-HH:mm مفصولة بفواصل، مثل 09:00-12:00, 13:00-18:00. تنتهي الفترة بعد بدايتها في اليوم نفسه؛ وآخر نهاية ممكنة هي 24:00. اتركها فارغة ليوم الإجازة."
+      },
+      note: {
+        label: "ملاحظة",
+        help: "ما هو هذا التاريخ، مثل العيد الوطني أو يوم عمل تعويضي لعيد الربيع."
+      }
+    },
+    _views: {
+      all_exceptions: {
+        label: "الكل",
+        emptyState: {
+          title: "لا توجد استثناءات تقويم بعد",
+          message: "أضف صفًا لكل عطلة أو يوم عمل تعويضي، أو استورد سنة كاملة منها من ملف."
         }
       }
     }

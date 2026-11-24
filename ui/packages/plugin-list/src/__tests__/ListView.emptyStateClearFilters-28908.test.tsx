@@ -71,6 +71,7 @@ const session: MePermissionsResponse = {
   userId: 'u1',
   tenantId: 'org_1',
   hasAnyQueue: true,
+  objectsUsingQueues: [OBJECT],
   positions: [],
   permissionSets: ['member_default'],
   objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
@@ -127,14 +128,15 @@ describe('ListView empty state — clear the reader\'s filters (objectstack#2890
     expect(add).not.toBeNull();
     expect(isPrimary(add)).toBe(false);
     expect(q(panel, 'empty-state-clear-search')).toBeNull();
-    expect(q(container, 'toolbar-filter-trigger')?.getAttribute('aria-label')).toMatch(/1 active/);
+    // The held filter is a chip in the condition row (objectstack#35878).
+    expect(q(container, 'condition-add-filter')).not.toHaveAttribute('data-empty');
 
     fireEvent.click(clear!);
 
     await waitFor(() => expect(q(container, 'empty-state')).toBeNull());
     expect(onFilterChange).toHaveBeenLastCalledWith(expect.objectContaining({ conditions: [] }));
     expect(JSON.stringify(ds.find.mock.calls.at(-1))).not.toContain(MISS);
-    expect(q(container, 'toolbar-filter-trigger')?.getAttribute('aria-label')).not.toMatch(/active/);
+    expect(q(container, 'condition-add-filter')).toHaveAttribute('data-empty', 'true');
   });
 
   it('a search alone keeps "Clear search" beside the primary "Add record"', async () => {

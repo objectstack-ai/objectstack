@@ -2,13 +2,16 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * objectui#12534 (the summed-currency half of objectui#12483's declared
- * amount): on the page objectstack serves for an approval request, the
- * snapshot summary also leads with a `summary` field whose spec
- * `summaryOperations` is a `sum` over a field the summarized object declares
- * `type: 'currency'`, so the showcase's expense-report and invoice roll-up
- * totals lead. The summarized object's definition is read through the same
- * metadata-store path as the target's, once, for one object.
+ * Roll-up totals on the page objectstack serves for an approval request
+ * (objectstack#34588, was objectui#12534). The page used to summarize the
+ * snapshot under a lead amount, and objectui#12534 let a `summary` field whose
+ * `summaryOperations` is a `sum` over a `currency` field take that lead, which
+ * cost a read of the summarized object's definition. #34588 draws the record
+ * WHOLE (maintainer 2026-11-17: 「审批页应该直接显示完整的记录」), so there is
+ * no lead to take: every roll-up is an ordinary field in its place, through
+ * its own field's cell, and no summarized object's definition is read for it.
+ * The record's child lines are drawn instead, as a read-only table of the
+ * CURRENT rows (the snapshot keeps the record's own row only).
  *
  * Mounted as `approvalRequestsDataSource.servedPageSummary-12483.test.tsx`
  * mounts it (the REAL `RecordDetailView`, opened by the generic record route
@@ -20,10 +23,9 @@
  * declarations (`examples/app-showcase`, objectstack `9e0945cf4`):
  * `showcase_expense_report` with its `showcase_expense_line` roll-ups,
  * `showcase_invoice.total` over `showcase_invoice_line.amount`, and
- * `showcase_product.unit_price` for the currency-only CONTROL. Only the HTTP
- * transport, the console adapter and the metadata store are doubled.
- */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+ * `showcase_product.unit_price`. Only the HTTP transport, the console adapter
+ * and the metadata store are doubled.
+ */import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -227,7 +229,7 @@ const DEFS: Record<string, unknown> = {
   showcase_product: PRODUCT_DEF,
 };
 
-/** objectstack `plugin-approvals`' `SysApprovalRequestDetailPage`, whole (as of objectstack `9e0945cf4`). */
+/** objectstack `plugin-approvals`' `SysApprovalRequestDetailPage`, whole (as of objectstack#34588). */
 const SERVED_PAGE = {
   name: 'sys_approval_request_detail',
   label: 'Approval Request',
@@ -241,46 +243,14 @@ const SERVED_PAGE = {
       name: 'main',
       width: 'full',
       components: [
-        { type: 'page:header' },
-        { type: 'record:approval_decision' },
+        { type: 'page:header', properties: { placedActions: true } },
         {
           type: 'record:highlights',
           properties: {
             fields: ['process_label', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
           },
         },
-        {
-          type: 'page:tabs',
-          properties: {
-            tabStyle: 'line',
-            position: 'top',
-            items: [
-              {
-                label: { en: 'Details', 'zh-CN': '详情', 'ja-JP': '詳細', 'es-ES': 'Detalles' },
-                icon: 'file-text',
-                children: [{ type: 'record:details' }],
-              },
-              {
-                label: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
-                icon: 'history',
-                children: [
-                  {
-                    type: 'record:related_list',
-                    properties: {
-                      objectName: 'sys_approval_action',
-                      relationshipField: 'request_id',
-                      columns: ['created_at', 'action', 'actor_id', 'step_name', 'comment', 'attachments'],
-                      sort: [{ field: 'created_at', order: 'desc' }],
-                      limit: 50,
-                      showViewAll: true,
-                      title: { en: 'Timeline', 'zh-CN': '时间线', 'ja-JP': 'タイムライン', 'es-ES': 'Cronología' },
-                    },
-                  },
-                ],
-              },
-            ],
-          },
-        },
+        { type: 'record:approval_decision' },
       ],
     },
   ],
@@ -350,9 +320,19 @@ const transport = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Pr
 });
 vi.stubGlobal('fetch', transport);
 
+/** The target record as it reads now; null reads as not found. */
+let current: Record<string, unknown> | null = null;
+
+/** The expense report's lines as they read now. */
+const EXPENSE_LINES = [
+  { id: 'line_1', expense_report: 'exp_1', merchant: 'Deutsche Bahn', amount: 240.5, billable: false, incurred_on: '2026-10-01' },
+  { id: 'line_2', expense_report: 'exp_1', merchant: 'Hotel Adlon', amount: 1600, billable: false, incurred_on: '2026-10-02' },
+];
+
 const host = {
-  find: vi.fn(async (_resource: string, _params?: unknown) => ({ data: [], total: 0 })),
-  findOne: vi.fn(async (_resource: string, _id: string) => null),
+  find: vi.fn(async (resource: string, _params?: unknown) =>
+    resource === 'showcase_expense_line' ? { data: EXPENSE_LINES, total: EXPENSE_LINES.length } : { data: [], total: 0 }),
+  findOne: vi.fn(async (_resource: string, id: string) => (current && current.id === id ? current : null)),
   create: vi.fn(), update: vi.fn(), delete: vi.fn(),
   getObjectSchema: vi.fn(async (name: string) => DEFS[name] ?? null),
 };
@@ -361,7 +341,7 @@ const host = {
 let defs: Record<string, unknown> = DEFS;
 const getItem = vi.fn(async (type: string, name: string) => (type === 'object' ? (defs[name] ?? null) : null));
 const metadata = {
-  apps: [], objects: [REQUEST_DEF, ACTION_DEF, USER_DEF], dashboards: [], reports: [],
+  apps: [], objects: [REQUEST_DEF, ACTION_DEF, USER_DEF] as unknown[], dashboards: [], reports: [],
   pages: [SERVED_PAGE], loading: false, error: null,
   refresh: async () => {}, invalidate: () => {}, ensureType: async () => [],
   getItem,
@@ -384,6 +364,7 @@ function readerWithout(...denied: string[]): MePermissionsResponse {
     tenantId: 't1',
     positions: [],
     hasAnyQueue: false,
+    objectsUsingQueues: [],
     permissionSets: [],
     objects: { '*': all } as never,
     fields: Object.fromEntries(denied.map((f) => [`showcase_expense_report.${f}`, { readable: false, editable: false }])),
@@ -419,31 +400,22 @@ async function openServedPage(row: Record<string, unknown>, permissions?: MePerm
   return panel;
 }
 
-async function summaryOf(panel: HTMLElement): Promise<HTMLElement> {
-  return within(panel).findByTestId('record-snapshot-summary', undefined, { timeout: 8000 });
+async function recordOf(panel: HTMLElement): Promise<HTMLElement> {
+  return within(panel).findByTestId('submitted-record', undefined, { timeout: 8000 });
 }
 
-/** The summary's rows, as `{ field key -> { label, value } }`. */
-function summaryRows(panel: HTMLElement): Map<string, { label: string; value: string }> {
+/** The card's fields, in drawn order, as `{ field key -> { label, value } }`. */
+function recordFields(panel: HTMLElement): Map<string, { label: string; value: string }> {
   const out = new Map<string, { label: string; value: string }>();
-  for (const row of panel.querySelectorAll('[data-summary-field]')) {
-    const [label, value] = Array.from(row.children);
-    out.set(row.getAttribute('data-summary-field') as string, {
-      label: (label?.textContent ?? '').trim(),
-      value: (value?.textContent ?? '').trim(),
+  for (const row of panel.querySelectorAll('[data-submitted-field]')) {
+    const value = row.querySelector('dd');
+    const note = value?.querySelector('[data-submitted-current]');
+    out.set(row.getAttribute('data-submitted-field') as string, {
+      label: (row.querySelector('dt')?.textContent ?? '').trim(),
+      value: (value?.textContent ?? '').replace(note?.textContent ?? '\u0000', '').trim(),
     });
   }
   return out;
-}
-
-function lead(panel: HTMLElement): { key: string | null; label: string; value: string } | null {
-  const el = panel.querySelector('[data-summary-lead]');
-  if (!el) return null;
-  return {
-    key: el.getAttribute('data-summary-lead'),
-    label: (el.children[0]?.textContent ?? '').trim(),
-    value: (el.children[1]?.textContent ?? '').trim(),
-  };
 }
 
 /** What the record page draws for this declaration and stored value, standalone. */
@@ -464,12 +436,16 @@ const pageText = () => document.body.textContent ?? '';
 afterEach(() => {
   cleanup();
   served = requestRow('showcase_expense_report', EXPENSE_PAYLOAD);
+  current = null;
   defs = DEFS;
+  metadata.objects = [REQUEST_DEF, ACTION_DEF, USER_DEF];
+  host.find.mockClear();
+  host.findOne.mockClear();
   getItem.mockClear();
   transport.mockClear();
 });
 
-describe('a `sum` summary over a currency field leads the served request page (objectui#12534)', () => {
+describe('roll-up totals are ordinary fields of the whole record (objectstack#34588, was objectui#12534)', () => {
   it('the showcase declarations parse as spec objects, and the served page as a spec page', () => {
     for (const def of [EXPENSE_REPORT_DEF, EXPENSE_LINE_DEF, INVOICE_DEF, INVOICE_LINE_DEF, PRODUCT_DEF]) {
       const { owner_id: _o, created_at: _c, ...authored } = def.fields as Record<string, unknown>;
@@ -479,101 +455,79 @@ describe('a `sum` summary over a currency field leads the served request page (o
     expect(PageSchema.safeParse(SERVED_PAGE).success).toBe(true);
   });
 
-  it('the expense report\'s total leads, under its declared label, through its own field\'s cell, and is not repeated as a row', async () => {
+  it("the expense report's total is drawn in its place, under its declared label, through its own field's cell, once", async () => {
     const panel = await openServedPage(requestRow('showcase_expense_report', EXPENSE_PAYLOAD));
-    await summaryOf(panel);
-    expect(lead(panel)).toEqual({
-      key: 'total_amount',
+    await recordOf(panel);
+    expect(panel.querySelector('[data-summary-lead]')).toBeNull();
+    const rows = recordFields(panel);
+    expect(rows.get('total_amount')).toEqual({
       label: 'Total',
       value: recordPageFace(EXPENSE_REPORT_DEF, 'total_amount', 1840.5),
     });
-    expect(lead(panel)?.value).toContain('1,840.5');
-    const rows = summaryRows(panel);
-    expect(rows.has('total_amount')).toBe(false);
-    // The other roll-ups of the same child are ordinary rows below it.
-    expect([...rows.keys()]).toEqual(['name', 'employee', 'status', 'submitted_on', 'approved_amount', 'reimbursable_amount']);
+    // Every roll-up of the same child, `sum` and `count` alike, in declared order.
+    expect([...rows.keys()]).toEqual([
+      'name', 'employee', 'status', 'submitted_on',
+      'total_amount', 'approved_amount', 'reimbursable_amount', 'line_count', 'rejected_count', 'over_limit_count',
+    ]);
+    expect(rows.get('line_count')).toEqual({ label: 'Lines', value: recordPageFace(EXPENSE_REPORT_DEF, 'line_count', 4) });
   });
 
-  it('the invoice, which declares no currency field of its own, leads with its subtotal', async () => {
+  it("the invoice's subtotal is an ordinary field", async () => {
     const panel = await openServedPage(requestRow('showcase_invoice', INVOICE_PAYLOAD));
-    await summaryOf(panel);
-    expect(lead(panel)).toEqual({
-      key: 'total',
-      label: 'Subtotal',
-      value: recordPageFace(INVOICE_DEF, 'total', 9876.25),
-    });
-    expect(summaryRows(panel).has('total')).toBe(false);
+    await recordOf(panel);
+    expect(recordFields(panel).get('total')).toEqual({ label: 'Subtotal', value: recordPageFace(INVOICE_DEF, 'total', 9876.25) });
   });
 
-  it('the summarized object\'s definition is read once, through the metadata store, and no record is read', async () => {
+  it("no summarized object's definition is read to draw a roll-up", async () => {
     const panel = await openServedPage(requestRow('showcase_expense_report', EXPENSE_PAYLOAD));
-    await summaryOf(panel);
+    await recordOf(panel);
     const reads = definitionsRead();
-    expect(reads.filter((n) => n === 'showcase_expense_report').length).toBeGreaterThan(0);
-    // Three `sum`s over one child, one read of that child.
-    expect(reads.filter((n) => n === 'showcase_expense_line')).toEqual(['showcase_expense_line']);
-    const paths = transport.mock.calls.map(([input]) =>
-      new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, 'http://test.local').pathname);
-    expect(paths.filter((p) => p.includes('expense'))).toEqual([]);
-    expect(host.findOne.mock.calls.filter(([resource]) => resource === 'showcase_expense_line')).toEqual([]);
+    expect(reads).toContain('showcase_expense_report');
+    expect(reads).not.toContain('showcase_expense_line');
   });
 
-  it('a field the reader may not read is never drawn: without the total, the next `sum` leads', async () => {
+  it('a field the reader may not read is never drawn; the other roll-ups still are', async () => {
     const panel = await openServedPage(requestRow('showcase_expense_report', EXPENSE_PAYLOAD), readerWithout('total_amount'));
-    await summaryOf(panel);
-    expect(lead(panel)?.key).toBe('approved_amount');
-    expect(summaryRows(panel).has('total_amount')).toBe(false);
+    await recordOf(panel);
+    const rows = recordFields(panel);
+    expect(rows.has('total_amount')).toBe(false);
+    expect(rows.has('approved_amount')).toBe(true);
     expect(pageText()).not.toContain('1,840.5');
   });
-});
 
-describe('controls (objectui#12534)', () => {
-  it('CONTROL: a summary that is not a `sum` is an ordinary row, and no other definition is read', async () => {
-    const { total_amount: _t, approved_amount: _a, reimbursable_amount: _r, ...counts } = EXPENSE_PAYLOAD;
-    const panel = await openServedPage(requestRow('showcase_expense_report', counts));
-    await summaryOf(panel);
-    expect(lead(panel)).toBeNull();
-    const rows = summaryRows(panel);
-    expect(rows.get('line_count')).toEqual({ label: 'Lines', value: recordPageFace(EXPENSE_REPORT_DEF, 'line_count', 4) });
-    expect(rows.has('rejected_count')).toBe(true);
-    expect(definitionsRead()).not.toContain('showcase_expense_line');
-  });
-
-  it('CONTROL: a `sum` over a field the summarized object declares `number` is an ordinary row', async () => {
-    const overQuantity = {
-      ...INVOICE_DEF,
-      fields: {
-        ...INVOICE_DEF.fields,
-        total: { ...INVOICE_DEF.fields.total, summaryOperations: { object: 'showcase_invoice_line', field: 'quantity', function: 'sum' } },
-      },
-    };
-    defs = { ...DEFS, showcase_invoice: overQuantity };
-    const panel = await openServedPage(requestRow('showcase_invoice', INVOICE_PAYLOAD));
-    await summaryOf(panel);
-    expect(lead(panel)).toBeNull();
-    expect(summaryRows(panel).get('total')).toEqual({ label: 'Subtotal', value: recordPageFace(INVOICE_DEF, 'total', 9876.25) });
-  });
-
-  it('CONTROL: the currency-only case keeps objectui#12483\'s amount, and reads no other definition', async () => {
+  it("the product's unit price, a plain currency field, is an ordinary field", async () => {
     const product = { id: 'prd_1', created_at: '2026-10-06T06:44:23.359Z', name: 'Widget', sku: 'W-1', unit_price: 49.5 };
     const panel = await openServedPage(requestRow('showcase_product', product));
-    await summaryOf(panel);
-    expect(lead(panel)).toEqual({
-      key: 'unit_price',
+    await recordOf(panel);
+    expect(recordFields(panel).get('unit_price')).toEqual({
       label: 'Unit Price',
       value: recordPageFace(PRODUCT_DEF, 'unit_price', 49.5),
     });
-    expect(definitionsRead().every((n) => !n.endsWith('_line'))).toBe(true);
+  });
+});
+
+describe("the record's child lines (objectstack#34588)", () => {
+  it('are drawn once the record reads: its current lines, read-only, headed as current rows', async () => {
+    metadata.objects = [REQUEST_DEF, ACTION_DEF, USER_DEF, EXPENSE_REPORT_DEF, EXPENSE_LINE_DEF];
+    current = { ...EXPENSE_PAYLOAD };
+    const panel = await openServedPage(requestRow('showcase_expense_report', EXPENSE_PAYLOAD));
+    const child = await within(panel).findByTestId('submitted-child-tables', undefined, { timeout: 8000 });
+    const lines = child.querySelector('[data-submitted-child="showcase_expense_line"]') as HTMLElement;
+    expect(lines).not.toBeNull();
+    expect(lines.querySelector('[data-submitted-child-note]')?.textContent)
+      .toBe('Current rows: the submission does not keep child rows.');
+    expect(await within(lines).findByText('Hotel Adlon', undefined, { timeout: 8000 })).toBeTruthy();
+    // Read-only: no New or Add.
+    expect(within(lines).queryByRole('button', { name: /^New$|Add/ })).toBeNull();
+    expect(host.find.mock.calls.some(([resource]) => resource === 'showcase_expense_line')).toBe(true);
   });
 
-  it('CONTROL: when the summarized object\'s definition cannot be read, the total is an ordinary row', async () => {
-    defs = { ...DEFS, showcase_expense_line: null };
+  it('CONTROL: a record that does not read draws no child lines, and asks for none', async () => {
+    metadata.objects = [REQUEST_DEF, ACTION_DEF, USER_DEF, EXPENSE_REPORT_DEF, EXPENSE_LINE_DEF];
+    current = null;
     const panel = await openServedPage(requestRow('showcase_expense_report', EXPENSE_PAYLOAD));
-    await summaryOf(panel);
-    expect(lead(panel)).toBeNull();
-    expect(summaryRows(panel).get('total_amount')).toEqual({
-      label: 'Total',
-      value: recordPageFace(EXPENSE_REPORT_DEF, 'total_amount', 1840.5),
-    });
+    await within(panel).findByTestId('submitted-record-current-unreadable', undefined, { timeout: 8000 });
+    expect(within(panel).queryByTestId('submitted-child-tables')).toBeNull();
+    expect(host.find.mock.calls.some(([resource]) => resource === 'showcase_expense_line')).toBe(false);
   });
 });

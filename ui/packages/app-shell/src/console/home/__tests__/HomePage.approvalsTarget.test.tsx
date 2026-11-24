@@ -91,6 +91,14 @@ vi.mock('../../../context/NavigationContext', () => ({
   useNavigationContext: () => ({ currentAppName: currentAppNameFixture }),
 }));
 
+// objectstack#35505 — the person's last used app (`ui.app.last`); `null`, as
+// outside a provider, unless a case names one.
+let lastAppFixture: string | null = null;
+vi.mock('../../../context/LastAppProvider', () => ({
+  useLastApp: () => ({ lastApp: lastAppFixture, settled: true, rememberApp: () => {} }),
+}));
+let pendingApprovalsFixture: Array<{ id: string; processLabel?: string; recordTitle?: string }> = [];
+
 // --- unrelated surfaces ----------------------------------------------------
 vi.mock('../../../hooks/useRecentItems', () => ({ useRecentItems: () => ({ recentItems: [] }) }));
 vi.mock('../../../hooks/useFavorites', () => ({ useFavorites: () => ({ favorites: [] }) }));
@@ -99,7 +107,7 @@ vi.mock('../../../hooks/useHomeInbox', () => ({
     pendingApprovalsCount: 3,
     // objectui#12602: the approvals preview, and whether each source is
     // the caller's to read — the My-work section draws a column per source.
-    pendingApprovals: [],
+    pendingApprovals: pendingApprovalsFixture,
     pendingApprovalsReadable: true,
     notificationsReadable: true,
     notifications: [],
@@ -226,6 +234,8 @@ describe('HomePage pending-approvals target (objectstack#7231)', () => {
     navigateMock.mockReset();
     appsFixture = [];
     currentAppNameFixture = undefined;
+    lastAppFixture = null;
+    pendingApprovalsFixture = [];
   });
 
   it('lands in the app the user last had open, not the hardcoded setup app', async () => {
@@ -276,5 +286,64 @@ describe('HomePage pending-approvals target (objectstack#7231)', () => {
 
     render(<HomePage />);
     expect(screen.queryByTestId('home-my-work')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#35505 (ruling option A) — an approval opened from Home stays in
+ * an app: the current app, then the last used one, then the first. The row
+ * hands the request page the pending queue Home holds and the way back to the
+ * approvals inbox.
+ */
+describe('HomePage approvals open in the current, last used or first app, with the pending queue (objectstack#35505)', () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    appsFixture = [];
+    currentAppNameFixture = undefined;
+    lastAppFixture = null;
+    pendingApprovalsFixture = [];
+  });
+
+  it('a cold landing at /home opens the inbox in the last used app, ahead of the first app', async () => {
+    appsFixture = [app('crm'), app('hr'), app('setup', { _packageId: 'com.objectstack.setup' })];
+    lastAppFixture = 'hr';
+
+    expect(await clickApprovals()).toBe('/apps/hr/system/approvals');
+  });
+
+  it('the current app still wins over the last used app', async () => {
+    appsFixture = [app('crm'), app('hr')];
+    currentAppNameFixture = 'crm';
+    lastAppFixture = 'hr';
+
+    expect(await clickApprovals()).toBe('/apps/crm/system/approvals');
+  });
+
+  it('Setup as the last used app keeps the inbox there (ruling item 3)', async () => {
+    appsFixture = [app('crm'), app('setup', { _packageId: 'com.objectstack.setup' })];
+    lastAppFixture = 'setup';
+
+    expect(await clickApprovals()).toBe('/apps/com.objectstack.setup/system/approvals');
+  });
+
+  it("a pending row opens its request with Home's pending queue and the inbox as the way back", async () => {
+    appsFixture = [app('crm'), app('hr')];
+    lastAppFixture = 'hr';
+    pendingApprovalsFixture = [
+      { id: 'req_a', recordTitle: 'INV-1' },
+      { id: 'req_b', recordTitle: 'INV-2' },
+    ];
+    const user = userEvent.setup();
+    render(<HomePage />);
+    const rows = screen.getAllByTestId('home-my-work-approval-row');
+    await user.click(rows[1]);
+
+    expect(navigateMock).toHaveBeenCalledTimes(1);
+    const [to, options] = navigateMock.mock.calls[0] as [string, { state?: Record<string, unknown> }];
+    expect(to).toBe('/apps/hr/system/approvals?request=req_b');
+    expect(options?.state).toMatchObject({
+      approvalQueue: true,
+      from: { pathname: '/apps/hr/system/approvals', siblings: ['req_a', 'req_b'] },
+    });
   });
 });

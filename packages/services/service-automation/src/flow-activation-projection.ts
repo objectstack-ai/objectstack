@@ -48,6 +48,14 @@ export interface FlowActivationProjectionReaders {
      * Reported once per name by the projection.
      */
     readonly reportPackagelessOverShared?: (overlay: { name: string }) => void;
+    /**
+     * [#34655, ADR-0126 §4] Does the flow the engine files under `key` ship
+     * switched off (`defaultActive: false`)? Read only when no row decides
+     * for the flow ({@link FlowActivationProjection.has}): a row is an
+     * administrator's choice and wins over the package's default. Absent,
+     * every flow ships switched on, as before the key.
+     */
+    readonly shipsOff?: (key: string) => boolean;
 }
 
 export class FlowActivationProjection {
@@ -78,7 +86,27 @@ export class FlowActivationProjection {
     constructor(private readonly readers: FlowActivationProjectionReaders) {}
 
     /**
-     * Is the flow `name` switched off by a ledger row?
+     * Is the flow `key` switched off for this installation? The row that
+     * decides for it ({@link rowVerdict}) when there is one, else the
+     * package's default ({@link FlowActivationProjectionReaders.shipsOff},
+     * #34655): with no row, a flow shipped `defaultActive: false` is off.
+     */
+    has(key: string): boolean {
+        return this.rowVerdict(key) ?? this.readers.shipsOff?.(key) === true;
+    }
+
+    /**
+     * [#34655] Is the flow `key` off only because its package ships it off —
+     * no row decides for it, so no administrator has switched it here?
+     */
+    offByDefault(key: string): boolean {
+        return this.rowVerdict(key) === undefined && this.readers.shipsOff?.(key) === true;
+    }
+
+    /**
+     * Does a ledger row decide whether the flow `key` is switched off, and
+     * which way? `undefined` when no row decides: the package's default
+     * does ({@link has}).
      *
      *  - The row of the package that ships the name decides, in either state.
      *  - Else a row naming no package binds to the name's one holder (ADR-0150
@@ -93,12 +121,12 @@ export class FlowActivationProjection {
      *  - When no reader can say which package ships the name, every
      *    switched-off row of the name switches it off.
      */
-    has(key: string): boolean {
+    private rowVerdict(key: string): boolean | undefined {
         const slot = this.readers.slotOf?.(key);
-        if (slot?.shared) return this.hasShared(slot.name, slot.packageId);
+        if (slot?.shared) return this.sharedRowVerdict(slot.name, slot.packageId);
         const name = slot?.name ?? key;
         const packages = this.rows.get(name);
-        if (!packages || packages.size === 0) return false;
+        if (!packages || packages.size === 0) return undefined;
         const holder = this.readers.holderOf(name);
         if (holder !== undefined && packages.has(holder)) return packages.get(holder) === true;
         if (packages.get('') === true) return true;
@@ -113,7 +141,7 @@ export class FlowActivationProjection {
             }
             return true;
         }
-        return false;
+        return undefined;
     }
 
     /**
@@ -122,13 +150,14 @@ export class FlowActivationProjection {
      * naming no package that switches the name off keeps this slot off too:
      * it binds to one holder and nothing says which, so it fails closed for
      * every holder without a row of its own, and is reported once. A row of
-     * another package keys that package's slot only.
+     * another package keys that package's slot only, so with neither the slot
+     * has no row deciding for it (`undefined`).
      */
-    private hasShared(name: string, packageId: string | null): boolean {
+    private sharedRowVerdict(name: string, packageId: string | null): boolean | undefined {
         const packages = this.rows.get(name);
-        if (!packages || packages.size === 0) return false;
+        if (!packages || packages.size === 0) return undefined;
         if (packageId !== null && packages.has(packageId)) return packages.get(packageId) === true;
-        if (packages.get('') !== true) return false;
+        if (packages.get('') !== true) return undefined;
         if (!this.packagelessBinding.has(name) && !this.packagelessSharedReported.has(name)) {
             this.packagelessSharedReported.add(name);
             this.readers.reportPackagelessOverShared?.({ name });
@@ -143,7 +172,7 @@ export class FlowActivationProjection {
      * has only ever read over one holder, and where the holder has no row of
      * its own. When it has one, that row is its switch, and the package-less
      * row is left as it is: once the name is shared, it keeps every other
-     * holder without a row of its own off ({@link hasShared}).
+     * holder without a row of its own off ({@link sharedRowVerdict}).
      */
     canBindPackageless(name: string, packageId: string): boolean {
         const packages = this.rows.get(name);

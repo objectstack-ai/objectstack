@@ -5,7 +5,7 @@
  * `ObjectQL`: the bodies of `resolveRelateThenLowerWhere`, `withResolvedWhere`,
  * `expandSearchOnAst`, `expandSearchOnOptions`, `fillQueryAstDefaults`,
  * `requireFindOnePredicate`, `find`, `reportFindFailure`, `findOne` moved out
- * of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * of `engine.ts` whole (split by #30012 and #31116).
  *
  * A MOVE, not a redesign. {@link FindFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -29,17 +29,24 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { formulaWorkCalendarsFor } from './formula-work-calendars.js';
 import { SortNodeSchema, lowerFilterCondition, resolveSearchFieldResolution } from '@objectstack/spec/data';
-import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions, FilterLoweringOptions, HookContext, QueryAST, QueryInput, ServiceObject } from '@objectstack/spec/data';
+import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryInput, ServiceObject } from '@objectstack/spec/data';
 import { mergeDriverOptionsIntoHookView } from './engine-driver-options.js';
+import { RELATION_SCOPE_PLAN, type RelationScopePlan } from './relation-semi-join.js';
+import {
+  assertLatestPerShape, latestPerFieldRefusal, latestPerJudgedSortKeys, latestPerRegistryRefusal, latestPerRequestOf,
+  withLatestPerDirective, type LatestPerOrder,
+} from './latest-per.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { collectCredentialFields, collectInternalReadFields } from './secret-fields.js';
-import { expandSearchToFilter, normalizeSearch } from './search-filter.js';
+import { expandSearchToFilter, normalizeSearch, resolveSearchFields } from './search-filter.js';
 import { FindHookResultNotArrayError } from './find-hook-result-shape.js';
 import { FindOneHookResultNotRecordError, isFindOneResultShape } from './verb-hook-result-shape.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
+import { atFixedReadLeafDoor } from './fixed-read-leaf-seam.js';
 import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { PLATFORM_PROVISIONED_COLUMNS, declaredColumnSet, rowsWithDeclaredColumnsOnly, rowsWithSelectedColumnsAnswered, selectedStoredColumns, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import {
@@ -50,7 +57,7 @@ import {
   resolveWhereFilterTokens, rowsWithoutFormulaWidening, whereResolvedTokenJudge, withFileOwnerKey,
   withoutFormulaWidening, writeFailureLogMeta,
 } from './engine-top-level.js';
-import type { EngineReadOptions, OperationContext } from './engine-top-level.js';
+import type { EngineMiddlewareEntry, EngineReadOptions, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -77,9 +84,11 @@ export interface FindHost {
   formulaFaultSink: ObjectQL['formulaFaultSink'];
   formulaOptionLabels: ObjectQL['formulaOptionLabels'];
   getDriver: ObjectQL['getDriver'];
+  hasHooksFor: ObjectQL['hasHooksFor'];
   readonly logger: ObjectQL['logger'];
   lowerRelationConditions: ObjectQL['lowerRelationConditions'];
   maskSecretFields: ObjectQL['maskSecretFields'];
+  readonly middlewares: ObjectQL['middlewares'];
   permissionResolution: ObjectQL['permissionResolution'];
   readonly relatedSchemaOf: ObjectQL['relatedSchemaOf'];
   reportFindFailure: ObjectQL['reportFindFailure'];
@@ -174,7 +183,7 @@ export class FindFacet {
    * would hand the driver a key it does not read, which is the same silent drop
    * one layer down.
    */
-  static async expandSearchOnAst(this: Pick<FindHost, 'resolveSearchQueryableFields'>, ast: QueryAST, schema: ServiceObject | undefined, context: ExecutionContext | undefined): Promise<void> {
+  static async expandSearchOnAst(this: Pick<FindHost, 'middlewares' | 'resolveSearchQueryableFields'>, ast: QueryAST, schema: ServiceObject | undefined, context: ExecutionContext | undefined): Promise<void> {
     // The `$search`/`$searchFields` OData spellings are NOT read here: the
     // protocol layer normalizes them to the bare keys before the engine
     // (protocol.ts findData), and a direct engine call carrying one is an
@@ -244,10 +253,19 @@ export class FindFacet {
       // NAMED in `searchFields` is not withheld, so the guard still refuses it
       // loudly. The guard itself is unchanged, and still judges every
       // predicate the caller wrote.
-      const queryableFields = normalizeSearch(raw).query.trim()
+      const searching = !!normalizeSearch(raw).query.trim();
+      const queryableFields = searching
         ? await this.resolveSearchQueryableFields(ast.object, context)
         : undefined;
-      const searchFilter = expandSearchToFilter(raw, { ...expandOptions, queryableFields });
+      // [#34700] …nor a column a guard of the object's own refuses this caller
+      // (`EngineMiddlewareOptions.withholdSearchFields`): plugin-audit's parent-field query
+      // guard refused the auditor's whole audit-log search for the snapshot
+      // columns the server put in the set. Asked with the caller's `where`, the
+      // one the guard will read its pinned parent from.
+      const withheldFields = searching
+        ? await FindFacet.resolveSearchWithheldFields(this.middlewares, ast, expandOptions, context)
+        : undefined;
+      const searchFilter = expandSearchToFilter(raw, { ...expandOptions, queryableFields, withheldFields });
       if (searchFilter) {
         ast.where = ast.where ? { $and: [ast.where, searchFilter] } : searchFilter;
       } else if (normalizeSearch(raw).query.trim()) {
@@ -265,12 +283,42 @@ export class FindFacet {
         // it reaches this only then. [#25672] A set the caller's
         // queryable fields withheld down to nothing gets the same answer: the
         // declared set expands without the narrowing, so the refusal says so.
-        const withheld = queryableFields !== undefined && expandSearchToFilter(raw, expandOptions) !== null;
+        const withheld = (queryableFields !== undefined || !!withheldFields?.size)
+          && expandSearchToFilter(raw, expandOptions) !== null;
         throw emptySearchSetError(ast.object, schema, internalFields.length > 0, withheld);
       }
     }
     delete (ast as any).search;
     delete (ast as any).searchFields;
+  }
+
+  /**
+   * [#34700] The fields the search-field withholders of the middlewares that
+   * run for `ast.object` (`EngineMiddlewareOptions.withholdSearchFields`, the
+   * object selector `executeWithMiddleware` applies) withhold from this
+   * caller's server-resolved search set, or `undefined` when none is
+   * registered, the read carries no context, or none withholds anything. Each
+   * is asked with the set the expansion resolves before any withholding; their
+   * answers are unioned.
+   */
+  static async resolveSearchWithheldFields(
+    middlewares: readonly EngineMiddlewareEntry[],
+    ast: QueryAST,
+    expandOptions: Parameters<typeof resolveSearchFields>[0],
+    context: ExecutionContext | undefined,
+  ): Promise<ReadonlySet<string> | undefined> {
+    const registered = middlewares.flatMap((m) =>
+      m.withholdSearchFields && (!m.object || m.object === '*' || m.object === ast.object) ? [m.withholdSearchFields] : [],
+    );
+    if (registered.length === 0 || context === undefined) return undefined;
+    const searchFields = resolveSearchFields(expandOptions);
+    if (searchFields.length === 0) return undefined;
+    const withheld = new Set<string>();
+    for (const withholder of registered) {
+      const answer = await withholder({ object: ast.object, where: ast.where, context, searchFields });
+      for (const field of answer ?? []) withheld.add(field);
+    }
+    return withheld.size > 0 ? withheld : undefined;
   }
 
   /**
@@ -416,7 +464,7 @@ export class FindFacet {
   }
 
   /** The body of `ObjectQL#find`; the method's docblock there is its contract. */
-  static async find(this: Pick<FindHost, '_registry' | 'buildDriverOptions' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandRelatedRecords' | 'expandSearchOnAst' | 'facade' | 'fillQueryAstDefaults' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'logger' | 'maskSecretFields' | 'permissionResolution' | 'relatedSchemaOf' | 'reportFindFailure' | 'resolveFileReferences' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveObjectName' | 'resolveWhereTokens' | 'stripSearchCompanionFromRead' | 'triggerHooks'>, object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
+  static async find(this: Pick<FindHost, '_registry' | 'buildDriverOptions' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'composeReadableIdsAtBoundary' | 'executeWithMiddleware' | 'expandRelatedRecords' | 'expandSearchOnAst' | 'facade' | 'fillQueryAstDefaults' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'hasHooksFor' | 'logger' | 'maskSecretFields' | 'permissionResolution' | 'relatedSchemaOf' | 'reportFindFailure' | 'resolveFileReferences' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveObjectName' | 'resolveWhereTokens' | 'stripSearchCompanionFromRead' | 'triggerHooks'>, object: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any[]> {
     object = this.resolveObjectName(object);
     // Normalize the alias spellings (`filter`→`where`, `top`→`limit`) by the
     // spec's slot table — the driver AST only understands the canonical keys,
@@ -430,9 +478,26 @@ export class FindFacet {
     rejectUnknownEngineOptions(object, 'find', query, ENGINE_FIND_OPTION_KEYS);
     // [#27008] An empty projection is refused, never read as every column.
     assertProjectionNamesAField(object, 'find', query);
-    query = lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object), this.relatedSchemaOf);
+    query = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(object, 'find', query, this._registry.getObject(object), this.relatedSchemaOf));
     this.logger.debug('Find operation starting', { object, query });
     const driver = this.getDriver(object);
+    // [latest per group] The engine-internal request for one row per group
+    // (`latest-per.ts`). Its shape, the registry facts and its fields are
+    // judged first, before anything is read: a driver that does not compile
+    // the window, an object whose rows can be narrowed after the driver call,
+    // or a field no driver can group or order by is refused here.
+    const latestPer = latestPerRequestOf(options);
+    if (latestPer !== undefined) {
+      assertLatestPerShape(object, latestPer);
+      const latestPerSchema = this._registry.getObject(object);
+      const refused = latestPerRegistryRefusal(object, {
+        driver: driver as { readonly name?: unknown; readonly find?: unknown } | undefined,
+        schema: latestPerSchema,
+        hasAfterFindHook: this.hasHooksFor('afterFind', object),
+        hasObjectMiddleware: this.facade.hasObjectMiddleware(object),
+      }) ?? latestPerFieldRefusal(object, latestPerSchema, latestPer);
+      if (refused !== undefined) throw refused;
+    }
     // `object` LAST: the resolved name must win. Spread-first used to let a
     // stray `query.object` overwrite it, splitting the AST's object from the
     // table actually queried (#4371 option-2 survey) — every middleware and
@@ -445,6 +510,12 @@ export class FindFacet {
     // schemas declare are filled here, before anything downstream reads the AST.
     const { context: _findContext, ...findQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object };
+    // [latest per group] The partition and order fields are sort keys to
+    // every door from here on: appended to the AST the doors and the
+    // middleware chain judge, taken back out at the executor boundary below.
+    const _latestPerOwnOrderBy = ast.orderBy;
+    const _latestPerJudged: LatestPerOrder[] = latestPer !== undefined ? latestPerJudgedSortKeys(latestPer, ast.orderBy) : [];
+    if (_latestPerJudged.length > 0) ast.orderBy = [...(ast.orderBy ?? []), ..._latestPerJudged];
     // [ADR-0100] A `secret` / `password` column is never a filter or sort key
     // for a non-system caller — judged on the caller's own `where` / `orderBy`
     // / `expand`, before the search term is expanded into `where` and before
@@ -545,10 +616,33 @@ export class FindFacet {
       // [ADR-0139 D2] The executor boundary: the AST is final here — after the
       // doors, the middleware chain and `beforeFind` — so every `ReadableIds`
       // leaf is composed (or refused) on it, immediately before the driver.
-      const driverAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context);
+      const composedAst = await this.composeReadableIdsAtBoundary(object, 'find', hookContext.input.ast as QueryAST, opCtx.context, driverOptions);
+      // [latest per group] The window directive goes on HERE, on the final
+      // AST whose `where` carries every composed scope, and the judged sort
+      // keys come back off it — so the window runs over the caller's own rows.
+      const driverAst = latestPer !== undefined
+          ? withLatestPerDirective(composedAst, _latestPerJudged, _latestPerOwnOrderBy, latestPer)
+          : composedAst;
+      // [relation semi-join] A PLANNED read (`relation-semi-join.ts`): the
+      // final `where` and the driver options are handed to the planner in
+      // place of the driver call, and the read answers the plan's own empty
+      // rows. Only the engine's own nested-relation lowering sets this
+      // symbol-keyed option.
+      const plan = (options as Record<symbol, unknown> | undefined)?.[RELATION_SCOPE_PLAN] as RelationScopePlan | undefined;
+      if (plan !== undefined) {
+          // A planned read is never a latest-per read: the planner reads ids.
+          if (latestPer !== undefined) throw new Error(`find('${object}'): a planned read cannot carry a latest-per request.`);
+          plan.capture(driverAst.where as FilterCondition | undefined, driverOptions);
+          opCtx.result = plan.rows;
+          return opCtx.result;
+      }
 
       try {
           let result = await driver.find(object, driverAst, driverOptions);
+          // [latest per group] The driver answered the window: the request's
+          // carriers read this back, and a read that comes back without it
+          // was not served as one row per group.
+          if (latestPer !== undefined) latestPer.outcome = { kind: 'served' };
 
           // [#21571] The read's default projection is the DECLARED field set:
           // a column no metadata declares (a field retired in an upgrade,
@@ -580,7 +674,8 @@ export class FindFacet {
               // [#24197] One batched read per reference field for this PAGE —
               // the rows the driver returned, after limit/offset.
               _findSchema, _findFormula.plan, result, opCtx.context, query,
-            ), this.formulaOptionLabels(_findSchema, _findFormula.plan, opCtx.context));
+            ), this.formulaOptionLabels(_findSchema, _findFormula.plan, opCtx.context),
+            await formulaWorkCalendarsFor(this.facade, _findFormula.plan, result, opCtx.context));
           }
 
           // Post-process: expand related records if expand is requested
@@ -753,7 +848,7 @@ export class FindFacet {
     rejectUnknownEngineOptions(objectName, 'findOne', query, ENGINE_FIND_OPTION_KEYS);
     // [#27008] Same refusal as find().
     assertProjectionNamesAField(objectName, 'findOne', query);
-    query = lowerWhereFilterArray(objectName, 'findOne', query, this._registry.getObject(objectName), this.relatedSchemaOf);
+    query = atFixedReadLeafDoor(this, () => lowerWhereFilterArray(objectName, 'findOne', query, this._registry.getObject(objectName), this.relatedSchemaOf));
     this.logger.debug('FindOne operation', { objectName });
     const driver = this.getDriver(objectName);
     // `object` after the spread for the same reason as find(); `limit: 1`
@@ -837,7 +932,7 @@ export class FindFacet {
       const driverOptions = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
       hookContext.input.options = mergeDriverOptionsIntoHookView(hookContext.input.options, driverOptions);
       // [ADR-0139 D2] The executor boundary, as in `find`.
-      const driverAst = await this.composeReadableIdsAtBoundary(objectName, 'findOne', hookContext.input.ast as QueryAST, opCtx.context);
+      const driverAst = await this.composeReadableIdsAtBoundary(objectName, 'findOne', hookContext.input.ast as QueryAST, opCtx.context, driverOptions);
 
       let result = await driver.findOne(objectName, driverAst, driverOptions);
 
@@ -854,7 +949,8 @@ export class FindFacet {
           objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
         ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(
           _findOneSchema, _findOneFormula.plan, [result], opCtx.context, query,
-        ), this.formulaOptionLabels(_findOneSchema, _findOneFormula.plan, opCtx.context));
+        ), this.formulaOptionLabels(_findOneSchema, _findOneFormula.plan, opCtx.context),
+            await formulaWorkCalendarsFor(this.facade, _findOneFormula.plan, [result], opCtx.context));
       }
 
       // Post-process: expand related records if expand is requested

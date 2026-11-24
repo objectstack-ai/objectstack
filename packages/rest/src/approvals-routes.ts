@@ -47,12 +47,16 @@
 // `handleApprovalError` below. Constructor and reader share one module in
 // `@objectstack/types` because the producer is a PLUGIN and rest cannot
 // import one.
-import { strandedDecisionDetails, sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
+import { declaredUserMessage, strandedDecisionDetails, sendError as sendEnvelopeError, sendOk } from '@objectstack/types';
 // [#29880] The declared value set of `sys_approval_request.status`. The
 // object's select options are built FROM this list (#3786), so it is the
 // object's own declaration, read where the object reads it, and not a second
 // list kept beside it.
-import { APPROVAL_STATUSES, type ApprovalStatus } from '@objectstack/spec/contracts';
+import {
+    APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS,
+    APPROVAL_STATUSES,
+    type ApprovalStatus,
+} from '@objectstack/spec/contracts';
 import {
     classifiedRefusalAnswer,
     nestedRefusalEnvelope,
@@ -78,6 +82,52 @@ import {
  * refused with the located 400 (AGENTS.md route rule 5), never dropped.
  */
 export const APPROVAL_RECORD_LOCK_PARAMS: readonly string[] = [];
+
+/**
+ * The closed query-parameter set of
+ * `POST {basePath}/approvals/records/:object/locks`: EMPTY. **Measured**: the
+ * handler reads the object from the path and the ids from the body, nothing
+ * from the query string (the caller's context comes from the session and
+ * headers). A name sent there is refused with the located 400, never dropped.
+ */
+export const APPROVAL_RECORD_LOCKS_PARAMS: readonly string[] = [];
+
+/** The body keys `POST {basePath}/approvals/records/:object/locks` reads: `recordIds` alone. */
+const APPROVAL_RECORD_LOCKS_BODY_KEYS: readonly string[] = ['recordIds'];
+
+/**
+ * Read the body of `POST {basePath}/approvals/records/:object/locks`: the ids,
+ * or the sentence that refuses the request. Every shape is refused whole,
+ * never trimmed: a body key the door does not read, a `recordIds` that is not
+ * a list of non-empty strings, an empty list and one over
+ * {@link APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS}.
+ */
+export function readRecordLocksBody(body: unknown): { recordIds: string[] } | { refusal: string } {
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+        return { refusal: 'The request body must be a JSON object of the form {"recordIds": ["<id>", ...]}.' };
+    }
+    const unknown = Object.keys(body).filter((key) => !APPROVAL_RECORD_LOCKS_BODY_KEYS.includes(key));
+    if (unknown.length > 0) {
+        return {
+            refusal: `Unknown body field${unknown.length > 1 ? 's' : ''} ${unknown.map((key) => `"${key}"`).join(', ')}: `
+                + 'this request reads "recordIds" alone. Nothing was read.',
+        };
+    }
+    const ids = (body as { recordIds?: unknown }).recordIds;
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || id.trim() === '')) {
+        return { refusal: '"recordIds" must be a list of record ids, each a non-empty string.' };
+    }
+    if (ids.length === 0) {
+        return { refusal: '"recordIds" names no record; send at least one id.' };
+    }
+    if (ids.length > APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS) {
+        return {
+            refusal: `"recordIds" carries ${ids.length} ids; one request carries at most `
+                + `${APPROVAL_RECORD_LOCKS_MAX_RECORD_IDS}. Send the rest in another request. Nothing was read.`,
+        };
+    }
+    return { recordIds: ids as string[] };
+}
 
 /**
  * [#29880] Read `?status=` on `GET {basePath}/approvals/requests` against the
@@ -234,6 +284,16 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
         // a `RESUME_FAILED` from a caller with no decision to report must
         // not be dressed up as one.
         const stranded = strandedDecisionDetails(err);
+        // [#36463] The refusal's end-user text, when the service marked one
+        // on the thrown error (`ApiErrorSchema.userMessage`: presence is the
+        // marking, read once through `declaredUserMessage`). At the top level
+        // of this flat body, the member the stranded envelope below already
+        // carries its own `userMessage` in, and the one `@objectstack/client`
+        // lifts from this dialect. Status-agnostic, as the contract declares
+        // it: every row answers it when the producer marked one, and none
+        // invents one. The decide refusal of a submitter's own approval is
+        // its producer, in the decider's language.
+        const marked = declaredUserMessage(err);
         for (const [re, status, code] of mapping) {
             if (re.test(msg)) {
                 // [#13095] The strip is anchored to the CODE this row just
@@ -250,10 +310,19 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
                 res.status(status).json({
                     code,
                     error: msg.replace(new RegExp(`^${code}:\\s*`), ''),
+                    ...(marked !== undefined ? { userMessage: marked } : {}),
                     // Anchored to the code the envelope describes, for the
                     // same reason the strip above is: these four facts are
                     // about a recorded-decision-with-stranded-run and
                     // about nothing else.
+                    //
+                    // [#34579] …and, when the run stranded on a refusal,
+                    // that refusal: `innerRefusal` (ruling B′ on #24914,
+                    // the engine's own shape) and the marked `userMessage`
+                    // at the top level, the channel a record save's refusal
+                    // and every flow door's `FLOW_FAILED` already use. Both
+                    // are present only when the producer attached them and
+                    // the recogniser accepted them.
                     ...(code === 'RESUME_FAILED' && stranded ? stranded : {}),
                 });
                 return true;
@@ -456,6 +525,43 @@ export function registerApprovalsEndpoints(this: ApprovalsRouteHost, basePath: s
             }
         },
         metadata: { summary: 'Whether a record is held by a locking approval', tags: ['approvals'] },
+    });
+
+    // The lock of a PAGE of records, in one request: what a list asks before it
+    // opens a cell editor, so moving through the rows sends no request per row.
+    // Each entry is exactly the single-record door's answer for that id, the
+    // 404 folded to `locked: null` (unreadable or missing, told apart by
+    // nothing); a service without `getRecordLocks` answers 501, never one
+    // `getRecordLock` per id.
+    this.routeManager.register({
+        method: 'POST',
+        path: `${dataPath}/approvals/records/:object/locks`,
+        handler: async (req: any, res: any) => {
+            try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+                if (refuseUnknownQueryParams(req, res, APPROVAL_RECORD_LOCKS_PARAMS)) return;
+                const read = readRecordLocksBody(req.body);
+                if ('refusal' in read) {
+                    sendEnvelopeError(res, 400, 'VALIDATION_ERROR', read.refusal);
+                    return;
+                }
+                const svc = await resolveService(environmentId, req);
+                if (!svc || typeof svc.getRecordLocks !== 'function') return respond501(res);
+                const { object } = req.params;
+                const answers = await svc.getRecordLocks(object, read.recordIds, context ?? {});
+                sendOk(res, {
+                    records: read.recordIds.map((recordId, index) => ({
+                        recordId,
+                        locked: answers[index] ? answers[index]!.locked === true : null,
+                    })),
+                });
+            } catch (error: any) {
+                handleRouteError(res, error);
+            }
+        },
+        metadata: { summary: 'Whether each of a page of records is held by a locking approval', tags: ['approvals'] },
     });
 
     // Record a decision on a node-driven request. Both branches funnel

@@ -1,6 +1,14 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+// Pays the first load of the egress module at collection, not inside a clocked test.
+import '@objectstack/core/egress';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { authIdentityObjects } from './manifest.js';
 import {
   createObjectQLAdapter,
   createObjectQLAdapterFactory,
@@ -28,6 +36,8 @@ import {
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import { sso } from '@better-auth/sso';
+import { twoFactor } from 'better-auth/plugins/two-factor';
+import { organization } from 'better-auth/plugins/organization';
 import { AuthManager } from './auth-manager';
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 
@@ -751,5 +761,341 @@ describe('an unbounded ssoProvider read reads every row (the 100-row factory def
       ['sys_user', 100],
       ['sys_sso_provider', 151],
     ]);
+  });
+});
+
+describe('a single-use auth value is redeemed at most once, even across processes sharing a database', () => {
+  // Each "process" is its own ObjectQL engine with its own SQL driver
+  // connection, both opened on ONE SQLite file, and its own factory-wrapped
+  // adapter: nothing in memory is shared between the two, only the database.
+  const VERIFICATION = 'sys_verification';
+  type Adapter = {
+    create(a: { model: string; data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+    consumeOne(a: { model: string; where: Array<Record<string, unknown>> }): Promise<Record<string, unknown> | null>;
+  };
+  /** A pause point: every caller waits until `parties` callers have arrived. */
+  type Gate = () => Promise<void>;
+  const gate = (parties: number): Gate => {
+    let arrived = 0;
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => { open = resolve; });
+    return async () => {
+      if (++arrived === parties) open();
+      await opened;
+    };
+  };
+
+  const dirs: string[] = [];
+  const engines: ObjectQL[] = [];
+  afterEach(async () => {
+    while (engines.length) {
+      try { await engines.pop()!.destroy(); } catch { /* noop */ }
+    }
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+
+  /**
+   * One replica over `file`. `atRead` runs once, after its adapter's first
+   * read of a verification row; `atDelete` before each of its driver's
+   * verification deletes. Both default to no pause.
+   */
+  const replica = async (
+    file: string,
+    pauses: { atRead?: () => Promise<void>; atDelete?: () => Promise<void> } = {},
+  ): Promise<{ adapter: Adapter; driver: SqlDriver }> => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
+    const engine = new ObjectQL();
+    engines.push(engine);
+    engine.registerDriver(driver, true);
+    await engine.init();
+    for (const object of authIdentityObjects) engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
+    await engine.syncSchemas();
+
+    const driverDelete = driver.delete.bind(driver);
+    driver.delete = (async (object: string, id: string | number, options?: unknown) => {
+      if (object === VERIFICATION) await pauses.atDelete?.();
+      return driverDelete(object, id, options as never);
+    }) as typeof driver.delete;
+
+    let read = false;
+    const seen = new Proxy(engine, {
+      get(target, prop) {
+        const member = Reflect.get(target, prop, target);
+        if (prop !== 'findOne') return typeof member === 'function' ? member.bind(target) : member;
+        return async (object: string, ...rest: unknown[]) => {
+          const row = await (member as (...a: unknown[]) => Promise<unknown>).call(target, object, ...rest);
+          if (object === VERIFICATION && !read) {
+            read = true;
+            await pauses.atRead?.();
+          }
+          return row;
+        };
+      },
+    });
+    const adapter = (createObjectQLAdapterFactory(seen as unknown as IDataEngine) as unknown as (o: unknown) => Adapter)({});
+    return { adapter, driver };
+  };
+
+  const sharedFile = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-auth-single-use-'));
+    dirs.push(dir);
+    return join(dir, 'auth.db');
+  };
+
+  const issue = (adapter: Adapter, identifier: string) =>
+    adapter.create({
+      model: 'verification',
+      data: { identifier, value: `value-of-${identifier}`, expiresAt: new Date(Date.now() + 5 * 60_000) },
+    });
+
+  const redeem = (adapter: Adapter, id: unknown) =>
+    adapter.consumeOne({ model: 'verification', where: [{ field: 'id', value: id, operator: 'eq', connector: 'AND' }] });
+
+  const stored = async (driver: SqlDriver, identifier: string) =>
+    (await driver.find(VERIFICATION, { object: VERIFICATION, where: { identifier } } as never)) as unknown[];
+
+  it('of two concurrent redemptions on two engines over one database, exactly one receives the value', async () => {
+    const file = sharedFile();
+    const atRead = gate(2);
+    const atDelete = gate(2);
+    const a = await replica(file, { atRead, atDelete });
+    const b = await replica(file, { atRead, atDelete });
+    const row = await issue(a.adapter, 'race-both-paused');
+
+    const answers = await Promise.all([redeem(a.adapter, row.id), redeem(b.adapter, row.id)]);
+
+    expect(answers.filter((r) => r !== null), 'redemptions that received the value').toHaveLength(1);
+    expect(answers.filter((r) => r === null), 'redemptions answered null').toHaveLength(1);
+    expect(answers.find((r) => r !== null)).toMatchObject({ id: row.id, value: 'value-of-race-both-paused' });
+    expect(await stored(a.driver, 'race-both-paused')).toHaveLength(0);
+  });
+
+  it('a redemption of a value already redeemed elsewhere receives null', async () => {
+    const file = sharedFile();
+    const bothRead = gate(2);
+    let aDone!: Promise<unknown>;
+    const a = await replica(file, { atRead: bothRead });
+    const b = await replica(file, { atRead: async () => { await bothRead(); await aDone; } });
+    const row = await issue(a.adapter, 'race-late-delete');
+
+    aDone = redeem(a.adapter, row.id);
+    const [first, second] = await Promise.all([aDone, redeem(b.adapter, row.id)]);
+
+    expect(first).toMatchObject({ id: row.id, value: 'value-of-race-late-delete' });
+    expect(second).toBeNull();
+    expect(await stored(b.driver, 'race-late-delete')).toHaveLength(0);
+  });
+
+  it('a single redemption receives the value and removes it', async () => {
+    const { adapter, driver } = await replica(sharedFile());
+    const row = await issue(adapter, 'single');
+
+    expect(await redeem(adapter, row.id)).toMatchObject({ id: row.id, identifier: 'single', value: 'value-of-single' });
+    expect(await stored(driver, 'single')).toHaveLength(0);
+    expect(await redeem(adapter, row.id), 'the same value a second time').toBeNull();
+  });
+
+  it('redeeming a value that does not exist receives null and removes nothing', async () => {
+    const { adapter, driver } = await replica(sharedFile());
+    await issue(adapter, 'bystander');
+
+    expect(await redeem(adapter, 'no-such-value')).toBeNull();
+    expect(await stored(driver, 'bystander')).toHaveLength(1);
+  });
+});
+
+describe('a guarded increment is one atomic conditional write, even across processes sharing a database', () => {
+  // The same two-replica shape as the single-use suite above: two ObjectQL
+  // engines, each with its own SQL driver connection to ONE SQLite file and
+  // its own factory-wrapped adapter. Each replica pauses once, right after its
+  // first read of a guarded row, until both replicas have read — so both
+  // calls see the guard pass before either one writes. The three call shapes
+  // are ones better-auth 1.7.12 itself issues against `incrementOne`.
+  const GUARDED = new Set(['sys_two_factor', 'sys_team']);
+  type Where = { field: string; value: unknown; operator?: string; connector?: string };
+  type Adapter = {
+    create(a: { model: string; data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+    findOne(a: { model: string; where: Where[] }): Promise<Record<string, unknown> | null>;
+    incrementOne(a: {
+      model: string; where: Where[]; increment: Record<string, number>; set?: Record<string, unknown>;
+    }): Promise<Record<string, unknown> | null>;
+  };
+  const gate = (parties: number) => {
+    let arrived = 0;
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => { open = resolve; });
+    return async () => {
+      if (++arrived === parties) open();
+      await opened;
+    };
+  };
+
+  const dirs: string[] = [];
+  const engines: ObjectQL[] = [];
+  afterEach(async () => {
+    while (engines.length) {
+      try { await engines.pop()!.destroy(); } catch { /* noop */ }
+    }
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+  });
+
+  const replica = async (file: string, atRead?: () => Promise<void>): Promise<{ adapter: Adapter; driver: SqlDriver }> => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true });
+    const engine = new ObjectQL();
+    engines.push(engine);
+    engine.registerDriver(driver, true);
+    await engine.init();
+    for (const object of authIdentityObjects) engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
+    await engine.syncSchemas();
+
+    let read = false;
+    const seen = new Proxy(engine, {
+      get(target, prop) {
+        const member = Reflect.get(target, prop, target);
+        if (prop !== 'findOne') return typeof member === 'function' ? member.bind(target) : member;
+        return async (object: string, ...rest: unknown[]) => {
+          const row = await (member as (...a: unknown[]) => Promise<unknown>).call(target, object, ...rest);
+          if (GUARDED.has(object) && !read) {
+            read = true;
+            await atRead?.();
+          }
+          return row;
+        };
+      },
+    });
+    const options = {
+      plugins: [
+        twoFactor({ schema: buildTwoFactorPluginSchema() }),
+        organization({ schema: buildOrganizationPluginSchema(), teams: { enabled: true } }),
+      ],
+    };
+    const adapter = (createObjectQLAdapterFactory(seen as unknown as IDataEngine) as unknown as (o: unknown) => Adapter)(options);
+    return { adapter, driver };
+  };
+
+  /** Two replicas over one fresh file, both paused at their first guarded read. */
+  const twoReplicas = async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-auth-guarded-increment-'));
+    dirs.push(dir);
+    const file = join(dir, 'auth.db');
+    const bothRead = gate(2);
+    return [await replica(file, bothRead), await replica(file, bothRead)] as const;
+  };
+  /** One replica, no pause: the sequential control. */
+  const oneReplica = async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-auth-guarded-increment-'));
+    dirs.push(dir);
+    return replica(join(dir, 'auth.db'));
+  };
+
+  const eq = (field: string, value: unknown): Where => ({ field, value, operator: 'eq', connector: 'AND' });
+  const stored = async (driver: SqlDriver, object: string, id: unknown) =>
+    ((await driver.find(object, { object, where: { id } } as never)) as Array<Record<string, unknown>>)[0];
+
+  const twoFactorRow = async (adapter: Adapter, backupCodes = 'codes-v1') => {
+    const user = await adapter.create({ model: 'user', data: { email: `u${Math.random()}@example.com`, name: 'U', emailVerified: false } });
+    return adapter.create({ model: 'twoFactor', data: { userId: user.id, secret: 'totp-secret', backupCodes } });
+  };
+  const teamRow = async (adapter: Adapter) => {
+    const org = await adapter.create({ model: 'organization', data: { name: 'Org', slug: `org-${Math.random()}`.replace('.', '') } });
+    return adapter.create({ model: 'team', data: { name: 'Team', organizationId: org.id, memberCount: 0 } });
+  };
+
+  // A guard on a stored value, and an absolute `set` that moves it.
+  const swapGuardedValue = (adapter: Adapter, id: unknown, from: string, to: string) =>
+    adapter.incrementOne({ model: 'twoFactor', where: [eq('id', id), eq('backupCodes', from)], increment: {}, set: { backupCodes: to } });
+  // No guard beyond the row: +1.
+  const incrementUnguarded = (adapter: Adapter, id: unknown) =>
+    adapter.incrementOne({ model: 'twoFactor', where: [eq('id', id)], increment: { failedVerificationCount: 1 } });
+  // A guard on the counter itself (below a bound), +1.
+  const incrementBelowBound = (adapter: Adapter, id: unknown, maximum: number) =>
+    adapter.incrementOne({
+      model: 'team',
+      where: [eq('id', id), { field: 'memberCount', value: maximum, operator: 'lt', connector: 'AND' }],
+      increment: { memberCount: 1 },
+    });
+
+  it('a guard on a stored value admits exactly one of two concurrent conditional writes on two engines over one database', async () => {
+    const [a, b] = await twoReplicas();
+    const row = await twoFactorRow(a.adapter);
+
+    const answers = await Promise.all([
+      swapGuardedValue(a.adapter, row.id, 'codes-v1', 'codes-v2-by-a'),
+      swapGuardedValue(b.adapter, row.id, 'codes-v1', 'codes-v2-by-b'),
+    ]);
+
+    expect(answers.filter((r) => r !== null), 'conditional writes applied').toHaveLength(1);
+    const accepted = answers.find((r) => r !== null)!;
+    expect((await stored(a.driver, 'sys_two_factor', row.id)).backup_codes).toBe(accepted.backupCodes);
+  });
+
+  it('two concurrent unguarded increments on two engines over one database are both applied', async () => {
+    const [a, b] = await twoReplicas();
+    const row = await twoFactorRow(a.adapter);
+
+    const answers = await Promise.all([incrementUnguarded(a.adapter, row.id), incrementUnguarded(b.adapter, row.id)]);
+
+    expect(answers.map((r) => r?.failedVerificationCount).sort()).toEqual([1, 2]);
+    expect((await stored(a.driver, 'sys_two_factor', row.id)).failed_verification_count).toBe(2);
+  });
+
+  it('a guard on the counter admits exactly one of two concurrent increments up to its bound on two engines over one database', async () => {
+    const [a, b] = await twoReplicas();
+    const team = await teamRow(a.adapter);
+
+    const answers = await Promise.all([incrementBelowBound(a.adapter, team.id, 1), incrementBelowBound(b.adapter, team.id, 1)]);
+
+    expect(answers.filter((r) => r !== null), 'increments applied').toHaveLength(1);
+    expect(answers.find((r) => r !== null)).toMatchObject({ id: team.id, memberCount: 1 });
+    expect((await stored(a.driver, 'sys_team', team.id)).member_count).toBe(1);
+  });
+
+  it('one caller at a time: each guarded increment applies, and a guard that no longer holds changes nothing', async () => {
+    const { adapter, driver } = await oneReplica();
+    const row = await twoFactorRow(adapter);
+    const team = await teamRow(adapter);
+
+    expect(await swapGuardedValue(adapter, row.id, 'codes-v1', 'codes-v2')).toMatchObject({ id: row.id, backupCodes: 'codes-v2' });
+    expect(await swapGuardedValue(adapter, row.id, 'codes-v1', 'codes-v3'), 'the same guard a second time').toBeNull();
+    expect((await stored(driver, 'sys_two_factor', row.id)).backup_codes).toBe('codes-v2');
+
+    expect((await incrementUnguarded(adapter, row.id))?.failedVerificationCount).toBe(1);
+    expect((await incrementUnguarded(adapter, row.id))?.failedVerificationCount).toBe(2);
+
+    expect(await incrementBelowBound(adapter, team.id, 2)).toMatchObject({ memberCount: 1 });
+    expect(await incrementBelowBound(adapter, team.id, 2)).toMatchObject({ memberCount: 2 });
+    expect(await incrementBelowBound(adapter, team.id, 2), 'the bound is reached').toBeNull();
+    expect((await stored(driver, 'sys_team', team.id)).member_count).toBe(2);
+
+    expect(await incrementUnguarded(adapter, 'no-such-row'), 'a row that does not exist').toBeNull();
+  });
+
+  it('the row a guarded increment answers carries the fields a read of that row carries, internal columns included', async () => {
+    const { adapter } = await oneReplica();
+    const row = await twoFactorRow(adapter);
+    const team = await teamRow(adapter);
+    const fieldsOf = (r: Record<string, unknown> | null) => Object.keys(r ?? {}).sort();
+    const read = (model: string, id: unknown) => adapter.findOne({ model, where: [eq('id', id)] });
+
+    const counted = await incrementUnguarded(adapter, row.id);
+    expect(counted).toMatchObject({ id: row.id, secret: 'totp-secret', backupCodes: 'codes-v1', failedVerificationCount: 1 });
+    expect(fieldsOf(counted)).toEqual(fieldsOf(await read('twoFactor', row.id)));
+
+    const swapped = await swapGuardedValue(adapter, row.id, 'codes-v1', 'codes-v2');
+    expect(swapped).toMatchObject({ id: row.id, secret: 'totp-secret', backupCodes: 'codes-v2' });
+    expect(fieldsOf(swapped)).toEqual(fieldsOf(await read('twoFactor', row.id)));
+
+    const reserved = await incrementBelowBound(adapter, team.id, 5);
+    expect(reserved).toMatchObject({ id: team.id, memberCount: 1 });
+    expect(fieldsOf(reserved)).toEqual(fieldsOf(await read('team', team.id)));
+  });
+
+  it('a counter stored as null counts from zero', async () => {
+    const { adapter, driver } = await oneReplica();
+    const row = await twoFactorRow(adapter);
+    await driver.update('sys_two_factor', row.id as string, { failed_verification_count: null });
+
+    expect((await incrementUnguarded(adapter, row.id))?.failedVerificationCount).toBe(1);
+    expect((await stored(driver, 'sys_two_factor', row.id)).failed_verification_count).toBe(1);
   });
 });

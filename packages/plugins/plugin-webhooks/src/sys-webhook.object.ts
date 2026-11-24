@@ -45,6 +45,7 @@ export const SysWebhook = ObjectSchema.create({
   label: 'Webhook',
   pluralLabel: 'Webhooks',
   icon: 'webhook',
+  color: 'teal',
   isSystem: true,
   managedBy: 'config',
   // Authoring a webhook from the UI requires a structured form for the
@@ -169,14 +170,21 @@ export const SysWebhook = ObjectSchema.create({
     }),
 
     method: Field.select(
-      ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      ['POST', 'PUT', 'PATCH', 'DELETE'],
       {
         label: 'HTTP Method',
         required: true,
         // Select instead of free text. Option values are lowercased by the
-        // Field.select helper (get/post/…); the auto-enqueuer upper-cases the
+        // Field.select helper (post/put/…); the auto-enqueuer upper-cases the
         // resolved method before delivery, so existing 'POST' rows and the
         // lowercase option values both normalise correctly.
+        //
+        // No `GET` (ADR-0049 enforce-or-remove, the spec's `WebhookSchema`
+        // `method` in step): every delivery carries the event as its body, so
+        // a GET webhook never delivered, and the select refusing it is what
+        // refuses it at save. A row stored with `get` before the option left
+        // is PARKED by the auto-enqueuer with the reason on a dead delivery
+        // row (`retiredMethodParkReason`); its method is never rewritten.
         defaultValue: 'post',
         description: 'HTTP method used for the callback request',
         group: 'Definition',

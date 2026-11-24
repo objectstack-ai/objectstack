@@ -245,6 +245,7 @@ export const TEXT_OPERATOR_DOOR_PASSING_TYPES: ReadonlySet<string> = new Set([
  * `currency` (#22727) is judged as the `currency` field it reads like: a member
  * of the numeric class, so this door refuses a text operator on it and the
  * number door judges its comparands, exactly as for a `currency` field.
+ * `percent` (#35047) is judged as the `percent` field it reads like, the same way.
  */
 export const FORMULA_RETURN_TYPE_AS_FIELD_TYPE: ReadonlyMap<string, string> = new Map([
   ['number', 'number'],
@@ -252,6 +253,7 @@ export const FORMULA_RETURN_TYPE_AS_FIELD_TYPE: ReadonlyMap<string, string> = ne
   ['boolean', 'boolean'],
   ['date', 'date'],
   ['currency', 'currency'],
+  ['percent', 'percent'],
 ]);
 
 /**

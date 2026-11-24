@@ -129,13 +129,17 @@
  * the closure and simply stops walking (`protocol.ts`,
  * `resolveWritePackageScope`) rather than treating it as a fault.
  *
- * Cycles keep the sorter's behaviour untouched: two packages in one artifact
- * that depend on each other throw, because an optional dependency is a real
- * edge whenever both sides are composed. ⛔ Neither the cycle throw nor the
- * missing-dependency semantics are re-adjudicated here.
+ * Cycles keep the sorter's verdict untouched: two packages in one artifact
+ * that depend on each other are refused, because an optional dependency is a
+ * real edge whenever both sides are composed. ⛔ Neither that verdict nor the
+ * missing-dependency semantics are re-adjudicated here. What this module adds
+ * is the envelope: the sorter throws its typed `PluginOrderCycleError`, and
+ * the refusal leaves here as `CYCLIC_ARTIFACT_PACKAGES` (`status: 422`) with
+ * `details.cycle`, like every other refusal of this resolver — the cycle path
+ * is read off the sorter's own error, never off a second walk of the graph.
  */
 
-import { resolvePluginOrder, type OrderablePlugin } from './plugin-order.js';
+import { PluginOrderCycleError, resolvePluginOrder, type OrderablePlugin } from './plugin-order.js';
 import { ArtifactPackageSchema, type ArtifactPackageSource } from '@objectstack/spec';
 
 /**
@@ -143,7 +147,7 @@ import { ArtifactPackageSchema, type ArtifactPackageSource } from '@objectstack/
  * (`code` + `status`) — the shape this repository's rejection tests assert
  * against, never a bare throw.
  */
-export type ArtifactPackageError = Error & { code: string; status: number };
+export type ArtifactPackageError = Error & { code: string; status: number; details?: Record<string, unknown> };
 
 /**
  * How many Zod issues one refusal quotes before it starts counting instead.
@@ -155,10 +159,11 @@ export type ArtifactPackageError = Error & { code: string; status: number };
  */
 const MAX_REPORTED_ENTRY_ISSUES = 5;
 
-function refuse(code: string, message: string): ArtifactPackageError {
+function refuse(code: string, message: string, details?: Record<string, unknown>): ArtifactPackageError {
   const err = new Error(message) as ArtifactPackageError;
   err.code = code;
   err.status = 422;
+  if (details !== undefined) err.details = details;
   return err;
 }
 
@@ -302,8 +307,10 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
  * @throws An ADR-0112 envelope (`code` + `status: 422`):
  *   `INVALID_ARTIFACT_PACKAGES` for a `packages` that is present but is not an
  *   array (`null` included), `INVALID_ARTIFACT_PACKAGE_ENTRY` for a malformed entry, and
- *   `DUPLICATE_ARTIFACT_PACKAGE` for a duplicate package id. Also
- *   `resolvePluginOrder`'s own error for a cycle.
+ *   `DUPLICATE_ARTIFACT_PACKAGE` for a duplicate package id, and
+ *   `CYCLIC_ARTIFACT_PACKAGES` for packages that depend on each other in a
+ *   cycle, with `details.cycle` naming the package ids along it (each depends
+ *   on the next, the first repeated last).
  */
 export function resolveArtifactPackageEntries(artifact: unknown): ArtifactPackageRegistration[] {
   const declared = (artifact as { packages?: unknown } | null | undefined)?.packages;
@@ -419,5 +426,23 @@ export function resolveArtifactPackageEntries(artifact: unknown): ArtifactPackag
     });
   });
 
-  return resolvePluginOrder(nodes).map(({ manifest, source }) => (source !== undefined ? { manifest, source } : { manifest }));
+  let ordered: ArtifactPackageNode[];
+  try {
+    ordered = resolvePluginOrder(nodes);
+  } catch (err) {
+    // The sorter's verdict, answered in this resolver's envelope (ADR-0112):
+    // a bare Error here reached the install door as an opaque 500. The path
+    // is the sorter's own reading; nothing else it throws is relabelled.
+    if (!(err instanceof PluginOrderCycleError)) throw err;
+    const cycle = [...err.cycle];
+    throw refuse(
+      'CYCLIC_ARTIFACT_PACKAGES',
+      `Release artifact packages depend on each other in a cycle: ${cycle.map((id) => `"${id}"`).join(' -> ')} `
+      + '(Circular dependency detected). Packages inside one artifact register in dependency order (ADR-0130 D5), '
+      + 'and a cycle has none: remove one `manifest.dependencies` entry along the cycle, or merge the packages '
+      + 'that need each other into one.',
+      { cycle },
+    );
+  }
+  return ordered.map(({ manifest, source }) => (source !== undefined ? { manifest, source } : { manifest }));
 }

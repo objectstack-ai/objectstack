@@ -1,6 +1,6 @@
 # ADR-0126: The platform customization model for packaged metadata — three regimes, one activation ledger
 
-**Status**: **Amended** (2026-09-04) by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — maintainer, verbatim: 「所以 ADR-0126 不能简单的关掉」「hotcrm 是标准的软件包，客户安装之后能根据业务需求实现具体的定制」「同意」. The three regimes stand at **environment scope only**: O's per-organization reading is retired (ADR-0005 amended), C's activation ledger stays as tenant-less deployment state (D3's reserved `organization_id`, written NULL, is withdrawn — ADR-0131 D1 forbids a nullable tenant column), E stands; the unreleased implementation (#12185, #12190, #12296, #12348, #12419, framework half of #12491) ships in 17.3 with that column dropped. The install mode ADR-0131 D6 adds (managed = sealed definitions + these regimes; template = copied once, fully editable, refused on shared-DB multi-tenant) is the frame the regimes now sit in. · **Amended** (2026-10-14, ADR-0131 D2/D3/D13): the permission projection §4 and §8 name is retired by #15204 stage 8 (`66949b7729`, 2026-10-13), which unwired the ADR-0094 projector and retired the `sys_permission_set` row object; see the notes in §4 and §8. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — D1 (§2 Regime C's "never an overlay read path", for a declared override), D4 wall 1 (§6 item 1's corollary against name-redirection, for the declared case only) and §7.1's "⛔ No same-name clone in a second package" (for a declared override from the paired `<base>.custom` only): customization of a packaged item is a declared override in the paired `<base>.custom` package, served at the base's name once real flow version pinning exists (ADR-0146 D2, D9); the lock, the ledger switch and the walled operator gate stand. §7.4's Setup surface moves to the item in Studio; of §9's first bullet the badge, the customization list and revert are chartered, diff-vs-base and the skip-report stay deferred. Original status line follows.
+**Status**: **Amended** (2026-09-04) by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — maintainer, verbatim: 「所以 ADR-0126 不能简单的关掉」「hotcrm 是标准的软件包，客户安装之后能根据业务需求实现具体的定制」「同意」. The three regimes stand at **environment scope only**: O's per-organization reading is retired (ADR-0005 amended), C's activation ledger stays as tenant-less deployment state (D3's reserved `organization_id`, written NULL, is withdrawn — ADR-0131 D1 forbids a nullable tenant column), E stands; the unreleased implementation (#12185, #12190, #12296, #12348, #12419, framework half of #12491) ships in 17.3 with that column dropped. The install mode ADR-0131 D6 adds (managed = sealed definitions + these regimes; template = copied once, fully editable, refused on shared-DB multi-tenant) is the frame the regimes now sit in. · **Amended** (2026-10-14, ADR-0131 D2/D3/D13): the permission projection §4 and §8 name is retired by #15204 stage 8 (`66949b7729`, 2026-10-13), which unwired the ADR-0094 projector and retired the `sys_permission_set` row object; see the notes in §4 and §8. · **Superseded in part by [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)** (2026-10-31) — D1 (§2 Regime C's "never an overlay read path", for a declared override), D4 wall 1 (§6 item 1's corollary against name-redirection, for the declared case only) and §7.1's "⛔ No same-name clone in a second package" (for a declared override from the paired `<base>.custom` only): customization of a packaged item is a declared override in the paired `<base>.custom` package, served at the base's name once real flow version pinning exists (ADR-0146 D2, D9); the lock, the ledger switch and the walled operator gate stand. §7.4's Setup surface moves to the item in Studio; of §9's first bullet the badge, the customization list and revert are chartered, diff-vs-base and the skip-report stay deferred. Original status line follows. · **Amended** (2026-11-17, [#34655](https://github.com/objectstack-ai/objectstack/issues/34655)): a packaged flow may declare §4's packaged default off (`defaultActive: false`); see the note under §4.
 **Original status**: Proposed (2026-08-25) — awaiting the maintainer's hand-merge, which is itself the
 acceptance act for a governed surface (Prime Directive #14) **and the ruling that settles the
 tentative flow-instance directions in §7** (chartered on
@@ -87,6 +87,25 @@ them into three tiers by flags × item provenance (`packages/metadata-protocol/s
 | **B — runtime-create only** | object, hook, seed, mapping, page, app, action, dataset, flow, datasource, external_catalog, doc, book, permission, position, tool, skill | **not customized at all** — writes against the packaged item answer 403 `NOT_OVERRIDABLE`; only brand-new sibling items can be authored |
 | **C — code-only** | field, job, api, capability, agent | nothing — no runtime write channel exists |
 
+> **Note (2026-11-20, #35731) — `capability` is no longer code-only.** The table above, measured
+> when this record was written, puts `capability` in tier C, with no runtime write channel; §2,
+> §3 and §9 repeat it. Since PR #35261 (`6ffa816e`, part of #35157) `capability` is
+> runtime-creatable and overlay-closed: its `DEFAULT_METADATA_TYPE_REGISTRY` entry
+> (`packages/spec/src/kernel/metadata-plugin.zod.ts`) reads `allowRuntimeCreate: true`,
+> `allowEnvironmentOverlay: false` and `supportsOverlay: false`, the tier-B posture. A brand-new
+> capability can be saved in the environment, and a packaged declaration cannot be re-declared or
+> re-scoped there. The save door judges the body by `CapabilityDeclarationSchema` (422, the type's
+> entry in `packages/spec/src/kernel/metadata-type-schemas.ts`), and refuses a platform capability
+> name and a name another holder already declares before anything is stored
+> (`packages/metadata-protocol/src/protocol-save-door-refusals.ts`). An unmanaged copy (ADR-0131
+> D6) copies an app's capabilities and renames them with the copy when it takes a new namespace
+> (`packages/metadata-protocol/src/package-namespace-rename.ts`). Ruled by the maintainer on
+> #35157: option A, record 6999763503 (「同意」), and the bound of record 7000639892
+> (「接受现有边界」). Of the five types the table lists in tier C, four stay there: field, job,
+> api, agent. The registry on `main` holds more types with no runtime write channel, admitted
+> after the survey this table records; this note does not re-measure the table, which is left as
+> written.
+
 Three real mechanisms operate across those tiers, each invented separately:
 
 - **Org overlay** (ADR-0005): tier A only. Per-org rows for any other type are **phantom writes**
@@ -160,6 +179,12 @@ the artifact are live at once, or when a customization is wrong?**
   disable switch** — the same posture as `job`. The registry flags are untouched: authoring a
   brand-new sibling hook stays open, exactly as today.
 
+  > **Note (2026-11-20, #35731).** `capability` has left this list: since PR #35261 (`6ffa816e`)
+  > it is runtime-creatable and overlay-closed, on the maintainer's ruling 6999763503 on #35157
+  > (option A, with the bound of record 7000639892). Customizing a packaged capability is still
+  > not possible; a new one can be authored in the environment. See the note under §1.1. The
+  > bullet is left as written.
+
 A **new metadata type** (or newly admitted dynamic kind) must declare its regime at admission,
 in its registry-entry comment, using this rule. A customization mechanism that fits none of the
 three regimes is not a gap in this ADR — it is a signal the mechanism is wrong (Prime Directive
@@ -178,6 +203,12 @@ From the survey's per-type table; classes are the survey's measurements, not asp
 | **E — extend** | object (fields/validations/indexes via `objectExtensions`) · app (navigation via ADR-0029 D7 contributions) | Already live. No ledger involvement: the customization IS a package, and package identity supplies provenance and upgrade isolation. |
 | **outside** | field, job, api, capability, agent (code-only) · **hook** (amendment ruling 1 — package code maintaining the package's own invariants; no ledger row, no disable switch; sibling authoring open as today) · seed, external_catalog (one-shot / derived — nothing durable to customize) · datasource (origin-gated: code-defined read-only, runtime-created free) | Recorded so their absence from the regimes reads as decided, not overlooked. |
 | **unassigned, deliberately** | page, dataset, doc, book, mapping | Presentational/content tier-B types with no measured customization pull beyond re-authoring a sibling. Today's posture (locked base + free sibling authoring) stands. First real pull picks a regime **by the D1 rule** — likely O via the ADR-0005 admission pair (page/dataset/book) — and does so in an ADR-0005 revision, not ad hoc. |
+
+> **Note (2026-11-20, #35731).** The **outside** row above lists `capability` as code-only.
+> Since PR #35261 (`6ffa816e`) it is runtime-creatable and overlay-closed (ruling 6999763503 on
+> #35157, option A, with the bound of record 7000639892): a packaged declaration stays locked, and
+> a new capability can be authored in the environment. The ruling assigned it no regime, and
+> this note assigns none. See the note under §1.1. The row is left as written.
 
 Two clarifications the survey forces:
 
@@ -215,6 +246,27 @@ matching the landed #11513 posture ("an ordinary org-owned set with no upgrade l
 Uniqueness: one row per `(metadata_type, name, organization_id NULL-collapsed)`; absence of a row
 means the packaged default — **active**. The ledger is written by the enable/disable actions and
 read at each runtime's own consult point; an empty ledger changes nothing anywhere.
+
+> **Amendment note (2026-11-17, [#34655](https://github.com/objectstack-ai/objectstack/issues/34655)) — a packaged flow may ship switched off.**
+> The packaged default above may be declared by the item, for `flow`: `defaultActive: false` on a flow a package ships
+> (`packages/spec/src/automation/flow.zod.ts#FlowSchema`) makes its packaged default **off**. Absence of a row still means
+> the packaged default, so on an installation where no administrator has switched the flow it is not armed and does not run.
+> A row is still the installation's choice and wins over the declared default in either state: a flow an administrator
+> switched on stays on across a restart, an upgrade and a reinstall, and one switched off stays off. An "on" row counts
+> only when it names the package that holds the flow now: a legacy row naming no package, or one naming a package that
+> no longer holds the name, does not switch a flow shipped off on (an "off" row of either kind still switches it off).
+> With no row the flow follows the declaration of the package's own body for the version installed now, so an upgrade
+> that changes it moves only installations nobody switched. The default is the package's: a declared `.custom` override
+> (ADR-0146 D2) armed in the base's place does not change it in either direction, whatever it declares, and is switched
+> by the same row (`packages/services/service-automation/src/engine.ts#packagedFlowDefault`).
+> The default is read at the consult point and never written as a row at install, so a row keeps meaning a recorded choice
+> (`packages/services/service-automation/src/flow-activation-projection.ts#FlowActivationProjection`). "An empty ledger
+> changes nothing anywhere" holds for every item that declares no default, and the ledger's shape does not move (§9's line
+> on `packages/spec` is about the ledger itself; this key is on the flow). Only a flow a package ships has the switch, so
+> the engine refuses the key on a flow authored in the environment, whose switch is its `status`
+> (`packages/services/service-automation/src/engine.ts#refuseUnpackagedDefaultActive`); a clone drops it
+> (`packages/runtime/src/flow-clone.ts#FLOW_CLONE_DROPPED_KEYS`), and an unmanaged install copies `false` as
+> `status: 'obsolete'` (`packages/metadata-protocol/src/package-unmanaged-install.ts#copyUnmanagedFlowSwitch`).
 
 **What the ledger is NOT:**
 
@@ -474,6 +526,10 @@ callers first, or don't), and preserves "packaged code calls what it names".
   clone's references stay pointed at what the original pointed at, and the surface tells the
   admin so).
 - Reopening any code-only type (field, job, api, capability, agent).
+  > **Note (2026-11-20, #35731).** For `capability` this item was reopened: the maintainer's
+  > ruling 6999763503 on #35157 (option A, 「同意」) made it runtime-creatable, overlay stays
+  > closed, and PR #35261 (`6ffa816e`) implements it. The other four code-only types stay as this
+  > item says. See the note under §1.1. The item is left as written.
 - Any edit to `packages/spec` for the ledger itself (it is a platform object; §4).
 
 ## 10. Consequences

@@ -139,6 +139,70 @@ export async function aggregateSummaryValue(
 }
 
 /**
+ * The most parent ids one grouped roll-up aggregate names in its `$in`. A
+ * batch touching more parents asks one grouped aggregate per chunk, so the
+ * bound-parameter count of a statement stays far below every dialect's limit
+ * (SQLite 32766, PostgreSQL 65535) whatever the batch size.
+ */
+export const SUMMARY_GROUPED_AGGREGATE_CHUNK = 500;
+
+/**
+ * Compute ONE roll-up descriptor's value for EVERY parent id a batch touched,
+ * in one grouped aggregate per {@link SUMMARY_GROUPED_AGGREGATE_CHUNK} ids
+ * (`where fk in (…) group by fk`), instead of one aggregate per parent.
+ *
+ * The value each parent gets is the value {@link aggregateSummaryValue} gives
+ * it alone: the same function over the same rows — the parent-FK match ANDed
+ * with the descriptor's optional predicate — and the same empty-set fallback
+ * for a parent no row matched, which a grouped aggregate answers by leaving
+ * its group out. Keys of the answer are the ids as handed in.
+ *
+ * [ADR-0144 D6, amended] Every group is one parent's rows, through `fkField`,
+ * so the roll-up channel rides this aggregate as it rides the one-parent one:
+ * grouped by the master_detail, a child amount that follows its parent's
+ * currency is one currency per group. It rides only when every id is one
+ * concrete id, for the reason {@link aggregateSummaryValue} gives.
+ */
+export async function aggregateSummaryValues(
+  engine: SummaryAggregateEngine,
+  desc: SummaryDescriptor,
+  parentIds: readonly string[],
+  execCtx?: unknown,
+): Promise<Map<string, unknown>> {
+  const found = new Map<string, unknown>();
+  // The aggregate's alias must not be the group key's name, or the two
+  // columns of one answer row would collide.
+  const alias = desc.fkField === 'value' ? 'summary_value' : 'value';
+  for (let start = 0; start < parentIds.length; start += SUMMARY_GROUPED_AGGREGATE_CHUNK) {
+    const chunk = parentIds.slice(start, start + SUMMARY_GROUPED_AGGREGATE_CHUNK);
+    const concrete = chunk.every((id: unknown) => (typeof id === 'string' && id !== '') || (typeof id === 'number' && Number.isFinite(id)));
+    const fkMatch = { [desc.fkField]: { $in: chunk } };
+    const where = desc.filter ? { $and: [fkMatch, desc.filter] } : fkMatch;
+    const rows = await engine.aggregate(desc.childObject, {
+      where,
+      groupBy: [desc.fkField],
+      aggregations: [{
+        function: desc.fn,
+        ...(desc.fn === 'count' ? {} : { field: desc.sourceField }),
+        alias,
+      }],
+      context: execCtx,
+    }, concrete ? { [ROLLUP_AGGREGATE_OPTION]: desc.fkField } : undefined);
+    for (const row of rows ?? []) {
+      const key = row?.[desc.fkField];
+      if (key == null || key === '') continue;
+      found.set(String(key), row?.[alias]);
+    }
+  }
+  const values = new Map<string, unknown>();
+  for (const id of parentIds) {
+    const value = found.get(String(id));
+    values.set(id, value == null ? summaryEmptySetValue(desc.fn) : value);
+  }
+  return values;
+}
+
+/**
  * [#26950] The matched rows a predicate delete hands the recompute, less every
  * foreign key that names a row the same delete removed.
  *

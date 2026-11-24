@@ -68,8 +68,36 @@ broke the example app" — it's "a valid primitive your app uses, but the exampl
 don't exercise, silently breaks at runtime." Point this at *your* app.
 
 > Posture: development / in-memory. The harness forces `NODE_ENV=development` to
-> provision a known dev admin and uses an in-memory database. It never touches a
-> real database or production data.
+> provision a known dev admin, and its own database is an in-memory one it
+> creates for the run. Datasources the app declares are connected the way
+> `objectstack dev` connects them, so reads of an object bound to one reach that
+> datasource. Verify's own writes never reach an object on an EXTERNAL
+> datasource: every derived write family leaves it out, even one whose write
+> gate is open (`external.allowWrites` and the object's `external.writable`),
+> and reports it `skipped` as `external datasource "<name>" (writes allowed |
+> read-only): not exercised`; an object that requires a reference to it is
+> skipped as withheld on purpose, with the target's reason. A write the app
+> itself makes to an external object (its seed, or a hook or flow that one of
+> verify's writes fires) goes where the app sends it, as under
+> `objectstack dev`. A declared MANAGED datasource (or one that declares no
+> `schemaMode`) is never connected to the database it names, on any engine
+> the platform ships (`mongodb` included): verify builds it as a fresh
+> in-memory store of the same kind as its own default store (a `memory`
+> datasource gets a fresh memory store), so its objects are exercised by every
+> derived family and every write to them, the app's seed, hooks and flows
+> included, stays in memory. A managed datasource on a driver id the platform
+> does not ship (a plugin's, or a misspelling) cannot be stood in: `objectstack
+> verify` refuses to boot while one is declared, naming the datasource and the
+> driver id, and exits non-zero. It refuses the same way when a plugin
+> registers a driver of its own under a managed datasource's name before the
+> stand-in holds it, whatever driver id the datasource declares, because the
+> boot would keep that driver instead of the stand-in: the driver is refused
+> before the engine holds it, so no connect, schema sync or write reaches it.
+> A driver registered under the name once the stand-in holds it is discarded
+> by the engine, and that boot runs on the stand-in. There is no switch around
+> either refusal. Only
+> the `--flow` run refuses every write routed away from the in-memory default
+> database.
 
 ## CLI (zero-config)
 

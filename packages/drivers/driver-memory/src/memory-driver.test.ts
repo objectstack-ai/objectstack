@@ -260,11 +260,14 @@ describe('InMemoryDriver', () => {
       expect(results[0].name).toBe('Alice');
     });
 
-    it('advertises no capability bits — transactions are expressed by the methods (#4634)', () => {
+    it('advertises only readableIdsLeaf — transactions are expressed by the methods (#4634)', () => {
       // `supports.transactions` was one of the 31 inert bits retired in #4634:
       // the engine gates transaction use on `driver.beginTransaction` presence
       // (proven by the rollback test above), never on a boolean.
-      expect(driver.supports).toEqual({});
+      // [#33876] The one bit it declares: it evaluates a composed
+      // `ReadableIds` leaf in process, so the engine plans a nested-relation
+      // condition on a read verb as that leaf here instead of refusing it.
+      expect(driver.supports).toEqual({ readableIdsLeaf: true });
     });
   });
 

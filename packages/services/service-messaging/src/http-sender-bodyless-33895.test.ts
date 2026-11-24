@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { signHttpBody, verifyHttpSignature } from '@objectstack/core';
@@ -128,6 +128,16 @@ describe('HTTP outbox — a GET or HEAD delivery reaches a real receiver through
     let server: Server;
     let baseUrl: string;
     const received: Array<{ method: string; body: string; signature: string | undefined }> = [];
+
+    // This suite's receiver listens on loopback, which the outbound-request guard
+    // refuses unless the operator allowlists it — so the suite allowlists it the way
+    // an operator does, through the environment.
+    beforeAll(() => {
+        vi.stubEnv('OS_EGRESS_ALLOWED_TARGETS', '127.0.0.1');
+    });
+    afterAll(() => {
+        vi.unstubAllEnvs();
+    });
 
     beforeAll(async () => {
         server = createServer((req, res) => {

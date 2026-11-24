@@ -9,6 +9,7 @@
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
 import { isEmptyValue } from '@object-ui/core';
+import type { KanbanLaneAggregate, LaneFigure } from './KanbanLaneStatistic';
 
 /**
  * The per-lane total a board's column headers paint (objectui#11629).
@@ -36,17 +37,46 @@ import { isEmptyValue } from '@object-ui/core';
  * and every board whose node carries no `summarizeField` render the header
  * exactly as they did before.
  */
+/**
+ * objectstack#36370 — the lane statistics the board draws at a lane's foot, the
+ * closed set the spec's `KanbanLaneSummarySchema` publishes (with `none`).
+ * `count` is the lane's own count; `sum`, `avg`, `min` and `max` are the
+ * server lane read's (objectstack#36520, `KanbanLaneStatistic.ts`).
+ */
+export type KanbanLaneStatisticType = 'count' | KanbanLaneAggregate;
+
 export interface KanbanColumnSummary {
-  /** The record field each lane totals — the view's `summarizeField`. */
+  /** The record field each lane totals — the view's `summarizeField`. Empty for a count. */
   field: string;
   /** The field's display label: the tooltip and the screen-reader name of the total. */
   label: string;
   /**
-   * Paints a total through the field's own cell renderer — the one the cards
+   * Paints a figure through the field's own cell renderer — the one the cards
    * use for that field — so a currency field totals as currency and a number
-   * field keeps its declared `scale`. No format code of its own.
+   * field keeps its declared `scale`. No format code of its own. A figure is a
+   * number, or the stored value a `min` / `max` answers over a date.
    */
-  renderTotal: (total: number) => ReactNode;
+  renderTotal: (total: number | string) => ReactNode;
+  /**
+   * objectstack#36370 — what the lane computes (absent ⇒ `sum`, the
+   * `summarizeField` total) and where it is drawn: `header`, beside the count
+   * (absent; the `summarizeField` total, as before), or `foot`, under the
+   * lane's cards (the view's `kanban.summary`).
+   */
+  type?: KanbanLaneStatisticType;
+  placement?: 'header' | 'foot';
+  /** The calculation's name at the foot (「Sum」, 「Count」), beside `label`. */
+  typeLabel?: string;
+  /**
+   * objectstack#36520 — each lane's `sum` / `avg` / `min` / `max` figure, from
+   * the server lane read, by lane id (`laneFigureOf` reads one). `null` while
+   * the read is pending, or when it cannot be answered (no door, a refusal, a
+   * filter the read cannot lower): no figure is drawn. Absent when the board
+   * does not query its cards itself (a host hands them in, or the document
+   * carries them): the board has no query to ask, so a `sum` adds the cards it
+   * was handed — the host's whole answer — and the other three draw nothing.
+   */
+  figures?: Readonly<Record<string, LaneFigure>> | null;
 }
 
 export const KanbanColumnSummaryContext = createContext<KanbanColumnSummary | null>(null);

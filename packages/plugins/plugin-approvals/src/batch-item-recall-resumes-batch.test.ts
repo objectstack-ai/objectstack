@@ -173,7 +173,7 @@ function wireReplica(
   fake: ReturnType<typeof makeFakeEngine>,
   store: InMemorySuspendedRunStore | ObjectStoreSuspendedRunStore,
   clock: { now: () => Date },
-  onPeek: (seen: { results: unknown; count: unknown }) => void,
+  onPeek: (seen: { results: unknown; count: unknown }) => void | Record<string, unknown>,
 ) {
   const service = new ApprovalService({ engine: fake as any, logger: silentLogger(), clock });
   const automation = new AutomationEngine(silentLogger(), store);
@@ -189,8 +189,8 @@ function wireReplica(
   automation.registerNodeExecutor({
     type: 'peek',
     async execute(_node: any, variables: Map<string, unknown>) {
-      onPeek({ results: variables.get('signoffResults'), count: variables.get('signoffs.count') });
-      return { success: true };
+      // A peek may answer a failure of its own (#34638's refused batch resume).
+      return onPeek({ results: variables.get('signoffResults'), count: variables.get('signoffs.count') }) ?? { success: true };
     },
   } as never);
   automation.registerFlow('task_signoff', TASK_SIGNOFF as never);
@@ -295,7 +295,7 @@ describe('a revise-window recall on a batch item resumes the batch (#28183)', ()
     await service.sendBack(first.id, { actorId: 'u1' }, asUser('u1'));
     await service.resubmit(first.id, { actorId: 'submitter' }, asUser('submitter'));
     const round2 = await requestFor('t1', 'pending');
-    await service.decide(round2.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX);
+    await service.decide(round2.id, { decision: 'reject', comment: 'Over budget.', actorId: 'u1' }, SYSTEM_CTX);
     const second = await requestFor('t2', 'pending');
     await service.decide(second.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
 
@@ -503,5 +503,28 @@ describe('a revise-window recall finds its batch past the first page of parked r
     expect(entries).toBe(1);
     expect(await requestFor('f2', 'pending')).toBeUndefined();
     expect(await storedRun(fan.runId!)).toMatchObject({ node_id: 'fan', correlation: `map:${req.flow_run_id}`, status: 'paused' });
+  });
+});
+
+describe('#34638 — a refused batch resume after a revise-window recall tells the refusal on resumeFailure', () => {
+  it('the batch strands on its next step\'s refusal: resumeFailure names the batch run and carries the pair', async () => {
+    const fake = makeFakeEngine();
+    const refusal = { innerRefusal: { code: 'VALIDATION_FAILED', message: 'over capacity' }, userMessage: 'Capacity is already taken.' };
+    const { automation, service } = wireReplica(fake, new InMemorySuspendedRunStore(), tickingClock(),
+      () => ({ success: false, error: 'peek refused', ...refusal }));
+    const paused = await automation.execute('release_signoff', {
+      userId: 'submitter', params: { items: [{ id: 't1', title: 'Task t1' }] },
+    } as never);
+    const batchRunId = paused.runId!;
+    const item = (await fake.find('sys_approval_request', { where: { record_id: 't1', status: 'pending' } }))[0];
+    await service.sendBack(item.id, { actorId: 'u1' }, asUser('u1'));
+
+    const out = await service.recall(item.id, { actorId: 'submitter' }, asUser('submitter'));
+
+    expect(out.request.status).toBe('recalled');
+    expect(out.resumeError, 'the batch resume is the failure told').toContain(`resuming the batch run '${batchRunId}'`);
+    expect(out.resumeFailure).toEqual({
+      code: 'RESUME_FAILED', runId: batchRunId, status: 'stranded', repairable: true, ...refusal,
+    });
   });
 });

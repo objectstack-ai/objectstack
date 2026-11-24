@@ -74,6 +74,13 @@ export interface AuthContextLike {
       password: string;
     }): Promise<unknown>;
   };
+  /**
+   * better-auth's storage adapter and plugin registry: where the forced
+   * reset's revocation ends the user's OAuth grants, and only for the plugins
+   * mounted (`forced-reset-revocation.ts`). Absent, no grant is read.
+   */
+  adapter?: OAuthGrantRows;
+  getPlugin?(pluginId: string): unknown;
 }
 
 export interface AdminUserEndpointDeps {
@@ -238,6 +245,7 @@ export interface EndpointResult {
 import { generatePlaceholderEmail } from './placeholder-email.js';
 import { authSystemWriteContext, runAttributedToUser } from './auth-actor-attribution.js';
 import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './forced-reset-revocation.js';
+import type { MountedOAuthGrants, OAuthGrantRows } from './password-reset-ends-added-access.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
 import type { AddMemberCapableApi } from './organization-add-member.js';
@@ -548,6 +556,24 @@ export type AdminAuditDecisions =
       organizationId?: string;
     }
   | {
+      /**
+       * A pending person was removed (`pending-sso-users.ts`, `admin/remove-sso-user`).
+       * `hostNotified`: the environment-user host took the cancellation of their
+       * invitation (false when no host is wired; a host that failed refused the removal).
+       */
+      event: 'user.admin_removed_pending';
+      hostNotified: boolean;
+    }
+  | {
+      /**
+       * A ban or its lifting committed (`admin-ban-endpoints.ts`). `hostNotified`:
+       * the environment-user host took the deactivation or reactivation. The
+       * reason and expiry are fields of the user, so they ride the mirror row only.
+       */
+      event: 'user.admin_banned' | 'user.admin_unbanned';
+      hostNotified: boolean;
+    }
+  | {
       event: 'user.admin_password_set';
       passwordGenerated: boolean;
       /** [#23287] Whether the administrator asked for the forced reset's revocation. */
@@ -555,6 +581,14 @@ export type AdminAuditDecisions =
       /** What the revocation landed (present only when it was asked for) — counts, never a credential. */
       revokedSessions?: number;
       revokedApiKeys?: number;
+      /** The linked sign-in accounts (other than the password) the revocation unlinked. */
+      revokedSignInAccounts?: number;
+      /** The apps the user had authorized whose consent the revocation deleted. */
+      revokedAuthorizedApps?: number;
+      /** The OAuth applications the user registered that the revocation disabled. */
+      revokedOwnedApps?: number;
+      /** The SCIM connection credentials the user minted that the revocation revoked. */
+      revokedScimCredentials?: number;
       revocationComplete?: boolean;
     };
 
@@ -618,7 +652,7 @@ export type AdminAuditDecisions =
 export async function writeAdminAudit(
   deps: Pick<AdminUserEndpointDeps, 'getDataEngine' | 'logger'>,
   entry: {
-    action: 'create' | 'update';
+    action: 'create' | 'update' | 'delete';
     actor: AdminActor;
     recordId: string;
     metadata: AdminAuditDecisions;
@@ -790,42 +824,8 @@ export async function runAdminCreateUser(
   // the join runs in the account's own unit of work, so an administrator with
   // no current organization, or a host that cannot run the join, is refused
   // with nothing created — never handed a member-less account.
-  let join:
-    | { seam: AdminCreateGrantSeam; addMember: AddMemberCapableApi['addMember']; organizationId: string }
-    | undefined;
-  if (multiOrgCreationJoinsCurrentOrganization(deps)) {
-    const organizationId = await deps.getCallerActiveOrganizationId!();
-    if (typeof organizationId !== 'string' || organizationId.length === 0) {
-      return {
-        status: 400,
-        body: {
-          success: false,
-          error: {
-            code: 'NO_ACTIVE_ORGANIZATION',
-            message:
-              'You are not working in an organization, so no user was created. '
-              + 'Switch to the organization the new user belongs to, then create them there.',
-          },
-        },
-      };
-    }
-    const seam = deps.createGrant;
-    const authApi = (await deps.getAuthApi()) as Partial<AddMemberCapableApi>;
-    if (!seam || typeof authApi.addMember !== 'function') {
-      return {
-        status: 501,
-        body: {
-          success: false,
-          error: {
-            code: 'NOT_IMPLEMENTED',
-            message:
-              'This server cannot add a new user to your organization while creating them, so no user was created.',
-          },
-        },
-      };
-    }
-    join = { seam, addMember: authApi.addMember.bind(authApi), organizationId };
-  }
+  const join = await settleCurrentOrganizationJoin(deps);
+  if (join && 'status' in join) return join;
 
   // [#25338] Everything the grant needs is settled BEFORE the account exists,
   // so a host that cannot judge the grant refuses with nothing created.
@@ -1024,6 +1024,15 @@ export async function joinCurrentOrganization(
   addMember: AddMemberCapableApi['addMember'],
   userId: string,
   organizationId: string,
+  /**
+   * Whose membership this is. `'created'` (the default): an account this unit
+   * of work just created, so the refusal says no user was created and a
+   * membership found already there was written during the creation.
+   * `'existing'`: an account that was there before — `import-users` matching a
+   * CSV row to a user — so the refusal names only the join, and a membership
+   * already there is reported as not created by this call.
+   */
+  account: 'created' | 'existing' = 'created',
 ): Promise<{ organizationId: string; membershipCreated: boolean }> {
   const engine = deps.getDataEngine();
   if (engine?.find) {
@@ -1032,26 +1041,87 @@ export async function joinCurrentOrganization(
       { where: { organization_id: organizationId, user_id: userId }, limit: 1 },
       { context: SYSTEM_CTX },
     );
-    if (Array.isArray(existing) && existing.length > 0) return { organizationId, membershipCreated: true };
+    if (Array.isArray(existing) && existing.length > 0) {
+      return { organizationId, membershipCreated: account === 'created' };
+    }
   }
   try {
     await addMember({ body: { userId, role: 'member', organizationId } });
   } catch (error) {
     const refused = mapAuthApiError(error, 'organization/add-member failed', deps.logger);
+    const lead = account === 'created'
+      ? 'The user could not be added to the organization, so no user was created'
+      : 'The user could not be added to the organization';
     throw new CreationRefused({
       status: refused.status,
       body: {
         success: false,
         error: {
           code: refused.body.error?.code ?? 'INTERNAL_ERROR',
-          message: `The user could not be added to the organization, so no user was created: ${
-            refused.body.error?.message ?? 'organization/add-member failed'
-          }`,
+          message: `${lead}: ${refused.body.error?.message ?? 'organization/add-member failed'}`,
         },
       },
     });
   }
   return { organizationId, membershipCreated: true };
+}
+
+/** What a multi-org creation settled before any account exists: its unit of work, the vendor's add, the organization. */
+export interface CurrentOrganizationJoin {
+  seam: AdminCreateGrantSeam;
+  addMember: AddMemberCapableApi['addMember'];
+  organizationId: string;
+}
+
+/**
+ * Settle, before any account exists, the multi-org join of the administrator's
+ * current organization (ADR-0093 D3 amendment) — the one settlement both doors
+ * that create local accounts read: `create-user` for one user and
+ * `import-users` for each row of a file.
+ *
+ * Answers `undefined` when this creation joins nothing (single-org, a degraded
+ * wall, or a host that wires no way to read the caller's current
+ * organization — see {@link multiOrgCreationJoinsCurrentOrganization}); the
+ * refusal to answer when the administrator has no current organization
+ * (`400 NO_ACTIVE_ORGANIZATION`) or the host cannot run the join inside the
+ * account's unit of work (`501 NOT_IMPLEMENTED`), so nothing is created; or
+ * the join to run.
+ */
+export async function settleCurrentOrganizationJoin(
+  deps: Pick<AdminUserEndpointDeps, 'getTenancy' | 'getCallerActiveOrganizationId' | 'createGrant' | 'getAuthApi'>,
+): Promise<CurrentOrganizationJoin | EndpointResult | undefined> {
+  if (!multiOrgCreationJoinsCurrentOrganization(deps)) return undefined;
+  const organizationId = await deps.getCallerActiveOrganizationId!();
+  if (typeof organizationId !== 'string' || organizationId.length === 0) {
+    return {
+      status: 400,
+      body: {
+        success: false,
+        error: {
+          code: 'NO_ACTIVE_ORGANIZATION',
+          message:
+            'You are not working in an organization, so no user was created. '
+            + 'Switch to the organization the new user belongs to, then create them there.',
+        },
+      },
+    };
+  }
+  const seam = deps.createGrant;
+  const authApi = (await deps.getAuthApi()) as Partial<AddMemberCapableApi>;
+  if (!seam || typeof authApi.addMember !== 'function') {
+    return {
+      status: 501,
+      body: {
+        success: false,
+        error: {
+          code: 'NOT_IMPLEMENTED',
+          message:
+            'This server cannot add a new user to your organization while creating them, so no user was created.',
+        },
+      },
+    };
+  }
+  return { seam, addMember: authApi.addMember.bind(authApi), organizationId };
 }
 
 /**
@@ -1122,7 +1192,12 @@ export async function runAdminSetUserPassword(
   }
   const mustChangePassword = body.mustChangePassword !== false; // default true
   // [#23287 — ruling C′ item 2] The forced reset's explicit revocation switch:
-  // revoke the user's sessions and API keys. ON by default, because the act
+  // revoke the user's sessions and API keys, unlink the sign-in accounts
+  // linked to it other than its password, end the apps authorized to it
+  // and its approved device sign-ins where their plugins are mounted, disable
+  // the OAuth applications it registered and revoke the SCIM credentials it
+  // minted, as a self-service reset does
+  // (`password-reset-ends-added-access.ts`). ON by default, because the act
   // records no reason and the ruling sets the default for a suspected
   // compromise — the case where a surviving key is the hole the reset was meant
   // to close. An administrator doing a routine reset turns it off explicitly
@@ -1209,8 +1284,12 @@ export async function runAdminSetUserPassword(
   // opened cannot outlive the reset, and never before it: a revocation that
   // ran and then a failed password write would sign the user out with their
   // old password still the valid one.
+  const oauth: MountedOAuthGrants = {
+    store: authCtx.adapter,
+    mounted: (pluginId) => typeof authCtx.getPlugin === 'function' && Boolean(authCtx.getPlugin(pluginId)),
+  };
   const revocation: ForcedResetRevocationOutcome | undefined = revokeSessionsAndKeys
-    ? await revokeSessionsAndApiKeys(deps.getDataEngine(), userId, { logger: deps.logger })
+    ? await revokeSessionsAndApiKeys(deps.getDataEngine(), userId, { logger: deps.logger, oauth, auditActorId: actor.id })
     : undefined;
 
   await writeAdminAudit(deps, {
@@ -1229,6 +1308,10 @@ export async function runAdminSetUserPassword(
         ? {
             revokedSessions: revocation.sessions,
             revokedApiKeys: revocation.apiKeys,
+            revokedSignInAccounts: revocation.signInAccounts,
+            revokedAuthorizedApps: revocation.authorizedApps,
+            revokedOwnedApps: revocation.ownedApps,
+            revokedScimCredentials: revocation.scimCredentials,
             revocationComplete: revocation.complete,
           }
         : {}),

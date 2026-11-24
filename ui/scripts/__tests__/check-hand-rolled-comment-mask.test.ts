@@ -64,8 +64,13 @@ const JSDOC_PAIR = `const bare = body.replace(${SLASH}${OPEN}${STAR}${ANY}${CLOS
 /** The exact projection `LineItemsPanel.parentIdNoCast-9333` carried before this card. */
 const HYBRID_PAIR = `const out = src.replace(${SLASH}${OPEN}${ANY}${CLOSE}${SLASH}g, (m) => m).replace(${SLASH}${LINE}[^${B}n]*${SLASH}g, '');`;
 
+// The whole-tree spawn measured 15.1 s and 19.1 s on queue runners, over the 15 s default (objectstack#34523).
+const WHOLE_TREE_CASE_MS = 60_000;
+// Below the case budget, so a hung sweep fails the assertion as `status: null`, not on vitest's timer.
+const SPAWN_TIMEOUT_MS = 50_000;
+
 function run(args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', timeout: 300_000 });
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
@@ -240,7 +245,7 @@ describe('this tree, today', () => {
 
   it('exits 0 as a process, which is what CI reads', () => {
     expect(run([]).status).toBe(0);
-  });
+  }, WHOLE_TREE_CASE_MS);
 });
 
 describe('wiring -- a gate nobody runs is indistinguishable from a gate that passes', () => {

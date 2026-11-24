@@ -290,6 +290,28 @@ describe('a declared rename that cannot be carried is refused 422 before any wri
         await refusedBefore(door, driver, before);
     });
 
+    it('`destructive_type` on an extension field: the renamed field an `objectExtensions` entry adds turns a type that stores no column (#34095)', async () => {
+        // The upgrade plan folds the extension's fields onto `acme_lead`, so the
+        // destructive retype on the declared rename reaches the planner as it
+        // does for an owned field: refused by name, which no token answers.
+        const driver = fakeDriver({ acme_lead: new Set(['id', 'company']) });
+        const ext = (version: string, fields: Row) => ({
+            id: 'com.acme.ext', namespace: 'acmeext', version, objectExtensions: [{ extend: 'acme_lead', fields }],
+        });
+        const served = { acme_lead: lead({ company: { type: 'text' } }) };
+        const door = await mount({ installed: ext('1.0.0', { company: { type: 'text' } }), driver, served });
+        const before = ledgerFiles();
+        const res = await door.install(makeC({
+            manifest: ext('2.0.0', { account_name: { type: 'formula', expression: '1', renamedFrom: ['company'] } }),
+        }));
+        expect(res.status).toBe(422);
+        expect(res.payload.error.code).toBe('VALIDATION_ERROR');
+        expect(res.payload.error.details.refusals).toEqual([expect.objectContaining({
+            object: 'acme_lead', field: 'account_name', from: ['company'], reason: 'destructive_type',
+        })]);
+        await refusedBefore(door, driver, before);
+    });
+
     it('`outside_package`: an extension\'s field names a column its own package never contributed (the owner\'s just-dropped key)', async () => {
         // The owner's table still holds `company` (the owner dropped it); this
         // package only ever extended the object with `nickname`.

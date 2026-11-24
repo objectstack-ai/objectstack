@@ -74,6 +74,19 @@ panels are hidden, and the page runs onto as many sheets as it needs.
 | `repeatTableHeaders` | A table's column headings repeated on every sheet it runs onto; on when omitted |
 | `avoidBreakInside` | `break-inside: avoid` on each block of a region |
 
+On a print page whose sections may break between sheets, author one `record:details` block
+per section: `avoidBreakInside` keeps each block whole on one sheet when it fits, so a block
+holding several sections moves to the next sheet as one piece.
+
+Leave `avoidBreakInside` off on a print page whose detail table can run past one sheet, such
+as a `record:line_items` table on a quote or invoice with many lines. A table is one block,
+so with the key on, a table that does not fit the rest of the first sheet moves whole to the
+next sheet even when it cannot fit any single sheet, and is broken there. The first sheet is
+then left with only the blocks above the table and a blank lower part, and the document can
+take one sheet more: measured on an A4 invoice page, a 21-line table printed on 3 sheets
+with the key on and 2 with it off. With the key off, the table starts under the blocks above
+it and runs on, with its column headings repeated on each sheet (`repeatTableHeaders`).
+
 Blocks print whole:
 
 - `record:line_items` loads at most its row cap (`limit`, 500 when unset). On a print page,
@@ -132,8 +145,18 @@ const file = await print.printRecordToFile(
   { app: 'sales', object: 'invoice', recordId: 'inv_1', page: 'invoice_document' },
   context, // the requesting user's execution context
 );
-// { fileId, attachmentId, size, filename: 'invoice_document-inv_1.pdf' }
+// { fileId, attachmentId, size, filename: 'INV-0001.pdf' }
 ```
+
+With no `filename`, the PDF is named after the record: its display name — the
+value of the object's title field (`nameField`, or the field derived from its
+fields) — plus `.pdf`, read from the record as the requesting user reads it.
+The name is made safe for a file: `/ \ : * ? " < > |` become `_`, control
+characters and runs of whitespace become one space, leading dots are dropped,
+and it is cut to 100 characters. A record with no display value keeps
+`<page>-<recordId>.pdf` (`invoice_document-inv_1.pdf`). A `filename` in the
+request is used exactly as given. Printing a record twice attaches two files
+of the same name; neither replaces the other.
 
 The page is rendered as the requesting user — never as the system — through a
 short-lived session minted for that user and revoked as soon as the print ends,
@@ -151,6 +174,16 @@ filename? }`, and it answers `201` with the stored file,
 `{ fileId, attachmentId, size, filename }`. The print runs as the signed-in
 caller, exactly as an in-process print with their context does, and the file is
 attached once, by the service.
+
+A kernel that owns no HTTP server, such as an environment's kernel behind a
+shared host, reaches the same route through the runtime dispatcher: it forwards
+`POST /api/v1/print/records` to the `print` service's `handlePrintDoor` member,
+which runs the same handler and gives the same answers. A kernel that does not
+compose `PrintServicePlugin` answers `NOT_IMPLEMENTED` / 501 naming
+`@objectstack/service-print`. The console shows that refusal as one line in
+the user's language saying the action needs a service this environment does
+not have, never the package name. A `SERVICE_UNAVAILABLE` / 503 keeps the
+route's own sentence, since it can clear on a retry.
 
 Reach it from the console with an ordinary `type: 'api'` action on the object:
 

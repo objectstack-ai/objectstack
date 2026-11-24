@@ -193,6 +193,13 @@ const EXPORT_FORMATS = ['csv', 'json', 'xlsx'] as const;
 type ExportFormatServed = typeof EXPORT_FORMATS[number];
 
 /**
+ * [#34163] The UTF-8 byte-order mark (U+FEFF, the bytes EF BB BF) a csv export
+ * opens with. Spelled as an escape on purpose: the literal character is
+ * invisible in review and in a diff.
+ */
+const UTF8_BOM = '\uFEFF';
+
+/**
  * [#27500] The export's `?format=`: absent is csv, a served format is itself,
  * anything else (the empty value included) is `undefined`, which the route
  * refuses.
@@ -589,7 +596,7 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 const access = await security.getRecordFieldAccess(object, id, context);
                 // The row went away (or out of the caller's sight) after the
                 // read above: the read path's own no-row answer.
-                if (access === null) throw recordNotFoundError(object, id);
+                if (access === null) throw recordNotFoundError(object, id, context);
                 if (access === undefined) {
                     sendEnvelopeError(
                         res, 501, 'NOT_IMPLEMENTED',
@@ -1215,6 +1222,10 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     // re-imports to the stored value (one exception: `unmarkCsvTextCell`).
     // xlsx and json are unaffected.
     //
+    // [#34163] csv only: a body with content opens with one UTF-8 byte-order
+    // mark (`UTF8_BOM`), so Excel reads the saved file as UTF-8; an export
+    // that writes nothing stays a zero-byte file. json and xlsx carry none.
+    //
     // [#24945] Boolean / toggle cells are written in the language of the
     // header row: `templateText(locale).booleanWords` (yes / no, or 是 / 否 for
     // a `zh*` locale), for the locale the header labels are translated to
@@ -1702,7 +1713,16 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
 
                     if (format === 'csv') {
                         const text = rowsToCsv(fields ?? [], rows, firstChunk && includeHeader, metaMap, timezone, booleanWords);
-                        res.write(text);
+                        // [#34163] The body's first write carries the UTF-8
+                        // byte-order mark in front of it, once: the header row,
+                        // or the first data row under `header=false`. The
+                        // answer's `charset=utf-8` does not travel with the
+                        // saved file, and Excel reads a csv without the mark in
+                        // the system ANSI code page, so every non-ASCII header
+                        // and cell opened garbled. The csv import strips one
+                        // leading mark (`parseCsvToRows`), so the file
+                        // re-imports unchanged.
+                        res.write(firstChunk ? UTF8_BOM + text : text);
                     } else if (format === 'xlsx') {
                         if (firstChunk && includeHeader) {
                             xlsx!.ws.addRow((fields ?? []).map((f) => headerLabel(f, metaMap))).commit();
@@ -1758,7 +1778,9 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     (readableProjected || !fieldsFromSchema)
                 ) {
                     if (format === 'csv') {
-                        res.write(rowsToCsv(fields, [], true, metaMap));
+                        // [#34163] The header row is this body's first write,
+                        // so it carries the mark as the first chunk's does.
+                        res.write(UTF8_BOM + rowsToCsv(fields, [], true, metaMap));
                     } else if (format === 'xlsx') {
                         xlsx!.ws.addRow(fields.map((f) => headerLabel(f, metaMap))).commit();
                     }

@@ -881,7 +881,10 @@ describe('CRUD `fields` value contract — the CEL value envelope beside literal
     [type, schema, wrap, 'no `source`', { dialect: 'cel' }, 'fields.total.source'],
     [type, schema, wrap, 'a whitespace-only `source`', { dialect: 'cel', source: '   ' }, 'fields.total.source'],
     [type, schema, wrap, 'an `ast`-only envelope', { dialect: 'cel', ast: { kind: 'const', value: 1 } }, 'fields.total.source'],
-    [type, schema, wrap, 'a `template` dialect', { dialect: 'template', source: 'Hi {name}' }, 'fields.total.dialect'],
+    // A `template` envelope is the field's TEXT form (ruling 6913660232 on
+    // #34062): its dialect is taken, and its text is judged as a text slot, so
+    // a single-brace token is refused at the source.
+    [type, schema, wrap, 'a `template` text holding a single-brace token', { dialect: 'template', source: 'Hi {name}' }, 'fields.total.source'],
     [type, schema, wrap, 'an unknown dialect', { dialect: 'javascript', source: '1 + 1' }, 'fields.total.dialect'],
   ] as const))('%s REFUSES a malformed envelope with %s — code `custom`, at the field\'s path, led by the slot-neutral sentence', (_type, schema, wrap, _what, envelope, path) => {
     const result = schema.safeParse(wrap({ subject: 'x', total: envelope }));

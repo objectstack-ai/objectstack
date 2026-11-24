@@ -54,32 +54,67 @@
  * would land at an unbounded time, which is the opposite of a bounded race.
  * The seed lands in the cache instead, and the next boot is correct forever.
  *
- * ## The app's declared default outranks the browser (objectstack#33231)
+ * ## A supported browser language, else the app's declared default (objectstack#33985)
  *
  * The endpoint's rungs are the caller's own `sys_user.locale`, else the
  * request's `Accept-Language`, else the deployment default. A bare `fetch`
- * sends the BROWSER's header, so for a user with no personal locale the second
- * rung always answered and the seed was the browser language: an app that
- * declares `i18n.defaultLocale: 'zh-CN'` (served as discovery `locale.default`)
- * still handed an `en-US` browser an English console, while the server wrote
- * to that same user in Chinese.
+ * sends the BROWSER's header whatever the app ships, so an `en-US` browser on
+ * an app that declares `i18n.defaultLocale: 'zh-CN'` and ships no English was
+ * answered `en-US` and booted an English console (objectstack#33231). Stating
+ * the app's declared default instead, always, overcorrected: discovery always
+ * serves a default, so a `zh-CN` browser on an app that ships `zh-CN` beside
+ * an `en` default booted English too, and browser detection was dead.
  *
- * So, when the device holds no explicit choice, the read states the app's
- * declared default as its `Accept-Language`. The server's rungs are unchanged:
- * a stored `sys_user.locale` still answers first, and the stated default only
- * decides the rung below it. The console's language for a signed-in user is
- * therefore `sys_user.locale` → the app's declared default → (no default
- * served) the browser → `en`. Discovery always serves a `locale.default`: an
- * app with no `i18n` block is served `en`, and that is the default it gets.
- * {@link loadAppDefaultLocale} reads it through the console's one shared
- * discovery request, and `LocalizationFetchProvider`'s every-boot read states
- * the same value, so the two reads still share one request and the
- * revalidation keeps the cached seed on the app default.
+ * The maintainer's ruling (letter B, record 6915665005 on objectstack#33985):
+ * for a signed-in user with no personal language, the console's language is
+ * the user's own `sys_user.locale`, else the browser's language when the app
+ * lists it in discovery `locale.supported`, else the app's declared default
+ * (discovery `locale.default`), else `en`. That is the order the server's own
+ * rungs already keep, applied to a request that only ever states a language
+ * the app ships.
+ *
+ * So, when the device holds no explicit choice, the read states
+ * {@link pickPreferredLocale}'s answer as its `Accept-Language`: the browser's
+ * language when `locale.supported` lists it. A stored `sys_user.locale` still
+ * answers first, and the stated language only decides the rung below it.
+ * {@link loadPreferredLocale} reads discovery through the console's one shared
+ * request, and `LocalizationFetchProvider`'s every-boot read states the same
+ * value, so the two reads still share one request and the revalidation keeps
+ * the cached seed on the same answer.
+ *
+ * ## A browser language the app does not ship states nothing (objectstack#34392)
+ *
+ * The same ruling puts the organization's `localization.locale` (Setup →
+ * Localization, or the first-run checklist's "Default language and country")
+ * between the browser's language and the app's declared default. Only the
+ * server holds that setting, and its deployment-default rung answers only a
+ * request that names no language the app lists. Stating `locale.default` here
+ * named one on every read, so the organization's language never decided a
+ * user who had chosen none.
+ *
+ * So the read states nothing when the browser's language is not in
+ * `locale.supported`, or when discovery fails. The browser's own header then
+ * goes out, and the server answers it only when the app lists that language;
+ * otherwise the organization's setting decides, then the app's declared
+ * default, then the server's floor.
+ *
+ * ## The request leaves at parse time (objectstack#35534)
+ *
+ * Asked from here, the first visit's request waited for the eager bundle to
+ * download and evaluate, though it needs only discovery's `locale.supported`.
+ * `index.html`'s `startEarlyLanguageSeed` script asks the same question the
+ * moment its parse-time discovery answers, under the same gates, and leaves
+ * the pending response for {@link takeEarlySeedRequest}. The seed takes it
+ * once, only when it is the request the seed would send, through the same
+ * `sharedGetJson` call, so the race, the in-flight sharing with
+ * `LocalizationFetchProvider` and the hand-off of the settled answer are
+ * unchanged.
  */
 import { cacheLanguageSeed, readCachedLanguageSeed, readStoredLanguage } from '@object-ui/i18n';
 import { getSessionOwnerChangeCount } from '@object-ui/auth';
-import { getSharedDiscovery } from '@object-ui/data-objectstack';
-import { sharedGetJson } from '@object-ui/types';
+import { inflightGetKey, sharedGetJson } from '@object-ui/types';
+import { resolveLocaleAmong } from '@objectstack/spec/system';
+import { readConsoleDiscovery } from './lib/early-discovery';
 
 /**
  * How long a true first visit will wait for the resolved locale before booting
@@ -94,72 +129,151 @@ interface MeLocalizationResponse {
   locale?: string | null;
 }
 
+/** This page-load's read of the language a choice-less read states, once started. */
+let preferredLocale: Promise<string | undefined> | null = null;
+
 /**
- * How long the console's discovery request may run before it is abandoned.
- * The request is shared with the data adapter's `connect()`, so this bound is
- * the adapter's too; it matches the shell's own discovery bound.
+ * The seed's settled answer, held for `LocalizationFetchProvider`'s boot read
+ * (objectstack#35455): the request it answered, as `inflightGetKey` spells it,
+ * and the session owner it was asked for. See {@link takeSettledSeedAnswer}.
  */
-const DISCOVERY_TIMEOUT_MS = 10_000;
+let settledSeed: { key: string; owner: number; body: object } | null = null;
+/** Whether the boot read has already been offered the seed's answer. */
+let settledSeedSpent = false;
 
-/** This page-load's read of the app's declared default, once started. */
-let appDefaultLocale: Promise<string | undefined> | null = null;
+/** Where `index.html`'s parse-time request leaves its pending response. */
+const EARLY_SEED_KEY = Symbol.for('objectui.earlyLanguageSeed');
 
-/** The discovery document, through the console's one shared request. */
-async function fetchDiscovery(serverBase: string): Promise<unknown> {
-  return getSharedDiscovery(serverBase, async () => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), DISCOVERY_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${serverBase}/api/v1/discovery`, {
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-        signal: ctrl.signal,
-      });
-      if (!res.ok) {
-        throw Object.assign(new Error(`discovery ${res.status}`), { status: res.status });
-      }
-      const body = await res.json();
-      return body && typeof body.success === 'boolean' && 'data' in body ? body.data : body;
-    } finally {
-      clearTimeout(timer);
-    }
-  });
+/**
+ * The slot `index.html`'s `startEarlyLanguageSeed` script fills: the URL it
+ * asks, and once discovery has answered, the `init` it sent and the pending
+ * `Response`. Spelled by hand on both sides: a classic inline script cannot
+ * import.
+ */
+interface EarlySeedSlot {
+  url: string;
+  init: RequestInit | null;
+  response: Promise<Response> | null;
+  taken: boolean;
 }
 
 /**
- * The app's declared default language, discovery `locale.default`
- * (objectstack#33231), or `undefined` when discovery does not answer one.
+ * The parse-time request (objectstack#35534), once per page load, when it is
+ * the request this seed would send: the same in-flight key, so the same URL,
+ * credentials and headers, `Accept-Language` included. The first look spends
+ * the slot whatever it finds, and the script sends nothing after it, so a
+ * mismatch or a script that has not asked yet leaves exactly one request: the
+ * seed's own.
+ */
+function takeEarlySeedRequest(url: string, init: RequestInit): Promise<Response> | null {
+  const slot = (globalThis as unknown as Record<symbol, EarlySeedSlot | undefined>)[EARLY_SEED_KEY];
+  if (!slot || slot.taken) return null;
+  slot.taken = true;
+  if (!slot.init || !slot.response) return null;
+  return inflightGetKey(slot.url, slot.init) === inflightGetKey(url, init) ? slot.response : null;
+}
+
+/**
+ * Hand the seed's settled answer to the boot read that asks the SAME request,
+ * once per page load (objectstack#35455), or `null`.
+ *
+ * On a true first visit the seed's request usually settles inside its race,
+ * before React mounts; the provider mounts later and, since the in-flight
+ * registry holds only pending requests, used to ask the endpoint a second
+ * time. This is the request it would make, answered moments ago in this page
+ * load, so it takes that answer instead.
+ *
+ * Only an answer about the caller who still owns the browser is handed over:
+ * an unauthenticated one is never held, and a change of owner since the seed
+ * asked (objectui#10193) answers `null`. The first call spends the hand-off
+ * whatever it finds, so a later read — a remount, or the re-read after a write
+ * to the user's own row — asks the server, and an answer that settles after
+ * the boot read started (which joined it in flight instead) is never held.
+ */
+export function takeSettledSeedAnswer(url: string, init: RequestInit): object | null {
+  const held = settledSeed;
+  settledSeed = null;
+  settledSeedSpent = true;
+  if (!held || held.key !== inflightGetKey(url, init)) return null;
+  if (held.owner !== getSessionOwnerChangeCount()) return null;
+  return structuredClone(held.body);
+}
+
+/**
+ * The language a read with no explicit choice states (objectstack#33985,
+ * ruling 6915665005): the browser's language when the app lists it in
+ * `supported`, else `undefined` — the read then states nothing, and the
+ * server's deployment default (the organization's language, then the app's
+ * declared default) decides (objectstack#34392).
+ *
+ * The browser's language is its top tag (`navigator.language`), the one tag
+ * the server's own `Accept-Language` rung reads off a header. "Lists it" is
+ * answered by the platform's one locale ladder, `resolveLocaleAmong`, the
+ * matcher that same server rung resolves a requested tag through: exact, then
+ * case-insensitive, then the platform table language through its read aliases
+ * (`ja` → `ja-JP`, `zh-TW` → `zh-Hant`), then base language (`en-US` → `en`),
+ * then variant (`es-MX` → `es-ES`, `zh` → `zh-CN`). The answer is the app's
+ * own spelling of the entry, so the server is asked for exactly a language the
+ * app ships, and the console agrees with what the server answered the raw
+ * browser header before the app default was stated.
+ */
+export function pickPreferredLocale(
+  browserTag: string | null | undefined,
+  supported: readonly string[],
+): string | undefined {
+  const tag = typeof browserTag === 'string' ? browserTag.trim() : '';
+  return tag ? resolveLocaleAmong(tag, supported) : undefined;
+}
+
+/** Discovery `locale.supported`, read as a list of non-empty tags. */
+function readSupportedLocales(discovery: unknown): string[] {
+  const locale = (discovery as { locale?: { supported?: unknown } } | null)?.locale;
+  return Array.isArray(locale?.supported)
+    ? locale.supported.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+    : [];
+}
+
+/**
+ * The language a read with no explicit choice states as its `Accept-Language`
+ * ({@link pickPreferredLocale} over discovery `locale.supported`), or
+ * `undefined` when the app does not list the browser's language or discovery
+ * fails.
  *
  * Started once per page-load and never rejects: the first call starts the
- * read, every later call shares it. A failed or unreadable discovery answers
- * `undefined`, and the reads that state it then send the browser's own header,
- * which is the console's behaviour without a served default.
+ * read, every later call shares it. On `undefined` the reads that state it
+ * send the browser's own header, which the server answers only when the app
+ * lists that language (objectstack#34392).
  */
-export function loadAppDefaultLocale(serverBase: string): Promise<string | undefined> {
-  if (!appDefaultLocale) {
-    appDefaultLocale = fetchDiscovery(serverBase).then(
+export function loadPreferredLocale(serverBase: string): Promise<string | undefined> {
+  if (!preferredLocale) {
+    preferredLocale = readConsoleDiscovery(serverBase).then(
       (discovery) => {
-        const value = (discovery as { locale?: { default?: unknown } } | null)?.locale?.default;
-        return typeof value === 'string' && value.length > 0 ? value : undefined;
+        const browser = typeof navigator === 'undefined' ? undefined : navigator.language;
+        return pickPreferredLocale(browser, readSupportedLocales(discovery));
       },
       () => undefined,
     );
   }
-  return appDefaultLocale;
+  return preferredLocale;
 }
 
 /**
- * This page-load's read of the app's declared default, or `null` when nothing
- * has started one. `seedTenantLanguage` starts it on every boot, before the
- * app mounts, so the console's in-app reads find it here.
+ * This page-load's read of the language a choice-less read states, or `null`
+ * when nothing has started one. `seedTenantLanguage` starts it on every boot,
+ * before the app mounts, so the console's in-app reads find it here.
  */
-export function startedAppDefaultLocale(): Promise<string | undefined> | null {
-  return appDefaultLocale;
+export function startedPreferredLocale(): Promise<string | undefined> | null {
+  return preferredLocale;
 }
 
-/** Test seam: forget this page-load's read of the app's declared default. Not public. */
-export function __resetAppDefaultLocaleForTests(): void {
-  appDefaultLocale = null;
+/**
+ * Test seam: forget this page-load's read of the stated language, and the
+ * seed's held answer. Not public.
+ */
+export function __resetPreferredLocaleForTests(): void {
+  preferredLocale = null;
+  settledSeed = null;
+  settledSeedSpent = false;
 }
 
 /**
@@ -179,7 +293,7 @@ export function __resetAppDefaultLocaleForTests(): void {
 async function fetchAndCacheSeed(serverBase: string): Promise<void> {
   // The owner is read after this wait, when the request leaves: it carries the
   // session that holds the browser then, not the one before the wait.
-  const appDefault = await loadAppDefaultLocale(serverBase);
+  const preferred = await loadPreferredLocale(serverBase);
   const ownerAtRequest = getSessionOwnerChangeCount();
   try {
     // Shared in flight with `LocalizationFetchProvider` (objectui#5544), which
@@ -189,21 +303,31 @@ async function fetchAndCacheSeed(serverBase: string): Promise<void> {
     // overlap by construction: this one keeps running past the 500 ms race, and
     // the provider mounts as soon as the race resolves. Sharing is in-flight
     // only, so on the boots where they do NOT overlap each still fetches.
-    const json = await sharedGetJson<MeLocalizationResponse>(
-      `${serverBase}/api/v1/auth/me/localization`,
-      {
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          // The app's declared default decides the rung below the user's own
-          // locale (objectstack#33231); none served, the browser's header goes.
-          ...(appDefault ? { 'Accept-Language': appDefault } : {}),
-        },
+    const url = `${serverBase}/api/v1/auth/me/localization`;
+    const init: RequestInit = {
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        // A supported browser language decides the rung below the user's
+        // own locale (objectstack#33985); otherwise the browser's own header
+        // goes, and the server's deployment default decides
+        // (objectstack#34392).
+        ...(preferred ? { 'Accept-Language': preferred } : {}),
       },
-    );
+    };
+    // `index.html` usually sent this very request at parse time
+    // (objectstack#35534): it is taken here as this read's transport, so the
+    // provider still joins it in flight and a failure is this read's own.
+    const early = takeEarlySeedRequest(url, init);
+    const json = await sharedGetJson<MeLocalizationResponse>(url, init, early ? () => early : undefined);
     if (json?.authenticated === false) return;
     if (getSessionOwnerChangeCount() !== ownerAtRequest) return;
     cacheLanguageSeed(json?.locale);
+    // Held for the provider's boot read (objectstack#35455), unless that read
+    // has already started: it then joined this request in flight.
+    if (!settledSeedSpent && json && typeof json === 'object') {
+      settledSeed = { key: inflightGetKey(url, init), owner: ownerAtRequest, body: json };
+    }
   } catch {
     // Offline, blocked, malformed — the boot simply goes unseeded.
   }
@@ -225,9 +349,9 @@ export async function seedTenantLanguage(
 
   // Started on every choice-less boot, not only the first visit, and not
   // awaited here: `LocalizationFetchProvider`'s every-boot read states the same
-  // default (objectstack#33231), and the request is the one the data adapter's
+  // language (objectstack#33985), and the request is the one the data adapter's
   // `connect()` makes anyway, so it costs no request of its own.
-  void loadAppDefaultLocale(serverBase);
+  void loadPreferredLocale(serverBase);
 
   // Stale-while-revalidate (ruling point 2): a cached seed applies at boot
   // immediately, with no waiting. Revalidation is not this module's job — the

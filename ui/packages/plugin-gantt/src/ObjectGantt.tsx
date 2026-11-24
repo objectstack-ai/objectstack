@@ -39,6 +39,7 @@ import {
   useDataInvalidation,
   useFilterScope,
   useResolvedFilter,
+  classifyLoadError,
 } from '@object-ui/react';
 import { useLocalization, useDisplayLocale, resolveFieldCurrency, formatDisplayNumber } from '@object-ui/i18n';
 import {
@@ -58,6 +59,7 @@ import {
   AlertDialogTitle,
   NavigationOverlay,
   RefreshIndicator,
+  DataEmptyState,
   legacyRecordDrawerWidthKey,
   recordOverlayWidthStorageKey,
   cn,
@@ -74,7 +76,6 @@ import {
   resolveAffordance,
   type SchemaLike,
   applyNonGridRowCeiling,
-  nonGridRowCeilingQuery,
   GANTT_ROW_CEILING,
   type NonGridCeilingResult,
   isRealCalendarDate,
@@ -95,11 +96,13 @@ import {
 } from '@object-ui/fields';
 import { GanttView, type GanttTask, type GanttDependency, type GanttLinkType, type GanttTaskType } from './GanttView';
 import { invertFrom, invertTo, makeTzShift } from './tzShift';
+import { fetchGanttRows } from './ganttRowWalk';
 import { ResourceWorkload } from './ResourceWorkload';
 import { QuickFilterBar, type QuickFilterField, type QuickFilterOption } from './QuickFilterBar';
 import type { WorkingCalendar } from './scheduling';
 import { normalizeShiftSegments, type ShiftSegmentsConfig } from './shifts';
 import { useGanttTranslation } from './useGanttTranslation';
+import { Lock } from 'lucide-react';
 
 /**
  * One quick-filter dimension. Generic by design: the page configures
@@ -297,6 +300,23 @@ export function normalizeDependencies(raw: unknown): GanttDependency[] {
     }
   }
   return out;
+}
+
+/**
+ * A task's parent id, read from the value under the configured `parentField`.
+ *
+ * The record query auto-`$expand`s lookup fields, so for a lookup (or
+ * self-lookup) `parentField` the value is the related ROW, not its id. The task
+ * tree keys parents by id, so the row is read down to its `id` (`_id` as the
+ * fallback) — the same read {@link normalizeDependencies} makes of an expanded
+ * predecessor. A scalar id passes through as it is; no value is `null`.
+ */
+function taskParentId(raw: unknown): string | number | null {
+  if (raw != null && typeof raw === 'object') {
+    const row = raw as { id?: string | number | null; _id?: string | number | null };
+    return row.id ?? row._id ?? null;
+  }
+  return (raw as string | number | null | undefined) ?? null;
 }
 
 /**
@@ -1050,22 +1070,27 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
       const expand = !perms?.isLoaded || !resource
         ? expandable
         : expandable.filter((f) => perms.checkField(resource, f, 'read'));
-      const result = await adapter.find(resource, {
+      // The gantt's own ceiling, `GANTT_ROW_CEILING` (objectstack#32421,
+      // ruling B), not the shared `NON_GRID_ROW_CEILING` the
+      // non-virtualised tree prices (objectui#7210, ruling a′). The gantt
+      // still fetches the whole FILTERED result set — a truthful
+      // `min(start) → max(end)` range and the group rollups need all of it,
+      // which is why paging this at `pagination.pageSize` was rejected — but
+      // "the whole result set" stops at a number instead of at whatever the
+      // table happens to hold. The walk reads one probe row past the ceiling,
+      // which is what makes the cut DETECTABLE; `applyNonGridRowCeiling`
+      // slices it back off at the SAME ceiling. ⛔ Not authorable: an
+      // authored `limit` / `pagination.pageSize` still cannot reach this
+      // query, and neither does a datasource's `external.rowCap`, by both
+      // rulings.
+      //
+      // ⛔ The ceiling is a stop condition, not a request size: the walk asks
+      // in `GANTT_FETCH_STEP` steps, because a host with a maximum page size
+      // (hosted: 5,000) refuses one `$top` of 10,001 outright, empty object
+      // or not. See `./ganttRowWalk`.
+      const result = await fetchGanttRows((params) => adapter.find(resource, params), {
         $filter: queryFilter,
         $orderby: convertSortToQueryParams(schema.sort),
-        // The gantt's own ceiling, `GANTT_ROW_CEILING` (objectstack#32421,
-        // ruling B), not the shared `NON_GRID_ROW_CEILING` the
-        // non-virtualised tree prices (objectui#7210, ruling a′). The gantt
-        // still fetches the whole FILTERED result set — a truthful
-        // `min(start) → max(end)` range and the group rollups need all of it,
-        // which is why paging this at `pagination.pageSize` was rejected — but
-        // "the whole result set" stops at a number instead of at whatever the
-        // table happens to hold. One probe row past the ceiling is what makes
-        // the cut DETECTABLE; `applyNonGridRowCeiling` slices it back off at
-        // the SAME ceiling. ⛔ Not authorable: an authored `limit` /
-        // `pagination.pageSize` still cannot reach this query, and neither
-        // does a datasource's `external.rowCap`, by both rulings.
-        ...nonGridRowCeilingQuery(GANTT_ROW_CEILING),
         ...(expand.length > 0 ? { $expand: expand } : {}),
         // objectui#10250 — the term and its field narrowing, sent together
         // or not at all. See `searchTerm` above.
@@ -1075,7 +1100,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
               ...(searchFields ? { $searchFields: searchFields } : {}),
             }
           : {}),
-      });
+      }, isCurrent);
       const capped = applyNonGridRowCeiling(result, GANTT_ROW_CEILING);
       if (isCurrent()) {
         setData(capped.rows);
@@ -1545,7 +1570,7 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         hasOwnDates: !!(startDate && endDate),
         progress: Math.min(100, Math.max(0, progress || 0)), // Clamp between 0-100
         dependencies: normalizeDependencies(dependencies),
-        parent: parentField ? record[parentField] ?? null : undefined,
+        parent: parentField ? taskParentId(record[parentField]) : undefined,
         type: typeField ? normalizeTaskType(record[typeField]) : undefined,
         locked: lockField ? !!record[lockField] : undefined,
         color,
@@ -2308,6 +2333,28 @@ export const ObjectGantt: React.FC<ObjectGanttProps> = ({
         <div className="flex items-center justify-center h-96">
           <div className="text-muted-foreground">Loading Gantt chart...</div>
         </div>
+      </div>
+    );
+  }
+
+  // objectstack#35317 — a refused task read (403 / PERMISSION_DENIED, by the
+  // shared `classifyLoadError` verdict the list page and the related list use)
+  // is not a failure of anything the reader did: they may open the record that
+  // hosts this chart without being granted its tasks. It is drawn as the
+  // related list's calm no-access state (`role="status"`, no destructive
+  // styling, the shared `list.loadErrorForbidden*` sentence in the reader's
+  // language) and never the server's text, which a refused read does not get
+  // to show. Every other failure keeps the error screen below.
+  if (error && classifyLoadError(error) === 'forbidden') {
+    return (
+      <div className={className}>
+        <DataEmptyState
+          data-testid="gantt-no-access"
+          className="h-96"
+          icon={<Lock className="size-5 text-muted-foreground" aria-hidden />}
+          title={t('list.loadErrorForbiddenTitle')}
+          description={t('list.loadErrorForbiddenMessage')}
+        />
       </div>
     );
   }

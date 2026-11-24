@@ -422,7 +422,11 @@ describe('member_default lets a member react to comments; external_default does 
  * capability by default). And `manage_connector_connections` (ADR-0143 D5 —
  * platform administrators hold the connector connection capability by default;
  * so do both organization-administrator sets since ruling B, record
- * 6545223261, pinned below).
+ * 6545223261, pinned below). And `viewAllFields` on the wildcard (the
+ * field-axis split, ruling of record 6912661484, letter A): the read-only
+ * "every field" vote, which duplicates the field vote the two record bits
+ * already cast, so no answer changes; the no-behaviour-change pin is in
+ * `fls-own-field-mask-33828.test.ts`.
  *
  * The set's `description` is admin-facing copy, not capability, so it is left
  * out of the comparison (its shape is pinned by
@@ -441,6 +445,8 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
           allowDelete: true,
           viewAllRecords: true,
           modifyAllRecords: true,
+          // added on purpose (ruling 6912661484) — see the docblock above.
+          viewAllFields: true,
           // [#8681] no `allowExport` — deliberate, see the spec declaration.
         },
       },

@@ -71,6 +71,8 @@ export interface CompatibilityApiHost {
   readonly logger: ObjectQL['logger'];
   getDriverForObject: ObjectQL['getDriverForObject'];
   removeActionsByPackage: ObjectQL['removeActionsByPackage'];
+  /** [#34096] The roll-ups an install added, computed on the stored rows. */
+  materialiseAddedSummaries: ObjectQL['materialiseAddedSummaries'];
 }
 
 /** The body of `ObjectQL#registerObject`; the method's docblock there is its contract. */
@@ -120,7 +122,7 @@ export async function introspectDatasource(
 
 /** The body of `ObjectQL#syncSchemas`; the method's docblock there is its contract. */
 export async function syncSchemas(
-  this: Pick<CompatibilityApiHost, '_registry' | 'getDriverForObject' | 'logger'>,
+  this: Pick<CompatibilityApiHost, '_registry' | 'getDriverForObject' | 'logger' | 'materialiseAddedSummaries'>,
 ): Promise<void> {
   // The storage layer's objects: a disabled package's extensions folded in,
   // so the DDL keeps their columns (`SchemaRegistry.getStorageObject`).
@@ -187,6 +189,12 @@ export async function syncSchemas(
       }
     }
   }
+  // [#34096] Every runtime caller of this sync is an install door, after its
+  // hot register: a roll-up the install added now has its column on every
+  // stored row, NULL. Compute it there, as the child-write recompute would
+  // (`summary-install-materialise.ts`); a roll-up the boot already served is
+  // not walked, and a sync before the boot completes walks nothing.
+  await this.materialiseAddedSummaries();
 }
 
 /** The body of `ObjectQL#syncObjectSchema`; the method's docblock there is its contract. */

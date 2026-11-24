@@ -11,9 +11,10 @@
  * WHAT IS PINNED.
  *  - The My views section lists the reader's own rows of this object, read
  *    through the data API filtered by object and owner, and no one else's.
- *  - Save as my view creates a row whose `config` is a spec `ListView` for
- *    this object carrying the list on screen, and opens it: its body reaches
- *    the list's query.
+ *  - Save as my view (since objectstack#35553 the dropdown's 「Add view」
+ *    card, personal by default) creates a row whose `config` is a spec
+ *    `ListView` for this object carrying the list on screen, and opens it:
+ *    its body reaches the list's query.
  *  - Rename goes through the data API's update; Delete through the owner's
  *    door, `DELETE /api/v1/personal-views/:id`, never the data API's delete.
  *  - 📌 on a personal row is the reader's default: it writes the per-object
@@ -24,7 +25,7 @@
  *    the list paints while the read is still out. It waits only for a pinned
  *    view it does not hold yet.
  *  - A refused read (no grant on the object) draws neither the section nor
- *    Save as my view, and the list is unaffected.
+ *    「Add view」, and the list is unaffected.
  *  - objectstack#30034 — a personal view opened by its address is not seeded
  *    from, and its address bar never carries, the default view's stored list
  *    state, whichever of the two reads (the reader's own views, the list
@@ -32,7 +33,14 @@
  */
 
 import * as React from 'react';
+// The view config panel this file mounts reaches `import('@objectstack/lint')`
+// inside a function body; paid here, at collection, rather than inside the
+// first case's clocked window (check:test-source-alias).
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { render, cleanup, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import {
   MemoryRouter,
@@ -97,9 +105,8 @@ vi.mock('./MetadataInspector', () => ({
 vi.mock('./RecordDetailView', () => ({ RecordDetailView: () => null }));
 
 import { ObjectView } from './ObjectView';
+import { listDraftScope, patchListDraft, readListDraft, resetListDraftStoreForTests, type ListDraftPatch } from './listDraftStore';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
-import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
-import { ListPreferencesProvider, listPreferenceKey, localListStateKey } from '../context/ListPreferencesProvider';
 import { applyListStateParams } from './userFilterUrlState';
 import { toast } from 'sonner';
 
@@ -203,7 +210,7 @@ function mountLeads(
 
 /** The list's toolbar has drawn: its Filter control is on screen. */
 const listToolbar = () =>
-  waitFor(() => expect(screen.getByTestId('toolbar-filter-trigger')).toBeInTheDocument(), { timeout: 5000 });
+  waitFor(() => expect(screen.getByTestId('condition-add-filter')).toBeInTheDocument(), { timeout: 5000 });
 
 /** The reader's pinned view of `crm_lead`, as the workspace preference keeps it. */
 const PIN_KEY = 'os:pref:list.view.pinned@object:crm_lead';
@@ -212,6 +219,18 @@ const switcher = () => screen.getByTestId('list-view-switcher');
 const openSwitcher = () => {
   fireEvent.click(switcher());
   return screen.getByTestId('list-view-switcher-menu');
+};
+/**
+ * Save the list on screen as one of the reader's own views: the dropdown's
+ * 「Add view」 turns into the in-place create card (objectstack#35553, which
+ * folded Save as my view into it), personal by default.
+ */
+const saveAsMyView = async (menu: HTMLElement, name: string) => {
+  await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-new')).toBeInTheDocument());
+  fireEvent.click(within(menu).getByTestId('list-view-switcher-new'));
+  const card = await screen.findByTestId('create-view-card');
+  fireEvent.change(within(card).getByTestId('create-view-card-name'), { target: { value: name } });
+  return card;
 };
 const sectionRowIds = (testId: string) =>
   Array.from(screen.getByTestId(testId).querySelectorAll('[data-testid^="view-switcher-row-"]')).map((el) =>
@@ -227,6 +246,7 @@ beforeEach(() => {
   grants.isLoaded = false;
   grants.denied.clear();
   localStorage.clear();
+  resetListDraftStoreForTests();
   fetchCalls.length = 0;
   vi.mocked(toast.error).mockClear();
   Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true, writable: true });
@@ -268,13 +288,11 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     const { dataSource } = mountLeads(`/apps/crm/crm_lead/view/v1?uf__sort=${sort}`);
     await listToolbar();
 
-    const menu = openSwitcher();
-    await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-save-mine')).toBeInTheDocument());
-    fireEvent.click(within(menu).getByTestId('list-view-switcher-save-mine'));
-    const dialog = await screen.findByTestId('personal-view-name-dialog');
-    fireEvent.change(within(dialog).getByTestId('personal-view-name-input'), { target: { value: '  Hot leads  ' } });
+    const card = await saveAsMyView(openSwitcher(), '  Hot leads  ');
+    // The list holds a sort its view does not: the card offers to keep it, on.
+    expect(within(card).getByTestId('create-view-card-include-current')).toBeChecked();
     const readsBefore = leadReads(dataSource).length;
-    fireEvent.click(within(dialog).getByTestId('personal-view-name-submit'));
+    fireEvent.click(within(card).getByTestId('create-view-card-submit'));
 
     await waitFor(() => expect(dataSource.create).toHaveBeenCalledTimes(1));
     const [resource, row] = dataSource.create.mock.calls[0];
@@ -289,7 +307,7 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     // It opens at once, on an address that carries no list state of its own,
     // so the sort the list then reads by is the stored body's.
     await waitFor(() => expect(switcher()).toHaveTextContent('Hot leads'));
-    await waitFor(() => expect(screen.queryByTestId('personal-view-name-dialog')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('create-view-card')).toBeNull());
     await waitFor(() => expect(leadReads(dataSource).length).toBeGreaterThan(readsBefore));
     expect(leadReads(dataSource).at(-1).$orderby).toEqual([{ field: 'status', order: 'desc' }]);
   });
@@ -318,6 +336,26 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
       { url: '/api/v1/personal-views/pv_mine', method: 'DELETE' },
     ]));
     expect(dataSource.delete).not.toHaveBeenCalled();
+  });
+
+  it('Options names the open personal view and renames it in place through the data API\'s update (objectstack#35551)', async () => {
+    const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
+    await listToolbar();
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const name = await screen.findByTestId('options-view-name-input');
+    expect(name).toHaveValue('Paris leads');
+    fireEvent.change(name, { target: { value: 'Paris only' } });
+    fireEvent.keyDown(name, { key: 'Enter' });
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    expect(dataSource.update.mock.calls[0].slice(0, 3)).toEqual(['sys_personal_view', 'pv_mine', { label: 'Paris only' }]);
+  });
+
+  it('CONTROL: on a package view a reader who is no admin sees its name, not a rename', async () => {
+    mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    await screen.findByTestId('view-settings-content');
+    expect(screen.queryByTestId('options-view-name-input')).toBeNull();
   });
 
   it('📌 on a personal row is the reader\'s default: it writes the pin, and the next open of the bare address opens it', async () => {
@@ -361,7 +399,7 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     await waitFor(() => expect(dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
     // No list of the default view is drawn or read while the pin may name a personal view.
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByTestId('toolbar-filter-trigger')).toBeNull();
+    expect(screen.queryByTestId('condition-add-filter')).toBeNull();
     expect(leadReads(dataSource)).toHaveLength(0);
 
     land({ data: [OWN] });
@@ -377,7 +415,7 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     const menu = openSwitcher();
     await new Promise((r) => setTimeout(r, 0));
     expect(within(menu).queryByTestId('list-view-switcher-mine')).toBeNull();
-    expect(within(menu).queryByTestId('list-view-switcher-save-mine')).toBeNull();
+    expect(within(menu).queryByTestId('list-view-switcher-new')).toBeNull();
     expect(sectionRowIds('list-view-switcher-all')).toEqual(['v1', 'v2']);
   });
 
@@ -387,9 +425,10 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     mountLeads('/apps/crm/crm_lead/view/v1');
     await listToolbar();
     const menu = openSwitcher();
-    // The reader's own views were read: the section is drawn, Save is not.
+    // The reader's own views were read: the section is drawn, 「Add view」 is
+    // not (a reader who is no admin creates only views of their own).
     await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-mine')).toBeInTheDocument());
-    expect(within(menu).queryByTestId('list-view-switcher-save-mine')).toBeNull();
+    expect(within(menu).queryByTestId('list-view-switcher-new')).toBeNull();
   });
 
   it('CONTROL: with the same loaded grants and the list\'s object readable, Save as my view is offered', async () => {
@@ -398,31 +437,29 @@ describe('objectstack#29635 — My views in the list view switcher', () => {
     await listToolbar();
     const menu = openSwitcher();
     await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-mine')).toBeInTheDocument());
-    expect(within(menu).getByTestId('list-view-switcher-save-mine')).toBeInTheDocument();
+    expect(within(menu).getByTestId('list-view-switcher-new')).toBeInTheDocument();
   });
 });
 
 /**
- * objectstack#30034 — the two reads a personal view opened by its address
- * waits on: the reader's own views (`sys_personal_view`) and the list
- * preferences (the attached family's first load). Each lands when the case
- * says, and the address bar is the page's history, read where the router
- * wrote it.
+ * objectstack#30034 — a personal view opened by its address waits on the
+ * reader's own views (`sys_personal_view`), while the default view holds a
+ * draft of the reader's (objectstack#35955: what they changed there and left;
+ * before it, the stored list preferences, a second read). The read lands when
+ * the case says, and the address bar is the page's history, read where the
+ * router wrote it.
  *
  * The race the card measured: the location the router hands the page moves in
  * a transition, so a read landing between the page's URL write and its commit
  * renders against the address as it was before that write. `landPersonalOn`
- * `'firstReplace'` lands the personal views read exactly there.
+ * `'firstReplace'` lands the personal views read exactly there; `'atOnce'`
+ * lands it before the page writes the address at all.
  */
 describe('objectstack#30034 — a personal view opened by its address never carries the default view\'s list state', () => {
-  /** The reader's stored list state for the DEFAULT view, `v1`: a filter and a sort. */
-  const DEFAULT_VIEW_STATE = {
-    perView: {
-      v1: {
-        sort: [{ field: 'status', order: 'desc' }],
-        filters: { id: 'root', logic: 'and', conditions: [{ id: 'c1', field: 'city', operator: 'equals', value: 'Rome' }] },
-      },
-    },
+  /** The reader's draft on the DEFAULT view, `v1`: a filter and a sort. */
+  const DEFAULT_VIEW_DRAFT = {
+    sort: [{ field: 'status', order: 'desc' as const }],
+    filters: { id: 'root', logic: 'and' as const, conditions: [{ id: 'c1', field: 'city', operator: 'equals', value: 'Rome' }] },
   };
 
   function deferred<T>() {
@@ -431,26 +468,15 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     return { promise, resolve };
   }
 
-  function AttachFamily({ family }: { family: unknown }) {
-    const attach = useAttachListStateFamily();
-    React.useEffect(() => {
-      attach(family as never);
-      return () => attach(null);
-    }, [attach, family]);
-    return null;
-  }
-
   function mountPersonal(
     entry: string,
-    { landPersonalOn }: { landPersonalOn: 'firstReplace' | 'beforePreferences' },
+    { landPersonalOn }: { landPersonalOn: 'firstReplace' | 'atOnce' },
   ) {
+    patchListDraft(listDraftScope('u1', 'crm_lead', 'v1'), DEFAULT_VIEW_DRAFT as ListDraftPatch);
     const objects = [LEAD];
     const i18n = createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
     const personalRead = deferred<{ data: unknown[]; total: number }>();
-    const preferencesRead = deferred<Record<string, unknown>>();
     const landPersonal = () => personalRead.resolve({ data: [OWN], total: 1 });
-    const landPreferences = () => preferencesRead.resolve({ [listPreferenceKey('crm_lead')]: structuredClone(DEFAULT_VIEW_STATE) });
-    const family = { prefix: 'ui.list.', load: vi.fn(() => preferencesRead.promise), save: vi.fn(async () => {}) };
     const history = createMemoryHistory({ initialEntries: [entry], v5Compat: true });
     const replace = history.replace.bind(history);
     let replaced = 0;
@@ -468,28 +494,22 @@ describe('objectstack#30034 — a personal view opened by its address never carr
       delete: vi.fn(async () => ({})),
     };
     render(
-      <UserStateAdaptersProvider>
-        <AttachFamily family={family} />
-        <ListPreferencesProvider>
-          <I18nProvider instance={i18n}>
-            <ExpressionProvider user={{ id: 'u1', name: 'Sales Rep' }}>
-              <HistoryRouter history={history as never}>
-                <Routes>
-                  <Route
-                    path="/apps/:appName/:objectName/view/:viewId"
-                    element={<ObjectView dataSource={dataSource as never} objects={objects} onEdit={() => {}} />}
-                  />
-                </Routes>
-              </HistoryRouter>
-            </ExpressionProvider>
-          </I18nProvider>
-        </ListPreferencesProvider>
-      </UserStateAdaptersProvider>,
+      <I18nProvider instance={i18n}>
+        <ExpressionProvider user={{ id: 'u1', name: 'Sales Rep' }}>
+          <HistoryRouter history={history as never}>
+            <Routes>
+              <Route
+                path="/apps/:appName/:objectName/view/:viewId"
+                element={<ObjectView dataSource={dataSource as never} objects={objects} onEdit={() => {}} />}
+              />
+            </Routes>
+          </HistoryRouter>
+        </ExpressionProvider>
+      </I18nProvider>,
     );
     return {
       dataSource,
       landPersonal,
-      landPreferences,
       /** The `uf_*` params of the address bar, by name. */
       ufParams: () => Object.fromEntries([...new URLSearchParams(history.location.search)].filter(([key]) => key.startsWith('uf_'))),
     };
@@ -503,11 +523,9 @@ describe('objectstack#30034 — a personal view opened by its address never carr
       .filter(([resource, params]) => resource === 'crm_lead' && (params as { $top?: number } | undefined)?.$top !== 0)
       .map(([, params]) => params as Record<string, unknown>);
 
-  it('the personal views read landing AFTER the preferences read: the address bar ends clean, holding only the personal view\'s own state', async () => {
+  it('the personal views read still out while the default view\'s draft is held: the address bar ends clean, holding only the personal view\'s own state', async () => {
     const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'firstReplace' });
-    // The preferences land first; the personal views read is still out.
     await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
-    page.landPreferences();
     await settle();
     // Nothing wrote the address while the requested view was unresolved, so
     // the personal views read is still out: land it now.
@@ -522,12 +540,10 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     expect(last).not.toContain('Rome');
   });
 
-  it('the reverse order — the personal views read landing BEFORE the preferences read: the address bar ends clean too', async () => {
-    const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'beforePreferences' });
+  it('the personal views read landing at once: the address bar ends clean too', async () => {
+    const page = mountPersonal('/apps/crm/crm_lead/view/pv_mine', { landPersonalOn: 'atOnce' });
     await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
     page.landPersonal();
-    await settle();
-    page.landPreferences();
     await listToolbar();
     expect(switcher()).toHaveTextContent('Paris leads');
     await settle();
@@ -542,7 +558,6 @@ describe('objectstack#30034 — a personal view opened by its address never carr
     const query = applyListStateParams(new URLSearchParams(), { sort }).toString();
     const page = mountPersonal(`/apps/crm/crm_lead/view/pv_mine?${query}`, { landPersonalOn: 'firstReplace' });
     await waitFor(() => expect(page.dataSource.find.mock.calls.some(([r]) => r === 'sys_personal_view')).toBe(true));
-    page.landPreferences();
     await settle();
     page.landPersonal();
     await listToolbar();
@@ -564,33 +579,45 @@ describe('objectstack#30034 — a personal view opened by its address never carr
 describe('objectstack#30073 — a personal view\'s conditions are Filter panel rows, saved back by 保存', () => {
   const ROME = { id: 'root', logic: 'and' as const, conditions: [{ id: 'r1', field: 'city', operator: 'equals', value: 'Rome' }] };
   const romeLink = (path: string) => `${path}?${applyListStateParams(new URLSearchParams(), { filters: ROME as never }).toString()}`;
-  const storeListState = (state: unknown) => localStorage.setItem(localListStateKey('u1', 'crm_lead'), JSON.stringify(state));
-  const storedListState = () => JSON.parse(localStorage.getItem(localListStateKey('u1', 'crm_lead')) ?? '{}');
-  const filterTrigger = () => screen.getByTestId('toolbar-filter-trigger');
+  // objectstack#35955 — the list's draft (what the reader changed and left
+  // when they opened a record), the state a bare address opens on.
+  const storeListState = (state: { perView: Record<string, ListDraftPatch> }) => {
+    for (const [viewId, draft] of Object.entries(state.perView)) patchListDraft(listDraftScope('u1', 'crm_lead', viewId), draft);
+  };
+  const draftOf = (viewId: string) => readListDraft(listDraftScope('u1', 'crm_lead', viewId));
+  /** Open Save's menu and pick 「Save to this view」. */
+  const saveToThisView = async () => {
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-to-view'));
+  };
+  const filterTrigger = () => screen.getByTestId('condition-add-filter');
   const lastLeadRead = (dataSource: ReturnType<typeof mountLeads>['dataSource']) => JSON.stringify(leadReads(dataSource).at(-1));
 
   it('opening a personal view seeds its conditions as panel rows, applied once, and the list is not personalized', async () => {
     const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
     await listToolbar();
     expect(switcher()).toHaveTextContent('Paris leads');
-    await waitFor(() => expect(filterTrigger()).toHaveAttribute('aria-label', 'Filter, 1 active'));
+    // objectstack#35878: with a filter set, the condition row's add control is 「+」.
+    await waitFor(() => expect(filterTrigger()).not.toHaveAttribute('data-empty'));
     fireEvent.click(filterTrigger());
+    // The trigger opens the shared field list (objectstack#35549); the panel
+    // rows are its advanced step.
+    fireEvent.click(await screen.findByTestId('filter-panel-open-advanced'));
     expect(await screen.findByDisplayValue('Paris')).toBeInTheDocument();
     // The panel row is the condition: it is not laid under the list as well.
     await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Paris'));
     expect(lastLeadRead(dataSource).match(/Paris/g)).toHaveLength(1);
-    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+    expect(screen.queryByTestId('list-draft')).toBeNull();
     expect(dataSource.update).not.toHaveBeenCalled();
   });
 
-  it('an edited panel is personalized and offers 保存, which writes the panel into that view in the stored shape', async () => {
+  it('an edited panel is a draft and Save offers 「Save to this view」, which writes the panel into that view in the stored shape', async () => {
     const { dataSource } = mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
     await listToolbar();
-    const marker = await screen.findByTestId('list-personalized-marker');
+    await screen.findByTestId('list-draft-discard');
     // Nothing is written back while the edit is only on screen.
     expect(dataSource.update).not.toHaveBeenCalled();
-    fireEvent.click(marker);
-    fireEvent.click(await screen.findByTestId('list-personalized-save'));
+    await saveToThisView();
 
     await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
     const [resource, id, patch] = dataSource.update.mock.calls[0];
@@ -598,20 +625,64 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     expect(ListViewSchema.safeParse(patch.config).success).toBe(true);
     expect(patch.config.data).toEqual({ provider: 'object', object: 'crm_lead' });
     expect(patch.config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
-    // The list opens again on the saved view: its rows are the view's own.
-    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
+    // The list opens again on the saved view: its rows are the view's own,
+    // Discard and Save go, and one notice says it was saved.
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
     await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Rome'));
     expect(lastLeadRead(dataSource)).not.toContain('Paris');
+    expect(toast.success).toHaveBeenCalledWith('Saved');
   });
 
-  it('a reader without update on their views is not offered 保存', async () => {
+  it('Options offers the same 保存 beside 恢复默认 (objectstack#35551): it writes the panel into that view', async () => {
+    const { dataSource } = mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
+    await listToolbar();
+    await screen.findByTestId('list-draft-discard');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    const reset = await screen.findByTestId('display-reset-button');
+    expect(reset).toBeEnabled();
+    fireEvent.click(screen.getByTestId('display-save-button'));
+
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    const [resource, id, patch] = dataSource.update.mock.calls[0];
+    expect([resource, id, Object.keys(patch)]).toEqual(['sys_personal_view', 'pv_mine', ['config']]);
+    expect(patch.config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
+    // Nothing differs from the view now: no 保存, and 恢复默认 is dimmed.
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    await waitFor(() => expect(screen.getByTestId('display-reset-button')).toBeDisabled());
+    expect(screen.queryByTestId('display-save-button')).toBeNull();
+  });
+
+  it('Options\' 恢复默认 is the marker\'s reset: the view opens as its own again', async () => {
+    const { dataSource } = mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
+    await listToolbar();
+    await screen.findByTestId('list-draft-discard');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    fireEvent.click(await screen.findByTestId('display-reset-button'));
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
+    await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Paris'));
+    expect(dataSource.update).not.toHaveBeenCalled();
+  });
+
+  it('a reader without update on their views is offered no 保存 in Options either', async () => {
     grants.isLoaded = true;
     grants.denied.add('sys_personal_view:update');
     mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
     await listToolbar();
-    fireEvent.click(await screen.findByTestId('list-personalized-marker'));
-    await screen.findByTestId('list-personalized-reset');
-    expect(screen.queryByTestId('list-personalized-save')).toBeNull();
+    await screen.findByTestId('list-draft-discard');
+    fireEvent.click(screen.getByTestId('toolbar-display-trigger'));
+    expect(await screen.findByTestId('display-reset-button')).toBeEnabled();
+    expect(screen.queryByTestId('display-save-button')).toBeNull();
+  });
+
+  it('a reader without update on their views is not offered 「Save to this view」, only 「Save as my view」', async () => {
+    grants.isLoaded = true;
+    grants.denied.add('sys_personal_view:update');
+    mountLeads(romeLink('/apps/crm/crm_lead/view/pv_mine'));
+    await listToolbar();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(await screen.findByTestId('list-draft-save-as')).toBeInTheDocument();
+    expect(screen.queryByTestId('list-draft-save-to-view')).toBeNull();
   });
 
   it('a panel the fold cannot write keeps the refusal: nothing is written to the view', async () => {
@@ -624,8 +695,7 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     });
     const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
     await listToolbar();
-    fireEvent.click(await screen.findByTestId('list-personalized-marker'));
-    fireEvent.click(await screen.findByTestId('list-personalized-save'));
+    await saveToThisView();
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ description: expect.stringContaining('nested condition groups') }),
@@ -642,29 +712,25 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     await listToolbar();
     await waitFor(() => expect(lastLeadRead(dataSource)).toContain('Paris'));
     expect(lastLeadRead(dataSource)).toContain('open');
-    expect(filterTrigger()).toHaveAttribute('aria-label', 'Filter');
+    expect(filterTrigger()).toHaveAttribute('data-empty', 'true');
   });
 
   it('Save as my view leaves the view it came from without the temporary conditions and not personalized', async () => {
     storeListState({ perView: { v1: { filters: ROME } } });
     const first = mountLeads(romeLink('/apps/crm/crm_lead/view/v1'));
     await listToolbar();
-    await screen.findByTestId('list-personalized-marker');
+    await screen.findByTestId('list-draft-discard');
 
-    const menu = openSwitcher();
-    await waitFor(() => expect(within(menu).getByTestId('list-view-switcher-save-mine')).toBeInTheDocument());
-    fireEvent.click(within(menu).getByTestId('list-view-switcher-save-mine'));
-    const dialog = await screen.findByTestId('personal-view-name-dialog');
-    fireEvent.change(within(dialog).getByTestId('personal-view-name-input'), { target: { value: 'Rome leads' } });
-    fireEvent.click(within(dialog).getByTestId('personal-view-name-submit'));
+    const card = await saveAsMyView(openSwitcher(), 'Rome leads');
+    fireEvent.click(within(card).getByTestId('create-view-card-submit'));
 
     await waitFor(() => expect(first.dataSource.create).toHaveBeenCalledTimes(1));
     expect(first.dataSource.create.mock.calls[0][1].config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
     await waitFor(() => expect(switcher()).toHaveTextContent('Rome leads'));
     // The new view holds the conditions as its own rows: nothing reads personalized.
-    await waitFor(() => expect(screen.queryByTestId('list-personalized-marker')).toBeNull());
-    // The source's stored list state is gone.
-    expect(storedListState().perView?.v1).toBeUndefined();
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
+    // The source's draft is gone.
+    expect(draftOf('v1')).toEqual({});
     first.unmount();
 
     const again = mountLeads('/apps/crm/crm_lead/view/v1');
@@ -672,7 +738,73 @@ describe('objectstack#30073 — a personal view\'s conditions are Filter panel r
     expect(switcher()).toHaveTextContent('View 1');
     await waitFor(() => expect(leadReads(again.dataSource).length).toBeGreaterThan(0));
     expect(lastLeadRead(again.dataSource)).not.toContain('Rome');
-    expect(filterTrigger()).toHaveAttribute('aria-label', 'Filter');
-    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+    expect(filterTrigger()).toHaveAttribute('data-empty', 'true');
+    expect(screen.queryByTestId('list-draft')).toBeNull();
+  });
+
+  it('objectstack#35955 — 「Save as my view」 in Save\'s menu asks a name first («<view> copy»), saves the draft, opens the new view and says so', async () => {
+    const first = mountLeads(romeLink('/apps/crm/crm_lead/view/v1'));
+    await listToolbar();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+    const input = await screen.findByDisplayValue('View 1 copy');
+    // Nothing is written before the name is given.
+    expect(first.dataSource.create).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: 'Rome leads' } });
+    fireEvent.click(screen.getByTestId('personal-view-name-submit'));
+
+    await waitFor(() => expect(first.dataSource.create).toHaveBeenCalledTimes(1));
+    const [resource, row] = first.dataSource.create.mock.calls[0];
+    expect(resource).toBe('sys_personal_view');
+    expect(row.label).toBe('Rome leads');
+    expect(row.config.filter).toEqual([{ field: 'city', operator: 'equals', value: 'Rome' }]);
+    await waitFor(() => expect(switcher()).toHaveTextContent('Rome leads'));
+    expect(toast.success).toHaveBeenCalledWith('Saved');
+    await waitFor(() => expect(screen.queryByTestId('list-draft')).toBeNull());
+    expect(draftOf('v1')).toEqual({});
+  });
+
+  it.each([
+    ['no label', undefined, 'Leads copy'],
+    ['a label given as a locale map', { en: 'Hot list', 'zh-CN': '热门' }, 'Hot list copy'],
+  ])('objectstack#35955 L1-b S1 — 「Save as my view」 names the copy by the view\'s tab label when it has %s', async (_case, label, expected) => {
+    const v1 = LEAD.listViews.v1 as Record<string, unknown>;
+    const authored = v1.label;
+    if (label === undefined) delete v1.label;
+    else v1.label = label;
+    try {
+      mountLeads(romeLink('/apps/crm/crm_lead/view/v1'));
+      await listToolbar();
+      fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+      fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+      // Never 「 copy」 or 「[object Object] copy」: the name the tab draws.
+      expect(await screen.findByDisplayValue(expected)).toBeInTheDocument();
+    } finally {
+      v1.label = authored;
+    }
+  });
+
+  it('objectstack#35955 — the draft\'s row colour is saved too: into the reader\'s own view, and into a view of their own', async () => {
+    const RED = { field: 'status', colors: { open: 'red' } };
+    storeListState({ perView: { pv_mine: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const { dataSource } = mountLeads('/apps/crm/crm_lead/view/pv_mine');
+    await listToolbar();
+    await saveToThisView();
+    await waitFor(() => expect(dataSource.update).toHaveBeenCalledTimes(1));
+    const patch = dataSource.update.mock.calls[0][2];
+    expect(patch.config.rowColor).toEqual(RED);
+    expect(patch.config.sort).toEqual([{ field: 'name', order: 'desc' }]);
+    expect(ListViewSchema.safeParse(patch.config).success).toBe(true);
+    cleanup();
+
+    storeListState({ perView: { v1: { sort: [{ field: 'name', order: 'desc' }], rowColor: RED } } });
+    const second = mountLeads('/apps/crm/crm_lead/view/v1');
+    await listToolbar();
+    fireEvent.pointerDown(await screen.findByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    fireEvent.click(await screen.findByTestId('list-draft-save-as'));
+    await screen.findByDisplayValue('View 1 copy');
+    fireEvent.click(screen.getByTestId('personal-view-name-submit'));
+    await waitFor(() => expect(second.dataSource.create).toHaveBeenCalledTimes(1));
+    expect(second.dataSource.create.mock.calls[0][1].config.rowColor).toEqual(RED);
   });
 });

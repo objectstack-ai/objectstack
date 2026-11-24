@@ -42,6 +42,17 @@
  * included. Until the server has answered, Authorize is
  * disabled; when it cannot answer, the page says the destination could not be
  * confirmed and Authorize stays disabled. Deny always works.
+ *
+ * ## After a decision
+ *
+ * Once the server has answered a decision with a redirect, the signed query is
+ * spent, so the page is terminal: Authorize and Deny are never enabled again.
+ * An `http(s)` redirect navigates the tab away. Any other redirect (a native
+ * app's custom scheme) is handed to the operating system and leaves this tab
+ * where it is, so the page replaces the consent card with the outcome, tells
+ * the person to return to the application, and offers a link that opens the
+ * same redirect again. A decision the server refused keeps the consent card
+ * and enables the buttons again.
  */
 
 import { useEffect, useState } from 'react';
@@ -93,18 +104,30 @@ const REQUEST_PENDING: RequestLookup = { state: 'pending' };
 const REQUEST_UNCONFIRMED: RequestLookup = { state: 'unconfirmed' };
 
 /**
- * Where a redirect sends the grant, as a person reads it: the host (with its
- * port) of an `http(s)` redirect, and any other redirect exactly as it is.
+ * The host (with its port) of an `http(s)` redirect, the kind a browser tab
+ * navigates to; `null` for any other redirect (a native app's custom scheme,
+ * which the operating system takes and the tab never leaves for).
  */
-function redirectDestination(redirectUri: string): string {
+function webRedirectHost(redirectUri: string): string | null {
   try {
     const url = new URL(redirectUri);
     if ((url.protocol === 'https:' || url.protocol === 'http:') && url.host) return url.host;
   } catch {
-    // Not a URL the platform can parse: shown as it is.
+    // Not a URL the platform can parse: not a web redirect.
   }
-  return redirectUri;
+  return null;
 }
+
+/**
+ * Where a redirect sends the grant, as a person reads it: the host (with its
+ * port) of an `http(s)` redirect, and any other redirect exactly as it is.
+ */
+function redirectDestination(redirectUri: string): string {
+  return webRedirectHost(redirectUri) ?? redirectUri;
+}
+
+/** A decision the server answered with a redirect the tab does not leave for. */
+type HandedOff = { accept: boolean; redirect: string };
 
 /** Read the server's account of the signed request. */
 async function readConsentRequest(res: Response): Promise<RequestLookup> {
@@ -135,6 +158,7 @@ export function OAuthConsentPage() {
   const navigate = useNavigate();
   const { user, isLoading } = useAuth();
   const [submitting, setSubmitting] = useState(false);
+  const [handedOff, setHandedOff] = useState<HandedOff | null>(null);
   // Keyed by the client id it answers for, so the lookup below is derived
   // rather than reset from an effect.
   const [answer, setAnswer] = useState<{ clientId: string; lookup: ClientLookup } | null>(null);
@@ -213,6 +237,9 @@ export function OAuthConsentPage() {
 
   const handleDecision = async (accept: boolean) => {
     setSubmitting(true);
+    // Set once the server has answered with a redirect: the signed query is
+    // spent, so the buttons are never enabled again.
+    let terminal = false;
     try {
       const res = await fetch(`${AUTH_BASE}/oauth2/consent`, {
         method: 'POST',
@@ -232,7 +259,9 @@ export function OAuthConsentPage() {
         (data as { redirectURI?: string }).redirectURI ??
         (data as { url?: string }).url;
       if (redirect) {
-        window.location.href = redirect;
+        terminal = true;
+        if (webRedirectHost(redirect) === null) setHandedOff({ accept, redirect });
+        window.location.assign(redirect);
         return;
       }
       const title = accept
@@ -249,12 +278,57 @@ export function OAuthConsentPage() {
         { description: (err as Error).message },
       );
     } finally {
-      setSubmitting(false);
+      if (!terminal) setSubmitting(false);
     }
   };
 
   const appName =
     identified?.name ?? t('oauth.consent.unknownApp', { defaultValue: 'an application' });
+
+  if (handedOff) {
+    return (
+      <div className="flex min-h-svh w-full flex-1 items-center justify-center bg-background px-4">
+        <Card className="w-full max-w-md" data-testid="oauth-consent-handed-off">
+          <CardHeader className="items-center text-center">
+            <div className="mb-3 rounded-full border bg-muted p-3">
+              {handedOff.accept ? (
+                <Check className="h-7 w-7 text-green-600 dark:text-green-400" />
+              ) : (
+                <X className="h-7 w-7 text-muted-foreground" />
+              )}
+            </div>
+            <CardTitle className="text-xl">
+              {handedOff.accept
+                ? t('oauth.consent.granted', { defaultValue: 'Access granted' })
+                : t('oauth.consent.denied', { defaultValue: 'Access denied' })}
+            </CardTitle>
+            <CardDescription>
+              {identified
+                ? t('oauth.consent.returnToApp', {
+                    appName: identified.name,
+                    defaultValue: `Return to ${identified.name} to continue. You can close this tab.`,
+                  })
+                : t('oauth.consent.returnToUnnamedApp', {
+                    defaultValue: 'Return to the application to continue. You can close this tab.',
+                  })}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline" className="w-full">
+              <a href={handedOff.redirect} data-testid="oauth-consent-open-app">
+                {identified
+                  ? t('oauth.consent.openApp', {
+                      appName: identified.name,
+                      defaultValue: `Open ${identified.name}`,
+                    })
+                  : t('oauth.consent.openUnnamedApp', { defaultValue: 'Open the application' })}
+              </a>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-svh w-full flex-1 items-center justify-center bg-background px-4">

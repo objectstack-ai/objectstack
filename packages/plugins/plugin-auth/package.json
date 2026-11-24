@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/plugin-auth",
-  "version": "18.5.0",
+  "version": "18.6.0",
   "license": "Apache-2.0",
   "description": "Authentication & Identity Plugin for ObjectStack",
   "type": "commonjs",
@@ -55,6 +55,7 @@
     "@noble/hashes": "^2.4.0",
     "@objectstack/core": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
+    "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/rest": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/spec": "workspace:*",
@@ -68,7 +69,6 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/formula": "workspace:*",
     "@objectstack/objectql": "workspace:*",
-    "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",
     "@objectstack/service-cache": "workspace:*",
     "@objectstack/service-cluster": "workspace:*",

@@ -18,6 +18,8 @@
  * node inspector are real.
  */
 
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
@@ -177,8 +179,8 @@ async function openAndSelect(type: string, name: string, host: MetadataAreaHost 
 
 /** The node inspector's reason, as its accessible description resolves. */
 async function nodeInspectorReason(): Promise<string | null> {
-  // The inspector is mounted once its Remove-node control is.
-  await screen.findByRole('button', { name: t('engine.inspector.flowNode.remove', 'en-US') });
+  // The inspector is mounted once its "···" menu (it holds Remove node) is.
+  await screen.findByRole('button', { name: t('engine.inspector.flowNode.moreActions', 'en-US') });
   const group = document.querySelector<HTMLElement>('[data-testid="flow-node-readonly-reason"]');
   if (!group) return null;
   const id = group.getAttribute('aria-describedby');
@@ -189,7 +191,7 @@ describe('the metadata editor page names the read-only cause to the scoped inspe
   it('a writable flow: the node inspector is editable and carries no reason', async () => {
     await openAndSelect('flow', 'close_case');
     expect(await nodeInspectorReason()).toBeNull();
-    expect(screen.getByRole('button', { name: t('engine.inspector.flowNode.remove', 'en-US') })).toBeEnabled();
+    expect(screen.getByRole('button', { name: t('engine.inspector.flowNode.moreActions', 'en-US') })).toBeEnabled();
   });
 
   it("a read-only package's area: the package is the reason, as Studio's Automations pillar says it", async () => {

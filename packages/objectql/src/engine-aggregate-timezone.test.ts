@@ -2,13 +2,16 @@
 //
 // ADR-0053 Phase 2 (D2): `engine.aggregate({ timezone })` routing.
 //
-// Native driver date bucketing (`date_trunc`) is UTC-only, so a non-UTC
-// reference timezone must force the in-memory path (uniform across drivers)
-// while UTC / unset keeps the native fast path. These tests pin both halves
-// using a driver that advertises native day bucketing and records whether its
-// native `aggregate()` was taken.
+// A driver that does NOT declare `supports.zonedDateBucketing` buckets
+// natively in UTC only, so a non-UTC reference timezone must force the
+// in-memory path while UTC / unset keeps the native fast path. These tests pin
+// both halves using a driver that advertises native day bucketing and records
+// whether its native `aggregate()` was taken. [#33697] D2 as amended: a driver
+// that DOES declare it receives the zone, resolved by the runtime first — the
+// last describe block pins that dispatch, spelling by spelling.
 
 import { describe, it, expect } from 'vitest';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 /**
@@ -102,5 +105,97 @@ describe('engine.aggregate timezone routing (ADR-0053 Phase 2)', () => {
       { closed_at: '2024-02-29', total: 10 },
       { closed_at: '2024-03-01', total: 5 },
     ]);
+  });
+});
+
+// [#33697] ADR-0053 Phase 2 D2 as amended: a driver declaring
+// `supports.zonedDateBucketing` is handed the zone the RUNTIME resolves the
+// request's string to, and only an area/location name; review items (d) and
+// (e) on the card name the spellings.
+describe('engine.aggregate zoned-bucket pushdown (#33697, D2 as amended)', () => {
+  const zonedDayBucket = (timezone: string): EngineAggregateOptions => ({
+    groupBy: [{ field: 'closed_at', dateGranularity: 'day' }],
+    aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+    timezone,
+  });
+
+  async function makeZonedEngine(zoned: boolean | undefined) {
+    const received: any[] = [];
+    let findCalls = 0;
+    const driver: any = {
+      name: 'zoned-mock',
+      version: '0.0.0',
+      supports: {
+        queryDateGranularity: { day: true, week: true, month: true, quarter: true, year: true },
+        ...(zoned === undefined ? {} : { zonedDateBucketing: zoned }),
+      },
+      async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
+      async find() { findCalls += 1; return ROWS.slice(); },
+      async findOne() { return null; },
+      async create(_o: string, d: any) { return d; },
+      async update(_o: string, _id: string, d: any) { return d; },
+      async delete() { return true; },
+      async count() { return ROWS.length; },
+      async bulkCreate(_o: string, r: any[]) { return r; },
+      async bulkUpdate() { return []; }, async bulkDelete() {},
+      async beginTransaction() { return { __trx: true, commit: async () => {}, rollback: async () => {} }; },
+      async commit() {}, async rollback() {},
+      async aggregate(_object: string, ast: any) { received.push(ast); return []; },
+    };
+    const engine = new ObjectQL();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: 'deal',
+      fields: { closed_at: { type: 'datetime' }, amount: { type: 'number' } },
+    } as any);
+    return { engine, received, finds: () => findCalls };
+  }
+
+  it.each([
+    ['Asia/Taipei', 'Asia/Taipei'],
+    ['Europe/Berlin', 'Europe/Berlin'],
+    ['CST', 'America/Chicago'],
+    ['US/Eastern', 'America/New_York'],
+    ['Etc/GMT+5', 'Etc/GMT+5'],
+  ])('pushes %s down as the resolved name %s', async (asked, sent) => {
+    const { engine, received, finds } = await makeZonedEngine(true);
+    await engine.aggregate('deal', zonedDayBucket(asked));
+    expect(finds()).toBe(0);
+    expect(received).toHaveLength(1);
+    expect(received[0].timezone).toBe(sent);
+  });
+
+  it.each(['UTC', 'Etc/UTC', 'GMT', 'Zulu'])('reads %s as the UTC bucket: native, no zone sent', async (asked) => {
+    const { engine, received, finds } = await makeZonedEngine(true);
+    await engine.aggregate('deal', zonedDayBucket(asked));
+    expect(finds()).toBe(0);
+    expect(received).toHaveLength(1);
+    expect('timezone' in received[0]).toBe(false);
+  });
+
+  it.each(['EST5EDT', '+08:00', 'Bogus/Zone'])('keeps %s in memory: it resolves to no area/location name', async (asked) => {
+    const { engine, received, finds } = await makeZonedEngine(true);
+    await engine.aggregate('deal', zonedDayBucket(asked));
+    expect(received).toHaveLength(0);
+    expect(finds()).toBe(1);
+  });
+
+  it.each([false, undefined])('keeps a non-UTC zone in memory on a driver whose bit is %s', async (bit) => {
+    const { engine, received, finds } = await makeZonedEngine(bit);
+    await engine.aggregate('deal', zonedDayBucket('Asia/Taipei'));
+    expect(received).toHaveLength(0);
+    expect(finds()).toBe(1);
+  });
+
+  it('sends no zone for a query with no date bucket', async () => {
+    const { engine, received } = await makeZonedEngine(true);
+    await engine.aggregate('deal', {
+      groupBy: ['closed_at'],
+      aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+      timezone: 'Asia/Taipei',
+    } satisfies EngineAggregateOptions);
+    expect(received).toHaveLength(1);
+    expect('timezone' in received[0]).toBe(false);
   });
 });

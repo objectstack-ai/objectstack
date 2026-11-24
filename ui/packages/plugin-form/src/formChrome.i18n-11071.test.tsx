@@ -197,6 +197,8 @@ describe('MasterDetailForm chrome resolves through the i18n catalogue (objectui#
     // The header record has loaded and a line has been typed, so the save has
     // something to send.
     await waitFor(() => expect((container.querySelector('input[name="ref"]') as HTMLInputElement)?.value).toBe('PO-1'));
+    // A line to type into (the grid draws no trailing entry row, objectstack#35507).
+    fireEvent.click(await screen.findByTestId('line-items-add'));
     const cell = (await screen.findAllByLabelText('Line Total'))[0];
     fireEvent.change(cell, { target: { value: '5' } });
     await waitFor(() => expect(screen.getByTestId('md-form-submit')).not.toBeDisabled());

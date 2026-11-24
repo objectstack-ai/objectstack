@@ -1,9 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Left sidebar listing the signed-in user's AI conversations. Active row is
- * derived from `useParams<{ conversationId }>()`; clicking a row navigates to
- * `/ai/:id`, the "New chat" button navigates to `/ai`.
+ * Sidebar listing the signed-in user's AI conversations. Two hosts:
+ *  - a routed page: the active row is `useParams<{ conversationId }>()`, a row
+ *    navigates to `/ai/:agent/:id` and "New chat" to `/ai/:agent?new=1`;
+ *  - the console's chat drawer (objectstack#34608), which has no route: it
+ *    passes {@link ConversationsSidebarProps.onSelectConversation} and its
+ *    siblings, and the list calls them instead of navigating.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -44,6 +47,16 @@ export interface ConversationsSidebarProps {
   refreshKey?: number | string;
   titleHints?: Record<string, string>;
   onNavigate?: () => void;
+  /**
+   * objectstack#34608 — the drawer host. When set, a row calls this instead of
+   * navigating, the active row is {@link activeConversationId}, and "New chat"
+   * and deleting the open conversation call {@link onNewConversation}.
+   */
+  onSelectConversation?: (conversation: { id: string; agentId?: string }) => void;
+  /** The drawer host's "New chat" (also after deleting the open conversation). */
+  onNewConversation?: () => void;
+  /** The drawer host's open conversation; read only with {@link onSelectConversation}. */
+  activeConversationId?: string;
 }
 
 function formatTimestamp(
@@ -145,10 +158,15 @@ export function ConversationsSidebar({
   refreshKey,
   titleHints,
   onNavigate,
+  onSelectConversation,
+  onNewConversation,
+  activeConversationId,
 }: ConversationsSidebarProps) {
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
-  const { conversationId: activeId } = useParams<{ conversationId?: string }>();
+  const { conversationId: routeActiveId } = useParams<{ conversationId?: string }>();
+  const hosted = onSelectConversation !== undefined;
+  const activeId = hosted ? activeConversationId : routeActiveId;
   const { conversations, isLoading, error, remove, rename } = useConversationList({
     userId,
     apiBase,
@@ -220,20 +238,22 @@ export function ConversationsSidebar({
     // resumes the last cached conversation (by design), so without the flag
     // this button silently landed back on the current chat. Stays on the
     // active agent's surface.
-    navigate(agentRoute ? `/ai/${agentRoute}?new=1` : '/ai?new=1');
+    if (hosted) onNewConversation?.();
+    else navigate(agentRoute ? `/ai/${agentRoute}?new=1` : '/ai?new=1');
     onNavigate?.();
-  }, [navigate, agentRoute, onNavigate]);
+  }, [hosted, onNewConversation, navigate, agentRoute, onNavigate]);
 
   const handleDelete = useCallback(
     async (e: React.MouseEvent, id: string) => {
       e.stopPropagation();
       await remove(id);
       if (id === activeId) {
-        navigate(agentRoute ? `/ai/${agentRoute}` : '/ai', { replace: true });
+        if (hosted) onNewConversation?.();
+        else navigate(agentRoute ? `/ai/${agentRoute}` : '/ai', { replace: true });
         onNavigate?.();
       }
     },
-    [remove, activeId, navigate, agentRoute, onNavigate],
+    [remove, activeId, hosted, onNewConversation, navigate, agentRoute, onNavigate],
   );
 
   const handleRenameSubmit = useCallback(
@@ -296,7 +316,7 @@ export function ConversationsSidebar({
           <div className="flex flex-col py-1">
             {groupConversationsByDate(visible).map((group) => (
               <section key={group.key} data-testid={`ai-conversation-group-${group.key}`}>
-                <h3 className="px-3 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                <h3 className="px-3 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   {t(`console.ai.group.${group.key}`, { defaultValue: CONVERSATION_GROUP_LABELS[group.key] })}
                 </h3>
                 <ul className="flex flex-col">
@@ -308,7 +328,8 @@ export function ConversationsSidebar({
                       active={c.id === activeId}
                       renaming={c.id === renamingId}
                       onSelect={() => {
-                        navigate(conversationHref(c));
+                        if (onSelectConversation) onSelectConversation({ id: c.id, agentId: c.agentId });
+                        else navigate(conversationHref(c));
                         onNavigate?.();
                       }}
                       onDelete={(e) => handleDelete(e, c.id)}
@@ -471,7 +492,7 @@ function ConversationRow({
             </span>
           ) : null}
           <span
-            className="mt-0.5 block text-[10px] text-muted-foreground"
+            className="mt-0.5 block text-xs text-muted-foreground"
             title={absoluteTimestamp(conversation.updatedAt ?? conversation.createdAt, displayLocale)}
           >
             {formatTimestamp(conversation.updatedAt ?? conversation.createdAt, t, displayLocale)}

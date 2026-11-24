@@ -161,8 +161,12 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
     expect(err.status).toBe(500);
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(ids(driver.rowsOf('acct'))).toEqual(['a1']);
-    // The dependent the walk reached first is gone: nothing can roll it back.
-    expect(ids(driver.rowsOf('line'))).toEqual(['l2']);
+    // The dependents the walk deleted are gone: nothing can roll them back.
+    // [ruling 6893661036, F1] The walk deletes a relation's dependents as ONE
+    // batch (one set delete, then the per-row after phase and the roll-up
+    // recompute), so the refusal arrives after the whole batch is removed,
+    // where the per-child walk stopped after the first child.
+    expect(ids(driver.rowsOf('line'))).toEqual([]);
   });
 
   it('a predicate delete (multi) on a runtime that cannot roll back: refused the same way, the parent still stored', async () => {

@@ -21,7 +21,11 @@
  * derived from its authored label.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, renderHook } from '@testing-library/react';
+import { render, screen, waitFor, renderHook, within } from '@testing-library/react';
+
+// Section names are read inside the <form>: the section navigation above it
+// repeats each name once two or more sections are drawn (objectstack#34605).
+const inForm = () => within(document.querySelector('form') as HTMLElement);
 import React from 'react';
 import { createI18n, I18nProvider, useObjectLabel } from '@object-ui/i18n';
 import { registerAllFields } from '@object-ui/fields';
@@ -140,8 +144,8 @@ describe('form section headings resolve `_sections` (objectstack#5408)', () => {
     // The non-tabbed grouping heading goes through the same resolver, so a
     // `simple` form view's headings never diverge from its tabbed sibling.
     renderForm(withSections(), { formType: 'simple', sections: NAMED_SECTIONS });
-    await waitFor(() => expect(screen.getByText('工单信息')).toBeTruthy());
-    expect(screen.getByText('SLA')).toBeTruthy();
+    await waitFor(() => expect(inForm().getByText('工单信息')).toBeTruthy());
+    expect(inForm().getByText('SLA')).toBeTruthy();
   });
 
   it('falls back to the authored label when the bundle carries no `_sections`', async () => {

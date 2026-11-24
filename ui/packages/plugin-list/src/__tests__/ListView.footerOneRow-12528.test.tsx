@@ -11,6 +11,13 @@
  * list: the record count at the left, the column summaries at the right of the
  * same row, truncated with the full text as their tooltip.
  *
+ * ⚠️ RETIRED by objectstack#35548: the summaries are the grid's own last
+ * table row again, each under its column (so they line up at any width and
+ * scroll with it), led by 「Count N」. What is pinned now is the hand-back:
+ * the list hands the grid no `onColumnSummaryChange`, and its count row holds
+ * the count alone. The grid's row is pinned in `@object-ui/plugin-grid`
+ * (`footerSummaryHost-12528.test.tsx`, `column-features.test.tsx`).
+ *
  * The grid hands its summaries up through the `onColumnSummaryChange` host
  * channel and draws no summary row of its own (that half is pinned in
  * `@object-ui/plugin-grid`, `footerSummaryHost-12528.test.tsx`). Here the grid
@@ -50,7 +57,11 @@ const reports = vi.fn();
  * row. So the summaries reach the row one render later, and every assertion
  * about them (present or absent) waits for the report first.
  */
+/** Every props object the probe was rendered with. */
+const probeProps: Array<{ onColumnSummaryChange?: unknown }> = [];
+
 function GridProbe(props: { onColumnSummaryChange?: (s: typeof SUMMARIES | null) => void }) {
+  probeProps.push(props);
   const { onColumnSummaryChange } = props;
   React.useEffect(() => {
     reports(reported);
@@ -98,34 +109,17 @@ function renderList() {
   );
 }
 
-const SUMMARY_TEXT = 'Annual Revenue: Sum: 109,800,000.00 · Number of Employees: Avg: 760';
-
-describe('ListView — one footer row with the count and the column summaries (objectui#12528)', () => {
-  it('draws the count at the left and the summaries at the right of the same row', async () => {
+describe('ListView hands the grid its summaries back (objectui#12528 retired by objectstack#35548)', () => {
+  it('the grid is handed no summary channel, so it draws its own summary row; the count row holds the count alone', async () => {
     renderList();
 
     const bar = await screen.findByTestId('record-count-bar');
     await waitFor(() => expect(within(bar).getByText('9 records')).toBeInTheDocument());
-    const summaries = await within(bar).findByTestId('record-count-summaries');
-    expect(summaries).toHaveTextContent(SUMMARY_TEXT);
-    // Truncated when it does not fit, with the full text as its tooltip.
-    expect(summaries).toHaveAttribute('title', SUMMARY_TEXT);
-    expect(summaries).toHaveClass('truncate');
-    // One row: no grid summary row anywhere, and one record-count bar.
-    expect(screen.queryByTestId('column-summary-footer')).toBeNull();
-    expect(screen.getAllByTestId('record-count-bar')).toHaveLength(1);
-  });
-
-  it('CONTROL: a grid that reports no summaries leaves the count row as it was', async () => {
-    reported = null;
-    renderList();
-
-    const bar = await screen.findByTestId('record-count-bar');
-    await waitFor(() => expect(within(bar).getByText('9 records')).toBeInTheDocument());
-    // Not vacuous: the grid has reported (its `null`), and the row it would
-    // have changed has re-rendered, before the absence is read.
-    await waitFor(() => expect(reports).toHaveBeenCalledWith(null));
+    // The probe reports through the channel only if it is handed one.
+    await waitFor(() => expect(reports).toHaveBeenCalled());
     await act(async () => {});
-    expect(within(screen.getByTestId('record-count-bar')).queryByTestId('record-count-summaries')).toBeNull();
+    expect(probeProps.at(-1)?.onColumnSummaryChange).toBeUndefined();
+    expect(within(bar).queryByTestId('record-count-summaries')).toBeNull();
+    expect(screen.getAllByTestId('record-count-bar')).toHaveLength(1);
   });
 });

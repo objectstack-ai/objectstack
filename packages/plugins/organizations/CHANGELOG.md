@@ -1,5 +1,142 @@
 # @objectstack/organizations
 
+## 18.6.0
+
+### Patch Changes
+
+- 2d94860: fix(organizations): a new organization's seed resolves its founder
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a walled (`isolated`) deployment, `POST /api/v1/auth/organization/create` replayed the app's seed into the new organization before better-auth wrote the founder's `sys_member` row. A seed loaded into an organization resolves a person only through membership in that organization, so every person reference the seed declared (`Field.user()`, `Field.lookup('sys_user')`, the injected `owner_id`) was stored empty with "not a member of organization ORG", the founder's included.
+  
+  The per-organization replay now waits, for an organization a signed-in person creates (`POST /api/v1/auth/organization/create`, whose `sys_organization` insert carries that person as `attributedUserId`), until that organization's first `sys_member` row is stored, and replays then. A seed record naming the founder now stores the founder's user id. A person who is not a member of the new organization still resolves to nothing, with the same warning. The replay still runs once per organization, still seeds in the founder's language, and still finishes before a host's `onOrganizationCreated` callback runs. Organizations created any other way (the Default Organization bootstrap, a system insert, or a server-side `auth.api.createOrganization({ body: { userId } })` call made with no auth request in scope, whose insert carries no `attributedUserId`) replay on the insert, as before.
+- e26e7be: Clause-②: no
+  Metadata-protocol: none
+  
+  On a walled boot, the Default Organization's seed now resolves the platform owner it is bound to. The default-organization bootstrap writes the `default` organization as SYSTEM and then the owner's `sys_member` row; the per-organization seed replay ran on the organization write, before that member existed, so a seeded `Field.user()` or `Field.lookup('sys_user')` column naming the owner was stored as NULL (only `owner_id` was repaired later, by the seed-ownership handoff). The replay of the organization that bootstrap creates now waits for the owner's member row and runs inside it, the same way an organization a person creates already does, with the owner as the locale user. When the bootstrap binds nobody (the bind was decided earlier, or the member write failed), the organization still replays once, with no person, as soon as the bootstrap call is over. Un-walled boots and every other organization write are unchanged.
+- Updated dependencies [e53e02e]
+- Updated dependencies [1f923d7]
+- Updated dependencies [64c4285]
+- Updated dependencies [b1efa37]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [fb79d47]
+- Updated dependencies [99a6ec0]
+- Updated dependencies [69783b7]
+- Updated dependencies [329f2f7]
+- Updated dependencies [bb17350]
+- Updated dependencies [3372da0]
+- Updated dependencies [a061708]
+- Updated dependencies [c59198f]
+- Updated dependencies [fb3d1ff]
+- Updated dependencies [2068e03]
+- Updated dependencies [5c7e448]
+- Updated dependencies [de3538c]
+- Updated dependencies [5326028]
+- Updated dependencies [f7b2d02]
+- Updated dependencies [bb3c163]
+- Updated dependencies [d635555]
+- Updated dependencies [0ac112f]
+- Updated dependencies [c934631]
+- Updated dependencies [63e47fe]
+- Updated dependencies [b005638]
+- Updated dependencies [e5c2d76]
+- Updated dependencies [db3bbd3]
+- Updated dependencies [9f32c0f]
+- Updated dependencies [109a903]
+- Updated dependencies [2539ad9]
+- Updated dependencies [98a4449]
+- Updated dependencies [fdfccbf]
+- Updated dependencies [fa1fb6f]
+- Updated dependencies [d10f652]
+- Updated dependencies [ba03d5e]
+- Updated dependencies [3e49033]
+- Updated dependencies [6091b64]
+- Updated dependencies [61ded62]
+- Updated dependencies [18194fb]
+- Updated dependencies [75ab117]
+- Updated dependencies [071323e]
+- Updated dependencies [41ff7c3]
+- Updated dependencies [aab8b31]
+- Updated dependencies [e0670b9]
+- Updated dependencies [50d655f]
+- Updated dependencies [3a08833]
+- Updated dependencies [0e2e4f5]
+- Updated dependencies [bef80d3]
+- Updated dependencies [e0670b9]
+- Updated dependencies [9e6fee1]
+- Updated dependencies [52ec26f]
+- Updated dependencies [c2cabce]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [6fb3d0c]
+- Updated dependencies [2c296cf]
+- Updated dependencies [fa9d695]
+- Updated dependencies [d9c4b62]
+- Updated dependencies [8c6ddc5]
+- Updated dependencies [1bf90a0]
+- Updated dependencies [27c0b20]
+- Updated dependencies [842637a]
+- Updated dependencies [c4c0794]
+- Updated dependencies [227ae36]
+- Updated dependencies [1177058]
+- Updated dependencies [12b69e1]
+- Updated dependencies [d4e4dfb]
+- Updated dependencies [22bf910]
+- Updated dependencies [371e5f1]
+- Updated dependencies [11e0441]
+- Updated dependencies [f23c71e]
+- Updated dependencies [4240719]
+- Updated dependencies [6302c2c]
+- Updated dependencies [7b3e955]
+- Updated dependencies [066177b]
+- Updated dependencies [ddab49d]
+- Updated dependencies [1538596]
+- Updated dependencies [21d84a8]
+- Updated dependencies [4fb8790]
+- Updated dependencies [36af6b0]
+- Updated dependencies [a1082f3]
+- Updated dependencies [f02f4f6]
+- Updated dependencies [62d9d0d]
+- Updated dependencies [e61af97]
+- Updated dependencies [758bbe7]
+- Updated dependencies [99bd220]
+- Updated dependencies [13057ce]
+- Updated dependencies [a8aa6ab]
+- Updated dependencies [9cf74ae]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [b846710]
+- Updated dependencies [b633afe]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [743308b]
+- Updated dependencies [bb169c3]
+- Updated dependencies [2487242]
+- Updated dependencies [c0665c0]
+- Updated dependencies [92a5cac]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [ad9b74b]
+- Updated dependencies [348fbc0]
+- Updated dependencies [ea1edf9]
+- Updated dependencies [0ff3b14]
+- Updated dependencies [e2a4c66]
+- Updated dependencies [6dd5716]
+- Updated dependencies [c37e47a]
+- Updated dependencies [3f5ffe7]
+- Updated dependencies [ad7331a]
+- Updated dependencies [a6c2b83]
+- Updated dependencies [8b7c5d5]
+- Updated dependencies [1354d2a]
+- Updated dependencies [e735892]
+- Updated dependencies [a2bb7d5]
+- Updated dependencies [6feea4e]
+- Updated dependencies [c1ec627]
+  - @objectstack/spec@18.6.0
+  - @objectstack/plugin-auth@18.6.0
+  - @objectstack/core@18.6.0
+  - @objectstack/formula@18.6.0
+  - @objectstack/types@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

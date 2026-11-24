@@ -51,6 +51,8 @@ const ledgerIndexes = [{ fields: ['metadata_type', 'package_id', 'name'], unique
 const plain = (name: string, columns: string[], unique = true): PhysicalIndex => ({ name, columns, unique });
 /** The package-less guard `metadata-protocol` builds at boot: a partial UNIQUE on the narrower key. */
 const GUARD_NAME = 'uniq_sys_metadata_activation_packageless';
+/** The `(created_at, id)` index every managed table carries since #33695 (`IMPLICIT_SYSTEM_COLUMN_KEYS`). */
+const DEFAULT_ORDER = `idx_${LEDGER}_created_at_id`;
 const guard: PhysicalIndex = { name: GUARD_NAME, columns: ['metadata_type', 'name'], unique: true, partial: true };
 
 /** The differ's verdict over the ledger as this release declares it, composed as `detectTableIndexDrift` composes it. */
@@ -447,7 +449,7 @@ declareDialectCell(MYSQL_CELL, 'activation ledger package-less guard on MySQL 8 
         'SELECT DISTINCT INDEX_NAME AS n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
         [LEDGER],
       );
-      expect(stats.map((r: any) => r.n).sort()).toEqual(['PRIMARY', NEW, GUARD_NAME].sort());
+      expect(stats.map((r: any) => r.n).sort()).toEqual(['PRIMARY', DEFAULT_ORDER, NEW, GUARD_NAME].sort());
 
       await driver.create(LEDGER, { id: 'a', metadata_type: 'flow', name: 'x', active: false });
       // A second row naming no package: refused by the guard.
@@ -517,7 +519,7 @@ declareDialectCell(MYSQL_CELL, 'activation ledger package-less guard on MariaDB 
         'SELECT DISTINCT INDEX_NAME AS n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
         [LEDGER],
       );
-      expect(stats.map((r: any) => r.n).sort()).toEqual(['PRIMARY', NEW, GUARD_NAME].sort());
+      expect(stats.map((r: any) => r.n).sort()).toEqual(['PRIMARY', DEFAULT_ORDER, NEW, GUARD_NAME].sort());
 
       await driver.create(LEDGER, { id: 'a', metadata_type: 'flow', name: 'x', active: false });
       // A second row naming no package: refused by the guard.

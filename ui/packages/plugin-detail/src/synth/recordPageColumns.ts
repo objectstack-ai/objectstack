@@ -16,17 +16,23 @@
  * one rule wherever it is drawn (the page, the split pane, the overlay drawer,
  * the maximized pane, a phone):
  *
- *  - 760 px and up: details | the right column (320 px) — the 动态 panel
- *    first, then the related panels;
- *  - 1120 px and up: the same, wide — the details field grid takes three
- *    columns, the right column 380 px, the 动态 panel five entries;
- *  - below 760 px: ONE column — the details sections, then the right
- *    column's panels in their order.
+ *  - a full page with room for a 320 px left column and 400 px of tabs
+ *    (objectstack#35890, figure 41, `RECORD_PAGE_PIN_MIN_WIDTH`): the details
+ *    pinned to a left column (400 px, the reader may drag it; it narrows on
+ *    its own to leave the tabs 400), the other tabs beside it — the tab row
+ *    without the details, open on its first tab — each side scrolling on its
+ *    own;
+ *  - anywhere else (narrower, a drawer, a pane, a phone, a page with no other
+ *    tab, or one whose field groups place a related table): the tab row with
+ *    the details as its first tab, 「详情」, the open tab drawn the full width.
+ *    The field grid takes up to three columns; pinned, one.
  *
- * (Container widths — see the two constants for how they are derived.) There
- * is no tabbed tier: the strip's blocks are always laid out
- * (objectstack#27524 retired it with the three-column tier and the related
- * rail), and the 动态 stream is a panel, never a column.
+ * (Container widths — see the two constants for how they are derived.) The
+ * tab row is the details, one tab per related list, 附件, 审批, 动态
+ * (objectstack#35595); a page with only the details draws none. A strip the
+ * page places (`record:path`, `record:highlights`) sits atop the details.
+ * The right rail of summary cards (objectstack#35596) is gone: each tab's
+ * count carries what it said (objectstack#35890).
  *
  * ## Why the layout is derived, never authored
  *
@@ -36,10 +42,11 @@
  * author — or an AI — could write and the spec could not judge, and a Studio
  * seed carrying it would be refused at save. The layout is therefore read off
  * the synthesized page itself, by the stable semantic `value` every tab item
- * carries (`buildDefaultTabs`, objectui#2257): `details` is the details
- * column, `timeline` (the one stream, objectstack#27055) is the right
- * column's 动态 panel, and `related`, `approvals` and `attachments` are its
- * panels after it. The synthesized page has one region (`main`); a page with
+ * carries (`buildDefaultTabs`, objectui#2257): `details` is the 概览 tab
+ * (its path and highlights are the strip, the rest the details column),
+ * `timeline` (the one stream, objectstack#27055) is the 动态 tab, and each
+ * `related:object.field`, `approvals` and `attachments` is a tab of its own
+ * (objectstack#35595; 动态 last, objectstack#34590). The synthesized page has one region (`main`); a page with
  * any other region is not the synthesized page (objectstack#27055 removed the
  * opt-in rail and the `rightRail` slot that used to add an `aside`).
  *
@@ -53,12 +60,14 @@
  * the sidebar primitive in `@object-ui/components`. Measured on the console
  * (HotCRM contact record page, sidebar expanded, objectstack#27241): the
  * record page root is the window minus this — 1184 px in a 1440 px window.
- * Below 1416 px the console folds the sidebar to its 48 px icon rail
+ * Below 1280 px the console starts with the sidebar collapsed, and a
+ * collapsed sidebar is hidden and takes no width
  * (`CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` in `@object-ui/app-shell`,
- * objectstack#27593), so a 1280 px window gives the root 1232 px and a 1024 px
- * one 976 px; only a reader who keeps the sidebar open gets 1024 px in 1280
- * and 768 px in 1024. The floors below are derived for the expanded sidebar,
- * so the rail only ever gives the page more room than they assume.
+ * objectstack#36112, ruling 6973617688 on objectstack#35062), so a 1024 px
+ * window gives the root 1024 px; from 1280 px it starts expanded, 1024 px in
+ * 1280, and a reader who expands it on a narrower window gets 768 px in 1024.
+ * The floors below are derived for the expanded sidebar, so a collapsed one
+ * only ever gives the page more room than they assume.
  */
 const EXPANDED_SIDEBAR_WIDTH = 256;
 
@@ -124,9 +133,76 @@ export function recordPageTierFor(width: number): RecordPageTier {
   return 'stack';
 }
 
-/** Whether a tier draws the right column beside the details (`⊟` applies). */
+/**
+ * Whether a tier is one that drew the right rail beside the details.
+ *
+ * @deprecated No tier draws a right rail since objectstack#35890; the pinned
+ * layout is {@link recordPagePinsDetails}. Kept, answering as it did, for a
+ * caller that still reads it.
+ */
 export function recordPageTierHasRightColumn(tier: RecordPageTier | null | undefined): boolean {
   return tier === 'two-column' || tier === 'wide';
+}
+
+/** The pinned left column's width when the reader never dragged it (objectstack#35890). */
+export const RECORD_PAGE_DETAILS_WIDTH = 400;
+/**
+ * The narrowest the pinned left column gets, dragged or yielding room to the
+ * tabs beside it (objectstack#35890).
+ */
+export const RECORD_PAGE_DETAILS_MIN_WIDTH = 320;
+/** The least the pinned layout keeps for the tabs beside the left column. */
+export const RECORD_PAGE_TABS_MIN_WIDTH = 400;
+/** The gap between the pinned left column and the tabs; the drag handle sits in it. */
+export const RECORD_PAGE_PINNED_GAP = 24;
+
+/**
+ * The narrowest page content (inside the page's padding) that pins the
+ * details (objectstack#35890): the narrowest left column, the gap and the
+ * least the tabs keep. ONE rule decides both whether the page pins and how
+ * wide the left column is ({@link clampDetailsWidth}): a narrower page — a
+ * window without room, or a page the comment panel narrowed — keeps the
+ * details as its first tab.
+ */
+export const RECORD_PAGE_PIN_MIN_WIDTH =
+  RECORD_PAGE_DETAILS_MIN_WIDTH + RECORD_PAGE_PINNED_GAP + RECORD_PAGE_TABS_MIN_WIDTH;
+
+/**
+ * Whether the synthesized record page pins its details to a left column, the
+ * other tabs beside it (objectstack#35890, figure 41): only on a full page (a
+ * drawer or a pane keeps the details as its first tab), only when its content
+ * is at least {@link RECORD_PAGE_PIN_MIN_WIDTH} wide, only when the page has
+ * another tab to put beside them, and never when a field group places a
+ * related table among the fields (objectstack#35889) — a table does not fit
+ * the left column, so that page keeps the details as its full-width first tab.
+ * An unknown width (zero or not a number) never pins.
+ */
+export function recordPagePinsDetails(
+  contentWidth: number,
+  columns: Pick<DefaultPageColumns, 'details' | 'timeline' | 'related'> | null | undefined,
+  fullPage: boolean,
+): boolean {
+  if (!fullPage || !columns || !(contentWidth >= RECORD_PAGE_PIN_MIN_WIDTH)) return false;
+  if (columns.timeline.length === 0 && columns.related.length === 0) return false;
+  return relatedListIdsIn(columns.details).length === 0;
+}
+
+/**
+ * The width the pinned left column takes in page content `contentWidth` CSS
+ * px wide, from the reader's dragged `width` (absent: {@link
+ * RECORD_PAGE_DETAILS_WIDTH}): never under {@link
+ * RECORD_PAGE_DETAILS_MIN_WIDTH}, and yielding to the tabs beside it, which
+ * keep at least {@link RECORD_PAGE_TABS_MIN_WIDTH} — the left column narrows
+ * on its own when room is short, and takes the asked width back when it
+ * returns. An unknown content width keeps the width asked, clamped from
+ * below.
+ */
+export function clampDetailsWidth(width: number | undefined, contentWidth: number): number {
+  const asked = typeof width === 'number' && Number.isFinite(width) ? width : RECORD_PAGE_DETAILS_WIDTH;
+  const max = contentWidth > 0
+    ? contentWidth - RECORD_PAGE_PINNED_GAP - RECORD_PAGE_TABS_MIN_WIDTH
+    : Number.POSITIVE_INFINITY;
+  return Math.round(Math.max(RECORD_PAGE_DETAILS_MIN_WIDTH, Math.min(asked, max)));
 }
 
 /**
@@ -138,8 +214,8 @@ export const RECORD_PAGE_TIMELINE_PANEL = 'timeline';
 
 /**
  * Where a synthesized tab's blocks land: the details column, the 动态 panel
- * (`timeline`, the first panel of the right column) or the related panels
- * after it.
+ * (`timeline`, the last panel of the right column, objectstack#34590) or the
+ * related panels before it.
  */
 export type RecordPageColumn = 'details' | 'timeline' | 'related';
 
@@ -167,11 +243,17 @@ export function recordPageColumnOfTab(value: unknown): RecordPageColumn | null {
 export interface DefaultPageColumns {
   /**
    * The record header: every node the page places before its tab strip
-   * (`page:header`, the actions / alerts slots, highlights, the stage path).
-   * The same nodes an authored strip draws above it — one header for every
-   * tier.
+   * (`page:header`, the actions / alerts slots) but the strip below. The same
+   * nodes an authored strip draws above it — one header for every tier.
    */
   header: any[];
+  /**
+   * The highlight strip and the stage path the page places before its tab
+   * strip (`record:highlights`, `record:path`), in their order. objectstack#35595:
+   * they are the 概览 tab's, drawn at its top across the whole width, and on no
+   * other tab.
+   */
+  strip: any[];
   /** The Details tab's body. */
   details: any[];
   /**
@@ -189,6 +271,11 @@ const asNode = (value: unknown): PageNode | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as PageNode) : null;
 
 const nodeList = (value: unknown): any[] => (Array.isArray(value) ? value.filter((n) => n != null) : []);
+
+/** The node types the 概览 tab draws at its top (objectstack#35595). */
+const STRIP_NODE_TYPES: ReadonlySet<string> = new Set(['record:highlights', 'record:path']);
+
+const isStripNode = (node: unknown): boolean => STRIP_NODE_TYPES.has(asNode(node)?.type);
 
 /**
  * Partition a synthesized default record page (`buildDefaultPageSchema`'s
@@ -219,8 +306,10 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
 
   const details: any[] = [];
   const timelineTabs: any[] = [];
-  const relatedLists: any[] = [];
-  const relatedPanels: any[] = [];
+  // The related column keeps the tab order (objectstack#35897: an object's
+  // declared `relatedLists` may place attachments or approvals among its lists;
+  // undeclared, the tabs already run lists, then attachments, then approvals).
+  const related: any[] = [];
   for (const rawItem of items) {
     const item = asNode(rawItem);
     if (!item) return null;
@@ -230,15 +319,16 @@ export function buildDefaultPageColumns(page: unknown): DefaultPageColumns | nul
     const children = nodeList(item.children);
     if (column === 'details') details.push(...children);
     else if (column === 'timeline') timelineTabs.push(...children);
-    else if (item.value === 'approvals' || item.value === 'attachments') relatedPanels.push(...children);
-    else relatedLists.push(...children);
+    else related.push(...children);
   }
 
+  const before = components.slice(0, tabIndex);
   return {
-    header: components.slice(0, tabIndex),
+    header: before.filter((node) => !isStripNode(node)),
+    strip: before.filter(isStripNode),
     details,
     timeline: [...components.slice(tabIndex + 1), ...timelineTabs],
-    related: [...relatedLists, ...relatedPanels],
+    related,
   };
 }
 

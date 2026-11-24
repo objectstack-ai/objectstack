@@ -7,6 +7,7 @@ import { AutomationEngine } from '../engine.js';
 import { registerParallelNode } from './parallel-node.js';
 import { registerNotifyNode } from './notify-node.js';
 import { registerHttpNodes } from './http-nodes.js';
+import { stubbedFetchEgress } from './stubbed-fetch-egress.testkit.js';
 
 /**
  * A failed `parallel` run on the REAL engine and the REAL built-in nodes: the
@@ -60,7 +61,7 @@ function boot() {
     const engine = new AutomationEngine(silentLogger());
     registerParallelNode(engine, pluginCtx);
     registerNotifyNode(engine, pluginCtx);
-    registerHttpNodes(engine, pluginCtx);
+    registerHttpNodes(engine, pluginCtx, { egress: stubbedFetchEgress() });
     return { engine, inbox };
 }
 

@@ -58,7 +58,7 @@ describe('`field` is still a declared metadata kind — only its create door clo
   });
 
   it('still resolves a schema — schema RESOLUTION is not the write door', () => {
-    // Same separation `api` (#5488) and `capability` (#5961) keep: a code-only
+    // Same separation `api` (#5488) keeps: a code-only
     // type still needs its shape resolvable for validation, diagnostics and
     // generated docs. Losing this would make `_diagnostics` silently opinionless
     // on every existing `field` row.

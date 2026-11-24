@@ -73,6 +73,16 @@ export {
 } from './validate-dataset-measure-aggregates.js';
 export type { DatasetMeasureAggregateFinding, GroupKeyClass } from './validate-dataset-measure-aggregates.js';
 
+// ADR-0149 D1 — a dataset measure or dimension that declares neither
+// `synonyms` nor a `description` is advised: a question asked in a user's own
+// words will not find it. The rule id is published for `--json` consumers
+// (`rule-id-barrel-exports.test.ts`).
+export {
+  validateDatasetMemberVocabulary,
+  DATASET_MEMBER_NO_VOCABULARY,
+} from './validate-dataset-member-vocabulary.js';
+export type { DatasetMemberVocabularyFinding } from './validate-dataset-member-vocabulary.js';
+
 export { validateStackExpressions, fieldRuleRootIssue, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
 export type { ExprIssue } from './validate-expressions.js';
 // [#32872] The gate's verdict on one validation rule, formula field or
@@ -163,6 +173,15 @@ export {
   FLOW_TRIGGER_UNROUTABLE,
   FLOW_API_TRIGGER_SECRET_MISSING,
   FLOW_API_TRIGGER_SIGNATURE_UNUSABLE,
+  // #35143 — the second batch of publish-time flow checks.
+  validateFlowSubflowTargets,
+  FLOW_TRIGGER_OBJECT_MISSING,
+  FLOW_CONDITION_OPTION_LABEL,
+  FLOW_TIME_RELATIVE_SHADOWED,
+  FLOW_TIME_RELATIVE_KEY_MISPLACED,
+  FLOW_TIME_RELATIVE_DATE_FIELD_INVALID,
+  FLOW_SCHEDULE_TIMEZONE_MISSING,
+  FLOW_SUBFLOW_UNKNOWN,
 } from './validate-flow-trigger-readiness.js';
 export type {
   FlowTriggerReadinessFinding,
@@ -184,6 +203,7 @@ export {
   validateReadonlyFlowWrites,
   FLOW_UPDATE_READONLY_FIELD,
   FLOW_UPDATE_READONLY_WHEN_FIELD,
+  FLOW_UPDATE_SUMMARY_FIELD,
 } from './validate-readonly-flow-writes.js';
 export type {
   ReadonlyFlowWriteFinding,
@@ -261,10 +281,18 @@ export {
 export type { RecordTitleFinding, RecordTitleSeverity } from './validate-record-title.js';
 
 export {
+  validateRecordPageHeader,
+  RECORD_PAGE_HEADER_TITLE_DIFFERS,
+  RECORD_PAGE_HEADER_ACTIONS_DIFFER,
+} from './validate-record-page-header.js';
+export type { RecordPageHeaderFinding } from './validate-record-page-header.js';
+
+export {
   validateSemanticRoles,
   FIELD_GROUP_UNDECLARED,
   FIELD_GROUP_EMPTY,
   FIELD_GROUP_SHADOWED,
+  FIELD_GROUP_MEMBER_UNKNOWN,
   SEMANTIC_ROLE_FIELD_UNKNOWN,
   SEMANTIC_ROLE_FIELD_UNPROVISIONED,
 } from './validate-semantic-roles.js';
@@ -284,6 +312,13 @@ export {
   FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
+// #36425 — an app still declaring an internal create / edit form, which the
+// Console no longer loads. Advisory.
+export {
+  validateInternalFormViews,
+  FORM_VIEW_INTERNAL_NOT_LOADED,
+} from './validate-internal-form-views.js';
+export type { InternalFormViewFinding } from './validate-internal-form-views.js';
 
 // A form open to anonymous intake that declares a file field (ruling C on #25572).
 export { validatePublicFormFileFields, PUBLIC_FORM_FILE_FIELD } from './validate-public-form-file-fields.js';
@@ -333,13 +368,15 @@ export {
   APPROVAL_APPROVER_TYPE_UNKNOWN,
   APPROVAL_APPROVER_TYPE_UNSUPPORTED,
   APPROVAL_ESCALATION_REASSIGN_NO_TARGET,
+  APPROVAL_ESCALATION_CALENDAR_WITHOUT_WORKING_TIME,
   APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY,
   APPROVAL_EXPRESSION_INVALID,
   APPROVAL_EXPRESSION_NO_EMPTY_POLICY,
   APPROVAL_DECISION_OUTPUTS_RESERVED,
   APPROVAL_APPROVER_CROSS_ORG_UNSUPPORTED,
+  APPROVAL_APPROVER_PLATFORM_ADMIN_AUTHORED,
 } from './validate-approval-approvers.js';
-export type { ApprovalApproverFinding, ApprovalApproverSeverity } from './validate-approval-approvers.js';
+export type { ApprovalApproverFinding, ApprovalApproverSeverity, ValidateApprovalApproversOptions } from './validate-approval-approvers.js';
 
 export {
   validateAssignmentRules,
@@ -347,12 +384,6 @@ export {
   ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
 } from './validate-assignment-rules.js';
 export type { AssignmentRuleFinding, AssignmentRuleSeverity } from './validate-assignment-rules.js';
-
-export {
-  validateSeedReplaySafety,
-  SEED_INSERT_MODE_DUPLICATES_ON_REPLAY,
-} from './validate-seed-replay-safety.js';
-export type { SeedReplaySafetyFinding, SeedReplaySafetySeverity } from './validate-seed-replay-safety.js';
 
 export {
   validateSeedStateMachine,
@@ -652,12 +683,31 @@ export type {
 // `relatedList` must match an inbound lookup / master_detail relationship.
 // `error`, the verdict `defineStack` gives, and on the runtime publish door,
 // which runs no `defineStack`. [#27478] A field group's `relatedList` must
-// name body tables only (`related-list-group-not-body`).
+// name body tables only (`related-list-group-not-body`). [#35897 · #35899] A
+// `relatedLists` object entry's columns must be child fields
+// (`related-list-column-unknown`, error), and since #35901 an object
+// extension's list placement's columns too; a built-in tab entry that draws
+// nothing warns (`related-list-attachments-off`, `related-list-stream-part`).
 export {
   validateRelatedListRefs,
   RELATED_LIST_REF_UNKNOWN,
   RELATED_LIST_GROUP_NOT_BODY,
+  RELATED_LIST_COLUMN_UNKNOWN,
+  RELATED_LIST_ATTACHMENTS_OFF,
+  RELATED_LIST_STREAM_PART,
 } from './validate-related-list-refs.js';
+
+// [#35901] Where an object extension's `place` will not land as written:
+// the extended object declares no `relatedLists` / `fieldGroups`
+// (`extension-placement-not-applied`), or an anchor it does not have
+// (`extension-placement-anchor-missing`). Warnings; the boot log names the
+// same placements, and is the channel for a target in another package.
+export {
+  validateExtensionPlacement,
+  EXTENSION_PLACEMENT_NOT_APPLIED,
+  EXTENSION_PLACEMENT_ANCHOR_MISSING,
+} from './validate-extension-placement.js';
+export type { ExtensionPlacementFinding } from './validate-extension-placement.js';
 export type {
   RelatedListRefFinding,
   RelatedListRefOptions,
@@ -670,6 +720,21 @@ export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-act
 
 export { validateActionLocations, ACTION_NO_PLACEMENT } from './validate-action-locations.js';
 export type { ActionLocationsFinding, ActionLocationsSeverity } from './validate-action-locations.js';
+export {
+  validateObjectActionLayout,
+  OBJECT_ACTION_LAYOUT_UNKNOWN,
+  OBJECT_ACTION_LAYOUT_NOT_PLACED,
+} from './validate-object-action-layout.js';
+export type { ObjectActionLayoutFinding } from './validate-object-action-layout.js';
+export { validateActionObjectBinding, ACTION_NO_OBJECT_BINDING } from './validate-action-object-binding.js';
+export type { ActionObjectBindingFinding } from './validate-action-object-binding.js';
+export { validateFlowNodeExecutors, FLOW_NODE_TYPE_NO_EXECUTOR } from './validate-flow-node-executors.js';
+export type { FlowNodeExecutorFinding } from './validate-flow-node-executors.js';
+export {
+  validateInertObjectDeclarations,
+  STATE_MACHINE_NO_INITIAL_STATES,
+} from './validate-inert-object-declarations.js';
+export type { InertObjectDeclarationFinding } from './validate-inert-object-declarations.js';
 
 export {
   validatePageFieldBindings,
@@ -1009,6 +1074,37 @@ export type {
   ActionBodyWriteExclusion,
 } from './validate-action-body-writes.js';
 
+// An action body must compile in the wrapper the runtime runs it in, which the
+// runtime builds from `actionBodyFunctionExpression` — the same function the
+// rule compiles inside, so the two cannot disagree about the wrapper.
+export {
+  validateActionBodyCompiles,
+  hostCompileFailure,
+  judgeBodyCompile,
+  ACTION_BODY_DOES_NOT_COMPILE,
+} from './validate-action-body-compiles.js';
+export type {
+  ActionBodyCompileFinding,
+  HostCompileFailure,
+  BodyCompileShape,
+  BodyCompileVerdict,
+} from './validate-action-body-compiles.js';
+export {
+  ACTION_BODY_PARAMETERS,
+  actionBodyFunctionExpression,
+  HOOK_BODY_PARAMETERS,
+  hookBodyFunctionExpression,
+} from './action-body-wrapper.js';
+
+// The same compile check over hook and job bodies, in their own `(ctx)`
+// wrapper, which the runtime builds from `hookBodyFunctionExpression`.
+export {
+  validateHookAndJobBodyCompiles,
+  HOOK_BODY_DOES_NOT_COMPILE,
+  JOB_BODY_DOES_NOT_COMPILE,
+} from './validate-hook-body-compiles.js';
+export type { HookBodyCompileFinding } from './validate-hook-body-compiles.js';
+
 // The same write-set question on the third surface — a flow `update_record`
 // node's structural `config.fields`. Shares the hook rule's field index and
 // implicit-field set so all three agree on what is writable without being
@@ -1018,6 +1114,8 @@ export {
   validateFlowNodeWrites,
   FLOW_NODE_WRITE_UNKNOWN_FIELD,
   FLOW_NODE_WRITE_UNPROVISIONED_ANCHOR,
+  FLOW_NODE_WRITE_UNKNOWN_OPTION,
+  FLOW_NODE_WRITE_DATE_HELPER_TEXT,
   FLOW_WRITE_NODE_TYPES,
   FLOW_WRITE_NODE_TYPES_DEFERRED,
 } from './validate-flow-node-writes.js';
@@ -1090,6 +1188,9 @@ export {
   FLOW_TRY_CATCH_WITHOUT_CATCH,
   FLOW_DECISION_MODE_INVALID,
   FLOW_DECISION_INCLUSIVE_OVERLAP,
+  FLOW_APPROVAL_DECISION_UNROUTED,
+  FLOW_HTTP_TIMEOUT_MISSING,
+  FLOW_CREATE_UPDATE_PAIR,
 } from './lint-flow-patterns.js';
 
 // A credential typed as a literal into a served flow position — the advisory,
@@ -1202,6 +1303,7 @@ export {
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
+  lintInlineEditBulk,
   lintDataModel,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
@@ -1213,6 +1315,8 @@ export {
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  FIELD_MISSING_VALUE_DOMAIN,
+  RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
 } from './data-model-rules.js';
 export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
 
@@ -1248,10 +1352,15 @@ export type {
 // ladder (request locale, then the workspace default, then `en`) over the
 // platform locale table. The door that holds the request puts it on the wire
 // as `RuntimeAuthoringIssueSchema.userMessage`; also on
-// `@objectstack/lint/runtime`. The catalogs and the ladder itself stay
-// internal: `findingUserMessage` is their one caller-facing door.
-export { findingUserMessage } from './finding-user-text.js';
-export type { UserTextParams } from './finding-user-text.js';
+// `@objectstack/lint/runtime`. The rules' catalogs stay internal:
+// `findingUserMessage` is their one caller-facing door. The ladder is exported
+// beside it (`userTextLocaleOf`, `renderUserText`) for a producer outside this
+// package that keeps its own catalog next to its own findings, such as the
+// post-publish build probes in `@objectstack/metadata-protocol`
+// (`RuntimeBuildIssueSchema.userMessage`), so every producer's sentences go
+// through the one ladder and none writes a second.
+export { findingUserMessage, renderUserText, userTextLocaleOf } from './finding-user-text.js';
+export type { UserTextEntry, UserTextParams } from './finding-user-text.js';
 
 // The runtime publish gate over that registry. Also published as the
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports.

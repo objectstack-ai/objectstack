@@ -95,4 +95,14 @@ describe('toastRecordSave', () => {
     expect(sink.warning).toHaveBeenCalledWith('Quote "Q-1" updated', { description: 'a\nb' });
     expect(sink.success).toHaveBeenCalledTimes(1);
   });
+
+  it('an action rides the toast on either variant (a list cell save\'s Undo, objectstack#35685)', () => {
+    const sink = { success: vi.fn(), warning: vi.fn() };
+    const action = { label: 'Undo', onClick: vi.fn() };
+    toastRecordSave(sink, '1 row saved', {}, action);
+    toastRecordSave(sink, '1 row saved', { warnings: ['a'], notice: 'n' }, action);
+
+    expect(sink.success).toHaveBeenCalledWith('1 row saved', { action });
+    expect(sink.warning).toHaveBeenCalledWith('1 row saved', { description: 'n\na', action });
+  });
 });

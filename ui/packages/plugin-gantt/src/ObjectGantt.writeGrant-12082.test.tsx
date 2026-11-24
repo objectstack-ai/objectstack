@@ -97,6 +97,7 @@ const envelope = (bits: Record<string, unknown>): MePermissionsAuthenticatedResp
   userId: 'u-pin',
   tenantId: null,
   hasAnyQueue: false,
+  objectsUsingQueues: [],
   positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits as never },

@@ -250,7 +250,7 @@ export interface AppArtifactHandlerBindingOptions {
      */
     withholdHooksWithoutBody?: boolean;
     /**
-     * [#26170] The `i18n` service a hook's declared refusal is translated
+     * [#26170] The `i18n` service a hook's (and, #34273, an action's) declared refusal is translated
      * through, read at refusal time. Absent, a declared refusal is answered
      * with its declared message.
      */
@@ -436,8 +436,11 @@ export function bindAppArtifactHandlers(
                             // applies it after resolving the name, so both take this one wrap.
                             // [#33214] …and its throws are answered against the hook's refusal
                             // catalogue, in the caller's language, with the body path's wire.
+                            // [#34374] …and handed `ctx.text`, the hook's declared texts in
+                            // the organization's language, read through the same services.
                             wrapHandler: (handler, hook) => withInProcessHookTitle(handler, ql, hook, {
                                 i18n: options.i18n,
+                                getService: options.getService,
                                 logger,
                             }),
                         });
@@ -480,6 +483,8 @@ export function bindAppArtifactHandlers(
                     ql,
                     logger,
                     appId,
+                    // [#34273] An action's declared refusal is translated as a hook's is.
+                    i18n: options.i18n,
                     getService: options.getService,
                     originPackageId: handlerOwnerPackage(actionOwner),
                 });

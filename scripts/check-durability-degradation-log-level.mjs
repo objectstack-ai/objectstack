@@ -636,6 +636,20 @@ const FAILURE_PROPAGATION_SITES = new Map([
                 + "(#22985); `schema-migration-plugins.test.ts` pins the refusal note and the failed count.",
         },
     ],
+    [
+        'packages/runtime/src/domains/mcp-authoring.ts::execute',
+        {
+            callees: [['refusalFromThrown', 'return']],
+            why:
+                "`refusalFromThrown()` is the open draft door's tool-call refusal: it builds the MCP tool result "
+                + 'with `isError: true` and an ADR-0112 `{ code, message, status }` envelope FROM the caught error, '
+                + 'keeping a coded 4xx refusal whole and answering any other throw `500 INTERNAL_ERROR`. The tool '
+                + 'switch\'s outer catch returns it on its only path, so the agent that asked for the draft save is '
+                + 'told, in the same reply, that the draft did not land. Scoped to this one function because the '
+                + 'name is a closure local to it (#34766); `mcp-authoring.test.ts` pins the coded refusal and the '
+                + 'uncoded fault answered without its text.',
+        },
+    ],
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3435,7 +3449,7 @@ function viaHostParameter(call) {
  * [#30147] The catch side's cross-file hop through the `sql-driver.ts` facade.
  *
  * `collectLoggedLevels` follows a catch's log helper to its body by NAME, in
- * the same file. The sql-driver codemod (`scripts/codemod-split-sql-driver.mjs`,
+ * the same file. The sql-driver codemod (split by #30139;
  * #30105) moves a `SqlDriver` method's body into a stateless facet class in a
  * `sql-driver-*.ts` section module and leaves a one-call stub behind, so that
  * lookup met the move twice, and both times read a loud catch as silent:

@@ -27,6 +27,7 @@ import { runCard, type CardRun, type ProjectOps } from '../../src/runner/orchest
 import type { PackageSource } from '../../src/runner/packages.js';
 import { runRecord } from '../../src/runner/scorecard.js';
 import type { ParsedTurn } from '../../src/runner/transcript.js';
+import { seedDoorAnswer } from '../runner/seed-door.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const CARDS_DIR = resolve(HERE, '../../../../../docs/qa/scenarios');
@@ -66,7 +67,9 @@ export function crmArtifact(iterated: boolean) {
     manifest: { id: `com.example.${NS}`, namespace: NS },
     objects,
     permissions: [
-      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
+      // `writeScope: 'org'` lifts the platform's owner-only delete floor for the sdr's
+      // card deletes of admin-owned contacts, as Modify All would without unmasking `email`.
+      { name: n('sdr'), objects: { [n('account')]: { allowRead: true }, [n('contact')]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, writeScope: 'org' } }, fields: { [`${n('contact')}.email`]: { readable: false } } },
       { name: n('partner_user'), objects: { [n('contact')]: { allowRead: true, allowCreate: true } } },
     ],
   };
@@ -166,6 +169,14 @@ export class FakeApp implements AppHarness {
     Object.assign(row, patch);
     return { ok: true, status: 200, body: {} };
   }
+  /** A restore's delete: a row an earlier operation added. */
+  async deleteRow(object: string, id: string): Promise<HttpAnswer> {
+    const rows = this.rows[object] ?? [];
+    const i = rows.findIndex((r) => r.id === id);
+    if (i < 0) return { ok: false, status: 404, body: {}, code: 'NOT_FOUND', message: `no ${object} ${id}` };
+    rows.splice(i, 1);
+    return { ok: true, status: 200, body: {} };
+  }
   async listRows(object: string) {
     return { ok: true, status: 200, body: {}, rows: (this.rows[object] ?? []).map((r) => ({ ...r })) };
   }
@@ -175,6 +186,14 @@ export class FakeApp implements AppHarness {
   async installUnmanaged(manifest: Record<string, unknown>) {
     this.installed = manifest;
     return { ok: true, status: 200, body: {} };
+  }
+  /** The managed door, which the seed loads through: a data-only package's `data[]` ({@link seedDoorAnswer}). */
+  async installManaged(manifest: Record<string, unknown>): Promise<HttpAnswer> {
+    if (!Array.isArray(manifest.data)) {
+      this.installed = manifest;
+      return { ok: true, status: 200, body: {} };
+    }
+    return seedDoorAnswer((object, row) => this.insertRow(object, row), manifest);
   }
   async metadataAsArtifact(collections: readonly string[]) {
     const src = (this.installed ?? {}) as Record<string, unknown[]>;
@@ -232,11 +251,17 @@ class ScriptedDriver implements AgentDriver {
     if (op.outcome.kind === 'applied') {
       if (op.kind === 'create') rows.push({ id: `new-${op.id}`, ...op.values });
       if (op.kind === 'update') Object.assign(rows.find((r) => r.id === op.target)!, op.values);
+      if (op.kind === 'delete') app.rows[op.object] = rows.filter((r) => r.id !== op.target);
       app.audit[op.target ?? `new-${op.id}`] = `u-${op.actingAs}`;
       return turn('Done.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: '{"ok":true}' }]);
     }
     if (op.outcome.kind === 'refused') {
       return turn('That was refused.', [{ name: `${op.kind}_record`, rawName: 'x', input: { objectName: op.object }, output: JSON.stringify({ error: { code: op.outcome.code } }), isError: true }]);
+    }
+    if (task.confirmation) {
+      // The person confirmed: delete the target through the door's confirm-gated delete, as the MCP door would.
+      app.rows[op.object] = rows.filter((r) => r.id !== op.target);
+      return turn('Deleted.', [{ name: 'delete_record', rawName: 'x', input: { objectName: op.object, recordId: op.target, confirm: true }, output: '{"ok":true}' }]);
     }
     return turn('This cannot be undone — do you want me to delete it? Please confirm.');
   }
@@ -264,6 +289,7 @@ export async function runCrm(
     /** The prefix of every API key the booted apps issue; default `key-`. */ keyPrefix?: string;
     /** Wraps the scripted model (e.g. to send its turns through another driver); the recording records what this answers. */ wrap?: (scripted: AgentDriver) => AgentDriver;
     /** How many times each question turn is asked (`--ask-repeats`); left to the runner's default when absent. */ askRepeats?: number;
+    /** A masking-off round (`--schema-masking off`): graded under it, and the record stamps it as `env.schemaMasking`. */ schemaMasking?: 'off';
   } = {},
 ): Promise<FixtureRun> {
   const scenario = loadCrm();
@@ -288,10 +314,11 @@ export async function runCrm(
     admin: ADMIN,
     ...(opts.iterateRun === false ? { iterateRun: false } : {}),
     ...(opts.askRepeats !== undefined ? { askRepeats: opts.askRepeats } : {}),
+    ...(opts.schemaMasking ? { schemaMasking: opts.schemaMasking } : {}),
   });
   const date = opts.date ?? '2026-11-06';
   const packages = opts.packages ?? { source: 'published', versions: ['18.3.0'] };
-  const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', packages, driver: driver.info(), runner: 'scenario-runner', evidenceDir: work }, cardRun);
+  const record = runRecord({ run: `${date}-scenario-${CARD_ID}`, date, framework: 'abc1234', packages, driver: driver.info(), runner: 'scenario-runner', evidenceDir: work, ...(opts.schemaMasking ? { schemaMasking: opts.schemaMasking } : {}) }, cardRun);
   return { scenario, work, cardRun, record, recording: driver.recording };
 }
 

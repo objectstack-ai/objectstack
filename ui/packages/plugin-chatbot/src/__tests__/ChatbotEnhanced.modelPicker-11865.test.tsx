@@ -109,13 +109,14 @@ describe('ChatbotEnhanced — the model picker is the shared Select (objectui#11
     expect(trigger().tagName).toBe('BUTTON');
     // Radix mirrors the value into a hidden native select inside a form; none is visible.
     expect(view.container.querySelectorAll('select:not([aria-hidden="true"])')).toHaveLength(0);
-    expect(trigger().textContent).toBe('Claude 3.5 · anthropic');
+    // objectstack#35445 — the closed trigger names the model alone; the list keeps the provider.
+    expect(trigger().textContent).toBe('Claude 3.5');
     const options = await openPicker(trigger());
     expect(options.map((o) => o.textContent)).toEqual(['GPT-4o mini · openai', 'Claude 3.5 · anthropic', 'local-llm']);
   });
 
   it('with no selection the first model is in force', () => {
-    expect(mount(SELECTIONS.unset).trigger().textContent).toBe('GPT-4o mini · openai');
+    expect(mount(SELECTIONS.unset).trigger().textContent).toBe('GPT-4o mini');
   });
 
   it('takes its name from the `model` label', () => {
@@ -152,5 +153,26 @@ describe('ChatbotEnhanced — the model picker is the shared Select (objectui#11
   it('the read-only transcript has no composer, so no picker', () => {
     mount(SELECTIONS.claude, { readOnly: true });
     expect(screen.queryByRole('combobox')).toBeNull();
+  });
+});
+
+describe('the composer footer reads in one line and names its 「+」 (objectstack#35445)', () => {
+  it('the attachment 「+」 is named Add attachment, and so is the item it opens', () => {
+    mount(SELECTIONS.claude, { enableFileUpload: true });
+    const plus = screen.getByRole('button', { name: 'Add attachment' });
+    expect(plus).toBe(screen.getByTestId('composer-add-attachment'));
+    fireEvent.keyDown(plus, { key: 'Enter' });
+    expect(screen.getByRole('menuitem', { name: 'Add attachment' })).toBeInTheDocument();
+  });
+
+  it('the key hint never wraps and never shrinks; the model picker is the part that gives way', () => {
+    mount(SELECTIONS.claude, { labels: { sendHint: 'to send', newlineHint: 'for a new line' } });
+    const hint = screen.getByTestId('composer-key-hint');
+    expect(hint).toHaveClass('whitespace-nowrap', 'shrink-0');
+    expect(hint).toHaveTextContent('to send·Shift+for a new line');
+    const trigger = screen.getByRole('combobox', { name: 'Model' });
+    expect(trigger).toHaveClass('min-w-0');
+    expect(trigger.className).toMatch(/\bmax-w-\[/);
+    expect(within(trigger).getByTestId('model-picker-value')).toHaveClass('truncate');
   });
 });

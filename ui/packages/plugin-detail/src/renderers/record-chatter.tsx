@@ -109,8 +109,23 @@ import { useRecordContext, useDiscussionContext } from '@object-ui/react';
 import type { FeedItem, RecordActivityComponentProps, RecordChatterComponentProps } from '@object-ui/types';
 import { RecordChatterPanel } from '../RecordChatterPanel';
 import type { FeedFilterMode } from '../RecordActivityTimeline';
-import { applyFeedConfig, describeRefusedFeedLimit, normalizeFilterMode, normalizeLimit } from './recordActivityFeed';
+import {
+  applyFeedConfig,
+  describeRefusedFeedLimit,
+  feedTypesAdmitComments,
+  normalizeFilterMode,
+  normalizeLimit,
+  warnWithheldCommentComposer,
+} from './recordActivityFeed';
 import { useRecordAriaProps } from './recordComponentAria';
+import { useDefaultRecordPage } from '../defaultRecordPage';
+import { RecordCommentsInPanelContext, RecordFieldChangesContext, RecordFieldHistoryContext, mergeFieldHistoryIntoFeed } from '../recordTimelineStream';
+import { useDetailTranslation } from '../useDetailTranslation';
+
+/** Dev mode, read per call — the guard `record-activity.tsx` puts on the same diagnostic. */
+const isDevBuild = (): boolean =>
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.NODE_ENV !== 'production';
 
 const splitDesigner = (props: Record<string, any>) => {
   const { 'data-obj-id': id, 'data-obj-type': type, style, ...rest } = props || {};
@@ -233,10 +248,33 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
   React.useEffect(() => { setFilterMode(defaultFilterMode); }, [defaultFilterMode]);
 
   const discussionItems = discussion?.items as FeedItem[] | undefined;
+  // objectstack#33996 — on an authored page the record's field changes, which
+  // the host reads while a feed panel is on screen, join this panel's feed by
+  // the stream's pairing (one action, one row). On the default record page
+  // they are the stream's (`record:activity`), so a panel drawn there leaves
+  // them to it. `unifiedTimeline: false` un-mixes them again (below). A panel
+  // that shows no field history offers no `changes_only` (objectstack#30074).
+  const fieldChanges = React.useContext(RecordFieldChangesContext);
+  const onDefaultPage = useDefaultRecordPage();
+  const fieldHistoryShown =
+    React.useContext(RecordFieldHistoryContext) && !onDefaultPage && feed?.unifiedTimeline !== false;
+  // objectstack#36193 — a slotted page's chatter is drawn on the record page's
+  // 动态 tab. While the comment panel beside the record holds the comments
+  // (objectstack#36075), this block draws the system entries alone, as the
+  // platform's own stream does there: no comment and no reply, no composer,
+  // no Comments-only filter, a count without the comments, and the 动态
+  // heading rather than 「讨论」. Off the default page (an authored page), and
+  // on the phone (no panel), the block is as it was.
+  const commentsInPanel = React.useContext(RecordCommentsInPanelContext) && onDefaultPage;
+  const { t } = useDetailTranslation();
+  const sourceItems = React.useMemo(
+    () => (commentsInPanel ? (discussionItems ?? []).filter((item) => item.type !== 'comment') : discussionItems ?? []),
+    [commentsInPanel, discussionItems],
+  );
   const applied = React.useMemo(
     () =>
       applyFeedConfig(
-        discussionItems ?? [],
+        onDefaultPage ? sourceItems : mergeFieldHistoryIntoFeed(sourceItems, fieldChanges),
         {
           types: feed?.types,
           showCompleted: feed?.showCompleted,
@@ -245,7 +283,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         pageSize,
         blockName,
       ),
-    [discussionItems, feed?.types, feed?.showCompleted, feed?.unifiedTimeline, pageSize, blockName],
+    [sourceItems, onDefaultPage, fieldChanges, feed?.types, feed?.showCompleted, feed?.unifiedTimeline, pageSize, blockName],
   );
 
   // `record-activity.tsx` writes its own `handleLoadMore` with an empty
@@ -258,6 +296,23 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
     setExtraPages((n) => n + 1);
   }, [setExtraPages]);
 
+  // A `feed.types` that leaves out `comment` filters every comment out of this
+  // panel, the ones posted here included, so the panel offers no composer and
+  // no Comments-only filter — `record:activity`'s rule, through the same
+  // predicate and the same block name `applyFeedConfig` filters by
+  // (objectstack#34525). Where the composer would have been offered, the
+  // author is told why once, in development.
+  const typesAdmitComments = feedTypesAdmitComments(feed?.types, blockName);
+  const commentsShown = typesAdmitComments && !commentsInPanel;
+  const composerWithheld = !typesAdmitComments && feed?.showCommentInput !== false;
+  const nodeId: string | undefined = typeof schema.id === 'string' ? schema.id : undefined;
+  const typesKey = JSON.stringify(feed?.types ?? null);
+  React.useEffect(() => {
+    if (composerWithheld && isDevBuild()) {
+      warnWithheldCommentComposer(`${blockName} feed`, nodeId, JSON.parse(typesKey));
+    }
+  }, [composerWithheld, blockName, nodeId, typesKey]);
+
   // `enableMentions` — withholding the suggestion list is what turns the
   // composer's @-autocomplete off, which is what the registration publishes for
   // this key ("Off withholds the suggestions"). `!== false` rather than a
@@ -267,6 +322,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
 
   return (
     <div className={className} {...designer} {...ariaProps}>
+      <RecordFieldHistoryContext.Provider value={fieldHistoryShown}>
       <RecordChatterPanel
         items={applied.items}
         config={config}
@@ -287,7 +343,8 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         // renderer was the only missing end of the wire.
         filterMode={filterMode}
         onFilterChange={setFilterMode}
-        onAddComment={discussion?.onAddComment as any}
+        onAddComment={commentsInPanel ? undefined : (discussion?.onAddComment as any)}
+        commentsShown={commentsShown}
         onAddReply={discussion?.onAddReply as any}
         onToggleReaction={discussion?.onToggleReaction as any}
         // objectui#12268: same two handlers `record:activity` forwards, off the
@@ -301,13 +358,18 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         // REFUSED. The host that owns the fetch decides it, the same way it
         // decides `loading` above; the panel only renders it.
         activityDenied={discussion?.activityDenied}
-        commentsDenied={discussion?.commentsDenied}
+        // A refused or failed comment read is the comment panel's to say.
+        commentsDenied={!commentsInPanel && discussion?.commentsDenied}
         // objectstack#29188: which of them FAILED (5xx, network), and the
         // host's re-read of those; the panel only renders it.
         activityFailed={discussion?.activityFailed}
-        commentsFailed={discussion?.commentsFailed}
+        commentsFailed={!commentsInPanel && discussion?.commentsFailed}
+        {...(commentsInPanel
+          ? { titleLabel: t('detail.timeline', { defaultValue: 'Activity' }), emptyLabel: t('detail.noActivity', { defaultValue: 'No activity recorded' }) }
+          : {})}
         onRetryFeed={discussion?.onRetryFeed}
       />
+      </RecordFieldHistoryContext.Provider>
     </div>
   );
 };

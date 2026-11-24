@@ -27,7 +27,7 @@ import { test, expect } from '@playwright/test';
  * `showcase_task.in_progress` is a SHIPPED saved view whose stored filter is
  * exactly that rule array (`src/ui/views/task.view.ts`), so no fixture setup is
  * needed — opening it is the reproduction. Before the fix the list renders no
- * rows at all (the request 400s, so `record-count-bar` never mounts); after it,
+ * rows at all (the request 400s, so the footer row's count never mounts); after it,
  * the 2 in-progress tasks out of 10.
  *
  * Prereqs: the usual live-e2e pair (see playwright.live.config.ts). Run:
@@ -60,7 +60,7 @@ test('a saved view filter reaches $filter as AST, and the server answers 200', a
   await page.goto(`/apps/${APP}/showcase_task/view/showcase_task.in_progress`);
 
   // The filter applied: 2 of the 10 seeded tasks are in_progress.
-  await expect(page.getByTestId('record-count-bar')).toContainText(/^2 /, { timeout: 20000 });
+  await expect(page.getByTestId('data-table-summary-lead')).toContainText(/^2 /, { timeout: 20000 });
 
   // And it applied by being ACCEPTED, not by some later rescue.
   expect(refused, `data requests the backend refused:\n${refused.join('\n')}`).toEqual([]);

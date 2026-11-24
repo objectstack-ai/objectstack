@@ -1,6 +1,6 @@
 # REST 通道操作对照表
 
-见 `platform-readings.md` 配额段;本表是逐操作的通道归属,动手前查一行:它有没有 REST 对应物。
+见 `readings-channels.md`;本表是逐操作的通道归属,动手前查一行:它有没有 REST 对应物。
 
 ## 通道边界
 
@@ -28,7 +28,7 @@
 - ⛔ 查重必须含 closed:卡刚关闭时最易被重开,开域查重漏掉刚关闭的同题卡即重复派发。
 - 开域查重是要申报的例外,不是默认;状态与标签列卡仍 `state=open`,那是状态读不是查重。
 - ✓ 卡与 PR 元数据 `GET .../issues/{n}` · `GET .../pulls/{n}`,assignees、labels、body 齐全。
-- ✓ 整条评论线 `GET .../issues/{n}/comments?per_page=100`;裸 `#N` 展开见 `platform-readings.md` 配额段。
+- ✓ 整条评论线 `GET .../issues/{n}/comments?per_page=100`;裸 `#N` 展开见 `readings-write-shapes.md`。
 - ✓ Timeline 事件 `GET .../issues/{n}/timeline`:cross-ref、`added_to_merge_queue`、ready_for_review。
 - ✓ PR diff `GET .../pulls/{n}` 带 Accept `application/vnd.github.diff`;文件清单 `.../pulls/{n}/files`。
 - ✓ 线程 `GET .../pulls/{n}/ccr/review_threads` 回 `{resolved,outdated,path,line,comment_ids}`,无线程 id。
@@ -61,20 +61,20 @@
 - 行即回读:答 `autoMergeRequest` null、`isDraft` true 即 ✓;答仍挂臂或仍 ready ⇒ 记 5 停。
 - 已入队者回读「in the merge queue」,转 draft 保位照合 ⇒ 反向不踢队;队位只读 timeline。
 - 未入队者审批不掉;已是 draft 再 `pr_draft` 答无 `pullRequest` 记 5:非落地,⛔ 不重试。
-- 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类,按账号非会话、逐写回读;见配额段,MCP 恒用户。
+- 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类,按账号非会话、逐写回读;见 channels,MCP 恒用户。
 
-## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `platform-readings.md` 配额段
+## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `readings-channels.md`
 
 1. 语义搜索:`/search/*` 被出口代理按设计拒绝。退路 = REST 列表端点加本地 grep。
 2. 看板(org Project)field_values:GraphQL-only,舰队不需要它;MCP 服务端无条件抓它才是漏点。
-3. `issue transfer`:issues 端点表无此路由(未实调)⇒ 同为 GraphQL-only;配方住 `platform-readings.md`。
+3. `issue transfer`:issues 端点表无此路由(未实调)⇒ 同为 GraphQL-only;配方住 `readings-channels.md`。
 
 ## 队列路由的读法
 
 - `merged_by` 是入队者,⛔ 不是绕队证据:队列合并归属给入队的账户,对队列与直合零分辨力。
 - 判据 ①:直接合并 `PUT .../pulls/{n}/merge` 在强制队列 ruleset 下回 405。
 - ②:PR 上的 `added_to_merge_queue` timeline 事件。③:对已入队 PR 发 `pr_update_branch` 回不能更新。
-- ①② 住 `platform-readings.md` 队列段,git 零配额四条住其配额段,本条只归拢判据。
+- ①② 住 `readings-queue.md`,git 零配额四条住 `readings-channels.md`,本条只归拢判据。
 - 队列 required 集按 job 与 check-run 名匹配,workflow 名从不作为 check context 出现,搜也搜不到。
 - 改任一 job 名或 test 分片矩阵的形状,必须同一笔更新队列 required 集,否则队列静默挂起。
 - ⛔ required 选择只 gate 等待、不 gate 触发:未列入的检查照跑、算力相同,红了不再挡队列。

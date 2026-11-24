@@ -40,6 +40,7 @@ export * from './utils/managedBy.js';
 // consumers).
 export {
   resolveAffordance,
+  resolveAffordanceGrant,
   resolveFieldAffordance,
   formFieldsAffordance,
   type AffordanceGrant,
@@ -97,6 +98,7 @@ export {
   readObjectSortability,
   isPlatformSortableField,
   filterPlatformSortableSort,
+  withHeaderSortPick,
 } from './utils/column-sortability.js';
 // [objectstack#27504] The served packaged-action activation: which declared
 // actions the installation switched off, stamped by the data layer and asked
@@ -243,6 +245,9 @@ export {
   dashboardFilterVariableDefs,
   buildFilterCondition,
   buildWidgetScopedFilter,
+  boundMemberFilterNames,
+  dashboardFiltersNotApplied,
+  type DashboardFilterJsonColumnOperators,
 } from './utils/dashboard-filters.js';
 export * from './utils/merge-filters.js';
 export * from './utils/compare-to.js';
@@ -352,6 +357,9 @@ export {
   type FieldColorDefinition,
 } from './utils/record-color.js';
 export * from './utils/export-filename.js';
+// The one shape of a CSV file the Console builds in the browser: a leading
+// UTF-8 byte-order mark, so Excel opens non-ASCII text readably.
+export * from './utils/csv-blob.js';
 // Named, not `export *`: the module's `reset*` helper is test-only and stays off
 // the public barrel (objectui#13453); in-repo tests import it from the module.
 export {
@@ -375,6 +383,7 @@ export * from './utils/parent-scope.js';
 // The other half of a view's field appetite: the fields its PREDICATES read,
 // which the column-derived `$select` never asked the server for.
 export * from './utils/predicate-fields.js';
+export * from './utils/withheld-fields.js';
 // The THIRD source of a view's field appetite: the fields it GROUPS BY. The
 // spec's `grouping` block is a sibling of `columns`, not a subset, so a grid
 // may group by a field it never shows (objectui#7179).

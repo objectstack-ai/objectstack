@@ -34,7 +34,9 @@ import {
 import { useAuth } from '@object-ui/auth';
 import {
   createDebouncedFlush,
+  readScopedCopy,
   scopedKey,
+  useOrganizationScope,
   useStorageSync,
   useUserStateAdapter,
 } from './UserStateAdapters.js';
@@ -69,18 +71,18 @@ function sanitize(list: unknown): string[] {
     : [];
 }
 
-function loadLocal(userId?: string | null): string[] {
+function loadLocal(userId?: string | null, orgId?: string | null): string[] {
   try {
-    const raw = localStorage.getItem(scopedKey(STORAGE_BASE_KEY, userId));
+    const raw = readScopedCopy(STORAGE_BASE_KEY, userId, orgId);
     return raw ? sanitize(JSON.parse(raw)) : [];
   } catch {
     return [];
   }
 }
 
-function saveLocal(list: string[], userId?: string | null) {
+function saveLocal(list: string[], userId?: string | null, orgId?: string | null) {
   try {
-    localStorage.setItem(scopedKey(STORAGE_BASE_KEY, userId), JSON.stringify(list));
+    localStorage.setItem(scopedKey(STORAGE_BASE_KEY, userId, orgId), JSON.stringify(list));
   } catch {
     // storage full / privacy mode — recents are a nicety, never an error
   }
@@ -131,12 +133,15 @@ const FlowPaletteRecentsContext = createContext<FlowPaletteRecentsValue | null>(
 export function FlowPaletteRecentsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const userId = user?.id ?? null;
+  // The browser copy is kept per organization, like the server row it mirrors
+  // (objectstack#36244).
+  const orgId = useOrganizationScope();
   const adapter = useUserStateAdapter<string>('flowPaletteRecents');
 
-  const [recents, setRecents] = useState<string[]>(() => loadLocal(userId));
+  const [recents, setRecents] = useState<string[]>(() => loadLocal(userId, orgId));
 
   // Cross-tab sync — see FavoritesProvider for the rationale.
-  useStorageSync<string[]>(scopedKey(STORAGE_BASE_KEY, userId), (value) => {
+  useStorageSync<string[]>(scopedKey(STORAGE_BASE_KEY, userId, orgId), (value) => {
     setRecents(sanitize(value));
   });
 
@@ -151,10 +156,10 @@ export function FlowPaletteRecentsProvider({ children }: { children: ReactNode }
 
   const commit = useCallback(
     (next: string[]) => {
-      saveLocal(next, userId);
+      saveLocal(next, userId, orgId);
       if (adapter) flusher.schedule(next);
     },
-    [userId, adapter, flusher],
+    [userId, orgId, adapter, flusher],
   );
 
   // Hydrate (and fold legacy) on mount and whenever the user or attached
@@ -166,19 +171,19 @@ export function FlowPaletteRecentsProvider({ children }: { children: ReactNode }
     const token = ++hydrationToken.current;
     let cancelled = false;
     void (async () => {
-      const local = loadLocal(userId);
+      const local = loadLocal(userId, orgId);
       const remote = adapter ? sanitize(await adapter.load().catch(() => [])) : [];
       if (cancelled || token !== hydrationToken.current) return;
       const base = remote.length ? remote : local;
       const { list, didMigrate } = migrateLegacy(base, userId);
       setRecents(list);
-      saveLocal(list, userId);
+      saveLocal(list, userId, orgId);
       if (didMigrate && adapter) flusher.schedule(list);
     })();
     return () => {
       cancelled = true;
     };
-  }, [adapter, userId, flusher]);
+  }, [adapter, userId, orgId, flusher]);
 
   const recordRecent = useCallback(
     (type: string) => {

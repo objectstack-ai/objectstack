@@ -28,6 +28,7 @@ import {
   credentialUseClientFor,
 } from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
+import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch } from '@objectstack/objectql';
 import type {
   AuthSessionApi,
   IAuthService,
@@ -95,7 +96,9 @@ import { bindRecordShareCascade } from './record-share-cascade.js';
 import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { inProcessSessionReadInput } from '@objectstack/types';
+import type { ShareLinkLabelProtocol } from '@objectstack/types';
 import { backfillStoredDeclarationPackagesAtBoot } from './stored-declaration-package-backfill.js';
+import { registeredObjectNames, reportInertShareGrantHolders, shareGrantRegistrationRefusal } from './share-arm-boot.js';
 
 /**
  * One page of the boot's organization enumeration. A PAGE size, not a cap: the
@@ -1226,6 +1229,24 @@ export class SharingServicePlugin implements Plugin {
             registerShareLinkRoutes(http, this.linkService, engine as SharingEngine, {
               basePath: this.options.shareLinkBasePath,
               contextFromRequest: verifiedContextFromRequest,
+              // The resolve answer's object label, in the request's locale. Read
+              // per request: the i18n plugin may register after this one.
+              i18n: () => {
+                try {
+                  return ctx.getService<II18nService>('i18n');
+                } catch {
+                  return undefined;
+                }
+              },
+              // The metadata protocol, for the object's packaged base (a renamed
+              // object keeps its rename, as on the meta door).
+              protocol: () => {
+                try {
+                  return ctx.getService<ShareLinkLabelProtocol>('protocol');
+                } catch {
+                  return undefined;
+                }
+              },
             });
             ctx.logger.info(
               'SharingServicePlugin: share-link routes mounted at ' +
@@ -1247,6 +1268,22 @@ export class SharingServicePlugin implements Plugin {
       // present; with no rule service running it answers 501 rather than an
       // unmounted path (see `shareable-objects-routes.ts`).
       this.mountShareableObjectsRoute(ctx);
+    });
+
+    // [ADR-0155 ② ruled R1 at boot] Registered BEFORE the passes below, so a
+    // host in D4's second class (a middleware or a find hook registered for
+    // `sys_record_share` by name) is refused before any of them runs and
+    // before any request is served (`kernel:listening` has not opened the
+    // socket). Judged here, not at `kernel:ready`: other plugins register
+    // their read middlewares and find hooks in their own `kernel:ready`
+    // handlers, so only now is every registration final. Only where a
+    // producer writes the leaf: the sharing service is registered, whatever
+    // `enforce` says, because plugin-security's read paths ask that service
+    // for its read filter too. See `share-arm-boot.ts`.
+    ctx.hook('kernel:bootstrapped', async () => {
+      if (!this.service) return;
+      const refusal = shareGrantRegistrationRefusal(this.engine as any, ctx.logger as any);
+      if (refusal) throw refusal;
     });
 
     // [#2926 ③] Materialize sharing grants for rows already present at boot.
@@ -1354,6 +1391,20 @@ export class SharingServicePlugin implements Plugin {
       // Withdrawal is now complete for this boot; runtime rule writes own it
       // from here (see bindRuleRebindTriggers).
       this.ruleGrantsBootReconciled = true;
+    });
+
+    // [ADR-0155 ② ruled R2, ADR-0111 D10] The visible trail of the storage
+    // rows' tightening: the objects whose share grants stopped counting at the
+    // switch and that hold share rows, named once per boot at `warn`. After
+    // the passes above, in a handler of its own, so it runs in every posture
+    // (`enforce: false` and no rule service included) and never fails the boot.
+    ctx.hook('kernel:bootstrapped', async () => {
+      if (!this.service) return;
+      try {
+        await reportInertShareGrantHolders(this.service, registeredObjectNames(this.engine), ctx.logger as any);
+      } catch (err: any) {
+        ctx.logger.warn('SharingServicePlugin: the report of share grants that no longer count (kernel:bootstrapped) failed', { error: err?.message });
+      }
     });
   }
 }
@@ -1480,8 +1531,10 @@ export function buildSharingMiddleware(
           // platform-authored as any sharing filter.
           markFilterSubtreeProvenance(selfScope, 'policy');
           vouchCallerWhereBeforeRewrite(ast, ctx.options);
+          // [ADR-0155 plan step 6] `where` only, as in the general read merge
+          // below: the AST's `filter` key is not walked by the executor seam
+          // and no driver reads it, so the scope is no longer mirrored there.
           ast.where = composeAnd(ast.where, selfScope);
-          ast.filter = composeAnd(ast.filter, selfScope);
           ctx.ast = ast;
         }
         return next();
@@ -1523,8 +1576,11 @@ export function buildSharingMiddleware(
         // card: vouch the caller's own predicate BEFORE the rewrite below
         // makes it unrecognisable to every later boundary.
         vouchCallerWhereBeforeRewrite(ast, ctx.options);
+        // [ADR-0155 plan step 6] `where` only. The scope used to be mirrored
+        // under the AST's `filter` key too, which the engine's executor seam
+        // does not walk and no driver reads; it now carries the share-grant
+        // leaf, which must never sit where the seam does not judge it.
         ast.where = composeAnd(ast.where, filter);
-        ast.filter = composeAnd(ast.filter, filter);
         ctx.ast = ast;
       }
       return next();
@@ -1542,7 +1598,7 @@ export function buildSharingMiddleware(
       const verb: 'update' | 'delete' = writeClass;
       const data: any = ctx.data;
       const options: any = ctx.options;
-      const id = inferTargetId(data, options);
+      const id = engineByIdTarget(verb, data, options);
       // [#30237] The recycle bin's own doors — `restore(entryId)`,
       // `purge(entryId)`, `empty(object)` — dispatch their verb with no id and
       // no AST: they address no live row, so there is no row to gate and no
@@ -1687,8 +1743,10 @@ export function buildSharingMiddleware(
       }
       if (writeFilter) {
         const ast: any = ctx.ast ?? {};
+        // [ADR-0155 plan step 6] `where` only, as on the read path above: the
+        // write form of the share-grant leaf is judged by the seam in a
+        // predicate update's `where`, and never mirrored under `filter`.
         ast.where = composeAnd(ast.where, writeFilter);
-        ast.filter = composeAnd(ast.filter, writeFilter);
         ctx.ast = ast;
       }
       return next();
@@ -1773,16 +1831,29 @@ function composeAnd(existing: unknown, addition: unknown): unknown {
   return { $and: [existing, addition] };
 }
 
-function inferTargetId(data: any, options: any): string | number | undefined {
-  if (data && typeof data === 'object' && data.id != null) return data.id;
-  if (options && typeof options === 'object') {
-    if (options.id != null) return options.id;
-    if (options.where && typeof options.where === 'object' && options.where.id != null) {
-      return options.where.id;
-    }
-    if (options.filter && typeof options.filter === 'object' && options.filter.id != null) {
-      return options.filter.id;
-    }
-  }
-  return undefined;
+/**
+ * The row the ENGINE writes by id, or `undefined` when the engine runs the
+ * write as a predicate over the AST it seeded from `where`.
+ *
+ * The rule: this gate judges by id exactly the writes the engine runs by id,
+ * and every other write meets the bulk scope (`buildWriteFilter`). So the
+ * branch is the engine's own dispatch decision, made by the helpers its
+ * `delete()` / `update()` call on the same options bag
+ * (`resolveEngineDeleteDispatch` / `resolveEngineUpdateDispatch`), never a
+ * reading of option slots of this gate's own: an option the engine does not
+ * route on names no row here either.
+ */
+function engineByIdTarget(
+  verb: 'update' | 'delete',
+  data: unknown,
+  options: unknown,
+): string | number | bigint | undefined {
+  const bag = (options && typeof options === 'object' ? options : undefined) as Record<string, unknown> | undefined;
+  const dispatch = verb === 'delete'
+    ? resolveEngineDeleteDispatch(bag)
+    : resolveEngineUpdateDispatch((data && typeof data === 'object' ? data : {}) as Record<string, unknown>, bag);
+  if (dispatch.kind !== 'by-id') return undefined;
+  const id: unknown = dispatch.id;
+  // The engine binds a by-id write to a scalar key; anything else is no row to judge by id.
+  return typeof id === 'string' || typeof id === 'number' || typeof id === 'bigint' ? id : undefined;
 }

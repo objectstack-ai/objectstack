@@ -20,7 +20,8 @@
  * `?runAction=` deep-link arming, which arms only what the header draws.
  *
  * The real chain throughout: the real `ObjectView`, the real `ObjectGrid` and
- * its `BulkActionBar` (fed by `resolveBulkActions` from the view's own keys),
+ * its selection actions (fed by `resolveBulkActions` from the view's own keys;
+ * on the list page they are drawn into the page bar, objectstack#35554),
  * the real `action:bar`. Every case is a differential on the view's wiring or
  * the action's placement, with the same object and the same rows.
  */
@@ -28,6 +29,9 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+// `ObjectView` reaches a dynamic `import('@objectstack/lint')`: pay its load at
+// collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@objectstack/lint';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { toast } from 'sonner';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
@@ -177,7 +181,7 @@ function mountLeads(viewName: keyof typeof LIST_VIEWS) {
 
 /** The page header, once its schema-driven toolbar has drawn the plain action. */
 async function headerWithToolbar(): Promise<HTMLElement> {
-  const header = await screen.findByTestId('page-header', undefined, { timeout: 5000 });
+  const header = await screen.findByTestId('list-view-bar-actions', undefined, { timeout: 5000 });
   await within(header).findByRole('button', { name: /Refresh Scores/ }, { timeout: 5000 });
   return header;
 }
@@ -189,6 +193,24 @@ async function rowBoxes(): Promise<HTMLElement[]> {
     expect(found).toHaveLength(LEADS.length);
     return found;
   }, { timeout: 5000 });
+}
+
+/**
+ * objectstack#35678 — the selection's actions on the list page: the floating
+ * selection bar, its exposed buttons and the ones behind its More. Returns the
+ * bar and the action names it carries.
+ */
+async function selectionBar(): Promise<{ bar: HTMLElement; names: string[] }> {
+  const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
+  const names = within(bar).queryAllByTestId(/^bulk-action-/).map((el) => el.getAttribute('data-testid')!.slice('bulk-action-'.length));
+  const more = within(bar).queryByTestId('selection-actions-more');
+  if (more) {
+    await act(async () => { fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' }); });
+    const menu = await screen.findByRole('menu');
+    names.push(...within(menu).queryAllByTestId(/^row-context-bulk-/).map((el) => el.getAttribute('data-testid')!.slice('row-context-bulk-'.length)));
+    await act(async () => { fireEvent.keyDown(menu, { key: 'Escape' }); });
+  }
+  return { bar, names };
 }
 
 async function tickRows(n: number): Promise<void> {
@@ -210,15 +232,15 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
     expect(addToCampaignIn(header)).toBeNull();
     expect(screen.queryByTestId('bulk-actions-bar')).toBeNull();
 
-    // Two rows: the bar floats carrying the action; the header still lacks it.
+    // Two rows: the selection carries the action; the header still lacks it.
     await tickRows(2);
-    const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-    expect(within(bar).getByTestId('bulk-action-create_campaign')).toHaveTextContent('Add to Campaign');
+    const { bar, names } = await selectionBar();
+    expect(names).toContain('create_campaign');
     expect(addToCampaignIn(header)).toBeNull();
     expect(within(header).getByRole('button', { name: /Refresh Scores/ })).toBeInTheDocument();
 
-    // Clearing the selection hides the bar.
-    await act(async () => { fireEvent.click(within(bar).getByRole('button', { name: /Clear/ })); });
+    // × clears the selection and the bar goes.
+    await act(async () => { fireEvent.click(within(bar).getByTestId('bulk-selection-clear')); });
     await waitFor(() => expect(screen.queryByTestId('bulk-actions-bar')).toBeNull(), { timeout: 5000 });
   });
 
@@ -228,8 +250,7 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
     expect(addToCampaignIn(header)).toBeNull();
 
     await tickRows(2);
-    const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-    expect(within(bar).getByTestId('bulk-action-create_campaign')).toBeInTheDocument();
+    expect((await selectionBar()).names).toContain('create_campaign');
   });
 
   it('CONTROL — a view that does not wire it keeps the header button, and its bar does not carry it', async () => {
@@ -238,8 +259,7 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
     expect(addToCampaignIn(header)).not.toBeNull();
 
     await tickRows(2);
-    const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-    expect(within(bar).queryByTestId('bulk-action-create_campaign')).toBeNull();
+    expect((await selectionBar()).names).not.toContain('create_campaign');
     expect(addToCampaignIn(header)).not.toBeNull();
   });
 
@@ -250,8 +270,7 @@ describe('objectui#12462 — a bulk-wired, record-scoped list_toolbar action lea
     expect(addToCampaignIn(header)).not.toBeNull();
 
     await tickRows(2);
-    const bar = await screen.findByTestId('bulk-actions-bar', undefined, { timeout: 5000 });
-    expect(within(bar).getByTestId('bulk-action-refresh_scores')).toBeInTheDocument();
+    expect((await selectionBar()).names).toContain('refresh_scores');
     expect(within(header).getByRole('button', { name: /Refresh Scores/ })).toBeInTheDocument();
   });
 });
@@ -275,7 +294,7 @@ describe('objectui#12462 — the deep link arms only what the header draws', () 
     // The header has drawn its toolbar and the grid its rows, so an armed link
     // would have run by now. `hidden: true`: an open param dialog takes the
     // page out of the accessibility tree, and this wait must not be what fails.
-    const header = await screen.findByTestId('page-header', undefined, { timeout: 5000 });
+    const header = await screen.findByTestId('list-view-bar-actions', undefined, { timeout: 5000 });
     await within(header).findByRole('button', { name: /Refresh Scores/, hidden: true }, { timeout: 5000 });
     await rowBoxes();
 

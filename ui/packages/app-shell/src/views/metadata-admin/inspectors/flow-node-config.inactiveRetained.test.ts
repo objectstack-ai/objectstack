@@ -167,9 +167,11 @@ describe('inactiveRetainedKind — mechanical coverage of every showWhen group',
     // objectui#12742: 23 -> 22 ungated types — `webhook` left the alias list
     // (spec 18 reserves it as a node type), and `http_request` became `http`,
     // a key `FLOW_NODE_CONFIG_TYPES` already contributes.
+    // ⚑ RE-MEASURED for ADR-0157 D5: the approval escalation gained `clock`
+    // (gated on `escalation.enabled`) and `calendar` (gated on `clock`), 33 -> 35.
     expect(gatedByType.size).toBe(9); // 9 (name, ...) buckets — 8 canonical + the `script_task` alias
     const totalGated = [...gatedByType.values()].reduce((n, fs) => n + fs.length, 0);
-    expect(totalGated).toBe(33);
+    expect(totalGated).toBe(35);
     // The discriminating control: most node types have NO showWhen at all, so a
     // predicate that simply said "yes" everywhere would fail here.
     const ungatedTypes = TYPES.filter((t) => !gatedByType.has(t));
@@ -214,7 +216,7 @@ describe('inactiveRetainedKind — mechanical coverage of every showWhen group',
         checked += 1;
       }
     }
-    expect(checked).toBe(33); // objectui#9336 added `end.message`, objectui#12780 ungated `start.condition` — see the note above.
+    expect(checked).toBe(35); // objectui#9336 added `end.message`, objectui#12780 ungated `start.condition`, ADR-0157 D5 added `escalation.clock` and `escalation.calendar` — see the note above.
   });
 });
 

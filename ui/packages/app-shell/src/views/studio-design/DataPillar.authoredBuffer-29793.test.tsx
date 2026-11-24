@@ -124,7 +124,11 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
   return { ...mod, ObjectView: GridDouble };
 });
 
+// The source under test reaches a dynamic import of `@objectstack/lint`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
+import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
@@ -171,9 +175,9 @@ afterEach(() => {
 function renderZh() {
   return render(
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
-      <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
+      <StudioSaveHarness><MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
         <DataPillar packageId={PKG} />
-      </MemoryRouter>
+      </MemoryRouter></StudioSaveHarness>
     </I18nProvider>,
   );
 }
@@ -215,6 +219,7 @@ describe('DataPillar in a zh-CN console — the object buffer is the authored do
     renderZh();
 
     await relabel('Severity', 'Level');
+    await pressStudioSave();
     await waitFor(() => expect(objectSaves().length).toBeGreaterThan(0), { timeout: 8000 });
     const { name, body, opts } = objectSaves().at(-1)!;
     expect(name).toBe(OBJECT);
@@ -228,6 +233,7 @@ describe('DataPillar in a zh-CN console — the object buffer is the authored do
     renderZh();
 
     await relabel('Severity', 'Level');
+    await pressStudioSave();
     await waitFor(() => expect(objectSaves().length).toBeGreaterThan(0), { timeout: 8000 });
     expectAuthoredBody(objectSaves().at(-1)!.body, 'Level');
   });
@@ -241,10 +247,11 @@ describe('DataPillar in a zh-CN console — the object buffer is the authored do
     const own = tFormat('engine.studio.data.fieldCount', 'zh-CN', { count: 2 });
     const system = tFormat('engine.studio.data.systemFieldCount', 'zh-CN', { count: 5 });
     await screen.findByText(`${own} ${system}`, undefined, { timeout: 8000 });
-    // The grid shows the records as the server has them: the served `owner_id`
-    // column leads, the author's columns follow; hidden ones stay out.
+    // The grid keeps the served `owner_id` column; hidden ones stay out.
+    // objectstack#34794 — the name field leads and the served column follows
+    // the author's fields.
     await waitFor(
-      () => expect(JSON.parse(screen.getByTestId('grid-columns').textContent ?? 'null')).toEqual(['owner_id', 'title', 'severity']),
+      () => expect(JSON.parse(screen.getByTestId('grid-columns').textContent ?? 'null')).toEqual(['title', 'severity', 'owner_id']),
       { timeout: 8000 },
     );
   });

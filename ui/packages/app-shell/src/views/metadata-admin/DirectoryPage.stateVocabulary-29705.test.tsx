@@ -288,14 +288,14 @@ describe('Access: sharing settings in zh carry no English doublet or bare OWD (o
   });
 
   it('the matrix column and the explain rule name the sharing model in Chinese', () => {
-    expect(ZH['engine.studio.access.colOwd']).toBe('记录共享模型');
+    expect(ZH['engine.studio.access.colOwd']).toBe('谁能看到哪些记录');
     expect(ZH['engine.studio.access.explain.ruleKind.owd_baseline']).toMatch(/^\p{Script=Han}/u);
     // The prose that names the Private option names it the way the picker does.
     expect(ZH['engine.studio.settings.sharingDescUnset']).not.toMatch(/Private/u);
     expect(ZH['engine.studio.data.owdHint']).not.toMatch(/Private/u);
-    // en is untouched.
-    expect(EN['perm.owd.private']).toBe('Private');
-    expect(EN['engine.studio.access.colOwd']).toBe('OWD');
+    // en names them in plain words too (objectstack#34795).
+    expect(EN['perm.owd.private']).toBe('Only the owner can see');
+    expect(EN['engine.studio.access.colOwd']).toBe('Who can see which records');
   });
 });
 
@@ -362,6 +362,7 @@ describe('one word per state, the second pass (objectstack#29729)', () => {
     'engine.studio.customize.walled',
     'engine.studio.customize.noVersion',
     'engine.studio.customize.draftFooter',
+    'engine.studio.customize.saveFooter',
     'engine.studio.customize.restoreBody',
     'engine.studio.customize.restoreFlowBody',
     'engine.edit.resetConfirmBody',
@@ -407,10 +408,11 @@ describe('one word per state, the second pass (objectstack#29729)', () => {
 /**
  * objectstack#30062 — the tile and the door agree for every type: on a
  * read-only package a type's tile (and its list header) reads 可定制 exactly
- * when Studio offers Customize on its items — the Interfaces pillar's header
- * (`STUDIO_CUSTOMIZE_TYPES`, a page since objectstack#30063), the All metadata
- * area's form editor (`AREA_FORM_EDITOR_TYPES`) or customize editor
- * (`AREA_CUSTOMIZE_EDITOR_TYPES`, a dataset since objectstack#30064), or the
+ * when Studio offers Customize on its items — `STUDIO_CUSTOMIZE_TYPES` (a page
+ * since objectstack#30063), the All metadata area's form editor
+ * (`AREA_FORM_EDITOR_TYPES`) or customize editor (`AREA_CUSTOMIZE_EDITOR_TYPES`,
+ * a dataset since objectstack#30064, a view, dashboard, report and page since
+ * objectstack#36502 retired the Interfaces pillar that was their door), or the
  * flow header — whatever the type's overlay flag says. Before, a tile read
  * `allowEnvironmentOverlay`, false for a flow, an app, a page and a dataset,
  * so their tiles read 只读 while their doors offered 定制.

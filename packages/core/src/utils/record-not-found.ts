@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { operationUserMessage, type UserMessageCaller } from './operation-user-message.js';
+
 /**
  * [#4435] The 404 a single-record operation answers when the id names no row.
  *
@@ -51,14 +53,25 @@
  * This is the same move `engineCanRollBack` made for the same reason — a fact
  * two layers must agree on lives in the layer beneath both, not in a copy each.
  */
-export function recordNotFoundError(object: string, id: string | number): Error {
+export function recordNotFoundError(
+    object: string,
+    id: string | number,
+    caller?: UserMessageCaller | null,
+): Error {
     const err = new Error(`Record ${id} not found in ${object}`) as Error & {
         code?: string;
         status?: number;
         object?: string;
+        userMessage?: string;
     };
     err.code = 'RECORD_NOT_FOUND';
     err.status = 404;
     err.object = object;
+    // [#34699] The end user's half, beside the developer sentence above (which
+    // keeps its id and API name byte for byte). The by-id doors answer an id
+    // the caller cannot read exactly as an id naming no row (ruling of record
+    // 5985885287), so `record_not_found` says both and decides neither; it
+    // names no id and no API name (#7414).
+    err.userMessage = operationUserMessage('record_not_found', caller);
     return err;
 }

@@ -92,6 +92,14 @@ export default defineConfig({
         find: /^@objectstack\/plugin-audit$/,
         replacement: path.resolve(__dirname, '../plugin-audit/src/index.ts'),
       },
+      // `default-permission-sets.notification-preference.integration.test.ts`
+      // boots the real `sys_notification_preference` object and drives the
+      // real `PreferenceResolver` over what a member wrote: both are
+      // service-messaging's, read from this checkout for the reason above.
+      {
+        find: /^@objectstack\/service-messaging$/,
+        replacement: path.resolve(__dirname, '../../services/service-messaging/src/index.ts'),
+      },
       {
         find: /^@objectstack\/driver-sqlite-wasm$/,
         replacement: path.resolve(__dirname, '../../drivers/driver-sqlite-wasm/src/index.ts'),

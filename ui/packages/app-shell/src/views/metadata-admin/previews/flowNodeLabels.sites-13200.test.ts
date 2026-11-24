@@ -276,10 +276,10 @@ const ID_SITES: Record<string, Verdict> = {
   'inspectors/FlowEdgeInspector.tsx · label-or-id · title={selection.label ?? selection.id}': 'selection-label',
   "inspectors/FlowNodeInspector.tsx · label-or-id · <InspectorShell kindLabel={t('engine.inspector.flowNode.kind', locale)} title={selection.label ?? emptyId} onClose={onClearSelection} closeLabel={t('engine.inspector.flowNode.close', locale)}>": 'selection-label',
   // ── own-title: own title beside the type eyebrow; resolver would repeat the type (ruled B on objectui#13200) ──
-  'previews/FlowCanvas.tsx · label-or-id · label={node.label || node.id}': 'own-title',
-  "previews/FlowPreview.tsx · label-or-id · title: (typeof node.label === 'string' && node.label) || node.id,": 'own-title',
-  'previews/flow-region-view.tsx · label-or-id · <div className="truncate text-[12px] font-semibold leading-tight text-foreground" title={node.label || node.id}>': 'own-title',
-  'previews/flow-region-view.tsx · label-or-id · {node.label || node.id}': 'own-title',
+  'previews/FlowCanvas.tsx · label-or-id · label={labelTranslations?.stepLabel(node) ?? (node.label || node.id)}': 'own-title',
+  "previews/FlowPreview.tsx · label-or-id · const authored = (typeof node.label === 'string' && node.label) || node.id;": 'own-title',
+  'previews/flow-region-view.tsx · label-or-id · <div className="truncate text-[12px] font-semibold leading-tight text-foreground" title={labelTranslations?.stepLabel(node) ?? (node.label || node.id)}>': 'own-title',
+  'previews/flow-region-view.tsx · label-or-id · {labelTranslations?.stepLabel(node) ?? (node.label || node.id)}': 'own-title',
   'inspectors/FlowNodeInspector.tsx · label-or-id · title={node.label || node.id}': 'own-title',
   "previews/flow-node-refs.ts · edge-ends · const where = site.holder.kind === 'node' ? site.holder.id : `${site.holder.source} → ${site.holder.target}`;": 'id-path',
 };

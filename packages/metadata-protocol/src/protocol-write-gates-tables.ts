@@ -6,8 +6,8 @@
  * conflict audit" section of `ObjectStackProtocolImplementation`: the
  * initializers of `OVERLAY_ALLOWED_TYPES`, `STATIC_REGISTRY_TYPES`,
  * `RUNTIME_CREATE_ALLOWED_TYPES`, `OVERLAY_CAPABLE_TYPES` moved out of
- * `protocol.ts` whole by `scripts/codemod-split-protocol.mjs --members`
- * (#30147).
+ * `protocol.ts` whole by the codemod's `--members` pass
+ * (split by #30954; #30147).
  *
  * A MOVE, not a redesign. Each initializer below is the one the class field of
  * the same name carried, byte for byte; the field keeps its docblock,

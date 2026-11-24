@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { ReadableIds, isReadableIds } from '@objectstack/spec/data';
+import { PERIOD_KEY_TOKENS, ReadableIds, SharedRecordIds, isFixedReadLeaf, isReadableIds } from '@objectstack/spec/data';
+import { bucketDateKey } from './datetime.js';
 import {
   resolveFilterToken,
   resolveFilterTokens,
@@ -259,6 +260,102 @@ describe('resolveFilterTokens — the record-context token refuses by name', () 
   });
 });
 
+describe('[#34199] resolveFilterTokens — an unresolved { $record } comparand refuses by name', () => {
+  // A FULL context, as for `{record_id}`: nothing a request carries resolves it.
+  const full = { now: NOW, userId: 'usr_1', orgId: 'org_9', timezone: 'UTC' };
+
+  function refusal(filter: unknown): { code?: string; status?: number; message: string } {
+    let err: unknown;
+    try {
+      resolveFilterTokens(filter, full);
+    } catch (e) {
+      err = e;
+    }
+    expect(err, 'expected a refusal').toBeInstanceOf(Error);
+    return err as { code?: string; status?: number; message: string };
+  }
+
+  it.each([
+    // The eq shorthand is what a picker that does not resolve it sends (the card's market entry).
+    ['the eq shorthand', { cb_market: { $record: 'account.cb_market' } }, 'cb_market', 'account.cb_market', 'filter.cb_market'],
+    ['an operator comparand', { cb_market: { $eq: { $record: 'account.cb_market' } } }, 'cb_market', 'account.cb_market', 'filter.cb_market.$eq'],
+    ['an ordering comparand', { valid_from: { $lte: { $record: 'quote_date' } } }, 'valid_from', 'quote_date', 'filter.valid_from.$lte'],
+    ['inside $or beside a literal', { $or: [{ cb_market: 'export' }, { cb_market: { $record: 'account.cb_market' } }] }, 'cb_market', 'account.cb_market', 'filter.$or[1].cb_market'],
+    ['under $not', { $not: { cb_market: { $ne: { $record: 'account.cb_market' } } } }, 'cb_market', 'account.cb_market', 'filter.$not.cb_market.$ne'],
+    ['beside a string token it no longer depends on', { $and: [{ owner: '{current_user_id}' }, { cb_market: { $record: 'account.cb_market' } }] }, 'cb_market', 'account.cb_market', 'filter.$and[1].cb_market'],
+    // A column literally named `value` beside one named `field` is two columns, not a rule entry.
+    ['on a column named value beside one named field', { field: 'x', value: { $record: 'account.cb_market' } }, 'value', 'account.cb_market', 'filter.value'],
+  ])('%s: INVALID_FILTER / 400 naming the field, the $record path and the position', (_label, filter, field, path, at) => {
+    const err = refusal(filter);
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain(`{ "$record": "${path}" }`);
+    expect(err.message).toContain(`on field "${field}" at ${at} reached the server unresolved`);
+  });
+
+  it('walks an or-array from its second member: an object node there is still judged', () => {
+    const err = refusal(['or', ['stage', '=', 'won'], { cb_market: { $record: 'account.cb_market' } }]);
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).toContain('on field "cb_market" at filter[2].cb_market reached');
+  });
+
+  it('bounds the echoed $record value, which came off the wire', () => {
+    const err = refusal({ cb_market: { $record: 'x'.repeat(500) } });
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message).not.toContain('x'.repeat(60));
+    expect(err.message).toContain('on field "cb_market" at filter.cb_market reached');
+  });
+
+  it('refuses a malformed reference by its key too', () => {
+    const malformed = refusal({ cb_market: { $record: 'account.cb_market', addDays: 1 } });
+    expect(malformed.code).toBe('INVALID_FILTER');
+    expect(malformed.status).toBe(400);
+    expect(malformed.message).toContain('on field "cb_market" at filter.cb_market reached');
+  });
+
+  it.each([
+    // A no-`$` object beneath a field is a deep-equality comparand (or a
+    // nested-relation condition): the `$record` inside it is data to this pass.
+    ['inside a deep-equality comparand', { attachment: { meta: { $record: 'x' } } }],
+    ['inside a nested-relation condition', { account: { cb_market: { $record: 'account.cb_market' } } }],
+    // A list member: the engine's comparand-type door refuses it first, and the
+    // first string of the list is never read as a field name.
+    ['as an $in list member', { region: { $in: ['NA', 'EU', { $record: 'account.region' }] } }],
+    ['at the root, where no field names it', { $record: 'account.cb_market' }],
+    ['as the third member of a [field, op, value] tuple', ['cb_market', '=', { $record: 'account.cb_market' }]],
+    // The tuple's value is a comparand: the array spelling of the deep-equality
+    // CONTROL above is the same literal, and the analytics service hands the
+    // unlowered array to this pass.
+    ['inside a deep-equality comparand in the array spelling', ['attachment', '=', { meta: { $record: 'x' } }]],
+    ['inside a tuple under an and-array', ['and', ['stage', '=', 'won'], ['attachment', '=', { meta: { $record: 'x' } }]]],
+    ['inside a tuple of a legacy list of tuples', [['stage', '=', 'won'], ['attachment', 'in', [{ meta: { $record: 'x' } }]]]],
+  ])('control — %s: not a field\'s comparand, so it comes back by reference', (_label, filter) => {
+    expect(resolveFilterTokens(filter, full)).toBe(filter);
+  });
+
+  it('control — a filter with no placeholder still returns by reference, nested objects included', () => {
+    const plain = { cb_market: 'export', account: { region: 'NA' }, meta: { $eq: 'x' }, $or: [{ score: { $gt: 1 } }] };
+    expect(resolveFilterTokens(plain, full)).toBe(plain);
+  });
+
+  it('control — string tokens and the $now anchor resolve as before, with `record` only as a value', () => {
+    expect(resolveFilterTokens({ owner: '{current_user_id}', due: { $lt: '{today}' }, note: '$record', kind: 'record' }, full)).toEqual({
+      owner: 'usr_1', due: { $lt: '2026-07-15' }, note: '$record', kind: 'record',
+    });
+    expect(resolveFilterTokens({ due: { $gte: { $now: true, addDays: -1 } } }, full)).toEqual({
+      due: { $gte: { $now: NOW.toISOString(), addDays: -1 } },
+    });
+  });
+
+  it('control — a deep { $record } beside a string token is resolved around, kept as written', () => {
+    expect(resolveFilterTokens({ owner: '{current_user_id}', attachment: { meta: { $record: 'x' } } }, full)).toEqual({
+      owner: 'usr_1', attachment: { meta: { $record: 'x' } },
+    });
+  });
+});
+
 describe('resolveFilterTokens — tree walk', () => {
   const ctx = { now: NOW, userId: 'usr_1', orgId: 'org_9' };
 
@@ -359,6 +456,32 @@ describe('resolveFilterTokens — tree walk', () => {
     expect(out.$or[0].record_id!.$in).toBe(leaf);
     expect(isReadableIds(out.$or[0].record_id!.$in)).toBe(true);
   });
+
+  // [ADR-0155 D1] The same for a fixed-read leaf: a read scope is an `$or` of
+  // the owner match and the leaf, and an owner match spelled with a
+  // placeholder rebuilds the tree around the leaf.
+  it('returns a fixed-read leaf beside a resolved placeholder by reference, brand intact', () => {
+    const read = SharedRecordIds.read('cpz_doc', 'usr_1');
+    const write = SharedRecordIds.write('cpz_doc', 'usr_1', ['edit']);
+    const where = { $or: [{ owner: '{current_user_id}' }, { id: { $in: read } }], $and: [{ id: { $in: write } }] };
+    const out = resolveFilterTokens(where, ctx) as {
+      $or: Array<{ owner?: string; id?: { $in: unknown } }>;
+      $and: Array<{ id: { $in: unknown } }>;
+    };
+    // Control: the tree around the placeholder was rebuilt, so the leaf's identity is the walk's answer.
+    expect(out).not.toBe(where);
+    expect(out.$or[1]).not.toBe(where.$or[1]);
+    expect(out.$or[0].owner).toBe('usr_1');
+    expect(out.$or[1].id!.$in).toBe(read);
+    expect(out.$and[0].id.$in).toBe(write);
+    expect(isFixedReadLeaf(out.$or[1].id!.$in)).toBe(true);
+  });
+
+  it('reads no placeholder inside a fixed-read leaf: its inputs are data', () => {
+    const leaf = SharedRecordIds.read('cpz_doc', '{current_user_id}');
+    const where = { id: { $in: leaf } };
+    expect(resolveFilterTokens(where, ctx)).toBe(where);
+  });
 });
 
 /**
@@ -449,5 +572,84 @@ describe('filterTokenContextFrom', () => {
     expect(filterTokenContextFrom(undefined)).toEqual({
       now: undefined, userId: undefined, orgId: undefined, timezone: undefined,
     });
+  });
+});
+
+/**
+ * `{current_iso_week}` — the period key (`PERIOD_KEY_TOKENS`): the ISO-8601
+ * week of the reference day, the label `bucketDateKey` writes for an analytics
+ * `week` bucket. The table is the client/server parity pin: the same rows are
+ * asserted against `@object-ui/core`'s `resolvePeriodKeyTokens` in the
+ * `resolvePeriodKeyTokens` block of
+ * `ui/packages/core/src/utils/__tests__/date-macros.test.ts`, which writes the
+ * same week rule again because it cannot import this package. Change a row in
+ * one file and change it in the other.
+ */
+describe('resolveFilterToken — the period key {current_iso_week}', () => {
+  /** instant · reference timezone (none = UTC) · ISO week key */
+  const PARITY_TABLE: ReadonlyArray<readonly [string, string | undefined, string]> = [
+    ['2026-11-19T12:00:00Z', undefined, '2026-W47'],
+    // Year edges: the ISO week-numbering year is the year of the week's Thursday.
+    ['2026-12-31T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-01T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-03T12:00:00Z', undefined, '2026-W53'],
+    ['2027-01-04T12:00:00Z', undefined, '2027-W01'],
+    ['2020-12-31T12:00:00Z', undefined, '2020-W53'],
+    ['2021-01-03T12:00:00Z', undefined, '2020-W53'],
+    ['2021-01-04T12:00:00Z', undefined, '2021-W01'],
+    ['2025-12-29T12:00:00Z', undefined, '2026-W01'],
+    ['2024-12-30T12:00:00Z', undefined, '2025-W01'],
+    // The reference timezone decides the day, and so the week.
+    ['2026-11-22T20:00:00Z', 'Asia/Tokyo', '2026-W48'],
+    ['2026-11-22T20:00:00Z', 'America/New_York', '2026-W47'],
+    ['2026-11-23T03:00:00Z', 'America/Los_Angeles', '2026-W47'],
+    ['2026-11-23T03:00:00Z', undefined, '2026-W48'],
+    ['2027-01-03T23:30:00Z', 'Asia/Shanghai', '2027-W01'],
+    ['2027-01-03T23:30:00Z', undefined, '2026-W53'],
+  ];
+
+  it.each(PARITY_TABLE)('%s in %s is %s', (instant, timezone, key) => {
+    const now = new Date(instant);
+    expect(resolveFilterToken('current_iso_week', { now, timezone })).toBe(key);
+    // One week rule: the analytics week bucket labels the same instant the same way.
+    expect(bucketDateKey(now, 'week', timezone)).toBe(key);
+  });
+
+  it('every token in the spec list resolves to a key, never to a date', () => {
+    expect(PERIOD_KEY_TOKENS.length).toBeGreaterThan(0);
+    for (const token of PERIOD_KEY_TOKENS) {
+      expect(resolveFilterToken(token, { now: NOW }), token).toMatch(/^\d{4}-W\d{2}$/);
+    }
+  });
+
+  it('resolves through the tree walk, both wrappings, beside the other vocabularies on one instant', () => {
+    const ctx = filterTokenContextFrom({ userId: 'usr_1', timezone: 'UTC' }, NOW);
+    expect(resolveFilterTokens({
+      $and: [
+        { cost_week: '{current_iso_week}' },
+        { supply_week: { $in: ['${current_iso_week}', '2026-W27'] } },
+        { day: { $gte: '{current_week_start}' } },
+        { owner: '{current_user_id}' },
+        { note: 'plan {current_iso_week}' },
+      ],
+    }, ctx)).toEqual({
+      $and: [
+        { cost_week: '2026-W29' },
+        { supply_week: { $in: ['2026-W29', '2026-W27'] } },
+        { day: { $gte: '2026-07-13' } },
+        { owner: 'usr_1' },
+        // A placeholder embedded in a longer string is not one: left as written.
+        { note: 'plan {current_iso_week}' },
+      ],
+    });
+  });
+
+  it('a near spelling is refused as unknown, and the refusal names the period key', () => {
+    let refusal: unknown;
+    try { resolveFilterTokens({ cost_week: '{current_week}' }, { now: NOW }); } catch (e) { refusal = e; }
+    expect(refusal).toBeInstanceOf(UnknownFilterTokenError);
+    expect((refusal as UnknownFilterTokenError).code).toBe('FILTER_TOKEN_UNKNOWN');
+    expect((refusal as UnknownFilterTokenError).status).toBe(400);
+    expect((refusal as Error).message).toContain('{current_iso_week}');
   });
 });

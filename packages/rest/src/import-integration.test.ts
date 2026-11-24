@@ -830,6 +830,27 @@ describe('import route — named mapping artifact (#2611)', () => {
       expect(await engine.findOne('task', { where: { id: 'e2' } })).toBeFalsy();
     });
 
+    // [#33385, review S2] A disabled package holds no name: `_env/NAME` of a
+    // mapping only a disabled package holds answers as `GET
+    // /meta/mapping/_env/NAME` answers it — not found, naming no package —
+    // where it was refused 409 naming the disabled holder.
+    it('_env/NAME of a mapping only a disabled package holds: 404 MAPPING_NOT_FOUND naming no package, as GET /meta answers it; re-enabled, 409 naming it', async () => {
+      shipMapping(ALPHA, 1);
+      engine.registry.disablePackage(ALPHA);
+      const held = await call(route, { format: 'csv', csv: 'ID,Task Title\ne3,壬', mappingName: '_env/task_pkg_feed' });
+      expect([held._status, held._json?.code], JSON.stringify(held._json)).toEqual([404, 'MAPPING_NOT_FOUND']);
+      expect(JSON.stringify(held._json)).not.toContain(ALPHA);
+      const meta = await metaQualifiedRead('_env', 'task_pkg_feed');
+      expect([meta._status, meta._json?.code ?? meta._json?.error?.code], JSON.stringify(meta._json)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+      expect(await engine.findOne('task', { where: { id: 'e3' } })).toBeFalsy();
+      // CONTROL — the holder enabled: refused 409 naming it, as before.
+      engine.registry.enablePackage(ALPHA);
+      const back = await call(route, { format: 'csv', csv: 'ID,Task Title\ne4,癸', mappingName: '_env/task_pkg_feed' });
+      expect([back._status, back._json?.code], JSON.stringify(back._json)).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(back._json.error).toContain(ALPHA);
+      expect(await engine.findOne('task', { where: { id: 'e4' } })).toBeFalsy();
+    });
+
     it('a qualifier that is no address reads the whole string by name, as before: 404, never the name after the slash', async () => {
       // `task_feed_import` is registered: reading the part after the slash
       // would import through it.

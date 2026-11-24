@@ -69,11 +69,17 @@ interface TypeMismatchParams {
   readonly reference?: string;
 }
 
-/** The params every `date-text-call*` code interpolates; the codes differ in the outcome their sentence states. */
+/**
+ * The params every `date-text-call*` code interpolates; the codes differ in the
+ * outcome their sentence states. `shift` is an optional clause's: present
+ * exactly when the call is `timestamp(<date field>)` (#34363), naming the
+ * whole-day shift that keeps the result a date, `isoDate(addDays(<field>, N))`.
+ */
 interface DateTextCallParams {
   readonly call: string;
   readonly reference: string;
   readonly rewrite: string;
+  readonly shift?: string;
 }
 
 /** Code → the params its message interpolates. The keys ARE the closed set. */
@@ -185,7 +191,8 @@ export interface ExpressionRefusalParams {
    * `reference` is the field as written, when it is known. A flattened (flow)
    * condition is `date-text-arithmetic-run-fails` / `-run-may-fail`; a
    * fail-closed site is `date-text-arithmetic-fail-closed`, an advisory rule's
-   * `date-text-arithmetic-fail-open`.
+   * `date-text-arithmetic-fail-open`, and a flow value envelope's
+   * `date-text-arithmetic-value-run-may-fail`.
    */
   'date-text-arithmetic': { readonly operands: string; readonly reference?: string };
   /**
@@ -204,6 +211,16 @@ export interface ExpressionRefusalParams {
   'date-text-arithmetic-run-fails': { readonly operands: string; readonly reference?: string };
   /** [#30016] ERROR: `date-text-arithmetic`, at a `date-arithmetic-run-may-fail` site. */
   'date-text-arithmetic-run-may-fail': { readonly operands: string; readonly reference?: string };
+  /**
+   * [#34660] ERROR: `date-text-arithmetic` in a flow VALUE envelope
+   * (`ExprSchemaHint.flowValueEnvelope`: an `assignment` value, a
+   * `create_record` / `update_record` `fields.*` value) — it faults, and so
+   * fails the run at the step, wherever the field holds that text when the
+   * value is computed. No condition runs at a value slot, so its sentence is
+   * not `-run-may-fail`'s. The `sweep` precedent names the site before the
+   * outcome (`type-mismatch-sweep-run-fails`); `value` is this site.
+   */
+  'date-text-arithmetic-value-run-may-fail': { readonly operands: string; readonly reference?: string };
   /**
    * [#30250] ERROR: `date-arithmetic` at a site that FAILS CLOSED (an `error`
    * validation rule, a field write rule, an option `visibleWhen`, a hook
@@ -227,15 +244,20 @@ export interface ExpressionRefusalParams {
    * field declared as that text: the evaluator faults on it on every row.
    * `call` is the call as written, `reference` the date field as written, and
    * `rewrite` the call with that field parsed by `date(…)` first, which the
-   * check proved clean. A flattened (flow) condition is
+   * check proved clean — for `timestamp(<date field>)`, whose string overload
+   * checks clean and faults on the `YYYY-MM-DD` text, `date(…)` in place of the
+   * call, with the optional `shift` clause. A flattened (flow) condition is
    * `date-text-call-run-fails` / `-run-may-fail`; a fail-closed site is
-   * `date-text-call-fail-closed`, an advisory rule's `date-text-call-fail-open`.
+   * `date-text-call-fail-closed`, an advisory rule's `date-text-call-fail-open`,
+   * and a flow value envelope's `date-text-call-value-run-may-fail`.
    */
   'date-text-call': DateTextCallParams;
   /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-run-fails` site. */
   'date-text-call-run-fails': DateTextCallParams;
   /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-run-may-fail` site. */
   'date-text-call-run-may-fail': DateTextCallParams;
+  /** [#34660] ERROR: `date-text-call`, at a `date-text-arithmetic-value-run-may-fail` site (a flow value envelope). */
+  'date-text-call-value-run-may-fail': DateTextCallParams;
   /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-fail-closed` site. */
   'date-text-call-fail-closed': DateTextCallParams;
   /** [#32595] ERROR: `date-text-call`, at a `date-arithmetic-fail-open` site. */
@@ -302,6 +324,27 @@ export interface ExpressionRefusalParams {
    * fault sentence for that call.
    */
   'label-field-no-options': { readonly field: string };
+  /**
+   * [#36167] `==` / `!=` between a list-valued field read (`ExprSchemaHint.multiValueFields`,
+   * or a `fieldTypes` type that is inherently multi) and a non-null scalar
+   * literal: CEL compares the whole list with the scalar, so the expression
+   * answers the same constant on every row. `reference` is the read as
+   * `<root>.<field>` (`record['f']` renders `record.f`), or the bare
+   * `<field>` at a flattened (flow) site, `operand` the literal as CEL prints
+   * it, `answer` the constant CEL answers (`false` for `==`, `true` for
+   * `!=`), and `rewrite` the guarded membership test that replaces the
+   * comparison, parenthesised whole and spelled for the site: `has()`-guarded
+   * `in` for a `<root>.<field>` read, `!= null`-guarded `in` for a bare name,
+   * `.contains(…)` where the source compiles to a query filter
+   * (`ExprSchemaHint.filterCompiled`).
+   */
+  'list-equality': {
+    readonly reference: string;
+    readonly operator: '==' | '!=';
+    readonly operand: string;
+    readonly answer: 'false' | 'true';
+    readonly rewrite: string;
+  };
   /** `collectCelRootIdentifiers` was handed no expression. */
   'empty-expression': Readonly<Record<string, never>>;
   /** `collectCelRootIdentifiers` could not parse the source; `detail` is the parser's reason. */
@@ -351,6 +394,7 @@ const CODE_TABLE = {
   'date-arithmetic-run-may-fail': true,
   'date-text-arithmetic-run-fails': true,
   'date-text-arithmetic-run-may-fail': true,
+  'date-text-arithmetic-value-run-may-fail': true,
   'date-arithmetic-fail-closed': true,
   'date-text-arithmetic-fail-closed': true,
   'date-arithmetic-fail-open': true,
@@ -358,6 +402,7 @@ const CODE_TABLE = {
   'date-text-call': true,
   'date-text-call-run-fails': true,
   'date-text-call-run-may-fail': true,
+  'date-text-call-value-run-may-fail': true,
   'date-text-call-fail-closed': true,
   'date-text-call-fail-open': true,
   'date-duration-value': true,
@@ -371,6 +416,7 @@ const CODE_TABLE = {
   'traversal-bare-and-traversed': true,
   'traversal-multi-hop': true,
   'label-field-no-options': true,
+  'list-equality': true,
   'empty-expression': true,
   'cel-parse-failed': true,
 } as const satisfies Record<ExpressionRefusalCode, true>;

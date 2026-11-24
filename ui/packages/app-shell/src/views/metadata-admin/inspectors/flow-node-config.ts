@@ -30,7 +30,7 @@
  */
 
 import type { FlowTriggerKind } from '@objectstack/spec/automation';
-import type { DeclaredConfigKey } from './json-schema-to-fields.js';
+import { SIBLING_GATES, type DeclaredConfigKey } from './json-schema-to-fields.js';
 import type { RegistryAndDataValueSource, RegistryValueSource } from '../../../utils/approverValueSources.js';
 import { flowFieldZh, isZhLocale } from '../i18n.js';
 
@@ -1004,7 +1004,9 @@ const FLOW_NODE_CONFIG: Record<string, FlowConfigField[]> = {
   // nodes wired to its `approve` / `reject` out-edges).
   approval: [
     cfg('approvers', 'Approvers', 'objectList', {
-      help: 'Who may act on this step. Wire the node’s out-edges with labels "approve" and "reject".',
+      // objectstack#34818 — the designer inserts the node with its `approve`
+      // and `reject` out-edges, and Problems names one that goes missing.
+      help: 'Who may act on this step. The node comes with an "approve" and a "reject" connection; keep both, or the Problems tab reports the missing one.',
       columns: [
         {
           key: 'type',
@@ -1161,6 +1163,23 @@ const FLOW_NODE_CONFIG: Record<string, FlowConfigField[]> = {
     // same: the rule is keyed by path, not declared here.
     { id: 'escalation.enabled', path: ['config', 'escalation', 'enabled'], label: 'SLA escalation', kind: 'boolean', defaultValue: 'true', help: 'Escalate when a decision is not recorded within the timeout.' },
     { id: 'escalation.timeoutHours', path: ['config', 'escalation', 'timeoutHours'], label: 'Timeout (hours)', kind: 'number', placeholder: '24', showWhen: { field: 'escalation.enabled', equals: ['true'] } },
+    // ADR-0157 D5: how the timeout's hours count. `defaultValue` mirrors the
+    // spec's `.default('wall_clock')` (held by the spec-reconciliation test).
+    // The calendar shows only under working time (`SIBLING_GATES`).
+    {
+      id: 'escalation.clock', path: ['config', 'escalation', 'clock'], label: 'Count hours as', kind: 'select', defaultValue: 'wall_clock',
+      options: [
+        { value: 'wall_clock', label: 'Wall-clock hours' },
+        { value: 'working_time', label: 'Working hours' },
+      ],
+      help: 'Wall-clock hours count nights, weekends and holidays. Working hours count only the working periods of a working calendar.',
+      showWhen: { field: 'escalation.enabled', equals: ['true'] },
+    },
+    {
+      id: 'escalation.calendar', path: ['config', 'escalation', 'calendar'], label: 'Working calendar', kind: 'text', placeholder: 'Organization default',
+      help: "The code of the working calendar that counts the hours. Leave it empty to use the organization's default calendar.",
+      showWhen: SIBLING_GATES['escalation.calendar'],
+    },
     {
       id: 'escalation.action', path: ['config', 'escalation', 'action'], label: 'On timeout', kind: 'select', defaultValue: 'notify',
       options: [
@@ -1259,20 +1278,29 @@ const FLOW_NODE_CONFIG: Record<string, FlowConfigField[]> = {
     // takes a string or a string array), so `mergeServerFlowFields` keeps this
     // editor for it rather than leaving the key to Advanced (JSON).
     cfg('recipients', 'Recipients', 'recipients', { help: 'Who receives the notification: a field of the trigger record, a user, a team or an email address. At least one is required.' }),
-    cfg('title', 'Title', 'text', { placeholder: 'Your request was approved', help: 'Notification title (required).', refMode: 'hole' }),
-    cfg('message', 'Message', 'textarea', { placeholder: 'Supports {{ var }} template holes.', help: 'Notification body.', refMode: 'hole' }),
-    cfg('channels', 'Channels', 'stringList', { help: 'Channels to fan out to (default: inbox — e.g. inbox · email · push).' }),
-    cfg('topic', 'Topic', 'text', { placeholder: 'notify', help: 'Event topic (default: "notify").' }),
+    // objectstack#36746 — the help rows speak the author's words: what the
+    // recipient sees and what a setting changes, never a key alias or a
+    // default spelled as a literal.
+    cfg('title', 'Title', 'text', { placeholder: 'Your request was approved', help: 'The headline the recipient sees. Required.', refMode: 'hole' }),
+    cfg('message', 'Message', 'textarea', {
+      placeholder: 'Can include values from the record, e.g. {{ record.name }}',
+      help: 'The text shown under the title.',
+      refMode: 'hole',
+    }),
+    cfg('channels', 'Channels', 'stringList', { help: 'Where the notification is delivered: inbox, email or push. Inbox when left empty.' }),
+    cfg('topic', 'Category', 'text', {
+      help: 'The kind of notification. Recipients can turn each kind on or off in their notification settings. Leave empty for general notifications.',
+    }),
     cfg('severity', 'Severity', 'select', {
       options: [
         { value: 'info', label: 'Info' },
         { value: 'warning', label: 'Warning' },
         { value: 'critical', label: 'Critical' },
       ],
-      help: 'Notification severity.',
+      help: 'How important the notification is.',
     }),
     // Click-through target (objectstack-ai/objectstack#2675): deep-link the notification to a record.
-    cfg('sourceObject', 'Link object', 'text', { placeholder: 'sys_approval_request', help: 'Object of the record the notification links to (requires Link record id).' }),
+    cfg('sourceObject', 'Link object', 'text', { placeholder: 'sys_approval_request', help: 'The object whose record opens when the notification is clicked. Needs the record to link as well.' }),
     // objectui#12372 — a value slot: the id as a string, or a CEL value envelope.
     cfg('sourceId', 'Link record id', 'text', {
       help: 'Record id the notification links to (requires Link object): the id as text, or a CEL expression (e.g. record.id).',
@@ -1508,14 +1536,19 @@ function withUnmappedDeclaredKeys(
   return out;
 }
 
-/** Overlay a column's zh label / option labels (English is the fallback). */
+/** Overlay a column's zh label / help / option labels (English is the fallback). */
 function localizeColumn(
   col: FlowConfigColumn,
-  cz: { label?: string; opts?: Record<string, string> } | undefined,
+  cz: { label?: string; help?: string; placeholder?: string; opts?: Record<string, string> } | undefined,
 ): FlowConfigColumn {
   if (!cz) return col;
   const out: FlowConfigColumn = { ...col };
   if (cz.label) out.label = cz.label;
+  // objectstack#34818 — the served column help (the spec's description).
+  if (cz.help) out.help = cz.help;
+  // objectstack#34818 — only a column the zh table names a placeholder for:
+  // a prose hint, never an example literal.
+  if (col.placeholder && cz.placeholder) out.placeholder = cz.placeholder;
   if (col.options && cz.opts) {
     out.options = col.options.map((o) => ({ ...o, label: cz.opts![o.value] ?? o.label }));
   }
@@ -1533,6 +1566,7 @@ function localizeField(rawType: string, canonicalType: string, field: FlowConfig
   if (z.label) out.label = z.label;
   if (z.help) out.help = z.help;
   if (field.unsetNotice && z.unsetNotice) out.unsetNotice = z.unsetNotice;
+  if (field.placeholder && z.placeholder) out.placeholder = z.placeholder;
   if (field.options && z.opts) {
     out.options = field.options.map((o) => ({ ...o, label: z.opts![o.value] ?? o.label }));
   }

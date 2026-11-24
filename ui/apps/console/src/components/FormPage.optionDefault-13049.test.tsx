@@ -205,6 +205,7 @@ describe('objectui#13049 — `readPrefill` keeps the stored record first', () =>
     const field = {
       name: 'priority',
       label: 'Priority',
+      labelSource: 'object' as const,
       type: 'select',
       required: true,
       readonly: false,

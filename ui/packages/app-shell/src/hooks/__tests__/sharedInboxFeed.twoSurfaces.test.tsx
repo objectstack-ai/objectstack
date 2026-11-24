@@ -114,9 +114,10 @@ vi.mock('@object-ui/components', async (importOriginal) => {
     Avatar: Pass,
     AvatarImage: () => null,
     AvatarFallback: Pass,
-    Popover: Pass,
-    PopoverTrigger: Pass,
-    PopoverContent: Pass,
+    Sheet: Pass,
+    SheetTrigger: Pass,
+    SheetContent: Pass,
+    SheetTitle: Pass,
     Tabs: Pass,
     TabsList: Pass,
     TabsTrigger: ({ children }: any) => <button type="button">{children}</button>,
@@ -344,7 +345,14 @@ const inHome = (title: string) =>
 const inboxReads = () => finds.filter((f) => f.object === 'sys_inbox_message');
 const receiptReads = () => finds.filter((f) => f.object === 'sys_notification_receipt');
 
+let widthBefore = 0;
+
 beforeEach(() => {
+  // From 768 px up the bell opens the full-page inbox instead of a panel
+  // (objectstack#36741); the panel's list these pins read is the phone's, so
+  // the page is drawn at phone width. The full page lists the same shared feed.
+  widthBefore = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 375 });
   finds.length = 0;
   inboxRows = [];
   receiptRows = [];
@@ -358,6 +366,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: widthBefore });
 });
 
 /**

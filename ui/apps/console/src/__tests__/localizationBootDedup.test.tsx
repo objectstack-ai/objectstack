@@ -18,15 +18,18 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { useLocalization, readCachedLanguageSeed } from '@object-ui/i18n';
 import { clearSharedDiscoveryCache } from '../../../../packages/data-objectstack/src/sharedDiscovery';
 import { resetInflightGetsForTesting } from '../../../../packages/types/src/http-inflight';
-import { __resetAppDefaultLocaleForTests, seedTenantLanguage } from '../languageSeed';
+import { __resetPreferredLocaleForTests, seedTenantLanguage } from '../languageSeed';
 import { LocalizationFetchProvider } from '../LocalizationFetchProvider';
+// Off the `@object-ui/auth` barrel; the vitest alias maps that barrel to
+// `packages/auth/src`, so this is the module the owner count is read from.
+import { SessionUserScope } from '../../../../packages/auth/src/ActiveOrganizationStorage';
 
 const ENDPOINT = '/api/v1/auth/me/localization';
 const DISCOVERY = '/api/v1/discovery';
 
 /**
- * The boot's discovery read (objectstack#33231) is the data adapter's request,
- * not this endpoint's: these answer it as a server serving no default, unless a
+ * The boot's discovery read (objectstack#33985) is the data adapter's request,
+ * not this endpoint's: these answer it as a server serving no locale, unless a
  * test says otherwise, and count only the localization requests.
  */
 const isDiscovery = (url: unknown) => String(url).endsWith(DISCOVERY);
@@ -59,12 +62,13 @@ function Consumer() {
 beforeEach(() => {
   resetInflightGetsForTesting();
   localStorage.clear();
-  __resetAppDefaultLocaleForTests();
+  __resetPreferredLocaleForTests();
   clearSharedDiscoveryCache();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   resetInflightGetsForTesting();
   localStorage.clear();
 });
@@ -101,14 +105,15 @@ describe('first-visit localization request budget', () => {
     expect(meCalls(fetchStub)).toBe(1);
   });
 
-  it("still ONE request when both state the app's declared default (objectstack#33231)", async () => {
+  it('still ONE request when both state the supported browser language (objectstack#33985)', async () => {
     const gate = deferred<Response>();
     const fetchStub = vi.fn((url: string, _init?: RequestInit) =>
       isDiscovery(url)
-        ? Promise.resolve(jsonResponse({ locale: { default: 'zh-CN', supported: ['zh-CN'], timezone: 'UTC' } }))
+        ? Promise.resolve(jsonResponse({ locale: { default: 'en', supported: ['en', 'zh-CN'], timezone: 'UTC' } }))
         : gate.promise,
     );
     vi.stubGlobal('fetch', fetchStub);
+    vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('zh-CN');
 
     await seedTenantLanguage('', 1);
     await waitFor(() => expect(meCalls(fetchStub)).toBe(1));
@@ -162,7 +167,7 @@ describe('first-visit localization request budget', () => {
     expect(meCalls(fetchStub)).toBeGreaterThanOrEqual(2);
   });
 
-  it('does not share once the request has settled', async () => {
+  it('takes the seed\'s settled answer: one request even when the seed settled before the mount (objectstack#35455)', async () => {
     const fetchStub = vi.fn(async (url: string) =>
       isDiscovery(url)
         ? jsonResponse({}, 404)
@@ -170,9 +175,11 @@ describe('first-visit localization request budget', () => {
     );
     vi.stubGlobal('fetch', fetchStub);
 
-    // Let the seed's request settle completely before the provider mounts.
-    await seedTenantLanguage('', 1);
-    await waitFor(() => expect(readCachedLanguageSeed()).toBe('en-US'));
+    // The seed's request settles completely inside its race, before the mount.
+    await seedTenantLanguage('', 1_000);
+    // CONTROL (the locale still applies before first paint): the seed is
+    // cached by the time the boot's race resolves, ahead of any render.
+    expect(readCachedLanguageSeed()).toBe('en-US');
     expect(meCalls(fetchStub)).toBe(1);
 
     render(
@@ -182,7 +189,76 @@ describe('first-visit localization request budget', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('en-US/USD'));
-    // Two waves, two requests: this is in-flight sharing, not a cache.
+    expect(meCalls(fetchStub)).toBe(1);
+  });
+
+  it('CONTROL: the hand-off is spent once — a later mount asks the server', async () => {
+    const fetchStub = vi.fn(async (url: string) =>
+      isDiscovery(url)
+        ? jsonResponse({}, 404)
+        : jsonResponse({ authenticated: true, locale: 'en-US', currency: 'USD' }),
+    );
+    vi.stubGlobal('fetch', fetchStub);
+
+    await seedTenantLanguage('', 1_000);
+    const first = render(
+      <LocalizationFetchProvider endpoint={ENDPOINT}>
+        <Consumer />
+      </LocalizationFetchProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('en-US/USD'));
+    first.unmount();
+
+    render(
+      <LocalizationFetchProvider endpoint={ENDPOINT}>
+        <Consumer />
+      </LocalizationFetchProvider>,
+    );
+    await waitFor(() => expect(meCalls(fetchStub)).toBe(2));
+  });
+
+  it('CONTROL: an unauthenticated seed answer is not handed over', async () => {
+    let answer: unknown = { authenticated: false };
+    const fetchStub = vi.fn(async (url: string) =>
+      isDiscovery(url) ? jsonResponse({}, 404) : jsonResponse(answer),
+    );
+    vi.stubGlobal('fetch', fetchStub);
+
+    await seedTenantLanguage('', 1_000);
+    expect(meCalls(fetchStub)).toBe(1);
+    // Signed in since: the provider's read is about the caller, so it asks.
+    answer = { authenticated: true, locale: 'ja-JP', currency: 'JPY' };
+
+    render(
+      <LocalizationFetchProvider endpoint={ENDPOINT}>
+        <Consumer />
+      </LocalizationFetchProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('ja-JP/JPY'));
+    expect(meCalls(fetchStub)).toBe(2);
+  });
+
+  it('CONTROL: an answer asked for the previous owner of the browser is not handed over', async () => {
+    SessionUserScope._resetForTests();
+    localStorage.setItem('auth-session-user-id', 'u_alice');
+    let answer: unknown = { authenticated: true, locale: 'de-DE', currency: 'EUR' };
+    const fetchStub = vi.fn(async (url: string) =>
+      isDiscovery(url) ? jsonResponse({}, 404) : jsonResponse(answer),
+    );
+    vi.stubGlobal('fetch', fetchStub);
+
+    await seedTenantLanguage('', 1_000);
+    expect(readCachedLanguageSeed()).toBe('de-DE');
+    // The browser changes hands between the seed's answer and the mount.
+    expect(SessionUserScope.adopt('u_bob')).toBe(true);
+    answer = { authenticated: true, locale: 'fr-FR', currency: 'EUR' };
+
+    render(
+      <LocalizationFetchProvider endpoint={ENDPOINT}>
+        <Consumer />
+      </LocalizationFetchProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('value').textContent).toBe('fr-FR/EUR'));
     expect(meCalls(fetchStub)).toBe(2);
   });
 });

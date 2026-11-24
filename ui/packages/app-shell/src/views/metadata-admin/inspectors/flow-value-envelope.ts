@@ -44,6 +44,7 @@
 import {
   AssignmentExpressionValueSchema,
   AssignmentValueSchema,
+  FlowRecordFieldValueSchema,
   FLOW_NODE_EXPRESSION_PATHS,
   flowNodeExpressionBlock,
   isExpressionEnvelopeShaped,
@@ -127,6 +128,29 @@ export function writeValueEnvelope(prior: unknown, source: string): Record<strin
  */
 export function valueEnvelopeRefusal(value: unknown): string[] | null {
   const result = AssignmentValueSchema.safeParse(value);
+  return result.success ? null : result.error.issues.map((issue) => issue.message);
+}
+
+/**
+ * Whether `path` is a record write's `fields` map (`create_record` /
+ * `update_record`), whose values the spec judges with
+ * `FlowRecordFieldValueSchema`: a CEL value envelope, a literal, or a
+ * `template` text envelope written in the organization's language.
+ */
+export function isRecordFieldValueSlot(nodeType: unknown, path: readonly string[]): boolean {
+  return (
+    (nodeType === 'create_record' || nodeType === 'update_record') &&
+    path.length === 2 && path[0] === 'config' && path[1] === 'fields'
+  );
+}
+
+/**
+ * The spec's refusal of `value` as a record write's field value, one message
+ * per issue, or `null` when `FlowRecordFieldValueSchema` accepts it. A text
+ * envelope is accepted there, where {@link valueEnvelopeRefusal} refuses it.
+ */
+export function recordFieldValueRefusal(value: unknown): string[] | null {
+  const result = FlowRecordFieldValueSchema.safeParse(value);
   return result.success ? null : result.error.issues.map((issue) => issue.message);
 }
 

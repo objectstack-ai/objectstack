@@ -2,7 +2,8 @@
 
 /**
  * Attachment-removal route ledger — the audited disposition of every HTTP route
- * `registerAttachmentRemovalRoutes` (`attachment-removal-routes.ts`) mounts.
+ * `registerAttachmentRemovalRoutes` (`attachment-removal-routes.ts`) mounts:
+ * the uploader's removal door and the rename door, at one route.
  *
  * WHY THIS EXISTS. `StorageServicePlugin` registers the uploader's removal door
  * straight on `IHttpServer`, beside the storage family and outside it: the
@@ -16,8 +17,9 @@
  * A GAP, NOT SDK SURFACE YET. The consumer is the Console's record Attachments
  * panel, whose per-row delete goes through the generic data door today and is
  * offered only to a holder of the delete grant; it moves to this route in the
- * console half of the same ruling. `@objectstack/client` has no method for it
- * yet, so the row is an acknowledged `gap`.
+ * console half of the same ruling. Its row menu's Rename calls the rename door.
+ * `@objectstack/client` has no method for either yet, so both rows are
+ * acknowledged `gap`s.
  *
  * This module is package-internal (not exported from the index): it is the
  * guard's data, not public API. It stays import-free, so a guard in another
@@ -52,4 +54,6 @@ export interface AttachmentRemovalRouteLedgerEntry {
 export const ATTACHMENT_REMOVAL_ROUTE_LEDGER: readonly AttachmentRemovalRouteLedgerEntry[] = [
   { route: 'DELETE /api/v1/attachments/:id', family: 'attachments', disposition: 'gap',
     note: "remove a sys_attachment row the caller uploaded (uploaded_by), needing no object delete grant; the Console's record Attachments panel is the consumer and the SDK has no method yet" },
+  { route: 'PATCH /api/v1/attachments/:id', family: 'attachments', disposition: 'gap',
+    note: "rename a sys_attachment row (file_name) by the attachment delete rule: its uploader, or a caller the update gate admits as an editor of the parent record; the Console's record Attachments panel row menu is the consumer and the SDK has no method yet" },
 ];

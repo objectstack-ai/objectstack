@@ -12,7 +12,7 @@
  * `keepsOrganizationReference`, `countReferencingRowsOutside`,
  * `organizationCountContext`, `organizationCountIsDisclosable`,
  * `refuseOrganizationDeleteWhileOwned`, `organizationOwnedRowCounts` moved out
- * of `engine.ts` whole by `scripts/codemod-split-engine.mjs`.
+ * of `engine.ts` whole (split by #30012).
  *
  * A MOVE, not a redesign. {@link CascadePlanningFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -47,11 +47,17 @@ import type { ServiceObject } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { declaredHttpStatus } from '@objectstack/types';
 import { ORGANIZATION_OBJECT, resolveTenantFieldName } from './tenancy/system-write-organization.js';
 import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 import {
-  cascadeMemberKey, cascadeSetAdd, cascadeSetHas, declaredMultiValued, deleteWalkTargetOf, statesDeleteSemantics,
+  CascadeBatchNarrowed, REFERENTIAL_CLEAR_OPTION, cascadeMemberKey, cascadeSetAdd, cascadeSetHas, declaredMultiValued,
+  deleteWalkTargetOf, statesDeleteSemantics,
 } from './engine-top-level.js';
+import type { ReferentialClearOption } from './engine-top-level.js';
+import { isExternalDriverFloor } from './external-driver-floor.js';
+import { ORGANIZATION_UNIT_OBJECT } from './validation/unit-code-membership.js';
+import { forgetCollectedProbes, takeCollectedProbe } from './engine-delete-cascade.js';
 import type { CascadeDeleteSet } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
 import type { ObjectQL as ObjectQLClass } from './engine.js';
@@ -517,6 +523,14 @@ export class CascadePlanningFacet {
    * and before the walk deletes or clears anything, so the snapshot reads every
    * row as it stood. Never called for a member that joins a cascade already in
    * progress: such a row belongs to its root's entry.
+   *
+   * [ruling 6893104201 c1] Nothing between the collection and the walk writes,
+   * so the walk takes the collection's answer to each probe it repeats before
+   * its own first write ({@link takeCollectedProbe}), rather than reading the
+   * same rows again. The snapshot keeps its own read: it reads the rows raw,
+   * through the driver, and the probe's rows come through the engine's read
+   * (formula values, file references, hooks), so they are not the values a
+   * restore must write back.
    */
   static async cascadeDeleteRelations(this: Pick<CascadePlanningHost, '_registry' | 'cascadeDeleteSets' | 'collectCascadeDeleteSet' | 'refuseRestrictsInsideOwnCascade' | 'walkReferencingRelations'>, object: string, ids: ReadonlyArray<string | number>, context?: ExecutionContext, depth = 0, onCollected?: (set: CascadeDeleteSet) => Promise<void>): Promise<void> {
     const roots: Array<string | number> = [];
@@ -856,7 +870,7 @@ export class CascadePlanningFacet {
    * a `restrict` and a `set_null` consider only rows OUTSIDE it, and a row the
    * walk has already entered is not cascaded into again.
    */
-  static async walkReferencingRelations(this: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'cascadeRelationBehavior' | 'delete' | 'deleteRestrictedError' | 'fileReferenceCheckElevation' | 'isTenantColumnSetNull' | 'logger' | 'probeReferencingRowsOfSet' | 'referenceProbeFilter' | 'refuseOrganizationDeleteWhileOwned' | 'update'>, object: string, ids: ReadonlyArray<string | number>, context: ExecutionContext | undefined, objects: ServiceObject[], cascadeSet: CascadeDeleteSet): Promise<void> {
+  static async walkReferencingRelations(this: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'cascadeRelationBehavior' | 'delete' | 'deleteRestrictedError' | 'fileReferenceCheckElevation' | 'find' | 'getDriver' | 'isTenantColumnSetNull' | 'logger' | 'probeReferencingRowsOfSet' | 'referenceProbeFilter' | 'refuseOrganizationDeleteWhileOwned' | 'update'>, object: string, ids: ReadonlyArray<string | number>, context: ExecutionContext | undefined, objects: ServiceObject[], cascadeSet: CascadeDeleteSet): Promise<void> {
     // Entered before the first nested `delete()` can come back here: every
     // record of the set, so one member's cascade never deletes another.
     for (const id of ids) cascadeSetAdd(cascadeSet.entered, object, id);
@@ -990,10 +1004,19 @@ export class CascadePlanningFacet {
 
         // [#27004] One probe per batch of the set; each record then takes its
         // own rows, in the set's order.
-        const referencing = await this.probeReferencingRowsOfSet(childName, fieldName, fdef, ids, context);
+        // [ruling 6893104201 c1] …or none: before the walk's first write, the
+        // collection walk's answer to this same probe is still the answer, so
+        // it is taken instead of read again (takeCollectedProbe).
+        const referencing = takeCollectedProbe(cascadeSet, object, childName, fieldName, ids) ??
+          await this.probeReferencingRowsOfSet(childName, fieldName, fdef, ids, context);
         const clearedKey = cascadeMemberKey(childName, fieldName);
         let cleared = cascadeSet.cleared.get(clearedKey);
         if (!cleared) { cleared = new Set(); cascadeSet.cleared.set(clearedKey, cleared); }
+        // [ruling 6893661036, F1] The `cascade` dependents of this relation,
+        // across every record of the set, in the walk's order: deleted after
+        // the loop, a chunk at a time ({@link deleteCascadedChildren}).
+        const cascaded: Array<string | number> = [];
+        const cascadedSeen = new Set<string>();
         for (const id of ids) {
           let behavior: string = relationBehavior;
           let dependents = referencing.get(String(id)) ?? [];
@@ -1092,23 +1115,11 @@ export class CascadePlanningFacet {
               // Either way this cascade removes it once, and re-entering would
               // loop forever on the first and answer 404 on the second.
               if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
-              // Recurse via the public delete so the child's own cascade,
-              // hooks and events fire.
-              //
-              // [#23221] Inside a token naming exactly this child, which that
-              // delete claims and projects onto the DECLARED
-              // `HookContext.referentialCascadeDelete` (see
-              // claimReferentialCascadeDelete): on the real request path the
-              // caller's context reaches the child unchanged, so without it a
-              // freeze guard cannot tell this delete from a hand delete of the
-              // same row. The context is passed as before, by reference and
-              // unmarked — see `cascadeIssuedDeletes` for why the marker is not
-              // a context key. A grandchild is issued by the child's own walk,
-              // inside a token of its own.
-              await this.cascadeIssuedDeletes.run(
-                { object: childName, id: String(depId), claimed: false },
-                () => this.delete(childName, { where: { id: depId }, context } as any),
-              );
+              // [ruling 6893661036, F1] Collected, not deleted here: the
+              // relation's dependents go after this loop, a chunk at a time.
+              if (cascadedSeen.has(String(depId))) continue;
+              cascadedSeen.add(String(depId));
+              cascaded.push(depId);
             } else {
               // [#3023] Clear the FK as an engine-internal referential-integrity
               // write, tagged so plugin-security's ownership-anchor guard (#3004)
@@ -1140,6 +1151,20 @@ export class CascadePlanningFacet {
                   object, id: String(id), referencingObject: childName, referencingId: String(depId), field: fieldName,
                 },
               } as ExecutionContext;
+              // The read-only strips' exemption for THIS clear: the holder row
+              // and the lookup, on the update's module-private symbol channel
+              // (`REFERENTIAL_CLEAR_OPTION`), never on the context above. A
+              // `readonly` / `readonlyWhen` lookup is the normal shape for a
+              // stamp a system writes, and the static strip runs on
+              // `!isSystem` alone, so without it this clear was dropped as a
+              // forged caller write and every holder kept the deleted row's id.
+              // `update()` exempts exactly this key at exactly the value written
+              // below; every other key is judged as before.
+              const referentialClear: ReferentialClearOption = { object: childName, id: String(depId), field: fieldName };
+              const clearOptions = { context: referentialCtx, [REFERENTIAL_CLEAR_OPTION]: referentialClear };
+              // [ruling 6893104201 c1] The walk's first write: its hooks may
+              // write a row a later probe must see.
+              forgetCollectedProbes(cascadeSet);
               if (multiValued) {
                 // The FK is a SET, so `set_null` clears the deleted MEMBER, not
                 // the slot: filter the stored array and write what remains.
@@ -1166,9 +1191,9 @@ export class CascadePlanningFacet {
                 // off-shape bare scalar normalized to the array spelling — is
                 // documented there.
                 const next = ObjectQL.remainderAfterMemberRemoval(dep?.[fieldName], id, cleared);
-                await this.update(childName, { id: depId, [fieldName]: next }, { context: referentialCtx } as any);
+                await this.update(childName, { id: depId, [fieldName]: next }, clearOptions as any);
               } else {
-                await this.update(childName, { id: depId, [fieldName]: null }, { context: referentialCtx } as any);
+                await this.update(childName, { id: depId, [fieldName]: null }, clearOptions as any);
               }
               // [#30237, ADR-0148 D2] The reference a restore re-links while
               // the field still lacks it: the live row, the field, and the id
@@ -1182,7 +1207,19 @@ export class CascadePlanningFacet {
           // [#27004] Every row outside the set has had `id` cleared from it.
           cleared.add(String(id));
         }
+        if (cascaded.length > 0) {
+          // [ruling 6893104201 c1] A write, and the children's hooks run with it.
+          forgetCollectedProbes(cascadeSet);
+          await deleteCascadedChildren(this, childName, cascaded, context, cascadeSet);
+        }
       }
+    }
+    // [ruling 7035627429, option B] An organization's delete removes its units,
+    // the one exemption from the `sys_unit` delete refusal. Last, once
+    // `refuseOrganizationDeleteWhileOwned` above has admitted the delete and
+    // every relation has been judged, so a refused delete removes no unit.
+    if (object === ORGANIZATION_OBJECT) {
+      for (const id of ids) await removeOrganizationUnits(this, id, context, objects, cascadeSet);
     }
   }
 
@@ -1319,7 +1356,9 @@ export class CascadePlanningFacet {
   /**
    * [#24948] The engine half of organization delete: refuse while any row
    * outside the cascade set still names the organization in its tenant column,
-   * a row that outlives the organization excepted ({@link outlivesOrganization}).
+   * a row that outlives the organization excepted ({@link outlivesOrganization}),
+   * and so is a unit of measure, which the walk removes with the organization
+   * once this admits the delete (`removeOrganizationUnits`).
    *
    * Runs before the walk touches the first relation, and reads every tenant
    * relation before it throws, so the one refusal names every table that holds
@@ -1344,6 +1383,9 @@ export class CascadePlanningFacet {
       const fields = (child as any)?.fields as Record<string, any> | undefined;
       // An append-only or engine-owned object's rows outlive the organization: not counted, kept as they are.
       if (!childName || !fields || ObjectQL.outlivesOrganization(child)) continue;
+      // [ruling 7035627429, option B] The organization's units are not counted:
+      // the walk removes them with it (`removeOrganizationUnits`).
+      if (childName === ORGANIZATION_UNIT_OBJECT) continue;
       for (const [fieldName, fdef] of Object.entries(fields)) {
         const behavior = this.cascadeRelationBehavior(ORGANIZATION_OBJECT, child, fieldName, fdef);
         if (!this.isTenantColumnSetNull(ORGANIZATION_OBJECT, child, fieldName, behavior)) continue;
@@ -1386,6 +1428,8 @@ export class CascadePlanningFacet {
       const childName = (child as any)?.name as string | undefined;
       const fields = (child as any)?.fields as Record<string, any> | undefined;
       if (!childName || !fields || exclude.has(childName) || ObjectQL.outlivesOrganization(child)) continue;
+      // [ruling 7035627429, option B] The organization's units go with its delete, as in the engine's refusal.
+      if (childName === ORGANIZATION_UNIT_OBJECT) continue;
       const tenantField = resolveTenantFieldName(child);
       if (!tenantField || !fields[tenantField]) continue;
       const fdef = fields[tenantField];
@@ -1404,4 +1448,195 @@ export class CascadePlanningFacet {
     }
     return counts;
   }
+}
+
+/**
+ * [ruling 6893661036, option F1] Delete the `cascade` dependents of one
+ * relation: one predicate delete per {@link REFERENCE_PROBE_BATCH} children,
+ * `where: { id: { $in: chunk } }` with `multi: true`, through the public
+ * `delete()`. So the chunk runs every child's `beforeDelete`, then ONE set
+ * delete, then the `afterDelete`s, each context on the per-row shape a
+ * predicate delete has always had (ADR-0058 Addendum II): `dispatch.mode`
+ * `'per-row'`, `input.options.multi` set, `previous` the child's own row.
+ * Before this, every child was its own by-id delete (`dispatch.mode`
+ * `'record'`), its hooks interleaved with its siblings' deletes.
+ *
+ * Inside a token naming exactly the chunk's ids, which that delete claims
+ * and projects onto the DECLARED `HookContext.referentialCascadeDelete`
+ * (see claimReferentialCascadeDelete), so every per-row context carries the
+ * marker, as every by-id child delete did [#23221]. The context is passed
+ * by reference and unmarked; a grandchild is issued by the chunk's own walk
+ * (the predicate arm's `cascadeDeleteRelations`, joining this set), inside a
+ * token of its own.
+ *
+ * A chunk keeps today's by-id deletes, one per child, inside a by-id token
+ * each, when:
+ *   - the child's driver has no `deleteMany` (or is a floored external
+ *     driver, which refuses a predicate write): the in-process path it has;
+ *   - the child object is the organization object, which is deleted by id or
+ *     not at all (`organizationPredicateDeleteRefusal`): its by-id delete is
+ *     where the per-organization clean-up runs;
+ *   - the caller's READ door does not return every child of the chunk
+ *     ({@link readDoorReturnsChunk}): a by-id delete re-reads its row through
+ *     the read door (plugin-security step 2.7), so a child the caller cannot
+ *     read refuses there, where a nested predicate delete, scoped by the
+ *     write-class policies alone, would delete it;
+ *   - the batch's caller-scoped WRITE read misses a child it was asked for
+ *     (`CascadeBatchNarrowed`, thrown before any hook or write): a by-id
+ *     delete of that child refuses where a predicate one would skip it.
+ * And a dependent the collect phase never held (not in `cascadeSet.members`)
+ * always goes by id, whatever its chunk does: it is the root of its own
+ * cascade, with its own recycle-bin entry, as before.
+ * In each case the by-id path gives today's answer, and a refusal rolls the
+ * whole cascade back (ruling 6893104201 point 2). So one cascade can show
+ * both shapes.
+ */
+async function deleteCascadedChildren(host: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'delete' | 'find' | 'getDriver' | 'logger'>, childName: string, dependents: ReadonlyArray<string | number>, context: ExecutionContext | undefined, cascadeSet: CascadeDeleteSet): Promise<void> {
+  const driver = host.getDriver(childName) as { deleteMany?: unknown };
+  const batchable = typeof driver?.deleteMany === 'function' && !isExternalDriverFloor(driver as any) &&
+    childName !== ORGANIZATION_OBJECT;
+  const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
+  for (let i = 0; i < dependents.length; i += batchSize) {
+    // [#22305] An earlier chunk's own cascade may have entered a member.
+    const chunk = dependents.slice(i, i + batchSize).filter((depId) => !cascadeSetHas(cascadeSet.entered, childName, depId));
+    if (chunk.length === 0) continue;
+    // Only the set's collected MEMBERS are batched. A dependent the probe
+    // found that the collect phase never held (a row a hook of this cascade
+    // wrote after the set was collected) is deleted by id below, as the root
+    // of its own cascade, so it keeps its own recycle-bin entry: a predicate
+    // delete opens none, and the root's entry snapshotted only the members.
+    const members = chunk.filter((depId) => cascadeSetHas(cascadeSet.members, childName, depId));
+    if (batchable && members.length > 0 && await readDoorReturnsChunk(host, childName, members, context)) {
+      try {
+        await host.cascadeIssuedDeletes.run(
+          { object: childName, ids: new Set(members.map((depId) => String(depId))), claimed: false },
+          () => host.delete(childName, { where: { id: { $in: members } }, multi: true, context } as any),
+        );
+        // The predicate arm walks a child's own relations only when one
+        // points at it; entered either way, so a second path to the same row
+        // never deletes it again.
+        for (const depId of members) cascadeSetAdd(cascadeSet.entered, childName, depId);
+      } catch (e) {
+        if (!(e instanceof CascadeBatchNarrowed)) throw e;
+      }
+    }
+    for (const depId of chunk) {
+      if (cascadeSetHas(cascadeSet.entered, childName, depId)) continue;
+      // Recurse via the public delete so the child's own cascade, hooks and
+      // events fire, inside a token naming exactly this child [#23221].
+      await host.cascadeIssuedDeletes.run(
+        { object: childName, id: String(depId), claimed: false },
+        () => host.delete(childName, { where: { id: depId }, context } as any),
+      );
+    }
+  }
+}
+
+/**
+ * The tokens {@link removeOrganizationUnits} issued, and no other: the
+ * provenance `delete()` reads ({@link isOrganizationUnitRemoval}) to admit an
+ * organization's unit delete. Module-private, so nothing outside this module
+ * can enter a token into it, a holder of the engine's own `cascadeIssuedDeletes`
+ * store included.
+ */
+const organizationUnitRemovals = new WeakSet<object>();
+
+/**
+ * [ruling 7035627429, option B] Is `token`, the cascade token a `delete()` has
+ * just claimed, one an organization's delete issued to remove one of its
+ * units? The one exemption from `refuseOrganizationUnitDelete`
+ * (`validation/unit-code-membership.ts`): `delete()` asks it only for the token
+ * it claimed itself, so the answer reaches that one delete and no other.
+ */
+export function isOrganizationUnitRemoval(token: unknown): boolean {
+  return typeof token === 'object' && token !== null && organizationUnitRemovals.has(token);
+}
+
+/**
+ * [ruling 7035627429, option B; ADR-0158 Open item 11] Remove the units of
+ * the organization `organizationId`, whose delete {@link
+ * CascadePlanningFacet.walkReferencingRelations} has admitted: a deleted
+ * organization can never create a code again, so its units, retired ones
+ * included, go with it and no `sys_unit` row is left naming it.
+ *
+ * The organization is named explicitly, twice, as the unit-code membership
+ * read names it (`organizationUnitRowsOf`): the read's predicate on the tenant
+ * column, and the `tenantId` of the context both the read and the deletes run
+ * under. That context is `sudo()`-shaped ({@link
+ * CascadePlanningFacet.referenceCheckContext}): the caller's transaction and
+ * user ride along, so the deletes join the organization delete's unit of work
+ * and the audit ledger records who triggered them, and system identity
+ * authorizes them, because no permission set grants a unit delete to anyone.
+ * The read is filed as a reference-check elevation, as the refusal's counts
+ * are.
+ *
+ * Each unit goes through the public `delete()` by id, inside a cascade token
+ * naming exactly that unit (as {@link deleteCascadedChildren} issues one per
+ * child), so its hooks run with `referentialCascadeDelete` set and its audit
+ * and events are a cascade child's. The token is recorded in
+ * {@link organizationUnitRemovals}, which is what admits the delete past the
+ * `sys_unit` refusal; a delete that does not claim it (a hook's own, another
+ * request's) is refused. A table never provisioned holds no unit.
+ */
+async function removeOrganizationUnits(host: Pick<CascadePlanningHost, 'cascadeIssuedDeletes' | 'delete' | 'fileReferenceCheckElevation' | 'find'>, organizationId: string | number, context: ExecutionContext | undefined, objects: ServiceObject[], cascadeSet: CascadeDeleteSet): Promise<void> {
+  const unit = objects.find((o) => (o as { name?: unknown })?.name === ORGANIZATION_UNIT_OBJECT);
+  const tenantField = unit ? resolveTenantFieldName(unit) : null;
+  if (!unit || !tenantField) return;
+  host.fileReferenceCheckElevation(cascadeSet, ORGANIZATION_OBJECT, organizationId, ORGANIZATION_UNIT_OBJECT, tenantField, context);
+  const unitContext = { ...ObjectQL.referenceCheckContext(context), tenantId: String(organizationId) } as ExecutionContext;
+  let rows: unknown;
+  try {
+    rows = await host.find(ORGANIZATION_UNIT_OBJECT, {
+      where: { [tenantField]: organizationId },
+      fields: ['id'],
+      context: unitContext,
+    });
+  } catch (error) {
+    if (isMissingTableError(error, ORGANIZATION_UNIT_OBJECT)) return;
+    throw error;
+  }
+  for (const row of Array.isArray(rows) ? (rows as Array<{ id?: unknown }>) : []) {
+    const token = { object: ORGANIZATION_UNIT_OBJECT, id: String(row.id), claimed: false };
+    organizationUnitRemovals.add(token);
+    await host.cascadeIssuedDeletes.run(
+      token,
+      () => host.delete(ORGANIZATION_UNIT_OBJECT, { where: { id: row.id }, context: unitContext } as any),
+    );
+  }
+}
+
+/**
+ * [ruling 6893104201 point 2] Does the caller's READ door return every child
+ * of the chunk? Asked through the public `find()` under the walk's context,
+ * so select-class row-level security, the sharing read filter and every data
+ * middleware's read visibility compose onto it, as they compose onto the
+ * by-id child delete's own re-read of its row (plugin-security step 2.7). A
+ * cascade batch is a nested write, and the security plugin composes the read
+ * scope onto an addressed predicate write only, so without this question a
+ * child the caller cannot read, admitted by a delete-class policy, would be
+ * deleted where the by-id delete refuses it.
+ *
+ * `false` hands the chunk to the by-id path, which gives today's answer in
+ * every case: it refuses a hidden child, and deletes one no write-class row
+ * filter binds. A read the door REFUSES (a declared 4xx) is answered `false`
+ * for the same reason: the by-id path asks its own question and answers it.
+ * A store fault propagates as raised: an outage is not a hidden row.
+ */
+async function readDoorReturnsChunk(host: Pick<CascadePlanningHost, 'find' | 'logger'>, childName: string, chunk: ReadonlyArray<string | number>, context: ExecutionContext | undefined): Promise<boolean> {
+  let rows: unknown;
+  try {
+    rows = await host.find(childName, { where: { id: { $in: [...chunk] } }, fields: ['id'], context });
+  } catch (e) {
+    const status = declaredHttpStatus(e);
+    if (status === undefined || status >= 500) throw e;
+    // Not a hidden answer: the refusal routes the chunk to the by-id path,
+    // which asks the read door again per child and answers the caller.
+    host.logger.debug(
+      `[cascade] the read door refused the caller on '${childName}'; deleting this chunk of the cascade by id`,
+      { object: childName, status, error: (e as Error)?.message ?? String(e) },
+    );
+    return false;
+  }
+  const found = new Set((Array.isArray(rows) ? rows : []).map((row: any) => String(row?.id)));
+  return chunk.every((depId) => found.has(String(depId)));
 }

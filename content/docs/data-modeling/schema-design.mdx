@@ -57,7 +57,7 @@ export const MyObject = ObjectSchema.create({
 | `description` | string | Help text | `'Companies...'` |
 | `nameField` | string | Canonical primary title field — the stored field used as the record display name (ADR-0079); the deprecated alias `displayNameField` is still accepted | `'name'` |
 | `titleFormat` | string | Deprecated (ADR-0079 → `nameField`). Render-only title template (`{{record.field}}` interpolation); an explicit `nameField` now takes precedence. Refused at save and by `os validate`; a stored object that carries it still loads | `'{{record.name}} - {{record.id}}'` |
-| `highlightFields` | string[] | Most-important fields, in priority order (default columns, cards, previews, detail highlight strip; ADR-0085 — formerly `compactLayout`; the old spelling was retired and is now rejected) | `['name', 'status']` |
+| `highlightFields` | string[] | Most-important fields, in priority order (default columns, cards, previews; ADR-0085 — formerly `compactLayout`; the old spelling was retired and is now rejected) | `['name', 'status']` |
 
 ### Enable Features
 
@@ -317,7 +317,7 @@ export const Account = ObjectSchema.create({
 | `label` | `string` | Human-readable group header |
 | `icon` | `string?` | Lucide/Material icon name for the group header |
 | `description` | `string?` | Optional description under the header |
-| `collapse` | `'none' \| 'expanded' \| 'collapsed'` (default `'none'`) | Collapse behaviour on every surface: `'none'` = always open (no toggle), `'expanded'` = collapsible and starts open, `'collapsed'` = collapsible and starts closed (ADR-0085; replaces the deprecated `defaultExpanded` flag, which is still accepted as an alias) |
+| `collapse` | `'none' \| 'expanded' \| 'collapsed'` (default `'none'`) | Collapse behaviour: `'none'` = always open (no toggle), `'expanded'` = collapsible and starts open, `'collapsed'` = collapsible and starts closed. Forms and the designer preview follow it as written; the synthesized (default) record page lets the reader fold every titled group, so there only `'collapsed'` starts closed (ADR-0085; replaces the deprecated `defaultExpanded` flag, which is still accepted as an alias) |
 | `visibleWhen` | `Expression?` (CEL) | Section visibility predicate — the whole group, header included, is shown only when it evaluates TRUE, else hidden (fail-closed). Same spelling and CEL vocabulary as field and action predicates (ADR-0089); write a bare string (`visibleWhen: "record.type == 'invoice'"`) or the full expression envelope (ADR-0085 §5) |
 
 ### Supported Migrations (MVP)
@@ -329,8 +329,9 @@ export const Account = ObjectSchema.create({
 (ADR-0085 §5).
 
 ⏳ Deferred (future iterations): explicit per-field in-group ordering, nested
-groups. Groups render identically on forms, modals, and detail pages; when a
-single page needs a bespoke layout beyond groups, assign it a custom Page
+groups. Groups use the same members, order and visibility on forms, modals, and
+detail pages (the default record page also lets the reader fold every titled
+group, see `collapse` above); when a single page needs a bespoke layout beyond groups, assign it a custom Page
 schema instead of adding per-surface hints here (ADR-0085).
 
 ---

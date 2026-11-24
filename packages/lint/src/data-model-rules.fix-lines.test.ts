@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FIELD_EMBEDDED_SUB_FIELDS,
+  FIELD_MISSING_VALUE_DOMAIN,
   lintDataModel,
   lintLegacyOrganizationComposites,
   lintSummaryRollups,
@@ -40,6 +41,7 @@ const IDS = [
   SELECT_MISSING_OPTIONS,
   ROLLUP_NON_NUMERIC_AGGREGAND,
   FIELD_EMBEDDED_SUB_FIELDS,
+  FIELD_MISSING_VALUE_DOMAIN,
 ];
 
 const LONG_OBJECT = 'acme_customer_purchase_order_header';
@@ -176,8 +178,8 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
 
   it('field/embedded-sub-fields: one line, whatever the type, the keys or the names', () => {
     const fix =
-      'Make the typed list a child object whose `master_detail` field points back here ' +
-      "(`inlineEdit: 'grid'` edits it inline), and remove the key.";
+      'Make the typed list a child object whose `master_detail` field points back here, name it in ' +
+      'a `fieldGroups[].relatedList` here (`inlineEdit` only picks how rows are edited), and remove the key.';
     for (const type of ['repeater', 'composite']) {
       const objects = [
         {
@@ -189,6 +191,15 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
         },
       ];
       expect(fixOf(record(lintDataModel(objects)), FIELD_EMBEDDED_SUB_FIELDS)).toBe(fix);
+    }
+  });
+
+  it('field/missing-value-domain: one line naming the domain to add', () => {
+    for (const [name, domain] of [['currency_code', 'iso_4217_currency'], ['country', 'iso_3166_alpha2'], ['tz', 'iana_time_zone']]) {
+      const objects = [{ name: LONG_OBJECT, nameField: 'name', fields: { name: { type: 'text' }, [name]: { type: 'text' } } }];
+      expect(fixOf(record(lintDataModel(objects)), FIELD_MISSING_VALUE_DOMAIN), name).toBe(
+        `Add \`valueDomain: '${domain}'\` if the field holds values of that domain; until then \`os lint --strict\` fails on this warning.`,
+      );
     }
   });
 
@@ -204,7 +215,7 @@ describe('[#22161] data-model-rules.ts — one remedy line per fix', () => {
   });
 
   it('every fix the cases above fired is one line of at most 200 characters', () => {
-    // The coverage control first: all seven ids fired.
+    // The coverage control first: all eight ids fired.
     expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual([...IDS].sort());
     for (const f of fired) {
       expect(f.fix, f.rule).toBeTruthy();

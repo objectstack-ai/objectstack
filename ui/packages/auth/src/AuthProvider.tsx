@@ -10,7 +10,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { authGateEvents } from './auth-gate-events.js';
 import { sessionEndEvents } from './session-end-events.js';
 import { runBeforeSignOut } from './beforeSignOut.js';
-import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
+import type { AuthUser, AuthClient, AuthProviderOptions, PreviewModeOptions, AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthInvitationOneStepInput, AuthInvitationOneStepOutcome, AuthPublicConfig, SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorChallenge } from './types.js';
 import { TWO_FACTOR_CHALLENGE_ENDED_CODES } from './two-factor-codes.js';
 import { AuthCtx, type AuthContextValue } from './AuthContext.js';
 import { createAuthClient, sessionReadWasInconclusive, takePreflightSession, TokenStorage } from './createAuthClient.js';
@@ -100,8 +100,10 @@ export function AuthProvider({
   );
 
   // objectui#12808 — the console's pre-React preflight already asked
-  // `get-session` with the stored Bearer. When that answer is still the one we
-  // would get, it IS the first state, and the mount below does not ask again.
+  // `get-session` with the stored Bearer, or with none the cookie session's
+  // question (objectstack#35455). When that answer is still the one we would
+  // get, it IS the first state — a signed-out one included — and the mount
+  // below does not ask again.
   // Taken once per page load, in an initializer so it runs once per instance
   // (StrictMode keeps the first call's result). Only for a provider that builds
   // its own client from `authUrl`: an injected client may talk to another server.
@@ -379,12 +381,20 @@ export function AuthProvider({
     }
 
     // The first state already holds the preflight's answer (see `bootSession`).
-    if (bootSessionFor.current !== null) return;
+    if (bootSessionFor.current !== null) {
+      // A handed-on signed-out answer is the server saying there is no
+      // session, as `loadSession` reads it: a browser that held one drops the
+      // signed-out user's client state before the sign-in page shows.
+      if (bootSession?.user === null && SessionUserScope.current() !== null) {
+        purgeSignedOutClientCaches();
+      }
+      return;
+    }
 
     let cancelled = false;
     loadSession(() => cancelled);
     return () => { cancelled = true; };
-  }, [client, enabled, isPreviewMode, previewMode, loadSession, authUrl, externalClient]);
+  }, [client, enabled, isPreviewMode, previewMode, loadSession, authUrl, externalClient, bootSession]);
 
   // Notify on auth state changes
   useEffect(() => {
@@ -1144,6 +1154,12 @@ export function AuthProvider({
     [client, refreshOrganizations],
   );
 
+  const acceptInvitationOneStep = useCallback(
+    (input: AuthInvitationOneStepInput): Promise<AuthInvitationOneStepOutcome> =>
+      client.acceptInvitationOneStep(input),
+    [client],
+  );
+
   const rejectInvitation = useCallback(
     (invitationId: string): Promise<void> => client.rejectInvitation(invitationId),
     [client],
@@ -1233,6 +1249,7 @@ export function AuthProvider({
       getInvitation,
       getInvitationPreview,
       acceptInvitation,
+      acceptInvitationOneStep,
       rejectInvitation,
       listUserInvitations,
     }),
@@ -1244,7 +1261,7 @@ export function AuthProvider({
       organizations, activeOrganization, activeMember, isOrganizationsLoading, isMembershipResolved, switchOrganization, createOrganization, refreshOrganizations,
       updateOrganization, deleteOrganization, leaveOrganization,
       getMembers, inviteMember, describeDelegableScope, removeMember, updateMemberRole,
-      listInvitations, cancelInvitation, getInvitation, getInvitationPreview, acceptInvitation, rejectInvitation, listUserInvitations,
+      listInvitations, cancelInvitation, getInvitation, getInvitationPreview, acceptInvitation, acceptInvitationOneStep, rejectInvitation, listUserInvitations,
     ],
   );
 

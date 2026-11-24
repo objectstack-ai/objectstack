@@ -60,13 +60,12 @@ const sectionIds = (testId: string) =>
 afterEach(cleanup);
 
 describe('objectstack#27594 — the title switcher dropdown', () => {
-  it('the title is the open view\'s label with ▾, and the count beside it once the list reported one', () => {
+  it('the title is the open view\'s label with ▾, and no record count beside it (objectstack#34603)', () => {
     render(
       <ObjectViewTitleSwitcher
         views={VIEWS}
         activeViewId="all"
         activeLabel="All Leads"
-        count={1234}
         pinnedViewId={null}
         onPinnedViewChange={() => {}}
         recentViewIds={[]}
@@ -75,13 +74,10 @@ describe('objectstack#27594 — the title switcher dropdown', () => {
         t={t}
       />,
     );
-    expect(screen.getByTestId('list-view-switcher')).toHaveTextContent('All Leads');
-    // Formatted in the display locale (en here), never the machine's.
-    expect(screen.getByTestId('list-view-switcher-count')).toHaveTextContent('· 1,234');
-  });
-
-  it('CONTROL: no count is drawn until the list reports one', () => {
-    mount();
+    const trigger = screen.getByTestId('list-view-switcher');
+    expect(trigger).toHaveTextContent('All Leads');
+    // The switcher's whole outer span is the label and its chevron: no 「· N」.
+    expect(trigger.parentElement).toHaveTextContent(/^All Leads$/);
     expect(screen.queryByTestId('list-view-switcher-count')).toBeNull();
   });
 
@@ -171,7 +167,7 @@ describe('objectstack#27594 — the title switcher dropdown', () => {
     expect(within(menu).getAllByTestId('view-switcher-pin')).toHaveLength(VIEWS.length);
   });
 
-  it('the foot offers New view and Manage views when handed, and each closes the dropdown', () => {
+  it('the foot offers Add view and Manage views when handed, and each closes the dropdown', () => {
     const onAddView = vi.fn();
     const onManageViews = vi.fn();
     mount({ onAddView, onManageViews });
@@ -182,6 +178,22 @@ describe('objectstack#27594 — the title switcher dropdown', () => {
     fireEvent.click(screen.getByTestId('list-view-switcher'));
     fireEvent.click(screen.getByTestId('list-view-switcher-manage'));
     expect(onManageViews).toHaveBeenCalledTimes(1);
+  });
+
+  it('with `create` handed, 「Add view」 turns the dropdown into the in-place card, not the dialog (objectstack#35553)', async () => {
+    const onAddView = vi.fn();
+    const onCreate = vi.fn().mockResolvedValue(true);
+    const { menu } = mount({
+      onAddView,
+      create: { canCreatePersonal: true, canCreateShared: false, hasUnsavedConditions: false, onCreate },
+    });
+    expect(within(menu).getByTestId('list-view-switcher-new')).toHaveTextContent('Add view');
+    fireEvent.click(within(menu).getByTestId('list-view-switcher-new'));
+    expect(onAddView).not.toHaveBeenCalled();
+    const card = await within(screen.getByTestId('list-view-switcher-menu')).findByTestId('create-view-card');
+    // Back returns to the views.
+    fireEvent.click(within(card).getByTestId('create-view-card-back'));
+    expect(screen.getByTestId('list-view-switcher-body')).toBeInTheDocument();
   });
 
   it('CONTROL: with neither handed (a reader who is no admin), the dropdown has no foot', () => {

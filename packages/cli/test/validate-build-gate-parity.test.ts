@@ -60,6 +60,9 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // or each `packages[]` body by name — so the row names the stack-level entry
   // both doors call, not the per-list classifier it runs.
   'preflightDeclaredCapabilities',
+  // An `enterprise` token whose package resolves but which no `plugins[]`
+  // entry provides: an advisory at both doors, never a refusal.
+  'preflightProviderWiring',
   // [#3786] The pre-parse undeclared-key diff, both halves.
   'lintUnknownStackKeys',
   'lintUnknownAuthoringKeys',
@@ -213,6 +216,15 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // (#28727), so the row moved here — deleted there rather than reworded, for
   // the reason the `runPerPackageAuthoringRules` row above gives.
   'findExtensionFieldSuffixRefusals',
+  // [ADR-0146 D10] An extended object's whole arrangement is the paired
+  // `.custom` package's: `fieldGroups` or `relatedLists` on an
+  // `objectExtensions` entry of any other package, judged by the save and
+  // install doors' own `judgeExtensionArrangement`. Not a registry rule, for
+  // the reason the row above gives: the verdict turns on the id of the
+  // package the extension is declared in, which the union stack a registry
+  // rule is handed does not carry. Both doors make the call, beside the
+  // `__c` reservation's.
+  'findExtensionArrangementRefusals',
   // [#29051] An undeclared cycle in a flow's top-level graph (ADR-0044),
   // judged by the automation engine's own registration judge
   // (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`), which the

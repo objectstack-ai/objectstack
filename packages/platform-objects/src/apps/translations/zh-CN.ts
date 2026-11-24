@@ -18,7 +18,9 @@ export const zhCN: TranslationData = {
         grp_account_developer: { label: '开发者' },
         grp_account_ai_assistant: { label: 'AI 助手' },
         nav_account_profile: { label: '个人资料' },
+        nav_account_mobile_app: { label: '移动应用' },
         nav_account_notifications: { label: '通知' },
+        nav_account_notification_settings: { label: '通知设置' },
         nav_account_approvals: { label: '待我审批' },
         nav_account_memberships: { label: '我的组织' },
         nav_account_linked: { label: '已关联账户' },
@@ -37,9 +39,8 @@ export const zhCN: TranslationData = {
       navigation: {
         group_overview: { label: '总览' },
         group_apps: { label: '应用' },
-        nav_packaged_actions: { label: '打包动作' },
         nav_marketplace_browse: { label: '浏览应用市场' },
-        nav_marketplace_installed: { label: '已安装应用' },
+        nav_packages: { label: '软件包' },
         nav_cloud_connection: { label: '云连接' },
         group_people_org: { label: '人员与组织' },
         group_access_control: { label: '访问控制' },
@@ -88,6 +89,9 @@ export const zhCN: TranslationData = {
         nav_settings_hub: { label: '全部设置' },
         nav_settings_localization: { label: '本地化' },
         nav_exchange_rates: { label: '汇率' },
+        nav_units_of_measure: { label: '计量单位' },
+        nav_work_calendars: { label: '工作日历' },
+        nav_work_calendar_exceptions: { label: '日历例外' },
         nav_settings_company: { label: '公司' },
         nav_settings_mail: { label: '邮件投递' },
         nav_settings_sms: { label: '短信投递' },
@@ -99,6 +103,7 @@ export const zhCN: TranslationData = {
         nav_settings_knowledge: { label: '知识库' },
         nav_settings_lifecycle: { label: '数据生命周期' },
         nav_recycle_bin: { label: '回收站' },
+        nav_public_forms: { label: '对外表单' },
         nav_notification_preferences: { label: '通知偏好' },
         nav_notification_templates: { label: '通知模板' },
 
@@ -116,6 +121,7 @@ export const zhCN: TranslationData = {
         nav_datasources: { label: '数据源' },
         nav_connector_credentials: { label: '连接器凭据' },
         nav_connector_connections: { label: '连接器连接' },
+        nav_slack: { label: 'Slack' },
 
         nav_oauth_apps: { label: 'OAuth 应用' },
       },
@@ -182,13 +188,55 @@ export const zhCN: TranslationData = {
   },
 
   datasets: {
-    sys_user_metrics: { measures: { user_count: { label: '用户' } } },
-    sys_organization_metrics: { measures: { org_count: { label: '组织' } } },
-    sys_session_metrics: { measures: { session_count: { label: '会话' } } },
-    sys_package_installation_metrics: { measures: { package_count: { label: '安装' } } },
+    sys_user_metrics: {
+      measures: {
+        user_count: {
+          label: '用户',
+          description: '系统中记录的用户账号数，无论是否处于启用状态。',
+        },
+      },
+    },
+    sys_organization_metrics: {
+      measures: {
+        org_count: {
+          label: '组织',
+          description: '系统中记录的组织数；每个组织拥有各自的成员、数据和设置。',
+        },
+      },
+    },
+    sys_session_metrics: {
+      measures: {
+        session_count: {
+          label: '会话',
+          description: '系统中记录的登录会话数，每次从浏览器或设备登录产生一个会话。',
+        },
+      },
+    },
+    sys_package_installation_metrics: {
+      measures: {
+        package_count: {
+          label: '安装',
+          description: '系统中记录的包安装数，每安装一个包记一次。',
+        },
+      },
+    },
     sys_audit_log_metrics: {
-      dimensions: { action: { label: '操作' }, user_id: { label: '用户' } },
-      measures: { event_count: { label: '事件' } },
+      dimensions: {
+        action: {
+          label: '操作',
+          description: '审计日志条目所记录的操作类型，例如创建、更新、删除、登录或配置变更。',
+        },
+        user_id: {
+          label: '用户',
+          description: '执行该审计操作的用户；平台自身写入的条目归入“系统”。',
+        },
+      },
+      measures: {
+        event_count: {
+          label: '事件',
+          description: '审计日志条目数；每个条目记录系统中的一次操作，由用户或平台自身执行。',
+        },
+      },
     },
   },
 

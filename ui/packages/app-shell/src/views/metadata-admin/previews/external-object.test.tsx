@@ -10,7 +10,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
 
 const metaGet = vi.fn();
@@ -26,6 +26,10 @@ vi.mock('../../../hooks/useAiSurface', () => ({
 }));
 
 import { ObjectFormCanvas } from './ObjectFormCanvas';
+// The source under test reaches a dynamic import of `@objectstack/lint` and `@objectstack/formula`: its first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@objectstack/formula';
 import { ObjectFieldInspector } from '../inspectors/ObjectFieldInspector';
 import { readExternalBinding } from './external-object';
 
@@ -176,6 +180,8 @@ describe('ObjectFieldInspector — field of an external object', () => {
     expect(screen.getByTestId('field-apiname-input')).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Type' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Duplicate field' })).toBeNull();
+    // objectstack#34794 — Remove is the header ⋯ menu's entry: no menu at all here.
+    expect(screen.queryByTestId('field-more-menu')).toBeNull();
     expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
     // Label is display metadata, not the remote column: it stays editable.
     expect(screen.getByTestId('field-label-input')).not.toBeDisabled();
@@ -187,7 +193,7 @@ describe('ObjectFieldInspector — field of an external object', () => {
     expect(screen.getByTestId('field-apiname-input')).not.toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Type' })).not.toBeDisabled();
     expect(screen.getByRole('button', { name: 'Duplicate field' })).toBeInTheDocument();
-    const footer = screen.getByRole('button', { name: /Remove/ });
-    expect(within(footer).getByText(/Task name/)).toBeInTheDocument();
+    // objectstack#34794 — Remove is the header ⋯ menu's entry.
+    expect(screen.getByTestId('field-more-menu')).not.toBeDisabled();
   });
 });

@@ -96,9 +96,11 @@ describe('the approval requests behind the count (objectui#12602)', () => {
     // The count is the answer's `total`, the route's own count — not a fold
     // of the page (objectui#13027). This fixture's route totals its 3 rows.
     expect(result.current.pendingApprovalsCount).toBe(3);
+    // `row` is the served row itself — the inbox panel's dispatch record for
+    // the request's declared actions (objectstack#34589).
     expect(result.current.pendingApprovals).toEqual([
-      { id: 'a1', processName: 'discount', processLabel: 'Discount approval', recordTitle: 'QUO-0007', createdAt: '2026-10-16T01:00:00Z' },
-      { id: 'a2', processName: 'contract', processLabel: undefined, recordTitle: undefined, createdAt: undefined },
+      { id: 'a1', processName: 'discount', processLabel: 'Discount approval', recordTitle: 'QUO-0007', createdAt: '2026-10-16T01:00:00Z', row: rows[0] },
+      { id: 'a2', processName: 'contract', processLabel: undefined, recordTitle: undefined, createdAt: undefined, row: rows[2] },
     ]);
   });
 

@@ -37,11 +37,13 @@
  *    not repeat;
  *  - `avoidBreakInside` → `break-inside: avoid` on every block of a region.
  *
- * Besides the keys, two rules every print page needs: everything on the
+ * Besides the keys, the rules every print page needs: everything on the
  * document that is not the print page, an ancestor of it, or inside it is
  * hidden on paper (the console chrome, and the record view's own panels
- * around the page), and the ancestors' viewport-height clipping is released
- * so the page runs onto as many sheets as it needs.
+ * around the page); the ancestors' viewport-height clipping is released so
+ * the page runs onto as many sheets as it needs; a data table fits the
+ * printable width; and the page prints on white, with links and select
+ * badges as plain text (objectstack#34228).
  *
  * ⚠️ Values are WRITTEN INTO A STYLESHEET, so only the spec's own values pass:
  * an enum member for `paperSize` / `orientation`, a finite non-negative number
@@ -60,6 +62,13 @@ export const PRINT_PAGE_ATTRIBUTE = 'data-print-page';
 
 /** The DOM attribute on the running-region table `PageRenderer` draws for `repeatHeader` / `repeatFooter`. */
 export const PRINT_RUNNING_ATTRIBUTE = 'data-print-running';
+
+/**
+ * The DOM attribute on a value drawn as a coloured badge that prints as plain
+ * text: the select cell's option badge (`SelectCellRenderer` in
+ * `@object-ui/fields`, which spells the same literal).
+ */
+export const PRINT_PLAIN_BADGE_ATTRIBUTE = 'data-select-badge';
 
 const PAPER_SIZES: ReadonlySet<string> = new Set(['A4', 'A5', 'Letter', 'Legal']);
 const ORIENTATIONS: ReadonlySet<string> = new Set(['portrait', 'landscape']);
@@ -112,6 +121,42 @@ function runningRegionRules(print: PagePrintDeclaration, page: string): string[]
 }
 
 /**
+ * A data table fits the sheet's printable width (objectstack#34228). On screen
+ * a table's cells keep a comfortable minimum width and one line, and the table
+ * scrolls sideways inside its box when they do not fit; paper has no scroll,
+ * so the table ran past its box: measured in Chromium on A4 portrait with
+ * 15 mm margins, a five-column `record:line_items` grid was 647 px wide in a
+ * 630 px box, its last column under the box's right border. On paper the
+ * minimum widths and the single line are dropped, so the columns shrink and
+ * wrap to the box. The running-region table is excluded: it lays out regions,
+ * not data.
+ */
+function paperFitRules(page: string): string[] {
+  const table = `${page} table:not([${PRINT_RUNNING_ATTRIBUTE}])`;
+  return [
+    `${table} { width: 100% !important; }`,
+    `${table} :is(th, td) { min-width: 0 !important; white-space: normal !important; overflow-wrap: break-word; }`,
+  ];
+}
+
+/**
+ * A printed document is a white sheet with plain values (objectstack#34228):
+ * the page and every box around it print on white, not the app's background;
+ * a link (a lookup's reference) prints as plain text in the colour around
+ * it; and a select value drawn as a coloured badge
+ * ({@link PRINT_PLAIN_BADGE_ATTRIBUTE}) prints as its label in that colour,
+ * with no pill. The `!important` beats the inline colours a hex option
+ * colour sets on its badge.
+ */
+function paperFaceRules(page: string): string[] {
+  return [
+    `:has(${page}), ${page} { background: #fff !important; }`,
+    `${page} a[href] { color: inherit !important; text-decoration: none !important; }`,
+    `${page} [${PRINT_PLAIN_BADGE_ATTRIBUTE}] { background: none !important; border-color: transparent !important; color: inherit !important; padding: 0 !important; border-radius: 0 !important; font-size: inherit !important; font-weight: inherit !important; }`,
+  ];
+}
+
+/**
  * Build the print stylesheet for a page that declares `print`. Pure: the same
  * declaration always yields the same text, so it is pinned as text.
  */
@@ -135,5 +180,6 @@ export function buildPagePrintStylesheet(print: PagePrintDeclaration): string {
   if (print.avoidBreakInside === true) {
     rules.push(`${page} [data-region] > * { break-inside: avoid; }`);
   }
+  rules.push(...paperFitRules(page), ...paperFaceRules(page));
   return `@media print {\n  ${rules.join('\n  ')}\n}\n`;
 }

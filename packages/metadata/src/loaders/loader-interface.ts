@@ -283,6 +283,19 @@ export interface MetadataLoader {
    *   `packagelessOnly`: delete only the name's package-less slots
    */
   delete?(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void>;
+
+  /**
+   * [#34206, ADR-0156 D5] A reading of this loader's backing store that moves
+   * whenever something outside this process changes what {@link load} would
+   * answer for an item it has been asked about: a file created, removed or
+   * edited, a row written by another node. Compared, never interpreted.
+   *
+   * Optional. `MetadataManager.loaderChangeMark()` reads it for a cache's
+   * confirmation; a loader that keeps none (other than an in-process
+   * `memory:` one) means the confirmation cannot observe it, and a cache
+   * renews nothing that may have read it.
+   */
+  changeMark?(): Promise<string>;
 }
 
 /** [ADR-0150 D4, #32198] How {@link MetadataLoader.delete} scopes a removal. */

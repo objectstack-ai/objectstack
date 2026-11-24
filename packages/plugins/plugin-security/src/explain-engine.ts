@@ -84,7 +84,12 @@ import {
 } from './unresolved-posture.js';
 import { grantSetNameOf } from './grant-permission-set-name.js';
 import { holdsExternalPosition, humanBaselineFor } from './external-baseline.js';
-import { isExternalAudienceContext } from '@objectstack/core';
+import { isExternalAudienceContext, type ReadableIdsRefusalLog } from '@objectstack/core';
+import {
+  batchedFixedReadLeafResolver,
+  resolveFixedReadLeavesAtRecord,
+  type FixedReadLeafRecordResolver,
+} from './explain-fixed-read-leaf.js';
 
 const SYSTEM_CTX = { isSystem: true } as const;
 
@@ -234,6 +239,32 @@ function isDenyAll(filter: unknown): boolean {
 }
 
 /**
+ * [ADR-0155 ② ruled R2] The sharing service's verdict on whether share grants
+ * count on `object`, read through the deps bag: a reason, or `undefined` when
+ * they count, when the bag carries no reader, or when the reader throws (no
+ * answer is never a reason).
+ */
+function shareGrantsInertReasonOf(deps: Pick<ExplainEngineDeps, 'shareGrantsInertReason'>, object: string): string | undefined {
+  if (typeof deps.shareGrantsInertReason !== 'function') return undefined;
+  try {
+    const reason = deps.shareGrantsInertReason(object);
+    return typeof reason === 'string' && reason !== '' ? reason : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [ADR-0155 ② ruled R2] The explainer's sentence: the sharing layer's detail,
+ * followed by why the shares attached to the record admit nothing, when share
+ * grants do not count on its object.
+ */
+function withSharesInertSentence(reason: string | undefined, detail: string): string {
+  if (reason === undefined) return detail;
+  return `${detail} Share grants do not count on this object, so no share attached to the record is consulted: ${reason}.`;
+}
+
+/**
  * A dependency call that REJECTED, kept apart from every value it could have
  * resolved to.
  *
@@ -378,6 +409,22 @@ export interface ExplainEngineDeps {
     delegatorSets: PermissionSet[] | null,
   ) => Promise<Record<string, FieldMaskingRule>>;
   /**
+   * The computed fields the read mask deletes for what they are computed
+   * from — a field `mask` withholds or `partialRules` serves masked, read on
+   * this record, through another computed field or through a reference —
+   * for the principal `context` names: the enforcement composition
+   * (`foldComputedFieldReads` over the posture, with
+   * `resolveHopWithheldFields`), never a re-derivation. Absent → none are
+   * reported, which under-reports and never widens; the plugin's own wiring
+   * passes it.
+   */
+  getComputedFieldsWithheld?: (
+    object: string,
+    mask: Record<string, { readable?: boolean; editable?: boolean }>,
+    partialRules: Record<string, FieldMaskingRule>,
+    context: any,
+  ) => Promise<Set<string>>;
+  /**
    * Configured additive baseline set NAMES (default `['member_default']`), for
    * attribution.
    *
@@ -448,6 +495,19 @@ export interface ExplainEngineDeps {
   /** The sharing service's own read-filter contribution for the object (owner-match OR granted-ids), same as enforcement AND-s in. */
   sharingReadFilter?: (object: string, context: any) => Promise<unknown | null>;
   /**
+   * [ADR-0155 D4, Q2 as ruled] Of the record ids the record pass judges, the
+   * ones a fixed-read leaf (`SharedRecordIds`) in {@link sharingReadFilter}
+   * holds: one indexed read under the leaf's own fixed predicate, keyed by the
+   * ids, the read `checkEdit` makes for one. The pass resolves the leaf at the
+   * record with it (`explain-fixed-read-leaf.ts`), so the matcher and the
+   * published `rowFilter` see the record's id or no share arm, ⛔ never the
+   * leaf. Absent, a filter that carries a leaf is refused in ADR-0139 D3's
+   * envelope; a rejection is the read filter failing.
+   */
+  resolveFixedReadLeaf?: FixedReadLeafRecordResolver;
+  /** [ADR-0155 D4] Where the record pass logs its refusal of a fixed-read leaf, once per log. */
+  fixedReadLeafRefusalLog?: ReadableIdsRefusalLog;
+  /**
    * [#26188 · ADR-0057] Is a hierarchy resolver mounted (the
    * `hierarchy-scope-resolver` service the enterprise `hierarchy-security`
    * capability registers)? Without one the sharing service evaluates a
@@ -470,6 +530,16 @@ export interface ExplainEngineDeps {
     recordId: string,
     context: any,
   ) => Promise<Array<{ id?: string; recipient_type?: string; recipient_id?: string; access_level?: 'read' | 'edit' | 'full'; source?: string; source_id?: string }>>;
+  /**
+   * [ADR-0155 ② ruled R2] Why share grants do not count on the object, or
+   * `null` when they do: the sharing service's own verdict
+   * (`SharingService.shareGrantsInertReason`), the one its read scope, its
+   * write gate and its grant doors read. Where it names a reason, every share
+   * attached to the record is reported `neutral` and the sharing layer's
+   * detail says why. Optional: a deps bag wired without it reports shares as
+   * before; a throw counts as no answer.
+   */
+  shareGrantsInertReason?: (object: string) => string | null | undefined;
   /**
    * [#26180] The pending approval requests that grant the principal READ of
    * the record while their step is pending (`SharingService.listApprovalReadGrants`,
@@ -2046,8 +2116,13 @@ async function applyRecordAttribution(
   const shares = deps.listRecordShares && recordExists
     ? await deps.listRecordShares(object, recordId, context).catch(() => [])
     : [];
+  // [ADR-0155 ② ruled R2] On an object whose storage does not evaluate the
+  // share arm, no share row is consulted: each is evaluated and `neutral`, and
+  // the layer's detail carries the sentence below.
+  const sharesInertReason = (shares ?? []).length > 0 ? shareGrantsInertReasonOf(deps, object) : undefined;
   const shareRules: ExplainMatchedRule[] = (shares ?? []).map((s) => {
-    const recipMatchesUser = s.recipient_type === 'user' && s.recipient_id != null && String(s.recipient_id) === String(context?.userId);
+    const recipMatchesUser = sharesInertReason === undefined
+      && s.recipient_type === 'user' && s.recipient_id != null && String(s.recipient_id) === String(context?.userId);
     const kind: ExplainMatchedRule['kind'] =
       s.source === 'rule' ? 'sharing_rule' : s.source === 'team' ? 'team' : 'record_share';
     return {
@@ -2111,9 +2186,18 @@ async function applyRecordAttribution(
   }
   // A rejected read filter is not a `null` one: the matcher reads `null` as
   // "no filter" and admits the row, while the find it explains fails.
-  const sharingFilterOrFault = deps.sharingReadFilter && recordExists
+  const sharingFilterRead = deps.sharingReadFilter && recordExists
     ? await settle(deps.sharingReadFilter(object, context))
     : undefined;
+  // [ADR-0155 D4, Q2 as ruled] A share-grant leaf in the filter is resolved at
+  // this record before anything matches or publishes it: the record's id when
+  // a grant admits it, no share arm otherwise. A leaf the pass does not
+  // resolve throws D4's refusal here; the read's rejection is the filter's.
+  const sharingFilterOrFault = sharingFilterRead === undefined || sharingFilterRead === DEPENDENCY_FAULT
+    ? sharingFilterRead
+    : await settle(resolveFixedReadLeavesAtRecord(
+        sharingFilterRead, object, recordId, deps.resolveFixedReadLeaf, deps.fixedReadLeafRefusalLog,
+      ));
   const readFilterFault = sharingFilterOrFault === DEPENDENCY_FAULT;
   const sharingFilter = sharingFilterOrFault === DEPENDENCY_FAULT ? undefined : sharingFilterOrFault;
   const sharingMatches = sharingFilter === undefined ? undefined : matches(sharingFilter);
@@ -2311,7 +2395,7 @@ async function applyRecordAttribution(
       rules: shareRules,
       // A fault is only ever recorded against an existing record, and the
       // master leg [ADR-0055] is only ever asked of one.
-      detail: sharingFaultDetail ?? masterLegRefusal?.detail ?? masterReadNullArmAdmits ?? (!recordExists
+      detail: withSharesInertSentence(sharesInertReason, sharingFaultDetail ?? masterLegRefusal?.detail ?? masterReadNullArmAdmits ?? (!recordExists
         ? 'Record not found; sharing not evaluated.'
         : owd.effect !== 'private'
           ? 'Baseline is not private — sharing adds nothing beyond it for this record.'
@@ -2353,7 +2437,7 @@ async function applyRecordAttribution(
                 : `${shareRules.length} share(s) attached; none grants the caller access to this record.` +
                   (vamaEffective
                     ? ` Superseded by the View/Modify All Data bypass [${vamaSets.join(', ')}] — see the vama_bypass layer.`
-                    : '')),
+                    : ''))),
     };
   }
 
@@ -2744,6 +2828,9 @@ export async function explainRecordsForAsker(
       return answer;
     };
   const verdictById = new Map<string, NonNullable<ExplainDecision['record']>>();
+  // [ADR-0155 D4] …and so a share-grant leaf in it is the same leaf for every
+  // record of the batch: it is read once, keyed by every id the batch judges.
+  const batchedLeafRead = batchedFixedReadLeafResolver(recordIds);
   for (const recordId of new Set(recordIds)) {
     const recordDeps = depsForRecord(recordId);
     const askerOnce = askedOncePerRecord(asker);
@@ -2752,6 +2839,7 @@ export async function explainRecordsForAsker(
         ...recordDeps,
         recordAbsentToCaller: askedOnce(recordDeps.recordAbsentToCaller),
         ...(recordDeps.sharingReadFilter ? { sharingReadFilter: sharedReadFilter(recordDeps.sharingReadFilter) } : {}),
+        ...(recordDeps.resolveFixedReadLeaf ? { resolveFixedReadLeaf: batchedLeafRead(recordDeps.resolveFixedReadLeaf) } : {}),
       },
       { ...pass, layers: structuredClone(pass.layers) },
       recordId,
@@ -3254,10 +3342,19 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   // — including the capability-gated case, where the mask says `readable:
   // false` precisely because the unmask gate is what the rule softens.
   const partialRules = await deps.getPartialMaskRules(sets, object, delegatorSets);
-  const partial = Object.keys(partialRules);
-  const hidden = Object.entries(mask)
-    .filter(([f, p]) => p?.readable === false && !(f in partialRules))
-    .map(([f]) => f);
+  // Field-level security covers what a value is computed from: a computed
+  // field the read mask deletes for what it reads is reported hidden, whole,
+  // whatever masking rule of its own it carries — as step 4 deletes it.
+  const computedWithheld = deps.getComputedFieldsWithheld
+    ? await deps.getComputedFieldsWithheld(object, mask, partialRules, context)
+    : new Set<string>();
+  const partial = Object.keys(partialRules).filter((f) => !computedWithheld.has(f));
+  const hidden = [
+    ...Object.entries(mask)
+      .filter(([f, p]) => p?.readable === false && !(f in partialRules) && !computedWithheld.has(f))
+      .map(([f]) => f),
+    ...computedWithheld,
+  ];
   const listFields = (fields: string[], label: (f: string) => string): string =>
     `[${fields.slice(0, 25).map(label).join(', ')}${fields.length > 25 ? ', …' : ''}]`;
   const maskNarrows = hidden.length > 0 || partial.length > 0;

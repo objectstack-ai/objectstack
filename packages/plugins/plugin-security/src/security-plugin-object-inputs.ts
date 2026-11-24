@@ -49,6 +49,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { MatchesFilterOptions } from '@objectstack/formula';
 import type { FieldConditionVerdict } from '@objectstack/core';
 import { intersectFieldMasks } from './explain-engine.js';
+import { computedFieldsNotServedWhole, foldComputedFieldReads, type ComputedFieldInputs } from './field-masker.js';
 import { storedFormCheckJudge } from './rls-check-stored-form.js';
 import type { FieldConditionJudge } from './permission-evaluator.js';
 import type { RlsFieldGuard } from './rls-compiler.js';
@@ -107,12 +108,14 @@ export interface ObjectInputsHost {
   readonly warnedAuthoredTenantPolicies: SecurityPlugin['warnedAuthoredTenantPolicies'];
   admitCollectedPolicy: SecurityPlugin['admitCollectedPolicy'];
   computePartialMaskRules: SecurityPlugin['computePartialMaskRules'];
+  computeQueryGuardFieldPerms: SecurityPlugin['computeQueryGuardFieldPerms'];
   computeReadPartialMaskRules: SecurityPlugin['computeReadPartialMaskRules'];
   foldFieldRequiredPermissions: SecurityPlugin['foldFieldRequiredPermissions'];
   getObjectFieldNames: SecurityPlugin['getObjectFieldNames'];
   loadObjectFieldNames: SecurityPlugin['loadObjectFieldNames'];
   probeMetadataOutage: SecurityPlugin['probeMetadataOutage'];
   probeUnpublishedDraft: SecurityPlugin['probeUnpublishedDraft'];
+  resolveHopWithheldFields: SecurityPlugin['resolveHopWithheldFields'];
   warnAuthoredTenantPolicyOnce: SecurityPlugin['warnAuthoredTenantPolicyOnce'];
   writeCheckFieldOptions: SecurityPlugin['writeCheckFieldOptions'];
 }
@@ -257,9 +260,10 @@ export function computePartialMaskRules(
 export function computeQueryGuardFieldPerms(
   this: Pick<ObjectInputsHost, 'computePartialMaskRules' | 'foldFieldRequiredPermissions' | 'permissionEvaluator'>,
   objectName: string,
-  secMeta: Pick<ObjectSecurityMeta, 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
+  secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
   permissionSets: PermissionSet[],
   delegatorSets: PermissionSet[] | null,
+  hopWithheld: Iterable<string> = [],
 ): Record<string, { readable: boolean; editable: boolean }> {
   let guard = this.permissionEvaluator.getFieldPermissions(objectName, permissionSets);
   guard = this.foldFieldRequiredPermissions(guard, secMeta.fieldRequiredPermissions, permissionSets);
@@ -274,7 +278,10 @@ export function computeQueryGuardFieldPerms(
       out[f] = { readable: false, editable: out[f]?.editable ?? false };
     }
   }
-  return out;
+  // Field-level security covers what a value is computed from: a computed
+  // field reading a field withheld here, here or through a reference
+  // (`hopWithheld`), is not queryable either.
+  return foldComputedFieldReads(out, secMeta.computedFieldInputs, [], hopWithheld).perms;
 }
 
 /**
@@ -316,6 +323,50 @@ function conditionsOn(objectName: string, sets: ReadonlyArray<PermissionSet | nu
 
 /** The body of `SecurityPlugin#computeForbiddenFieldWrites`; the method's docblock there is its contract. */
 export async function computeForbiddenFieldWrites(
+  this: Pick<
+    ObjectInputsHost,
+    | 'computeQueryGuardFieldPerms'
+    | 'datetimeFieldNamesCache'
+    | 'fieldMasker'
+    | 'foldFieldRequiredPermissions'
+    | 'getObjectFieldNames'
+    | 'logger'
+    | 'metadata'
+    | 'numberComparandFieldsCache'
+    | 'permissionEvaluator'
+    | 'ql'
+    | 'resolveHopWithheldFields'
+    | 'rlsCompiler'
+    | 'writeCheckFieldOptions'
+  >,
+  objectName: string,
+  data: Record<string, any> | Record<string, any>[],
+  secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets' | 'fieldMaskingRules' | 'fieldRequiredPermissions'>,
+  permissionSets: PermissionSet[],
+  delegatorSets: PermissionSet[] | null,
+  row: FieldWriteRow,
+): Promise<string[]> {
+  const fields = await fieldEditVerdict.call(this, objectName, data, secMeta, permissionSets, delegatorSets, row);
+  // Field-level security covers what a value is computed from, on the write
+  // side too: a computed field this caller is not served whole is not
+  // nameable in its payload, whatever value the payload carries for it.
+  const inputs = secMeta.computedFieldInputs ?? {};
+  if (Object.keys(inputs).length === 0) return fields;
+  const named = new Set<string>();
+  for (const payload of Array.isArray(data) ? data : [data]) {
+    if (payload && typeof payload === 'object') for (const key of Object.keys(payload)) if (key in inputs) named.add(key);
+  }
+  if (named.size === 0) return fields;
+  const hopWithheld = await this.resolveHopWithheldFields(secMeta, row.context, { fallbackOnEmptySets: false });
+  const notWhole = computedFieldsNotServedWhole(
+    inputs,
+    this.computeQueryGuardFieldPerms(objectName, secMeta, permissionSets, delegatorSets, hopWithheld),
+  );
+  return [...new Set([...fields, ...[...named].filter((key) => notWhole.has(key))])].sort();
+}
+
+/** The field-permission half of {@link computeForbiddenFieldWrites}: the evaluator's map, the capability fold, the delegator. */
+async function fieldEditVerdict(
   this: Pick<
     ObjectInputsHost,
     | 'datetimeFieldNamesCache'
@@ -455,6 +506,7 @@ export function maskOperationResult(
   permissionSets: PermissionSet[],
   secMeta: ObjectSecurityMeta,
   delegatorSets: PermissionSet[] | null,
+  hopWithheld: Iterable<string> = [],
 ): void {
   if (opCtx.result && ['find', 'findOne', 'insert', 'update'].includes(opCtx.operation)) {
     const basePerms = this.permissionEvaluator.getFieldPermissions(opCtx.object, permissionSets);
@@ -475,6 +527,14 @@ export function maskOperationResult(
     const partialRules = this.computeReadPartialMaskRules(
       secMeta, permissionSets, delegatorSets, basePerms, delBasePerms,
     );
+    // Field-level security covers what a value is computed from: a computed
+    // field reading a field this caller may not read, or is served partially
+    // masked — on this record, on the record it reads through a reference
+    // (`hopWithheld`), or through another computed field — is deleted as well,
+    // whole, even where a masking rule of its own would have applied.
+    const folded = foldComputedFieldReads(fieldPerms, secMeta.computedFieldInputs, Object.keys(partialRules), hopWithheld);
+    fieldPerms = folded.perms;
+    for (const f of folded.withheld) delete partialRules[f];
     if (Object.keys(fieldPerms).length > 0 || Object.keys(partialRules).length > 0) {
       opCtx.result = this.fieldMasker.maskResults(opCtx.result, fieldPerms, opCtx.object, partialRules);
     }
@@ -621,4 +681,98 @@ export function extractTargetField(
   // regex did not match.
   const m = using.match(/^\s*([a-z_][a-z0-9_]*)\s*(?:==|=|IN|in)(?=\s|\()/);
   return m ? m[1] : null;
+}
+
+/**
+ * One object a computed field reads through a reference, as the caller is
+ * served it: the fields it declares, whether the caller may read it at all,
+ * what its own computed fields read (on its record and through its own
+ * references), and the fields served WHOLE there given the computed fields of
+ * it withheld for what they read through a reference. `servedWhole` answers
+ * `null` when it cannot be determined.
+ */
+export interface HopTarget {
+  readonly declared: ReadonlySet<string>;
+  readonly admitted: boolean;
+  readonly inputs: ComputedFieldInputs;
+  readonly hopTargets: Readonly<Record<string, string>>;
+  servedWhole(hopWithheld: ReadonlySet<string>): ReadonlySet<string> | null;
+}
+
+/**
+ * The body of `SecurityPlugin#resolveHopWithheldFields`; the method's docblock there is its contract.
+ */
+export async function resolveHopWithheldFields(
+  this: { readHopTarget: (object: string, context: unknown) => Promise<HopTarget | null> },
+  secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs' | 'computedHopTargets'>,
+  context: unknown,
+): Promise<Set<string>> {
+  // Every object reachable through the references computed fields read,
+  // asked once each. An object whose answer cannot be had is `null`; an
+  // object the caller may not read is not followed further (every computed
+  // field reading through it is withheld whatever it reads there).
+  const nodes = new Map<string, HopTarget | null>();
+  const pending: string[] = [];
+  const reach = (inputs: ComputedFieldInputs | undefined, targets: Readonly<Record<string, string>> | undefined) => {
+    for (const input of Object.values(inputs ?? {})) {
+      for (const ref of input.hops?.keys() ?? []) {
+        const target = targets?.[ref];
+        if (target && !nodes.has(target) && !pending.includes(target)) pending.push(target);
+      }
+    }
+  };
+  reach(secMeta.computedFieldInputs, secMeta.computedHopTargets);
+  while (pending.length > 0) {
+    const object = pending.shift()!;
+    const node = await this.readHopTarget(object, context).catch(() => null);
+    nodes.set(object, node);
+    if (node?.admitted === true) reach(node.inputs, node.hopTargets);
+  }
+
+  // Per object, the computed fields withheld for what they read through a
+  // reference: a leaf the referenced object declares that the caller is not
+  // served whole there — or a referenced object the caller may not read, or
+  // whose answer cannot be had (fail closed). A leaf it does not declare is
+  // no field to withhold (the engine answers it `null` with its own fault).
+  const served = new Map<string, ReadonlySet<string> | null>();
+  const withheldThrough = (inputs: ComputedFieldInputs | undefined, targets: Readonly<Record<string, string>> | undefined) => {
+    const out = new Set<string>();
+    for (const [field, input] of Object.entries(inputs ?? {})) {
+      for (const [ref, leaves] of input.hops ?? []) {
+        const target = targets?.[ref];
+        if (!target) continue;
+        const node = nodes.get(target);
+        const whole = served.get(target);
+        if (!node || node.admitted !== true || !whole || [...leaves].some((leaf) => node.declared.has(leaf) && !whole.has(leaf))) {
+          out.add(field);
+          break;
+        }
+      }
+    }
+    return out;
+  };
+
+  // A withheld field withholds every computed field reading it, however long
+  // the chain and wherever it returns: grow each object's withheld set from
+  // empty until no object's set grows (each step only adds, so it ends).
+  const hopWithheld = new Map<string, Set<string>>([...nodes.keys()].map((o) => [o, new Set<string>()]));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [object, node] of nodes) {
+      served.set(object, node && node.admitted === true ? node.servedWhole(hopWithheld.get(object)!) : null);
+    }
+    for (const [object, node] of nodes) {
+      if (!node || node.admitted !== true) continue;
+      const held = hopWithheld.get(object)!;
+      for (const field of withheldThrough(node.inputs, node.hopTargets)) {
+        if (!held.has(field)) { held.add(field); grew = true; }
+      }
+    }
+  }
+  return withheldThrough(secMeta.computedFieldInputs, secMeta.computedHopTargets);
+}
+
+/** Does any computed field of this posture read through a reference? */
+export function postureHasComputedHops(secMeta: Pick<ObjectSecurityMeta, 'computedFieldInputs'>): boolean {
+  return Object.values(secMeta.computedFieldInputs ?? {}).some((input) => (input.hops?.size ?? 0) > 0);
 }

@@ -11,12 +11,16 @@
  *
  *  (a) the deep-link table: one row per draft kind, every row under
  *      `?preview=draft`, the app row the URL the Live Canvas already opens;
- *  (b) the DraftPreviewBar's pending line names what is pending on the surface
- *      it shows, on a page and on an object list;
- *  (c) CONTROL: outside draft preview the bar draws nothing, and on a route
- *      with no surface of its own the bar keeps today's message.
+ *  (b) objectstack#34610 — the DraftPreviewBar counts ONE scope, the current
+ *      app's package, on every page of the app: its line, its Changes (N) and
+ *      the app's drafts agree — its package and its ADR-0146 customization
+ *      pair, off the env-wide `_drafts` (the per-page line is gone);
+ *  (c) CONTROL: outside draft preview the bar draws nothing.
  */
 import '@testing-library/jest-dom/vitest';
+// The draft bar reaches `import('@objectstack/lint')` (its publish
+// preflight); pay its first load at collection, never inside a clocked case.
+import '@objectstack/lint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -38,9 +42,12 @@ vi.mock('../usePublishAllDrafts', () => ({
   usePublishAllDrafts: () => ({ publishAll: vi.fn(async () => ({ ok: true })), publishing: false }),
 }));
 vi.mock('../DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
+vi.mock('../../providers/MetadataProvider', () => ({
+  useMetadata: () => ({ apps: [{ name: 'crm', _packageId: 'app.crm' }] }),
+}));
 
 import { DraftPreviewBar } from '../DraftPreviewBar';
-import { draftPreviewPath, draftSurfaceOf, draftsOnSurface } from '../draftSurface';
+import { draftPreviewPath } from '../draftSurface';
 
 afterEach(() => {
   previewState.on = true;
@@ -76,32 +83,6 @@ describe('draftPreviewPath — the deep-link table (objectui#12968)', () => {
   });
 });
 
-describe('draftsOnSurface — what the bar counts (objectui#12968)', () => {
-  const entries = [
-    { type: 'object', name: 'crm_account' },
-    { type: 'view', name: 'crm_account.pipeline' },
-    { type: 'field', name: 'crm_account.priority' },
-    { type: 'object', name: 'crm_contact' },
-    { type: 'page', name: 'crm_home' },
-    { type: 'flow', name: 'crm_onboard' },
-  ];
-  it.each([
-    ['an object list', 'crm_account', ['crm_account', 'crm_account.pipeline', 'crm_account.priority']],
-    ['a view of the object', 'crm_account/view/crm_account.pipeline', ['crm_account', 'crm_account.pipeline', 'crm_account.priority']],
-    ['a record of the object', 'crm_contact/record/r1', ['crm_contact']],
-    ['a page', 'page/crm_home', ['crm_home']],
-  ])('%s', (_label, subPath, names) => {
-    const surface = draftSurfaceOf(subPath);
-    expect(surface).not.toBeNull();
-    expect(draftsOnSurface(entries, surface!).map((e) => e.name)).toEqual(names);
-  });
-  it('the app landing and admin routes show no single surface', () => {
-    expect(draftSurfaceOf('')).toBeNull();
-    expect(draftSurfaceOf('metadata/object')).toBeNull();
-    expect(draftSurfaceOf('search')).toBeNull();
-  });
-});
-
 function mockDrafts(list: unknown) {
   global.fetch = vi.fn(async () => ({ ok: true, json: async () => list })) as unknown as typeof fetch;
 }
@@ -119,42 +100,30 @@ function renderBarAt(path: string) {
 const PENDING = [
   { type: 'object', name: 'crm_account', packageId: 'app.crm' },
   { type: 'view', name: 'crm_account.pipeline', packageId: 'app.crm' },
-  { type: 'page', name: 'crm_home', packageId: 'app.crm' },
+  // A code-shipped app's edits are drafted into its pair (ADR-0146).
+  { type: 'page', name: 'crm_home', packageId: 'app.crm.custom' },
+  // Another app's draft in the same environment, and a package-less one: not this app's.
+  { type: 'object', name: 'other_note', packageId: 'app.other' },
+  { type: 'flow', name: 'loose_flow', packageId: null },
 ];
 
-describe('the DraftPreviewBar pending line (objectui#12968)', () => {
-  it('on an object list it names the drafts pending on that object', async () => {
+describe('the DraftPreviewBar counts the app, on every page (objectstack#34610)', () => {
+  it.each([
+    ['an object list', '/apps/app.crm/crm_account?preview=draft'],
+    ['a page', '/apps/app.crm/page/crm_home?preview=draft'],
+    ['the app landing', '/apps/app.crm?preview=draft'],
+    ['the app routed by its name', '/apps/crm/crm_contact?preview=draft'],
+  ])('on %s: one number in the line and on Changes, read in the app package', async (_label, path) => {
     mockDrafts(PENDING);
-    renderBarAt('/apps/app.crm/crm_account?preview=draft');
+    renderBarAt(path);
     await waitFor(() =>
-      expect(screen.getByTestId('draft-preview-bar')).toHaveTextContent('Draft preview · 2 unpublished changes on this page'),
+      expect(screen.getByTestId('draft-preview-bar')).toHaveTextContent(
+        'Draft preview · 3 unpublished changes in this app.',
+      ),
     );
-    // The package-wide count stays on Changes, as before.
     expect(screen.getByTestId('draft-preview-changes')).toHaveTextContent('(3)');
-  });
-
-  it('on a page it names the drafts pending on that page', async () => {
-    mockDrafts(PENDING);
-    renderBarAt('/apps/app.crm/page/crm_home?preview=draft');
-    await waitFor(() =>
-      expect(screen.getByTestId('draft-preview-bar')).toHaveTextContent('Draft preview · 1 unpublished changes on this page'),
-    );
-  });
-
-  it('CONTROL: a surface with nothing pending of its own keeps the general message', async () => {
-    mockDrafts(PENDING);
-    renderBarAt('/apps/app.crm/crm_contact?preview=draft');
-    await waitFor(() =>
-      expect(screen.getByTestId('draft-preview-bar')).toHaveTextContent(/Nothing here is live until you publish/),
-    );
     expect(screen.getByTestId('draft-preview-bar')).not.toHaveTextContent(/on this page/);
-  });
-
-  it('CONTROL: the app landing keeps the general message', async () => {
-    mockDrafts(PENDING);
-    renderBarAt('/apps/app.crm?preview=draft');
-    await waitFor(() => expect(screen.getByTestId('draft-preview-changes')).toHaveTextContent('(3)'));
-    expect(screen.getByTestId('draft-preview-bar')).toHaveTextContent(/Nothing here is live until you publish/);
+    expect(global.fetch).toHaveBeenCalledWith('/api/v1/meta/_drafts', expect.anything());
   });
 
   it('CONTROL: outside draft preview the bar draws nothing and reads nothing', () => {

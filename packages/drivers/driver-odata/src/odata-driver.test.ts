@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { READABLE_IDS_REFUSAL, SHARED_RECORD_IDS_CASE_SET, SharedRecordIds } from '@objectstack/spec/data';
 import { parseODataDriverConfig } from './config.js';
 import { ODataDriver } from './odata-driver.js';
 import { ODataRequestError } from './transport.js';
@@ -270,5 +271,31 @@ describe('credentials', () => {
     const { driver, requests } = driverFor([], { auth: { scheme: 'bearer' }, credential: async () => undefined });
     await expect(driver.find('trip_person', {})).rejects.toThrow(/resolved to nothing/);
     expect(requests).toHaveLength(0);
+  });
+});
+
+describe('[ADR-0155 D4, Q2 storage rows as ruled: R2, with R1 behind it] the share-grant leaf', () => {
+  // The step-1 case-set's "refuses" reading: D4's envelope on every case that
+  // holds a leaf, before any request reaches the service (the translator would
+  // otherwise leave the leaf to the engine, as no restriction).
+  for (const c of SHARED_RECORD_IDS_CASE_SET.cases.filter((x) => x.holdsLeaf)) {
+    it(`refuses, sends nothing: ${c.name}`, async () => {
+      for (const read of ['find', 'count'] as const) {
+        const { driver, requests } = driverFor([{ url: 'People', body: page(PEOPLE) }]);
+        const err = await driver[read]('trip_person', { where: c.where() } as never).then(() => null, (e: any) => e);
+        expect({ code: err?.code, status: err?.status }, read).toEqual(READABLE_IDS_REFUSAL);
+        expect(urls(requests), read).toEqual([]);
+      }
+    });
+  }
+
+  it('names the driver and the leaf by name and table, never the recipient', async () => {
+    const { driver } = driverFor([]);
+    const err = await driver
+      .find('trip_person', { where: { $or: [{ first_name: 'Russell' }, { id: { $in: SharedRecordIds.read('trip_person', 'u-secret') } }] } } as never)
+      .then(() => null, (e: any) => e);
+    expect(err?.message).toContain('[driver-odata]');
+    expect(err?.message).toContain("where.$or[1].id.$in holds a SharedRecordIds leaf, a fixed read of 'sys_record_share'");
+    expect(err?.message).not.toContain('u-secret');
   });
 });

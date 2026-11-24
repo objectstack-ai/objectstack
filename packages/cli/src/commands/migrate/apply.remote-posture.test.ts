@@ -295,7 +295,9 @@ describe('apply\'s listing reads the driver\'s apply limit', () => {
     op: { type: 'relax_not_null', table: T, column: 'memo' },
     message: `${T}.memo: the column is NOT NULL but the metadata declares no storage constraint. Ratify it by declaring \`storage: { notNull: true }\` yourself — nothing supplies it for you, and \`required: true\` does not imply it (ADR-0113) — or deliberately relax the column via "os migrate".`,
   };
-  const LIMITED = new Set(['tighten_not_null', 'relax_not_null']);
+  // [#33724] The REMOTE face relaxes in place (ruling 6915086281): its driver
+  // declares a limit for the tightening alone, and applies the relax.
+  const LIMITED = new Set(['tighten_not_null']);
   const LIMIT_SENTENCE = `"os migrate apply" cannot apply it on this database: ${APPLY_LIMIT}.`;
 
   /** The line the listing prints under an entry's `[op]` heading. */
@@ -309,23 +311,24 @@ describe('apply\'s listing reads the driver\'s apply limit', () => {
   /** The held-back lines the apply prints after it ran. */
   const postApplySkippedLines = (lines: string) => lines.split('\n').filter((l) => l.startsWith('  ⚠ Skipped '));
 
-  it('without --allow-destructive: the limited entries name the limit; only the drop is offered a re-run, the tightening is named as drift no re-run applies', async () => {
-    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped', LIMITED).stack);
+  it('without --allow-destructive: the limited entry names the limit; only the drop is offered a re-run, the tightening is named as drift no re-run applies', async () => {
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP, RELAX], 'skipped', LIMITED).stack);
     const { lines, exitCode } = await run(MigrateApply, ['--yes']);
     expect(exitCode, lines).toBe(0);
 
     const tighten = entryLine(lines, 'tighten_not_null');
     expect(tighten).not.toContain('--allow-destructive');
     expect(tighten).toContain(`${T}.code: metadata declares \`storage.notNull\` but the column is nullable — existing nulls must be backfilled. ${LIMIT_SENTENCE}`);
-    expect(entryLine(lines, 'relax_not_null')).toContain(LIMIT_SENTENCE);
+    // [#33724] No limit declared for the relax: its finding as the differ wrote it.
+    expect(entryLine(lines, 'relax_not_null')).toBe(`        ${RELAX.message}`);
     expect(entryLine(lines, 'drop_column')).toBe(`        ${DROP.message}`);
 
     expect(skippedLines(lines)).toEqual([
       '  ⚠ 1 destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).',
       '  ⚠ 1 destructive change(s) remain drift that a re-run with --allow-destructive cannot apply on this database either (each says why above).',
     ]);
-    // Unchanged after the prompt: the needs-confirm entry the driver could not apply is still named.
-    expect(lines).toContain('t23925.memo — relax_not_null');
+    // After the prompt: the relax the driver applied is not named among what it did not apply.
+    expect(lines).not.toContain('t23925.memo — relax_not_null');
     // The post-apply held-back line splits the same way.
     expect(postApplySkippedLines(lines)).toEqual([
       '  ⚠ Skipped 1 destructive change(s) (re-run with --allow-destructive to include them).',
@@ -334,7 +337,7 @@ describe('apply\'s listing reads the driver\'s apply limit', () => {
   }, CASE_TIMEOUT_MS);
 
   it('with --allow-destructive: the listing names the limit, and the notApplied report, PARTIAL and exit 1 are unchanged', async () => {
-    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped', LIMITED).stack);
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP, RELAX], 'skipped', LIMITED).stack);
     const { lines, exitCode } = await run(MigrateApply, ['--allow-destructive', '--yes']);
     expect(exitCode, lines).toBe(1);
     expect(entryLine(lines, 'tighten_not_null')).toContain(LIMIT_SENTENCE);
@@ -345,9 +348,9 @@ describe('apply\'s listing reads the driver\'s apply limit', () => {
   }, CASE_TIMEOUT_MS);
 
   it('--json: the document is the one a driver that declares nothing gets, key for key and entry for entry', async () => {
-    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped', LIMITED).stack);
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP, RELAX], 'skipped', LIMITED).stack);
     const limited = await run(MigrateApply, ['--yes', '--json']);
-    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped').stack);
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP, RELAX], 'skipped').stack);
     const declaresNothing = await run(MigrateApply, ['--yes', '--json']);
     const withoutDuration = (p: Record<string, unknown>) => Object.fromEntries(Object.entries(p).filter(([k]) => k !== 'duration'));
     expect(limited.exitCode).toBe(declaresNothing.exitCode);

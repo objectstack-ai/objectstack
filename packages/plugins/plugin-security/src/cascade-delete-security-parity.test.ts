@@ -208,11 +208,21 @@ describe('cascade delete: security parity between id-shaped and predicate-shaped
     }
     return out;
   };
-  /** The record ids the audit ledger holds a `delete` row for, under `prefix`. */
+  /**
+   * The record ids the audit ledger holds a `delete` row for, under `prefix`,
+   * on the fixture objects only. Every fixture id is written by this file; the
+   * ledger also holds the `delete` rows of revoked record shares, whose ids are
+   * generated (16 characters from an alphabet that has `_`), so a prefix
+   * alone would match one of them by chance.
+   */
   const auditedDeletes = async (prefix: string) => {
     const rows = (await ql.find('sys_audit_log', { where: { action: 'delete' }, context: SYSTEM } as never)) as
-      Array<{ record_id?: string }>;
-    return rows.map((r) => String(r.record_id)).filter((id) => id.startsWith(prefix)).sort();
+      Array<{ object_name?: string; record_id?: string }>;
+    return rows
+      .filter((r) => FIXTURE_OBJECTS.includes(String(r.object_name)))
+      .map((r) => String(r.record_id))
+      .filter((id) => id.startsWith(prefix))
+      .sort();
   };
   /** The record ids still carrying a record share, under `prefix`. */
   const sharedRecords = async (prefix: string) => {

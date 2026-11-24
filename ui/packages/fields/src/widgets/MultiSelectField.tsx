@@ -6,6 +6,7 @@ import { toDomProps } from './toDomProps.js';
 import { toHostGroupProps } from './toHostGroupProps.js';
 import { OptionsEmptyState } from './OptionsEmptyState.js';
 import { useCascadingOptions } from './useCascadingOptions.js';
+import { InCellOptionList } from './InCellOptionList.js';
 
 interface Option extends OptionLike { color?: string }
 
@@ -34,6 +35,8 @@ export function MultiSelectField({
   emptyHint,
   dataSource: _dataSource,
   error,
+  inCell,
+  onCommit: _onCommit,
   ...props
 }: FieldWidgetComponentProps<string[]>) {
   const config = field as any;
@@ -140,6 +143,22 @@ export function MultiSelectField({
     const next = selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v];
     onChange(next);
   };
+
+  // The grid's cell editor (objectstack#35688): a searchable check list; each
+  // pick toggles and stages, and the grid commits when the user moves on.
+  if (inCell && !props.disabled) {
+    const domProps = toDomProps(props);
+    return (
+      <InCellOptionList
+        options={options.map((o) => ({ value: String(o.value), label: optionDisplayLabel(o) }))}
+        selected={selected}
+        multiple
+        onPick={toggle}
+        testId={fieldName ? `multiselect-in-cell-${fieldName}` : undefined}
+        inputProps={{ id: domProps.id, 'aria-describedby': domProps['aria-describedby'], 'aria-invalid': !!error }}
+      />
+    );
+  }
 
   // DOM pass-through (objectui#3318): the container carries the form
   // renderer's id / aria-describedby, but NOT its `aria-invalid` — a plain

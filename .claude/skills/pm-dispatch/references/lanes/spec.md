@@ -22,18 +22,17 @@
 - 契约面 = 「改动前后同一份输入的接受/拒绝结果变了」;判定逐字节不变 ⇒ 辅助面。
 - 契约面五形任一命中:收紧、放宽、公开导出面增删、declared ≠ enforced、退役。
 - 辅助面的 changeset 恒 patch,默认 sweep-first;第二刀问「它误导了 AI 吗」。
-- 误导 ⇒ P2 保留;不误导 ⇒ 关 not planned,或搭下一个触碰它的 PR 的 Acceptance notes。
+- 误导 ⇒ `Suggested-grade:` 交分诊;不误导 ⇒ 关 not planned,或搭下个碰它的 PR 的 Acceptance notes。
 - 放宽接受集或扩大公开面的卡,不论多小,即条款②;收窄仍是契约面,不触条款②。
 - 收窄不触发条款②,但按 `yes` 申报恒不是错误;⛔ 个案裁决不改本行。
 - 机器面改围契约的仪器,与辅助面不交,⛔ 不碰 `packages/spec/src/**/*.zod.ts` 与 strictness 台账。
-- 机器面卡只按北极星「Instruments serve the fleet」的那一问评级。
-- 拿不准 FLAG 回分诊,⛔ 不自设判据;档位随面走,表在 SKILL.md 模型分档,⛔ 不另抄。
+- 机器面卡照北极星「Instruments serve the fleet」那一问写 `Suggested-grade:`,级归分诊。
+- 拿不准 FLAG 回分诊,⛔ 不自设判据;档位住 `../execution-duties.md` 定档节,⛔ 不另抄。
 
 ## 常设承诺
 
-- findings 首触定级归分诊席,本席只供证据;例外见 `triage-duties.md` 车道席自分诊。
 - 门禁强制的跨车道 ledger 追加整类预批(`error-code-ledger.zod.ts`),三条全中即免本席签字。
-- ①:码的存在已在归属卡裁过;②:兜底不变,条款②路径肢照命中,入队前仍过契约复核。
+- ①:码的存在已在归属卡裁过;②:兜底不变,条款②路径肢照命中,入队前仍过 L2 审核。
 - ③:纯增量 —— 不动 schema 形状、既有条目与 ledger 机制,只落追加方自己的包分节。
 - 出类(新 ledger 字段、重构、别道条目、准入或拒收语义)⇒ 本席卡,不论谁需要它。
 - 分支信息测试(原文不译):Does this defect give a consumer a branch it could act on differently?

@@ -94,6 +94,13 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 }));
 
 import { AppContent } from '../AppContent';
+// The object list is a lazy route element (`AppContent`'s `ObjectView`), and
+// the plain "Object Not Found" of (b) is drawn inside it. Its cold load — the
+// list and `@object-ui/plugin-view`'s entry, which the shell no longer holds
+// eager (objectstack#33581) — is paid here, at collection, never inside a
+// clocked `waitFor`. `@objectstack/lint` is reached through it, so it is too.
+import '@objectstack/lint';
+import '../../views/ObjectView';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 
 const PKG = 'app.showcase';

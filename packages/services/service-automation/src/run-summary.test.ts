@@ -30,6 +30,7 @@ import { registerConnectorNodes } from './builtin/connector-nodes.js';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import type { FlowRunSummary } from '@objectstack/spec/automation';
+import { stubbedFetchEgress } from './builtin/stubbed-fetch-egress.testkit.js';
 
 /**
  * `resumeAuthority: 'any'` is required of a pausing fixture since #5561: these
@@ -1002,7 +1003,7 @@ describe('uncountable effects (#4354 follow-up)', () => {
             ] as const) {
                 const logger = makeLogger();
                 const engine = new AutomationEngine(logger);
-                registerHttpNodes(engine, { logger, getService: () => undefined } as never);
+                registerHttpNodes(engine, { logger, getService: () => undefined } as never, { egress: stubbedFetchEgress() });
                 engine.registerFlow('f', {
                     name: 'f', label: 'f', type: 'autolaunched',
                     nodes: [

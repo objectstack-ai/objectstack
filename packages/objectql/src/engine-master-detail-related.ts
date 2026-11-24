@@ -51,7 +51,7 @@
  * exist.
  *
  * [#30053 codemod] A PRIVATE method's docblock has since moved here,
- * onto its function (`--hand-docs` of `scripts/codemod-split-engine.mjs`),
+ * onto its function (`--hand-docs`, split by #30341),
  * and the class keeps none for it; a public or protected method's docblock
  * stays on the class, the contract, and its function keeps the placeholder.
  *
@@ -71,7 +71,7 @@ import { collectPredicateRelationships, referentialClearBinding } from './valida
 // [#19911] The settlement's question "does judging the FK's own lock need the
 // header it names?" — asked of the same root reader the strips use.
 import { readonlyWhenFkJudgementReadsParent } from './validation/rule-validator.js';
-import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
+import type { ReferentialClearExemption, RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { isFederatedObject } from './federated-object.js';
 import { masterIdOf, servedAsStored, staticReadonlyStoredView, undeclaredRelatedFields } from './engine.js';
@@ -138,6 +138,8 @@ function staticReadonlyStripTakes(
     hookWrittenKeys: ReadonlySet<string> | undefined;
     /** [#24822] The wall's flag, read once by `update()` — see {@link staticReadonlyStoredView}. */
     wallJudgesOrganization?: boolean;
+    /** The walk's referential clear, read once by `update()` — see {@link staticReadonlyStoredView}. */
+    referentialClear?: ReferentialClearExemption;
   },
 ): boolean {
   if (!strip.runs) return false;
@@ -287,7 +289,9 @@ export async function settleMasterDetailLanding<H>(
  * is judged as empty: the header is materialised over the master's declared
  * fields after the columns are kept, so such a column reads `null`. So the
  * verdict never depends on a header value the caller could not have read in
- * full.
+ * full. [#34821] `servedColumns[i]` names the columns kept for `parents[i]`:
+ * a multi-row preview moves and computes the batch's roll-ups onto those
+ * only, so a withheld column reads `null` at every row.
  */
 export async function resolvePreviewParents(
   this: Pick<MasterDetailRelatedHost, 'find' | 'logger' | 'resolveMasterDetailParents' | 'materializeParentHeader'>,
@@ -298,6 +302,7 @@ export async function resolvePreviewParents(
 ): Promise<{
     parents: Array<Record<string, unknown> | null>;
     previousParents: Array<Record<string, unknown> | null | undefined>;
+    servedColumns: Array<ReadonlySet<string> | null>;
   }> {
   const rel = resolveMasterDetailRelation(schema as any);
   const landingIds = views.map((view) => (rel ? masterIdOf(rel.fk, null, view) : undefined));
@@ -316,6 +321,8 @@ export async function resolvePreviewParents(
   priorIds.forEach((id, i) => { if (repoints[i]) ids.add(String(id)); });
 
   const headers = new Map<string, Record<string, unknown>>();
+  /** [#34821] Header id → the columns kept: what a batch overlay may move or compute onto. */
+  const keptColumns = new Map<string, ReadonlySet<string>>();
   // [#24358] ⛔ A stored-metadata-body header is never read here either, as
   // the write's own header read never reads one: every header binds unbound.
   if (rel && ids.size > 0 && !isStoredMetadataBodyObject(rel.master)) {
@@ -349,6 +356,7 @@ export async function resolvePreviewParents(
           }
         }
         headers.set(id, this.materializeParentHeader(rel.master, kept));
+        keptColumns.set(id, new Set(Object.keys(kept)));
       }
     }
   }
@@ -356,6 +364,7 @@ export async function resolvePreviewParents(
   return {
     parents: landingIds.map(headerOf),
     previousParents: priorIds.map((id, i) => (priorUnknown[i] ? null : repoints[i] ? headerOf(id) : undefined)),
+    servedColumns: landingIds.map((id) => (id == null ? null : (keptColumns.get(String(id)) ?? null))),
   };
 }
 

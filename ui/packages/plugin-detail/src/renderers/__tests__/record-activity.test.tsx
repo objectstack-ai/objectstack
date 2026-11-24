@@ -33,11 +33,13 @@
  */
 
 import * as React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import { RecordContextProvider, DiscussionContextProvider } from '@object-ui/react';
 import type { FeedItem } from '@object-ui/types';
 import { RecordActivityRenderer } from '../record-activity';
+import { activityRowToFeedItem, resetWithheldCommentComposerWarnings } from '../recordActivityFeed';
+import { RecordActivityTimeline } from '../../RecordActivityTimeline';
 
 const COMPOSER_PLACEHOLDER = 'Leave a comment… (Ctrl+Enter to submit)';
 const EMPTY_FEED = 'No activity recorded';
@@ -327,5 +329,281 @@ describe('record:activity — showSubscriptionToggle is the one documented gap',
     // input declaration must be deleted with it (objectui#3165).
     expect(screen.queryByLabelText('Subscribe to notifications')).toBeNull();
     expect(screen.queryByLabelText('Unsubscribe from notifications')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#34371 — a `types` allow-list that leaves out `comment` filters
+ * every comment out of the block, the ones posted on it included, so the block
+ * offers no composer and no Comments-only filter, and says why once in
+ * development. HotCRM's `lead_detail` page authors exactly that shape
+ * (`types: ['task']`, `showCompleted: true`); the controls are the same block
+ * with `comment` admitted, and with no `types` at all.
+ */
+describe('record:activity — a types list without comment offers no comment composer (objectstack#34371)', () => {
+  const FILTER_TRIGGER = 'Filter activity';
+  const COMMENTS_ONLY = 'Comments Only';
+  const FEED: FeedItem[] = [
+    { id: 'c1', type: 'comment', actor: 'Ada', body: 'a posted comment', createdAt: '2026-11-16T09:47:37.000Z' },
+    { id: 't1', type: 'task', actor: 'Ada', body: 'Meeting held', createdAt: '2026-11-16T09:30:00.000Z' },
+  ];
+  const HOTCRM_LEAD_ACTIVITY = { types: ['task'], limit: 20, showCompleted: true };
+  const withHost = (node: React.ReactNode) => (
+    <DiscussionContextProvider items={FEED as any} onAddComment={vi.fn()}>
+      {node}
+    </DiscussionContextProvider>
+  );
+  const mountBlock = (properties: Record<string, unknown>) =>
+    mountBound({ type: 'record:activity', id: 'lead_activity', properties }, makeDataSource(), withHost);
+
+  /** The dropdown's option labels, read by opening the Radix Select. */
+  async function filterOptionLabels(): Promise<string[]> {
+    fireEvent.keyDown(screen.getByRole('combobox', { name: FILTER_TRIGGER }), { key: 'ArrowDown' });
+    await waitFor(() => expect(screen.queryAllByRole('option').length).toBeGreaterThan(0));
+    return screen.getAllByRole('option').map((o) => o.textContent ?? '');
+  }
+
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    resetWithheldCommentComposerWarnings();
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  const withheldWarnings = () =>
+    (warn.mock.calls as unknown[][])
+      .map((c: unknown[]) => String(c[0]))
+      .filter((m: string) => m.includes('offers no comment composer'));
+
+  it('the HotCRM shape (types: [task]) draws no composer and no Comments-only option', async () => {
+    mountBlock(HOTCRM_LEAD_ACTIVITY);
+    expect(await screen.findByText('Meeting held')).toBeTruthy();
+    expect(screen.queryByText('a posted comment')).toBeNull();
+    expect(screen.queryByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeNull();
+    const options = await filterOptionLabels();
+    expect(options).toContain('All Activity');
+    expect(options).not.toContain(COMMENTS_ONLY);
+  });
+
+  it('CONTROL: types that admits comment keeps the composer and the option, and the comment shows', async () => {
+    mountBlock({ ...HOTCRM_LEAD_ACTIVITY, types: ['task', 'comment'] });
+    expect(await screen.findByText('a posted comment')).toBeTruthy();
+    expect(screen.getByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeTruthy();
+    expect(await filterOptionLabels()).toContain(COMMENTS_ONLY);
+    expect(withheldWarnings()).toHaveLength(0);
+  });
+
+  it('CONTROL: no types keeps the composer and the option, and the comment shows', async () => {
+    mountBlock({ limit: 20, showCompleted: true });
+    expect(await screen.findByText('a posted comment')).toBeTruthy();
+    expect(screen.getByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeTruthy();
+    expect(await filterOptionLabels()).toContain(COMMENTS_ONLY);
+    expect(withheldWarnings()).toHaveLength(0);
+  });
+
+  it('warns once, naming the block, its types and both fixes, however often it renders', async () => {
+    const first = mountBlock(HOTCRM_LEAD_ACTIVITY);
+    expect(await screen.findByText('Meeting held')).toBeTruthy();
+    first.rerender(
+      <RecordContextProvider objectName="crm_account" recordId="rec-alpha" data={{ id: 'rec-alpha', name: 'Alpha' }} dataSource={makeDataSource()}>
+        {withHost(<RecordActivityRenderer schema={{ type: 'record:activity', id: 'lead_activity', properties: { ...HOTCRM_LEAD_ACTIVITY } } as any} />)}
+      </RecordContextProvider>,
+    );
+    first.unmount();
+    mountBlock(HOTCRM_LEAD_ACTIVITY);
+    expect(await screen.findByText('Meeting held')).toBeTruthy();
+    const said = withheldWarnings();
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('record:activity "lead_activity"');
+    expect(said[0]).toContain('["task"]');
+    expect(said[0]).toContain('add "comment" to `types`');
+    expect(said[0]).toContain('`showCommentInput: false`');
+  });
+
+  it('an author who switched the composer off is not told anything', async () => {
+    mountBlock({ ...HOTCRM_LEAD_ACTIVITY, showCommentInput: false });
+    expect(await screen.findByText('Meeting held')).toBeTruthy();
+    expect(withheldWarnings()).toHaveLength(0);
+  });
+});
+
+describe('record:activity — one line per changed field, old → new (objectstack#36290)', () => {
+  /** An `updated` row as plugin-audit serves it: the summary, and the field-change code narrowed to this reader. */
+  const updatedRow = (
+    id: string,
+    changes: Array<{ field: string; from: Record<string, unknown>; to: Record<string, unknown> }>,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    id,
+    type: 'updated',
+    summary: 'stored summary',
+    timestamp: '2026-11-20T09:00:00.000Z',
+    actor_name: 'Grace',
+    metadata: JSON.stringify({ summary_message: { key: 'fieldChanges', object: 'crm_account', changes } }),
+    ...extra,
+  });
+  const SCHEMA = {
+    name: 'crm_account',
+    fields: {
+      notes: { type: 'textarea', label: 'Customer notes' },
+      phone: { type: 'phone', label: 'Phone' },
+      email: { type: 'email', label: 'Email' },
+      stage: {
+        type: 'select',
+        label: 'Stage',
+        options: [
+          { value: 'prospect', label: 'Prospect' },
+          { value: 'won', label: 'Closed won' },
+        ],
+      },
+      parent_id: { type: 'lookup', label: 'Parent account' },
+      owner_id: { type: 'user', label: 'Owner' },
+      vip: { type: 'boolean', label: 'VIP' },
+    },
+  };
+  const mount = (rows: unknown[]) =>
+    render(
+      <RecordContextProvider
+        objectName="crm_account"
+        recordId="rec-alpha"
+        data={{ id: 'rec-alpha', name: 'Alpha' }}
+        objectSchema={SCHEMA as any}
+        dataSource={makeDataSource(rows)}
+      >
+        <RecordActivityRenderer schema={{ type: 'record:activity' } as any} />
+      </RecordContextProvider>,
+    );
+  const linesOf = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll('[data-stream-field-change] [data-field-change]')).map((line) => ({
+      field: line.getAttribute('data-field-change'),
+      label: line.querySelector('[data-field-change-label]')?.textContent,
+      old: line.querySelector('[data-field-change-side="old"]')?.textContent,
+      new: line.querySelector('[data-field-change-side="new"]')?.textContent,
+      text: line.textContent,
+    }));
+
+  it('a save that changed one field: the entry, and under it `Label: old → new`', async () => {
+    const { container } = mount([
+      updatedRow('a1', [{ field: 'notes', from: { text: 'Old words' }, to: { text: 'New words' } }]),
+    ]);
+    await waitFor(() => expect(container.querySelector('[data-stream-field-change]')).not.toBeNull());
+    expect(container.querySelectorAll('[data-stream-system-row]')).toHaveLength(1);
+    expect(linesOf(container)).toEqual([
+      { field: 'notes', label: 'Customer notes:', old: 'Old words', new: 'New words', text: 'Customer notes: Old words → New words' },
+    ]);
+  });
+
+  it('one save that changed the phone and the email: ONE entry, two lines under it', async () => {
+    const { container } = mount([
+      updatedRow('a2', [
+        { field: 'phone', from: { text: '111' }, to: { text: '222' } },
+        { field: 'email', from: { text: 'a@x.io' }, to: { text: 'b@x.io' } },
+      ]),
+    ]);
+    await waitFor(() => expect(container.querySelectorAll('[data-stream-field-change]')).toHaveLength(2));
+    const entries = container.querySelectorAll('[data-stream-system-row]');
+    expect(entries).toHaveLength(1);
+    // The entry is ONE row: its line and the field lines under it.
+    expect(container.querySelectorAll('[data-stream-row]')).toHaveLength(1);
+    expect(entries[0].hasAttribute('data-stream-row')).toBe(true);
+    expect(entries[0].querySelectorAll('[data-stream-field-change]')).toHaveLength(2);
+    expect(entries[0].querySelector('[data-stream-change]')?.textContent).toBe('Updated Phone, Email');
+    expect(linesOf(container).map((l) => [l.field, l.old, l.new])).toEqual([
+      ['phone', '111', '222'],
+      ['email', 'a@x.io', 'b@x.io'],
+    ]);
+  });
+
+  it('an empty side reads as the word for empty, never the writer\'s `∅`', async () => {
+    const { container } = mount([updatedRow('a3', [{ field: 'phone', from: { text: '∅' }, to: { text: '222' } }])]);
+    await waitFor(() => expect(container.querySelector('[data-field-change]')).not.toBeNull());
+    const old = container.querySelector('[data-field-change-side="old"]')!;
+    expect(old.textContent).toBe('Empty');
+    expect(old.hasAttribute('data-field-change-empty')).toBe(true);
+    expect(container.textContent).not.toContain('∅');
+  });
+
+  it('an option, a lookup and a user read as the option label and the record names, never the stored ids', async () => {
+    const { container } = mount([
+      updatedRow('a4', [
+        { field: 'stage', from: { text: 'Prospect', option: 'prospect' }, to: { text: 'Won', option: 'won' } },
+        { field: 'parent_id', from: { text: '∅' }, to: { text: 'Acme Corp' } },
+        { field: 'owner_id', from: { text: 'Ada Lovelace' }, to: { text: 'Grace Hopper' } },
+        { field: 'vip', from: { text: 'No', boolean: false }, to: { text: 'Yes', boolean: true } },
+      ]),
+    ]);
+    await waitFor(() => expect(container.querySelectorAll('[data-field-change]')).toHaveLength(4));
+    expect(linesOf(container).map((l) => [l.label, l.old, l.new])).toEqual([
+      // The field's option label as the page reads it, not the label the writer stored.
+      ['Stage:', 'Prospect', 'Closed won'],
+      ['Parent account:', 'Empty', 'Acme Corp'],
+      ['Owner:', 'Ada Lovelace', 'Grace Hopper'],
+      ['VIP:', 'No', 'Yes'],
+    ]);
+    expect(container.textContent).not.toMatch(/\bwon\b|prospect/);
+  });
+
+  it('draws only the changes the server served: a field the reader may not read has no line', async () => {
+    // The row's stored change touched `phone` and `salary`; the reader is not
+    // served `salary`, so plugin-audit's redaction left its change out of the code.
+    const { container } = mount([
+      updatedRow('a5', [{ field: 'phone', from: { text: '111' }, to: { text: '222' } }], { changed_fields: ['phone'] }),
+    ]);
+    await waitFor(() => expect(container.querySelector('[data-field-change]')).not.toBeNull());
+    expect(linesOf(container).map((l) => l.field)).toEqual(['phone']);
+    expect(container.querySelector('[data-field-change="salary"]')).toBeNull();
+  });
+
+  it('a long value is cut to its line, with a control that shows it in full and clamps it again', async () => {
+    const long = 'A long note that runs well past one line of the activity column, and then some more.';
+    const { container } = mount([updatedRow('a6', [{ field: 'notes', from: { text: 'Short' }, to: { text: long } }])]);
+    await waitFor(() => expect(container.querySelector('[data-field-change]')).not.toBeNull());
+    const line = container.querySelector('[data-field-change="notes"]')!;
+    const side = line.querySelector('[data-field-change-side="new"]')!;
+    expect(side.className).toContain('truncate');
+    const toggle = line.querySelector('[data-field-change-toggle]') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.textContent).toBe('Show all');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toBe('Show less');
+    expect(side.className).toContain('whitespace-pre-wrap');
+    expect(side.className).not.toContain('truncate');
+    expect(side.textContent).toBe(long);
+  });
+
+  it('the 动态 stream: two saves by one person on one day fold, and each save opens to its own lines', () => {
+    const at = (minute: number) => {
+      const d = new Date();
+      d.setHours(9, minute, 0, 0);
+      return d.toISOString();
+    };
+    const items = [
+      updatedRow('s1', [{ field: 'phone', from: { text: '111' }, to: { text: '222' } }], { timestamp: at(5) }),
+      updatedRow('s2', [
+        { field: 'notes', from: { text: '∅' }, to: { text: 'First note' } },
+        { field: 'email', from: { text: 'a@x.io' }, to: { text: 'b@x.io' } },
+      ], { timestamp: at(4) }),
+    ].map((row) => activityRowToFeedItem(row, 'System')!);
+    const { container } = render(<RecordActivityTimeline items={items} variant="stream" titleLabel="Timeline" />);
+    const fold = container.querySelector('[data-testid="activity-fold"]')!;
+    expect(fold.getAttribute('data-fold-count')).toBe('2');
+    fireEvent.click(fold.querySelector('button[aria-expanded]')!);
+    const rows = Array.from(container.querySelectorAll('[data-testid="activity-fold-entries"] [data-stream-row]'));
+    expect(rows.map((row) => row.querySelectorAll('[data-stream-field-change]').length)).toEqual([1, 2]);
+    expect(rows[1].querySelector('[data-field-change="notes"]')?.textContent).toBe('notes: Empty → First note');
+  });
+
+  it('CONTROL — a short value offers no control, and a row with no served code draws its summary as before', async () => {
+    const { container } = mount([
+      updatedRow('a7', [{ field: 'phone', from: { text: '111' }, to: { text: '222' } }]),
+      { id: 'a8', type: 'updated', summary: 'Stage: draft to qualified', timestamp: '2026-11-19T09:00:00.000Z', actor_name: 'Ada' },
+    ]);
+    await waitFor(() => expect(container.querySelector('[data-field-change]')).not.toBeNull());
+    expect(container.querySelector('[data-field-change-toggle]')).toBeNull();
+    expect(screen.getByText('Stage: draft to qualified')).toBeTruthy();
+    expect(container.querySelectorAll('[data-stream-field-change]')).toHaveLength(1);
   });
 });

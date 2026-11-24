@@ -1,5 +1,127 @@
 # @object-ui/plugin-report
 
+## 18.6.0
+
+### Patch Changes
+
+- 23a18fd: fix(plugin-report): a matrix report lays out each header dimension on its own, so a date axis reads by bucket key and a select axis keeps its option order whatever the report's `order`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset matrix collected its row and column headers in row-arrival order. When the server's empty-bucket fill and its default ascending time order did not run (a selection with limit/offset, an order on a measure, `compareTo`, or a grid over 2,000 cells), a date column axis came out in first-seen order: one ascending run per row bucket, end to end. And any report `order` switched off the select option layout on both axes, so ordering by the date dimension turned a `priority` row axis from Low / Medium / High / Critical into the stored-value order Critical / High / Low / Medium.
+  
+  The matrix now decides per header dimension. A dimension the report's `order` names keeps the order the server applied, so an explicit `desc` on a date axis stays descending. A select dimension it does not name takes its declared option order, as before with no `order`. A date dimension it does not name (its answer column is typed `time`, at any `dateGranularity`) takes its bucket keys ascending, compared by the raw key and not the localized label, with the empty bucket last. Any other dimension keeps its arrival order.
+  
+  Only the two header lists are permuted. Every cell is still placed by its bucket ids and every drill click still carries its own bucket, so no row is re-sorted and nothing a truncated page holds is reordered. Flat tables and embedded charts are unchanged.
+- 6c7d730: fix(ui): CSV files the Console builds in the browser start with a UTF-8 byte-order mark, so Excel shows Chinese and other non-ASCII text correctly
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Excel reads a CSV file that has no byte-order mark in the computer's own code page, so Chinese names and other non-ASCII values opened as garbled text. The server export already writes the mark. Six Console downloads build their CSV in the browser and did not:
+  
+  - the list view's export when the data source cannot export on the server;
+  - the grid's export in the same case;
+  - the data table's Export CSV button;
+  - a report's CSV export;
+  - the bulk action's Download error CSV;
+  - the temporary-password CSV after an identity import.
+  
+  All six now build their file with the new `csvBlob(text)` from `@object-ui/core`. It puts one mark (U+FEFF, the bytes EF BB BF) before the text and types the file `text/csv;charset=utf-8`. The core package also exports the mark as `UTF8_BYTE_ORDER_MARK`. The CSV import already removes one leading mark, so a downloaded file can still be imported again. The data table's file is now typed with `charset=utf-8` too.
+- 6d2db1d: fix(dashboard): a drill on a dimension across a relationship lists its records, and a failed drill says so in the viewer's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset dimension can read a field of a related object (`crm_account.owner_id`). Clicking such a bucket in a dashboard widget or a report built a drill filter on the dotted path itself, which the data API refuses with `INVALID_FIELD` / 400, and the drill drawer then printed that English developer message to the viewer.
+  
+  - **The drill resolves the relationship first.** `resolveDatasetDrillFilter` (`@object-ui/core`) reads the related object's ids matching the clicked value through the surface's own data source, as the viewer, and filters the base object on the relationship field: `{ crm_account: { $in: [...] } }`. A path of up to three hops (ADR-0071's limit) is read innermost first, one read per hop, and dimensions that share a hop are read together. A bucket with no relationship path drills exactly as before, with nothing extra read.
+  - **No drill rather than a wrong list.** A path past three hops offers no drill. A relationship the object does not declare as a single-valued lookup, the empty bucket of a relationship dimension, and more than 200 related records at a hop open the drawer on a localized notice instead of a list. The id list is never truncated. A report emits no drill in those cases and logs why.
+  - **The drawer speaks to the viewer.** When the drawer's list read fails, it shows a localized sentence (`dashboard.drillFailed`) instead of the server's message. New keys `dashboard.drillTooMany`, `dashboard.drillUnavailable` and `dashboard.drillFailed` are in every built-in locale.
+  - `buildDatasetDrillFilter` now refuses a relationship-path dimension with a `FilterOperatorError` instead of writing a dotted key, and takes the resolved conditions as an optional sixth argument.
+- Updated dependencies [e53e02e]
+- Updated dependencies [0e2ead3]
+- Updated dependencies [ffa6db1]
+- Updated dependencies [c493adb]
+- Updated dependencies [84e6bbb]
+- Updated dependencies [3372da0]
+- Updated dependencies [b019048]
+- Updated dependencies [b005638]
+- Updated dependencies [a78781a]
+- Updated dependencies [1078c73]
+- Updated dependencies [39fa82b]
+- Updated dependencies [b4eea88]
+- Updated dependencies [8436f67]
+- Updated dependencies [4c0cf65]
+- Updated dependencies [31eb2ae]
+- Updated dependencies [2c296cf]
+- Updated dependencies [5a75579]
+- Updated dependencies [6a7403b]
+- Updated dependencies [04e7b90]
+- Updated dependencies [3b1307e]
+- Updated dependencies [842637a]
+- Updated dependencies [227ae36]
+- Updated dependencies [dc54c60]
+- Updated dependencies [a8e794f]
+- Updated dependencies [d57d6ee]
+- Updated dependencies [bdd5176]
+- Updated dependencies [2b267b7]
+- Updated dependencies [4240719]
+- Updated dependencies [518baca]
+- Updated dependencies [066177b]
+- Updated dependencies [6c7d730]
+- Updated dependencies [b86331d]
+- Updated dependencies [e2d3514]
+- Updated dependencies [e95210d]
+- Updated dependencies [26cab15]
+- Updated dependencies [e9f65a3]
+- Updated dependencies [13c62a6]
+- Updated dependencies [77b42a1]
+- Updated dependencies [4db3750]
+- Updated dependencies [2e29287]
+- Updated dependencies [8bc0808]
+- Updated dependencies [e61af97]
+- Updated dependencies [b1da9f5]
+- Updated dependencies [a931063]
+- Updated dependencies [14619f5]
+- Updated dependencies [e47c1cb]
+- Updated dependencies [758bbe7]
+- Updated dependencies [81ea504]
+- Updated dependencies [c81f498]
+- Updated dependencies [4bdbdac]
+- Updated dependencies [3bbda33]
+- Updated dependencies [d656d62]
+- Updated dependencies [6c1f9b3]
+- Updated dependencies [e05445e]
+- Updated dependencies [90f2b1c]
+- Updated dependencies [0584eb5]
+- Updated dependencies [94c9491]
+- Updated dependencies [fff0ad0]
+- Updated dependencies [65ec3c5]
+- Updated dependencies [4aeeca5]
+- Updated dependencies [aa0fde3]
+- Updated dependencies [421f180]
+- Updated dependencies [2fcc9cf]
+- Updated dependencies [7b7272f]
+- Updated dependencies [cb7d514]
+- Updated dependencies [97cd541]
+- Updated dependencies [2487242]
+- Updated dependencies [4443014]
+- Updated dependencies [343c49c]
+- Updated dependencies [6d2db1d]
+- Updated dependencies [db1a05c]
+- Updated dependencies [d4b2a75]
+- Updated dependencies [3c535ee]
+- Updated dependencies [59defa0]
+  - @object-ui/i18n@18.6.0
+  - @object-ui/core@18.6.0
+  - @object-ui/types@18.6.0
+  - @object-ui/components@18.6.0
+  - @object-ui/fields@18.6.0
+  - @object-ui/permissions@18.6.0
+  - @object-ui/react@18.6.0
+
 ## 18.5.0
 
 ### Patch Changes

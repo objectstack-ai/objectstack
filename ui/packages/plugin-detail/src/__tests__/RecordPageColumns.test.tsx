@@ -11,21 +11,41 @@
  * synthesized record page laid out by one rule. The blocks themselves are
  * stubbed (each node draws its type, and reports the details column cap it
  * is drawn under), so what is measured here is the layout alone: where each
- * node lands, that the header is drawn once, that no tab strip and no rail
- * exist, the 动态 panel leading the right column, and each tier's measures.
+ * node lands, that the header is drawn once, the details pinned to a left
+ * column beside the other tabs on a wide full page (objectstack#35890), and
+ * that no width draws the right rail of summary cards any more.
+ *
+ * Two describes (objectstack#35253, objectstack#35483) opt each
+ * `record:details` stub into mounting the `DetailView` the real block mounts
+ * (`showHeader: false`, inline edit on), so the approval band it draws is
+ * measured on the laid-out page; every other describe keeps the bare stub.
  */
 
 import * as React from 'react';
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, within } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { render, screen, cleanup, within, waitFor, fireEvent, act } from '@testing-library/react';
+import { RelatedCountStore } from '@object-ui/components';
+import { RecordContextProvider } from '@object-ui/react';
+
+const harness = vi.hoisted(() => ({
+  /** Set by the objectstack#35253 describe: a `record:details` stub mounts `body`. */
+  detailBodies: false,
+  body: null as React.ComponentType<{ schema: any }> | null,
+  /** The content width every element reports (jsdom lays nothing out). */
+  width: 0,
+}));
 
 vi.mock('@object-ui/react', async (importOriginal) => {
   const { DetailsColumnCapContext } = await import('../defaultRecordPage');
-  const Stub = ({ schema }: { schema: any }) => (
-    <div data-node={schema?.type} data-cap={React.useContext(DetailsColumnCapContext)}>
-      {schema?.properties?.objectName ?? schema?.type}
-    </div>
-  );
+  const Stub = ({ schema }: { schema: any }) => {
+    const Body = harness.detailBodies && schema?.type === 'record:details' ? harness.body : null;
+    return (
+      <div data-node={schema?.type} data-cap={React.useContext(DetailsColumnCapContext)}>
+        {schema?.properties?.objectName ?? schema?.type}
+        {Body && <Body schema={schema} />}
+      </div>
+    );
+  };
   return {
     ...(await importOriginal<Record<string, unknown>>()),
     SchemaRenderer: Stub,
@@ -33,8 +53,11 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { RecordPageColumns } from '../RecordPageColumns';
+import { useReportEmptyFields } from '../recordFieldList';
 import { buildDefaultPageColumns } from '../synth/recordPageColumns';
 import { buildDefaultPageSchema } from '../synth/buildDefaultPageSchema';
+import { DetailView } from '../DetailView';
+import { InlineEditProvider } from '@object-ui/react';
 
 const page = buildDefaultPageSchema(
   { name: 'lead', label: 'Lead', fields: { name: { name: 'name', type: 'text' } } },
@@ -52,75 +75,578 @@ const column = (container: HTMLElement, name: string) =>
 const nodesIn = (el: HTMLElement | null) =>
   Array.from(el?.querySelectorAll('[data-node]') ?? []).map((n) => n.getAttribute('data-node'));
 const grid = (container: HTMLElement) => container.querySelector('[data-record-columns]') as HTMLElement;
+const tabNames = () => screen.queryAllByRole('tab').map((tab) => tab.getAttribute('data-record-tab'));
 
-afterEach(() => cleanup());
+beforeEach(() => {
+  harness.width = 0;
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => harness.width);
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
-describe('RecordPageColumns — details | the right column (objectstack#27524, Target 6)', () => {
-  it('wide (≥ 1120): one header, details | right column at 380 px, 动态 first, no tab strip', () => {
-    const { container } = render(
-      <RecordPageColumns tier="wide" columns={columns} footer={<p data-testid="meta-footer">meta</p>} />,
-    );
-    expect(container.querySelector('[data-record-page-tier="wide"]')).not.toBeNull();
-    expect(screen.queryByRole('tablist')).toBeNull();
-    expect(container.querySelectorAll('[data-node="page:header"]')).toHaveLength(1);
-    expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details right');
-    expect(grid(container).className).toContain('grid-cols-[minmax(0,1fr)_23.75rem]');
-    expect(nodesIn(column(container, 'details'))).toEqual(['record:details']);
-    // The 动态 panel leads the right column; the related panels follow it.
-    const right = column(container, 'right')!;
-    expect(right.firstElementChild?.hasAttribute('data-record-timeline-panel')).toBe(true);
-    expect(nodesIn(right)).toEqual(['record:activity', 'record:related_list', 'record:related_list']);
-    // No timeline column exists any more (「动态是面板，不是栏」).
-    expect(column(container, 'timeline')).toBeNull();
-    // The meta line closes the details column (objectstack#27055).
-    expect(within(right).queryByTestId('meta-footer')).toBeNull();
-    expect(column(container, 'details')!.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
-    // The related lists are siblings of one parent, so they form one empty-fold stack.
-    const lists = right.querySelectorAll('[data-node="record:related_list"]');
-    expect(lists[0].parentElement).toBe(lists[1].parentElement);
-    // Wide: a details section may take three field columns.
-    expect(column(container, 'details')!.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('3');
+describe('RecordPageColumns — no right rail at any width (objectstack#35890 retires objectstack#35596)', () => {
+  for (const tier of ['wide', 'two-column', 'stack'] as const) {
+    it(`${tier}: one header, the details alone the full width, the footer closing them, no summary card`, () => {
+      const { container } = render(
+        <RecordPageColumns tier={tier} columns={columns} footer={<p data-testid="meta-footer">meta</p>} />,
+      );
+      expect(container.querySelector(`[data-record-page-tier="${tier}"]`)).not.toBeNull();
+      expect(screen.queryByRole('tablist')).toBeNull();
+      expect(container.querySelectorAll('[data-node="page:header"]')).toHaveLength(1);
+      expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details');
+      expect(grid(container).className).toContain('grid-cols-1');
+      expect(column(container, 'right')).toBeNull();
+      expect(container.querySelector('[data-record-summary-card]')).toBeNull();
+      expect(nodesIn(column(container, 'details'))).toEqual(['record:details']);
+      expect(column(container, 'details')!.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
+      // A drawer or pane (no `fullPage`): one field a row (objectstack#36147).
+      expect(column(container, 'details')!.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('1');
+    });
+  }
+
+  it('the retired `rightColumn` / `rail` props change nothing (the ⊟ switch went with the rail)', () => {
+    const drawn = (props: Record<string, unknown>) => {
+      const { container, unmount } = render(<RecordPageColumns tier="wide" columns={columns} {...props} />);
+      const shown = grid(container).getAttribute('data-record-columns-shown');
+      unmount();
+      return shown;
+    };
+    expect([drawn({}), drawn({ rightColumn: false }), drawn({ rail: true }), drawn({ rail: false })]).toEqual([
+      'details', 'details', 'details', 'details',
+    ]);
   });
 
-  it('two-column (760 – 1119): the right column at 320 px, its lists resident — no rail, no toggle', () => {
-    const { container } = render(<RecordPageColumns tier="two-column" columns={columns} />);
-    expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details right');
-    expect(grid(container).className).toContain('grid-cols-[minmax(0,1fr)_20rem]');
-    expect(nodesIn(column(container, 'right'))).toEqual(['record:activity', 'record:related_list', 'record:related_list']);
-    expect(screen.queryByRole('button', { name: /Related/ })).toBeNull();
-    expect(container.querySelector('[data-testid="record-related-rail-toggle"]')).toBeNull();
-    // Beside the 320 px column a details section takes two field columns at most.
-    expect(column(container, 'details')!.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('2');
-  });
-
-  it('a page with nothing for the right column draws the details alone; the footer closes them', () => {
+  it('a page with nothing but its details draws them alone; the footer closes them', () => {
     const bare = buildDefaultPageColumns(buildDefaultPageSchema({ name: 'thing', fields: {} }, { hideDiscussion: true }))!;
+    harness.width = 1600;
     const { container } = render(
-      <RecordPageColumns tier="wide" columns={bare} footer={<p data-testid="meta-footer">meta</p>} />,
+      <RecordPageColumns tier="wide" columns={bare} fullPage footer={<p data-testid="meta-footer">meta</p>} />,
     );
-    expect(column(container, 'details')).not.toBeNull();
-    expect(column(container, 'right')).toBeNull();
+    expect(container.querySelector('[data-record-page-pinned]')).toBeNull();
     expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details');
     expect(within(column(container, 'details')!).getByTestId('meta-footer')).toBeTruthy();
   });
 });
 
-describe('RecordPageColumns — the stack (< 760, objectstack#27524, Target 6)', () => {
-  it('ONE column: the details and their footer, then the right column’s panels in their order — no tabs', () => {
-    const { container } = render(
-      <RecordPageColumns tier="stack" columns={columns} footer={<p data-testid="meta-footer">meta</p>} />,
+describe('RecordPageColumns — the tab row follows the header (objectstack#35745)', () => {
+  // Measured in the browser (1280, Expense Report): the header's bottom at 92,
+  // the tab row at 140 — the host scroller's 24px top padding and this root's
+  // 24px stacked. The host's scroller pads no top now (RecordDetailView), and
+  // this root's top is 12px at every width; the sides and foot keep the page's.
+  it("the root's top padding is 12px at every width, its sides and foot the page's", () => {
+    const { container } = render(<RecordPageColumns tier="wide" columns={columns} />);
+    const root = container.querySelector('[data-page-type="record"]')!;
+    const classes = root.className.split(/\s+/);
+    expect(classes).toContain('pt-3');
+    expect(classes.filter((c) => /^(?:\w+:)?(?:p|pt|py)-/.test(c) && c !== 'pt-3')).toEqual([]);
+    expect(classes).toEqual(expect.arrayContaining(['px-3', 'md:px-4', 'lg:px-6', 'pb-3', 'md:pb-4', 'lg:pb-6']));
+  });
+});
+
+/**
+ * objectstack#35890 (figure 41) — on a full page with room for a 320 px left
+ * column and 400 px of tabs, the details are pinned left and the other tabs
+ * sit beside them, open on the first; the left column is 400 px, dragged by
+ * the reader, and narrows on its own to leave the tabs 400.
+ */
+describe('RecordPageColumns — the details pinned left on a wide full page (objectstack#35890)', () => {
+  beforeEach(() => RelatedCountStore._reset());
+  const find = vi.fn(async () => ({ data: [], total: 0 }));
+  let draws = 0;
+  const drawPage = (cols: typeof columns, extra: Record<string, unknown> = {}) => {
+    const onEnlargeRelated = vi.fn();
+    const utils = render(
+      <RecordContextProvider
+        objectName="lead"
+        recordId={`lead-${++draws}`}
+        dataSource={{ find, getObjectSchema: vi.fn(async () => ({ fields: {} })) } as any}
+      >
+        <RecordPageColumns
+          tier="wide"
+          columns={cols}
+          fullPage
+          onEnlargeRelated={onEnlargeRelated}
+          footer={<p data-testid="meta-footer">meta</p>}
+          {...extra}
+        />
+      </RecordContextProvider>,
     );
-    expect(container.querySelector('[data-record-page-tier="stack"]')).not.toBeNull();
-    expect(screen.queryByRole('tablist')).toBeNull();
-    expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details');
-    expect(grid(container).className).toContain('grid-cols-1');
-    // Details first, the panels after them, in one flow.
-    const [details, right] = Array.from(grid(container).children) as HTMLElement[];
-    expect(details.getAttribute('data-record-column')).toBe('details');
-    expect(right.getAttribute('data-record-column')).toBe('right');
+    return { ...utils, onEnlargeRelated };
+  };
+
+  it('pins: details left at 400 px, one field a row; beside them the tabs without 「详情」, open on the first list', () => {
+    harness.width = 1184;
+    const { container } = drawPage(columns);
+    expect(container.querySelector('[data-record-page-pinned]')).not.toBeNull();
+    expect(grid(container).getAttribute('data-record-columns-shown')).toBe('details tabs');
+    expect(grid(container).style.gridTemplateColumns).toBe('400px 24px minmax(0,1fr)');
+    const details = column(container, 'details')!;
+    expect(nodesIn(details)).toEqual(['record:details']);
+    expect(details.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('1');
     expect(details.lastElementChild?.getAttribute('data-testid')).toBe('meta-footer');
-    expect(nodesIn(right)).toEqual(['record:activity', 'record:related_list', 'record:related_list']);
-    // The stack's details are the whole width: the section's own container decides.
-    expect(details.querySelector('[data-node="record:details"]')!.getAttribute('data-cap')).toBe('3');
+    // The tab row is beside the details, never above both; 「详情」 is not a tab.
+    const tabs = column(container, 'tabs')!;
+    expect(within(tabs).getByRole('tablist')).toBeTruthy();
+    expect(tabNames()).toEqual(['task.lead_id', 'note.parent_id', 'timeline']);
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('data-record-tab')).toBe('task.lead_id');
+    expect(tabs.querySelector('[data-related-enlarged="task.lead_id"]')).not.toBeNull();
+    expect(nodesIn(tabs)).toContain('record:related_list');
+    // Nothing is drawn twice, and there is no rail.
+    expect(container.querySelectorAll('[data-node="record:details"]')).toHaveLength(1);
+    expect(container.querySelector('[data-record-summary-card]')).toBeNull();
+  });
+
+  it('opens on the address\'s tab when it names one; choosing the implied tab writes nothing', () => {
+    harness.width = 1184;
+    const { container, onEnlargeRelated, unmount } = drawPage(columns, { enlargedRelated: 'timeline' });
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('data-record-tab')).toBe('timeline');
+    expect(column(container, 'tabs')!.querySelector('[data-related-enlarged="timeline"]')).not.toBeNull();
+    unmount();
+    const second = drawPage(columns);
+    fireEvent.click(screen.getByRole('tab', { name: /Tasks/ }));
+    expect(second.onEnlargeRelated).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('tab', { name: /Notes/ }));
+    expect(second.onEnlargeRelated).toHaveBeenCalledWith('note.parent_id');
+    expect(onEnlargeRelated).not.toHaveBeenCalled();
+  });
+
+  it('with no related list, the first other tab is 动态', () => {
+    harness.width = 1184;
+    const noLists = buildDefaultPageColumns(buildDefaultPageSchema({ name: 'thing', fields: {} }))!;
+    drawPage(noLists);
+    expect(tabNames()).toEqual(['timeline']);
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('data-record-tab')).toBe('timeline');
+  });
+
+  it('the left column narrows on its own to leave the tabs 400, down to 320; under that the page does not pin', () => {
+    harness.width = 744 + 80;
+    const { container, unmount } = drawPage(columns);
+    expect(grid(container).style.gridTemplateColumns).toBe('400px 24px minmax(0,1fr)');
+    unmount();
+    harness.width = 800;
+    const narrower = drawPage(columns);
+    expect(grid(narrower.container).style.gridTemplateColumns).toBe('376px 24px minmax(0,1fr)');
+    narrower.unmount();
+    harness.width = 744;
+    const least = drawPage(columns);
+    expect(grid(least.container).style.gridTemplateColumns).toBe('320px 24px minmax(0,1fr)');
+    least.unmount();
+    // CONTROL: one pixel less and the details are the first tab again.
+    harness.width = 743;
+    const tabbed = drawPage(columns);
+    expect(tabbed.container.querySelector('[data-record-page-pinned]')).toBeNull();
+    expect(tabNames()[0]).toBe('overview');
+  });
+
+  it('the reader\'s dragged width holds, clamped the same way; the handle moves it by keyboard', () => {
+    harness.width = 1184;
+    const onDetailsWidthChange = vi.fn();
+    const { container } = drawPage(columns, { detailsWidth: 520, onDetailsWidthChange });
+    expect(grid(container).style.gridTemplateColumns).toBe('520px 24px minmax(0,1fr)');
+    const handle = screen.getByRole('separator');
+    expect(handle.getAttribute('aria-valuenow')).toBe('520');
+    expect(handle.getAttribute('aria-valuemin')).toBe('320');
+    expect(handle.getAttribute('aria-valuemax')).toBe(String(1184 - 24 - 400));
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(onDetailsWidthChange).toHaveBeenLastCalledWith(536);
+    fireEvent.keyDown(handle, { key: 'Home' });
+    expect(onDetailsWidthChange).toHaveBeenLastCalledWith(320);
+    fireEvent.keyDown(handle, { key: 'End' });
+    expect(onDetailsWidthChange).toHaveBeenLastCalledWith(760);
+  });
+
+  it('a drag previews and keeps the width once it ends', () => {
+    harness.width = 1184;
+    const onDetailsWidthChange = vi.fn();
+    const { container } = drawPage(columns, { onDetailsWidthChange });
+    const handle = screen.getByRole('separator');
+    fireEvent.pointerDown(handle, { button: 0, clientX: 400, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 460, pointerId: 1 });
+    expect(grid(container).style.gridTemplateColumns).toBe('460px 24px minmax(0,1fr)');
+    expect(onDetailsWidthChange).not.toHaveBeenCalled();
+    fireEvent.pointerUp(handle, { clientX: 460, pointerId: 1 });
+    expect(onDetailsWidthChange).toHaveBeenCalledWith(460);
+  });
+
+  it('a double-click on the handle keeps the default 400 again, ends a drag, and the default holds on the next open (objectstack#36226)', () => {
+    harness.width = 1184;
+    // The host's per-reader store, read again by every mount (the console's
+    // workspace preference; 400 when nothing is kept).
+    const store: { width?: number } = {};
+    const Host = () => {
+      const [width, setWidth] = React.useState(store.width ?? 400);
+      return (
+        <RecordPageColumns
+          tier="wide"
+          columns={columns}
+          fullPage
+          detailsWidth={width}
+          onDetailsWidthChange={(next) => { store.width = next; setWidth(next); }}
+        />
+      );
+    };
+    const drawHost = () => render(
+      <RecordContextProvider objectName="lead" recordId={`lead-${++draws}`} dataSource={{ find } as any}>
+        <Host />
+      </RecordContextProvider>,
+    );
+    const first = drawHost();
+    const handle = () => screen.getByRole('separator');
+    fireEvent.pointerDown(handle(), { button: 0, clientX: 400, pointerId: 1 });
+    fireEvent.pointerMove(handle(), { clientX: 520, pointerId: 1 });
+    fireEvent.pointerUp(handle(), { clientX: 520, pointerId: 1 });
+    expect(handle().getAttribute('aria-valuenow')).toBe('520');
+    expect(store.width).toBe(520);
+    // The double-click's second press is still down when it lands: no drag
+    // outlives it, so the moves after it neither preview nor keep a width.
+    fireEvent.pointerDown(handle(), { button: 0, clientX: 520, pointerId: 1 });
+    fireEvent.doubleClick(handle());
+    expect(handle().getAttribute('aria-valuenow')).toBe('400');
+    expect(grid(first.container).style.gridTemplateColumns).toBe('400px 24px minmax(0,1fr)');
+    fireEvent.pointerMove(handle(), { clientX: 600, pointerId: 1 });
+    fireEvent.pointerUp(handle(), { clientX: 600, pointerId: 1 });
+    expect(handle().getAttribute('aria-valuenow')).toBe('400');
+    expect(store.width).toBe(400);
+    first.unmount();
+    const second = drawHost();
+    expect(handle().getAttribute('aria-valuenow')).toBe('400');
+    expect(grid(second.container).style.gridTemplateColumns).toBe('400px 24px minmax(0,1fr)');
+  });
+
+  it('a drawer or pane (no `fullPage`) never pins: the details stay its first tab', () => {
+    harness.width = 1600;
+    const { container } = drawPage(columns, { fullPage: false });
+    expect(container.querySelector('[data-record-page-pinned]')).toBeNull();
+    expect(tabNames()).toEqual(['overview', 'task.lead_id', 'note.parent_id', 'timeline']);
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('data-record-tab')).toBe('overview');
+  });
+
+  it('a page whose field groups place a related table among the fields does not pin (objectstack#35889)', () => {
+    harness.width = 1600;
+    const withBody = buildDefaultPageColumns(
+      buildDefaultPageSchema(
+        { name: 'quote', label: 'Quote', fields: { name: { name: 'name', type: 'text' } } },
+        { related: [{ objectName: 'quote_line', relationshipField: 'quote_id', title: 'Lines', isPrimary: true }] },
+      ),
+    )!;
+    const { container } = drawPage(withBody);
+    expect(container.querySelector('[data-record-page-pinned]')).toBeNull();
+    expect(tabNames()[0]).toBe('overview');
+  });
+
+  it('narrowed out of the pinned layout, the implied tab goes into the address (replacing), so it stays open', async () => {
+    const observed: Array<() => void> = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { observed.push(callback); }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    });
+    harness.width = 1184;
+    const { onEnlargeRelated } = drawPage(columns);
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('data-record-tab')).toBe('task.lead_id');
+    harness.width = 700;
+    act(() => observed.forEach((measure) => measure()));
+    await waitFor(() => expect(onEnlargeRelated).toHaveBeenCalledWith('task.lead_id', { replace: true }));
+    expect(onEnlargeRelated).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('tells the host which tab is on screen, implied or addressed', () => {
+    harness.width = 1184;
+    const onShownTabChange = vi.fn();
+    drawPage(columns, { onShownTabChange });
+    expect(onShownTabChange).toHaveBeenLastCalledWith('task.lead_id');
+    cleanup();
+    harness.width = 0;
+    drawPage(columns, { onShownTabChange });
+    expect(onShownTabChange).toHaveBeenLastCalledWith('overview');
+  });
+});
+
+/**
+ * objectstack#35253 — one approval band per record page. The synthesized page
+ * splits its details around a body table (`relatedList: 'primary'`, a
+ * quote's line items), so the details column holds two `record:details`
+ * nodes; each mounts a `DetailView` with its own header suppressed, and each
+ * of those drew the band — "Locked for approval" above the table and again
+ * above the next section. The card's Expected: one lock chip per record page,
+ * however many body sections the synthesized page splits the details into.
+ *
+ * The band stays with the FIRST details part (above the table). The lock
+ * rule itself is untouched: a `lockRecord: false` node still reads as an
+ * editable approval, never as locked, and it too is drawn once.
+ */
+describe('RecordPageColumns — the approval band is drawn once per page (objectstack#35253)', () => {
+  /** What `record:details` mounts: its own header off, inline edit on (`renderers/record-details`). */
+  const Body = () => (
+    <DetailView
+      schema={{ type: 'detail-view', objectName: 'quote', showHeader: false, data: { id: 'Q1', name: 'Q-1' }, sections: [] } as any}
+      inlineEdit
+      recordFromHost
+    />
+  );
+  beforeEach(() => {
+    harness.detailBodies = true;
+    harness.body = Body;
+  });
+  afterEach(() => {
+    harness.detailBodies = false;
+    harness.body = null;
+  });
+
+  // The `lines` group positions the body table between the two sections
+  // (objectstack#35597 draws an unplaced body table above every section, so
+  // the split this suite pins is the group-placed one).
+  const quote = {
+    name: 'quote',
+    fields: {
+      name: { type: 'text', label: 'Name', group: 'basic' },
+      terms: { type: 'textarea', label: 'Terms', group: 'terms' },
+    },
+    fieldGroups: [{ key: 'basic' }, { key: 'lines', relatedList: 'quote_line_item' }, { key: 'terms' }],
+  };
+  const SECTIONS = [
+    { name: 'basic', label: 'Basic', fields: ['name'] },
+    { name: 'terms', label: 'Terms', fields: ['terms'] },
+  ];
+  const LINES = { objectName: 'quote_line_item', relationshipField: 'quote', title: 'Line items', isPrimary: true };
+  const split = buildDefaultPageColumns(buildDefaultPageSchema(quote, { sections: SECTIONS, related: [LINES] }))!;
+  const whole = buildDefaultPageColumns(buildDefaultPageSchema(quote, { sections: SECTIONS }))!;
+
+  const drawPage = (
+    tier: 'wide' | 'two-column' | 'stack',
+    columns: typeof split,
+    approval: { locked?: boolean; approvalPending?: boolean },
+  ) =>
+    render(
+      <InlineEditProvider canEdit={false} {...approval}>
+        <RecordPageColumns tier={tier} columns={columns} />
+      </InlineEditProvider>,
+    );
+
+  it('the split page carries two details parts around the body table', () => {
+    expect(split.details.map((n: any) => n.type)).toEqual(['record:details', 'record:related_list', 'record:details']);
+  });
+
+  for (const tier of ['wide', 'two-column', 'stack'] as const) {
+    it(`${tier}: a locked record split around its body table draws "Locked for approval" once, above the table`, () => {
+      const { container } = drawPage(tier, split, { locked: true });
+      const details = column(container, 'details')!;
+      expect(details.querySelectorAll('[data-node="record:details"]')).toHaveLength(2);
+      const chips = screen.getAllByText('Locked for approval');
+      expect(chips).toHaveLength(1);
+      const table = details.querySelector('[data-node="record:related_list"]')!;
+      expect(chips[0].compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  }
+
+  it('CONTROL: a page with one details part still draws its one chip', () => {
+    const { container } = drawPage('wide', whole, { locked: true });
+    expect(column(container, 'details')!.querySelectorAll('[data-node="record:details"]')).toHaveLength(1);
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+  });
+
+  it('CONTROL: an authored page\'s one details body (no laid-out page around it) still draws its one chip', () => {
+    render(
+      <InlineEditProvider canEdit={false} locked>
+        <Body />
+      </InlineEditProvider>,
+    );
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+  });
+
+  it('CONTROL: a record with no approval running draws no band on the split page', () => {
+    drawPage('wide', split, {});
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('a `lockRecord: false` approval on the split page reads as editable, once — never as locked', () => {
+    render(
+      <InlineEditProvider canEdit approvalPending locked={false}>
+        <RecordPageColumns tier="wide" columns={split} />
+      </InlineEditProvider>,
+    );
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.getAllByText('In approval · editable')).toHaveLength(1);
+  });
+});
+
+/**
+ * objectstack#35483 / objectstack#35484 — the band is not dropped when the
+ * FIRST details part draws no body. A slotted page's `details` slot places the
+ * author's own `record:details` nodes in the laid-out details column; the first
+ * may draw no band of its own: its `requiredPermissions` withheld (the real
+ * block draws its insufficient-permissions notice in place of the body,
+ * `record-blocks.requiredPermissions-gate.test.tsx`) or `showHeader: true`
+ * (the body draws its own header, and no band). The column draws the band once
+ * by the first body that reaches its place (`ApprovalBandOnceScope`), so the
+ * next part draws it. Before, every part after the first was told not to draw
+ * it and such a page showed no band at all, on a locked record.
+ */
+describe('RecordPageColumns — a first details part that draws no band leaves it to the next (objectstack#35483, objectstack#35484)', () => {
+  /** What `record:details` mounts for its node: the notice when withheld, else its body. */
+  const PartBody = ({ schema }: { schema: any }) => {
+    const p = { ...schema, ...(schema?.properties ?? {}) };
+    if (Array.isArray(p.requiredPermissions) && p.requiredPermissions.length > 0) {
+      return <p role="status">Insufficient permissions to view details.</p>;
+    }
+    return (
+      <DetailView
+        schema={{ type: 'detail-view', objectName: 'quote', showHeader: p.showHeader ?? false, data: { id: 'Q1', name: 'Q-1' }, sections: [] } as any}
+        inlineEdit
+        recordFromHost
+      />
+    );
+  };
+  beforeEach(() => {
+    harness.detailBodies = true;
+    harness.body = PartBody;
+  });
+  afterEach(() => {
+    harness.detailBodies = false;
+    harness.body = null;
+  });
+
+  const quote = { name: 'quote', fields: { name: { type: 'text', label: 'Name' }, terms: { type: 'textarea', label: 'Terms' } } };
+  const part = (id: string, props: Record<string, unknown> = {}) => ({
+    type: 'record:details',
+    id,
+    properties: { sections: [{ name: id, label: id, fields: [id === 'first' ? 'name' : 'terms'] }], ...props },
+  });
+  const slotted = (details: any[]) => buildDefaultPageColumns(buildDefaultPageSchema(quote, { slots: { details } } as any))!;
+  const drawPage = (columns: ReturnType<typeof slotted>, approval: { locked?: boolean; approvalPending?: boolean; canEdit?: boolean }) =>
+    render(
+      <InlineEditProvider canEdit={approval.canEdit ?? false} locked={approval.locked} approvalPending={approval.approvalPending}>
+        <RecordPageColumns tier="wide" columns={columns} />
+      </InlineEditProvider>,
+    );
+  /** The details parts (by node id) whose subtree shows `text`. */
+  const partsShowing = (container: HTMLElement, text: string) =>
+    Array.from(column(container, 'details')!.querySelectorAll('[data-node="record:details"]'))
+      .map((node, index) => ({ node, index }))
+      .filter(({ node }) => node.textContent?.includes(text))
+      .map(({ index }) => index);
+
+  it('the slotted page lays its two details nodes out in the details column', () => {
+    expect(slotted([part('first'), part('second')]).details.map((n: any) => n.id)).toEqual(['first', 'second']);
+  });
+
+  for (const [why, props] of [
+    ['withheld by its requiredPermissions', { requiredPermissions: ['quote.audit'] }],
+    ['drawing its own header', { showHeader: true }],
+  ] as const) {
+    it(`a first part ${why}: "Locked for approval" once, on the second part`, () => {
+      const { container } = drawPage(slotted([part('first', props), part('second')]), { locked: true });
+      expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+      expect(partsShowing(container, 'Locked for approval')).toEqual([1]);
+    });
+  }
+
+  it('a `lockRecord: false` approval behind a withheld first part reads editable, once — never locked', () => {
+    drawPage(slotted([part('first', { requiredPermissions: ['quote.audit'] }), part('second')]), { approvalPending: true, locked: false, canEdit: true });
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.getAllByText('In approval · editable')).toHaveLength(1);
+  });
+
+  it('CONTROL: two drawing parts keep the band on the first, once', () => {
+    const { container } = drawPage(slotted([part('first'), part('second')]), { locked: true });
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+    expect(partsShowing(container, 'Locked for approval')).toEqual([0]);
+  });
+
+  it('CONTROL: a single slotted details part draws its one band', () => {
+    drawPage(slotted([part('first')]), { locked: true });
+    expect(screen.getAllByText('Locked for approval')).toHaveLength(1);
+  });
+
+  it('CONTROL: a single withheld part draws no band and no body (nothing on the page reaches its place)', () => {
+    drawPage(slotted([part('first', { requiredPermissions: ['quote.audit'] })]), { locked: true });
+    expect(screen.queryByText('Locked for approval')).toBeNull();
+    expect(screen.getByText('Insufficient permissions to view details.')).toBeTruthy();
+  });
+});
+
+/**
+ * objectstack#36147 — the field area is one list wherever it sits beside other
+ * tabs or is one of them: the drawer, the phone, the narrow page and the
+ * pinned left column draw it one field a row. Only a full page whose details
+ * are its only face (objectstack#35890 item 4) lays them out by width. The
+ * list ends in one row folding every empty field of its groups.
+ */
+describe('RecordPageColumns — the field area is one list (objectstack#36147)', () => {
+  beforeEach(() => RelatedCountStore._reset());
+  const find = vi.fn(async () => ({ data: [], total: 0 }));
+  let draws = 0;
+  const drawPage = (cols: typeof columns, extra: Record<string, unknown> = {}) =>
+    render(
+      <RecordContextProvider
+        objectName="lead"
+        recordId={`lead-1-${++draws}`}
+        dataSource={{ find, getObjectSchema: vi.fn(async () => ({ fields: {} })) } as any}
+      >
+        <RecordPageColumns tier="wide" columns={cols} onEnlargeRelated={vi.fn()} {...extra} />
+      </RecordContextProvider>,
+    );
+  const capOf = (container: HTMLElement) =>
+    container.querySelector('[data-record-column="details"] [data-node="record:details"]')?.getAttribute('data-cap');
+
+  it('one column in a drawer at any width, on a narrow page with tabs, and pinned', () => {
+    harness.width = 1600;
+    const drawer = drawPage(columns, { fullPage: false });
+    expect(capOf(drawer.container)).toBe('1');
+    drawer.unmount();
+    harness.width = 600;
+    const narrow = drawPage(columns, { fullPage: true });
+    expect(narrow.container.querySelector('[data-record-page-pinned]')).toBeNull();
+    expect(capOf(narrow.container)).toBe('1');
+    narrow.unmount();
+    harness.width = 1184;
+    const pinned = drawPage(columns, { fullPage: true });
+    expect(pinned.container.querySelector('[data-record-page-pinned]')).not.toBeNull();
+    expect(capOf(pinned.container)).toBe('1');
+  });
+
+  it('a full page whose details are its only face keeps laying them out by width', () => {
+    const bare = buildDefaultPageColumns(buildDefaultPageSchema({ name: 'thing', fields: {} }, { hideDiscussion: true }))!;
+    harness.width = 1600;
+    const { container } = drawPage(bare, { fullPage: true });
+    expect(capOf(container)).toBe('3');
+  });
+
+  it('the details end in one row folding every empty field the groups report, after the footer', () => {
+    const Reporter = ({ count }: { count: number }) => {
+      useReportEmptyFields(count);
+      return null;
+    };
+    harness.width = 600;
+    const { container } = drawPage(columns, {
+      footer: (
+        <>
+          <Reporter count={2} />
+          <Reporter count={3} />
+          <p data-testid="meta-footer">meta</p>
+        </>
+      ),
+    });
+    const details = column(container, 'details')!;
+    const row = details.lastElementChild as HTMLElement;
+    expect(row.hasAttribute('data-empty-fields-row')).toBe(true);
+    expect(row.getAttribute('data-empty-fields-count')).toBe('5');
+    expect(row.previousElementSibling?.getAttribute('data-testid')).toBe('meta-footer');
+    const button = within(row).getByRole('button');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(button.textContent).toMatch(/5/);
+    fireEvent.click(button);
+    expect(within(column(container, 'details')!.lastElementChild as HTMLElement).getByRole('button').getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('no empty field, no row', () => {
+    harness.width = 600;
+    const { container } = drawPage(columns, { footer: <p data-testid="meta-footer">meta</p> });
+    expect(container.querySelector('[data-empty-fields-row]')).toBeNull();
   });
 });

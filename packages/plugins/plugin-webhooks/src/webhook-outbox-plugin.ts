@@ -4,6 +4,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 // ADR-0069 — the authentication-policy gate's ONE decision, asked by the
 // redeliver door on the session it already reads (see `serveRedeliver`).
 import { evaluateAuthGate, type RequestAuthService } from '@objectstack/core';
+import { installEgressGuard, type EgressGuard, type EgressPolicy } from '@objectstack/core/egress';
 import type {
     AuthSessionApi,
     IDataEngine,
@@ -32,6 +33,7 @@ import {
     readDeclaredWebhookNames,
 } from './declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
+import { censusWebhookEgressTargets, type WebhookEgressCensus } from './webhook-egress-census.js';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
 import { bindWebhookProvenanceStamp, unbindWebhookProvenanceStamp } from './webhook-provenance.js';
 import {
@@ -187,6 +189,14 @@ export interface WebhookOutboxPluginOptions {
      * Set `false` to disable and enqueue webhooks imperatively elsewhere.
      */
     autoEnqueue?: boolean | AutoEnqueuerOptions;
+    /**
+     * The outbound-request guard's policy — the same one the messaging HTTP
+     * outbox delivers through. This plugin sends nothing itself; it uses the
+     * policy once at boot to count the stored `sys_webhook` rows whose target
+     * the guard will refuse. Omitted, the open-core default
+     * (`OS_EGRESS_ALLOWED_TARGETS`); a malformed allowlist fails the boot.
+     */
+    egressPolicy?: EgressPolicy;
 }
 
 /**
@@ -240,7 +250,13 @@ export class WebhookOutboxPlugin implements Plugin {
 
     constructor(private readonly options: WebhookOutboxPluginOptions = {}) {}
 
+    /** The outbound-request guard, installed at init (a malformed allowlist fails the boot). */
+    private egress?: EgressGuard;
+    /** The boot census of stored targets the guard refuses — settled once, at `kernel:ready`. */
+    egressCensus?: Promise<WebhookEgressCensus | undefined>;
+
     async init(ctx: PluginContext): Promise<void> {
+        this.egress = await installEgressGuard({ policy: this.options.egressPolicy, logger: ctx.logger as any });
         // Register the webhook config object (ADR-0029 K2.a). The delivery
         // telemetry now lives in messaging's `sys_http_delivery`, so the nav's
         // "Deliveries" entry points there (filtered to source=webhook in views).
@@ -297,6 +313,10 @@ export class WebhookOutboxPlugin implements Plugin {
                 // engine, so it must not be gated behind the auto-enqueue
                 // dispatch prerequisites (realtime + messaging).
                 await this.bootWebhookTable(ctx);
+                // Said once: how many stored rows target an address the
+                // outbound-request guard refuses. In the background — it
+                // resolves host names, and the boot need not wait on DNS.
+                this.egressCensus = this.bootEgressCensus(ctx);
                 // [#22756] The redelivery veto, and beside it the `webhooks`
                 // service — gated on the engine and messaging alone, like the
                 // step above, and never on the auto-enqueue prerequisites. It
@@ -353,6 +373,21 @@ export class WebhookOutboxPlugin implements Plugin {
     private getMessaging(ctx: PluginContext): MessagingHttpSurface | undefined {
         const svc = this.tryGetService<MessagingHttpSurface>(ctx, ['messaging']);
         return svc && typeof svc.enqueueHttp === 'function' ? svc : undefined;
+    }
+
+    /**
+     * The boot census of stored webhook targets against the outbound-request
+     * guard — said once, in the background, so the boot never waits on DNS.
+     */
+    private async bootEgressCensus(ctx: PluginContext): Promise<WebhookEgressCensus | undefined> {
+        const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
+        if (!engine || !this.egress) return undefined;
+        try {
+            return await censusWebhookEgressTargets(engine, this.egress, ctx.logger as any);
+        } catch (err) {
+            ctx.logger.warn?.('[webhook] egress census failed', { error: (err as Error)?.message ?? String(err) });
+            return undefined;
+        }
     }
 
     /**

@@ -34,6 +34,8 @@ import {
 } from './default-value-shape';
 import { AddressSchema, FILE_REFERENCE_TYPES, MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES, SINGLE_OPTION_TYPES } from './field-value.zod';
 import { ValueDomainSchema } from '../shared/value-domain.zod';
+// The standard unit table (ADR-0158 U1). Imports nothing, so no cycle.
+import { STANDARD_UNITS, UNIT_DIMENSIONS, standardUnitOf } from './standard-units';
 import { SystemObjectName } from '../system/constants/system-names';
 
 /**
@@ -96,7 +98,7 @@ export const FieldType = z.enum([
   // (≈ Strapi component / ACF group / ACF repeater): `FieldSchema` declares no sub-field
   // member, so nothing types, labels, validates or addresses the inner keys or rows.
   // A list that needs typed columns is a CHILD OBJECT whose `master_detail` field points
-  // back at the parent; `inlineEdit: 'grid'` edits its rows inline on the parent's form
+  // back at the parent; a parent field group naming it edits its rows inline on the parent's form
   // (ruling 6386744473).
   // A form view's `fields` sub-rows (`ui/view.zod.ts`) are a different surface.
   'composite',    // Single embedded JSON object, untyped — no declared sub-fields
@@ -192,10 +194,13 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * (#12017 two-copies failure shape; the #11875 lesson that a hand-written
  * enumeration goes one revision stale).
  *
- * Package-internal on purpose: it is the superRefine's membership test, not a
- * third answer to "is this field multi-valued". That question has exactly one
- * answer — `isMultiValueField` (`field-value.zod.ts`) — and both of the sets
- * this one unions stay untouched.
+ * Exported for ONE reader beside this file's superRefine: the AI blueprint
+ * field (`ai/solution-blueprint.zod.ts`), which refuses `multiple: true` on
+ * exactly the types this file refuses it on, reading this set rather than a
+ * copy. It answers "may an author DECLARE `multiple: true` here", and
+ * is not a third answer to "is this field multi-valued". That question has
+ * exactly one answer — `isMultiValueField` (`field-value.zod.ts`) — and both of
+ * the sets this one unions stay untouched.
  *
  * ⚠️ Computed on FIRST USE, never at module top level. `field-value.zod` reaches
  * back into this module through `shared/strict-object` → `shared/suggestions.zod`,
@@ -206,7 +211,7 @@ export const VALUE_DOMAIN_FIELD_TYPES: ReadonlySet<string> = new Set([
  * module has settled) is the same discipline `lazySchema` applies above.
  */
 let multiDeclarableTypes: ReadonlySet<string> | undefined;
-function multiDeclarableTypeSet(): ReadonlySet<string> {
+export function multiDeclarableFieldTypes(): ReadonlySet<string> {
   return (multiDeclarableTypes ??= new Set([...MULTI_CAPABLE_TYPES, ...MULTI_OPTION_TYPES]));
 }
 
@@ -221,7 +226,7 @@ function multiDeclarableTypeSet(): ReadonlySet<string> {
  */
 let multiDeclarableRemedyTypes: readonly string[] | undefined;
 function multiDeclarableRemedyTypeList(): readonly string[] {
-  return (multiDeclarableRemedyTypes ??= [...multiDeclarableTypeSet()].filter((t) => t !== 'radio'));
+  return (multiDeclarableRemedyTypes ??= [...multiDeclarableFieldTypes()].filter((t) => t !== 'radio'));
 }
 
 /**
@@ -713,11 +718,13 @@ function refuseSummaryWithoutField(
  * amount resolves the roll-up the same way and no key is added. Whether the
  * child amount it rolls up follows that very code through that very
  * `master_detail` is a question about two objects, answered where both are
- * held, never by this one-config shape. A roll-up of a stored home amount (a
- * child field some `homeAmount.field` names) declares `currencyMode: 'dynamic'`
- * with no `defaultCurrency`: the home field is a `dynamic` field in the
- * organization's home currency (ADR-0144 D8 rule 5), so its total is too, and
- * the Console draws it in that currency without metadata naming it (#33659).
+ * held, never by this one-config shape. A roll-up of an amount in the home
+ * currency (a child `currency` field in `dynamic` mode, a stored home amount
+ * included) declares `currencyMode: 'dynamic'` with no `defaultCurrency`: a
+ * `dynamic` amount is in the organization's home currency (ADR-0144 D8 rule 5,
+ * `localization.currency`), so its total is too, and the Console draws it in
+ * that currency without metadata naming it (#33659; widened to every `dynamic`
+ * child amount by seat ruling record 7000258793).
  * Outside those two roll-ups a `summary` may declare only `fixed` (read by the
  * analytics layer); a `count` roll-up, every other `dynamic` config and every
  * other `record` roll-up are refused at the object door
@@ -982,6 +989,213 @@ export function isOrganizationUnique(unique: unknown): boolean {
 }
 
 /**
+ * Why this shape refuses an unknown key — the `history` its refusals carry.
+ * The shape is new, so no stored row ever carried another key here.
+ */
+const UNIT_CONFIG_HISTORY =
+  'This shape was closed from the day it was declared — an unknown key here was never accepted, so a '
+  + 'misspelled unit or pointer cannot parse and leave a quantity in no unit.';
+
+/**
+ * The codes a `fixed` unit may name: the own keys of the standard unit table
+ * (ADR-0158 U1), in exact uppercase. The same set {@link standardUnitOf}
+ * answers, so the build-time check and the write-time check cannot drift into
+ * two opinions (`field-unit-config.test.ts` pins the equality).
+ */
+const STANDARD_UNIT_CODE_LIST = Object.keys(STANDARD_UNITS) as [string, ...string[]];
+
+/** The refusal of a `fixed` config with no `unit`, or with a code the standard table does not hold. */
+function fixedUnitMessage(input: unknown): string {
+  if (input === undefined) {
+    return '`unitMode: \'fixed\'` needs `unit`, the field\'s one unit: a standard UN/ECE Recommendation 20 code '
+      + 'in exact uppercase (e.g. `unit: \'KGM\'`). Use `unitMode: \'record\'` with `unitField` when each '
+      + 'record names its own unit.';
+  }
+  const shown = typeof input === 'string' ? `'${input}'` : JSON.stringify(input) ?? String(input);
+  if (typeof input === 'string' && input !== input.toUpperCase().trim() && standardUnitOf(input.toUpperCase().trim())) {
+    return `\`unit: ${shown}\` is not a unit code: codes are exact uppercase with no spaces. `
+      + `Write \`unit: '${input.toUpperCase().trim()}'\`.`;
+  }
+  if (input === 'C62' || input === 'EA') {
+    return `\`unit: ${shown}\` is not a standard unit: the piece is \`H87\`, and its near-synonyms \`C62\` and \`EA\` `
+      + 'are not admitted (ADR-0158 U2). Write `unit: \'H87\'`.';
+  }
+  return `\`unit: ${shown}\` is not a standard unit code. A \`fixed\` unit is checked against the standard unit table `
+    + '(`STANDARD_UNITS` in `@objectstack/spec/data`), for example `KGM`, `MTR`, `LTR`, `HUR`, `H87` or `XBX`; '
+    + 'an organization\'s own unit cannot be a field\'s fixed unit. Use `unitMode: \'record\'` with `unitField` when '
+    + 'each record names its unit, an organization unit included.';
+}
+
+/** The refusal of a `record` config with no pointer, or an empty one. */
+const UNIT_FIELD_REQUIRED =
+  '`unitMode: \'record\'` needs `unitField`: name the `text` field on this object that holds each record\'s unit '
+  + 'code, conventionally `unit_code`. Use `unitMode: \'fixed\'` with `unit` when the field has one unit.';
+const UNIT_FIELD_EMPTY =
+  '`unitField` names a field: an empty name points at nothing — name the `text` field on this object that holds '
+  + 'each record\'s unit code, conventionally `unit_code`.';
+
+/** One closed dimension restriction (ADR-0158 U4: "An optional dimension restriction is allowed"). */
+const unitDimensionSchema = () => z.enum(UNIT_DIMENSIONS, {
+  error: (iss) =>
+    `\`unitDimension: ${JSON.stringify(iss.input)}\` is not a unit dimension: write one of `
+    + `${UNIT_DIMENSIONS.map((d) => `\`${d}\``).join(', ')}.`,
+});
+
+/** The guidance every variant gives the key that belongs to another mode. */
+const UNIT_FIELD_OFF_MODE =
+  '`unitField` is read only under `unitMode: \'record\'`, where it names the sibling `text` field holding each '
+  + 'record\'s unit code: set `unitMode: \'record\'`, or delete `unitField`.';
+const UNIT_OFF_MODE =
+  '`unit` is read only under `unitMode: \'fixed\'`, where it is the field\'s one standard unit: under '
+  + '`\'record\'` each record names its own unit in the field `unitField` names, and a `\'code\'` field holds the '
+  + 'code itself. Delete `unit`, or use `unitMode: \'fixed\'`.';
+
+/**
+ * [ADR-0158 U4, L3] A `fixed` quantity: one standard unit for every record,
+ * written in metadata and checked at build against the standard table (U1).
+ * No `unitDimension`: the standard table already gives the code its dimension.
+ */
+const FixedUnitConfigSchema = strictObject({
+  surface: 'this fixed-unit configuration',
+  history: UNIT_CONFIG_HISTORY,
+  aliases: { mode: 'unitMode', defaultUnit: 'unit', unitCode: 'unit', code: 'unit', uom: 'unit' },
+  guidance: {
+    unitField: UNIT_FIELD_OFF_MODE,
+    unitDimension:
+      '`unitDimension` is not read under `unitMode: \'fixed\'`: the standard unit table already gives `unit` its '
+      + 'dimension (`KGM` is a mass). Delete `unitDimension`.',
+  },
+}, {
+  unitMode: z.literal('fixed').describe('`fixed`: the field has one unit, `unit`, a standard code checked at build.'),
+  unit: z.enum(STANDARD_UNIT_CODE_LIST, { error: (iss) => fixedUnitMessage(iss.input) })
+    .describe('The field\'s one unit: a standard UN/ECE Recommendation 20 code from `STANDARD_UNITS`, in exact uppercase (e.g. `KGM`, `MTR`, `H87`). Required under `fixed`; checked at build, so an unknown or lowercase code never parses.'),
+});
+
+/**
+ * [ADR-0158 U4, L3] A `record` quantity: each record names its own unit in a
+ * sibling `text` field, the code stored in exact uppercase and never an id.
+ * What the pointer names is the object's to judge (object.zod.ts), because
+ * only the object holds the field map; a two-segment pointer through a
+ * `master_detail` is refused there (L3: reserved, not admitted).
+ */
+const RecordUnitConfigSchema = strictObject({
+  surface: 'this record-unit configuration',
+  history: UNIT_CONFIG_HISTORY,
+  aliases: { mode: 'unitMode', field: 'unitField', codeField: 'unitField', dimension: 'unitDimension' },
+  guidance: { unit: UNIT_OFF_MODE },
+}, {
+  unitMode: z.literal('record').describe('`record`: each record names its own unit, in the field `unitField` names.'),
+  unitField: z.string({ error: UNIT_FIELD_REQUIRED }).min(1, UNIT_FIELD_EMPTY)
+    .describe('The name of the `text` field on the same object that holds each record\'s unit code, in exact uppercase (conventionally `unit_code`; the name is a convention, never a contract). One segment: a unit cannot follow a parent through `master_detail` yet. Required under `record`.'),
+  unitDimension: unitDimensionSchema().optional()
+    .describe('Optional restriction: the dimension every record\'s unit must have (`mass`, `length`, `area`, `volume`, `time`, `count` or `package`). A write naming a unit of another dimension is refused. Absent: any dimension.'),
+});
+
+/**
+ * [ADR-0158 Open item 8, ruled A: 「可以单独声明」] A `text` field that holds a
+ * unit code with no quantity beside it — a material's base unit, a pack
+ * table's unit column — declares itself a unit field. The write path judges it
+ * as it judges a `record` quantity's unit field (U5); the picker and the
+ * backfill reach it. A unit marker, not a fourth value domain (U1 keeps
+ * `ValueDomainSchema` at three members): the membership it asks is
+ * asynchronous and reads the organization's `sys_unit` rows, which no pure
+ * value-domain predicate can.
+ *
+ * Only on a field no quantity points at: a field a `record` quantity's
+ * `unitField` names is declared by that pointer (L3, "the pointer is the
+ * declaration"), and the object door refuses a second declaration on it.
+ */
+const CodeUnitConfigSchema = strictObject({
+  surface: 'this unit-code field configuration',
+  history: UNIT_CONFIG_HISTORY,
+  aliases: { mode: 'unitMode', dimension: 'unitDimension' },
+  guidance: {
+    unit: UNIT_OFF_MODE,
+    unitField:
+      '`unitField` is not read under `unitMode: \'code\'`: this field holds the unit code itself and points at '
+      + 'nothing. Delete `unitField`.',
+  },
+}, {
+  unitMode: z.literal('code').describe('`code`: this `text` field holds a unit code itself, with no quantity beside it.'),
+  unitDimension: unitDimensionSchema().optional()
+    .describe('Optional restriction: the dimension every unit this field holds must have. A write naming a unit of another dimension is refused. Absent: any dimension.'),
+});
+
+/** The refusal of a `unitConfig` whose `unitMode` is missing or not one of the three. */
+function unitModeMessage(input: unknown): string {
+  const config = input !== null && typeof input === 'object' ? input as Record<string, unknown> : undefined;
+  if (config && config.unitMode === undefined && 'mode' in config) {
+    return '`mode` is spelled `unitMode` in a unit configuration: write `unitMode: \'fixed\'`, `\'record\'` or `\'code\'`.';
+  }
+  const head = config?.unitMode === undefined
+    ? '`unitConfig` needs `unitMode`, and it has no default: the platform never guesses a unit.'
+    : `\`unitMode: ${JSON.stringify(config.unitMode)}\` is not a unit mode.`;
+  return `${head} On a \`number\` field write \`'fixed'\` (one standard unit, \`unit\`) or \`'record'\` (each `
+    + 'record\'s code in the `text` field `unitField` names); on a `text` field that holds a unit code itself, '
+    + 'write `\'code\'`.';
+}
+
+/**
+ * Unit Configuration Schema — the unit of a quantity, or the declaration of a
+ * unit code field (ADR-0158 U4, settled under its L3; Open item 8 ruled A).
+ *
+ * The keys mirror `currencyConfig` (ADR-0144): `unitConfig`, `unitMode` and
+ * `unitField` are `currencyConfig`, `currencyMode` and `currencyField`, and
+ * `fixed` / `record` mean what they mean there. The value of a quantity stays
+ * a bare number (ADR-0104 D1); a record stores a unit CODE, never an id, in
+ * exact uppercase (U4). Three modes, one per variant, each a closed shape:
+ *
+ * - `fixed` (on `number`): `unit`, a standard code (U1), checked at build.
+ * - `record` (on `number`): `unitField`, the sibling `text` field holding each
+ *   record's code, and an optional `unitDimension`.
+ * - `code` (on `text`): this field holds a unit code itself (Open item 8), with
+ *   an optional `unitDimension`.
+ *
+ * Where it diverges from `currencyConfig`, and why:
+ *
+ * - `unitMode` is REQUIRED with no default. `currencyMode` defaults to
+ *   `dynamic` because an absent config already means the tenant currency; no
+ *   tenant unit exists, and the platform does not guess one (L3).
+ * - `unit`, not `defaultUnit`: under `fixed` it is the field's one unit, never a
+ *   default (L3; `defaultCurrency` is the recorded misnomer).
+ * - `unitDimension`, not `dimension`: the bare word is a group-by axis in the
+ *   analytics schemas (L3).
+ * - A discriminated union of three closed shapes, not one shape with a
+ *   cross-key `superRefine`: the discriminator is required here, so each
+ *   mode's keys are its variant's, and the rule reaches the published JSON
+ *   Schema (`oneOf`) instead of being enforced only at runtime (the
+ *   dropped-refinement ratchet). `currencyConfig` cannot take this form,
+ *   because its discriminator has a default.
+ *
+ * Which field TYPE may carry which mode (`number`: `fixed` / `record`;
+ * `text`: `code`; every other type: none, `formula` and `summary` included
+ * until a reader exists, U8) is `FieldSchema`'s to judge; what a `record`
+ * pointer names, and a `code` field no quantity points at, are the object's
+ * (`object.zod.ts`). The write path's reader is the engine's unit membership
+ * check (`@objectstack/objectql`, U5).
+ */
+export const UnitConfigSchema = lazySchema(() => z.discriminatedUnion('unitMode', [
+  FixedUnitConfigSchema,
+  RecordUnitConfigSchema,
+  CodeUnitConfigSchema,
+], { error: (iss) => unitModeMessage(iss.input) }));
+
+export type UnitConfig = z.input<typeof UnitConfigSchema>;
+/** Post-parse shape of {@link UnitConfig} — defaults applied, transforms run (ADR-0122). */
+export type UnitConfigParsed = z.infer<typeof UnitConfigSchema>;
+
+/**
+ * The field types that may carry each unit mode (ADR-0158 U4, Open item 8):
+ * a quantity is a `number`, and a unit code field is a `text` field. Every
+ * other type carries no `unitConfig`: a `currency` amount's unit is its
+ * currency, and a `formula` or `summary` has no reader yet (U8).
+ */
+const UNIT_CONFIG_MODES_BY_FIELD_TYPE: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  number: Object.freeze(['fixed', 'record']),
+  text: Object.freeze(['code']),
+});
+
+/**
  * Partial-masking presets (#8993, maintainer ruling 2026-08-16, Option A).
  *
  * A CLOSED enum, deliberately: free-form format strings are exactly where
@@ -1150,7 +1364,10 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
 }, {
   name: z.string().min(1).describe('Child field this column shows — the key the grid reads and writes on each row object (objectui GridColumn.name). The retired `field` spelling is refused.').meta({ title: 'Name' }),
   label: z.string().optional().describe("Column header; defaults to the child field's label via hydration.").meta({ title: 'Label' }),
-  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file']).optional().describe("Cell control, derived from the child field's type when omitted. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
+  // #36043 — `user` (people), `multiselect`, `tags`, `boolean` (check) and
+  // `rating` joined the nine. Each member is spelled as its namesake field
+  // type, which the renderer's derivation maps to that same column type.
+  type: z.enum(['text', 'number', 'currency', 'date', 'datetime', 'time', 'select', 'lookup', 'file', 'user', 'multiselect', 'tags', 'boolean', 'rating']).optional().describe("Cell control, derived from the child field's type when omitted: `user` is a person picker, `multiselect` a list holding several of the column's options, `tags` a list of free-form tags, `boolean` a checkbox and `rating` a row of stars. Declaring it opts the column out of schema hydration — supply the extras (options / reference / …) yourself.").meta({ title: 'Type' }),
   width: z.number().positive().optional().describe('Fixed column width in px; omitted columns use type-based role sizing (text flexes, numeric/date/select stay fixed).').meta({ title: 'Width' }),
   required: z.boolean().optional().describe('Cell is flagged inline-invalid while empty. Computed columns are never required.').meta({ title: 'Required' }),
   options: z.array(strictObject({
@@ -1160,7 +1377,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().describe('Option label shown in the select cell.'),
     value: z.string().min(1).describe("Stored option value; must match the child select field's option values."),
-  })).optional().describe("Select-cell options for `type: 'select'`; derived from the child field's options when the column declares no `type`.").meta({ title: 'Options' }),
+  })).optional().describe("Options of a `select` or `multiselect` cell, and the words a `boolean` cell reads as (values `true` / `false`); derived from the child field's options when the column declares no `type`. A `tags` cell reads none: it holds free-form tags.").meta({ title: 'Options' }),
   // #20045 — no default symbol: the grid shows the resolved currency's own
   // symbol when this is omitted (objectui GridField `currencyAdornment`,
   // objectui#10355), so the former 「(default '¥')」 described a fallback the
@@ -1170,7 +1387,8 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   reference: z.string().optional().describe("Referenced object for `type: 'lookup'` cells; derived from the child lookup field when the column declares no `type`.").meta({ title: 'Reference' }),
   displayField: z.string().optional().describe('Label field shown for a picked lookup record.').meta({ title: 'Display Field' }),
   idField: z.string().optional().describe('Id field stored for a picked lookup record.').meta({ title: 'ID Field' }),
-  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  multiple: z.boolean().optional().describe('Multi-value column: multi-record lookup, several people in a `user` cell, or multi-file upload cell.').meta({ title: 'Multiple' }),
+  max: z.number().int().positive().optional().describe("Star count of a `rating` cell (default 5); derived from the child field's `max` when the column declares no `type`.").meta({ title: 'Max' }),
   accept: z.array(z.string()).optional().describe("Accepted MIME types / extensions for a `file` cell's picker (e.g. ['image/*', '.pdf']); omit to accept anything.").meta({ title: 'Accept' }),
   defaultHidden: z.boolean().optional().describe("Collapsed into the grid's column chooser by default (not dropped); required columns are never default-hidden.").meta({ title: 'Default Hidden' }),
   computed: z.boolean().optional().describe('Read-only computed column, recomputed live from sibling cells via `expr` and written back into the row.').meta({ title: 'Computed' }),
@@ -1183,7 +1401,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   // mirror); the describe names the one type set it still applies to.
   scale: z.number().int().nonnegative().max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
     .describe('Decimal places to round a computed numeric result to (integer 0-100). REFUSED on a column declaring `type: \'currency\'` — delete it there: the currency\'s CLDR fraction digits decide. The upper bound is the renderer\'s: the grid rounds with `toFixed`, which throws a RangeError above 100.').meta({ title: 'Scale' }),
-  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable.").meta({ title: 'Autofill' }),
+  autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable. An amount of money is copied only into a cell in the same currency: a picked amount in another currency than its cell (its child field's: a `fixed` code, the code the line or its header holds, or the home currency) is not copied, the cell stays empty and the grid says why. Nothing is converted.").meta({ title: 'Autofill' }),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`).").meta({ title: 'Read-only When' }),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.').meta({ title: 'Required When' }),
 }).superRefine((column, ctx) => {
@@ -1312,15 +1530,28 @@ const LOOKUP_FILTER_RECORD_PATH_RE = /^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?$/
  * - **Path.** A field of the edited record (`quote_date`), or ONE lookup hop
  *   from it (`account.cb_market`: the `account` lookup on the edited record,
  *   then `cb_market` on the account it points at). Two hops are refused.
+ *   [#34378] A path through or to a MULTI-VALUED field (`isMultiValueField`:
+ *   one flagged `multiple: true`, or a multiselect, checkboxes or tags field)
+ *   has no single value — `accounts.cb_market` through a `multiple: true`
+ *   lookup, `tags`, or `account.markets` ending at one — so it is not resolved,
+ *   and `os lint` refuses it (`object-field-ref-unknown`). The picker's
+ *   handling of such a path is #34389.
  * - **Operator.** Only the six scalar comparisons
  *   ({@link LOOKUP_FILTER_SCALAR_COMPARISONS}), and the reference is the whole
  *   value: never a member of an `in` / `notIn` list.
+ * - **Where it resolves.** In a record form only, whatever its layout (the
+ *   auto layout, authored or field-group sections, a modal, drawer, tabbed or
+ *   wizard form, a master-detail header form). Every other picker host leaves
+ *   every `{ $record }` entry out — inline edit on a record page, a record
+ *   page's header or related list, an action's parameter dialog, and a
+ *   picker with no single record being edited (a bulk action over selected
+ *   rows).
  * - **An empty value.** When the referenced value is empty (null, unset, an
- *   empty string, or a hop whose lookup is unset), the entry is left out of
- *   the candidate query, so a quote whose account has no market is offered
- *   every book the other entries admit. A picker with no single record being
- *   edited (a bulk-action selection bar, a filter panel) has no value to read
- *   and leaves every `{ $record }` entry out by the same rule.
+ *   empty string, or a hop whose lookup is unset) or cannot be read (the
+ *   hop's row or field does not come back, no object is named for the hop,
+ *   or the host has no single-row reader), the entry is left out of the
+ *   candidate query, so a quote whose account has no market is offered
+ *   every book the other entries admit.
  * - **Re-query.** The picker re-queries its candidates whenever a referenced
  *   field changes — the first segment of the path (`quote_date`, `account`).
  *   Those fields are implied by the `$record` paths. Do NOT list them in
@@ -1351,7 +1582,9 @@ export const LookupFilterRecordReferenceSchema = lazySchema(() => strictObject({
   }).describe('Path of the value on the record being edited: a field name (`quote_date`) or one lookup hop (`account.cb_market`) — at most one dot.'),
 })).describe(
   'A lookupFilters comparand read from the record being edited: { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup hop). '
-  + 'The picker replaces it with that value before querying; unlike { $field }, which names a column of the candidate row.',
+  + 'The picker replaces it with that value before querying; unlike { $field }, which names a column of the candidate row. '
+  + 'A path through or to a multi-valued field (one flagged `multiple: true`, or a multiselect, checkboxes or tags field) '
+  + 'has no single value: it is not resolved, and lint refuses it (`object-field-ref-unknown`).',
 );
 
 export type LookupFilterRecordReference = z.input<typeof LookupFilterRecordReferenceSchema>;
@@ -1452,7 +1685,31 @@ export const FieldSchema = lazySchema(() => {
     // CASE-SENSITIVELY on the authored spelling, so a row per spelling is the
     // only way this channel can cover a family, and `not_null` was the spelling
     // it would have missed.
-    tracked: '`tracked` is not a field key — per-field timeline tracking is `trackHistory: true` (ADR-0052 §5b).',
+    tracked:
+      '`tracked` is not a field key — a field\'s old → new values show on the record activity timeline '
+      + 'by default. Write `fieldHistory: false` to turn them off for this field (`true` opts a media or '
+      + 'structured-JSON field in), or `enable.fieldHistory: false` on the object to turn them off for every field.',
+    // [ADR-0158 L3] The natural spellings of a quantity's unit on the field
+    // itself, answered in prose because the targets are NESTED keys of
+    // `unitConfig` — the form the `currency` answer above takes. None of them
+    // is, or ever was, a field key.
+    unit:
+      '`unit` is not a field key — a quantity\'s one standard unit is declared as `unitConfig: '
+      + '{ unitMode: \'fixed\', unit: \'KGM\' }` on the `number` field; when each record names its own unit, '
+      + 'as `unitConfig: { unitMode: \'record\', unitField: \'unit_code\' }`.',
+    uom:
+      '`uom` is not a field key — a quantity\'s unit is declared in `unitConfig` on the `number` field: '
+      + '`{ unitMode: \'fixed\', unit: \'KGM\' }` for one standard unit, or `{ unitMode: \'record\', '
+      + 'unitField: \'unit_code\' }` when each record names its own. A `text` field that holds a unit code with no '
+      + 'quantity beside it declares `unitConfig: { unitMode: \'code\' }`.',
+    unitCode:
+      '`unitCode` is not a field key — a `text` field that holds a unit code declares `unitConfig: '
+      + '{ unitMode: \'code\' }` (or is named by a quantity\'s `unitConfig.unitField`); a quantity\'s one unit is '
+      + '`unitConfig: { unitMode: \'fixed\', unit: \'KGM\' }` on the `number` field.',
+    dimension:
+      '`dimension` is not a field key — a quantity\'s dimension restriction is `unitConfig.unitDimension` '
+      + '(`mass`, `length`, `area`, `volume`, `time`, `count` or `package`). The vector length of an '
+      + 'embedding is `dimensions`.',
     // Prose rather than a rename, because this surface declares BOTH forms and
     // the two answers have opposite polarity: renaming onto `visibleWhen` sends
     // `visible: false` to a slot that wants a CEL string, and renaming onto
@@ -1494,7 +1751,7 @@ export const FieldSchema = lazySchema(() => {
    * fail it. The describe is form help in Studio and carries the rule, not the
    * ruling date (#22093).
    */
-  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
+  required: z.boolean().default(false).describe('Write-time contract (ADR-0113): an insert must provide a non-null value, and an update may not null it out. With the field\'s own `visibleWhen` it is required WHEN SHOWN: a write whose record the predicate hides does not need it, a write that reveals the field empty is refused, and a predicate the server cannot evaluate counts as shown. On a multi-value lookup (`multiple: true`) required means NON-EMPTY array — an emptied required set fails validation loudly; `[]` does not satisfy it. NOT a column constraint — the physical NOT NULL is a separate explicit opt-in (`storage.notNull`), so tightening this on a deployed object is safe: existing null rows stay readable, and editable as long as the write does not touch this field.'),
 
   /**
    * Physical storage constraints (ADR-0113). Deliberately separate from the
@@ -1659,7 +1916,7 @@ export const FieldSchema = lazySchema(() => {
   // (batch #218 item 2, letter 乙) words. The describe names the type set the
   // key still applies to, for the same reason as above.
   scale: z.number().int().min(0).max(MAX_RENDERABLE_SCALE, { message: SCALE_UPPER_BOUND_MESSAGE }).optional()
-    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
+    .describe('Decimal places (integer 0-100). Applies to `number`, `percent`, `rating` and `slider` fields, where it is enforced on writes, and to a `formula` field, whose computed result is rounded to it — a `formula` whose `returnType` is `percent` counts the places of its displayed percentage, as a `percent` field does, so a fraction result is rounded to `scale + 2` places. REFUSED on a `currency` field — delete it there: a currency amount\'s decimal places are its currency\'s, so the currency\'s CLDR fraction digits decide how the amount displays, and a currency write\'s decimal places stay unconstrained. OMITTED on a `percent` field ⇒ 0 decimal places, so a stored 0.25 reads `25%` on every face; omitted on any OTHER numeric type declares NO fixed width — the value keeps its natural precision, and a DECLARED `scale: 0` (a year, a fiscal period, an ordinal) stays distinguishable from having declared nothing, so nothing is defaulted there. Consumers resolve the effective width by calling `resolveFieldScale` from `@objectstack/spec/data`, the single source for an absent `scale`: a renderer that spells its own fallback is a width no other face can see, and that is how one stored 0.25 came to read `25%` on the read-only cell and `25.00%` in the edit widget. On a `percent` field this is the number of decimal places of the PERCENTAGE-POINT value as displayed and entered — `scale: 2` means 12.34% — and the STORED precision derives from the field\'s storage scale rather than being declared again: a fraction-stored percent (no `max`, or a `max` at or below 1) stores 12.34% as 0.1234 and is allowed `scale + 2` decimal places at the write seam, while a whole-percent field (`max` above 1) stores the displayed number itself and is allowed exactly `scale`. `number`, `rating` and `slider` are allowed exactly `scale`. The upper bound is the platform\'s, not a policy: renderers turn `scale` into fraction digits through `toFixed` and `Intl.NumberFormat`\'s `maximumFractionDigits`, both of which throw a RangeError above 100 — so a larger declaration is unrenderable by any conforming consumer.'),
   min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
@@ -1726,7 +1983,7 @@ export const FieldSchema = lazySchema(() => {
    * header chips. The liveness row is `live` and names the relay sites that
    * carry the key to that renderer.
    */
-  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
+  percentDisplay: z.enum(['bar', 'plain']).optional().describe('How a `percent` field, or a `formula` whose `returnType` is `percent`, is displayed read-only (list cells, record page). Absent = the renderer default, a progress bar beside the percentage; `bar` = pin the progress bar; `plain` = the percentage as text alone, with no bar, for a rate or a probability rather than progress. Display only: the stored value, its validation and its decimal places (`scale`) are unchanged.'),
 
   /**
    * Media Constraints (ADR-0104 D3 wave 2)
@@ -2044,25 +2301,65 @@ export const FieldSchema = lazySchema(() => {
     default: 'set_null',
   }),
   /**
-   * Master-detail INLINE EDITING. On a child's `master_detail`/`lookup` field
-   * (whose `reference` is the parent object), declare that "this child is
-   * entered/edited inline within the parent's form". The parent's standard
-   * create/edit form then renders the children and saves parent + children in
-   * ONE atomic transaction — no form view config and no bespoke page. The intent
-   * lives here in the data model; forms derive the UI.
+   * [ruling 7000907189 point 4 · #35315] What a Change Owner of the referenced
+   * (parent) record does to THIS object's records that point at it — the
+   * relationship-level cascade, declared on the child's reference field beside
+   * {@link deleteBehavior}, as Dynamics 365's per-relationship Assign cascade.
    *
-   * The value also selects the EDITING FORM FACTOR:
-   *   - `true`   → auto: the UI picks `grid` or `form` from the child's shape
-   *                (rich types / many fields → `form`, else `grid`).
+   * - `'none'` (the default, also when omitted): the child rows keep their owner.
+   * - `'cascade'`: the Change Owner dialog offers this relationship as a tick,
+   *   and a Change Owner request that names it (`cascade: [{ object, field }]`)
+   *   also moves, to the parent's new owner, the child rows that point at the
+   *   parent AND are owned by the parent's PREVIOUS owner — no other rows (the
+   *   ruled default semantics; there is no filter key). Each cascaded row is an
+   *   ordinary update under the caller's own context, so it passes the caller's
+   *   own transfer verdict on the child object; a row it does not pass is
+   *   reported, never skipped, and one call moves at most the hand-over's row
+   *   cap. The reader is `@objectstack/core`'s `change-record-owner.ts`.
+   *
+   * Refused where it could never act (ADR-0049): on any type but `lookup` and
+   * `master_detail` (here), on a reference to a `sys_*` object (no `sys_*`
+   * object offers Change Owner), `'cascade'` on a multi-value relationship
+   * (`multiple: true`: its targets are one stored list, never one parent), and — on `ObjectSchema`, where the declaring
+   * object is known — `'cascade'` on a field of an object that does not offer
+   * Change Owner itself: one that is not structurally eligible, a
+   * `controlled_by_parent` detail (its access already follows its master, so
+   * it is not cascaded for access), or one whose `userActions.transfer` is
+   * off.
+   */
+  transferBehavior: z.enum(['none', 'cascade']).optional().meta({
+    description:
+      "What a Change Owner of the referenced (parent) record does to this object's records that point at it. "
+      + "'none' (default): they keep their owner. 'cascade': the Change Owner dialog offers this relationship, "
+      + "and when it is ticked the records here that point at the parent and are owned by the parent's previous "
+      + "owner move to the new owner too, each as the caller's own update (a row the caller may not transfer is "
+      + 'reported, never skipped; one call moves at most 500 rows). Only on lookup and master_detail fields, not '
+      + 'on a reference to a sys_ object, and cascade only on an object that offers Change Owner itself (eligible, '
+      + 'not controlled_by_parent, userActions.transfer not off).',
+    default: 'none',
+  }),
+  /**
+   * Master-detail INLINE EDITING — the FORM FACTOR of the child's rows in the
+   * parent's form. WHETHER the parent's form inlines this child is no longer
+   * this key's to say (#35889, maintainer ruling B: 「明细表应该改成指看分组的定义了」):
+   * the parent's create/edit form inlines a child exactly where one of the
+   * PARENT's field groups names it (`ObjectFieldGroupSchema.relatedList`), the
+   * same test that draws its table in the record page's body, and saves parent
+   * + children in ONE atomic transaction. A child no group names is a tab of
+   * the record page and stays out of the form, whatever this key says.
+   *
+   * The value selects the EDITING FORM FACTOR of a placed child:
+   *   - `true` / absent → auto: the UI picks `grid` or `form` from the
+   *                child's shape (rich types / many fields → `form`, else `grid`).
    *   - `'grid'` → an editable line-item grid (fast bulk entry; thin children
    *                like invoice lines / order items).
    *   - `'form'` → a compact read-only list; "Add" / per-row edit opens the
    *                child's FULL form (fat children with rich types, e.g. long
    *                text, attachments, many fields).
-   * Use for true line-item/composition children; leave off for associations
-   * (comments, attachments) — surface those as detail-page related lists.
+   * Place true line-item/composition children with a group; leave
+   * associations (comments, attachments) as tabs.
    */
-  inlineEdit: z.union([z.boolean(), z.enum(['grid', 'form'])]).optional().describe('Edit these child records inline within the parent\'s form (atomic master-detail). true = auto-pick grid/form by child shape; \'grid\' = editable line-item grid; \'form\' = list + per-row full form.'),
+  inlineEdit: z.union([z.boolean(), z.enum(['grid', 'form'])]).optional().describe('How the parent\'s form edits these child records inline (atomic master-detail) when a field group of the parent names this child (fieldGroups[].relatedList); a child no group names is not inlined, whatever this says. true or absent = auto-pick grid/form by child shape; \'grid\' = editable line-item grid; \'form\' = list + per-row full form.'),
   /** Optional section title for the inline grid (defaults to the child object label). */
   inlineTitle: z.string().optional().describe('Title for the inline master-detail grid'),
   /**
@@ -2083,16 +2380,19 @@ export const FieldSchema = lazySchema(() => {
    * the parent's record DETAIL page. Owned children (`master_detail`) and
    * `lookup` children are shown by default (derived from the relationship);
    * set `relatedList: false` to suppress a child from the detail page (e.g.
-   * noisy audit/association links you don't want surfaced). Where `inlineEdit`
-   * pulls a child INTO the parent's entry form (write side), `relatedList`
-   * controls its appearance on the parent's detail page (read side). The intent
+   * noisy audit/association links you don't want surfaced). `relatedList`
+   * controls the child's appearance on the parent's detail page (read side);
+   * whether the parent's entry form inlines it is the parent's field group's
+   * to say (#35889, ruling B), and `inlineEdit` only picks the form factor of
+   * a child a group places. The intent
    * lives here in the data model; the detail page derives the UI.
    *
    * Tri-state (ADR-0085 semantic-role style — a statement about the
    * relationship, not a layout switch):
    *   - `false`         → suppress this child from the parent's detail page.
    *   - `true` / absent  → shown as an auxiliary panel on the parent's record
-   *                       page. There is no count-based auto-split.
+   *                       page (absent on a `master_detail` field: see below).
+   *                       There is no count-based auto-split.
    *   - `'primary'`     → part of the record's MAIN CONTENT (#27069): shown as
    *                       a full-width table in the record's detail body, not
    *                       as an auxiliary panel. A field group's `relatedList`
@@ -2105,10 +2405,16 @@ export const FieldSchema = lazySchema(() => {
    * How the record page lays these out is ADR-0085's to define; this key states
    * the relationship's role, not the page's chrome.
    *
-   * Absent on a `master_detail` field that sets `inlineEdit`, the list is
-   * `'primary'` by default: line items edited inside the parent's form are part
-   * of its main content (a quote's lines belong under the quote, not beside
-   * it). Write `relatedList: true` to keep such a list an auxiliary panel.
+   * Absent on a `master_detail` field, the list is an auxiliary panel (a tab
+   * of the record page) by default, like a `lookup` (#35889, superseding
+   * #35597's `'primary'` default): it joins the record's main content only
+   * when a field group of the PARENT names it (`ObjectFieldGroupSchema.relatedList`),
+   * which draws its table at the group's position in the record page and its
+   * edit state, and inlines it in the parent's entry form at the same place
+   * (a form whose sections name no field group keeps it below its fields).
+   * Write `relatedList: true` to keep it a tab even from a group (a group
+   * naming it is refused), `'primary'` to make it a body table with no group,
+   * or `false` to hide it.
    *
    * SORT INHERITANCE (#13294, following #11345's browser-verified acceptance
    * run): a derived related list (`relatedList: 'primary'`) inherits its row
@@ -2121,7 +2427,7 @@ export const FieldSchema = lazySchema(() => {
    * A child object with no list-view sort emits no ordering parameter at all,
    * and rows fall back to record-id order.
    */
-  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). false = the child object is not shown on the parent record page; true/absent = shown as an auxiliary panel on the record page; \'primary\' = part of the record\'s main content, shown as a full-width table in the record\'s detail body. Absent on a master_detail field that sets inlineEdit, the list is \'primary\' by default; write true to keep it an auxiliary panel. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
+  relatedList: z.union([z.boolean(), z.literal('primary')]).optional().describe('Show this child collection as a related list on the parent\'s detail page (read-side mirror of inlineEdit). true = an auxiliary panel on the record page; absent = an auxiliary panel, except that a master_detail field becomes a body table when a field group of the parent names it (fieldGroups[].relatedList); false = hidden: the child object is not shown on the parent record page; \'primary\' = a body table: part of the record\'s main content, shown as a full-width table in the record\'s detail body. Write true on a master_detail field to keep it an auxiliary panel even from a field group. \'primary\' places a list and does not order it: the parent object\'s relatedLists orders the full-width tables and the auxiliary panels. The page layout is defined by ADR-0085. A derived related list (relatedList: \'primary\') inherits its row order from the child object\'s DEFAULT list view sort — the isDefault view, or the first declared list item when none is marked default; wire spelling is sort=<field> / sort=-<field>, never $orderby. A child object with no list-view sort emits no ordering parameter, and rows fall back to record-id order.'),
   /** Optional section title for the detail-page related list (defaults to the child object label). */
   relatedListTitle: z.string().optional().describe('Title for the detail-page related list'),
   /**
@@ -2251,24 +2557,32 @@ export const FieldSchema = lazySchema(() => {
       'The comparand: a literal (an array for `in` / `notIn`), a date placeholder such as `{today}` or a '
       + '{ $now: true, addDays } comparand for a date relative to today, or a { $record: "path" } reference to the '
       + 'record being edited — a field of it, or one lookup hop ("account.cb_market"); a { $record } value pairs '
-      + 'only with eq, ne, gt, lt, gte or lte. [PLANNED — not enforced] The picker does not resolve { $record } yet.',
+      + 'only with eq, ne, gt, lt, gte or lte. In a record form, whatever its layout, the picker sends the referenced '
+      + 'value in place of the reference; every other picker host leaves the entry out. A { $record } path through or '
+      + 'to a multi-valued field (one flagged `multiple: true`, or a multiselect, checkboxes or tags field) has no '
+      + 'single value: it is not resolved, and lint refuses it (`object-field-ref-unknown`). A { $record } that '
+      + 'reaches a server unresolved is refused (INVALID_FILTER), never read as null.',
     ),
     orEmpty: z.boolean().optional().describe(
-      '[PLANNED — not enforced] TRUE: the entry also matches a candidate whose column is null — "valid from the '
-      + 'quote date, or with no start date". Only with eq, ne, gt, lt, gte or lte. The picker does not read it yet.',
+      'TRUE: the entry also matches a candidate whose column is null — "valid from the quote date, or with no '
+      + 'start date". Only with eq, ne, gt, lt, gte or lte. The picker sends the comparison or a null match on the same column.',
     ),
   }).superRefine(refuseMalformedLookupFilterEntry)).optional().describe(
     'Base filters restricting which records are selectable (e.g. only active). The structured, picker-honoured lookup filter. '
     + 'Each entry compares a column of the CANDIDATE record (`field`, on the referenced object) with `value`. A value may '
     + 'read the record being edited as { $record: "field" } or { $record: "lookup_field.field" } (at most one lookup '
-    + 'hop): the picker sends that value in its place and re-queries whenever a referenced field changes. Those fields '
+    + 'hop). In a record form, whatever its layout, the picker sends that value in its place and re-queries whenever a '
+    + 'referenced field changes; every other picker host leaves every { $record } entry out: inline edit on a record '
+    + 'page, a record page\'s header or related list, an action\'s parameter dialog, and a picker with no single record '
+    + 'being edited (a bulk action over selected rows). The referenced fields '
     + 'are implied: do not list them in `dependsOn`, which also scopes the candidate query by equality '
     + '(`dependsOn: [\'quote_date\']` adds `quote_date = …` to the query over the referenced object). While the value is '
-    + 'empty, and on a picker with no single record being edited (a bulk-action bar, a filter panel), the entry is left '
-    + 'out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
-    + 'server unresolved is refused, never read as null. The picker narrows the choice only: a rule the save must '
-    + 'enforce belongs on the server too. [PLANNED — not enforced] { $record } and orEmpty are declared ahead of the '
-    + 'picker that resolves them.',
+    + 'empty or cannot be read (the hop\'s row or field does not come back, no object is named for the hop, or the host '
+    + 'has no single-row reader), the entry is left out. A { $record } is the whole value, never a member of an `in` / `notIn` list. `orEmpty: true` also matches a candidate whose column is null. A { $record } that reaches a '
+    + 'server unresolved is refused (INVALID_FILTER), never read as null: by name, naming the field and the path, when '
+    + 'it arrives as the eq shorthand on a column other than a date, datetime or time column; any other operator, and '
+    + 'eq on a date, datetime or time column, is refused earlier, in generic words. The picker narrows the choice only: '
+    + 'a rule the save must enforce belongs on the server too.',
   ),
   dependsOn: z.array(z.union([z.string(), strictObject({
     surface: 'this dependsOn entry',
@@ -2297,11 +2611,18 @@ export const FieldSchema = lazySchema(() => {
    * pick never replaces a value somebody wrote unless the pair says
    * `overwrite: true`.
    *
-   * ⭐ Relation to the grid column key `autofill` (`InlineGridColumnSchema`),
-   * which is unchanged: that key governs only the grid's implicit SAME-NAMED
-   * copy (on by default, overwriting). A declared pair applies in the grid too,
-   * under this key's own overwrite rule, and takes its target out of the
-   * same-named copy, so one target never has two writers on one pick.
+   * ⭐ Relation to the grid column key `autofill` (`InlineGridColumnSchema`):
+   * that key governs only the grid's implicit SAME-NAMED copy (on by default,
+   * overwriting). A declared pair applies in the grid too, under this key's
+   * own overwrite rule, and takes its target out of the same-named copy, so
+   * one target never has two writers on one pick.
+   *
+   * ⭐ The currency rule binds both copies (maintainer ruling 「B 币种不同就不填并说明」,
+   * record 7075336705 on objectstack-ai/objectstack#36249): an amount of money
+   * is copied only into a target in the same currency, else the target is left
+   * as it is and the form says why. Nothing is converted (ADR-0144 D5 refuses
+   * an implied rate of 1). The rule is the client's, like the fill itself: the
+   * line's currency is known only at run time, so no build-time door judges it.
    *
    * Three doors judge it: the parse (this field's superRefine — a single-value
    * relationship only), the object's parse (`refuseDishonestLookupAutofill` in
@@ -2325,8 +2646,9 @@ export const FieldSchema = lazySchema(() => {
   })).min(1).optional().describe(
     "Fields a pick in this lookup fills on the record being edited: each `{ target, source }` pair copies the picked record's `source` field (a field of the `reference` object) into this object's `target` field — e.g. `[{ target: 'unit_price', source: 'list_price' }]` on a quote line's product lookup. Read wherever this field is picked: the record form, and a line-item grid column over it. "
     + "OVERWRITE RULE — the default, `overwrite` absent or false: a pick never replaces a value somebody wrote. The target is filled only while it is empty or still holds the value an earlier pick filled in; a value the user typed, or one the record already stored, stays. Only a pair that declares `overwrite: true` replaces the target on every pick, whatever it holds. "
+    + "CURRENCY RULE: an amount of money (a `currency` field, or a `formula` returning `currency`) is copied only into a target in the same currency, both in the home currency or both naming the same ISO 4217 code (a `fixed` code, or the code the record or its `master_detail` parent holds). Otherwise the target is left as it is and the form says why, naming both currencies and the picked amount; nothing is converted. A `number` carries no currency and copies as before. "
     + 'Client-side only: it fills the form, and nothing on the write path reads it — the filled value is saved as an ordinary write, and an import or API write that sets the lookup fills nothing. '
-    + "Only on a single-value `lookup` / `master_detail`. Each target is a field of this object other than this one, written by its author — not `readonly`, not computed (`formula`, `summary`, `autonumber`, or an `expression`) — and named once. Each source is a field of the referenced object that the record carries (not `internal`) and whose value the target can hold; `os validate` / `os build` judge the source. In a line-item grid the column key `autofill` still governs only the same-named copy and is unchanged; a declared pair takes its target out of that copy.",
+    + "Only on a single-value `lookup` / `master_detail`. Each target is a field of this object other than this one, written by its author — not `readonly`, not computed (`formula`, `summary`, `autonumber`, or an `expression`) — and named once. Each source is a field of the referenced object that the record carries (not `internal`) and whose value the target can hold; `os validate` / `os build` judge the source. In a line-item grid the column key `autofill` still governs only the same-named copy, under the same currency rule; a declared pair takes its target out of that copy.",
   ),
 
   /**
@@ -2344,7 +2666,8 @@ export const FieldSchema = lazySchema(() => {
    * Salesforce/Airtable carry a formula's result type). Lets consumers — dataset
    * measures, display formatting, validation — read a declared type instead of
    * re-parsing the expression. Authoring stamps it from the inferred CEL type;
-   * absent when the type can't be proven (an ambiguous/`dyn` expression).
+   * absent when the type can't be proven (an ambiguous/`dyn` expression),
+   * except that a declared `percent` or `currency` stays (below).
    *
    * `currency` (#22727): the result is an amount of money. It carries its
    * currency exactly the way a `currency` field does — through the formula's
@@ -2353,10 +2676,30 @@ export const FieldSchema = lazySchema(() => {
    * expression references at read time: "taken from the source field" happens
    * at AUTHORING, where `@objectstack/formula`'s `inferFormulaReturn` proves the
    * result is money and answers the source's currency for the stamp to copy.
-   * The value itself is a bare number, as a currency field's is.
+   * The value itself is a bare number, as a currency field's is. Authoring
+   * stamps `currency`, with the currency the source amounts are in, when that
+   * verdict proves money, and withdraws a declared `currency` — for `number`,
+   * with no `currencyConfig` — when an edit leaves it answering `number`: the
+   * expression no longer computes money.
+   *
+   * `percent` (#35047): the result is a ratio, read exactly as a `percent`
+   * field reads its stored value — one convention, never a second one. The
+   * value is a FRACTION (`0.25` reads `25%`), unless the formula declares a
+   * `max` above 1, the percent field's own whole-percent statement
+   * (`percentScaleOf`), when it is percentage points. Its `scale` counts the
+   * decimal places of the displayed percentage, as on a `percent` field
+   * (absent ⇒ 0), so the engine rounds a fraction to `scale + 2` places and a
+   * whole percentage to `scale`. It is DECLARED, never inferred: no CEL type
+   * proves a quotient is a percentage, so authoring keeps a declared `percent`
+   * under every verdict that proves no other type — where it would stamp
+   * `number`, and where the type is unproven (a field-over-field quotient such
+   * as `record.spent / record.budget` types `dyn`), which would otherwise
+   * clear it. A declared `percent` is kept under a money verdict too: it is
+   * never re-stamped `currency`. A declared `currency` is kept under an
+   * unproven verdict the same way. A verdict that proves `text`, `boolean` or `date` still stamps.
    */
-  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency']).optional()
-    .describe('Inferred value type of a formula field (number/text/boolean/date/currency). `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency).'),
+  returnType: z.enum(['number', 'text', 'boolean', 'date', 'currency', 'percent']).optional()
+    .describe('Value type of a formula field (number/text/boolean/date/currency/percent). Authoring stamps `number`, `text`, `boolean` or `date` from the expression\'s inferred type and leaves it absent when none is proven; `percent` is declared by the author, and a verdict that proves no other type (`number`, or none) keeps it, as does a money verdict: a declared `percent` is never re-stamped `currency`. Otherwise `currency` is stamped when the expression provably computes money, and withdrawn for `number` (its `currencyConfig` dropped) when an edit leaves it a plain number; an unproven verdict keeps it. `currency`: an amount of money, in the currency the formula\'s own `currencyConfig` declares, as a currency field declares it (no `currencyConfig`: dynamic, the tenant default currency). `percent`: a ratio, read and displayed as a `percent` field reads its stored value — a fraction (0.25 shows 25%, so the expression divides and does not multiply by 100) unless the formula declares a `max` above 1, then percentage points; its `scale` is the decimal places of the displayed percentage (absent: 0), and its `percentDisplay` picks the bar or the plain face.'),
   summaryOperations: strictObject({
     surface: 'this roll-up summary',
     history: FIELD_HISTORY,
@@ -2418,7 +2761,14 @@ export const FieldSchema = lazySchema(() => {
 
   // Currency config — read for a `currency` field and for a `formula` whose
   // `returnType` is `currency` (#22727): one shape for both, never a second one.
-  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary that rolls up a stored home amount (a child field some `homeAmount.field` names) declares `currencyMode: \'dynamic\'`, with no `defaultCurrency`, and shows in the organization\'s home currency. A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, any other `dynamic` summary and any other `record` roll-up are refused, by `defineStack` and by a single-object save or publish on a running server alike. Absent: dynamic mode, and no currency on a summary.'),
+  currencyConfig: CurrencyConfigSchema.optional().describe('Which currency an amount is in: for a currency field, for a formula field whose returnType is currency, and for a summary that rolls up, through a master_detail, child amounts that follow this record\'s currency (`currencyMode: \'record\'` naming this object\'s own code field). A summary that rolls up an amount in the home currency (a child `currency` field in `dynamic` mode, a stored home amount included) declares `currencyMode: \'dynamic\'`, with no `defaultCurrency`, and shows in the organization\'s home currency. A summary may otherwise declare only `currencyMode: \'fixed\'`, when every amount it reads is in that one currency; a `count` summary, any other `dynamic` summary and any other `record` roll-up are refused, by `defineStack` and by a single-object save or publish on a running server alike. Absent: dynamic mode, and no currency on a summary.'),
+  // [ADR-0158 U4, L3; Open item 8 ruled A] The unit of a quantity (`number`:
+  // `fixed` / `record`), or the declaration of a unit code field (`text`:
+  // `code`). Which type carries which mode is the superRefine below; what a
+  // `record` pointer names is `ObjectSchema`'s. Read at write by the engine's
+  // unit membership check (`@objectstack/objectql`, U5): the key ships with
+  // its reader (U8).
+  unitConfig: UnitConfigSchema.optional().describe('Which unit a quantity is in, or that a text field holds a unit code (units of measure). On a `number` field: `{ unitMode: \'fixed\', unit }`, one standard UN/ECE Recommendation 20 code checked at build (e.g. `KGM`, `MTR`, `H87`), or `{ unitMode: \'record\', unitField, unitDimension? }`, where each record names its own unit in the sibling `text` field `unitField` names. On a `text` field that holds a unit code with no quantity pointing at it: `{ unitMode: \'code\', unitDimension? }`. The quantity stays a bare number; a record stores the unit CODE in exact uppercase, never an id. At write, a code must be a standard code or one of the organization\'s own non-retired units (`sys_unit`), of the restricted dimension when one is declared, and a quantity beside a blank code is refused. Refused on every other field type, `formula` and `summary` included. Absent: the number has no unit.'),
 
   // Vector field — flat dimensionality (the live authoring path).
   // The renderer reads this flat sibling (read point recorded in
@@ -2426,18 +2776,33 @@ export const FieldSchema = lazySchema(() => {
   dimensions: z.number().int().min(1).max(10000).optional().describe('Vector dimensionality (e.g., 1536 for OpenAI embeddings)'),
 
   /**
-   * Track this field's value changes on the record **activity timeline**. When
-   * TRUE, the platform's activity writer renders each change as a human-readable
-   * entry ("<label>: <old> → <new>") instead of a generic "Updated <object>"
-   * row — no app code required. Opt-in per field (cf. Salesforce Feed Tracking,
-   * ServiceNow field auditing, Dataverse column auditing). The writer already
-   * captures the field diff; this flag controls whether it is surfaced legibly.
+   * Opt a no-line field into old → new values on the record **activity
+   * timeline** (ADR-0052 §5b). Since #36290 values show by default for every
+   * field, so `true` matters only for a media or structured-JSON type (image,
+   * file, json, …), which shows them only when asked. `false` and absent read
+   * the same — values show. ⛔ `false` is NOT an off switch: the field
+   * designer wrote it on every save while it meant nothing, so a stored
+   * `false` cannot be told from a choice. The off switch is
+   * {@link FieldSchema.fieldHistory} `false`.
    *
    * Unlike the pruned `auditTrail` below, this flag HAS a runtime consumer
    * (`@objectstack/plugin-audit` audit-writers), satisfying enforce-or-remove
-   * (ADR-0049). See ADR-0052 §5b.
+   * (ADR-0049).
    */
-  trackHistory: z.boolean().optional().describe("Render this field's value changes as human-readable entries on the record activity timeline (ADR-0052 §5b). Opt-in per field."),
+  trackHistory: z.boolean().optional().describe("Opt a media or structured-JSON field into old → new values on the record activity timeline (ADR-0052 §5b). Every other field shows them already, so true changes nothing there. false and absent read the same: values show. false is not an off switch; turn a field's values off with fieldHistory: false."),
+
+  /**
+   * [#36290, ruling 7076513167 point 1] This field's off switch for old → new
+   * values on the record activity timeline. No default on purpose: a parsed
+   * field never carries the key, so only an author who wrote it turns values
+   * off. Absent: values show (a media or structured-JSON type only with an
+   * explicit `true`). `false`: the change is named by the field's label only.
+   * `true`: values show, a no-line type included. Under an object that writes
+   * `enable.fieldHistory: false`, values stay off whatever the field says. A
+   * credential field never shows values. Who reads a value is the field's read
+   * rule.
+   */
+  fieldHistory: z.boolean().optional().describe("This field's old → new values on the record activity timeline. Absent: they show (a media or structured-JSON type only with true). false: off, the change names the field's label only. true: on, a media or JSON type included. Off whatever this says when the object sets enable.fieldHistory: false; a credential field never shows values. Who reads a value is this field's read rule."),
 
   // Pruned 2026-06 (dead in both layers — aspirational governance with no runtime
   // consumer; encryption/masking implied at-rest protection that never happened —
@@ -2473,8 +2838,17 @@ export const FieldSchema = lazySchema(() => {
   // side of ADR-0049. Do not restore a schema on its own; that middle state is what
   // both issues were filed about.
 
-  /** Layout & Grouping */
-  group: z.string().optional().describe('Field group name for organizing fields in forms and layouts (e.g., "contact_info", "billing", "system")'),
+  /**
+   * Layout & Grouping — the OLDER spelling of field-group membership, still
+   * read and not scheduled for removal. It names the `key` of one of the
+   * object's `fieldGroups`; the field joins that group in field declaration
+   * order. New metadata lists a group's members on the group instead
+   * (`fieldGroups[].fields`), which also orders them without moving the field.
+   * When both speak they must agree: a field one group lists may not name
+   * another group here. A field naming a group that lists `fields` without it
+   * is placed after the listed members.
+   */
+  group: z.string().optional().describe('Older spelling of field-group membership, still read: the key of one of the object\'s fieldGroups (e.g. "contact_info"); the field joins that group in field declaration order. New metadata lists members on the group instead (fieldGroups[].fields), which also sets their order. A field a group lists may not name a different group here; a field naming a group whose fields list leaves it out follows the listed ones.'),
 
   /**
    * Conditional field rules (CEL predicates over `record`). Evaluated on BOTH
@@ -2489,8 +2863,17 @@ export const FieldSchema = lazySchema(() => {
    * ADR-0137 D2 refuses the write. `objectstack validate` refuses it (#20078);
    * a `validations[]` `script` rule is the seam that reads one hop through a
    * reference.
+   *
+   * `visibleWhen` is display only, except on a `required` field: there the
+   * write path reads it too (ADR-0113 D1, as amended), and the field is
+   * required only on a write whose record the predicate shows: a clean TRUE,
+   * as the form reads it, with `formula` fields computed over the record being
+   * written. The form computes the same formulas over the record being edited
+   * (`planObjectFormulas`, `@object-ui/core`); where it cannot compute one (a
+   * hop, `label()`, `can()`, `os`, or no signed-in user) it shows the field,
+   * keeps it required, and the server decides.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`. On a `required` field the server reads it on every write: where it is not TRUE (FALSE, or null such as an unset boolean) the field is not required for that write, and a predicate the server cannot evaluate counts as shown, so the field stays required. Reads the record's own columns, with `formula` fields computed over the record being written, as the form computes them over the record being edited; a read THROUGH a reference field, or a formula that reads through one, calls label(), calls can() on a write that picks no permission-gated option, or reads current_user on a system write with no user, cannot be evaluated there."),
   readonlyWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every update that writes the field — `objectstack validate` refuses it. Put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference."),
   requiredWhen: EvaluatedExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. Reads the bound record's OWN columns: the field level never reads a related record, so a read THROUGH a reference field (`record.account.tier`) faults on every row and refuses every write that reaches it — `objectstack validate` refuses it; put such a check in a `validations[]` `script` rule, whose `condition` is read one hop through a reference. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
@@ -2569,6 +2952,24 @@ export const FieldSchema = lazySchema(() => {
 
   /** Security & Visibility */
   hidden: z.boolean().default(false).describe('Hidden from default UI'),
+
+  /**
+   * Whether the field is asked for when a record is created (ADR-0085 §2: a
+   * creation-time intent of the field — which fields this business asks for
+   * when a record is born, not inferable from the schema — that binds every
+   * create surface and names none of them). Absent, as `true`: the field is
+   * asked for. `false`: every create surface leaves it out; editing, the
+   * record page and lists still show it.
+   *
+   * A `required: true` field cannot be switched off: a required field is
+   * always asked for on create, with or without a `defaultValue`, so the pair
+   * is refused here, at every door that parses a field (this schema's
+   * superRefine). A
+   * `requiredWhen` field is not refused: its gate is a predicate the parse
+   * cannot judge, and the write door still refuses a create born inside it.
+   * `liveness/field.json` carries its row.
+   */
+  showOnCreate: z.boolean().optional().describe('Ask for this field when a record is created. Absent or `true`: the field is on every create surface (the create dialog, the full-page create, an action-opened create). `false`: no create surface shows it; editing, the record page and lists still do, so a value is filled in after the record exists. Refused on a `required: true` field, with or without a `defaultValue`: a required field is always asked for on create. Keep the field on create, or drop `required`. A `requiredWhen` field is accepted, and its create is still refused when the predicate holds and the value is empty.'),
 
   /**
    * [#7728] "The declared value is never returned on the generic data path."
@@ -2836,6 +3237,79 @@ export const FieldSchema = lazySchema(() => {
   // key at the tail and break the byte-identity contract above.
   const shapeOrder = Object.keys(base.shape);
   return base.superRefine((field, ctx) => {
+  // [ADR-0158 U4, L3; Open item 8] `unitConfig` is read on two types only: a
+  // quantity is a `number` (`fixed` / `record`), and a unit code field is a
+  // `text` field (`code`). Every other type would parse a declaration nothing
+  // reads (ADR-0078): a `currency` amount's unit is its currency, and a
+  // `formula` or `summary` has no reader yet (U8), so a roll-up of a quantity
+  // shows a bare number until one ships.
+  if (field.unitConfig !== undefined) {
+    const mode = field.unitConfig.unitMode;
+    const admitted = Object.prototype.hasOwnProperty.call(UNIT_CONFIG_MODES_BY_FIELD_TYPE, field.type)
+      ? UNIT_CONFIG_MODES_BY_FIELD_TYPE[field.type]!
+      : [];
+    if (admitted.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['unitConfig'],
+        message:
+          `\`unitConfig\` is read on a \`number\` field (a quantity) and on a \`text\` field (a unit code) only, and `
+          + `this field is \`${field.type}\`: ${field.type === 'currency'
+            ? 'a currency amount\'s unit is its currency, declared in `currencyConfig`'
+            : field.type === 'formula' || field.type === 'summary'
+              ? 'a computed or rolled-up value has no unit reader yet, so the declaration would be inert (ADR-0158 U8)'
+              : 'nothing reads a unit on this type'}. Delete \`unitConfig\`, or declare it on the \`number\` field `
+          + 'that holds the quantity.',
+      });
+    } else if (!admitted.includes(mode)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['unitConfig', 'unitMode'],
+        message: field.type === 'text'
+          ? `\`unitMode: '${mode}'\` declares a quantity's unit, and this field is \`text\`: a quantity is a \`number\` `
+            + 'field. A `text` field that holds a unit code declares `unitConfig: { unitMode: \'code\' }`; '
+            + `put \`unitMode: '${mode}'\` on the \`number\` field holding the quantity.`
+          : '`unitMode: \'code\'` declares a `text` field that holds a unit code, and this field is a `number`, '
+            + 'a quantity: declare `unitMode: \'fixed\'` with `unit` (one standard unit) or `unitMode: \'record\'` '
+            + 'with `unitField` (each record\'s code in a sibling `text` field).',
+      });
+    } else if (mode === 'code' && field.valueDomain !== undefined) {
+      // A unit code field and a value domain are two vocabularies for one
+      // column (ADR-0158 U1 keeps the value domains at three, and a unit is
+      // not one of them). They are not disjoint — `MMK`, `XDR` and `PR` are in
+      // both — so the pair is refused for meaning two things at once, not for
+      // admitting nothing. The object door refuses the same pairing reached
+      // through a quantity's `unitField` (object.zod.ts).
+      ctx.addIssue({
+        code: 'custom',
+        path: ['unitConfig'],
+        message: `\`unitConfig: { unitMode: 'code' }\` declares that this field holds a unit code, and it also declares `
+          + `\`valueDomain: '${String(field.valueDomain)}'\`, another vocabulary. One column holds one kind of code: `
+          + 'declared as both, every write is judged against two lists, and a value passes only where they happen to '
+          + 'share a spelling (`MMK` is both a unit and an ISO 4217 currency code), meaning two things at once. '
+          + 'Delete one of the two.',
+      });
+    }
+  }
+  // A required field is always asked for when a record is created: the
+  // person creating the record sees every value the record must have, so
+  // `showOnCreate: false` beside `required: true` is refused (#36425 item 6,
+  // which makes no exception). That holds with a `defaultValue` too, which
+  // the insert would resolve: the field is still asked for, its default
+  // filled in. Refused where the author can fix it, at every door that
+  // parses a field (`defineStack`, `os validate`, the metadata save).
+  if (field.showOnCreate === false && field.required === true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['showOnCreate'],
+      message:
+        '`showOnCreate: false` would leave this field off every create surface, and it is `required: true`: a '
+        + 'required field is always asked for when a record is created, so the person creating it sees every value '
+        + 'the record must have. Keep the field on create (delete `showOnCreate`), or drop `required`; a value '
+        + 'needed only in some cases can be `requiredWhen` instead. A `defaultValue` makes no exception: the field '
+        + 'is still asked for, with its default filled in.',
+    });
+  }
   // [#11339] `referenceVia` declares the id half of a polymorphic pointer
   // pair (ADR-0052 §5) — semantics only a plain `text` column carries. On a
   // relationship type it contradicts the type's own single static target, and
@@ -2921,6 +3395,53 @@ export const FieldSchema = lazySchema(() => {
         'inbound mail, and only an `email` field stores an address to match. Change the field to ' +
         "`type: 'email'` if it holds an email address, or drop the key.",
     });
+  }
+  // [ruling 7000907189 point 4 · #35315] `transferBehavior` is the Change Owner
+  // cascade of a relationship: only a `lookup` or `master_detail` field points
+  // at a parent whose owner can change, and no `sys_*` object offers Change
+  // Owner, so on any other type, or on a reference to one, the key would parse
+  // and move nothing. An authored `'none'` off-type is refused too: the key
+  // describes nothing there (the `mailAssociation` precedent above). The
+  // declaring object's own eligibility is judged on `ObjectSchema`
+  // (`refuseIneligibleTransferCascades`), where that object is known.
+  if (field.transferBehavior !== undefined) {
+    if (field.type !== 'lookup' && field.type !== 'master_detail') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          "`transferBehavior` is only valid on `type: 'lookup'` or `type: 'master_detail'` (this field is " +
+          `\`${field.type}\`): it says whether a Change Owner of the record this field points at also moves ` +
+          "this object's records, and only a lookup or master_detail points at such a parent. Declare it on " +
+          'the reference field to the parent, or drop the key.',
+      });
+    } else if (
+      field.transferBehavior === 'cascade'
+      && typeof field.reference === 'string'
+      && field.reference.startsWith('sys_')
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          `\`transferBehavior: 'cascade'\` cannot act on a reference to '${field.reference}': no sys_ object ` +
+          'offers the Change Owner action, so its owner never changes through it and nothing would cascade. ' +
+          "Drop the key, or set it to 'none'.",
+      });
+    } else if (field.transferBehavior === 'cascade' && field.multiple === true) {
+      // A multi-value relationship stores its targets as one JSON array, which
+      // the SQL driver refuses to compare by equality: the cascade's child read
+      // could never find a row there (the `lookupAutofill` precedent below).
+      ctx.addIssue({
+        code: 'custom',
+        path: ['transferBehavior'],
+        message:
+          "`transferBehavior: 'cascade'` is not valid on a multi-value relationship (`multiple: true`): a " +
+          'record here can point at several parents with different owners, so no single Change Owner decides ' +
+          "who it goes to, and its stored list of targets cannot be matched to one parent. Drop the key, set it " +
+          "to 'none', or make the field single-value if each record has one parent.",
+      });
+    }
   }
   // [#27945] `lookupAutofill` copies fields of the ONE record a pick chooses.
   // Off a relationship there is no pick, and on a multi-value relationship a
@@ -3199,7 +3720,7 @@ export const FieldSchema = lazySchema(() => {
   //
   // `radio` is INSIDE the set and is therefore never refused here — its own
   // narrower #11437 check above owns that pair, so the two never double-fire.
-  if (field.multiple === true && !multiDeclarableTypeSet().has(field.type)) {
+  if (field.multiple === true && !multiDeclarableFieldTypes().has(field.type)) {
     const alternative = REFERENCE_VALUE_TYPES.has(field.type)
       ? 'a `lookup` with `reference` naming the same object (`multiple: true` there stores several related records)'
       : FILE_REFERENCE_TYPES.has(field.type)

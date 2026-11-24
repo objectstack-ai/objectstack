@@ -280,7 +280,8 @@ describe('#8034 stdio transport: tools/list', () => {
     const tool = (listed.result.tools as Array<{ name: string; inputSchema: any }>).find((t) => t.name === 'resume_run');
     expect(tool).toBeDefined();
     expect(tool!.inputSchema.required).toEqual(['runId']);
-    expect(Object.keys(tool!.inputSchema.properties).sort()).toEqual(['confirm', 'runId', 'values']);
+    // [#34209] No `confirm`: the member is retired from resume_run.
+    expect(Object.keys(tool!.inputSchema.properties).sort()).toEqual(['runId', 'values']);
     expect(tool!.inputSchema.additionalProperties).toBe(false);
 
     const called = await session.rpc('tools/call', {
@@ -288,7 +289,7 @@ describe('#8034 stdio transport: tools/list', () => {
       arguments: { runId: 'run_7', values: { subject: 'Call back' } },
     });
     expect(called.result.isError).toBeFalsy();
-    expect(resumeRun).toHaveBeenCalledWith('run_7', { values: { subject: 'Call back' }, confirm: undefined });
+    expect((resumeRun.mock.calls[0] as unknown[])[1]).toStrictEqual({ values: { subject: 'Call back' } });
   });
 
   it('serves NO tools and advertises none when no bridge was given', async () => {

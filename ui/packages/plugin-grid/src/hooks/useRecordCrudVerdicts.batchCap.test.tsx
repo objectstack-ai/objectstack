@@ -58,7 +58,10 @@ vi.mock('@objectstack/spec/security', async (importOriginal) => {
   return { ...actual, EXPLAIN_BATCH_MAX_RECORD_IDS: STUB_CAP };
 });
 
-import { useRecordCrudVerdicts, __clearRecordCrudVerdictCache } from './useRecordCrudVerdicts';
+import { __clearRecordCrudVerdictCache } from './useRecordCrudVerdicts';
+// objectstack#34208 — the hook asks only once a row's actions are reached for;
+// these pins are about what it does once it asks.
+import { useAskedRecordCrudVerdicts } from '../__tests__/askedRecordCrudVerdicts';
 
 const OBJECT = 'showcase_project';
 
@@ -107,7 +110,7 @@ describe('[#6286] the batch cap is the spec\'s export, not a local copy', () => 
 
   it('splits a page at the SPEC\'s cap — chunk sizes follow the export when it moves', async () => {
     const ids = idsFor(STUB_CAP * 2 + 1);
-    renderHook(() => useRecordCrudVerdicts({ objectName: OBJECT, recordIds: ids, update: true }));
+    renderHook(() => useAskedRecordCrudVerdicts({ objectName: OBJECT, recordIds: ids, update: true }));
 
     await waitFor(() => expect(calls.length).toBe(3));
     // The pre-fix hook produces exactly one call of seven ids here.
@@ -125,7 +128,7 @@ describe('[#6286] the batch cap is the spec\'s export, not a local copy', () => 
     // that out: written with the first half alone, this case survived the revert.
     const atCap = idsFor(STUB_CAP);
     const { unmount } = renderHook(() =>
-      useRecordCrudVerdicts({ objectName: OBJECT, recordIds: atCap, update: true }),
+      useAskedRecordCrudVerdicts({ objectName: OBJECT, recordIds: atCap, update: true }),
     );
     await waitFor(() => expect(calls.length).toBe(1));
     expect(calls[0].recordIds).toEqual(atCap);
@@ -135,7 +138,7 @@ describe('[#6286] the batch cap is the spec\'s export, not a local copy', () => 
     calls = [];
 
     const overCap = idsFor(STUB_CAP + 1);
-    renderHook(() => useRecordCrudVerdicts({ objectName: OBJECT, recordIds: overCap, update: true }));
+    renderHook(() => useAskedRecordCrudVerdicts({ objectName: OBJECT, recordIds: overCap, update: true }));
     await waitFor(() => expect(calls.length).toBe(2));
     expect(calls.map((c) => c.recordIds?.length)).toEqual([STUB_CAP, 1]);
   });
@@ -143,7 +146,7 @@ describe('[#6286] the batch cap is the spec\'s export, not a local copy', () => 
   it('splits per operation, so two verbs over cap+1 ids cost four requests', async () => {
     const ids = idsFor(STUB_CAP + 1);
     renderHook(() =>
-      useRecordCrudVerdicts({ objectName: OBJECT, recordIds: ids, update: true, delete: true }),
+      useAskedRecordCrudVerdicts({ objectName: OBJECT, recordIds: ids, update: true, delete: true }),
     );
 
     await waitFor(() => expect(calls.length).toBe(4));

@@ -41,12 +41,15 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { validationFailure } from '@objectstack/types';
 import { runAdminImportUsers, type IdentityImportDeps } from './admin-import-users.js';
 import { settleImportResetDelivery } from './account-invitation-marker.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS, SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
-import type { AdminActor } from './admin-user-endpoints.js';
+import { settleCurrentOrganizationJoin, type AdminActor } from './admin-user-endpoints.js';
 
 const ACTOR: AdminActor = { id: 'usr_admin', email: 'admin@example.com' };
+/** [#33113] The administrator's own execution context, as the grant seam resolves it. */
+const ADMIN_CONTEXT = { userId: 'usr_admin', isSystem: false, positions: ['platform_admin'], permissions: [] };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const IMPORT_USERS_SOURCE = readFileSync(resolve(HERE, 'admin-import-users.ts'), 'utf8');
@@ -103,11 +106,31 @@ function makeHarness(opts: {
   resetFails?: boolean;
   /** Make every `sys_user` READ throw, to drive the failed-lookup branch. */
   failUserReads?: boolean;
+  /**
+   * [#33113] The grant seam for the `positions` column. An object wires it:
+   * `catalog` is the positions the security catalog holds (any other name is
+   * refused as the catalog refusal refuses it), `denied` the ones the caller
+   * may not assign. `'no-context'` wires a seam whose caller does not resolve.
+   * Absent ⇒ no seam.
+   */
+  grant?: { catalog: string[]; denied?: string[] } | 'no-context';
+  seedUserPositions?: Row[];
+  /**
+   * [#34535] Multi-org mode: the organization wall is in force and the
+   * administrator's current organization is `callerActiveOrg` (`null` ⇒ none).
+   * `memberCap` is the organization's member limit, refused as better-auth
+   * refuses it; `withSeam: false` wires no unit of work, `addMember: false` no
+   * organization plugin. In this mode a position assignment is refused for a
+   * user who is not a member of the current organization (the grant-holder
+   * membership refusal), and the unit of work really rolls the tables back.
+   */
+  multiOrg?: { callerActiveOrg: string | null; memberCap?: number; withSeam?: boolean; addMember?: boolean };
 } = {}) {
   const tables: Record<string, Row[]> = {
     sys_user: (opts.seedUsers ?? []).map((u) => ({ manager_id: null, source: 'env_native', ...u })),
     sys_member: [...(opts.seedMembers ?? [])],
     sys_scim_subject: [...(opts.seedScimSubjects ?? [])],
+    sys_user_position: [...(opts.seedUserPositions ?? [])],
     sys_audit_log: [],
   };
 
@@ -163,7 +186,29 @@ function makeHarness(opts: {
     if (row) Object.assign(row, data);
     return row ?? null;
   });
-  const insert = vi.fn(async (object: string, data: any) => {
+  const insert = vi.fn(async (object: string, data: any, options?: any) => {
+    // [#33113] A position assignment is judged as the security plugin judges
+    // it — and only for a non-system write, which is exactly why the importer
+    // must hand it the administrator's own context.
+    if (object === 'sys_user_position' && !options?.context?.isSystem && typeof opts.grant === 'object') {
+      // [#34535] The grant-holder membership refusal: in multi-org mode a
+      // position is assigned only to a member of the current organization.
+      if (opts.multiOrg && !tables.sys_member.some(
+        (m) => m.user_id === data.user_id && m.organization_id === opts.multiOrg!.callerActiveOrg,
+      )) {
+        throw validationFailure(`User '${data.user_id}' is not a member of this organization`, [
+          { field: 'user_id', code: 'reference_not_found', message: 'names no member of this organization' },
+        ]);
+      }
+      if (!opts.grant.catalog.includes(String(data.position))) {
+        throw validationFailure(`No position named '${data.position}'`, [
+          { field: 'position', code: 'reference_not_found', message: 'names no position' },
+        ]);
+      }
+      if (opts.grant.denied?.includes(String(data.position))) {
+        throw Object.assign(new Error(`You may not assign '${data.position}'`), { code: 'PERMISSION_DENIED', status: 403 });
+      }
+    }
     (tables[object] ??= []).push({ ...data });
     return {};
   });
@@ -172,8 +217,40 @@ function makeHarness(opts: {
   const sendInviteSms = vi.fn(async () => {});
   const noteMustChangePasswordIssued = vi.fn();
 
+  // [#34535] better-auth's `addMember`: refuses past the organization's member
+  // cap with the vendor's code, else writes the membership.
+  const addMember = vi.fn(async ({ body }: any) => {
+    const cap = opts.multiOrg?.memberCap;
+    const count = tables.sys_member.filter((m) => m.organization_id === body.organizationId).length;
+    if (cap !== undefined && count >= cap) {
+      throw { statusCode: 403, body: { code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED', message: 'Organization membership limit reached' } };
+    }
+    tables.sys_member.push({ organization_id: body.organizationId, user_id: body.userId, role: body.role });
+    return { id: `mem-${tables.sys_member.length}`, ...body };
+  });
+  // [#34535] A unit of work that really undoes: a throw restores every table.
+  const outcomes: string[] = [];
+  const runAtomically = vi.fn(async <T,>(work: () => Promise<T>): Promise<T> => {
+    const before = Object.fromEntries(Object.entries(tables).map(([k, rows]) => [k, rows.map((r) => ({ ...r }))]));
+    try {
+      const result = await work();
+      outcomes.push('committed');
+      return result;
+    } catch (error) {
+      for (const k of Object.keys(tables)) tables[k] = before[k] ?? [];
+      outcomes.push('rolled back');
+      throw error;
+    }
+  });
+  const callerActiveOrganizationId = vi.fn(async () => opts.multiOrg?.callerActiveOrg ?? null);
+  const multiOrgSeam = opts.multiOrg && opts.multiOrg.withSeam !== false;
+
   const deps: IdentityImportDeps = {
-    getAuthApi: async () => ({ createUser, requestPasswordReset }),
+    getAuthApi: async () => ({
+      createUser,
+      requestPasswordReset,
+      ...(opts.multiOrg && opts.multiOrg.addMember !== false ? { addMember } : {}),
+    }),
     getAuthContext: async () => ({ password: { config: { minPasswordLength: 8, maxPasswordLength: 128 } } }),
     getDataEngine: () => ({ find, update, insert }),
     phoneNumberEnabled: () => opts.phoneEnabled ?? false,
@@ -182,11 +259,30 @@ function makeHarness(opts: {
     sendInviteSms,
     noteMustChangePasswordIssued,
     logger: { warn },
+    ...(opts.grant || multiOrgSeam
+      ? {
+          createGrant: {
+            resolveActorContext: async () => (opts.grant === 'no-context' ? undefined : ADMIN_CONTEXT),
+            runAtomically: multiOrgSeam
+              ? (runAtomically as unknown as <T>(work: () => Promise<T>) => Promise<T>)
+              : async <T>(work: () => Promise<T>) => work(),
+          },
+        }
+      : {}),
+    ...(opts.multiOrg
+      ? {
+          getTenancy: () => ({ defaultOrgId: async () => null, isolationActive: true }),
+          getCallerActiveOrganizationId: callerActiveOrganizationId,
+        }
+      : {}),
   };
 
   return {
     deps, tables, snapshotsAtCreate,
     createUser, requestPasswordReset, find, update, insert, warn,
+    addMember, runAtomically, outcomes, callerActiveOrganizationId, sendInviteSms,
+    membersOf: (organizationId: string) =>
+      tables.sys_member.filter((m) => m.organization_id === organizationId).map((m) => m.user_id),
     failUserReadsFrom: () => { readsFail = true; },
     userBy: (email: string) => tables.sys_user.find((u) => u.email === email),
   };
@@ -604,5 +700,456 @@ describe('import-users manager pass — the fences (#18028)', () => {
     expect(data.summary.manager).toEqual({ linked: 0, unresolved: 0, refused: 0 });
     expect(managerWriteIndex(h.update)).toBe(-1);
     expect(data.rows.every((r: Row) => r.manager === undefined)).toBe(true);
+  });
+});
+
+/** [#33113] The `sys_user_position` inserts, in call order, with the context each was written under. */
+function positionInserts(insert: ReturnType<typeof vi.fn>): Array<{ data: Row; context: any; order: number }> {
+  const out: Array<{ data: Row; context: any; order: number }> = [];
+  insert.mock.calls.forEach(([object, data, options]: any[], i: number) => {
+    if (object === 'sys_user_position') out.push({ data, context: options?.context, order: insert.mock.invocationCallOrder[i] });
+  });
+  return out;
+}
+
+describe('import-users positions column — assigned in a second pass, as Setup assigns (#33113)', () => {
+  const CATALOG = { catalog: ['sales_rep', 'area_manager', 'finance'], denied: ['finance'] };
+
+  it('assigns every named position, under the ADMINISTRATOR\'s context, after the last row is created', async () => {
+    const h = makeHarness({ grant: CATALOG });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      format: 'json',
+      rows: [
+        { email: 'rep@x.co', name: 'Rep', positions: 'sales_rep; area_manager' },
+        { email: 'boss@x.co', name: 'Boss', positions: ['area_manager'] },
+      ],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.created).toBe(2);
+    expect(data.summary.errors).toBe(0);
+    expect(data.summary.positions).toEqual({ assigned: 3, alreadyAssigned: 0, unresolved: 0, refused: 0 });
+    expect(data.rows[0].positions).toEqual([
+      { position: 'sales_rep', outcome: 'assigned' },
+      { position: 'area_manager', outcome: 'assigned' },
+    ]);
+    expect(data.rows[1].positions).toEqual([{ position: 'area_manager', outcome: 'assigned' }]);
+    expect(data.rows[0].error).toBeUndefined();
+
+    const rep = h.userBy('rep@x.co')!;
+    expect(h.tables.sys_user_position.filter((r) => r.user_id === rep.id).map((r) => r.position))
+      .toEqual(['sales_rep', 'area_manager']);
+
+    const writes = positionInserts(h.insert);
+    expect(writes).toHaveLength(3);
+    // ⛔ never SYSTEM_CTX: every check Setup's form passes through stands down for it.
+    for (const w of writes) expect(w.context).toBe(ADMIN_CONTEXT);
+    const createOrders = h.createUser.mock.invocationCallOrder;
+    for (const w of writes) expect(w.order).toBeGreaterThan(createOrders[createOrders.length - 1]);
+  });
+
+  it('reads the column from a CSV file, `;`-separated', async () => {
+    const h = makeHarness({ grant: CATALOG });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      format: 'csv',
+      csv: 'email,name,positions\nrep@x.co,Rep,sales_rep;area_manager\n',
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    expect(payload(res).rows[0].positions).toEqual([
+      { position: 'sales_rep', outcome: 'assigned' },
+      { position: 'area_manager', outcome: 'assigned' },
+    ]);
+  });
+
+  it('an unresolved position is PER-ROW: the user lands, every other row lands', async () => {
+    const h = makeHarness({ grant: CATALOG });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      format: 'json',
+      rows: [
+        { email: 'typo@x.co', name: 'Typo', positions: 'sales_rpe;area_manager' },
+        { email: 'ok@x.co', name: 'Ok', positions: 'sales_rep' },
+      ],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.created).toBe(2);
+    expect(data.summary.errors).toBe(0);
+    expect(data.summary.positions).toEqual({ assigned: 2, alreadyAssigned: 0, unresolved: 1, refused: 0 });
+    expect(data.rows[0].ok).toBe(true);
+    expect(data.rows[0].action).toBe('created');
+    expect(data.rows[0].positions).toEqual([
+      { position: 'sales_rpe', outcome: 'unresolved' },
+      { position: 'area_manager', outcome: 'assigned' },
+    ]);
+    expect(data.rows[0].error).toContain('sales_rpe');
+    expect(data.rows[0].code).toBeUndefined();
+    expect(h.userBy('typo@x.co')).toBeDefined();
+    expect(data.rows[1].positions).toEqual([{ position: 'sales_rep', outcome: 'assigned' }]);
+  });
+
+  it('a REFUSED assignment carries the refusal\'s own code, and the user still lands', async () => {
+    const h = makeHarness({ grant: CATALOG });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      format: 'json',
+      rows: [{ email: 'cfo@x.co', name: 'Cfo', positions: 'finance' }],
+    }), ACTOR);
+
+    const data = payload(res);
+    expect(data.summary.created).toBe(1);
+    expect(data.summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 1 });
+    expect(data.rows[0].positions).toEqual([{ position: 'finance', outcome: 'refused', code: 'PERMISSION_DENIED' }]);
+    expect(h.userBy('cfo@x.co')).toBeDefined();
+    expect(h.tables.sys_user_position).toHaveLength(0);
+  });
+
+  it('an upserted user who already holds a position reports already_assigned and is not written twice', async () => {
+    const h = makeHarness({
+      grant: CATALOG,
+      seedUsers: [{ id: 'u-old', email: 'rep@x.co', name: 'Rep' }],
+      seedUserPositions: [{ user_id: 'u-old', position: 'sales_rep' }],
+    });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      mode: 'upsert',
+      format: 'json',
+      rows: [{ email: 'rep@x.co', name: 'Rep', positions: 'sales_rep;area_manager' }],
+    }), ACTOR);
+
+    const data = payload(res);
+    expect(data.rows[0].action).toBe('updated');
+    expect(data.rows[0].positions).toEqual([
+      { position: 'sales_rep', outcome: 'already_assigned' },
+      { position: 'area_manager', outcome: 'assigned' },
+    ]);
+    expect(data.summary.positions).toEqual({ assigned: 1, alreadyAssigned: 1, unresolved: 0, refused: 0 });
+    expect(positionInserts(h.insert).map((w) => w.data.position)).toEqual(['area_manager']);
+  });
+
+  it('a cell that is not a list reads unreadable, and the user still lands', async () => {
+    const h = makeHarness({ grant: CATALOG });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      format: 'json',
+      rows: [{ email: 'odd@x.co', name: 'Odd', positions: 42 }],
+    }), ACTOR);
+
+    const data = payload(res);
+    expect(data.summary.created).toBe(1);
+    expect(data.rows[0].positions).toBe('unreadable');
+    expect(data.rows[0].error).toContain('positions');
+    expect(data.summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 1, refused: 0 });
+    expect(positionInserts(h.insert)).toHaveLength(0);
+  });
+
+  it('the cell never reaches the identity write, and an empty cell is not a finding', async () => {
+    const h = makeHarness({ grant: CATALOG });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      format: 'json',
+      rows: [{ email: 'rep@x.co', name: 'Rep', positions: '' }],
+    }), ACTOR);
+
+    const body = h.createUser.mock.calls[0][0].body;
+    expect(Object.hasOwn(body, 'positions')).toBe(false);
+    expect(JSON.stringify(body)).not.toContain('positions');
+    expect(payload(res).rows[0].positions).toBeUndefined();
+    expect(payload(res).rows[0].error).toBeUndefined();
+  });
+
+  it('a file naming no position needs no grant seam at all', async () => {
+    const h = makeHarness();
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json', rows: [{ email: 'rep@x.co', name: 'Rep' }],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    expect(payload(res).summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 0 });
+  });
+
+  it('FROM control — a file naming positions on a host with no grant seam still answers 200 and creates every user', async () => {
+    // Measured on main before this column existed (PR #34531, Acceptance notes): the same file answered
+    // 200, created both users and dropped the cell. Anything less here would NARROW the door, so the
+    // users land exactly as they did, and only the positions are reported.
+    const h = makeHarness();
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json',
+      rows: [
+        { email: 'a@x.co', name: 'A', positions: 'sales_rep' },
+        { email: 'b@x.co', name: 'B', positions: 'sales_rep;area_manager' },
+      ],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.created).toBe(2);
+    expect(data.summary.errors).toBe(0);
+    expect(h.createUser).toHaveBeenCalledTimes(2);
+    expect(data.rows.map((r: any) => [r.ok, r.action])).toEqual([[true, 'created'], [true, 'created']]);
+  });
+
+  it('a host with no grant seam reports every named position refused / NOT_IMPLEMENTED on its row', async () => {
+    const h = makeHarness();
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json',
+      rows: [
+        { email: 'a@x.co', name: 'A', positions: 'sales_rep' },
+        { email: 'b@x.co', name: 'B', positions: 'sales_rep;area_manager' },
+        { email: 'c@x.co', name: 'C' },
+      ],
+    }), ACTOR);
+
+    const data = payload(res);
+    expect(data.rows[0].positions).toEqual([{ position: 'sales_rep', outcome: 'refused', code: 'NOT_IMPLEMENTED' }]);
+    expect(data.rows[1].positions).toEqual([
+      { position: 'sales_rep', outcome: 'refused', code: 'NOT_IMPLEMENTED' },
+      { position: 'area_manager', outcome: 'refused', code: 'NOT_IMPLEMENTED' },
+    ]);
+    expect(data.rows[0].error).toContain('cannot assign positions');
+    expect(data.rows[0].code).toBeUndefined();
+    expect(data.rows[2].positions).toBeUndefined();
+    expect(data.rows[2].error).toBeUndefined();
+    expect(data.summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 3 });
+    expect(positionInserts(h.insert)).toHaveLength(0);
+  });
+
+  it('a caller whose own access does not resolve: every position refused / PERMISSION_DENIED, every user created', async () => {
+    const h = makeHarness({ grant: 'no-context' });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json',
+      rows: [{ email: 'rep@x.co', name: 'Rep', positions: 'sales_rep;area_manager' }],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.created).toBe(1);
+    expect(data.summary.errors).toBe(0);
+    expect(h.userBy('rep@x.co')).toBeDefined();
+    expect(data.rows[0].ok).toBe(true);
+    expect(data.rows[0].positions).toEqual([
+      { position: 'sales_rep', outcome: 'refused', code: 'PERMISSION_DENIED' },
+      { position: 'area_manager', outcome: 'refused', code: 'PERMISSION_DENIED' },
+    ]);
+    expect(data.rows[0].error).toContain('could not be resolved');
+    expect(data.summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 2 });
+    expect(positionInserts(h.insert)).toHaveLength(0);
+  });
+
+  it('a dry run on a host with no grant seam answers as main did: 200, nothing written, no refusal', async () => {
+    const h = makeHarness();
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json', dryRun: true,
+      rows: [{ email: 'rep@x.co', name: 'Rep', positions: 'sales_rep' }],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    expect(h.createUser).not.toHaveBeenCalled();
+    expect(payload(res).rows[0].positions).toBeUndefined();
+    expect(payload(res).summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 0 });
+  });
+
+  it('dryRun does not run the pass, and reports zeros', async () => {
+    const h = makeHarness({ grant: CATALOG });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json', dryRun: true,
+      rows: [{ email: 'rep@x.co', name: 'Rep', positions: 'sales_rep' }],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    expect(payload(res).summary.positions).toEqual({ assigned: 0, alreadyAssigned: 0, unresolved: 0, refused: 0 });
+    expect(positionInserts(h.insert)).toHaveLength(0);
+  });
+});
+
+describe("import-users in multi-org mode: each row joins the administrator's current organization (#34535)", () => {
+  const ORG = 'org_current';
+  const CATALOG = { catalog: ['sales_rep', 'area_manager'] };
+  /** The administrator, already a member of the current organization. */
+  const ADMIN_MEMBER = { organization_id: ORG, user_id: 'usr_admin', role: 'owner' };
+
+  it('every created row joins the current organization as member, in its own unit of work, and its positions then validate', async () => {
+    const h = makeHarness({ grant: CATALOG, seedMembers: [ADMIN_MEMBER], multiOrg: { callerActiveOrg: ORG } });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      format: 'json',
+      rows: [
+        { email: 'rep@x.co', name: 'Rep', positions: 'sales_rep' },
+        { email: 'boss@x.co', name: 'Boss', positions: 'area_manager' },
+      ],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.created).toBe(2);
+    expect(data.summary.errors).toBe(0);
+    const rep = h.userBy('rep@x.co')!;
+    const boss = h.userBy('boss@x.co')!;
+    expect(h.addMember.mock.calls.map(([arg]: any[]) => arg)).toEqual([
+      { body: { userId: rep.id, role: 'member', organizationId: ORG } },
+      { body: { userId: boss.id, role: 'member', organizationId: ORG } },
+    ]);
+    expect(h.outcomes).toEqual(['committed', 'committed']);
+    expect(h.membersOf(ORG)).toEqual(['usr_admin', rep.id, boss.id]);
+    // The positions pass judges membership: a member-less user is refused there.
+    expect(data.summary.positions).toEqual({ assigned: 2, alreadyAssigned: 0, unresolved: 0, refused: 0 });
+    expect(data.rows[0].positions).toEqual([{ position: 'sales_rep', outcome: 'assigned' }]);
+    expect(data.rows[0].error).toBeUndefined();
+    const audit = h.tables.sys_audit_log.find((r) => r.action === 'import')!;
+    expect(JSON.parse(audit.metadata)).toMatchObject({ organizationId: ORG });
+  });
+
+  it('a row whose join is refused creates no account and gets no invitation; the other rows go on', async () => {
+    const h = makeHarness({ seedMembers: [ADMIN_MEMBER], multiOrg: { callerActiveOrg: ORG, memberCap: 3 } });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'invite',
+      format: 'json',
+      rows: [
+        { email: 'one@x.co', name: 'One' },
+        { email: 'two@x.co', name: 'Two' },
+        { email: 'three@x.co', name: 'Three' },
+      ],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.created).toBe(2);
+    expect(data.summary.errors).toBe(1);
+    expect(data.rows[2]).toMatchObject({ row: 3, ok: false, action: 'failed', code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED' });
+    expect(data.rows[2].error).toContain('could not be added to the organization, so no user was created');
+    expect(data.rows[2].id).toBeUndefined();
+    // Rolled back: the account the refused row wrote is gone, and no membership was left for it.
+    expect(h.outcomes).toEqual(['committed', 'committed', 'rolled back']);
+    expect(h.createUser).toHaveBeenCalledTimes(3);
+    expect(h.userBy('three@x.co')).toBeUndefined();
+    expect(h.membersOf(ORG)).toEqual(['usr_admin', h.userBy('one@x.co')!.id, h.userBy('two@x.co')!.id]);
+    // Invitations only for the rows that landed.
+    expect(h.requestPasswordReset.mock.calls.map(([arg]: any[]) => arg.body.email)).toEqual(['one@x.co', 'two@x.co']);
+    expect(data.summary.delivery).toEqual({ emailInvite: 2, smsInvite: 0, temporary: 0 });
+  });
+
+  it('a refused row under the temporary policy is handed no password', async () => {
+    const h = makeHarness({ seedMembers: [ADMIN_MEMBER], multiOrg: { callerActiveOrg: ORG, memberCap: 2 } });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'temporary',
+      format: 'json',
+      rows: [{ email: 'in@x.co', name: 'In' }, { email: 'out@x.co', name: 'Out' }],
+    }), ACTOR);
+
+    const data = payload(res);
+    expect(data.rows[0]).toMatchObject({ ok: true, action: 'created' });
+    expect(typeof data.rows[0].temporaryPassword).toBe('string');
+    expect(data.rows[1]).toMatchObject({ ok: false, action: 'failed', code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED' });
+    expect(data.rows[1].temporaryPassword).toBeUndefined();
+    expect(data.summary.delivery).toEqual({ emailInvite: 0, smsInvite: 0, temporary: 1 });
+    expect(h.userBy('out@x.co')).toBeUndefined();
+  });
+
+  for (const dryRun of [false, true]) {
+    it(`no current organization: the whole import is refused 400 NO_ACTIVE_ORGANIZATION, create-user's code and sentence${dryRun ? ' (dry run too)' : ''}`, async () => {
+      const h = makeHarness({ multiOrg: { callerActiveOrg: null } });
+      const res = await runAdminImportUsers(h.deps, makeRequest({
+        passwordPolicy: 'none',
+        format: 'json',
+        dryRun,
+        rows: [{ email: 'a@x.co', name: 'A' }],
+      }), ACTOR);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error?.code).toBe('NO_ACTIVE_ORGANIZATION');
+      const single = await settleCurrentOrganizationJoin({ ...h.deps, createGrant: h.deps.createGrant } as any);
+      expect(single && 'status' in single ? single.body.error : undefined).toEqual(res.body.error);
+      expect(h.createUser).not.toHaveBeenCalled();
+      expect(h.tables.sys_user).toHaveLength(0);
+    });
+  }
+
+  it('a host with no unit of work, or no organization plugin, is refused 501 before any account exists', async () => {
+    for (const multiOrg of [
+      { callerActiveOrg: ORG, withSeam: false },
+      { callerActiveOrg: ORG, addMember: false },
+    ]) {
+      const h = makeHarness({ multiOrg });
+      const res = await runAdminImportUsers(h.deps, makeRequest({
+        passwordPolicy: 'none', format: 'json', rows: [{ email: 'a@x.co', name: 'A' }],
+      }), ACTOR);
+      expect(res.status).toBe(501);
+      expect(res.body.error?.code).toBe('NOT_IMPLEMENTED');
+      expect(h.createUser).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a dry run with a current organization joins nothing', async () => {
+    const h = makeHarness({ multiOrg: { callerActiveOrg: ORG } });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json', dryRun: true, rows: [{ email: 'a@x.co', name: 'A' }],
+    }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(h.addMember).not.toHaveBeenCalled();
+    expect(h.createUser).not.toHaveBeenCalled();
+  });
+
+  it('upsert: a matched existing user joins too; one already a member is not added twice', async () => {
+    const h = makeHarness({
+      seedUsers: [{ id: 'u-out', email: 'out@x.co', name: 'Out' }, { id: 'u-in', email: 'in@x.co', name: 'In' }],
+      seedMembers: [ADMIN_MEMBER, { organization_id: ORG, user_id: 'u-in', role: 'member' }],
+      multiOrg: { callerActiveOrg: ORG },
+    });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      mode: 'upsert',
+      format: 'json',
+      rows: [{ email: 'out@x.co', name: 'Out Renamed' }, { email: 'in@x.co', name: 'In' }],
+    }), ACTOR);
+
+    expect(res.status).toBe(200);
+    const data = payload(res);
+    expect(data.summary.updated).toBe(2);
+    expect(data.summary.errors).toBe(0);
+    expect(h.addMember.mock.calls.map(([arg]: any[]) => arg.body.userId)).toEqual(['u-out']);
+    expect(h.membersOf(ORG)).toEqual(['usr_admin', 'u-in', 'u-out']);
+    expect(h.userBy('out@x.co')!.name).toBe('Out Renamed');
+  });
+
+  it('upsert: a matched user whose join is refused fails its row, and its profile update rolls back with it', async () => {
+    const h = makeHarness({
+      seedUsers: [{ id: 'u-out', email: 'out@x.co', name: 'Out' }],
+      seedMembers: [ADMIN_MEMBER],
+      multiOrg: { callerActiveOrg: ORG, memberCap: 1 },
+    });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none',
+      mode: 'upsert',
+      format: 'json',
+      rows: [{ email: 'out@x.co', name: 'Out Renamed' }],
+    }), ACTOR);
+
+    const data = payload(res);
+    expect(data.summary.updated).toBe(0);
+    expect(data.summary.errors).toBe(1);
+    expect(data.rows[0]).toMatchObject({ ok: false, action: 'failed', code: 'ORGANIZATION_MEMBERSHIP_LIMIT_REACHED' });
+    // An existing user: the sentence names the join only, never "no user was created".
+    expect(data.rows[0].error).toContain('could not be added to the organization');
+    expect(data.rows[0].error).not.toContain('no user was created');
+    expect(h.outcomes).toEqual(['rolled back']);
+    expect(h.userBy('out@x.co')!.name).toBe('Out');
+  });
+
+  it('CONTROL single-org (or a degraded wall): the current organization is never read, nothing joins, the import is unchanged', async () => {
+    const h = makeHarness({ multiOrg: { callerActiveOrg: ORG } });
+    h.deps.getTenancy = () => ({ defaultOrgId: async () => 'org_default', isolationActive: false });
+    const res = await runAdminImportUsers(h.deps, makeRequest({
+      passwordPolicy: 'none', format: 'json', rows: [{ email: 'a@x.co', name: 'A' }],
+    }), ACTOR);
+    expect(res.status).toBe(200);
+    expect(payload(res).summary.created).toBe(1);
+    expect(h.callerActiveOrganizationId).not.toHaveBeenCalled();
+    expect(h.addMember).not.toHaveBeenCalled();
+    expect(h.runAtomically).not.toHaveBeenCalled();
   });
 });

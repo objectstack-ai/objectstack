@@ -109,7 +109,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ObjectStackClient } from '@objectstack/client';
-import { ConsolePageHeader, useMetadata, useAdapter } from '@object-ui/app-shell';
+import { ConsolePageHeader, useMetadata, useAdapter, useOpenAssistant } from '@object-ui/app-shell';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveKeyedI18nLabel } from '../../utils';
 
@@ -124,8 +124,16 @@ import { resolveKeyedI18nLabel } from '../../utils';
  */
 type MetaWriteClient = Pick<ObjectStackClient['meta'], 'saveItem' | 'deleteItem'>;
 
+/** The stored (untranslated) app at a package: `ObjectStackAdapter.getAuthoredItem`. */
+type ReadAuthored = (
+  type: string,
+  name: string,
+  options?: { packageId?: string },
+) => Promise<Record<string, unknown> | null>;
+
 interface AdapterWithClient {
   getClient?: () => { meta?: MetaWriteClient } | null | undefined;
+  getAuthoredItem?: ReadAuthored;
 }
 
 /**
@@ -148,19 +156,33 @@ function owningPackage(app: { _packageId?: unknown }): string | undefined {
 }
 
 /**
- * Save one app in the scope it is served from (objectui#12300).
+ * Save one app in the scope it is served from (objectui#12300), with the keys
+ * one control owns changed.
  *
  * A package-owned app is saved with `{ packageId }`, which the SDK sends as
  * `?package=`. That is the row the reader serves, so the change is what the
  * next read shows. A package-less app is saved exactly as before, with no
  * fourth argument, because there is no package to name.
+ *
+ * objectstack#35054 (route D) — the body is the app as its author STORED it,
+ * read from the untranslated layers at that same scope, with `patch` over it.
+ * The served row this page lists is translated for the console's locale (the
+ * app's label and every navigation label), and the door stores a body
+ * verbatim, so spreading it stored the translations as the app's source text
+ * on every toggle. An app with nothing stored to read is not written: the
+ * rejection carries no message, so the toast says the page's own "unknown
+ * error".
  */
-function saveApp(
+async function saveApp(
   meta: MetaWriteClient,
+  readAuthored: ReadAuthored,
   app: { name: string; _packageId?: unknown },
-  body: Record<string, unknown>,
+  patch: Record<string, unknown>,
 ) {
   const packageId = owningPackage(app);
+  const stored = await readAuthored('app', app.name, packageId ? { packageId } : {});
+  if (!stored) throw new Error();
+  const body = { ...stored, ...patch };
   return packageId
     ? meta.saveItem('app', app.name, body, { packageId })
     : meta.saveItem('app', app.name, body);
@@ -237,6 +259,7 @@ function SetDefaultStar({
 export function AppManagementPage() {
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
+  const openAssistant = useOpenAssistant();
   const { appName } = useParams();
   const basePath = appName ? `/apps/${appName}` : '';
   const { apps, refresh } = useMetadata();
@@ -252,6 +275,13 @@ export function AppManagementPage() {
   const metaClient = useCallback((): MetaWriteClient | null => {
     const client = (adapter as AdapterWithClient | null | undefined)?.getClient?.();
     return client?.meta ?? null;
+  }, [adapter]);
+
+  /** The stored app at a package (objectstack#35054); refuses when the adapter cannot read one. */
+  const readAuthored = useCallback<ReadAuthored>(async (type, name, options) => {
+    const read = (adapter as AdapterWithClient | null | undefined)?.getAuthoredItem;
+    if (!read) throw new Error();
+    return read.call(adapter, type, name, options);
   }, [adapter]);
 
   /** The page's own word for "the server told us nothing" — see `reason`. */
@@ -339,11 +369,10 @@ export function AppManagementPage() {
     setProcessing(true);
     try {
       const newActive = app.active === false;
-      // Spread the record the server gave us and override the ONE key this
-      // control owns — the same round trip `useNavigationSync.saveApp` performs
-      // for the `navigation` key. Rebuilding a minimal payload instead would
-      // drop every field of the app the console does not model.
-      await saveApp(meta, app, { ...app, active: newActive });
+      // The stored app with the ONE key this control owns overridden
+      // (`saveApp`). Rebuilding a minimal payload instead would drop every
+      // field of the app the console does not model.
+      await saveApp(meta, readAuthored, app, { active: newActive });
       toast.success(
         newActive
           ? t('appManagement.toast.appEnabled', { defaultValue: '{{name}} enabled', name: appTitle(app) })
@@ -360,7 +389,7 @@ export function AppManagementPage() {
       await refresh();
       setProcessing(false);
     }
-  }, [refresh, metaClient, t, appTitle, unknownError]);
+  }, [refresh, metaClient, readAuthored, t, appTitle, unknownError]);
 
   const handleSetDefault = useCallback(async (app: any) => {
     const meta = metaClient();
@@ -383,9 +412,9 @@ export function AppManagementPage() {
       // Each app is saved in ITS OWN package's scope: the outgoing default and
       // the incoming one may belong to different packages, or to none.
       for (const prev of outgoing) {
-        await saveApp(meta, prev, { ...prev, isDefault: false });
+        await saveApp(meta, readAuthored, prev, { isDefault: false });
       }
-      await saveApp(meta, app, { ...app, isDefault: true });
+      await saveApp(meta, readAuthored, app, { isDefault: true });
       toast.success(t('appManagement.toast.setDefaultDone', {
         defaultValue: '{{name}} set as default',
         name: appTitle(app),
@@ -401,7 +430,7 @@ export function AppManagementPage() {
       await refresh();
       setProcessing(false);
     }
-  }, [apps, refresh, metaClient, t, appTitle, unknownError]);
+  }, [apps, refresh, metaClient, readAuthored, t, appTitle, unknownError]);
 
   const handleDelete = useCallback(async (appToDelete: any) => {
     if (confirmDelete !== appToDelete.name) {
@@ -468,7 +497,7 @@ export function AppManagementPage() {
         const app = byName.get(name);
         if (!app) continue;
         try {
-          await saveApp(meta, app, { ...app, active });
+          await saveApp(meta, readAuthored, app, { active });
           saved += 1;
         } catch (e: unknown) {
           // Keyed for its PUNCTUATION as much as its words — the CJK packs set
@@ -508,7 +537,7 @@ export function AppManagementPage() {
       await refresh();
       setProcessing(false);
     }
-  }, [apps, selectedIds, refresh, metaClient, t, appTitle, unknownError]);
+  }, [apps, selectedIds, refresh, metaClient, readAuthored, t, appTitle, unknownError]);
 
   return (
     <div>
@@ -657,8 +686,9 @@ export function AppManagementPage() {
                         // pre-scoped to this app's package (passed as the chat
                         // context.packageId the cloud seeds as the active package),
                         // so the AI iterates within THIS app, not the whole env.
+                        // objectstack#34608 — in the console's chat drawer, in place.
                         onClick={() =>
-                          navigate(`/ai/build?package=${encodeURIComponent(app._packageId!)}&new=1`)
+                          openAssistant({ agent: 'build', packageId: app._packageId, fresh: true })
                         }
                       >
                         <Sparkles className="h-4 w-4" />

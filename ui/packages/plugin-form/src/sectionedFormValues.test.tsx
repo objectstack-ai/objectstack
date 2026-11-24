@@ -32,7 +32,11 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
+
+// Section names are read inside the <form>: the section navigation above it
+// repeats each name once two or more sections are drawn (objectstack#34605).
+const inForm = () => within(document.querySelector('form') as HTMLElement);
 import { registerAllFields } from '@object-ui/fields';
 import { ModalForm } from './ModalForm';
 import { TabbedForm } from './TabbedForm';
@@ -248,8 +252,8 @@ describe('ModalForm stacked sections — one form for all sections (#2153)', () 
       />,
     );
 
-    expect(await screen.findByText('Basics')).toBeTruthy();
-    expect(screen.getByText('Triage')).toBeTruthy();
+    await waitFor(() => expect(inForm().getByText('Basics')).toBeTruthy());
+    expect(inForm().getByText('Triage')).toBeTruthy();
     // A section's authored blurb survives the move to inline headers.
     expect(screen.getByText('Who is asking')).toBeTruthy();
   });

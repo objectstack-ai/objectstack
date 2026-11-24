@@ -5,6 +5,7 @@ import {
   validateReadonlyFlowWrites as validateReadonlyFlowWritesUnrecorded,
   FLOW_UPDATE_READONLY_FIELD,
   FLOW_UPDATE_READONLY_WHEN_FIELD,
+  FLOW_UPDATE_SUMMARY_FIELD,
 } from './validate-readonly-flow-writes.js';
 import { explainRule } from './rule-explanations.js';
 import { ObjectSchema } from '@objectstack/spec/data';
@@ -826,5 +827,99 @@ describe('[#22161] one-line fixes — the rule ids this file shortened', () => {
   it.each([...SHORTENED_RULE_IDS])('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
     const text = explanationOf(rule);
     for (const fact of MOVED_FROM_FIX[rule]) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#35114] The implicit roll-up lock: the engine reads every `summary` field as
+// `readonly: true` on create and on update, declared or not, so a non-system
+// flow write of one is dropped. Reported at its own id as a WARNING (area
+// ruling, claim amendment 7035408057, option B), never as the static id's
+// ERROR, so a build that passed before keeps passing.
+describe('validateReadonlyFlowWrites · a roll-up summary field without readonly: true', () => {
+  const accountObject = {
+    name: 'crm_account',
+    label: 'Account',
+    fields: {
+      name: { type: 'text' },
+      // The card's shape: a roll-up with no `readonly`.
+      order_total: { type: 'summary', summaryOperations: { object: 'crm_order', field: 'amount', function: 'sum' } },
+      // A roll-up its author did declare read-only: the static branch's.
+      order_count: { type: 'summary', readonly: true, summaryOperations: { object: 'crm_order', function: 'count' } },
+      credit_status: { type: 'text', readonly: true },
+    },
+  };
+
+  /** A flow with one `nodeType` node writing `fields` on the account. */
+  const flowWriting = (nodeType: 'create_record' | 'update_record', fields: Record<string, unknown>, runAs?: string) => ({
+    name: 'sync_account',
+    type: 'record_change',
+    ...(runAs ? { runAs } : {}),
+    nodes: [
+      { id: 'start', type: 'start', config: {} },
+      {
+        id: 'w',
+        type: nodeType,
+        label: 'Write account',
+        config: {
+          objectName: 'crm_account',
+          ...(nodeType === 'update_record' ? { filter: { id: { dialect: 'cel', source: 'recordId' } } } : {}),
+          fields,
+        },
+      },
+    ],
+    edges: [],
+  });
+
+  it.each(['create_record', 'update_record'] as const)('a %s writing the roll-up under a user run: one warning, at its own id', (nodeType) => {
+    const findings = validateReadonlyFlowWrites({
+      objects: [accountObject],
+      flows: [flowWriting(nodeType, { name: 'Acme', order_total: 100 })],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'warning',
+      rule: FLOW_UPDATE_SUMMARY_FIELD,
+      path: 'flows[0].nodes[1].config.fields.order_total',
+      where: 'flow "sync_account" › node "Write account"',
+    });
+    expect(findings[0].message).toContain("roll-up summary field 'order_total' of object 'crm_account'");
+    expect(findings[0].message).toContain('on create and update alike');
+    expect(findings[0].message).not.toContain('\n');
+    expect(findings[0].message.length).toBeLessThanOrEqual(200);
+    expect(findings[0].hint).toContain(nodeType);
+    expect(findings[0].hint.length).toBeLessThanOrEqual(200);
+  });
+
+  it('control: a declared readonly field, roll-up or not, is still the static id at error', () => {
+    const findings = validateReadonlyFlowWrites({
+      objects: [accountObject],
+      flows: [flowWriting('update_record', { order_count: 3, credit_status: 'hold' }, 'user')],
+    });
+    expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+      [FLOW_UPDATE_READONLY_FIELD, 'error', 'flows[0].nodes[1].config.fields.order_count'],
+      [FLOW_UPDATE_READONLY_FIELD, 'error', 'flows[0].nodes[1].config.fields.credit_status'],
+    ]);
+  });
+
+  it('control: a write to a field that is not a roll-up draws nothing', () => {
+    const findings = validateReadonlyFlowWrites({
+      objects: [accountObject],
+      flows: [flowWriting('update_record', { name: 'Acme' }), flowWriting('create_record', { name: 'Acme' })],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it.each(['create_record', 'update_record'] as const)('control: a runAs:system %s writing the roll-up draws nothing', (nodeType) => {
+    const findings = validateReadonlyFlowWrites({
+      objects: [accountObject],
+      flows: [flowWriting(nodeType, { order_total: 100 }, 'system')],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('`os explain flow-update-summary-field` says the engine drops it on both verbs and that it never blocks a build', () => {
+    const text = explanationOf(FLOW_UPDATE_SUMMARY_FIELD);
+    expect(text).toContain('on create and on update');
+    expect(text).toContain('never blocks a build');
   });
 });

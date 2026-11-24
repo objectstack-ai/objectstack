@@ -42,8 +42,10 @@ import type { ApprovalSentenceRender } from './admin-rescue-note.js';
  *    organization's administrators (`admin_rescue`, the default, or a
  *    `fallback` that named no one but the submitter);
  *  - `no_one` — nobody was left and no administrator other than the submitter
- *    could take it, so the request opened on the slate that names no one,
- *    which only the privileged override decides.
+ *    could take it, so the request opened on the slate that names no one. Its
+ *    remedy is the no-approver note written beside this one
+ *    (`no-approver-note.ts`); the submitter cannot take it through the
+ *    override either.
  *
  * A `fail` node opens no request, so it has no route to record: its
  * `NO_APPROVERS` refusal names the exclusion instead.

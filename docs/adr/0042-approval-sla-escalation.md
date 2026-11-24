@@ -100,6 +100,8 @@ would require per-request clock bookkeeping (schema change) and is exactly
 the kind of speculative state this ADR avoids; it gets built when a real
 tenant asks.
 
+> **Note (2026-11-19) — a second clock.** [ADR-0157](./0157-working-calendars-are-org-editable-runtime-data-resolved-by-code-or-refused.md) D5 adds `escalation.clock: 'working_time'` beside the default `wall_clock`: the deadline still runs from `created_at` and does not pause, and only how the hours are counted changes; its D9 says what the sweep does when a working-time deadline cannot be computed, and its D12 recomputes that deadline on every sweep while §1's single-shot rule stands.
+
 ## Mechanics
 
 - **Wiring**: `ApprovalsServicePlugin.start()` resolves the `job` service

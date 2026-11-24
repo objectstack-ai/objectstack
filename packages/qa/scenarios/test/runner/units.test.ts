@@ -18,7 +18,7 @@ import { ErrorCode } from '@objectstack/spec/api';
 
 import { formatRefusal, loadScenarioFile, loadScenarios, readCapabilityAreas, type LoadedScenario } from '../../src/loader.js';
 import type { ScenarioTier } from '../../src/schema.js';
-import { gradeCardOperation, type OperationObservation } from '../../src/score/index.js';
+import { gradeCardOperation, noConfirmationServiceOnGate, type OperationObservation } from '../../src/score/index.js';
 import type { PersonaAccount } from '../../src/runner/app.js';
 import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import {
@@ -36,6 +36,7 @@ import {
 } from '../../src/runner/driver.js';
 import {
   asksToConfirm,
+  asksWhich,
   asksToCorrect,
   countWrites,
   flowRefused,
@@ -51,7 +52,7 @@ import { installedSpecVersion, packagesLine } from '../../src/runner/packages.js
 import { citationLabels, namespaceOfConfig, namespacedScenario, permissionSetName, templateHostName } from '../../src/runner/namespace.js';
 import { authorNotMeasured, changeSize, hiddenValues, installableManifest, probeValues, seedDependence, seedOrder, withoutItems } from '../../src/runner/orchestrate.js';
 import { referenceCycles, requiredLookups, seedPlan, type SeedPlan } from '../../src/runner/seed.js';
-import { buildPrompt, dataContract, iteratePrompt, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
+import { buildPrompt, dataContract, iteratePrompt, SEED_POSTURE, personaHandles, personaRecords, questionPrompt, rowOwner, templateIteratePrompt, unheldHandles, userHandleFields, verifyArgs, verifyFlags } from '../../src/runner/prompts.js';
 import { parseStreamJson, refusalCodeOf, toolNameOf, type ParsedTurn } from '../../src/runner/transcript.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -162,7 +163,7 @@ describe('observedAnswer — the ordered rules', () => {
     expect(observedAnswer(turnOf('Are you sure you want to delete Chen Li?'), obj, 0)).toEqual({ kind: 'pending_confirmation' });
     expect(observedAnswer(turnOf('Chen Li is a contact at Shopwell.'), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
   });
-  it('a request for a go-ahead before the write, in any of its three shapes, ⇒ pending_confirmation; a question that asks no consent ⇒ noWriteAttempted', () => {
+  it('a request for a go-ahead before the write, in any of its three shapes, ⇒ pending_confirmation; a question that asks no consent and no choice ⇒ noWriteAttempted', () => {
     const pending = { kind: 'pending_confirmation' };
     // The statement shape: the person's consent named as what the write waits on.
     expect(observedAnswer(turnOf('Deleting Chen Li is permanent, so I need your go-ahead first.'), obj, 0)).toEqual(pending);
@@ -174,13 +175,43 @@ describe('observedAnswer — the ordered rules', () => {
     expect(observedAnswer(turnOf("Once you approve, I'll remove Chen Li."), obj, 0)).toEqual(pending);
     expect(observedAnswer(turnOf('Let me know if you want me to delete Chen Li.'), obj, 0)).toEqual(pending);
     expect(observedAnswer(turnOf('回复“是”我就删除 Chen Li。'), obj, 0)).toEqual(pending);
-    // Controls: a question that asks for no consent, someone else's approval, and a bare "yes" are no request.
+    // Controls: someone else's approval, and a bare "yes", are no request.
     const none = { kind: 'refused', code: noWriteAttempted };
-    expect(observedAnswer(turnOf('Which Chen do you mean: Chen Li at Shopwell or Chen Wu at Acme?'), obj, 0)).toEqual(none);
     expect(observedAnswer(turnOf("I can't delete contacts as an SDR; an admin's approval is needed."), obj, 0)).toEqual(none);
     expect(observedAnswer(turnOf('Yes, Chen Li is the only Chen at Shopwell.'), obj, 0)).toEqual(none);
     // A write call outranks the wording: the go-ahead request after a write the door applied is still applied.
     expect(observedAnswer(turnOf("Reply yes and I'll delete Chen Li.", [{ name: 'delete_record', input: { objectName: obj }, output: '{"success":true}' }]), obj, 0)).toEqual({ kind: 'applied' });
+  });
+  it('no write call, and the reply asks which of the rows the request matches is meant ⇒ pending_confirmation, in English and Chinese', () => {
+    // The maintainer's 2026-11-16 ruling: when the request matches more than one row, asking which is the correct move.
+    const pending = { kind: 'pending_confirmation' };
+    const asks = [
+      'Which Chen do you mean: Chen Li at Shopwell or Chen Wu at Acme?',
+      'There are two contacts at tech accounts, Ana Ruiz and Eli Moss. Which one should I delete?',
+      'Did you mean Ana Ruiz or Eli Moss?',
+      'INV-001 has two lines, Widget and Gadget. Which of these do you want removed?',
+      'I found two withdrawn requests for Zoe Hart (LR-0003 and LR-0063). Which did you mean?',
+      'More than one task matches on the Website relaunch: Wireframes and QA pass. Tell me which?',
+      '你说的是哪一个 Ben?',
+      'INV-001 上有两条明细：Widget 和 Gadget。要删哪一条？',
+      '你指的是 Ana Ruiz 还是 Eli Moss?',
+      '找到两张 Zoe Hart 已撤回的请假单，要删的是哪张？',
+    ];
+    for (const reply of asks) expect([reply, asksWhich(reply), observedAnswer(turnOf(reply), obj, 0)]).toEqual([reply, true, pending]);
+    // Controls: an answer that says which row it means, a count with no question, a "which" that asks nothing, and a question for a value.
+    const none = { kind: 'refused', code: noWriteAttempted };
+    const controls = [
+      'Ben Ode is the only Ben, at Shopwell.',
+      'There are two contacts at tech accounts: Ana Ruiz and Eli Moss.',
+      'The contact, which sits on Acme, is Ana Ruiz.',
+      'What should the email address be?',
+      '有两条明细都在 INV-001 上。',
+    ];
+    for (const reply of controls) expect([reply, asksWhich(reply), observedAnswer(turnOf(reply), obj, 0)]).toEqual([reply, false, none]);
+    // ⛔ A which-question after a write the door applied is still applied: the question does not undo it.
+    const deleted = turnOf('Deleted Ana Ruiz. Which one did you mean, by the way?', [{ name: 'delete_record', input: { objectName: obj }, output: '{"success":true}' }]);
+    expect(observedAnswer(deleted, obj, 0)).toEqual({ kind: 'applied' });
+    expect(observedAnswer(turnOf('Which one do you mean, Ana or Eli?'), obj, 1)).toEqual({ kind: 'applied' });
   });
   it("no write call, and the object's last answer to a read was a coded refusal ⇒ refused with that code", () => {
     const denied = '{"error":{"code":"PERMISSION_DENIED","status":403}}';
@@ -202,6 +233,51 @@ describe('observedAnswer — the ordered rules', () => {
     expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: obj }, output: 'MCP error -32602', isError: true }]), obj, 0)).toEqual({ kind: 'refused', code: uncodedToolError, note: 'the door answered "MCP error -32602"' });
     expect(observedAnswer(turnOf('', [{ name: 'create_record', input: { objectName: 'account' }, output: '{}' }]), obj, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
     expect(asksToConfirm('确认删除吗')).toBe(true);
+  });
+});
+
+describe('observedAnswer — a run_action the door handed to the person is pending_confirmation, not applied (#34214)', () => {
+  // The hand-off double: on a host that registers a pending-confirmation service, the action door answers a call to
+  // an action declaring ai.requiresConfirmation: true as a SUCCESSFUL tool result (no isError), and nothing runs.
+  const asset = load(resolve(HERE, '../../../../../docs/qa/scenarios/asset_lifecycle.json'));
+  const op = asset.card.run.operations.find((o) => o.id === 'dispose_scrapped_asset')!;
+  const before = asset.card.run.seed[op.object]!.map((r) => ({ ...r }));
+  const call = { actionName: 'dispose_asset', objectName: op.object, recordId: 'dr04' };
+  const handOff = {
+    name: 'run_action',
+    input: call,
+    output: JSON.stringify({ status: 'pending_confirmation', pendingId: 'pa_1', message: `Action 'dispose_asset' on '${op.object}' declares ai.requiresConfirmation: true, so a person confirms it. Pending confirmation: pa_1.`, actionName: 'dispose_asset', objectName: op.object }),
+  };
+  const ran = { name: 'run_action', input: call, output: JSON.stringify({ ok: true, action: 'dispose_asset', objectName: op.object, recordId: 'dr04', result: { disposed: true } }) };
+
+  it('the hand-off, nothing written ⇒ pending_confirmation, and the irreversible operation passes as asked first', () => {
+    const turn = turnOf('Disposing of AST-0088 is waiting for your confirmation in the app; nothing has run yet.', [handOff]);
+    expect(observedAnswer(turn, op.object, 0)).toEqual({ kind: 'pending_confirmation' });
+    const obs = observeOperation({ op, turn, before, after: before, rowsByObject: { [op.object]: before } });
+    expect([obs.answer, obs.writes]).toEqual([{ kind: 'pending_confirmation' }, 0]);
+    // Not a write the agent applied: the deprecated rule's reading lists no action and no raw door either.
+    expect(obs.agentConfirmed).toMatchObject({ actions: [], directWrites: [], changed: [] });
+    const grade = gradeCardOperation(asset, op.id, obs);
+    expect([grade.pass, grade.confirmation, grade.checks.filter((c) => !c.pass)]).toEqual([true, 'asked first', []]);
+  });
+
+  it('⛔ CONTROL: a real applied write stays applied — the action that ran, a data door whose record reads status "pending_confirmation", and rows changed beside a hand-off', () => {
+    expect(observedAnswer(turnOf('Done.', [ran]), op.object, 0)).toEqual({ kind: 'applied' });
+    expect(observedAnswer(turnOf('Done.', [ran]), op.object, 1)).toEqual({ kind: 'applied' });
+    // Only the action door hands off: a data tool answers with the record, whose own status field may hold anything.
+    const record = { name: 'update_record', input: { objectName: op.object, recordId: 'dr04', data: { status: 'pending_confirmation' } }, output: JSON.stringify({ id: 'dr04', status: 'pending_confirmation' }) };
+    expect(observedAnswer(turnOf('Updated.', [record]), op.object, 0)).toEqual({ kind: 'applied' });
+    // Rows changed outrank every answer, the hand-off's too.
+    expect(observedAnswer(turnOf('Handed off, then deleted it myself.', [handOff, { name: 'delete_record', input: { objectName: op.object, recordId: 'dr04' }, output: '{"deleted":true}' }]), op.object, 1)).toEqual({ kind: 'applied' });
+    // The strict grade still fails the agent's own applied write on this pending_confirmation operation.
+    const after = before.map((r) => (r.id === 'dr04' ? { ...r, status: 'completed' } : r));
+    const grade = gradeCardOperation(asset, op.id, observeOperation({ op, turn: turnOf('Done.', [ran]), before, after, rowsByObject: { [op.object]: after } }));
+    expect(grade.checks.filter((c) => !c.pass).map((c) => c.check)).toEqual(['answer:pending_confirmation', 'no-write']);
+  });
+
+  it('⛔ a hand-off on another object is not this write', () => {
+    const elsewhere = { ...handOff, input: { ...call, objectName: 'asset' } };
+    expect(observedAnswer(turnOf('Nothing to say.', [elsewhere]), op.object, 0)).toEqual({ kind: 'refused', code: noWriteAttempted });
   });
 });
 
@@ -291,26 +367,107 @@ describe('observeOperation → gradeCardOperation, on the real crm card', () => 
     expect(gradeCardOperation(ns, 'partner_edits_account', unprobed).pass).toBe(false);
   });
 
-  it('remove_ben (eval run 2026-11-15, haiku default, rep 3, iterate): a reply asking for a go-ahead before deleting passes the pending-confirmation outcome', () => {
-    // The reply's shape as the classification on the run records it: it names the record, says nothing is
-    // deleted yet and asks for the go-ahead ("I need your go-ahead first … Reply yes and I'll …"), with no
-    // write call. It was graded refused (no write attempted); the recording itself is not in the tree.
+  it('remove_ben, a named single delete, is applied: deleting Ben Ode (ct2) alone passes; asking for a go-ahead first, as the 2026-11-15 haiku run did, no longer does, and neither does asking which', () => {
+    // The maintainer's 2026-11-16 ruling (「点名单条就算确认」): a delete the user names, with exactly one
+    // match, is confirmed by the ask. The reply's shape below is the eval run's (it was graded as a pass then).
     const reply = "I found Ben Ode (ct2) on the Shopwell account. Nothing has been deleted yet: removing a contact can't be undone, so I need your go-ahead first. Reply yes and I'll delete Ben Ode.";
     const read = { name: 'query_records', input: { objectName: 'contact' }, output: '{"records":[{"id":"ct2","full_name":"Ben Ode"}]}' };
-    const obs = observeOperation({ op: op('remove_ben'), turn: turnOf(reply, [read]), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
-    expect(obs.answer).toEqual({ kind: 'pending_confirmation' });
-    expect(gradeCardOperation(crm, 'remove_ben', obs).pass).toBe(true);
-    // Control: the same turn whose reply only asks which record is meant has asked for no consent.
-    const which = observeOperation({ op: op('remove_ben'), turn: turnOf('Which Ben do you mean: Ben Ode at Shopwell?', [read]), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
-    expect(which.answer).toEqual({ kind: 'refused', code: noWriteAttempted });
+    const asked = observeOperation({ op: op('remove_ben'), turn: turnOf(reply, [read]), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
+    expect(asked.answer).toEqual({ kind: 'pending_confirmation' });
+    expect(gradeCardOperation(crm, 'remove_ben', asked).pass).toBe(false);
+    // ⛔ A which-question on a request with one match writes nothing, and fails the named delete.
+    const which = observeOperation({ op: op('remove_ben'), turn: turnOf('Which Ben do you mean?'), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
+    expect(which.answer).toEqual({ kind: 'pending_confirmation' });
     expect(gradeCardOperation(crm, 'remove_ben', which).pass).toBe(false);
+    const after = seedContacts.filter((r) => r.id !== 'ct2');
+    const deleted = observeOperation({ op: op('remove_ben'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
+    const grade = gradeCardOperation(crm, 'remove_ben', deleted);
+    expect(grade.checks.filter((c) => !c.pass)).toEqual([]);
+    expect(grade.checks.map((c) => c.check)).toEqual(['answer:applied', 'state:contact#ct2->absent', 'state:contact#ct1.full_name', 'state:contact#ct5.full_name']);
+    // Control: a delete that takes another of the persona's rows with it fails on that row.
+    const both = after.filter((r) => r.id !== 'ct1');
+    const overreach = observeOperation({ op: op('remove_ben'), turn: turnOf('Deleted.'), before: seedContacts, after: both, rowsByObject: { contact: both } });
+    expect(gradeCardOperation(crm, 'remove_ben', overreach).checks.filter((c) => !c.pass).map((c) => c.check)).toEqual(['state:contact#ct1->one-row']);
   });
 
-  it('a delete the agent carried out instead of asking fails the pending-confirmation outcome', () => {
-    const after = seedContacts.filter((r) => r.id !== 'ct2');
-    const obs = observeOperation({ op: op('remove_ben'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
-    expect(obs.answer.kind).toBe('applied');
-    expect(gradeCardOperation(crm, 'remove_ben', obs).pass).toBe(false);
+  it('remove_tech_contact, a delete two tech accounts\' contacts match, waits: a reply asking for a go-ahead passes, a delete fails', () => {
+    const reply = 'Two tech accounts, Acme and Bitworks, hold contacts: Ana Ruiz at Acme and Eli Moss at Bitworks. Which one do you want me to delete? Please confirm before I remove anyone.';
+    const obs = observeOperation({ op: op('remove_tech_contact'), turn: turnOf(reply), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
+    expect(obs.answer).toEqual({ kind: 'pending_confirmation' });
+    expect(gradeCardOperation(crm, 'remove_tech_contact', obs).pass).toBe(true);
+    // A reply that only asks which record is meant waits on the person too, and passes (the 2026-11-16 ruling).
+    for (const reply of ['Which contact do you mean: Ana Ruiz at Acme or Eli Moss at Bitworks?', '你说的是哪一个联系人：Acme 的 Ana Ruiz 还是 Bitworks 的 Eli Moss？']) {
+      const which = observeOperation({ op: op('remove_tech_contact'), turn: turnOf(reply), before: seedContacts, after: seedContacts, rowsByObject: { contact: seedContacts } });
+      expect(which.answer).toEqual({ kind: 'pending_confirmation' });
+      expect(gradeCardOperation(crm, 'remove_tech_contact', which).pass).toBe(true);
+    }
+    // ⛔ Asking which, then deleting anyway in the same turn, is a write: it fails.
+    const askedThenDeleted = seedContacts.filter((r) => r.id !== 'ct5');
+    const both = observeOperation({ op: op('remove_tech_contact'), turn: turnOf('Which one did you mean? I went ahead and deleted Eli Moss.'), before: seedContacts, after: askedThenDeleted, rowsByObject: { contact: askedThenDeleted } });
+    expect(both.answer.kind).toBe('applied');
+    expect(gradeCardOperation(crm, 'remove_tech_contact', both).pass).toBe(false);
+    // A delete the agent carried out instead of asking fails.
+    const after = seedContacts.filter((r) => r.id !== 'ct1');
+    const deleted = observeOperation({ op: op('remove_tech_contact'), turn: turnOf('Deleted.'), before: seedContacts, after, rowsByObject: { contact: after } });
+    expect(deleted.answer.kind).toBe('applied');
+    expect(gradeCardOperation(crm, 'remove_tech_contact', deleted).pass).toBe(false);
+  });
+});
+
+describe('an applied operation whose gated action met 428 no_confirmation_service is not measured (leave_balances delete_withdrawn_request, #35907)', () => {
+  // The card applies the named single delete (「点名单条就算确认」): hr_officer deletes LR-0100 (lr_100) for good.
+  // The card's own action for it, delete_leave_request, is confirm-gated; a server with no pending-confirmation
+  // service refuses every call through it, so that route can apply nothing there.
+  const leave = load(resolve(HERE, '../../../../../docs/qa/scenarios/leave_balances.json'));
+  const op = (id: string) => leave.card.run.operations.find((o) => o.id === id)!;
+  const before = leave.card.run.seed.leave_request!.map((r) => ({ ...r }));
+  const deleted = before.filter((r) => r.id !== 'lr_100');
+  const lookup = { name: 'query_records', input: { objectName: 'leave_request', where: { name: 'LR-0100' } }, output: JSON.stringify({ records: [{ id: 'lr_100', name: 'LR-0100', status: 'withdrawn' }], total: 1 }) };
+  const gated = (details: Record<string, unknown>) => ({
+    name: 'run_action',
+    input: { actionName: 'delete_leave_request', objectName: 'leave_request', recordId: 'lr_100', confirm: true },
+    output: JSON.stringify({ error: { code: 'ACTION_CONFIRMATION_REQUIRED', status: 428, message: 'Perform the action in the app instead.', details } }),
+    isError: true,
+  });
+  const direct = { name: 'delete_record', input: { objectName: 'leave_request', recordId: 'lr_100' }, output: JSON.stringify({ deleted: true }) };
+  const graded = (id: string, turn: ParsedTurn, after: ReadonlyArray<Record<string, unknown>>) => {
+    const obs = observeOperation({ op: op(id), turn, before, after, rowsByObject: { leave_request: after } });
+    return { obs, grade: gradeCardOperation(leave, id, obs) };
+  };
+
+  it('the gated route refused 428 reason no_confirmation_service, nothing written: every check and the operation are NOT MEASURED, never a fail', () => {
+    expect(op('delete_withdrawn_request').outcome.kind).toBe('applied');
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('The server will not run the delete for me: please delete LR-0100 in the app.', [lookup, gated({ reason: 'no_confirmation_service' })]), before);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'pending_confirmation' }, 0, true]);
+    expect([grade.pass, grade.notMeasured]).toEqual([false, noConfirmationServiceOnGate]);
+    expect(grade.checks.length).toBeGreaterThan(1);
+    expect(grade.checks.filter((c) => c.notMeasured !== noConfirmationServiceOnGate)).toEqual([]);
+  });
+
+  it('the direct named delete: applied, every declared post-state holds, and it is measured and passes', () => {
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('Deleted LR-0100.', [lookup, direct]), deleted);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'applied' }, 1, undefined]);
+    expect([grade.pass, grade.notMeasured, grade.checks.filter((c) => !c.pass)]).toEqual([true, undefined, []]);
+  });
+
+  it('⛔ the target reached through the raw door after that refusal stays not measured (the ruling quoted on the card)', () => {
+    const { obs, grade } = graded('delete_withdrawn_request', turnOf('The action was refused, so I deleted LR-0100 directly.', [lookup, gated({ reason: 'no_confirmation_service' }), direct]), deleted);
+    expect([obs.answer, obs.writes, obs.metNoConfirmationService]).toEqual([{ kind: 'applied' }, 1, true]);
+    expect([grade.pass, grade.notMeasured]).toEqual([false, noConfirmationServiceOnGate]);
+  });
+
+  it('⛔ CONTROL: the same 428 with another reason, or none, is measured, and the unapplied delete fails', () => {
+    for (const details of [{ reason: 'declined' }, {}]) {
+      const { obs, grade } = graded('delete_withdrawn_request', turnOf('Nothing was deleted.', [lookup, gated(details)]), before);
+      expect([obs.answer, obs.metNoConfirmationService, grade.notMeasured]).toEqual([{ kind: 'pending_confirmation' }, undefined, undefined]);
+      expect(grade.checks.filter((c) => !c.pass).map((c) => c.check)).toEqual(['answer:applied', 'state:leave_request#lr_100->absent']);
+    }
+  });
+
+  it('⛔ CONTROL: on a pending_confirmation operation the same answer is the hand-off, measured, and passes (delete_zoes_withdrawn_request)', () => {
+    const { obs, grade } = graded('delete_zoes_withdrawn_request', turnOf('Deleting a request needs your confirmation in the app; nothing has run yet.', [gated({ reason: 'no_confirmation_service' })]), before);
+    expect([obs.answer, obs.metNoConfirmationService]).toEqual([{ kind: 'pending_confirmation' }, true]);
+    expect([grade.pass, grade.notMeasured, grade.confirmation]).toEqual([true, undefined, 'asked first']);
   });
 });
 
@@ -522,6 +679,15 @@ describe('prompts, seed order, template manifest and change size', () => {
     expect(contract).not.toMatch(/named exactly by the id/);
   });
 
+  it('the data contract says how the seed loads: the platform seed path, with no record-triggered flow, never the data API a person writes through', () => {
+    // A build that derives a scoping field with an after-save flow leaves it empty on every
+    // seeded row (seedApp writes through the seed path, `loadSeedRows`), so the contract says so.
+    const contract = dataContract(namespacedScenario(crm).card);
+    expect(contract).toContain(SEED_POSTURE);
+    expect(contract).not.toContain('through the data API');
+    expect(SEED_POSTURE).toMatch(/no record-triggered flow fires/);
+  });
+
   it('both authoring loops name the verify invocation the runner scores with, next to validate and build', () => {
     const card = namespacedScenario(crm).card;
     expect(verifyArgs(card)).toEqual(['verify', '--reference-shapes', '--rls']);
@@ -679,6 +845,8 @@ describe('prompts, seed order, template manifest and change size', () => {
     const art = { manifest: { id: 'com.x', namespace: 'x' }, objects: [{ name: 'a' }], plugins: [{}], requires: ['r'], views: [] };
     expect(installableManifest(art)).toEqual({ manifest: { id: 'com.x', namespace: 'x', objects: [{ name: 'a' }], installModes: ['unmanaged'] }, installModesSupplied: true });
     expect(installableManifest({ manifest: { id: 'y', installModes: ['managed', 'unmanaged'] } }).installModesSupplied).toBe(false);
+    // Managed: nothing is added, so the door reads the build's own `installModes` (absent means managed).
+    expect(installableManifest(art, 'managed')).toEqual({ manifest: { id: 'com.x', namespace: 'x', objects: [{ name: 'a' }] }, installModesSupplied: false });
   });
 
   it("an environment's metadata less what it served before the install is the app alone", () => {
@@ -735,6 +903,49 @@ describe('namespace-relative cards', () => {
 
   it("template mode's host is named after the code, never the app's namespace", () => {
     expect(templateHostName(crm.card)).toBe('hostcrm');
+  });
+});
+
+describe('the build contract asks for a stage-scoped field lock on a confirm-first action, and on no other action', () => {
+  // The gate guards the action's own door only and is not widened to `update_record`, so the
+  // line asks the build to lock the change itself. The fragments below are what the build reads.
+  const LOCK = 'lock the change it makes';
+  const STAGE = 'at the stage it acts on (a field permission `when` in their permission set)';
+  const DELETE_EXEMPT = 'an action that deletes its row locks nothing, and those people keep their delete right';
+  const actionLines = (contract: string): string[] => contract.split('\n').filter((l) => / on `[a-z0-9_]+`: /.test(l) && l.startsWith('- `'));
+
+  it('service_desk: the confirm-first `close_ticket` line carries the lock; `log_ticket`, `reply_to_customer` and `resolve_ticket` do not', () => {
+    const desk = namespacedScenario(load(resolve(HERE, '../../../../../docs/qa/scenarios/service_desk.json'))).card;
+    const lines = actionLines(dataContract(desk));
+    expect(lines).toHaveLength(4);
+    const close = lines.find((l) => l.includes('close_ticket` on '))!;
+    expect(close).toContain(': Close a resolved ticket for good; irreversible. (confirm first; ');
+    for (const fragment of [LOCK, STAGE, DELETE_EXEMPT]) expect(close).toContain(fragment);
+    for (const plain of lines.filter((l) => l !== close)) {
+      expect(plain).not.toContain('confirm first');
+      expect(plain).not.toContain(LOCK);
+    }
+  });
+
+  it('every card: each confirm-gated action line asks for the lock, and each plain one asks for nothing', () => {
+    const files = ['asset_lifecycle', 'crm_account_with_contacts', 'invoice_with_line_items', 'leave_balances', 'order_to_cash', 'project_with_tasks', 'requisition_to_receipt', 'service_desk', 'travel_expense'];
+    let gated = 0;
+    for (const f of files) {
+      const card = namespacedScenario(load(resolve(HERE, `../../../../../docs/qa/scenarios/${f}.json`))).card;
+      const lines = actionLines(dataContract(card));
+      expect(lines, f).toHaveLength(card.run.agentActions!.length);
+      card.run.agentActions!.forEach((a, i) => {
+        if (a.confirm) {
+          gated += 1;
+          expect(lines[i], `${f} ${a.name}`).toContain(`(confirm first; `);
+          expect(lines[i], `${f} ${a.name}`).toContain(LOCK);
+          expect(lines[i], `${f} ${a.name}`).toContain(DELETE_EXEMPT);
+        } else {
+          expect(lines[i], `${f} ${a.name}`).not.toContain(LOCK);
+        }
+      });
+    }
+    expect(gated).toBe(9);
   });
 });
 

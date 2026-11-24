@@ -114,6 +114,18 @@ async function pickFrom(index: 0 | 1, label: string) {
   fireEvent.click(option);
 }
 
+/**
+ * A number range's bound once the object schema has typed its column.
+ *
+ * The widget draws the stored row before `getObjectSchema` resolves, with an
+ * untyped (text) bound that becomes `<input type="number">` when the schema
+ * lands. A bare `findByLabelText` resolves on the first box it sees, so a
+ * typed-value assertion straight after it races the schema.
+ */
+function findTypedBound(label: 'From' | 'To') {
+  return screen.findByRole('spinbutton', { name: label });
+}
+
 describe('the dropdown path: a date range authors nothing until both bounds are filled', () => {
   it('emits nothing on pick and on one bound, then exactly the range', async () => {
     const { onChange } = renderWidget('');
@@ -170,7 +182,11 @@ describe('the stored-criteria path: clearing a bound of a saved range', () => {
 
     // A saved number range loads as a `between` row with two editable bounds,
     // even though the number bucket does not offer `between` in its dropdown.
-    const to = await screen.findByLabelText('To');
+    // The row is seeded from the stored value at once, but `age` is typed
+    // `number` only when the async object schema answers; until then the
+    // bound is a text box holding `"5"`. Wait for the TYPED box (a number
+    // input's role is `spinbutton`), never for whichever box is there first.
+    const to = await findTypedBound('To');
     expect(to).toHaveValue(5);
     // Seeding is not an edit.
     expect(onChange).not.toHaveBeenCalled();
@@ -194,8 +210,8 @@ describe('a criteria already stored with a blank bound', () => {
     // the bound it has, and is rewritten only when the admin edits it.
     const { onChange } = renderWidget('{"age":{"$gte":1,"$lte":""}}');
 
-    const to = await screen.findByLabelText('To');
-    expect(screen.getByLabelText('From')).toHaveValue(1);
+    const to = await findTypedBound('To');
+    expect(screen.getByRole('spinbutton', { name: 'From' })).toHaveValue(1);
     expect(to).toHaveValue(null);
     expect(onChange).not.toHaveBeenCalled();
 

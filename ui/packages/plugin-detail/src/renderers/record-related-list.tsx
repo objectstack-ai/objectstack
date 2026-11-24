@@ -29,9 +29,11 @@ import {
 import { useFieldPermissions, usePermissions } from '@object-ui/permissions';
 import { useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import { humanizeLabel } from '@object-ui/fields';
+import { usePageTabCountReporter } from '@object-ui/components';
 import {
   columnIdentity,
   elementDataSourceBlock,
+  isElementDataSourceConfig,
   resolveAffordance,
   servedObjectPluralLabel,
   toPredicateRecord,
@@ -39,7 +41,7 @@ import {
 } from '@object-ui/core';
 import type { RecordRelatedListComponentProps } from '@object-ui/types';
 import { RelatedList } from '../RelatedList';
-import { RecordBodyTablesContext, RelatedListCompactContext } from '../relatedListCompact';
+import { RecordBodyTableEditorSlotContext, RecordBodyTablesContext, RelatedListCompactContext, RelatedListTotalReportContext } from '../relatedListCompact';
 import { relatedCardId } from '../synth/relatedArrangement';
 import { useRecordAriaProps } from './recordComponentAria';
 import { ParentRecordBinding } from './recordBinding';
@@ -916,8 +918,31 @@ const NoParentRecord: React.FC<{
  * "declared but not reached" shape in miniature.
  */
 export const RecordRelatedListRenderer: React.FC<RecordRelatedListRendererProps> = elementDataSourceBlock((props) => (
-  <RecordRelatedListBound {...props} />
+  <RecordRelatedListOrEditor {...props} />
 ));
+
+/**
+ * objectstack#35599 — a record page in its edit state draws each body table it
+ * edits as the host's editor (`RecordBodyTableEditorSlotContext`), in this
+ * block's place and before either binding: the editor reads the page's record
+ * and its lines itself. Every other list, and every list outside an open edit
+ * state, is the bound block below.
+ */
+const RecordRelatedListOrEditor: React.FC<RecordRelatedListRendererProps> = (props) => {
+  const slot = React.useContext(RecordBodyTableEditorSlotContext);
+  const objectName = props.schema?.objectName;
+  const relationshipField = props.schema?.relationshipField;
+  if (
+    slot
+    && typeof objectName === 'string'
+    && typeof relationshipField === 'string'
+    && slot.ids.has(`${objectName}.${relationshipField}`)
+  ) {
+    const title = props.schema?.title;
+    return <>{slot.render({ objectName, relationshipField, title: typeof title === 'string' ? title : undefined })}</>;
+  }
+  return <RecordRelatedListBound {...props} />;
+};
 
 /** The block bound to its parent record and its child rows — see above. */
 const RecordRelatedListBound: React.FC<RecordRelatedListRendererProps> = (props) => {
@@ -925,18 +950,28 @@ const RecordRelatedListBound: React.FC<RecordRelatedListRendererProps> = (props)
   const parentBinding = schema?.parentDataSource;
   // objectui#12920 — the parent-read panel's title reads the bundle.
   const { t } = useObjectTranslation();
+  // objectstack#34250 — a list whose parent its own binding reads says how many
+  // records it holds to the `page:tabs` panel around it, since no tab strip can
+  // name that parent to count for it (`RelatedListTotalReportContext`). The
+  // predicate is the one `ParentRecordBinding` reads the binding by, so the
+  // list reports exactly when its parent is the bound one; the strip excludes
+  // the same lists from its own probe by the same predicate.
+  const reportTabCount = usePageTabCountReporter();
+  const reportTotal = isElementDataSourceConfig(parentBinding) ? reportTabCount : undefined;
   return (
-    <ParentRecordBinding
-      binding={parentBinding}
-      blockKey="record:related_list"
-      testId="record-related-list-parent"
-      errorTitle={t('element.relatedList.parentUnreadable', {
-        defaultValue: 'This related list’s parent record could not be read',
-      })}
-      absent={<NoParentRecord object={parentBinding?.object} className={className} designer={splitDesigner(rest).designer} />}
-    >
-      <RecordRelatedListChildRows {...props} />
-    </ParentRecordBinding>
+    <RelatedListTotalReportContext.Provider value={reportTotal}>
+      <ParentRecordBinding
+        binding={parentBinding}
+        blockKey="record:related_list"
+        testId="record-related-list-parent"
+        errorTitle={t('element.relatedList.parentUnreadable', {
+          defaultValue: 'This related list’s parent record could not be read',
+        })}
+        absent={<NoParentRecord object={parentBinding?.object} className={className} designer={splitDesigner(rest).designer} />}
+      >
+        <RecordRelatedListChildRows {...props} />
+      </ParentRecordBinding>
+    </RelatedListTotalReportContext.Provider>
   );
 };
 

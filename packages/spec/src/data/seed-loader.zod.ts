@@ -72,14 +72,16 @@ export type ReferenceResolutionParsed = z.infer<typeof ReferenceResolutionSchema
 
 /**
  * Represents a single object in the dependency graph.
- * Built from object metadata by inspecting lookup/master_detail fields.
+ * Built from object metadata by inspecting lookup/master_detail fields, and
+ * from the seed datasets' declared `dependsOn` edges.
  */
 export const ObjectDependencyNodeSchema = lazySchema(() => z.object({
   /** Object machine name */
   object: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe('Object name (snake_case)'),
 
   /**
-   * Objects that this object depends on (via lookup/master_detail fields).
+   * Objects that this object depends on: via its lookup / master_detail /
+   * user fields, plus the objects its datasets declare in `Seed.dependsOn`.
    * These must be loaded before this object.
    */
   dependsOn: z.array(z.string()).describe('Objects this object depends on'),
@@ -416,8 +418,8 @@ export const SeedLoadResultSchema = lazySchema(() => z.object({
    * and left as it was. Each id appears once, in record order. Empty on a
    * dry run, which writes nothing and matches nothing.
    *
-   * [#30348] Exactly what the loader fills, per mode: `insert` / `replace` —
-   * each row an insert created; `ignore` (the default since #30081) — each row
+   * [#30348] Exactly what the loader fills, per mode: `ignore` (the default
+   * since #30081; the unkeyed `insert` / `replace` modes are retired, #34613) — each row
    * an insert created AND each existing row a record's key matched, which the
    * mode then leaves as it was; `upsert` — created, updated, and matched-but-
    * unchanged rows; `update` — updated and matched-but-unchanged rows (an

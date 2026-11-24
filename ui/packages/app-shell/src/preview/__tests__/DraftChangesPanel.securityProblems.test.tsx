@@ -82,7 +82,7 @@ describe('DraftChangesPanel — pre-publish security posture (objectui#5418)', (
     // language (`SECURITY_RULE_TEXT`), not the ADR paragraph.
     expect(block.textContent).toMatch(/sharingModel/);
     // And where to go, which the toast never said.
-    expect(block.textContent).toMatch(/Settings → Record sharing/);
+    expect(block.textContent).toMatch(/Settings → Who can see which records/);
   });
 
   it('reports without blocking — the server door stays the authority', async () => {

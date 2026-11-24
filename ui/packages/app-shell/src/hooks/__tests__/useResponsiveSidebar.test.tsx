@@ -1,12 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * useResponsiveSidebar — the sidebar folds to its icon rail on a window
- * narrower than `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` and unfolds when it widens
- * (objectstack#27593). The wide window's open state survives the fold, a
- * reader's "keep open" turns the fold off, and the phone drawer is left alone.
- * Only an open or close on a wide window is kept as the wide-window choice
- * (objectstack#28079).
+ * useResponsiveSidebar — a window starts in the reader's choice for its side
+ * of `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` (1280 px), else expanded on a wide
+ * window and collapsed on a narrow one (objectstack#27593, ruling 7069868269
+ * on objectstack#36112). The two choices are kept apart: an open or close on a
+ * wide window is the wide-window choice (objectstack#28079), a close of the
+ * docked sidebar on a narrow window the narrow-window choice; the phone drawer
+ * is left alone.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -15,10 +16,10 @@ import { SidebarProvider, useSidebar } from '@object-ui/components';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useResponsiveSidebar } from '../useResponsiveSidebar';
 import {
-  CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE,
+  CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE,
   readWideWindowOpen,
 } from '../../layout/consoleSidebarRail';
-import { writeWorkspacePreference } from '../../utils/workspacePreference';
+import { readWorkspacePreference, writeWorkspacePreference } from '../../utils/workspacePreference';
 
 /**
  * Size the test window: happy-dom's own viewport, so `innerWidth`, the
@@ -78,73 +79,76 @@ afterEach(() => {
   document.cookie = 'sidebar_state=; path=/; max-age=0';
 });
 
-describe('useResponsiveSidebar (objectstack#27593)', () => {
-  it('folds the sidebar on a 1280 px window and leaves it open on a 1440 px one', () => {
-    renderAt(1280);
+const narrowChoice = () => readWorkspacePreference(CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE, 'user');
+
+describe('useResponsiveSidebar (objectstack#27593, objectstack#36112)', () => {
+  it('starts collapsed on a 1279 px window and expanded on a 1280 px one', () => {
+    renderAt(1279);
     expect(openState()).toBe('false');
     cleanup();
 
-    renderAt(1440);
+    renderAt(1280);
     expect(openState()).toBe('true');
   });
 
-  it('keeps a manual expand on a narrow window (the rail expanded over the content)', () => {
-    renderAt(970);
+  it('a state it gives a window is not a choice: nothing is kept until the reader toggles', () => {
+    renderAt(1440);
+    resizeTo(1024);
+    resizeTo(1440);
+    expect(readWideWindowOpen()).toBeUndefined();
+    expect(narrowChoice()).toBeUndefined();
+  });
+
+  it('hands each side its own state as the window crosses the threshold', () => {
+    renderAt(1440);
+    expect(openState()).toBe('true');
+
+    resizeTo(1279);
     expect(openState()).toBe('false');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }));
-    expect(openState()).toBe('true');
-  });
-
-  it('hands the wide state back when the window widens, and folds again when it narrows', () => {
-    renderAt(1440);
-    expect(openState()).toBe('true');
 
     resizeTo(1280);
-    expect(openState()).toBe('false');
-    expect(readWideWindowOpen()).toBe(true);
-
-    resizeTo(1440);
     expect(openState()).toBe('true');
-    expect(readWideWindowOpen()).toBe(true);
   });
 
-  it('hands back a collapsed wide state as collapsed', () => {
+  it('keeps a collapse on a wide window, and gives it back when the window widens again', () => {
     renderAt(1440);
     fireEvent.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
     expect(openState()).toBe('false');
+    expect(readWideWindowOpen()).toBe(false);
 
-    resizeTo(1280);
-    // The reader expands the rail over the content on the narrow window…
-    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }));
-    expect(openState()).toBe('true');
-
-    // …and the wide window gets back the state the reader left it in.
+    resizeTo(1024);
+    expect(openState()).toBe('false');
     resizeTo(1440);
     expect(openState()).toBe('false');
   });
 
-  it('a load that opens wide after a narrow one gets the wide state back, not the fold', () => {
-    renderAt(1280);
-    expect(openState()).toBe('false');
-    cleanup();
-
-    // The primitive's cookie recorded the fold; the wide-window choice is kept apart.
-    renderAt(1440);
+  it('keeps a collapse of the docked sidebar on a narrow window as the narrow-window choice', () => {
+    writeWorkspacePreference(CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE, 'user', 'on');
+    renderAt(1024);
     expect(openState()).toBe('true');
-    expect(readWideWindowOpen()).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle sidebar' }));
+    expect(openState()).toBe('false');
+    expect(narrowChoice()).toBe('off');
+    // The wide-window choice is not touched.
+    expect(readWideWindowOpen()).toBeUndefined();
   });
 
-  it('"keep open" turns the fold off: a narrow window keeps the sidebar open', () => {
-    writeWorkspacePreference(CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE, 'user', 'on');
-    renderAt(1280);
+  it('a narrow-window choice turned collapsed elsewhere collapses an open sidebar', () => {
+    writeWorkspacePreference(CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE, 'user', 'on');
+    renderAt(1024);
     expect(openState()).toBe('true');
-    expect(readWideWindowOpen()).toBeUndefined();
+
+    act(() => {
+      writeWorkspacePreference(CONSOLE_SIDEBAR_NARROW_OPEN_PREFERENCE, 'user', 'off');
+    });
+    expect(openState()).toBe('false');
   });
 
   it('leaves the open state alone below the phone breakpoint, where the drawer takes over', () => {
     renderAt(700);
     expect(openState()).toBe('true');
     expect(readWideWindowOpen()).toBeUndefined();
+    expect(narrowChoice()).toBeUndefined();
   });
 });

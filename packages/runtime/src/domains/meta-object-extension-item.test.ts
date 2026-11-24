@@ -153,7 +153,7 @@ async function boot(extraObjects: readonly Record<string, unknown>[] = []) {
         expect(r.response?.status, JSON.stringify(r.response?.body)).toBe(200);
         return r.response?.body?.data;
     };
-    return { engine, protocol: p, saveAndPublish, rows, fieldsOn, extenders, exportOf };
+    return { engine, protocol: p, dispatcher, saveAndPublish, rows, fieldsOn, extenders, exportOf };
 }
 
 const has = (list: string[]) => list.includes('region__c');
@@ -707,7 +707,7 @@ describe('[#33216] the publish door judges the one-hop leaf through a lookup the
 });
 
 describe('[#33153] the publish door refuses a formula cycle the extension adds, as `os build` does', () => {
-    const formula = (expression: string) => ({ type: 'formula', label: 'F', expression, returnType: 'number' });
+    const formula = (expression: string, label = 'F') => ({ type: 'formula', label, expression, returnType: 'number' });
     const where = (field: string) => `object 'crm_account' · objectExtensions[0] · field '${field}' expression`;
     /** `os build`'s cycle findings at the extension, over the base as authored. */
     const atBuild = (item: unknown) => {
@@ -719,7 +719,7 @@ describe('[#33153] the publish door refuses a formula cycle the extension adds, 
 
     for (const [label, fields, members] of [
         ['a formula reading itself', { a__c: formula('record.a__c') }, ['a__c']],
-        ['two formulas reading each other', { a__c: formula('record.b__c'), b__c: formula('record.a__c') }, ['a__c', 'b__c']],
+        ['two formulas reading each other', { a__c: formula('record.b__c', 'A'), b__c: formula('record.a__c', 'B') }, ['a__c', 'b__c']],
     ] as const) {
         it(`⭐ LIT — ${label} is refused with the build's rule id and location on each member; no field is served`, async () => {
             const item = { extend: TARGET, fields };
@@ -739,7 +739,7 @@ describe('[#33153] the publish door refuses a formula cycle the extension adds, 
     }
 
     it('⭐ CONTROL — a chain of formulas the extension adds publishes and is served', async () => {
-        const item = { extend: TARGET, fields: { b__c: formula('record.a__c * 2'), a__c: formula('1 + 1') } };
+        const item = { extend: TARGET, fields: { b__c: formula('record.a__c * 2', 'B'), a__c: formula('1 + 1', 'A') } };
         expect(atBuild(item)).toEqual([]);
 
         const rig = await boot();
@@ -750,7 +750,7 @@ describe('[#33153] the publish door refuses a formula cycle the extension adds, 
 });
 
 describe('[#33494] the publish door serves the winner `os build` serves when another package extends the same field', () => {
-    const formula = (expression: string) => ({ type: 'formula', label: 'F', expression, returnType: 'number' });
+    const formula = (expression: string, label = 'F') => ({ type: 'formula', label, expression, returnType: 'number' });
     const number = { type: 'number', label: 'Sibling' };
     /** A third package, registered as an extender of the account at the priority given. */
     const SIBLING = 'com.acme.sibling';
@@ -785,8 +785,8 @@ describe('[#33494] the publish door serves the winner `os build` serves when ano
     }
 
     it('⭐ LIT — a higher sibling\'s formula closing a cycle through the entry\'s other field is refused on that field, as `os build` refuses it', async () => {
-        const sibling = { s__c: formula('record.a__c + 1') };
-        const item = { extend: TARGET, priority: 200, fields: { s__c: number, a__c: formula('record.s__c * 2') } };
+        const sibling = { s__c: formula('record.a__c + 1', 'S') };
+        const item = { extend: TARGET, priority: 200, fields: { s__c: number, a__c: formula('record.s__c * 2', 'A') } };
         const where = "object 'crm_account' · objectExtensions[0] · field 'a__c' expression";
         expect(atBuild(sibling, 300, item)).toContain(where.replace('objectExtensions[0]', 'packages[1].manifest.objectExtensions[0]'));
 
@@ -1011,5 +1011,61 @@ describe('[#29594] the App unit: HotCRM and three modules share one pair, and a 
         const created: any = await engine.insert(CASE, { subject: 'Outage', sla_tier__c: 'gold', organization_id: 'org_1' }, { context: { isSystem: true } });
         const back: any = await engine.findOne(CASE, { where: { id: created.id }, context: { isSystem: true } });
         expect(back?.sla_tier__c).toBe('gold');
+    }, 60_000);
+});
+
+describe('an unchanged owner object re-saved at the public door while an extension adds a column', () => {
+    // The owner is a stored object of the pair; a third package that depends on
+    // the pair extends it with a stored column. The owner's author then PUTs the
+    // owner's own body back unchanged. The destructive-change diff must judge the
+    // owner's layer, so the extension's column is no field this save drops.
+    const LEAD = 'crm_custom_lead';
+    const EXT = 'com.acme.leadext';
+    const leadBody = (fields: Record<string, unknown> = { title: { name: 'title', label: 'Title', type: 'text' }, score: { name: 'score', label: 'Score', type: 'number' } }) => ({
+        name: LEAD, label: 'Lead', sharingModel: 'private', fields,
+    });
+    const AUTHOR: any = {
+        request: {}, environmentId: 'platform',
+        executionContext: { userId: 'u_admin', systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'] },
+    };
+
+    async function extendedLead() {
+        const rig = await boot();
+        await rig.protocol.saveMetaItem({ type: 'object', name: LEAD, mode: 'draft', packageId: PAIR, item: leadBody() });
+        await rig.protocol.publishMetaItem({ type: 'object', name: LEAD, packageId: PAIR });
+        await rig.protocol.installPackage({
+            manifest: { id: EXT, name: 'lead-ext', version: '0.1.0', type: 'app', namespace: 'leadext', dependencies: { [PAIR]: '^0.1.0' } },
+        });
+        await rig.saveAndPublish(EXT, { extend: LEAD, fields: { leadext_region: { type: 'text', label: 'Region' } } }, LEAD);
+        // Precondition: the extension's column is served on the owner.
+        expect(Object.keys((rig.engine.registry.getObject(LEAD) as any)?.fields ?? {})).toContain('leadext_region');
+        const put = (item: unknown) => rig.dispatcher.handleMetadata(`/object/${LEAD}`, AUTHOR, 'PUT', item, { package: PAIR });
+        const stored = async () => {
+            const row: any = await rig.engine.findOne('sys_metadata', { where: { type: 'object', name: LEAD, package_id: PAIR, state: 'active' }, context: { isSystem: true } });
+            const body = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+            return Object.keys(body?.fields ?? {}).sort();
+        };
+        return { ...rig, put, stored };
+    }
+
+    it('answers 200 and keeps the extension\'s column served', async () => {
+        const rig = await extendedLead();
+
+        const res: any = await rig.put(leadBody());
+
+        expect({ status: res.response?.status, code: res.response?.body?.error?.code }, JSON.stringify(res.response?.body)).toEqual({ status: 200, code: undefined });
+        expect(await rig.stored(), 'the owner row holds only its own fields').toEqual(['score', 'title']);
+        expect(Object.keys((rig.engine.registry.getObject(LEAD) as any)?.fields ?? {})).toEqual(expect.arrayContaining(['title', 'score', 'leadext_region']));
+    }, 60_000);
+
+    it('CONTROL: a save that drops the owner\'s own column is still refused 409 DESTRUCTIVE_CHANGE naming that column alone', async () => {
+        const rig = await extendedLead();
+
+        const res: any = await rig.put(leadBody({ title: { name: 'title', label: 'Title', type: 'text' } }));
+
+        expect({ status: res.response?.status, code: res.response?.body?.error?.code }).toEqual({ status: 409, code: 'DESTRUCTIVE_CHANGE' });
+        const issues = (res.response?.body?.error?.details?.issues ?? []).map((i: any) => `${i.code}:${i.field}`);
+        expect(issues).toEqual(['field_removed:score']);
+        expect(await rig.stored(), 'nothing was written').toEqual(['score', 'title']);
     }, 60_000);
 });

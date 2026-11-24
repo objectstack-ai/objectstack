@@ -93,7 +93,7 @@ function makeDataSource(rows: Record<string, unknown>[], fields: Record<string, 
 }
 
 function renderGrid(schema: Record<string, unknown>, ds?: any) {
-  const grid = <ObjectGrid schema={{ type: 'object-grid', pagination: { pageSize: 50 }, ...schema } as any} dataSource={ds} />;
+  const grid = <ObjectGrid cellSelection={false} schema={{ type: 'object-grid', pagination: { pageSize: 50 }, ...schema } as any} dataSource={ds} />;
   return render(
     <ActionProvider>
       {ds ? <SchemaRendererProvider dataSource={ds}>{grid}</SchemaRendererProvider> : grid}
@@ -131,14 +131,14 @@ describe('ObjectGrid — a masked column opens no inline editor (objectui#10583)
       name: 'over an object `text` field',
       render: () =>
         renderGrid(
-          { objectName: 'masked_edit_probe', columns: COLUMNS, editable: true, singleClickEdit: true },
+          { objectName: 'masked_edit_probe', columns: COLUMNS, editable: true },
           makeDataSource(ROWS, { id: { type: 'text' }, name: { type: 'text', label: 'Name' }, pin: { type: 'text', label: 'PIN' } }),
         ),
     },
     {
       name: 'over no field def (inline rows)',
       render: () =>
-        renderGrid({ data: { provider: 'value', items: ROWS }, columns: COLUMNS, editable: true, singleClickEdit: true }),
+        renderGrid({ data: { provider: 'value', items: ROWS }, columns: COLUMNS, editable: true }),
     },
   ];
 
@@ -192,7 +192,9 @@ describe("ObjectGrid — the client export leaves every masked field out (object
     fireEvent.click(toolbarExport!);
     fireEvent.click(await screen.findByRole('button', { name: new RegExp(`export as ${format}`, 'i') }));
     await waitFor(() => expect(blobs.length, `CONTROL: the ${format} export produced a file`).toBeGreaterThan(0));
-    return blobs.pop()!.text();
+    // A CSV opens with one UTF-8 byte-order mark (pinned at the byte level in
+    // csvByteOrderMark-34420.test.tsx); these pins read the text after it.
+    return (await blobs.pop()!.text()).replace(/^\uFEFF/, '');
   }
 
   const MASKED_ROWS = [

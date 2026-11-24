@@ -459,8 +459,9 @@ export function defaultNodeExtras(type: string, nodes?: readonly unknown[]): Rec
     case 'boundary_event':
       return { boundaryConfig: { attachedToNodeId: '', eventType: 'error', interrupting: true } };
     case 'approval':
-      // Seed a node-model approval: at least one approver + spec defaults. The
-      // author wires the out-edges with labels `approve` / `reject`.
+      // Seed a node-model approval: at least one approver + spec defaults. Its
+      // `approve` / `reject` out-edges are drawn by the canvas when it inserts
+      // the node (`approvalOutcomes`, objectstack#34818 item 4).
       return { config: { approvers: [{ type: 'manager' }], behavior: 'first_response', lockRecord: true } };
     case 'notify':
       // Seed a sensible notify node: inbox channel + one empty recipient slot,

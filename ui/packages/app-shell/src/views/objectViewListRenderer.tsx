@@ -8,15 +8,18 @@
  * passed in; the component reads the returned callback.
  */
 
-import { useCallback, useRef, useState, lazy, Suspense, type ReactNode } from 'react';
+import type { ColumnSummary } from '@objectstack/spec/ui';
+import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, columnIdentity, normalizeListViewSchema, servedPackageId, type FilterTokenScope } from '@object-ui/core';
-import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
-import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
+import { layKanbanDraft, listDraftPreference, nextKanbanDraft, type useListDraft } from './listDraftStore.js';
+import { columnSummaryOf, columnsWithSummaries, declaredColumnFields } from './columnSummaryWrite.js';
+import type { useObjectListLayout } from './listLayoutStore.js';
+import type { ListViewPreference } from './listDraftStore.js';
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
-import { ListView, type ListViewProps } from '@object-ui/plugin-list';
-import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
+import { ListView, type ListToolbarTrailingState } from '@object-ui/plugin-list';
+import type { ListColumn, ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
@@ -24,10 +27,10 @@ import { useLocalization, type useObjectLabel, type useObjectTranslation } from 
 import { resolveManagedByEmptyState } from '../utils/managedByEmptyState.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { withUnpublishedObjectReads } from '../preview/unpublishedObjectReads.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
 import type { DataSource } from '@object-ui/types';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
-import type { isSetupAppSegment } from '../console/setupApp.js';
 import type { useObjectActions } from '../hooks/useObjectActions.js';
 import { substituteFilterTokens } from './objectViewHelpers.js';
 import type { buildViewTabs } from './objectViewTabs.js';
@@ -39,8 +42,9 @@ import {
     kanbanViewOptions,
     isSameOptionsValue,
 } from './objectViewOptions.js';
-import { keepInlineEditModeForTheSession } from './objectViewChrome.js';
-import { OpenAsPageLink } from './objectViewOpenAsPage.js';
+import { useViewTabsFit } from './objectViewChrome.js';
+import { ListRecordCountContext } from './objectViewTitleSwitcher.js';
+import { OpenInSidePanelButton } from './objectViewOpenAsPage.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
 import type { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
@@ -72,7 +76,6 @@ export function withAddedListColumns(
 
 export function useObjectViewListRenderer({
     objectName,
-    inSetup,
     t,
     viewEmptyState,
     localizeActionTexts,
@@ -85,7 +88,8 @@ export function useObjectViewListRenderer({
     managedUsers,
     managedUserMarker,
     savedViews,
-    listPrefs,
+    listLayout,
+    listDraft,
     derivedColumnViewIds,
     baseView,
     activeView,
@@ -97,19 +101,23 @@ export function useObjectViewListRenderer({
     actions,
     handleRowClick,
     handleListRowsChange,
-    recordOpen,
-    openAsPage,
+    handleListTotalChange,
+    openInPanel,
+    openReferencedRecord,
     rowOpensRecord,
     phoneTitle,
+    viewBarTrailing,
+    conditionRowEnd,
     handleListPersonalizationChange,
     urlFilters,
     initialUfSelections,
     handleUserFilterSelectionsChange,
-    handleListTotalChange,
     viewPanelFilters,
+    listViewActions,
+    onBulkChangeOwner,
+    bulkChangeOwnerOffered,
 }: {
     objectName: string | undefined;
-    inSetup: ReturnType<typeof isSetupAppSegment>;
     t: ReturnType<typeof useObjectTranslation>['t'];
     viewEmptyState: ReturnType<typeof useObjectLabel>['viewEmptyState'];
     localizeActionTexts: ReturnType<typeof useActionTextLocalizer>;
@@ -122,7 +130,9 @@ export function useObjectViewListRenderer({
     managedUsers: ReturnType<typeof useObjectViewIdentity>['managedUsers'];
     managedUserMarker: ReturnType<typeof useObjectViewIdentity>['managedUserMarker'];
     savedViews: Parameters<typeof buildViewTabs>[0]['savedViews'];
-    listPrefs: ReturnType<typeof useObjectListPreferences>;
+    listLayout: ReturnType<typeof useObjectListLayout>;
+    /** objectstack#35955 — the open list's unsaved changes, and their writer. */
+    listDraft: ReturnType<typeof useListDraft>;
     derivedColumnViewIds: Set<string>;
     baseView: ReturnType<typeof buildViewTabs>[number];
     activeView: ReturnType<typeof buildViewTabs>[number];
@@ -136,33 +146,109 @@ export function useObjectViewListRenderer({
     handleRowClick: ReturnType<typeof useObjectViewRecordNavigation>['handleRowClick'];
     /** objectstack#26679 — the rows the list shows, for the drawer's root `↑` `↓`. */
     handleListRowsChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListRowsChange'];
-    /** objectstack#26681 — the Display menu's Open records section; none on a phone (objectstack#27058). */
-    recordOpen: ListViewProps['recordOpen'];
-    /** objectstack#26681 — the name cell's ↗ (`./objectViewOpenAsPage.tsx`), or `null` for none. */
-    openAsPage: { objectName: string; label: string; open: (recordId: string | number) => void } | null;
+    /** objectstack#35853 — the count the list matched, the M of the record's 「第 N 条，共 M 条」. */
+    handleListTotalChange: ReturnType<typeof useObjectViewRecordNavigation>['handleListTotalChange'];
+    /** objectstack#35854 — the name cell's 「在侧边打开」 (`./objectViewOpenAsPage.tsx`), or `null` for none. */
+    openInPanel: { label: string; open: (recordId: string | number) => void } | null;
+    /** objectstack#36015 — a lookup chip's record in the side drawer, or `undefined` where the list has none. */
+    openReferencedRecord: ((objectName: string, recordId: string) => void) | undefined;
     /** objectstack#33317 — whether a row click opens the record: `false` for the `none` mode. */
     rowOpensRecord: boolean;
     /**
-     * objectstack#27058 — on a phone, the title's view switcher, drawn at the
-     * start of the list's toolbar row (`ListView`'s `toolbarLeading`) or above
-     * a chart; `null` elsewhere, where the page header draws it.
+     * The view switcher, drawn at the start of the list's toolbar row — its
+     * view bar (`ListView`'s `toolbarLeading`) — or above a chart, at every
+     * width (objectstack#27058 on a phone, objectstack#35548 everywhere);
+     * `null` with no view to switch.
      */
     phoneTitle: ReactNode;
+    /**
+     * objectstack#35878 — the right end of the view bar, given the list's own
+     * tools there (its search): the page's create button and ⋮ More after
+     * them. `null` ⇒ the list's search alone. Called afresh on every render
+     * of the page, read through a store like the lead. Given, the list hands
+     * it its export door too (objectstack#36113: 「Import / Export」 there).
+     */
+    viewBarTrailing: ((tools: ReactNode, state: ListToolbarTrailingState) => ReactNode) | null;
+    /** objectstack#35878 — the condition row's right end: Discard and Save while the list holds a draft (objectstack#35955), or `null`. */
+    conditionRowEnd: ReactNode;
     /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
     handleListPersonalizationChange: ReturnType<typeof useObjectViewListUrlState>['handleListPersonalizationChange'];
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
-    /** objectstack#27594 — the records the active view matched, for the title's count. */
-    handleListTotalChange: (total: number) => void;
     /**
      * objectstack#30073 — the active view's own conditions when the Filter
      * panel holds them as rows (a personal view, `personalViewPanelFilters`):
      * the panel opens on them, they are not applied under the list a second
-     * time, and the list judges its 「Personalized」 filters against them.
+     * time, and the list judges its draft filters against them.
      */
     viewPanelFilters?: FilterBuilderRowGroup;
+    /**
+     * objectstack#35551 — the open view's rename, 保存 and full reset, for
+     * the list's options menu (`ListView`'s `onRenameView` / `onSaveView` /
+     * `onResetView`). Each is wired only when the reader may use it.
+     */
+    listViewActions?: {
+        rename?: (label: string) => boolean | Promise<boolean>;
+        save?: () => void;
+        reset?: () => void;
+        /**
+         * objectstack#36194 — the footer's calculation picks go into the list's
+         * draft (`summaries`), on every column the saved body would carry:
+         * set where the list holds a draft. Nothing a pick does writes.
+         */
+        draftsSummaries?: boolean;
+    };
+    /**
+     * objectstack#35403 — the bulk Change Owner the grid's selection bar
+     * offers, wired where the object offers the action (it makes the rows
+     * selectable). It opens the page's Change Owner dialog over the selected
+     * rows. Grid-only (objectstack#36395): a kanban, calendar, gallery or
+     * other non-grid view takes no selection and offers no bulk entry.
+     */
+    onBulkChangeOwner?: (records: any[]) => void;
+    /**
+     * objectstack#35403 — whether the bar draws the entry now: the caller's
+     * object-level transfer verdict (`useListChangeOwnerOffered`), asked once
+     * a selection is open.
+     */
+    bulkChangeOwnerOffered?: boolean;
 }) {
+    // objectstack#35551 — the host hands fresh closures every render; the list
+    // reads the latest through a ref, and re-renders only when one appears or goes.
+    const listViewActionsRef = useRef(listViewActions);
+    listViewActionsRef.current = listViewActions;
+    // objectstack#35403 — read through a ref like the view's acts above: the
+    // list re-renders only when the offer appears or goes.
+    const bulkChangeOwnerRef = useRef(onBulkChangeOwner);
+    bulkChangeOwnerRef.current = onBulkChangeOwner;
+    const offersBulkChangeOwner = !!onBulkChangeOwner;
+    const offersRename = !!listViewActions?.rename;
+    const offersSave = !!listViewActions?.save;
+    const offersReset = !!listViewActions?.reset;
+    const offersSummaryPick = !!listViewActions?.draftsSummaries;
+    // objectstack#27058 — below `sm` the title switcher is the phone's one
+    // view control, so the list offers no layout switcher of its own there.
+    const wideViewport = useViewTabsFit();
+    // objectstack#35548 — the switcher leads the view bar at every width. The
+    // page builds a new switcher element on every render; read through this
+    // store, it re-draws itself without re-rendering the list (a `?recordId=`
+    // step must leave the list alone, objectstack#27545 Target 5). The relay
+    // keys only on whether there is one.
+    const [leadStore] = useState(() => createLeadStore(phoneTitle));
+    useLayoutEffect(() => {
+        leadStore.set(phoneTitle);
+    });
+    const hasPhoneTitle = phoneTitle != null;
+    // objectstack#35878 — the view bar's right end and the condition row's,
+    // read through stores the same way, so a change in them redraws only them.
+    const [trailStore] = useState(() => createLeadStore<((tools: ReactNode, state: ListToolbarTrailingState) => ReactNode) | null>(viewBarTrailing));
+    const [rowEndStore] = useState(() => createLeadStore<ReactNode>(conditionRowEnd));
+    useLayoutEffect(() => {
+        trailStore.set(viewBarTrailing);
+        rowEndStore.set(conditionRowEnd);
+    });
+    const hasViewBarTrailing = viewBarTrailing != null;
     // objectui#10694 — does the active view, as AUTHORED, declare a non-empty
     // `columns`? Booleans, so the relay keys on values and not on the memo's
     // Set (AGENTS.md #10).
@@ -219,18 +305,29 @@ export function useObjectViewListRenderer({
     // publish). That is an empty list, not a fault: the wrapper answers it
     // empty and names the object, and the list says why it is empty. One
     // wrapper per source, so the list's fetch never sees a new data source.
+    //
+    // objectstack#34807 — the same wrapper answers the list's object definition
+    // with the draft-only fields marked (`readDraftPreviewObjectSchema`, read
+    // through the provider's overlay), so `ListView` keeps them out of the
+    // query and draws their columns empty. A new draft-aware `objectDef` (a
+    // field drafted) makes a new wrapper, so the list re-reads its definition.
     const previewDrafts = usePreviewDrafts();
+    const { getItem: getMetadataItem } = useMetadata();
+    const getMetadataItemRef = useRef(getMetadataItem);
+    getMetadataItemRef.current = getMetadataItem;
     const [unpublishedObjects, setUnpublishedObjects] = useState<ReadonlySet<string>>(() => new Set());
-    const unpublishedReadsRef = useRef(new WeakMap<object, DataSource>());
+    const unpublishedReadsRef = useRef(new WeakMap<object, { revision: unknown; wrapped: DataSource }>());
     const previewDataSource = useCallback((ds: DataSource): DataSource => {
         const cached = unpublishedReadsRef.current.get(ds);
-        if (cached) return cached;
-        const wrapped = withUnpublishedObjectReads(ds, (name) =>
-            setUnpublishedObjects((prev) => (prev.has(name) ? prev : new Set(prev).add(name))),
+        if (cached && cached.revision === objectDef) return cached.wrapped;
+        const wrapped = withUnpublishedObjectReads(
+            ds,
+            (name) => setUnpublishedObjects((prev) => (prev.has(name) ? prev : new Set(prev).add(name))),
+            (name) => getMetadataItemRef.current('object', name),
         );
-        unpublishedReadsRef.current.set(ds, wrapped);
+        unpublishedReadsRef.current.set(ds, { revision: objectDef, wrapped });
         return wrapped;
-    }, []);
+    }, [objectDef]);
 
     const renderListView = useCallback(({ schema: listSchema, dataSource: rawDs, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
         const ds = previewDrafts && rawDs ? previewDataSource(rawDs) : rawDs;
@@ -252,21 +349,28 @@ export function useObjectViewListRenderer({
         const identityKey = listIdentityKey ?? `${objectName}-${activeView.id}`;
         const viewDef = activeView;
 
-        // Per-user, per-view search-term cache. Restored into ListView at mount
-        // so leaving via a nav link and coming back keeps what the user was
-        // searching — URL params alone don't survive that (the nav link has no
-        // query string). Keyed on the signed-in user so two accounts on one
-        // browser never share it. The Filter panel's conditions are the user's
-        // list state since objectui#12418 (`listPrefs`), not this cache.
-        const listFilterKey = buildListFilterKey(user?.id, objectName, activeView.id);
-        // objectui#12418 — this user's own state for this view: its sort and
-        // filters arrive through the seed below, its column layout here.
-        const viewPref: ListViewPreference | undefined = listPrefs.preference.perView?.[viewDef.id];
+        // objectstack#35955 — the list's DRAFT (`./listDraftStore.ts`): its
+        // sort, filters, grouping and search arrive through the seed below,
+        // its columns and their order here. The column widths and the row
+        // height are the reader's layout in this browser (`listLayout`), never
+        // a draft.
+        const viewOwnRowColor = viewDef.rowColor ?? listSchema.rowColor;
+        const viewPref: ListViewPreference | undefined = listDraftPreference(
+            listDraft.draft,
+            listLayout.layout.perView?.[viewDef.id],
+        );
         const persistListSort = (sort: Array<{ field: string; order?: string }>) => {
-            listPrefs.patchView(viewDef.id, { sort });
+            listDraft.patch({ sort: sort as ListViewPreference['sort'] });
         };
+        // One report carries the order and the widths: the order is a draft,
+        // the widths are the reader's layout (a drag that changed only a width
+        // hands back the order the draft already holds).
         const persistListColumnState = (state: { order?: string[]; widths?: Record<string, number> }) => {
-            listPrefs.patchView(viewDef.id, { columnState: state });
+            listDraft.patch({ columnOrder: state.order && state.order.length > 0 ? state.order : undefined });
+            const keptWidths = listLayout.layout.perView?.[viewDef.id]?.widths;
+            if (JSON.stringify(state.widths ?? {}) !== JSON.stringify(keptWidths ?? {})) {
+                listLayout.patchView(viewDef.id, { widths: state.widths ?? null });
+            }
         };
         // objectui#11860 — what the list opens with: the URL's state, else this
         // cache (see `listSeedRef`). Same identity as the list's `key`.
@@ -322,14 +426,22 @@ export function useObjectViewListRenderer({
          */
         if (viewDef.type === 'chart') {
             const chartConfig = viewDef.chart || {};
-            // The way back to the other views is the page title's view
-            // switcher (objectstack#27594), above every face, a chart included.
-            // On a phone the switcher heads the chart (objectstack#27058).
+            // The way back to the other views is the view switcher
+            // (objectstack#27594), which heads the chart in a bar of the
+            // list's view bar's height (objectstack#27058, objectstack#35548)
+            // and the list's view bar's padding (`TOOLBAR_ROW` in
+            // plugin-list's `listToolbarRow.ts`, objectstack#35729): from `sm`
+            // up 10px on the left puts the switcher's 6px-padded icon on the
+            // list page's 16px line (objectstack#35663), so switching between
+            // the list and the chart does not move it; below `sm` both bars
+            // keep `px-2`.
             const chartPage = (chartFace: ReactNode) => (
                 <div className="h-full flex flex-col min-w-0">
-                    {phoneTitle != null && (
-                        <div className="border-b px-2 py-1.5 flex items-center min-w-0 bg-background">
-                            {phoneTitle}
+                    {hasPhoneTitle && (
+                        <div className="border-b px-2 py-1.5 sm:h-10 sm:pl-2.5 sm:pr-2 sm:py-0 flex items-center justify-between gap-2 min-w-0 bg-background">
+                            <ViewBarLead store={leadStore} />
+                            {/* objectstack#35878 — the page's acts end this bar too. */}
+                            {hasViewBarTrailing && <ViewBarTrailing store={trailStore} tools={null} state={NO_LIST_TOOLS} />}
                         </div>
                     )}
                     {chartFace}
@@ -397,13 +509,6 @@ export function useObjectViewListRenderer({
             );
         }
 
-        // objectui#12418 — the list opens on the user's stored sort and
-        // filters, which are read in the console's one preference read; until
-        // that read has answered, there is nothing to open on yet.
-        if (!listPrefs.ready) {
-            return <div className="h-full w-full" aria-busy="true" data-testid="object-view-list-preferences-pending" />;
-        }
-
         // ADR-0053 wrong-context authoring: userFilters/quickFilters on an
         // object list view are suppressed below — say so instead of letting
         // the author stare at a toolbar with nothing where their filter
@@ -414,11 +519,11 @@ export function useObjectViewListRenderer({
         const calendarOptions = calendarViewOptions(viewDef);
 
         /**
-         * objectui#12474 — the Hide Fields popover's choice is the USER's: it
-         * is stored on their own list state (`listPrefs`, beside the sort and
-         * the column layout), never written into the shared view, so one
-         * user's click no longer hides a column for everyone and a walled
-         * tenant member is not refused. It is a SUBTRACTION from the columns
+         * objectui#12474 — the Hide Fields popover's choice is the READER's,
+         * never written into the shared view by the click, so one user's click
+         * hides no column for everyone and a walled tenant member is not
+         * refused. Since objectstack#35955 it is a DRAFT (`listDraft`), kept
+         * only once the reader saves it into a view. It is a SUBTRACTION from the columns
          * the view declares: the popover offers only those (and, objectui#11984,
          * only the ones the caller may read), and the list draws `columns`
          * minus this list, so it can never add a column.
@@ -444,14 +549,15 @@ export function useObjectViewListRenderer({
          */
         const persistHiddenFields = (hidden: string[]) => {
             if (!activeViewDeclaresColumns && !activeViewIsSaved) return;
-            listPrefs.patchView(viewDef.id, { hiddenFields: hidden });
+            listDraft.patch({ hiddenFields: hidden });
         };
 
         /**
          * objectstack#30077 (ruling 6631126993, option A) — the object's fields
-         * this user ADDED to their list as columns with the same popover, stored
-         * beside their hidden fields (`addedFields`) and dropped with the rest of
-         * the entry by "Reset to view". The `columns` rung below appends them to
+         * this user ADDED to their list as columns with the same popover, held
+         * in the list's draft beside their hidden fields (`addedFields`,
+         * objectstack#35955): Save keeps them in a view, Discard drops them with
+         * the rest of the draft. The `columns` rung below appends them to
          * the view's columns, so the list fetches, expands and draws them as it
          * does a declared column; `ListView` offers only fields the caller may
          * read. Offered where a Hide Fields choice is stored, never on the
@@ -464,8 +570,27 @@ export function useObjectViewListRenderer({
             listSchema.columns,
             addedFieldsStored ? viewPref?.addedFields : undefined,
         );
+        /**
+         * objectstack#36194 — the footer's calculations are part of the draft
+         * too: a pick applies at once (the columns the list draws carry it)
+         * and is written nowhere; Discard drops it, Save keeps it. The menu is
+         * offered on the columns a saved body carries (the columns the list
+         * draws, the reader's added ones included), the only columns the draft
+         * can carry a calculation on. A pick of the view's own calculation
+         * drops the column from the draft.
+         */
+        const summaryColumns = columnsWithSummaries(listColumns.columns as ListColumn[] | string[] | undefined, listDraft.draft.summaries) as ListViewSchema['columns'];
+        const summaryPickFields = offersSummaryPick
+            ? declaredColumnFields(listColumns.columns as ListColumn[] | string[] | undefined)
+            : undefined;
+        const pickDraftSummary = (field: string, summary: ColumnSummary | null): boolean => {
+            const own = columnSummaryOf(listColumns.columns as ListColumn[] | string[] | undefined, field);
+            const { [field]: _replaced, ...rest } = listDraft.draft.summaries ?? {};
+            listDraft.patch({ summaries: (summary ?? null) === own ? rest : { ...rest, [field]: summary ?? null } });
+            return true;
+        };
         const persistAddedFields = (added: string[]) => {
-            listPrefs.patchView(viewDef.id, { addedFields: added });
+            listDraft.patch({ addedFields: added.length > 0 ? added : undefined });
         };
 
         /**
@@ -492,17 +617,18 @@ export function useObjectViewListRenderer({
          * objectstack#28948 — a reset to the view's own is not a choice. The
          * list's "Reset to view default" (the Display control's, the sort
          * popover's) names the parts it put back, and they are CLEARED from
-         * this user's stored state rather than stored as the view's values, so
-         * a later change to the view reaches them. A view left with nothing is
-         * removed (`patchViewPreference`).
+         * the draft and the reader's layout rather than kept as the view's
+         * values, so a later change to the view reaches them.
          * The sort leaves the URL too, which would otherwise seed it again.
          * A deliberate `sort: []` or `hiddenFields: []` still arrives through
-         * `persistListSort` / `persistHiddenFields` and stays stored.
+         * `persistListSort` / `persistHiddenFields` and stays in the draft.
          */
         const restoreViewDefaults = (parts: ReadonlyArray<'sort' | 'hiddenFields' | 'rowHeight'>) => {
-            const patch: ListViewPreferencePatch = {};
-            for (const part of parts) patch[part] = null;
-            listPrefs.patchView(viewDef.id, patch);
+            // objectstack#35955 — the sort and the hidden fields leave the
+            // draft; the row height leaves the reader's layout.
+            if (parts.includes('sort')) listDraft.patch({ sort: undefined });
+            if (parts.includes('hiddenFields')) listDraft.patch({ hiddenFields: undefined });
+            if (parts.includes('rowHeight')) listLayout.patchView(viewDef.id, { rowHeight: null });
             if (parts.includes('sort')) writeListUrlState({ sort: null });
         };
 
@@ -544,7 +670,9 @@ export function useObjectViewListRenderer({
             // new object documents of equal content: hold it like the blocks.
             // objectstack#30077 — plus the fields this user added (see
             // `withAddedListColumns`).
-            columns: holdBlock('columns', listColumns.columns),
+            // objectstack#36194 — and the footer calculations the draft holds,
+            // drawn at once (`summaryColumns`).
+            columns: holdBlock('columns', summaryColumns),
             // objectui#10035 — the refresh signal, in place of the remount the
             // key used to force. The spread above carries only the plugin
             // ObjectView's counter; this page's own counter (actions, import,
@@ -589,12 +717,11 @@ export function useObjectViewListRenderer({
                 viewPref?.rowHeight
                 ?? (normalizeListViewSchema(viewDef ?? {}) as Pick<ListViewSchema, 'rowHeight'>).rowHeight
                 ?? listSchema.rowHeight,
-            // Hydrate the persisted settings so they survive reload. The sort
-            // and the column layout (objectui#12418), the density and the
-            // hidden fields (objectui#12474) are the USER's: they are read
-            // from and written to `listPrefs`, never `/meta/view`. No list
-            // toolbar control writes the shared view; the view editor's
-            // explicit save does.
+            // The sort, the column order and the hidden fields are the list's
+            // draft; the widths and the density are the reader's layout in
+            // this browser (`listLayout`). Neither writes `/meta/view`: no list
+            // toolbar control writes the shared view; Save and the view
+            // editor's explicit save do.
             //
             // objectui#11860 — a sort the URL carries is applied over the
             // view's: an opened link sorts as it was sorted. Without a link,
@@ -674,16 +801,16 @@ export function useObjectViewListRenderer({
             fieldOrder: activeViewDeclaresColumns
                 ? (viewDef.fieldOrder ?? listSchema.fieldOrder)
                 : undefined,
-            // objectui#12418 — the user's column layout over the view's. `{}`
-            // when neither has one: this host persists the layout, so the
+            // The draft's column order and the reader's widths over the view's.
+            // `{}` when neither has one: this host keeps the layout, so the
             // grid's own per-browser fallback must not stand in for it (and a
-            // "Reset view" must reach the grid).
+            // Discard must reach the grid).
             columnState: viewPref?.columnState ?? (viewDef as any).columnState ?? (listSchema as any).columnState ?? {},
             onDensityChange: (mode) => {
-                // objectui#12474 — the USER's density, on their own list state,
-                // never the shared view. Stored as the spec-canonical
-                // `rowHeight` (#2890), the vocabulary the rung above reads.
-                listPrefs.patchView(viewDef.id, {
+                // objectui#12474 — the reader's density, on their layout in
+                // this browser, never the shared view. Kept as the
+                // spec-canonical `rowHeight`, the vocabulary the rung above reads.
+                listLayout.patchView(viewDef.id, {
                     rowHeight: DENSITY_MODE_TO_ROW_HEIGHT[mode],
                 });
             },
@@ -723,7 +850,7 @@ export function useObjectViewListRenderer({
             // objectstack#27058 — not on a phone: the title switcher is the
             // phone's one view control, and the Display menu drops its Layout
             // row there.
-            showViewSwitcher: phoneTitle == null
+            showViewSwitcher: (!hasPhoneTitle || wideViewport)
                 && ((viewDef.appearance ?? listSchema.appearance)?.allowedVisualizations?.length ?? 0) > 1,
             // Toolbar policy — one vocabulary (#2890). Stored views may still
             // carry the legacy bare `show*` flags, so each side is run through
@@ -763,7 +890,14 @@ export function useObjectViewListRenderer({
              * a different nesting level ('may the user open the colour panel'
              * versus 'what the colours are').
              */
-            rowColor: viewDef.rowColor ?? listSchema.rowColor,
+            // objectstack#35955 — the reader's unsaved row colour (the list's
+            // draft, `null` for "none") over the view's own; the view's own
+            // goes to `viewDefaults` below, for Discard and Save.
+            rowColor: listDraft.draft.rowColor !== undefined
+                ? (listDraft.draft.rowColor ?? undefined)
+                : viewOwnRowColor,
+            // objectstack#35955 — and the reader's unsaved layout.
+            viewType: listDraft.draft.viewType ?? listSchema.viewType,
             // objectui#11013 — the seven renderer flags this relay used to read
             // off the active view (`wrapHeaders`, `clickIntoRecordDetails`,
             // `addRecordViaForm`, `addDeleteRecordsInline`,
@@ -877,7 +1011,11 @@ export function useObjectViewListRenderer({
             // outranks what this page relays (it never did through the bag).
             // The lane key is the spec's `groupByField`, not the legacy
             // `groupField` this used to write. See `kanbanViewOptions`.
-            kanban: holdBlock('kanban', kanbanViewOptions(viewDef, objectDef)),
+            //
+            // objectstack#36370 — with the board's settings the list's draft
+            // holds laid over it (`layKanbanDraft`): a change in 视图设置 or in
+            // a lane's menu draws at once and is kept by Save alone.
+            kanban: holdBlock('kanban', layKanbanDraft(kanbanViewOptions(viewDef, objectDef), listDraft.draft.kanban)),
             // The calendar config the view DECLARED, or `undefined` — never
             // an invented field name (objectui#7029). With no block,
             // ListView's capability gate stops offering the
@@ -969,6 +1107,11 @@ export function useObjectViewListRenderer({
             // rather than the old permanently-truthy husk, which is what
             // keeps the gate from offering a chart nobody configured.
             chart: holdBlock('chart', viewDef.chart),
+            // The timesheet binding the view DECLARED, forwarded whole for
+            // the reason the chart block above is: `ListView`'s capability
+            // gate and `case 'timesheet'` read its three keys by name
+            // (objectstack#34382).
+            timesheet: holdBlock('timesheet', viewDef.timesheet),
 
         };
 
@@ -982,13 +1125,36 @@ export function useObjectViewListRenderer({
                 // objectstack#28950 — and the view's own grouping, under a
                 // grouping the URL carries (the `grouping` rung above), so the
                 // list can tell the reader's from the view's.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters }}
+                // objectstack#35955 — and the view's own layout and row colour,
+                // under the draft's (`viewType` / `rowColor` above).
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping, filters: viewPanelFilters, viewType: listSchema.viewType, rowColor: viewOwnRowColor }}
                 // objectstack#28948 — those resets clear the user's state.
                 onRestoreViewDefaults={restoreViewDefaults}
                 // objectstack#28950 — what of the list differs from the view,
-                // for the 「Personalized」 marker, which then owns the one reset
-                // (the Display control draws none of its own).
+                // for Discard and Save (objectstack#35955), which then own the
+                // one reset (the Display control draws none of its own).
                 onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
+                // objectstack#35955 — the layout and the row colour the reader
+                // picks are the list's draft; picking the view's own again
+                // drops that part.
+                onViewChange={(view: string) => listDraft.patch({ viewType: view === listSchema.viewType ? undefined : view })}
+                // objectstack#36370 — a board's settings are the list's draft
+                // too: each changed key of the view's kanban block, dropped
+                // again once it is the view's own as the board draws it (an
+                // auto-detected lane field picked back is no change).
+                laneCollapseKey={activeView.id}
+                onKanbanChange={(patch: Record<string, unknown>) => listDraft.patch({
+                    kanban: nextKanbanDraft(listDraft.draft.kanban, patch, kanbanViewOptions(viewDef, objectDef)),
+                })}
+                onRowColorChange={(rowColor: { field: string; colors?: Record<string, string> } | null) => listDraft.patch({
+                    rowColor: (rowColor?.field ?? '') === (viewOwnRowColor?.field ?? '') ? undefined : rowColor,
+                })}
+                // objectstack#35551 — the view's rename, 保存 and full reset in the options menu.
+                onRenameView={offersRename ? (label: string) => listViewActionsRef.current?.rename?.(label) ?? false : undefined}
+                onSaveView={offersSave ? () => listViewActionsRef.current?.save?.() : undefined}
+                onResetView={offersReset ? () => listViewActionsRef.current?.reset?.() : undefined}
+                onColumnSummaryPick={summaryPickFields && summaryPickFields.length > 0 ? pickDraftSummary : undefined}
+                columnSummaryPickFields={summaryPickFields}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -1013,6 +1179,10 @@ export function useObjectViewListRenderer({
                     // batch-aware delete handler handles refresh + toast.
                     actionsRef.current.deleteRecords(valid);
                 }}
+                onBulkChangeOwner={offersBulkChangeOwner
+                    ? (records: any[]) => bulkChangeOwnerRef.current?.(records)
+                    : undefined}
+                bulkChangeOwnerOffered={offersBulkChangeOwner ? bulkChangeOwnerOffered === true : undefined}
                 onRowClick={(record: any, event?: any) => {
                     handleRowClick(record, event);
                 }}
@@ -1029,21 +1199,25 @@ export function useObjectViewListRenderer({
                 }}
                 // objectui#11860 — the URL only: nothing else stores the
                 // toolbar grouping, and the view's own stays as authored.
-                onGroupingChange={(grouping) => writeListUrlState({ grouping: grouping ?? null })}
+                onGroupingChange={(grouping) => {
+                    // objectstack#35955 — a draft, and the URL, so the list is a link.
+                    listDraft.patch({ grouping: grouping ?? undefined });
+                    writeListUrlState({ grouping: grouping ?? null });
+                }}
                 onFilterChange={(filter: any) => {
-                    // The USER's state (objectui#12418), never the view's
-                    // stored body (objectui#4155) — the user's list state keeps
-                    // the BUILDER's group verbatim, read back into
-                    // `initialFilters`, which needs `conditions` (and the row
-                    // ids) to rehydrate the toolbar. It follows the user to
-                    // another browser, and the panel's own "Clear all" clears
-                    // it: it writes an empty group through this same handler.
-                    listPrefs.patchView(viewDef.id, { filters: filter });
+                    // A DRAFT (objectstack#35955), never the view's stored body
+                    // (objectui#4155) — the draft keeps the BUILDER's group
+                    // verbatim, read back into `initialFilters`, which needs
+                    // `conditions` (and the row ids) to rehydrate the toolbar.
+                    // The panel's own "Clear all" writes an empty group through
+                    // this same handler.
+                    listDraft.patch({ filters: filter });
                     // objectui#11860 — and the URL, so the list is a link.
                     writeListUrlState({ filters: filter });
                 }}
                 onSearchChange={(search: string) => {
-                    writeListFilterState(listFilterKey, { search });
+                    // objectstack#35955 — the search lives as long as the draft.
+                    listDraft.patch({ search: search || undefined });
                     writeListUrlState({ search });
                 }}
                 onHiddenFieldsChange={persistHiddenFields}
@@ -1051,8 +1225,6 @@ export function useObjectViewListRenderer({
                 // the door that stores a change to them (see `persistAddedFields`).
                 addedFields={listColumns.addedFields}
                 onAddedFieldsChange={addedFieldsStored ? persistAddedFields : undefined}
-                // objectui#5144 (ruling E): session-only, writes nothing.
-                onInlineEditChange={keepInlineEditModeForTheSession}
                 onColumnStateChange={persistListColumnState}
                 userFilterSelections={initialUfSelections}
                 onUserFilterSelectionsChange={handleUserFilterSelectionsChange}
@@ -1060,37 +1232,82 @@ export function useObjectViewListRenderer({
                 // a personal view's panel opens on the view's own conditions.
                 initialFilters={listSeed?.filters ?? viewPanelFilters}
                 initialSearchTerm={listSeed?.search}
-                // objectui#12606 — Setup's list opens without row numbers in
-                // the leading cell. A host prop, not a view key: a console
-                // posture, never metadata.
-                defaultRowNumbers={!inSetup}
                 // objectui#13330 — on a managed environment, the Users list
                 // marks a user who holds nothing beyond the baseline. A host
                 // prop the grid draws beside the row's title.
                 rowAdornment={managedUsers ? managedUserMarker : undefined}
-                // objectstack#26681 — for a row that opens the drawer, the ↗
-                // beside its record link that opens the record as the full page.
-                recordLinkAdornment={openAsPage
+                // objectstack#35854 — the name opens the full page; the icon
+                // beside it, on hover, opens the record in the side drawer.
+                recordLinkAdornment={openInPanel
                     ? (row: Record<string, unknown>) => {
                         const id = row?.id ?? row?._id;
                         return (typeof id === 'string' && id !== '') || typeof id === 'number'
-                            ? <OpenAsPageLink objectName={openAsPage.objectName} recordId={id} label={openAsPage.label} onOpen={openAsPage.open} />
+                            ? <OpenInSidePanelButton recordId={id} label={openInPanel.label} onOpen={openInPanel.open} />
                             : null;
                     }
                     : undefined}
+                // objectstack#36015 — a lookup chip in the grid opens the record it
+                // names in the same side drawer.
+                openReferencedRecord={openReferencedRecord}
                 // objectstack#33317 — a row that opens nothing (the view
                 // authored `navigation.mode: 'none'`, or a list-only object)
                 // draws no record link and no Open in its context menu.
                 rowOpensRecord={rowOpensRecord}
-                // objectstack#26681 — the Display menu's Open records section.
-                recordOpen={recordOpen}
-                // objectstack#27058 — on a phone the toolbar row is the title
-                // row: the view switcher, then the filter / sort / display tools.
-                toolbarLeading={phoneTitle}
+                // The toolbar row is the view bar: the view switcher, then the
+                // filter / sort / options tools (objectstack#27058,
+                // objectstack#35548). The switcher shows the list's own record
+                // count and layout, which only the list knows.
+                toolbarLeading={hasPhoneTitle ? ({ recordCount, layout }) => (
+                    <ListRecordCountContext.Provider value={{ count: recordCount, layout }}>
+                        <ViewBarLead store={leadStore} />
+                    </ListRecordCountContext.Provider>
+                ) : null}
+                // objectstack#35878 — the bar's right end: the search, then
+                // the page's acts; and the condition row's right end.
+                toolbarTrailing={hasViewBarTrailing ? (tools, state) => <ViewBarTrailing store={trailStore} tools={tools} state={state} /> : undefined}
+                conditionRowEnd={hasPhoneTitle ? <ViewBarLead store={rowEndStore} /> : undefined}
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, rowOpensRecord, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, previewDrafts, previewDataSource, unpublishedObjects]);
+    }, [hasViewBarTrailing, trailStore, rowEndStore, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, listPage, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listLayout.layout, listLayout.patchView, listDraft.draft, listDraft.patch, managedUsers, managedUserMarker, openInPanel, openReferencedRecord, rowOpensRecord, handleListRowsChange, handleListTotalChange, hasPhoneTitle, leadStore, wideViewport, handleListPersonalizationChange, workspaceTimeZone, viewPanelFilters, offersRename, offersSave, offersReset, offersSummaryPick, offersBulkChangeOwner, bulkChangeOwnerOffered, previewDrafts, previewDataSource, unpublishedObjects]);
 
     return { renderListView };
+}
+
+/** The page's current view-bar lead (the switcher), read by `ViewBarLead`; also its right ends. */
+interface LeadStore<T = ReactNode> {
+    get: () => T;
+    set: (next: T) => void;
+    subscribe: (listener: () => void) => () => void;
+}
+
+function createLeadStore<T = ReactNode>(initial: T): LeadStore<T> {
+    let current = initial;
+    const listeners = new Set<() => void>();
+    return {
+        get: () => current,
+        set: (next) => {
+            if (Object.is(next, current)) return;
+            current = next;
+            listeners.forEach((listener) => listener());
+        },
+        subscribe: (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+    };
+}
+
+/** Draws the store's lead, re-rendering on its own when the page hands a new one. */
+function ViewBarLead({ store }: { store: LeadStore }) {
+    return <>{useSyncExternalStore(store.subscribe, store.get, store.get)}</>;
+}
+
+/** A chart heads its page with the view bar but draws no list: no export door. */
+const NO_LIST_TOOLS: ListToolbarTrailingState = {};
+
+/** Draws the view bar's right end from the store, around the list's own `tools`. */
+function ViewBarTrailing({ store, tools, state }: { store: LeadStore<((tools: ReactNode, state: ListToolbarTrailingState) => ReactNode) | null>; tools: ReactNode; state: ListToolbarTrailingState }) {
+    const render = useSyncExternalStore(store.subscribe, store.get, store.get);
+    return <>{render ? render(tools, state) : tools}</>;
 }

@@ -45,7 +45,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           credential_use: "استخدام بيانات الاعتماد",
           scim_refused: "رفض طلب SCIM",
           audit_signing_key_change: "تغيير مفتاح توقيع التدقيق",
-          dataset_query: "استعلام مجموعة بيانات"
+          dataset_query: "استعلام مجموعة بيانات",
+          scim_manager_unresolved: "تعذّر تحديد مدير SCIM"
         }
       },
       user_id: {
@@ -264,6 +265,18 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       edited_at: {
         label: "تاريخ التعديل"
+      },
+      is_resolved: {
+        label: "تم الحل",
+        help: "ما إذا كانت السلسلة التي يبدأها هذا التعليق من المستوى الأعلى قد حُلّت؛ مرفوض على الرد"
+      },
+      resolved_by: {
+        label: "حُلّ بواسطة",
+        help: "من حلّ السلسلة — تسجّله المنصة، ولا يكتبه المؤلفون أبدًا"
+      },
+      resolved_at: {
+        label: "وقت الحل",
+        help: "متى حُلّت السلسلة — تسجّله المنصة، ولا يكتبه المؤلفون أبدًا"
       },
       created_at: {
         label: "تاريخ الإنشاء"

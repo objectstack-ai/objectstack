@@ -430,6 +430,13 @@ const [users, orders] = await Promise.all([
 console.log(users.data.length, users.total);
 ```
 
+A paged read (`$top` or `$skip`) reports `total` by default, and the server
+runs a `count(*)` over the whole filter to answer it. A surface that never
+shows a record count passes `$count: false`: the adapter sends `count=false`,
+the server skips the count, and the result carries no `total` (the page length
+is not put in its place). `hasMore` is still answered from the page. An absent
+`$count`, or `$count: true`, gets the total as before.
+
 ### Mutations
 
 ```typescript

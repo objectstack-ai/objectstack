@@ -22,8 +22,8 @@ import { DevMasterDetail } from './dev/DevMasterDetail';
 import { DevLists } from './dev/DevLists';
 import { DevModal } from './dev/DevModal';
 import { DevLookup } from './dev/DevLookup';
-import { DevRowActions } from './dev/DevRowActions';
 import {
+  AiAddressRedirect,
   ConsoleShell,
   RequireAiSurface,
   RequireOrganization,
@@ -40,10 +40,11 @@ import {
   DefaultSettingsPage,
   DefaultAcceptInvitationPage,
   useMetadata,
+  usePhoneViewport,
 } from '@object-ui/app-shell';
 
 import { AppContent, ConsolePermissionsRequest, ConsolePermissionsScope } from './AppContent';
-import { FirstRunChecklist } from './pages/settings/FirstRunChecklist';
+import { FirstRunChecklist, type FirstRunChecklistPlacement } from './pages/settings/FirstRunChecklist';
 import { publishAuthState } from './i18nSession';
 import { FaviconSync } from './components/FaviconSync';
 import { RootLandingRedirect } from './components/RootLandingRedirect';
@@ -94,21 +95,16 @@ const DocsSlug = lazy(() => import('./pages/DocsSlug'));
 const DocPage = lazy(() => import('./pages/DocPage'));
 
 /*
- * The AI chat surfaces, lazy for the same reason (objectui#13410).
- *
- * `/ai…` and the public share page `/s/:token` are the two console routes that
- * render the chat UI (`ChatbotEnhanced` and everything it reaches in
- * `@object-ui/plugin-chatbot`: `streamdown`, `shiki`, the AI Elements). Imported
- * statically here, that UI was in every first page load, the third-largest
- * eager chunk, including for users who never open a chat. The AI page arrives
- * through `./components/aiChatPage`, a console-local module nothing imports
- * statically, because an `import()` of the `@object-ui/app-shell` barrel this
- * file already imports would move nothing (see `./components/studioBuilder`).
+ * The public share page `/s/:token` renders the chat UI (`ChatbotEnhanced` and
+ * everything it reaches in `@object-ui/plugin-chatbot`), so it is lazy for the
+ * same reason (objectui#13410). The `/ai…` addresses no longer draw a page: they
+ * open the console's chat drawer (objectstack#34608, `AiAddressRedirect`), whose
+ * body loads the chat UI when it first renders.
  */
-const DefaultAiChatPage = lazy(() =>
-  import('./components/aiChatPage').then((m) => ({ default: m.DefaultAiChatPage })),
-);
 const SharedRecordPage = lazy(() => import('./pages/SharedRecordPage'));
+// Dev-only page drawn with `ObjectGrid`: lazy, so the grid package stays off
+// every first load.
+const DevRowActions = lazy(() => import('./dev/DevRowActions'));
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || '';
 const AUTH_URL = `${SERVER_URL}/api/v1/auth`;
@@ -198,19 +194,46 @@ function NativeShellRouting() {
   return null;
 }
 
+/** Home's checklist slot: the first-run checklist, where Home places it. */
+function homeChecklist(placement: FirstRunChecklistPlacement) {
+  return <FirstRunChecklist placement={placement} />;
+}
+
 /**
  * Wraps `DefaultHomeLayout` so the FAB gets the signed-in user id, and draws
- * an administrator's first-run checklist above the page's own sections
- * (objectstack#30206). The route sits under `ConsolePermissionsScope`, which
- * is what tells the checklist whether this session may write the settings it
- * lists; for anyone else it draws nothing.
+ * an administrator's first-run checklist in Home's checklist slot
+ * (objectstack#30206): above the page's own sections on a desktop, after the
+ * apps on a phone (objectstack#34596). The route sits under
+ * `ConsolePermissionsScope`, which is what tells the checklist whether this
+ * session may write the settings it lists; for anyone else it draws nothing.
+ *
+ * From 768 px up the platform home page is retired (objectstack#36732): the
+ * address resolves like `/` does on a desktop and redirects into the
+ * last-used app, the declared default or the first product app, and draws the
+ * page — its no-apps empty state — only for a viewer with no product app. A
+ * phone keeps its app list here, unchanged.
  */
 function HomeRoute() {
   const { user } = useAuth();
-  return (
+  const phone = usePhoneViewport();
+  const page = (
     <DefaultHomeLayout userId={user?.id}>
-      <FirstRunChecklist />
-      <DefaultHomePage />
+      <DefaultHomePage checklist={homeChecklist} />
+    </DefaultHomeLayout>
+  );
+  return phone ? page : <RootLandingRedirect home={page} />;
+}
+
+/**
+ * The docs portal's frame (objectstack#35424): Home's layout with the docs bar,
+ * around the lazily loaded docs layout, so the bar is up while the portal's
+ * chunk loads.
+ */
+function DocsPortalRoute() {
+  const { user } = useAuth();
+  return (
+    <DefaultHomeLayout userId={user?.id} variant="docs">
+      <Suspense fallback={<LoadingScreen />}><DocsLayout /></Suspense>
     </DefaultHomeLayout>
   );
 }
@@ -353,26 +376,6 @@ export function App() {
               * layer too late for a capability whose declared meaning is
               * "Enter the Studio metadata-design surfaces". */}
             {studioRoutes}
-            {/* Package documentation (ADR-0046): a platform-level portal
-              * lists every installed `doc` (grouped by package), and one
-              * viewer route renders any item; cross-references between docs
-              * resolve to that same viewer route. Both are app-independent. */}
-            {/* Docs portal (ADR-0046 §6). The layout fetches book + doc once
-              * and shares it with every child route via context. Children:
-              *   index        → book index
-              *   :slug        → a book landing, or a flat-doc permalink that
-              *                  redirects to its canonical /docs/<book>/<name>
-              *   :slug/:name  → in-book reader (doc identity stays single-
-              *                  coordinate; the book segment is derived nav). */}
-            <Route path="/docs" element={
-              <ProtectedRoute>
-                <Suspense fallback={<LoadingScreen />}><DocsLayout /></Suspense>
-              </ProtectedRoute>
-            }>
-              <Route index element={<Suspense fallback={<LoadingScreen />}><DocsIndex /></Suspense>} />
-              <Route path=":slug" element={<Suspense fallback={<LoadingScreen />}><DocsSlug /></Suspense>} />
-              <Route path=":slug/:name" element={<Suspense fallback={<LoadingScreen />}><DocPage /></Suspense>} />
-            </Route>
             {/* objectui#12700 — Home and every app share ONE
               * `/auth/me/permissions` source. A pathless layout route is their
               * common ancestor: its element (auth, the shell, the permissions
@@ -421,6 +424,25 @@ export function App() {
                 </RequireOrganization>
               }>
                 <Route path="/home" element={<HomeRoute />} />
+                {/* Package documentation (ADR-0046 §6): a platform-level portal
+                  * lists every installed `doc` (grouped by the launcher's apps),
+                  * and one viewer route renders any item; cross-references
+                  * between docs resolve to that same viewer route. App-independent,
+                  * so it is drawn in Home's frame with the docs bar (`docs`
+                  * variant: 「PRODUCT / Documentation」), under this layout for
+                  * the same `/auth/me/permissions` answer Home reads
+                  * (objectstack#35424). The layout fetches book + doc once and
+                  * shares it with every child route via context. Children:
+                  *   index        → book index
+                  *   :slug        → a book landing, or a flat-doc permalink that
+                  *                  redirects to its canonical /docs/<book>/<name>
+                  *   :slug/:name  → in-book reader (doc identity stays single-
+                  *                  coordinate; the book segment is derived nav). */}
+                <Route path="/docs" element={<DocsPortalRoute />}>
+                  <Route index element={<Suspense fallback={<LoadingScreen />}><DocsIndex /></Suspense>} />
+                  <Route path=":slug" element={<Suspense fallback={<LoadingScreen />}><DocsSlug /></Suspense>} />
+                  <Route path=":slug/:name" element={<Suspense fallback={<LoadingScreen />}><DocPage /></Suspense>} />
+                </Route>
                 <Route path="/apps/:appName/*" element={<AppContent />} />
                 {/* Internal authed form — same renderer as `/f/:slug`, different
                   * submit path, and (objectui#4109) rendered INSIDE the console
@@ -470,7 +492,7 @@ export function App() {
             {/* Dev-only: row-action inline-overflow (multiple primary actions). */}
             <Route path="/dev/row-actions" element={
               <ProtectedRoute>
-                <DevRowActions />
+                <Suspense fallback={<LoadingScreen />}><DevRowActions /></Suspense>
               </ProtectedRoute>
             } />
             <Route path="/organizations" element={
@@ -498,34 +520,33 @@ export function App() {
             </Route>
             <Route path="/system/*" element={<SystemRedirect />} />
             {/*
-              AI surfaces are agent-scoped: the active assistant is baked into
-              the route (`/ai/:agent`) rather than a `?agent=` query snapshot,
-              so each assistant ("build" authoring vs "ask" data Q&A, plus any
-              custom `*.agent.ts`) is its own page. AiChatPage handles the
-              back-compat redirects: bare `/ai` → the default agent surface, and
-              a single-segment `/ai/:agent` that is actually a legacy bare
-              conversation id → `/ai/:agent/:conversationId`.
+              objectstack#34608 (ui ADR-0057 as amended) — the AI assistant has
+              one container, the right-side drawer, and no page. The old
+              full-page addresses (`/ai`, `/ai/:agent`,
+              `/ai/:agent/:conversationId`, with `?package=` / `?new=`) stay
+              routed so bookmarks and shared links keep working:
+              `AiAddressRedirect` opens the drawer on the conversation the
+              address names, filling the window, over the declared landing.
 
               `RequireAiSurface` keeps these from dead-ending on a runtime that
               serves no AI (Community Edition): with AI unavailable a stale
               bookmark / external link gets a screen saying so, with the way
-              home, instead of a chat with no agent to talk to. Cloud installs
-              pass straight through. Purely additive runtime gating — same
-              server signal the floating-chat FAB has always used.
+              home. Purely additive runtime gating — the same server signal the
+              top-bar robot uses.
             */}
             <Route path="/ai" element={
               <ProtectedRoute>
-                <RequireAiSurface><Suspense fallback={<LoadingScreen />}><DefaultAiChatPage /></Suspense></RequireAiSurface>
+                <RequireAiSurface><AiAddressRedirect /></RequireAiSurface>
               </ProtectedRoute>
             } />
             <Route path="/ai/:agent" element={
               <ProtectedRoute>
-                <RequireAiSurface><Suspense fallback={<LoadingScreen />}><DefaultAiChatPage /></Suspense></RequireAiSurface>
+                <RequireAiSurface><AiAddressRedirect /></RequireAiSurface>
               </ProtectedRoute>
             } />
             <Route path="/ai/:agent/:conversationId" element={
               <ProtectedRoute>
-                <RequireAiSurface><Suspense fallback={<LoadingScreen />}><DefaultAiChatPage /></Suspense></RequireAiSurface>
+                <RequireAiSurface><AiAddressRedirect /></RequireAiSurface>
               </ProtectedRoute>
             } />
             {/* `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378).

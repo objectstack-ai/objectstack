@@ -21,7 +21,7 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `ui/` | 221 | 212 | 4 | 0 | 5 |
+| `ui/` | 230 | 220 | 6 | 0 | 4 |
 
 ## `ui/` — sites
 
@@ -32,9 +32,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | File | Sites |
 |---|---|
 | `action-params.zod.ts` | 1 |
-| `action.zod.ts` | 12 |
+| `action.zod.ts` | 13 |
 | `app.zod.ts` | 20 |
-| `bulk-action.zod.ts` | 4 |
+| `bulk-action.zod.ts` | 6 |
 | `chart.zod.ts` | 8 |
 | `component.zod.ts` | 81 |
 | `dashboard.zod.ts` | 11 |
@@ -44,9 +44,9 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `report.zod.ts` | 4 |
 | `responsive.zod.ts` | 1 |
 | `sharing.zod.ts` | 1 |
-| `view.zod.ts` | 59 |
+| `view.zod.ts` | 65 |
 | `widget.zod.ts` | 1 |
-| **total** | **221** |
+| **total** | **230** |
 
 ## `ui/` — open
 
@@ -54,21 +54,21 @@ Per file, how many of its sites still silently discard unknown keys. The `Class`
 column that decides the bucket split is hand-written in the ledger; the arithmetic
 over it is here.
 
-**5 strip of 221**, in 4 file(s).
+**4 strip of 230**, in 4 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `action-params.zod.ts` | 1 | 1 |
 | `app.zod.ts` | 1 | 20 |
-| `view.zod.ts` | 2 | 59 |
+| `view.zod.ts` | 1 | 65 |
 | `widget.zod.ts` | 1 | 1 |
-| **total** | **5** | **221** |
+| **total** | **4** | **230** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 2 |
+| wire / open — out of forced scope | 1 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |

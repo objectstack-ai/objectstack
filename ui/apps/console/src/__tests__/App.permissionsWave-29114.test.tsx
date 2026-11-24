@@ -65,7 +65,7 @@ const ORG = { id: 'org_1', name: 'Acme', slug: 'acme' };
 function respond(input: unknown): Promise<Response> {
   const url = String(input);
   const body = url.includes('/auth/me/permissions')
-    ? { authenticated: true, userId: 'u1', tenantId: ORG.id, positions: [], permissionSets: [], objects: {}, fields: {}, hasAnyQueue: false }
+    ? { authenticated: true, userId: 'u1', tenantId: ORG.id, positions: [], permissionSets: [], objects: {}, fields: {}, hasAnyQueue: false, objectsUsingQueues: [] }
     : url.includes('/me/apps')
       ? { apps: [] }
       : {};
@@ -134,6 +134,10 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => {
     LoadingScreen: () => <div data-testid="loading-screen" />,
     DefaultHomeLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
     DefaultHomePage: () => <div data-testid="home-page" />,
+    // objectstack#36732 — from 768 px up `/home` redirects into an app; the page
+    // these cases read is a phone's (and a desktop's with no product app), so
+    // they render at phone width.
+    usePhoneViewport: () => true,
     DefaultAppContent: () => <div data-testid="app-content" />,
     DefaultOrganizationsLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
     DefaultOrganizationsPage: () => <div data-testid="organizations-page" />,

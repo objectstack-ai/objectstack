@@ -77,9 +77,20 @@ inside the caller's **readable** set, so when **no** write-class policy applies
 to a caller on an object, the `update` / `delete` scope is derived from that
 caller's `select` policies — a record they cannot read is one they cannot
 modify, by id or in bulk. Authoring a write-class policy switches the
-derivation off for that class: an authored `update` predicate then decides
-the `update` *filter* alone, widening past the platform's owner-scoped write
-floor exactly as written. Nothing is derived for `insert`
+derivation off for that class: an authored `update` predicate then joins
+the `update` *filter* as one more OR term, widening past the platform's
+owner-scoped write floor exactly as written. A write policy adds rows; it
+does not take away a row the floor admits (one the caller created), whether
+or not record sharing replaces the floor for that row. Two exceptions: on an
+object whose org-wide default is `public_read_write`, an `update` has no floor,
+so an authored `update` policy is the whole scope and does refuse the caller's
+own non-matching row; and on a `controlled_by_parent` detail, a write is
+judged by its master gate instead of the floor, so a detail policy bounds every
+detail row written, by id or by predicate (a write made on another user's
+behalf keeps the floor). To cap what a caller
+may do to rows they created, use a `check` (it judges the stored image) or a
+`beforeUpdate` / `beforeDelete` lifecycle hook (it sees the prior row as
+`ctx.previous`). Nothing is derived for `insert`
 (there is no pre-existing row to be visible), and a caller holding the
 read-side superuser bypass (`viewAllRecords` on a private or deployment-level
 object) is not narrowed, because their readable set is already unbounded.
@@ -99,6 +110,20 @@ narrowing you authored), so an `update` widener works as written. On a
 records, their access depth and the records shared with them, so an `update`
 widener reaches **only rows the caller can already read**; everything else it
 admits by predicate is still refused.
+
+**Under record sharing, a predicate write is bounded by the write scope, not
+the read scope.** When record sharing is composed (`@objectstack/plugin-sharing`),
+a predicate (`multi: true`) `update` / `delete` on a `private` object writes only
+the rows the caller may **write**: their own records, their access depth and
+queue membership, plus **edit** shares for an `update` (a share never grants
+`delete`, ADR-0111 D3). A row the caller holds only through
+a **read** share is readable, and an app `update` widener admits it, but a
+predicate write does not reach it: the row is left as it was and the write
+answers no error. To write such a row, address it **by id alone**
+(`where: { id }`, or the payload `id`): a by-id write is judged by id, and the
+widener admits it as written. A `where` that carries a scalar `id` **beside
+other keys** under `multi: true`, and an `id` that is falsy (`''`, `0`), run as
+predicate writes and meet the same bound.
 
 <Callout type="warn">
 **Known limitation — an app-authored write widener does nothing on a

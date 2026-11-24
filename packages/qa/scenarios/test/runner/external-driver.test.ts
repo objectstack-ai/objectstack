@@ -211,7 +211,10 @@ class ThroughCommand implements AgentDriver {
       toolCalls: t.toolCalls.map((c) => ({ name: c.name, input: c.input, output: c.output, ...(c.isError ? { isError: true } : {}) })),
       ...this.usage(task),
     };
-    writeFileSync(join(this.script, `${encodeURIComponent(stepKey(task))}.json`), JSON.stringify(answer));
+    // The command reads its answer by the step it is handed, which never carries the confirmation mark
+    // (an operation's confirmation turn is told by its prompt): the turn's answer goes where this call reads it.
+    const { confirmation: _confirmation, ...step } = task;
+    writeFileSync(join(this.script, `${encodeURIComponent(stepKey(step))}.json`), JSON.stringify(answer));
   }
   async author(task: AuthorTask): Promise<AuthorResult> {
     this.write(task, (await this.scripted.author(task)).turn);

@@ -546,6 +546,8 @@
     "TranslationItemSchema": "system/TranslationItem",
     "TrustedAppScheme": "system/TrustedAppScheme",
     "TrustedAppSchemeSchema": "system/TrustedAppScheme",
+    "TrustedProxyNetworks": "system/TrustedProxyNetworks",
+    "TrustedProxyNetworksSchema": "system/TrustedProxyNetworks",
     "UserActivityStatus": "system/UserActivityStatus",
     "UserDevice": "system/UserDevice",
     "UserDeviceSchema": "system/UserDevice",

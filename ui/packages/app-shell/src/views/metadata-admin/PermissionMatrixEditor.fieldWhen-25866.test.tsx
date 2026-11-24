@@ -19,11 +19,13 @@ import { MemoryRouter } from 'react-router-dom';
 import '@objectstack/formula';
 import '@objectstack/lint';
 import '@objectstack/spec/identity';
+import { FieldPermissionSchema } from '@objectstack/spec/security';
 
 interface FieldEntry {
   readable?: boolean;
   editable?: boolean;
   when?: string;
+  rollupSourceUnreadableReason?: string;
 }
 interface SavedSet {
   fields?: Record<string, FieldEntry>;
@@ -199,5 +201,39 @@ describe('a field row offers a row condition on its edit vote (objectstack#25866
     await waitFor(() => expect(screen.queryByTestId('perm-autosave-held')).toBeNull(), { timeout: 3000 });
     const set = await saveAfter(1);
     expect(set.fields?.['a_account.amount']).toEqual({ readable: true, editable: false, when: "status == 'approved'" });
+  });
+});
+
+/**
+ * The roll-up acknowledgement (`rollupSourceUnreadableReason`) rides the same
+ * cascade as the row condition: the spec refuses it beside `readable: false`,
+ * so Read off removes it in the same edit, and a bulk shortcut that keeps the
+ * row readable keeps it.
+ */
+describe('a field row keeps a roll-up acknowledgement only while Read is on', () => {
+  const REASON = 'Service staff read account totals but not invoice rows';
+
+  it('Read off removes the reason, so the saved entry is one the spec accepts', async () => {
+    await renderExpanded({ 'a_account.revenue': { readable: true, editable: false, rollupSourceUnreadableReason: REASON } });
+
+    fireEvent.click(screen.getByLabelText('a_account.revenue readable'));
+    expect(screen.getByLabelText('a_account.revenue readable')).not.toBeChecked();
+
+    const set = await saveAfter(0);
+    const entry = set.fields?.['a_account.revenue'];
+    expect(entry).toEqual({ readable: false, editable: false });
+    expect(FieldPermissionSchema.safeParse(entry).success).toBe(true);
+  });
+
+  it('Write all keeps the reason on a row it rewrites, and the spec accepts the entry', async () => {
+    await renderExpanded({ 'a_account.revenue': { readable: true, editable: false, rollupSourceUnreadableReason: REASON } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Write all' }));
+    expect(screen.getByLabelText('a_account.revenue editable')).toBeChecked();
+
+    const set = await saveAfter(0);
+    const entry = set.fields?.['a_account.revenue'];
+    expect(entry).toEqual({ readable: true, editable: true, rollupSourceUnreadableReason: REASON });
+    expect(FieldPermissionSchema.safeParse(entry).success).toBe(true);
   });
 });

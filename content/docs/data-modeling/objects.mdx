@@ -69,7 +69,7 @@ export const Account = ObjectSchema.create({
 | `nameField` | `string` | optional | The stored field used as the record display name, e.g. `'name'` or `'title'` (ADR-0079). The deprecated alias `displayNameField` is still accepted. |
 | `titleFormat` | `string` | optional | Deprecated (ADR-0079 → `nameField`). Render-only title template (e.g. `'{{record.name}} - {{record.code}}'`); an explicit `nameField` takes precedence. An object definition that declares it is refused at save and by `os validate`; a stored object that carries it still loads |
 | `imageField` | `string` | optional | The record's picture: names a field of this object whose type is `image` or `avatar` — any other name is refused when the object is validated or published. It is the one object-level declaration the record page header draws beside the title; a record whose field is empty shows no picture. |
-| `highlightFields` | `string[]` | optional | Most-important fields in priority order — default list columns, cards, previews, detail highlight strip (ADR-0085; formerly `compactLayout` — the old spelling was retired and is now rejected) |
+| `highlightFields` | `string[]` | optional | Most-important fields in priority order — default list columns, cards, previews (ADR-0085; formerly `compactLayout` — the old spelling was retired and is now rejected) |
 | `stageField` | `string \| false` | optional | Linear lifecycle field; `false` declares the status field non-linear and suppresses stage heuristics (ADR-0085) |
 
 ### Capabilities (`enable`)
@@ -92,6 +92,7 @@ enable: {
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | `trackHistory` | `false` | Field history tracking for audit compliance |
+| `fieldHistory` | — (on) | Field-change values (`old → new`) on the activity stream; `false` turns them off for the object |
 | `searchable` | `true` | Index records for global search |
 | `apiEnabled` | `true` | Expose object via automatic APIs |
 | `apiMethods` | all | Whitelist over the six primitives (`get/list/create/update/delete/bulk`); derived verbs (search/export/upsert/…) follow automatically. `undefined` = all, `[]` = none |
@@ -234,8 +235,39 @@ lifecycle: {
   commitments instead of in clear, so a checkpoint never carries their values.
   Each must be a declared field other than `id` and `created_at` (refused at
   parse time otherwise). Both must be in the object's registered fields, with
-  `tenant_id`, which keys each checkpoint chain: an object without one of the
-  three is not sealed.
+  the chain column below: an object without one of the three is not sealed.
+- `chainField` names the chain column: the column whose value is the
+  organization a row's checkpoint chain belongs to. It is optional and
+  defaults to `tenant_id`. An object whose organization lives in the tenant
+  column the platform injects names that column instead:
+  `seal: { valueFields: ['payload'], chainField: 'organization_id' }`. A
+  named column must be a declared field or a column the platform injects;
+  `organization_id` counts unless the object opts out of the tenant column
+  (`systemFields: false`, `systemFields.tenant: false` or
+  `tenancy.enabled: false`). Any other name is refused at parse time, at
+  `lifecycle.seal.chainField`, and so is a column that cannot name an
+  organization: one whose value is not one text on every store (a number,
+  currency, percent, rating, slider, progress, summary, boolean, toggle, date,
+  datetime, JSON-shaped or multi-value column, the injected `updated_at`
+  included), `id` or `created_at` (they order the rows), and a column
+  `valueFields` also lists (the chain value travels in clear in every
+  checkpoint). Name a text or lookup column holding the organization id. An object that names no chain column is
+  chained by `tenant_id`, and that column is held to the same rules: an object
+  with no `tenant_id` field (the platform never injects one), with a
+  `tenant_id` whose value is not text, or with `tenant_id` in `valueFields` is
+  refused at parse time, at `lifecycle.seal`. Declare a text or lookup
+  `tenant_id`, or name a chain column such as `organization_id`. An object
+  chained by `organization_id` that its deployment declares platform-global,
+  which withholds that column, still parses but is not sealed: the sealer
+  reports it at `error`, as it does any definition that reaches the registry
+  without the parse. A row whose chain column is empty is
+  sealed with the rows about no organization. `os audit verify --org <id>`
+  reads the same column, so it reports that organization's rows whichever
+  column holds it. The chain column is fixed once the object has
+  checkpoints: after a change, the last sealed hour's rows are sealed again
+  under the new column, `os audit verify` reports them `listed_twice`, and
+  verifying one organization with `--org` reads the rows sealed before the
+  change as `late` and unsealed. Both fail the check.
 - Every column must have a type with one canonical spelling. A column of type
   `password`, `secret`, `formula`, `summary`, `image`, `file`, `avatar`,
   `video` or `audio` has none, and an object that declares one is not sealed.
@@ -302,7 +334,7 @@ indexes: [
 | :--- | :--- | :--- |
 | `isSystem` | `boolean` | System object, protected from deletion (default: `false`) |
 | `managedBy` | `enum` | Lifecycle bucket that sets the default CRUD affordances and write policy — `'platform'` (default), `'config'`, `'system-data'`, `'engine-owned'`, `'append-only'`, `'synced'`, `'better-auth'`. See [Lifecycle bucket](#lifecycle-bucket-managedby) below. |
-| `userActions` | `object` | Per-object override of the CRUD affordances the `managedBy` default implies — `{ create?, edit?, delete?, import?, exportCsv? }`. This is what NARROWS a `system-data` object, opens CSV `import` on one, or opens a verb on an `engine-owned`/`append-only` one. See [Lifecycle bucket](#lifecycle-bucket-managedby). |
+| `userActions` | `object` | Per-object override of the CRUD affordances the `managedBy` default implies — `{ create?, edit?, delete?, import?, exportCsv? }`. This is what NARROWS a `system-data` object, opens CSV `import` on one, or opens a verb on an `engine-owned`/`append-only` one. `exportCsv: false` hides the Export entry that downloads the object's data (CSV, XLSX or JSON) on its grids, list views and dataset reports; a Gantt view's PNG / PDF export of its chart is not covered. It refuses no export request, since who may export is the permission set's `allowExport`. See [Lifecycle bucket](#lifecycle-bucket-managedby). |
 | `sharingModel` | `enum` | Org-Wide Default record visibility (ADR-0055/0056/0090). Canonical four only: `'private'`, `'public_read'`, `'public_read_write'`, `'controlled_by_parent'` (detail visibility derived from its master). The legacy aliases (`'read'`, `'read_write'`, `'full'`) were removed from the enum (ADR-0090 D4) — authoring rejects them. Unset on a custom object resolves to `'private'` (ADR-0090 D1) |
 | `ownership` | `enum` | Record-ownership model: `'user'` (default — injects the reassignable `owner_id` lookup, engaging owner-scoped RLS, "My" views and owner reports, plus `owning_business_unit_id`), `'business_unit'` (owned by an org unit rather than a person — injects `owning_business_unit_id` and deliberately **no** `owner_id`; ADR-0117 D1), `'org'`, or `'none'` (no per-record owner of either kind — Dataverse-style catalog / junction tables). Distinct from the package `own`/`extend` contribution kind. |
 | `validations` | `ValidationRule[]` | Object-level validation rules (see [Validation](/docs/data-modeling/validation)) |
@@ -322,7 +354,7 @@ bare bucket string.
 | `system-data` | Platform-defined schema holding **admin/user-writable data** (RBAC link tables, preferences, messaging config). New / Edit / Delete / Export by default — **no CSV import**, which is opt-in per object; narrow the rest with `userActions`. |
 | `engine-owned` | Runtime rows a platform service owns end to end — generic CRUD hidden, exposed `['get', 'list']` only, **no user writes ever**. |
 | `append-only` | Immutable audit trail — View + Export only. |
-| `synced` | Rows a scheduled pull copies from a connector or a federated source — View + Export only. The one bucket `userActions` cannot open a write on: a member's edit would be kept or overwritten by the next pull, so a change belongs in the source. The target of every mapping with a `connectorSource` or `datasourceSource`. |
+| `synced` | Rows a scheduled pull copies from a connector or a federated source — View + Export only. The one bucket `userActions` cannot open a write on: a member's edit would be kept or overwritten by the next pull, so a change belongs in the source. The target of every mapping with a `connectorSource` or `datasourceSource`. The platform adds five hidden `_sync_` provenance columns that only the pull writes (see [Jobs](/docs/automation/jobs)). |
 | `better-auth` | Identity tables owned by the better-auth driver — generic user-context CRUD is suppressed; mutations flow through the auth API (sign-in, invite, reset). |
 
 **`engine-owned` vs. `system-data` (ADR-0103, #3355).** Both hold a

@@ -14,11 +14,12 @@
  * every verb `aggregate` included (`@objectstack/objectql`'s
  * `relation-filter-lowering.ts`). It reads the related object through the
  * engine's own `find`, AS THE CALLER — that object's CRUD gate, row scope and
- * field permissions apply as they do to a direct read — and matches the
- * relation field against the ids the read returns, refusing a match past its
- * cap (`RELATION_FILTER_ID_CAP`) rather than truncating it. That is "resolve the
- * parent ids first, then filter the base object with `IN`", with the security
- * rule in the one place that owns it. This module only respells the member; it
+ * field permissions apply as they do to a direct read — and keeps the rows
+ * whose relation field is a record that read admits: a subquery in the same
+ * statement where that is provably the same read, otherwise the ids the read
+ * returns, refusing a match past the cap (`RELATION_FILTER_ID_CAP`) rather
+ * than truncating it. That is "resolve the parent ids first, then filter the
+ * base object with `IN`", with the security rule in the one place that owns it. This module only respells the member; it
  * reads no data and judges no permission.
  *
  * ## What a lowered leaf means
@@ -49,10 +50,12 @@
  * A leaf this path cannot serve EXACTLY is left as written, and
  * `ObjectQLStrategy.planCrossObject` refuses it with the reason recorded here:
  *
- * - **`multi-hop`** — `a.b.field`. The engine's nested-relation form is one
- *   relationship deep (the related object's own relation fields cannot carry a
- *   condition), and a second hop resolved here would be a second copy of the
- *   engine's read, cap and field rule. The hop limit is ONE relationship.
+ * - **`multi-hop`** — a path past {@link CROSS_OBJECT_WHERE_MAX_HOPS}
+ *   relationships (`a.b.c.d.field`). Up to that limit (ADR-0071's three hops) a
+ *   path is respelled as the nested form one relation inside the next
+ *   (`a.b.field` → `{ a: { b: { field } } }`), which the engine serves hop by
+ *   hop, each hop its related object's own read as the caller; past it the
+ *   engine refuses the nested form too.
  * - **`negated`** — a leaf under `$not`, at any depth. Negating the existential
  *   test admits every row whose parent is absent or unreadable, so a parent the
  *   caller cannot read would let its children through. The negation belongs
@@ -84,6 +87,13 @@ import { findCrossFieldComparand } from '../comparand-shape.js';
 import { resolvePathHops, type HopReference } from '../hop-object.js';
 import type { Cube } from '@objectstack/spec/data';
 
+/**
+ * The most relationships a dotted `where` leaf may traverse and still be
+ * respelled: ADR-0071's hop limit, the one the engine's nested-relation form
+ * carries (`@objectstack/objectql`'s `RELATION_CONDITION_MAX_HOPS`).
+ */
+export const CROSS_OBJECT_WHERE_MAX_HOPS = 3;
+
 /** Why a cross-object `where` leaf is left for the strategy to refuse. */
 export type UnservedCrossObjectReason = 'multi-hop' | 'negated' | 'field-reference' | 'join-target';
 
@@ -95,6 +105,8 @@ export interface ServedCrossObjectLeaf {
   readonly field: string;
   /** The relation field of the base object the condition sits beneath. */
   readonly relation: string;
+  /** Every relation field the path traverses, the base object's first (`[relation]` for one hop). */
+  readonly path: readonly string[];
   /** The related object the hop reads. */
   readonly object: string;
 }
@@ -191,7 +203,7 @@ export function lowerCrossObjectWhere(
       const field = reader.resolveField(key);
       if (!reader.isCrossObject(field)) continue;
       const segments = field.split('.');
-      if (segments.length > 2) {
+      if (segments.length - 1 > CROSS_OBJECT_WHERE_MAX_HOPS) {
         unserved.set(field, { reason: 'multi-hop' });
         continue;
       }
@@ -204,29 +216,42 @@ export function lowerCrossObjectWhere(
         unserved.set(field, { reason: 'field-reference' });
         continue;
       }
-      const [relation, attr] = segments;
-      const [hop] = resolvePathHops(reader.cube, reader.baseObject, [relation], reader.referenceOf);
-      if (hop.via === 'join') {
-        const declared = reader.referenceOf?.(reader.baseObject, relation);
-        if (declared !== undefined && declared !== '' && declared !== hop.object) {
-          unserved.set(field, { reason: 'join-target', joined: hop.object, declared });
-          continue;
-        }
+      const relations = segments.slice(0, -1);
+      const attr = segments[segments.length - 1];
+      const hops = resolvePathHops(reader.cube, reader.baseObject, relations, reader.referenceOf);
+      // Every hop the cube joins must join the object its field declares: the
+      // engine reads the declared reference, hop by hop.
+      const misjoined = hops.find((h) => {
+        if (h.via !== 'join') return false;
+        const declared = reader.referenceOf?.(h.from, h.field);
+        return declared !== undefined && declared !== '' && declared !== h.object;
+      });
+      if (misjoined) {
+        unserved.set(field, {
+          reason: 'join-target', joined: misjoined.object, declared: reader.referenceOf?.(misjoined.from, misjoined.field),
+        });
+        continue;
       }
 
       out ??= { ...cond };
       delete out[key];
-      const conditions = byRelation.get(hop.field) ?? [];
+      // One condition per relation PATH: leaves through the same relations
+      // share the record at its end (`a.b.x` and `a.b.y` are one `b` with both).
+      const pathKey = relations.join('.');
+      const conditions = byRelation.get(pathKey) ?? [];
       const open = conditions.find((c) => !Object.prototype.hasOwnProperty.call(c, attr));
       if (open) open[attr] = spec;
       else conditions.push({ [attr]: spec });
-      byRelation.set(hop.field, conditions);
-      served.push({ member: key, field, relation: hop.field, object: hop.object });
+      byRelation.set(pathKey, conditions);
+      served.push({ member: key, field, relation: hops[0].field, path: relations, object: hops[0].object });
     }
 
     if (byRelation.size === 0) return out ?? cond;
-    const relationConditions = [...byRelation].flatMap(([relation, conditions]) =>
-      conditions.map((condition) => ({ [relation]: condition })),
+    // `a.b` → `{ a: { b: CONDITION } }`: each relation holds the next one's condition.
+    const nest = (path: string, condition: Record<string, unknown>): Record<string, unknown> =>
+      path.split('.').reduceRight<Record<string, unknown>>((inner, relation) => ({ [relation]: inner }), condition);
+    const relationConditions = [...byRelation].flatMap(([path, conditions]) =>
+      conditions.map((condition) => nest(path, condition)),
     );
     const result = out ?? { ...cond };
     const prior = result.$and;

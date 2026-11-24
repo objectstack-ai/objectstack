@@ -51,9 +51,11 @@ import {
   DateField,
   NumberCellRenderer,
   NumberField,
+  PercentCellRenderer,
   getCellRenderer,
 } from '../index';
 import { FormulaField } from '../widgets/FormulaField';
+import { PercentField } from '../widgets/PercentField';
 
 afterEach(() => cleanup());
 
@@ -348,5 +350,68 @@ describe('one stored value, one reading: the form face equals the cell (objectui
       expect(form).not.toBe('');
       expect(form).toBe(cell);
     });
+  });
+});
+
+// ── percent ────────────────────────────────────────────────────────────────
+
+/**
+ * objectstack#35047 — a formula declares a `percent` result, and it reads as
+ * a `percent` field reads its stored value: a fraction unless the formula
+ * declares a `max` above 1, at the decimal places its `scale` gives (absent:
+ * the percent default, 0). Before the card the member did not exist; a value
+ * the cell did not know fell to the text face and a ratio read `0.25`.
+ */
+describe('percent: both faces draw the percent field\'s own faces (objectstack#35047)', () => {
+  const percentCell = (locale: Locale, value: number, extra: FormulaExtra = {}) =>
+    textOf(locale, <PercentCellRenderer value={value} field={{ type: 'percent', name: 'p', ...extra } as never} />);
+  const percentForm = (locale: Locale, value: number, extra: FormulaExtra = {}) =>
+    textOf(
+      locale,
+      <PercentField value={value} onChange={noop} field={{ type: 'percent', name: 'p', ...extra } as never} readonly />,
+    );
+
+  describe.each(LOCALES)('%s', (locale) => {
+    it.each(FACES)('%s — a fraction reads as a percentage, at the percent default width', (_face, draw) => {
+      const text = textOf(locale, draw(0.25, { returnType: 'percent' }));
+      expect(text).toBe('25%');
+      expect(text).not.toBe('0.25');
+    });
+
+    it.each(FACES)('%s — a declared scale counts the displayed percentage\'s places', (_face, draw) => {
+      expect(textOf(locale, draw(0.417, { returnType: 'percent', scale: 1 }))).toBe('41.7%');
+    });
+
+    it.each(FACES)('%s — a declared `max` above 1 says whole percentage points', (_face, draw) => {
+      expect(textOf(locale, draw(41.7, { returnType: 'percent', scale: 1, max: 100 }))).toBe('41.7%');
+    });
+
+    it("both faces equal the percent field's own faces for the same value", () => {
+      for (const extra of [{}, { scale: 2 }, { max: 100 }] as FormulaExtra[]) {
+        const value = 'max' in extra ? 12.5 : 0.125;
+        expect(textOf(locale, formFace(value, { returnType: 'percent', ...extra }))).toBe(percentForm(locale, value, extra));
+        expect(textOf(locale, cellFace(value, { returnType: 'percent', ...extra }))).toBe(percentCell(locale, value, extra));
+      }
+    });
+
+    it('CONTROL — the same fraction under `returnType: number` still reads as a number', () => {
+      expect(textOf(locale, cellFace(0.25, { returnType: 'number' }))).toBe('0.25');
+      expect(textOf(locale, formFace(0.25, { returnType: 'number' }))).toBe('0.25');
+    });
+  });
+
+  it('the cell draws the percent bar unless the formula declares `percentDisplay: plain`', () => {
+    const { container } = renderSession('en-US', cellFace(0.25, { returnType: 'percent' }));
+    expect(container.querySelector('[role="progressbar"]')).not.toBeNull();
+    cleanup();
+    const plain = renderSession('en-US', cellFace(0.25, { returnType: 'percent', percentDisplay: 'plain' }));
+    expect(plain.container.querySelector('[role="progressbar"]')).toBeNull();
+    expect(plain.container.textContent).toBe('25%');
+  });
+
+  it.each(FACES)('%s — whitespace is empty, not a fabricated 0%%', (_face, draw) => {
+    const { container } = renderSession('en-US', draw('   ', { returnType: 'percent' }));
+    expect(affordance(container)).not.toBeNull();
+    expect(container.textContent).not.toContain('0%');
   });
 });

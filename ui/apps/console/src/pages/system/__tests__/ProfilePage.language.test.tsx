@@ -58,12 +58,13 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { normaliseClientError } from '@object-ui/data-objectstack';
 
-const { user, updateUser, findOne, update, offerable, writable } = vi.hoisted(() => ({
+const { user, updateUser, findOne, update, offerable, appContent, writable } = vi.hoisted(() => ({
   user: { value: { id: 'usr_1', name: 'Ada', email: 'ada@example.com' } as Record<string, unknown> | null },
   updateUser: vi.fn(async () => {}),
   findOne: vi.fn<(resource: string, id: string) => Promise<unknown>>(async () => ({ id: 'usr_1' })),
   update: vi.fn<(resource: string, id: string, data: unknown) => Promise<unknown>>(async () => ({})),
-  offerable: { value: ['en', 'zh', 'ja'] as readonly string[] | null },
+  offerable: { value: ['en', 'zh', 'ja'] as readonly string[] },
+  appContent: { value: null as readonly string[] | null },
   writable: { value: true },
 }));
 
@@ -98,6 +99,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
         String(options?.[name] ?? ''),
       ),
     offerableLanguages: offerable.value,
+    appContentLanguages: appContent.value,
   }),
 }));
 
@@ -149,6 +151,7 @@ describe('ProfilePage — my language (objectui#7501)', () => {
     vi.clearAllMocks();
     user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
     offerable.value = ['en', 'zh', 'ja'];
+    appContent.value = null;
     writable.value = true;
     findOne.mockResolvedValue({ id: 'usr_1' });
     update.mockResolvedValue({});
@@ -276,6 +279,7 @@ describe('ProfilePage — a stored spelling of a table language (objectstack#305
   beforeEach(() => {
     vi.clearAllMocks();
     user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
+    appContent.value = null;
     writable.value = true;
     update.mockResolvedValue({});
   });
@@ -303,5 +307,40 @@ describe('ProfilePage — a stored spelling of a table language (objectstack#305
 
     expect(await listed(select)).toHaveLength(4);
     expect(select).toHaveTextContent('ไทย');
+  });
+
+  it('says the app content shows in the default language for a chosen language the app does not ship (objectstack#35425)', async () => {
+    offerable.value = ['en', 'zh-Hans', 'ja'];
+    appContent.value = ['en', 'zh-Hans'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'en' });
+    const select = await renderProfile();
+
+    // A shipped language, and the deployment default: no hint.
+    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
+    await pick(select, 'Use the deployment default');
+    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
+
+    // 日本語 is offered (every table language is) but the app ships no `ja`.
+    await pick(select, '日本語');
+    expect(screen.getByTestId('profile-language-app-content-default')).toHaveTextContent(
+      'App content shows in the default language',
+    );
+  });
+
+  it('marks nothing while the app list is not known', async () => {
+    offerable.value = ['en', 'zh-Hans', 'ja'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'ja' });
+    await renderProfile();
+
+    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
+  });
+
+  it('does not mark a stored tag outside the table', async () => {
+    appContent.value = ['en'];
+    offerable.value = ['en', 'zh-Hans'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'th' });
+    await renderProfile();
+
+    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
   });
 });

@@ -7,15 +7,18 @@
  * A package-less write onto an item a read-only package ships answers 403
  * NOT_OVERRIDABLE and names the base's `.custom` pair. The landing's page
  * description and its read-only section hint used to send the user there
- * ("customize them with an environment overlay"). They now name Customize and
- * New similar, saved in the package's `.custom` customization package.
+ * ("customize them with an environment overlay"). objectstack#34715 then
+ * reworded both to say what the author can do, naming no mechanism: the open
+ * route is the Customize button each installed app's card carries.
  *
  * Read off the real `BuilderLanding`, rendered in English and in Chinese with a
  * read-only package listed, so both strings are on the page. The expected
- * words are the tables' own: the Customize and New similar action labels.
+ * words are the tables' own: the Customize action label.
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
@@ -96,30 +99,20 @@ function descriptionElement(): HTMLElement {
   return description;
 }
 
-describe('Studio landing: a read-only package is customized in its .custom package (objectstack#29489)', () => {
+describe('Studio landing: a read-only package is customized through its Customize button, never an overlay (objectstack#29489)', () => {
   for (const [locale, lang] of LOCALES) {
-    it(`${locale}: the description and the read-only hint name Customize, New similar and the .custom package, never an overlay`, async () => {
+    it(`${locale}: the description and the installed-apps hint offer no overlay, and the card carries Customize`, async () => {
       await renderLanding(lang);
       await screen.findByText('Showcase');
 
-      const customize = row('engine.studio.customize.action', locale);
-      const newSimilar = row('engine.studio.auto.newSimilar.action', locale);
       const shown = [
         descriptionElement().textContent ?? '',
         screen.getByTestId('studio-landing-readonly-hint').textContent ?? '',
       ];
+      expect(shown).toEqual([row('engine.studio.landing.lead', locale), row('engine.studio.landing.appsHint', locale)]);
+      for (const text of shown) expect(text).not.toMatch(ENVIRONMENT_OVERLAY);
 
-      // The rendered text is the table's row, so the landing reads these keys.
-      expect(shown).toEqual([
-        row('engine.studio.landing.description', locale),
-        row('engine.studio.landing.readonlyHint', locale),
-      ]);
-      for (const text of shown) {
-        expect(text).not.toMatch(ENVIRONMENT_OVERLAY);
-        expect(text).toContain('.custom');
-        expect(text).toContain(customize);
-        expect(text).toContain(newSimilar);
-      }
+      expect(screen.getByTestId('studio-landing-customize')).toHaveTextContent(row('engine.studio.customize.action', locale));
     });
   }
 });

@@ -79,12 +79,14 @@ function makeDriver() {
     return s;
   };
   // Flat equality plus `$and` — the two shapes `aggregateSummaryValue` and the
-  // row-filter middleware below actually produce.
+  // row-filter middleware below actually produce — and a field's `$in`, the
+  // shape a recompute naming several parents groups them under (#33795).
   const matches = (row: any, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     return Object.entries(where).every(([k, v]) => {
       if (k === '$and') return (v as any[]).every((sub) => matches(row, sub));
       if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+      if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row?.[k]);
       return row?.[k] === v;
     });
   };

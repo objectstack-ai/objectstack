@@ -272,10 +272,15 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // sample names it.
         // [#31840] 52 → 53: `preflight` (the same-origin read the param dialog
         // shows before submit) joined the accepted set, and the sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(53);
+        // [#34273] 53 → 54: `refusals` (the action body's declared refusal
+        // catalogue) joined the accepted set, and the sample names it.
+        // [#34374, action half] 54 → 55: `texts` (the sentences the action's
+        // body writes into records, in the organization's language) joined
+        // the accepted set, and the sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(55);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides', 'preflight']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides', 'preflight', 'refusals', 'texts']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
@@ -384,9 +389,27 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
     // owner names to serve its definition to callers its own door admits.
     // [#32983] `position` 13 → 14: `renamedFrom`, the earlier names whose
     // holders the security plugin moves to the renamed position at boot.
+    // [#34167] `skill` 16 → 17: `mcpPrompt`, the owner's opt-out of MCP
+    // prompt projection for a skill written for the in-product agents only.
+    // [#34374] `hook` 23 → 24: the declared texts, `texts`, a hook's
+    // sentences written into records in the organization's language.
+    // [#34655] `flow` 23 → 24: `defaultActive`, the default of the
+    // packaged-flow switch (a package ships the flow switched off).
+    // [#35489] `field` 83 → 84: `unitConfig`, the unit a quantity is in or
+    // that a text field holds a unit code (ADR-0158 U4, Open item 8).
+    // [#35985] `object` 50 → 51: `color`, the palette name the console draws
+    // the object's icon tile in.
+    // [#36425] `field` 84 → 85: `showOnCreate`, whether a field is asked for
+    // when a record is created.
+    // [#36290] `field` 85 → 86: `fieldHistory`, the field's own switch for
+    // old → new values on the record activity timeline (false turns them off).
+    // [#36366] `object` 51 → 52: `actionLayout`, the order of the object's
+    // actions and which are buttons, per action scope (list, record).
+    // [#35315] `field` 86 → 87: `transferBehavior`, whether Change Owner on the
+    // referenced record can cascade along the reference.
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 83, flow: 23,
-        hook: 23, object: 50, page: 28, position: 14, report: 24, skill: 16, tool: 14,
+        agent: 24, app: 24, dashboard: 21, dataset: 17, field: 87, flow: 24,
+        hook: 24, object: 52, page: 28, position: 14, report: 24, skill: 17, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

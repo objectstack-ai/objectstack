@@ -222,9 +222,13 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
             .toEqual(['nav_connect_agent']);
         expect(groupChildren(account.body?.item, 'grp_account_developer'))
             .toEqual(['nav_account_api_keys', 'nav_account_oauth_apps']);
-        // The whole served tree, counted: 12 authored ids (the AI Assistant
-        // slot among them) + the one contributed.
-        expect(navIds(account.body?.item)).toHaveLength(13);
+        // The whole served tree, counted: 14 authored ids (the AI Assistant
+        // slot among them) + the one contributed. (12 authored until the
+        // Mobile App entry, `nav_account_mobile_app`, joined after Profile;
+        // 13 until the Notification Settings entry,
+        // `nav_account_notification_settings`, joined the Inbox group
+        // (#34728).)
+        expect(navIds(account.body?.item)).toHaveLength(15);
         // …and the entry's TARGET rode along, so the menu item resolves.
         expect(JSON.stringify(account.body)).toContain('connect_agent');
 
@@ -260,25 +264,42 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         // The Setup tree the platform admin is served BY THIS COMPOSITION: 9
         // authored groups less `group_approvals` and `group_integrations`,
         // which nothing in it contributes into and the filter collapses, plus
-        // the 24 entries `SETUP_NAV_CONTRIBUTIONS` carries, plus the MCP one.
+        // the 28 entries `SETUP_NAV_CONTRIBUTIONS` carries, plus the MCP one.
         // (25 until #25098 moved the unfiltered Packages entry to Studio; 24
         // until #30204 removed the Feature Flags entry with its namespace; 32
         // until #30895 moved the MCP entry out of `group_integrations`, the
         // one entry this composition put there; 31 until the organization
         // Access policy entry, `nav_settings_access_policy`, joined
         // Configuration; 32 until the recycle bin entry, `nav_recycle_bin`,
-        // joined Configuration (#30239); 33 until #33933 moved the Knowledge
-        // entry, `nav_settings_knowledge`, to `@objectstack/service-knowledge`,
-        // which contributes it only where the knowledge service is mounted.)
+        // joined Configuration (#30239); 33 until objectstack#34724 retired
+        // the Packaged Actions entry, `nav_packaged_actions`, the one entry
+        // `group_apps` held here, so that group collapses too; 31 until the
+        // Units of Measure entry, `nav_units_of_measure`, joined Configuration
+        // (#35488); 32 until the working-calendar pair, `nav_work_calendars`
+        // and `nav_work_calendar_exceptions`, joined it, ADR-0157; 34 until
+        // the public forms entry, `nav_public_forms`, joined it, #36444; 35
+        // until objectstack#36834 gave Setup its Packages entry,
+        // `nav_packages`, in `group_apps`, so that group is served again:
+        // +2, `group_apps` and `nav_packages`; 37 until #33933 moved the
+        // Knowledge entry, `nav_settings_knowledge`, to
+        // `@objectstack/service-knowledge`, which contributes it only where the
+        // knowledge service is mounted.)
         // `nav_settings_branding` is not among them, and not because of a
         // tenancy wall (this harness boots none): since #24766 it is
         // contributed by `@objectstack/service-settings` together with the
         // `branding` namespace, offered only where no organization wall stands,
         // and this harness composes platform-objects and the MCP bundle alone.
-        expect(allowedIds).toHaveLength(32);
+        expect(allowedIds).toHaveLength(36);
+        expect(allowedIds).toContain('nav_packages');
+        expect(groupChildren(setupAllowed.body?.item, 'group_apps')).toEqual(['nav_packages']);
+        expect(allowedIds).toContain('nav_public_forms');
+        expect(allowedIds).toContain('nav_work_calendars');
+        expect(allowedIds).toContain('nav_work_calendar_exceptions');
+        expect(allowedIds).not.toContain('nav_packaged_actions');
         expect(allowedIds).toContain('nav_settings_access_policy');
         expect(allowedIds).not.toContain('nav_settings_knowledge');
         expect(allowedIds).toContain('nav_recycle_bin');
+        expect(allowedIds).toContain('nav_units_of_measure');
         expect(allowedIds).not.toContain('nav_settings_branding');
         // The two per-user stores are reached from the User record page, not
         // from Setup's menu (#23803).
@@ -301,8 +322,8 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        // 32: the composition the count in the test above states.
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(32);
+        // 36: the composition the count in the test above states.
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(36);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at

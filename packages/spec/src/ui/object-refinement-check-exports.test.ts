@@ -56,6 +56,7 @@ import {
   ObjectListViewSchema,
   checkListViewCalendarVisualization,
   checkListViewChartBinding,
+  checkListViewTimesheetBinding,
 } from './view.zod';
 import {
   PageSchema,
@@ -234,6 +235,18 @@ const chartBindingFixtures: Fixture[] = [
     refusesAt: [],
   },
   { label: 'a block-less view of another type', value: { type: 'kanban', columns: ['stage'] }, refusesAt: [] },
+];
+
+// [#34382] The timesheet-binding check: a `type: 'timesheet'` view must
+// declare its `timesheet` block; the block's own strict schema judges its keys.
+const timesheetBindingFixtures: Fixture[] = [
+  { label: "`type: 'timesheet'` with no `timesheet` block", value: { type: 'timesheet', columns: ['project'] }, refusesAt: ['timesheet'] },
+  {
+    label: "`type: 'timesheet'` with a complete block",
+    value: { type: 'timesheet', columns: ['project'], timesheet: { rowFields: ['project'], dateField: 'work_date', valueField: 'hours' } },
+    refusesAt: [],
+  },
+  { label: 'a block-less view of another type', value: { type: 'grid', columns: ['project'] }, refusesAt: [] },
 ];
 
 const PAGE_BASE = { name: 'home_page', label: 'Home', type: 'home' } as const;
@@ -553,6 +566,7 @@ const chartMeasureArityFixtures: Fixture[] = [
 const listViewExports: ExportUnderTest[] = [
   { name: 'checkListViewCalendarVisualization', check: checkListViewCalendarVisualization, fixtures: calendarFixtures },
   { name: 'checkListViewChartBinding', check: checkListViewChartBinding, fixtures: chartBindingFixtures },
+  { name: 'checkListViewTimesheetBinding', check: checkListViewTimesheetBinding, fixtures: timesheetBindingFixtures },
 ];
 
 const MIRRORED: MirroredSchema[] = [
@@ -718,6 +732,14 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
       /ListViewShapeSchema\s*\.superRefine\(checkListViewCalendarVisualization\)\s*\.superRefine\(checkListViewChartBinding\)/,
     );
     expect(attachments(src, 'checkListViewChartBinding')).toBe(3);
+    // [#34382] The timesheet-binding check: declared once, chained after the
+    // chart-binding check at the same three doors.
+    expect(src).toContain('export function checkListViewTimesheetBinding(');
+    expect(declarations(src, 'checkListViewTimesheetBinding')).toBe(1);
+    expect(src).toMatch(
+      /\.superRefine\(checkListViewChartBinding\)\s*\.superRefine\(checkListViewTimesheetBinding\)/,
+    );
+    expect(attachments(src, 'checkListViewTimesheetBinding')).toBe(3);
     // [#17063] `checkListViewPageMount` was retired with the `type: 'page'`
     // mount it policed, so neither a declaration nor an attachment of it may
     // return: a re-attachment would be a check with no rule left to enforce.
@@ -771,6 +793,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   it.each([
     ['checkListViewCalendarVisualization', checkListViewCalendarVisualization],
     ['checkListViewChartBinding', checkListViewChartBinding],
+    ['checkListViewTimesheetBinding', checkListViewTimesheetBinding],
     ['checkPageSourceCompleteness', checkPageSourceCompleteness],
     ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkPagePrintComposition', checkPagePrintComposition],

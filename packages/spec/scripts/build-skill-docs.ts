@@ -119,6 +119,9 @@ const DISPLAY: Array<{ name: string; label: string }> = [
   { name: 'objectstack-i18n', label: 'i18n' },
   { name: 'objectstack-formula', label: 'Formula' },
   { name: 'objectstack-upgrade', label: 'Upgrade' },
+  { name: 'objectstack-ask', label: 'Ask' },
+  { name: 'objectstack-mcp-build', label: 'MCP Build' },
+  { name: 'objectstack-project', label: 'Project' },
   { name: 'objectui', label: 'ObjectUI' },
 ];
 

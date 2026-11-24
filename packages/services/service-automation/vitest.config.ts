@@ -50,6 +50,12 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        // The outbound-request guard the `http` node sends through, read from
+        // source so its pins judge this checkout's guard, not a stale `dist/`.
+        find: /^@objectstack\/core\/egress$/,
+        replacement: path.resolve(__dirname, '../../core/src/egress.ts'),
+      },
+      {
         find: /^@objectstack\/platform-objects$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/index.ts'),
       },

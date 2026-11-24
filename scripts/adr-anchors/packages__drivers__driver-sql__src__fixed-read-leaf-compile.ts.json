@@ -1,0 +1,7 @@
+{
+  "file": "packages/drivers/driver-sql/src/fixed-read-leaf-compile.ts",
+  "adrs": [
+    "ADR-0155"
+  ],
+  "invariant": "ADR-0155 D1, D4: a fixed-read leaf compiles only as the `$in` comparand of a field's operator map; every other position is refused with INTERNAL_ERROR / 500, never read as an ordinary comparand. The inner read's predicates come from the leaf's own description (`fixedInnerReadOf`), so no compiler restates them, and its tenant scope is the literal `'none'` (① ruled A): a widened type stops this module compiling until every compiler answers it."
+}

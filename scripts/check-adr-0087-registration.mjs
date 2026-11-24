@@ -572,8 +572,8 @@ export const MIGRATION_LEDGER_ENTRY_DIRS = [
 ];
 
 /**
- * Where `LEDGER_SOURCES[1]`'s conversions live since the #29987 codemod split
- * (`scripts/codemod-split-conversions-registry.mjs`): one module per conversion
+ * Where `LEDGER_SOURCES[1]`'s conversions live since the #29987 codemod
+ * (split by #29993): one module per conversion
  * under this directory, plus the shared helpers. `registry.ts` itself still
  * exists and lists them, but no conversion's `id:` line is in it any more. A rev
  * that tracks no `.ts` file here is a rev from before the split, and the

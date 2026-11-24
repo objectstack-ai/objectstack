@@ -3,7 +3,7 @@
 /**
  * [#29985 codemod] The "Global search and the metadata cache" facet of
  * `ObjectStackProtocolImplementation`: the bodies of `getMetaItemCached` moved
- * out of `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
+ * out of `protocol.ts` whole (split by #29998).
  *
  * A MOVE, not a redesign. `ProtocolSearchAndCacheFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class

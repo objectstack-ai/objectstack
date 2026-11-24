@@ -209,6 +209,28 @@ describe('ObjectStackClient', () => {
         ]);
     });
 
+    it('sends `include` as `?include=`, on the unscoped and the environment surface (the doc list keeps its bodies)', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ type: 'doc', items: [{ name: 'intro', content: '# Intro' }] }),
+        });
+        const client = new ObjectStackClient({ baseUrl: 'http://localhost:3000', fetch: fetchMock });
+
+        await client.meta.getItems('doc', { include: 'content' });
+        await client.meta.getItems('doc', { packageId: 'com.acme', include: 'content' });
+        await client.environment('env_1').meta.getItems('doc', { include: 'content' });
+        // Left out, nothing is sent: the list stays the slim default.
+        await client.meta.getItems('doc');
+
+        const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+        expect(urls).toEqual([
+            'http://localhost:3000/api/v1/meta/doc?include=content',
+            'http://localhost:3000/api/v1/meta/doc?package=com.acme&include=content',
+            'http://localhost:3000/api/v1/environments/env_1/meta/doc?include=content',
+            'http://localhost:3000/api/v1/meta/doc',
+        ]);
+    });
+
     it('should get metadata item by type and name', async () => {
         // The server's body is the spec-declared `GetMetaItemResponseSchema`
         // envelope — `{ type, name, item }`, with the metadata document under
@@ -744,6 +766,18 @@ describe('Approvals namespace (ADR-0019)', () => {
         expect(opts?.method ?? 'GET').toBe('GET');
     });
 
+    it('reads the approval locks of a page of records in one POST, object segment encoded', async () => {
+        const records = [{ recordId: 'rec_1', locked: true }, { recordId: 'rec_2', locked: null }];
+        const { client, fetchMock } = createMockClient({ success: true, data: { records } });
+        const result = await client.approvals.getRecordLocks('sales order', ['rec_1', 'rec_2']);
+        expect(result).toEqual({ records });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [url, opts] = fetchMock.mock.calls[0];
+        expect(String(url)).toBe('http://localhost:3000/api/v1/approvals/records/sales%20order/locks');
+        expect(opts.method).toBe('POST');
+        expect(JSON.parse(opts.body)).toEqual({ recordIds: ['rec_1', 'rec_2'] });
+    });
+
     it('should record an approve decision', async () => {
         const { client, fetchMock } = createMockClient({
             request: { id: 'req-1', status: 'approved' }, finalized: true, decision: 'approve', resumed: true
@@ -768,6 +802,15 @@ describe('Approvals namespace (ADR-0019)', () => {
         const [url, opts] = fetchMock.mock.calls[0];
         expect(url).toContain('/api/v1/approvals/requests/req-1/reject');
         expect(opts.method).toBe('POST');
+        expect(JSON.parse(opts.body).comment).toBe('Missing fields');
+        // A reject carries its reason: the decision and its `comment` are required.
+        const typeOnly = () => {
+            // @ts-expect-error — no decision, so no reason
+            void client.approvals.reject('req-1');
+            // @ts-expect-error — a decision without its reason
+            void client.approvals.reject('req-1', { actorId: 'user-1' });
+        };
+        void typeOnly;
     });
 
     it('should list the action audit trail', async () => {

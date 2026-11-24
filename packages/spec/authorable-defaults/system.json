@@ -250,6 +250,7 @@
     "system/TracingConfig:enabled = true",
     "system/TracingConfig:propagation = {\"extract\":true,\"formats\":[\"w3c\"],\"inject\":true}",
     "system/TracingConfig:sampling = {\"rules\":[],\"type\":\"always_on\"}",
-    "system/TracingConfig:traceIdGenerator = \"random\""
+    "system/TracingConfig:traceIdGenerator = \"random\"",
+    "system/TrustedProxyNetworks:header = \"x-forwarded-for\""
   ]
 }

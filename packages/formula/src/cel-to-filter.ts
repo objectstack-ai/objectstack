@@ -63,6 +63,7 @@ import type { FilterCondition } from '@objectstack/spec/data';
 import { CEL_BOUNDS_MEASURE_CAP_FACTOR, parseCelToAstWithReason } from './cel-engine';
 import type { CelBoundsOverrun } from './cel-engine';
 import { celPushdownLimitsMode } from './cel-pushdown-limits';
+import { WORKING_DAY_FUNCTIONS } from './working-day';
 
 // ---------------------------------------------------------------------------
 // Public contract
@@ -331,8 +332,28 @@ function lowerCondition(node: ASTNode, ctx: Ctx): FilterCondition {
       throw new CompileError('unsupported', `constant non-true predicate (${String(v)})`);
     }
     default:
+      refuseWorkingDayCall(node);
       throw new CompileError('unsupported', `unsupported operator "${String(op)}"`);
   }
+}
+
+/**
+ * ADR-0157 D6: a working-day function evaluates in memory only, over the
+ * calendar the engine loads for it, so a query filter refuses it — as it
+ * refuses every function call — and says what to write instead. The generic
+ * `unsupported` refusal below would name only the node kind.
+ */
+function refuseWorkingDayCall(node: ASTNode): void {
+  if (node.op !== 'call') return;
+  const name = (node.args as unknown[] | undefined)?.[0];
+  if (typeof name !== 'string' || !(WORKING_DAY_FUNCTIONS as readonly string[]).includes(name)) return;
+  throw new CompileError(
+    'unsupported',
+    `${name}() counts with a working calendar and evaluates in memory only, so it cannot run as a database ` +
+      'filter: no calendar arithmetic runs in SQL. To filter on a working-day due time, store it: ' +
+      `give the object a datetime field whose \`expression\` calls ${name}(), computed when the record is written, ` +
+      'and compare that field with {now}.',
+  );
 }
 
 function combine(key: '$and' | '$or', node: ASTNode, ctx: Ctx): FilterCondition {
@@ -717,6 +738,7 @@ function classify(node: ASTNode, ctx: Ctx): Leaf {
       throw new CompileError('unsupported', `cross-object field path "${chain.join('.')}" is not pushdown-able`);
     }
     default:
+      refuseWorkingDayCall(node);
       throw new CompileError('unsupported', `unsupported operand "${String(node.op)}"`);
   }
 }

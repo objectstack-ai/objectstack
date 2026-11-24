@@ -8,8 +8,10 @@
  * (`MetadataContextValue.readObjectScope`): the package's objects, plus by
  * name the route's object and its lookup targets when the package does not
  * hold them (the lookup targets without views, objectstack#29551), the objects
- * the app's navigation and area entries require (`requiresObject`), and the
- * navigation's objects while the command palette is open.
+ * the app's navigation and area entries require (`requiresObject`) that this
+ * runtime registers (objectstack#34244: a presence read answers that first,
+ * {@link readObjectPresence}), and the navigation's objects while the command
+ * palette is open.
  *
  * A page (`page/:pageName`, objectui#12980) reads only the objects its page
  * definition binds ({@link pageObjectNames}), by name, beside the app's
@@ -30,16 +32,21 @@
  * same names by name once the package list has answered empty: the route's
  * object, its lookup targets and the app's `requiresObject` entries, never the
  * whole registry. Only the route's object holds the route. The app's ROOT in
- * such a package keeps the whole registry: measured on Setup's landing, asking
- * the entries' objects by name cost a request each and the landing loaded the
- * whole registry anyway (objectui#12811).
+ * such a package reads the same way (objectstack#34211): the objects its
+ * entries require, in the one presence read, those the entered app's bundle
+ * holds answered from it, and never the whole registry.
  *
  * A record route (`:objectName/record/:recordId`, and its named-page sibling)
  * whose record page is declared as a full page reads the objects that page
  * binds, by name, the way a page route does (objectui#13046), once the page
  * list has answered; the page it picks is the page `RecordDetailView` renders
- * (`usePageAssignment`'s choice). A record route with no declared record page,
- * or a slotted one, reads the whole registry: its synthesized page derives
+ * (`usePageAssignment`'s choice). objectstack#36150 — that page is drawn on
+ * the desktop full page only: on a phone (below `PHONE_BELOW_WIDTH`, read as
+ * the view reads it) the route takes the synthesized page's arm below, as the
+ * view does, through the same `authoredRecordPageApplies` (a page named in the
+ * URL, and the platform pages that keep their own, still read their page's
+ * objects). A record route with no declared record page,
+ * or a slotted one, or an authored page off the desktop, reads the whole registry: its synthesized page derives
  * the related lists from every object that points at the record's object, in
  * any package. objectstack#29552 — except for an object the app's navigation
  * reaches: the app bundle holds every object that points at it
@@ -89,7 +96,9 @@ import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { COMMAND_PALETTE_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_PARAM } from '../urlParams.js';
 import type { ReadNamesWithoutViews } from '../hooks/useObjectPresence.js';
-import type { BundledRead } from '../providers/bundledReads.js';
+import { BUNDLE_MISS, useBundledReads, type BundledRead } from '../providers/bundledReads.js';
+import { authoredRecordPageApplies } from '../views/recordPageSurface.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 
 type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
 export type AppObjectScope = ReturnType<ReadObjectScope>;
@@ -176,6 +185,51 @@ function matchObjectScopeRoute(
     recordId: match.params.recordId,
     dashboardName: match.params.dashboardName,
   };
+}
+
+/** The route paths whose element is `ObjectView`, the list page of an object. */
+const OBJECT_VIEW_ROUTES: readonly string[] = [':objectName', ':objectName/view/:viewId'];
+
+/**
+ * objectstack#35535 — the object whose list `ObjectView` draws on the route at
+ * `subPath` (below `/apps/:appName`), or `undefined` on every other route.
+ * Matched against the same table as the scope's routes, so a static or host
+ * route that shadows `:objectName` (`search`, `reports`) is not one.
+ */
+export function objectViewRouteObject(subPath: string, hostPaths: readonly string[] = []): string | undefined {
+  const routes = [...APP_ROUTE_METADATA_READS.map(({ path }) => ({ path })), ...hostPaths.map((path) => ({ path }))];
+  const matches = matchRoutes(routes, `/${subPath.replace(/^\/+/, '')}`);
+  const match = matches?.[matches.length - 1];
+  if (!match || !OBJECT_VIEW_ROUTES.includes(match.route.path)) return undefined;
+  return match.params.objectName || undefined;
+}
+
+/** An adapter that reads an object's saved views (`ObjectStackAdapter`). */
+type ObjectViewRowsHost = {
+  listViews?: unknown;
+  listViewOverrides?: (objectName: string) => Promise<unknown>;
+};
+
+/**
+ * objectstack#35535 — start the read of `objectName`'s published views that
+ * `ObjectView` sends when its list mounts, so it runs while the list's lazy
+ * modules still load instead of after them.
+ *
+ * It is the reader's own call, never a second read: `ObjectView` asks
+ * `listViewOverrides(objectName)` and `listViews(objectName)`, and outside a
+ * draft preview the adapter answers both from one stored, shared one-object
+ * read (`GET /meta/view?object=OBJECT`, or the stored `/meta/view` list it
+ * narrows). A reader asking while this is on the wire joins it; one asking
+ * after it landed reads what it stored. A failure is not stored, so the
+ * reader that asks next asks again and sees it, as it did before.
+ *
+ * An adapter without both readers is left alone.
+ */
+export function prefetchObjectViewRows(dataSource: unknown, objectName: string): void {
+  const host = dataSource as ObjectViewRowsHost | null | undefined;
+  if (!host || typeof host.listViews !== 'function' || typeof host.listViewOverrides !== 'function') return;
+  // Nobody waits on it: a failure is the reader's to see when it asks.
+  host.listViewOverrides.call(host, objectName).catch(() => undefined);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -289,7 +343,12 @@ export function readPageObjectScope(
   const ready = routeReadDone(boundRead);
   const names = [...new Set([...bound, ...extraNames])];
   const first = read(names);
-  const lookups = bound.flatMap((name) => lookupTargetNames(first.objects.find((o: any) => o?.name === name)));
+  const lookups = servedByName(
+    readObjectScope,
+    packageId,
+    names,
+    bound.flatMap((name) => lookupTargetNames(first.objects.find((o: any) => o?.name === name))),
+  );
   return {
     scope: lookups.length > 0 ? read([...new Set([...names, ...lookups])]) : first,
     ready,
@@ -402,14 +461,20 @@ export interface PagesRead {
  * segment), else the object's default record page (`defaultRecordPageObject`),
  * else its first record page. Only a full page is returned. A slotted page, or
  * none, returns `null`: the view synthesizes that page, and derives its related
- * lists from every object that points at the record's object.
+ * lists from every object that points at the record's object. So does a full
+ * page where it does not apply (objectstack#36150): on a phone, unless the URL
+ * names it or the object keeps its own page (`authoredRecordPageApplies`).
  */
 function declaredRecordPage(
   pages: readonly unknown[],
   objectName: string,
   pageName: string | undefined,
   appName: string | undefined,
+  phone: boolean,
 ): unknown {
+  // objectstack#36150 — the record route is the full page, never embedded:
+  // the drawer reads the registry beside the route's scope.
+  if (!authoredRecordPageApplies({ embedded: false, phone, objectName, requestedPageName: pageName })) return null;
   const page = pageName
     ? pages.find((p) => isRecord(p) && p.name === pageName && isRecordPageOf(p, objectName))
     : (() => {
@@ -455,6 +520,93 @@ function lookupTargetNames(def: any): string[] {
   return [...out];
 }
 
+/** What {@link readObjectPresence} answers: the presence read, and the names the package list holds. */
+export interface ObjectPresenceRead {
+  /**
+   * The `?names=` read's scope (`objects` the names it answered served,
+   * `missing` the ones it left out), or an empty settled one when nothing is
+   * asked. Its arrays keep one identity until a read lands, so a reader may
+   * key a memo on them.
+   */
+  presence: { objects: readonly unknown[]; missing: readonly string[]; settled: boolean };
+  /** The names the app's package list holds (none in an app with no package); `null` until that list has answered. */
+  held: ReadonlySet<string> | null;
+}
+
+const NO_NAMES_HELD: ReadonlySet<string> = new Set();
+const NO_PRESENCE = Object.freeze({ objects: Object.freeze([]) as readonly unknown[], missing: Object.freeze([]) as readonly string[], settled: true });
+
+/**
+ * objectstack#34188, objectstack#34244 — whether this runtime registers the
+ * objects in `names`, asked so that an object it does not register is never
+ * asked by name. A lookup may point at, and an app entry's `requiresObject`
+ * names, an object the host does not register at all (the control plane
+ * registers no `sys_business_unit`, a Free environment no
+ * `sys_approval_request`), and a by-name read answers such a name 404 on every
+ * open of the route.
+ *
+ * In an app whose served item names its package, the names the package list
+ * holds are registered and asked nothing more; the others wait for that list.
+ * The rest are asked in ONE `GET /meta/object?names=` read, which leaves an
+ * absent name out ({@link readDashboardWidgetObjects}'s read,
+ * objectstack#29444). One rule for both arms: every reader that asks these
+ * names (the route's scope, the sidebar's capability gate, the served view
+ * items, the `nav:menu` block) asks them here, so the same names share one
+ * request.
+ */
+export function readObjectPresence(
+  readObjectScope: ReadObjectScope,
+  packageId: string | undefined,
+  names: readonly string[],
+): ObjectPresenceRead {
+  let held: ReadonlySet<string> = NO_NAMES_HELD;
+  if (packageId) {
+    const own = (readObjectScope as ReadNamesWithoutViews)({ packageId, views: false });
+    if (!own.settled) return { presence: { ...NO_PRESENCE, settled: false }, held: null };
+    held = new Set(own.served.map((o: any) => o?.name).filter((n: unknown): n is string => typeof n === 'string'));
+  }
+  const ask = [...new Set(names)].filter((name) => !!name && !held.has(name));
+  if (ask.length === 0) return { presence: NO_PRESENCE, held };
+  return { presence: (readObjectScope as unknown as ReadNamesInOneRequest)({ names: ask, views: false, batch: true }), held };
+}
+
+/**
+ * The `candidates` a route asks by name: those among its `known` names (asked
+ * by name anyway: its object, the objects its page binds), and of the rest
+ * only those {@link readObjectPresence} has answered registered. A name joins
+ * the by-name scope once that read has answered it served; until then, and
+ * when it is absent, it is not asked.
+ */
+function servedByName(
+  readObjectScope: ReadObjectScope,
+  packageId: string | undefined,
+  known: readonly string[],
+  candidates: readonly string[],
+): string[] {
+  if (candidates.length === 0) return [];
+  const asked = new Set(known);
+  const unknown = candidates.filter((name) => !asked.has(name));
+  if (unknown.length === 0) return [...candidates];
+  const { presence, held } = readObjectPresence(readObjectScope, packageId, unknown);
+  if (!held) return candidates.filter((name) => asked.has(name));
+  const served = new Set(presence.objects.map((o: any) => o?.name).filter((n: unknown): n is string => typeof n === 'string'));
+  return candidates.filter((name) => asked.has(name) || held.has(name) || served.has(name));
+}
+
+/**
+ * The objects an app's entries require ({@link appRequiredObjectNames}) that
+ * its route asks by name: only those this runtime registers
+ * ({@link readObjectPresence}). An entry whose object is absent is hidden by
+ * the sidebar's gate, which reads the same presence answer.
+ */
+export function servedRequiredObjectNames(
+  readObjectScope: ReadObjectScope,
+  app: Record<string, unknown> | undefined,
+): string[] {
+  const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
+  return servedByName(readObjectScope, packageId, [], appRequiredObjectNames(app));
+}
+
 /** The names a navigation tree carries under `key` on its entries, at every group depth. */
 export function navigationNames(navigation: unknown, pick: (item: Record<string, unknown>) => unknown): string[] {
   const out: string[] = [];
@@ -473,16 +625,31 @@ export function navigationNames(navigation: unknown, pick: (item: Record<string,
 /**
  * The objects an app's entries require (`requiresObject`), in its `navigation`
  * and in every `areas[].navigation`: the sidebar draws and gates both
- * (objectui#12980), so an area entry requiring an object outside the package
- * is asked by name and answered exactly.
+ * (objectui#12980). objectstack#34244 — asked first in the presence read
+ * ({@link readObjectPresence}), so one this runtime does not register is never
+ * asked by name, and the gate hides its entry on that answer.
  */
-function appRequiredObjectNames(app: Record<string, unknown> | undefined): string[] {
+export function appRequiredObjectNames(app: Record<string, unknown> | undefined): string[] {
   const pick = (item: Record<string, unknown>) => item.requiresObject;
   const areas: unknown[] = Array.isArray(app?.areas) ? app.areas : [];
   return [
     ...navigationNames(app?.navigation, pick),
     ...areas.flatMap((area) => navigationNames(isRecord(area) ? area.navigation : undefined, pick)),
   ];
+}
+
+/**
+ * The objects the app's navigation opens, which the command palette reads
+ * while it is open. objectstack#34244 — an entry that requires the object it
+ * opens is gated on it, so that object is asked by name only once the presence
+ * read has answered it served ({@link servedRequiredObjectNames}).
+ */
+function paletteObjectNames(readObjectScope: ReadObjectScope, app: Record<string, unknown> | undefined): string[] {
+  const opened = navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined));
+  const required = new Set(appRequiredObjectNames(app));
+  if (!opened.some((name) => required.has(name))) return opened;
+  const served = new Set(servedRequiredObjectNames(readObjectScope, app));
+  return opened.filter((name) => !required.has(name) || served.has(name));
 }
 
 export interface AppObjectScopeRead {
@@ -536,6 +703,8 @@ export function readAppObjectScope(
   readPages?: () => PagesRead,
   readDashboard?: (dashboardName: string) => DashboardRead,
   readObjectsReferencing?: (objectName: string) => BundledRead<readonly string[]>,
+  /** objectstack#36150 — the viewport is a phone's (`usePhoneViewport`), as the record view reads it. */
+  phone = false,
 ): AppObjectScopeRead {
   const route = matchObjectScopeRoute(subPath, hostPaths);
   const candidate = !!route && !!readObjectScope && !hasRecordFormOverlay(search);
@@ -552,21 +721,36 @@ export function readAppObjectScope(
       if (dashboardRead?.settled) return { candidate, scope: NO_OBJECT_SCOPE, ready: true, ...NOT_READ };
       return { candidate, scope: packageId ? readObjectScope({ packageId }) : PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
     }
-    const extra = appRequiredObjectNames(app);
+    const extra = servedRequiredObjectNames(readObjectScope, app);
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readDashboardObjectScope(readObjectScope, app, dashboardRead.dashboard, extra), routeObjectRefusal: null };
   }
   if (candidate && readObjectScope && route && route.recordId !== undefined && route.objectName) {
     // objectui#13046 — a record route: the app list, then the page list, then
     // either the objects the record's declared page binds, by name, or the
-    // whole registry. Nothing is read while the page list is out: a route that
-    // turns out to have no declared page asks exactly what it asked before.
+    // whole registry.
     if (!app) return { candidate, scope: null, ready: false, ...NOT_READ };
     const pagesRead = readPages?.();
-    if (!pagesRead?.settled) return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
-    const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined);
+    if (!pagesRead?.settled) {
+      // objectstack#35455 — in an app that names a package, the package list
+      // starts beside the page list instead of one round trip after it: both
+      // arms that read it (a declared page's objects, and a synthesized page
+      // the bundle can say the related objects of) ask it first, so it is the
+      // same request, earlier. Only the whole-registry arm reads no package
+      // list, and that arm is taken exactly when the bundle answers no
+      // related objects (`readObjectsReferencing` a miss: no bundle, a draft
+      // preview, an object outside the app's navigation). A bundle that is
+      // already a miss starts nothing here. One still on the wire does: should
+      // it then answer a miss with no declared page either, that package list
+      // is one read the registry arm does not use.
+      if (packageId && readObjectsReferencing && readObjectsReferencing(route.objectName).state !== 'miss') {
+        readObjectScope({ packageId });
+      }
+      return { candidate, scope: PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
+    }
+    const page = declaredRecordPage(pagesRead.pages, route.objectName, route.pageName, typeof app.name === 'string' ? app.name : undefined, phone);
     if (!page) {
       // objectstack#29552 — the synthesized page: its related lists are
       // derived from every object that points at the record's object, which
@@ -585,9 +769,9 @@ export function readAppObjectScope(
         ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId, referencing.value, true),
       };
     }
-    const extra = [route.objectName, ...appRequiredObjectNames(app)];
+    const extra = [route.objectName, ...servedRequiredObjectNames(readObjectScope, app)];
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readPageObjectScope(readObjectScope, app, page, extra), routeObjectRefusal: null };
   }
@@ -602,9 +786,9 @@ export function readAppObjectScope(
       if (pageRead?.settled) return { candidate, scope: NO_OBJECT_SCOPE, ready: true, ...NOT_READ };
       return { candidate, scope: packageId ? readObjectScope({ packageId }) : PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
     }
-    const extra = appRequiredObjectNames(app);
+    const extra = servedRequiredObjectNames(readObjectScope, app);
     if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+      extra.push(...paletteObjectNames(readObjectScope, app));
     }
     return { candidate, ...readPageObjectScope(readObjectScope, app, pageRead.page, extra), routeObjectRefusal: null };
   }
@@ -625,11 +809,9 @@ export function readAppObjectScope(
   const own = readObjectScope({ packageId });
   if (!own.settled) return { candidate, scope: own, ready: false, ...NOT_READ };
   // objectui#13046 — a package that holds no objects of its own: an object's
-  // route reads its names by name all the same, below; the app's root keeps the
-  // whole registry (the header says why).
-  if (!route.objectName && !own.served.some((o: any) => o?._packageId === packageId)) {
-    return { candidate, scope: null, ready: false, ...NOT_READ };
-  }
+  // route reads its names by name all the same, below, and so does the app's
+  // root (objectstack#34211): the objects its entries require, never the whole
+  // registry.
   return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId) };
 }
 
@@ -670,23 +852,26 @@ function readObjectRouteNames(
     failedAnswer: failedAnswerOf(routeRead),
     routeObjectRefusal: refusalOf(routeRead, objectName),
   };
-  const names = appRequiredObjectNames(app);
+  const names = servedRequiredObjectNames(readObjectScope, app);
   if (objectName) names.push(objectName);
   names.push(...relatedNames);
   if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
-    names.push(...navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+    names.push(...paletteObjectNames(readObjectScope, app));
   }
   const asked = read(names);
   const first = relatedNames.length > 0 ? inRelatedOrder(asked, relatedNames) : asked;
   const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
-  const lookups = routeDef ? lookupTargetNames(routeDef) : [];
+  const lookups = routeDef ? servedByName(readObjectScope, packageId, names, lookupTargetNames(routeDef)) : [];
   const streamNames = synthesizedRecordPage && routeDef ? recordStreamObjectNames(routeDef) : [];
   if (lookups.length === 0 && streamNames.length === 0) return { scope: first, ready, ...routeOutcome };
   // The lookup targets are asked without views, through the same scope as the
   // route's names: a lookup cell links and names its target and reads none of
   // its views, and a target outside the app bundle (`sys_user`) composed with
   // them read the whole `/meta/view` list (objectstack#29551). They join the
-  // scope's objects as they land; the route's names keep their views.
+  // scope's objects as they land; the route's names keep their views. A
+  // target the presence read answered served is answered with the definition
+  // that read carried, and costs no request of its own (objectstack#35306,
+  // `readObjectScope`).
   const readWithoutViews = readObjectScope as ReadNamesWithoutViews;
   const readNames = (names: readonly string[]) =>
     packageId ? readWithoutViews({ packageId, names, views: false }) : readWithoutViews({ names, views: false });
@@ -777,14 +962,33 @@ export function enterAppBundle(dataSource: unknown, appName: string | undefined)
  * scope composes its views from the bundle instead of reading the
  * `/meta/view` list before the app was entered. Leaving the app ends the
  * entry, so coming back revalidates the bundle as entering it always has.
+ *
+ * objectstack#35416 — on a record route it also starts the page list, and
+ * hands {@link readAppObjectScope} the same page-list and bundle readers
+ * `AppContent` does, so the record route's reads leave beside the permission
+ * read instead of one wave after it.
  */
 export function useAppObjectScopePrefetch(): void {
-  const { apps, readObjectScope } = useMetadata();
+  const metadata = useMetadata();
+  const { apps, readObjectScope, ensureType, getTypeStatus } = metadata;
+  const bundledReads = useBundledReads();
   const dataSource = useAdapter() as BundleHost | null;
   const { pathname, search } = useLocation();
+  // objectstack#36150 — the same surface `AppContent` reads the scope for.
+  const phone = usePhoneViewport();
   const segments = pathname.split('/').filter(Boolean);
   const app = segments[0] === 'apps' && segments[1] ? matchAppBySegment(apps, segments[1]) : undefined;
   const bundleAppName = typeof app?.name === 'string' && app.name ? app.name : undefined;
+  const subPath = segments.slice(2).join('/');
+  // objectstack#35416 — a record route's page list, asked here rather than
+  // when `AppContent` mounts below the session's permission read: the route
+  // asks it on every record route (`APP_ROUTE_METADATA_READS`), so this is
+  // the same request one wave earlier, and the scope read below can start
+  // the package object list beside it.
+  const recordRoute = !!app && !!readObjectScope && matchObjectScopeRoute(subPath, [])?.recordId !== undefined;
+  useEffect(() => {
+    if (recordRoute && ensureType) void ensureType('page');
+  }, [recordRoute, ensureType]);
   useEffect(() => {
     const load = dataSource?.loadAppBundle;
     if (!dataSource || !bundleAppName || typeof load !== 'function') return;
@@ -794,5 +998,28 @@ export function useAppObjectScopePrefetch(): void {
       rootEnteredApps.delete(bundleAppName);
     };
   }, [dataSource, bundleAppName]);
-  if (app && readObjectScope) readAppObjectScope(readObjectScope, app, segments.slice(2).join('/'), search);
+  if (!app || !readObjectScope) return;
+  // The record route's readers, as `AppContent` hands them: the page list and
+  // its status, and the objects the app bundle says point at the record's.
+  readAppObjectScope(
+    readObjectScope,
+    app,
+    subPath,
+    search,
+    [],
+    undefined,
+    () => {
+      // Read only when the record route asks: the provider's `pages` starts
+      // the page list when read.
+      const status = getTypeStatus?.('page');
+      const pages = metadata.pages;
+      return {
+        pages: Array.isArray(pages) ? (pages as unknown[]) : [],
+        settled: status === undefined || status === 'ready' || status === 'error',
+      };
+    },
+    undefined,
+    (objectName) => (bundledReads && bundleAppName ? bundledReads.objectsReferencing(bundleAppName, objectName) : BUNDLE_MISS),
+    phone,
+  );
 }

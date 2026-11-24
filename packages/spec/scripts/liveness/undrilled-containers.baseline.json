@@ -102,7 +102,6 @@
     "object/indexes",
     "object/lifecycle",
     "object/publicSharing",
-    "object/userActions",
     "page/aria",
     "page/interfaceConfig",
     "page/regions",

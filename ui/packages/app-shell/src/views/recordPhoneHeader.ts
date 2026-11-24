@@ -8,17 +8,16 @@
 
 /**
  * The record header on a phone (objectstack#27058, Target 4): the name and
- * the object chip, a subtitle line from the record's first two declared text
- * highlights (「Atlas Construction · Director of Sales」), then the remaining
- * highlights, at most four, in the strip's two columns. The rest of the
- * fields are in the sections anyway. It narrows the default page's header by
- * width, the record page v4 header's highlight rule (#27524 item 12); an
- * authored page draws its own header. An object that declares no highlights
- * has no strip and no subtitle here either, as on any width: nothing is
+ * the object chip, then a subtitle line from the record's first two declared
+ * text highlights (「Atlas Construction · Director of Sales」). The default
+ * page draws no highlight strip, so `highlightFields` below (the remaining
+ * highlights, at most four) has no reader there; the fields are in their
+ * groups. An authored page draws its own header. An object that declares no
+ * highlights has no subtitle here either, as on any width: nothing is
  * guessed (objectstack#28868).
  */
 
-/** The highlights a phone's header strip shows after its subtitle. */
+/** The highlights after the subtitle's, at most; the default page draws no strip, so nothing reads them there. */
 export const PHONE_HIGHLIGHTS_MAX = 4;
 
 /** The declared text highlights the subtitle reads, at most. */

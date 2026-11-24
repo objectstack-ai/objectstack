@@ -26,10 +26,17 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs.
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
   resolve: {
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
+      // The outbound-request guard the HTTP dispatcher sends through, read from
+      // source for the same reason: its pins judge this checkout's guard.
+      { find: /^@objectstack\/core\/egress$/, replacement: path.resolve(__dirname, '../../core/src/egress.ts') },
       // [#24983] The template channel refusal pins drive the real data
       // protocol (create / update / bulk update / the import runner's writes),
       // so it is read from source for the same reason as core above.

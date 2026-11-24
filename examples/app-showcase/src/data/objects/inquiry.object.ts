@@ -23,6 +23,7 @@ export const Inquiry = ObjectSchema.create({
   label: 'Inquiry',
   pluralLabel: 'Inquiries',
   icon: 'mail',
+  color: 'pink',
   description: 'A public contact-form submission — created anonymously via the web-to-lead public form (ADR-0056 Option A).',
 
   // Once inside, an inquiry is staff-only. The public form does not read the

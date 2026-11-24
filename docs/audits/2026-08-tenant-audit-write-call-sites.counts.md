@@ -1,7 +1,7 @@
 <!-- GENERATED — DO NOT EDIT BY HAND. -->
 <!-- Regenerate: node scripts/tenant-audit-census.mjs --write -->
 
-# Tenant-audit census — every write call site (generated)
+# Tenant-audit census — the write call site ledger (generated)
 
 Every application-surface write call site against a tenancy-enabled object, as
 `scripts/tenant-audit-census.mjs` derives it from the tree. **The prose, the
@@ -9,43 +9,35 @@ method and the deviations from the figures this replaced are on the page**
 (`content/docs/permissions/tenant-audit-census.mdx`); this file has no prose to
 preserve and is regenerated whole.
 
-⛔ **Never hand-patch a row or a number here** — fix the code, or the census, and
-regenerate. `scripts/check-tenant-audit-census.mjs` fails the build when this file
-and the tree disagree.
+## Where the sites are
+
+One file per package, under [`2026-08-tenant-audit-write-call-sites.counts/`](2026-08-tenant-audit-write-call-sites.counts/) —
+`services/<package>.md` and `plugins/<package>.md`, for every package that holds
+a write call site or a subtraction the census could not defend. Each shard
+carries that package's totals and every one of its sites. ⛔ No total across
+packages is committed anywhere, so two branches that each add a write call site
+in a different package edit different files and merge apart.
+`node scripts/check-tenant-audit-census.mjs` prints the census totals on every run.
+
+⛔ **Never hand-patch a row or a number in a shard** — fix the code, or the census,
+and regenerate. `scripts/check-tenant-audit-census.mjs` fails the build when a
+shard and the tree disagree, when a package with sites has no shard, and when a
+shard names a package the census finds nothing in.
 
 Rows are aggregated by (file, verb, object, tenancy, context posture) and carry no
 line numbers, so a pure displacement cannot move them. Run the generator with
 `--json` for per-site `file:line`.
 
-⚠️ **On a merge conflict here, regenerate — never resolve by hand.** Two branches
-that each add a write call site produce rows git merges cleanly and totals that
-merge cleanly and WRONG. This file is NOT `merge=os-regen`: no `.gitattributes`
-row names it, so `git check-attr merge` over it reads `unspecified`. Routing it
-would take a `REGEN_ARTIFACTS` row whose `gen:`/`check:` names exist in the
-manifest that row declares as owner, and no manifest declares such a pair for
-this census — the gate runs straight from the lint workflow. Root-level tooling
-is no obstacle by itself: the driver resolves those names in whichever manifest
-the row names, the root one included. The gate is the backstop — a wrongly
-merged file fails `check-tenant-audit-census`, so the error is loud rather than
-silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
-
-## Totals
-
-| Measure | Value |
-|---|---:|
-| Write call sites | 321 |
-| Object name statically decidable | 226 |
-| Object name chosen at run time | 95 |
-| Against a tenancy-enabled object | 219 |
-| Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 250 |
-| Provably carrying none | 12 |
-| …and decidably tenancy-enabled | 3 |
-| Options argument unreadable | 59 |
-| …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 181 |
-| Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 128 |
+⚠️ **On a merge conflict in a shard, regenerate — never resolve by hand.** Two
+branches that add a write call site in the SAME package produce a shard whose
+rows can merge cleanly and whose totals merge cleanly and WRONG. These files are
+NOT `merge=os-regen`: no `.gitattributes` row names them, so `git check-attr merge`
+over them reads `unspecified`. Routing them would take a `REGEN_ARTIFACTS` row
+whose `gen:`/`check:` names exist in the manifest that row declares as owner, and
+no manifest declares such a pair for this census — the gate runs straight from
+the lint workflow. The gate is the backstop — a wrongly merged shard fails
+`check-tenant-audit-census`, so the error is loud rather than silent, and
+`node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -54,272 +46,39 @@ subtraction is DEFENSIBLE when this census can name why: the receiver is a `node
 builtin, a value it watched being constructed, a language global, a type THIS
 corpus declares and the door rule rejected, or an `UNTYPED_RECEIVERS` row.
 
-⚠️ Counted below are the subtractions it can name no such fact for — the
-receiver carries a declared type the engine type index does not hold, and that
-index is built from TRACKED sources only, deliberately. An untracked, generated
-or dependency-owned declaration is one this census never saw, and «never saw it»
-must not be spelled the same way as «read it, not an engine».
+⚠️ Counted in every package shard are the subtractions it can name no such fact
+for — the receiver carries a declared type the engine type index does not hold,
+and that index is built from TRACKED sources only, deliberately. An untracked,
+generated or dependency-owned declaration is one this census never saw, and
+«never saw it» must not be spelled the same way as «read it, not an engine».
 
 ⚠️ One arm here says something else again: `type-text-not-round-trippable` is a
 receiver whose declared type THIS TOOL derived and then could not read back —
 the source parsed, the re-serialisation of it did not, so the door rule could
 never be read off it. That is a fault in this tool rather than a fact about the
-corpus, and it is the one row here that also fails the gate.
+corpus, and it is the one arm here that also fails the gate.
 
-| what | count |
-| :--- | ---: |
-| write calls subtracted with no defensible reason | **1** |
-| …whose declared type text states an engine door anyway | **0** |
-
-⛔ The second row is **0 by construction**, not a tally that happens to be low.
-An inline type literal stating a write door has no name for the engine type index
-to be keyed on, so the door rule is read off the type text itself and the site is
-PLACED — it is in the population above rather than subtracted here. A non-zero
-value on that row means a door-shaped receiver reached the subtraction anyway.
-
-| file | receiver | verb | why | declared type | door | n |
-|---|---|---|---|---|---|---:|
-| `packages/plugins/plugin-hono-server/src/adapter.ts` | `this.app` | `delete` | type-not-in-corpus | `Hono` | no | 1 |
+⛔ A shard's door-shaped count is **0 by construction**, not a tally that happens
+to be low. An inline type literal stating a write door has no name for the engine
+type index to be keyed on, so the door rule is read off the type text itself and
+the site is PLACED — it is in the population rather than subtracted. A non-zero
+value there means a door-shaped receiver reached the subtraction anyway.
 
 ## Corpus scale — present and dated, ⛔ NOT enforced
 
 ⛔ These four describe the CORPUS this census walked, not the population it
 certifies, and the gate deliberately does not hold them to the tree — a source
-file arriving anywhere under the two roots moves them while every verdict above
+file arriving anywhere under the two roots moves them while every verdict
 holds still. They are required to be HERE and to say WHEN they were true;
-their values are not compared. The reasoning, and the measurement behind it,
-are in `scripts/check-tenant-audit-census.mjs`.
+their values are not compared, and `--write` keeps them as committed until
+`--write --refresh-scale` re-measures them. The reasoning, and the measurement
+behind it, are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-15 at `2ab05f460`.
+Measured on 2026-11-16 at `94cb58c3d`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1176 |
-| engine-shaped types recognised | 141 |
+| tracked non-test sources scanned | 1186 |
+| engine-shaped types recognised | 142 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 311 |
-
-## Every site
-
-| file | verb | object | tenancy | tenant context | n |
-|---|---|---|---|---|---:|
-| `packages/plugins/organizations/src/claim-org-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-approvals/src/action-slot-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 2 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 16 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_approver` | enabled | elevated | 2 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_request` | enabled | elevated | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_request` | enabled | elevated | 10 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_token` | enabled | elevated | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_token` | enabled | elevated | 1 |
-| `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` | `update` | `objectPlan.object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-approvals/src/display-label-backfill.ts` | `update` | `sys_approval_action` | enabled | elevated | 1 |
-| `packages/plugins/plugin-approvals/src/display-label-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
-| `packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/action-invocation-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/app-activity-door.ts` | `insert` | `sys_activity` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-audit/src/audit-seal/amendment-writer.ts` | `insert` | `AUDIT_AMENDMENT_OBJECT` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` | `insert` | `AUDIT_CHECKPOINT_OBJECT` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `insert` | `AUDIT_SIGNING_KEY_OBJECT` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `delete` | `sys_secret` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-audit/src/audit-signing-key-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/credential-use-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/data-export-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/dataset-query-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-audit/src/mail-log-body-migration.ts` | `update` | `object` | undecidable | options unreadable | 1 |
-| `packages/plugins/plugin-audit/src/package-lifecycle-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/read-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-audit/src/scim-refusal-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-audit/src/stored-metadata-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/admin-import-users.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/admin-import-users.ts` | `update` | `sys_user` | enabled | options unreadable | 2 |
-| `packages/plugins/plugin-auth/src/admin-set-user-manager.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `update` | `sys_user` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/admin-user-endpoints.ts` | `insert` | `sys_user_permission_set` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/adopt-membership.ts` | `update` | `SystemObjectName.MEMBER` | undecidable | PROVABLY NONE | 1 |
-| `packages/plugins/plugin-auth/src/audience-gate-test-support.ts` | `insert` | `sys_invitation` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager-database-hooks.ts` | `update` | `sys_user` | enabled | options unreadable | 2 |
-| `packages/plugins/plugin-auth/src/auth-manager-membership-admission.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_account` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_session` | enabled | options unreadable | 3 |
-| `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_two_factor` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager-password-session-policy.ts` | `update` | `sys_user` | enabled | options unreadable | 3 |
-| `packages/plugins/plugin-auth/src/auth-manager-sign-in-lockout.ts` | `update` | `sys_user` | enabled | options unreadable | 3 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_session` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `delete` | `sys_verification` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_verification` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 1 |
-| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/default-organization-invariant.ts` | `insert` | `sys_organization` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/demo-staff.ts` | `update` | `sys_user` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/demo-staff.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `insert` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/ensure-default-organization.ts` | `update` | `sys_member` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/forced-reset-revocation.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
-| `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `insert` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/idp-group-mapping-admin.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/idp-group-mapping-match.ts` | `update` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
-| `packages/plugins/plugin-auth/src/idp-locale-claim.ts` | `update` | `sys_user` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/mcp-client-last-use.ts` | `update` | `sys_oauth_consent` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/member-role-canonical.ts` | `update` | `MEMBER_OBJECT` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/membership-backfill-ledger.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/membership-ended-session.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 2 |
-| `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `delete` | `m` | undecidable | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `insert` | `m` | undecidable | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `update` | `m` | undecidable | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `delete` | `objectName` | undecidable | PROVABLY NONE | 5 |
-| `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `insert` | `objectName` | undecidable | options unreadable | 2 |
-| `packages/plugins/plugin-auth/src/objectql-adapter.ts` | `update` | `objectName` | undecidable | options unreadable | 5 |
-| `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_team_member` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/organization-delete.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/pending-sso-users.ts` | `insert` | `sys_user` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/pending-sso-users.ts` | `insert` | `sys_user_permission_set` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/pending-sso-users.ts` | `insert` | `sys_user_position` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/reconcile-membership.ts` | `insert` | `sys_member` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/scim-connection-admin.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `insert` | `sys_scim_connection_credential` | enabled | PROVABLY NONE | 1 |
-| `packages/plugins/plugin-auth/src/scim-connection-service.ts` | `update` | `sys_scim_connection_credential` | enabled | elevated | 2 |
-| `packages/plugins/plugin-auth/src/scim-deactivation-key-revocation.ts` | `update` | `SystemObjectName.API_KEY` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `delete` | `sys_user_permission_set` | enabled | PROVABLY NONE | 1 |
-| `packages/plugins/plugin-auth/src/scim-group-projection.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/scim-identity-source.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/service-account-doors.ts` | `insert` | `sys_api_key` | disabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/service-account-doors.ts` | `insert` | `USER_OBJECT` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/service-account-lifecycle.ts` | `update` | `API_KEY_OBJECT` | undecidable | context, elevation undecidable | 3 |
-| `packages/plugins/plugin-auth/src/service-account-lifecycle.ts` | `delete` | `MEMBER_OBJECT` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/service-account-lifecycle.ts` | `update` | `USER_OBJECT` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/service-account-owner-leaves.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
-| `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
-| `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-auth/src/user-ban-write.ts` | `update` | `sys_user` | enabled | elevated | 1 |
-| `packages/plugins/plugin-auth/src/user-session-admission.ts` | `update` | `sys_user` | enabled | elevated | 2 |
-| `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-email/src/email-plugin.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-email/src/stored-template-package-backfill.ts` | `update` | `sys_email_template` | enabled | elevated | 1 |
-| `packages/plugins/plugin-pinyin-search/src/boot-reconcile.ts` | `update` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-pinyin-search/src/companion-projection.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `delete` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/auto-org-admin-grant.ts` | `insert` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts` | `insert` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/claim-seed-ownership.ts` | `update` | `schema.name` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/cleanup-package-permissions.ts` | `delete` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/invitation-placement.ts` | `insert` | `sys_user_position` | enabled | elevated | 1 |
-| `packages/plugins/plugin-security/src/position-renamed-holder-carry.ts` | `update` | `sys_user_position` | enabled | elevated | 1 |
-| `packages/plugins/plugin-security/src/stored-permission-set-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `delete` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 4 |
-| `packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
-| `packages/plugins/plugin-sharing/src/primary-bu-projection.ts` | `update` | `sys_user` | enabled | elevated | 2 |
-| `packages/plugins/plugin-sharing/src/record-orphan-cleanup.ts` | `delete` | `table` | undecidable | options unreadable | 2 |
-| `packages/plugins/plugin-sharing/src/share-link-service.ts` | `insert` | `sys_share_link` | enabled | elevated | 1 |
-| `packages/plugins/plugin-sharing/src/share-link-service.ts` | `update` | `sys_share_link` | enabled | elevated | 3 |
-| `packages/plugins/plugin-sharing/src/sharing-plugin.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` | `delete` | `sys_record_share` | enabled | options unreadable | 3 |
-| `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` | `delete` | `sys_sharing_rule` | enabled | options unreadable | 1 |
-| `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` | `insert` | `sys_sharing_rule` | enabled | elevated | 1 |
-| `packages/plugins/plugin-sharing/src/sharing-rule-service.ts` | `update` | `sys_sharing_rule` | enabled | elevated | 1 |
-| `packages/plugins/plugin-sharing/src/sharing-service.ts` | `delete` | `sys_record_share` | enabled | elevated | 2 |
-| `packages/plugins/plugin-sharing/src/sharing-service.ts` | `insert` | `sys_record_share` | enabled | elevated | 1 |
-| `packages/plugins/plugin-sharing/src/sharing-service.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
-| `packages/plugins/plugin-sharing/src/stored-declaration-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/plugins/plugin-webhooks/src/migrate-webhook-secrets.ts` | `update` | `subscriptionsObject` | undecidable | options unreadable | 1 |
-| `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/builtin/crud-nodes.ts` | `update` | `objectName` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | elevated | 1 |
-| `packages/services/service-automation/src/connector-connections.ts` | `delete` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/connector-connections.ts` | `insert` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/connector-connections.ts` | `update` | `sys_connector_connection` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/connector-credentials.ts` | `delete` | `sys_connector_credential` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/connector-credentials.ts` | `insert` | `sys_connector_credential` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/connector-credentials.ts` | `update` | `sys_connector_credential` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/connector-credentials.ts` | `update` | `sys_connector_credential` | enabled | elevated | 3 |
-| `packages/services/service-automation/src/flow-credential-channel.ts` | `delete` | `sys_flow_credential` | enabled | elevated | 5 |
-| `packages/services/service-automation/src/flow-credential-channel.ts` | `insert` | `sys_flow_credential` | enabled | elevated | 1 |
-| `packages/services/service-automation/src/flow-credential-channel.ts` | `update` | `sys_flow_credential` | enabled | elevated | 2 |
-| `packages/services/service-automation/src/flow-credential-migration.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
-| `packages/services/service-automation/src/flow-credential-migration.ts` | `update` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
-| `packages/services/service-automation/src/flow-dispatch-key-package-backfill.ts` | `insert` | `sys_flow_dispatch` | enabled | elevated | 1 |
-| `packages/services/service-automation/src/flow-dispatch-store.ts` | `insert` | `sys_flow_dispatch` | enabled | elevated | 1 |
-| `packages/services/service-automation/src/flow-dispatch-store.ts` | `update` | `sys_flow_dispatch` | enabled | elevated | 1 |
-| `packages/services/service-automation/src/stored-reference-package-backfill.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/services/service-automation/src/suspended-run-store.ts` | `delete` | `sys_automation_run` | enabled | elevated | 3 |
-| `packages/services/service-automation/src/suspended-run-store.ts` | `insert` | `sys_automation_run` | enabled | elevated | 2 |
-| `packages/services/service-automation/src/suspended-run-store.ts` | `update` | `sys_automation_run` | enabled | elevated | 2 |
-| `packages/services/service-automation/src/sync-run-ledger.ts` | `insert` | `sys_sync_run` | enabled | elevated | 1 |
-| `packages/services/service-automation/src/sync-run-ledger.ts` | `update` | `sys_sync_run` | enabled | elevated | 5 |
-| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `delete` | `sys_metadata` | enabled | elevated | 1 |
-| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `insert` | `sys_metadata` | enabled | elevated | 1 |
-| `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `update` | `sys_metadata` | enabled | elevated | 2 |
-| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `delete` | `sys_secret` | enabled | elevated | 1 |
-| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
-| `packages/services/service-job/src/db-job-adapter.ts` | `insert` | `sys_job` | enabled | elevated | 1 |
-| `packages/services/service-job/src/db-job-adapter.ts` | `update` | `sys_job` | enabled | elevated | 3 |
-| `packages/services/service-job/src/db-job-adapter.ts` | `insert` | `sys_job_run` | enabled | elevated | 1 |
-| `packages/services/service-job/src/db-job-adapter.ts` | `update` | `sys_job_run` | enabled | elevated | 1 |
-| `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_ASSOCIATION_OBJECT` | undecidable | elevated | 1 |
-| `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `insert` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
-| `packages/services/service-mailbox/src/ingest/mail-ingest-service.ts` | `update` | `MAIL_MESSAGE_OBJECT` | undecidable | elevated | 1 |
-| `packages/services/service-mailbox/src/sync/mailbox-sync-service.ts` | `update` | `MAILBOX_OBJECT` | undecidable | elevated | 1 |
-| `packages/services/service-messaging/src/device-registry.ts` | `delete` | `sys_user_device` | disabled | options unreadable | 2 |
-| `packages/services/service-messaging/src/device-registry.ts` | `insert` | `sys_user_device` | disabled | context, elevation undecidable | 1 |
-| `packages/services/service-messaging/src/device-registry.ts` | `update` | `sys_user_device` | disabled | options unreadable | 2 |
-| `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-messaging/src/inbox-channel.ts` | `insert` | `receiptObject` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `RECEIPT_OBJECT` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-messaging/src/messaging-service.ts` | `update` | `RECEIPT_OBJECT` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/messaging-service.ts` | `insert` | `sys_notification` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-messaging/src/preference-user-conversion.ts` | `update` | `sys_notification_preference` | enabled | elevated | 1 |
-| `packages/services/service-messaging/src/sql-http-outbox.ts` | `insert` | `this.objectName` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | context, elevation undecidable | 4 |
-| `packages/services/service-messaging/src/sql-http-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-messaging/src/sql-outbox.ts` | `insert` | `this.objectName` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | context, elevation undecidable | 3 |
-| `packages/services/service-messaging/src/sql-outbox.ts` | `update` | `this.objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-queue/src/db-queue-adapter.ts` | `delete` | `sys_job_queue` | enabled | context, elevation undecidable | 2 |
-| `packages/services/service-queue/src/db-queue-adapter.ts` | `insert` | `sys_job_queue` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-queue/src/db-queue-adapter.ts` | `update` | `sys_job_queue` | enabled | context, elevation undecidable | 8 |
-| `packages/services/service-settings/src/config-change-audit.ts` | `insert` | `sys_audit_log` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `objectName` | undecidable | options unreadable | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `objectName` | undecidable | options unreadable | 2 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_platform_setting_audit` | enabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `delete` | `sys_secret` | enabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `sys_secret` | enabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_setting_audit` | enabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-settings/src/settings-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/attachment-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 4 |
-| `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | options unreadable | 1 |
-| `packages/services/service-storage/src/backfill-file-references.ts` | `update` | `object` | undecidable | elevated | 1 |
-| `packages/services/service-storage/src/backfill-file-references.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/backfill-sys-file-organizations.ts` | `update` | `sys_file` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/backfill-sys-file-public-scope.ts` | `update` | `sys_file` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/file-attachment-service.ts` | `delete` | `sys_attachment` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/file-attachment-service.ts` | `insert` | `sys_attachment` | enabled | context, elevation undecidable | 2 |
-| `packages/services/service-storage/src/file-reference-lifecycle.ts` | `insert` | `sys_file` | enabled | context, elevation undecidable | 1 |
-| `packages/services/service-storage/src/file-reference-lifecycle.ts` | `update` | `sys_file` | enabled | elevated | 3 |
-| `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_file` | enabled | options unreadable | 1 |
-| `packages/services/service-storage/src/metadata-store.ts` | `insert` | `sys_file` | enabled | options unreadable | 1 |
-| `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_file` | enabled | options unreadable | 2 |
-| `packages/services/service-storage/src/metadata-store.ts` | `delete` | `sys_upload_session` | enabled | options unreadable | 1 |
-| `packages/services/service-storage/src/metadata-store.ts` | `insert` | `sys_upload_session` | enabled | options unreadable | 1 |
-| `packages/services/service-storage/src/metadata-store.ts` | `update` | `sys_upload_session` | enabled | options unreadable | 2 |
-| `packages/services/service-storage/src/record-file-access.ts` | `update` | `state.object` | undecidable | context, elevation undecidable | 1 |
+| same-named calls subtracted as non-engine | 323 |

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { ObjectSchema } from '@objectstack/spec/data';
+import { ObjectExtensionSchema, ObjectSchema } from '@objectstack/spec/data';
 import {
   newField,
   readFields,
@@ -18,6 +18,11 @@ import {
   moveGroup,
   clearFieldGroup,
   groupEntries,
+  currentGroupLayout,
+  writeGroupLayout,
+  groupListLayout,
+  groupArrangement,
+  groupMembership,
   diffFields,
   type FieldsView,
 } from './object-fields-io';
@@ -420,5 +425,166 @@ describe('newField — a master-detail field starts required (objectui#12326)', 
   it('leaves every other type without required', () => {
     expect('required' in newField('owner', 'lookup').def).toBe(false);
     expect('required' in newField('subject', 'text').def).toBe(false);
+  });
+});
+
+/* ─────────────── fieldGroups[].fields (objectstack#35900) ─────────────── */
+
+describe('writeGroupLayout — a move lands on the groups\' fields lists, not the field order', () => {
+  // `fields` declares name, account, valid_until, terms; `basic` holds the
+  // first two by the older `group`, `terms` is ungrouped.
+  const view: FieldsView = readFields({
+    name: { type: 'text', group: 'basic' },
+    account: { type: 'text', group: 'basic' },
+    valid_until: { type: 'date', group: 'money' },
+    terms: { type: 'textarea' },
+  });
+  const groups = readGroups([{ key: 'basic', label: 'Basic' }, { key: 'money', label: 'Money' }]);
+
+  it('dragging a field to the top of its group writes only that group\'s list', () => {
+    const layout = currentGroupLayout(view, groups);
+    layout.set('basic', ['account', 'name']);
+    const patch = writeGroupLayout(view, groups, layout);
+    expect(patch.fields).toBeUndefined();
+    expect(patch.fieldGroups).toEqual([
+      { key: 'basic', label: 'Basic', fields: ['account', 'name'] },
+      { key: 'money', label: 'Money' },
+    ]);
+    // The result is one the spec accepts, and the record page draws it so.
+    const parsed = ObjectSchema.safeParse({ name: 'quote', label: 'Quote', fields: writeFields(view), ...patch });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('an unchanged layout writes nothing', () => {
+    expect(writeGroupLayout(view, groups, currentGroupLayout(view, groups))).toEqual({});
+  });
+
+  it('moving a field between groups rewrites both lists and drops the group key the list contradicts', () => {
+    const layout = currentGroupLayout(view, groups);
+    layout.set('basic', ['name']);
+    layout.set('money', ['account', 'valid_until']);
+    const patch = writeGroupLayout(view, groups, layout);
+    expect(patch.fieldGroups?.map((g) => g.fields)).toEqual([['name'], ['account', 'valid_until']]);
+    const fields = patch.fields as Record<string, Record<string, unknown>>;
+    expect(Object.keys(fields)).toEqual(['name', 'account', 'valid_until', 'terms']);
+    expect(fields.account.group).toBeUndefined();
+    expect(fields.name.group).toBe('basic');
+    const parsed = ObjectSchema.safeParse({ name: 'quote', label: 'Quote', ...patch });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('moving a field to the ungrouped bucket drops its group and leaves the field order alone', () => {
+    const layout = currentGroupLayout(view, groups);
+    layout.set('basic', ['name']);
+    layout.set(null, ['account', 'terms']);
+    const patch = writeGroupLayout(view, groups, layout);
+    const fields = patch.fields as Record<string, Record<string, unknown>>;
+    expect(Object.keys(fields)).toEqual(['name', 'account', 'valid_until', 'terms']);
+    expect(fields.account.group).toBeUndefined();
+    expect(patch.fieldGroups?.[0].fields).toEqual(['name']);
+  });
+
+  it('reordering the ungrouped bucket permutes only the ungrouped fields\' slots', () => {
+    const v = readFields({ a: { type: 'text' }, b: { type: 'text', group: 'basic' }, c: { type: 'text' } });
+    const layout = currentGroupLayout(v, groups);
+    layout.set(null, ['c', 'a']);
+    const patch = writeGroupLayout(v, groups, layout);
+    expect(Object.keys(patch.fields as object)).toEqual(['c', 'b', 'a']);
+    expect(patch.fieldGroups).toBeUndefined();
+    expect(writeGroupLayout(v, groups, layout, { reorderUngrouped: false })).toEqual({});
+  });
+
+  it('a field the caller does not show keeps its membership behind the shown ones', () => {
+    const v = readFields({ name: { type: 'text', group: 'basic' }, secret: { type: 'text', group: 'basic' }, account: { type: 'text', group: 'basic' } });
+    const layout = currentGroupLayout(v, groups, (e) => e.name !== 'secret');
+    layout.set('basic', ['account', 'name']);
+    expect(writeGroupLayout(v, groups, layout).fieldGroups?.[0].fields).toEqual(['account', 'name', 'secret']);
+  });
+});
+
+describe('groupEntries reads a group\'s own fields list (objectstack#35900)', () => {
+  it('orders a listing group by its list, and a field its group names but the list leaves out after it', () => {
+    const view = readFields({ name: { type: 'text' }, account: { type: 'text' }, terms: { type: 'text', group: 'basic' }, other: { type: 'text' } });
+    const buckets = groupEntries(view, [{ key: 'basic', label: 'Basic', fields: ['account', 'name'] }]);
+    expect(buckets.map((b) => [b.key, b.entries.map((e) => e.name)])).toEqual([
+      ['basic', ['account', 'name', 'terms']],
+      [null, ['other']],
+    ]);
+  });
+});
+
+describe('groupListLayout — an object in the older per-field `group` spelling converts, membership unchanged (objectstack#36505)', () => {
+  // `basic` holds name and account by the older `group`; `money` lists
+  // valid_until and also picks up `fee` by its `group`; terms is ungrouped;
+  // `orphan` names no declared group.
+  const view: FieldsView = readFields({
+    name: { type: 'text', group: 'basic' },
+    account: { type: 'text', group: 'basic' },
+    valid_until: { type: 'date' },
+    fee: { type: 'currency', group: 'money' },
+    terms: { type: 'textarea' },
+    orphan: { type: 'text', group: 'gone' },
+  });
+  const groups = readGroups([
+    { key: 'basic', label: 'Basic' },
+    { key: 'money', label: 'Money', fields: ['valid_until'] },
+    { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+  ]);
+
+  it('lists every group\'s members in display order and drops each `group` a list now holds', () => {
+    const out = groupListLayout(view, groups);
+    expect(out.changed).toBe(true);
+    expect(out.groups).toEqual([
+      { key: 'basic', label: 'Basic', fields: ['name', 'account'] },
+      { key: 'money', label: 'Money', fields: ['valid_until', 'fee'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const fields = writeFields(out.view) as Record<string, Record<string, unknown>>;
+    expect(Object.keys(fields)).toEqual(['name', 'account', 'valid_until', 'fee', 'terms', 'orphan']);
+    expect(['name', 'account', 'fee'].map((n) => fields[n].group)).toEqual([undefined, undefined, undefined]);
+    // A `group` naming no declared group says nothing and is kept.
+    expect(fields.orphan.group).toBe('gone');
+  });
+
+  it('the converted object places every field exactly where the old spelling did', () => {
+    const before = groupMembership(view, groups);
+    const out = groupListLayout(view, groups);
+    const after = groupMembership(out.view, out.groups);
+    expect([...after.members]).toEqual([...before.members]);
+    expect(Object.fromEntries(after.groupOf)).toEqual(Object.fromEntries(before.groupOf));
+    const parsed = ObjectSchema.safeParse({ name: 'quote', label: 'Quote', fields: writeFields(out.view), fieldGroups: out.groups });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('an object already in the list spelling is answered as it is', () => {
+    const out = groupListLayout(view, groups);
+    const again = groupListLayout(out.view, out.groups);
+    expect(again.changed).toBe(false);
+    expect(again.view).toBe(out.view);
+    expect(again.groups).toBe(out.groups);
+  });
+});
+
+describe('groupArrangement — the whole arrangement an installed object\'s .custom extension writes (objectstack#36505)', () => {
+  it('lists every group\'s members, the older spelling included, and keeps a related-table group as it is', () => {
+    const view = readFields({
+      name: { type: 'text', group: 'basic' },
+      region__c: { type: 'text' },
+      account: { type: 'text' },
+      terms: { type: 'textarea' },
+    });
+    const groups = readGroups([
+      { key: 'basic', label: 'Basic' },
+      { key: 'extra', label: 'Extra', fields: ['region__c', 'account'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const arrangement = groupArrangement(view, groups);
+    expect(arrangement).toEqual([
+      { key: 'basic', label: 'Basic', fields: ['name'] },
+      { key: 'extra', label: 'Extra', fields: ['region__c', 'account'] },
+      { key: 'kids', label: 'Kids', relatedList: 'quote_line' },
+    ]);
+    const parsed = ObjectExtensionSchema.safeParse({ extend: 'quote', fieldGroups: arrangement });
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 });

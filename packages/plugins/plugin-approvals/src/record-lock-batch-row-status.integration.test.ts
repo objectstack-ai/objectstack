@@ -50,6 +50,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { bindApprovalLockHook } from './lifecycle-hooks.js';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const opportunity = {
@@ -139,6 +140,8 @@ describe('[#8570] a locked record\'s batch row carries the 409 the hook declared
       // side of it is what this file exists for and is unmoved.
       message: "RECORD_LOCKED: Opportunity 'Deal' is locked while an approval is in progress, and cannot be edited until that approval is complete",
       httpStatus: 409,
+      // [#34699] The same sentence, marked for the end user, without the wire prefix.
+      userMessage: "Opportunity 'Deal' is locked while an approval is in progress, and cannot be edited until that approval is complete",
     });
     // The same row, read as the CARD reads it: no internal identifier in the
     // user-visible body (#18153). The object is named by its LABEL
@@ -168,7 +171,8 @@ describe('[#8570] a locked record\'s batch row carries the 409 the hook declared
     expect(thrown.code).toBe('RECORD_LOCKED');
     expect(thrown.statusCode).toBe(409);
     expect(thrown.status).toBeUndefined();
-    expect(Object.getOwnPropertyNames(thrown)).toEqual(['stack', 'message', 'code', 'statusCode']);
+    // [#34699] `userMessage` is the end user's sentence; it declares no status.
+    expect(Object.getOwnPropertyNames(thrown)).toEqual(['stack', 'message', 'code', 'statusCode', 'userMessage']);
     // The production recogniser, on the real throw — and the field the row's
     // limb reads, which is what separates a declared refusal from a fault.
     expect(resolveThrownHttpError(thrown).declaredStatus).toBe(409);
@@ -190,6 +194,38 @@ describe('[#8570] a locked record\'s batch row carries the 409 the hook declared
     expect(res.results[0].errors).toBeUndefined();
     expect(res.results[1].errors[0].httpStatus).toBe(409);
     expect((await engine.findOne('opportunity', { where: { id: freeId } }))?.amount).toBe(555);
+  });
+
+  // [#34060] The row carries the sentence in the WRITER's locale — the same
+  // sentence the by-id door answers (`record-lock-user-facing-message.test.ts`),
+  // because both are the one hook's one refusal. Only the sentence moves: the
+  // row's `code` and `httpStatus` are the ones pinned above, in every locale.
+  it('a zh-CN writer\'s row carries the Chinese sentence; an en-US writer\'s the English one', async () => {
+    const rowIn = async (locale: string) => {
+      const res: any = await protocol.updateManyData({
+        object: 'opportunity',
+        records: [{ id: lockedId, data: { amount: 999 } }],
+        context: { userId: 'u_writer', positions: [], permissions: [], locale },
+      });
+      expect(res.results[0].success).toBe(false);
+      return res.results[0].errors[0];
+    };
+    const zh = BUILTIN_OPERATION_MESSAGES['zh-CN'].record_locked
+      .replace('{{object}}', 'Opportunity').replace('{{title}}', 'Deal');
+    expect(await rowIn('zh-CN')).toEqual({ code: 'RECORD_LOCKED', message: `RECORD_LOCKED: ${zh}`, httpStatus: 409, userMessage: zh });
+    expect(await rowIn('en-US')).toEqual({
+      code: 'RECORD_LOCKED',
+      message: "RECORD_LOCKED: Opportunity 'Deal' is locked while an approval is in progress, and cannot be edited until that approval is complete",
+      httpStatus: 409,
+      userMessage: "Opportunity 'Deal' is locked while an approval is in progress, and cannot be edited until that approval is complete",
+    });
+    const upsert: any = await protocol.batchData({
+      object: 'opportunity',
+      request: { operation: 'upsert', records: [{ id: lockedId, data: { amount: 999 } }] },
+      context: { userId: 'u_writer', positions: [], permissions: [], locale: 'zh-CN' },
+    });
+    expect(upsert.results[0].errors[0]).toEqual({ code: 'RECORD_LOCKED', message: `RECORD_LOCKED: ${zh}`, httpStatus: 409, userMessage: zh });
+    expect((await engine.findOne('opportunity', { where: { id: lockedId } }))?.amount).toBe(100);
   });
 
   it('the batchData upsert loop answers the same way — not just updateManyData', async () => {

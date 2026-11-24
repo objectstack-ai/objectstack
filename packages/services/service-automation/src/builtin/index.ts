@@ -30,6 +30,7 @@
  */
 
 import type { PluginContext } from '@objectstack/core';
+import type { EgressGuard } from '@objectstack/core/egress';
 import type { AutomationEngine } from '../engine.js';
 import { registerLogicNodes } from './logic-nodes.js';
 import { registerLoopNode } from './loop-node.js';
@@ -64,14 +65,18 @@ export { registerMapNode } from './map-node.js';
  * {@link AutomationServicePlugin.init} so a bare `new AutomationServicePlugin()`
  * yields a fully-functional automation capability with no companion plugins.
  */
-export function installBuiltinNodes(engine: AutomationEngine, ctx: PluginContext): void {
+export function installBuiltinNodes(
+    engine: AutomationEngine,
+    ctx: PluginContext,
+    options: { egress?: EgressGuard } = {},
+): void {
     registerLogicNodes(engine, ctx);
     registerLoopNode(engine, ctx);
     registerParallelNode(engine, ctx);
     registerTryCatchNode(engine, ctx);
     registerCrudNodes(engine, ctx);
     registerScreenNodes(engine, ctx);
-    registerHttpNodes(engine, ctx);
+    registerHttpNodes(engine, ctx, { egress: options.egress });
     registerConnectorNodes(engine, ctx);
     registerNotifyNode(engine, ctx);
     registerSaveNoticeNode(engine, ctx);

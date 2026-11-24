@@ -4,8 +4,8 @@
  * [#29986 codemod] The "Write preparation and insert" section of `ObjectQL`:
  * the bodies of `staticReadonlyCreateStrip`, `updateByIdExpecting`,
  * `ownershipQueueService`, `assignment`, `readUpdatePriorRow`, `insert`,
- * `insertMany` moved out of `engine.ts` whole by
- * `scripts/codemod-split-engine.mjs`.
+ * `insertMany` moved out of `engine.ts` whole (split
+ * by #30012 and #31922).
  *
  * A MOVE, not a redesign. {@link InsertFacet} is a stateless facet of `ObjectQL`
  * (ruling 6624345766): each static method of it is the body of the `ObjectQL`
@@ -35,6 +35,7 @@
  * this module.
  */
 
+import { formulaWorkCalendarsFor } from './formula-work-calendars.js';
 import type { DataEngineInsertOptions, EngineCountOptions, EngineQueryOptions, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import type { PendingSecretRow } from './engine-secret-internal-fields.js';
@@ -47,11 +48,13 @@ import { SummaryRecomputeError } from './summary-errors.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { DuplicateRecordError } from './duplicate-record-error.js';
 import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
+import { refuseHookSyncProvenanceWrite, refuseSyncProvenanceWrite, snapshotSyncKeys } from './sync-provenance-write.js';
 import { ASSIGNMENT_RULE_TYPE, AssignmentRuleEvaluator, OWNERSHIP_QUEUE_SOURCE_SLOT } from './assignment-rules.js';
 import type { AssignmentQueueService } from './assignment-rules.js';
 import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
 import { assertRecordCurrencyCodes, followParentCurrencyCodes, parentCodeFieldServingOf, recordCurrencyPairs } from './validation/record-currency-code.js';
+import { assertUnitCodes, organizationUnitRowsOf, readOrganizationUnits } from './validation/unit-code-membership.js';
 import { planHomeAmounts, projectHomeAmounts } from './home-amount-projection.js';
 import { stripSearchCompanion } from './search-companion.js';
 import type { EvalPermissions } from '@objectstack/formula';
@@ -60,13 +63,15 @@ import { coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFiel
 import { emitValidationAdvisories, evaluateValidationRules, hasParentScopedRequiredWhen, preserveAuditIgnoredOnInsertWarning, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
 import type { staticReadonlyInsertSubject } from './validation/rule-validator.js';
 import { createBatchSummaryAccumulator } from './summary-batch-accumulation.js';
+import { attachInsertSummaryDependents } from './engine-update.js';
+import { resolveMasterDetailRelation } from './master-detail.js';
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { dispatchHooksExplainingWithheldReadonly } from './hook-withheld-readonly-fault.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, selectedStoredColumns, storedColumnsLeftUnwritten, withDeclaredColumnsOnly, withSelectedColumnsAnswered } from './declared-read-columns.js';
 import {
   WRITE_PRECONDITION_OPTION, autonumberFieldNames, callerKeySets, callerSuppliedRow, computeStoredExpressions,
-  droppedFieldEvents, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
+  droppedFieldEvents, formulaValuesFor, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
   planStoredExpressions, recomputeAutonumberReaders, replacedStoredExpressionFields, shouldSkipStateMachine,
   storedExpressionsReading, stripComputedWriteFields, undeclaredWriteFieldErrors, withholdInsertReadonlyFromHooks,
   callerInputRefusalLogMeta, writeFailureLogMeta,
@@ -178,13 +183,23 @@ export class InsertFacet {
    * need it. Scoped to the TAKEN keys: those are the only defaults this pass
    * keeps, so no other field's default can make it ask, or fail.
    *
+   * [#34672] A taken roll-up `summary` is then re-SEEDED, after its default:
+   * `initializeSummaryFields` over the stripped row, copied back for the
+   * taken keys only, so the column starts at the empty-child-list value (`0`
+   * for `count` / `sum`) exactly as a create that never named it does. The
+   * re-default alone never asked the seed, so a value taken from a
+   * `readonly: true` roll-up left the column `null` (the #5749 state, which
+   * the seed exists to rule out) while the write still succeeded. The seed
+   * yields nothing for `min` / `max` / `avg`, which stay empty as on any
+   * create.
+   *
    * @returns the row as the strip leaves it (the SAME reference when nothing
    *   was taken) and the keys taken, in the row's key order. When the
    *   re-default's permission resolution fails, `error` carries it and `row`
    *   is the row as it arrived: the caller decides whether that fails the
    *   write or culls the row, and the taken keys are still reported.
    */
-  static async staticReadonlyCreateStrip(this: Pick<InsertHost, 'applyFieldDefaults' | 'resolveDefaultPermissions'>, object: string, readonlySubject: NonNullable<ReturnType<typeof staticReadonlyInsertSubject>>, row: Record<string, unknown>, supplied: Readonly<Record<string, unknown>>, context: ExecutionContext | undefined, pass: {
+  static async staticReadonlyCreateStrip(this: Pick<InsertHost, 'applyFieldDefaults' | 'initializeSummaryFields' | 'resolveDefaultPermissions'>, object: string, readonlySubject: NonNullable<ReturnType<typeof staticReadonlyInsertSubject>>, row: Record<string, unknown>, supplied: Readonly<Record<string, unknown>>, context: ExecutionContext | undefined, pass: {
       logger: Parameters<typeof stripReadonlyFields>[3];
       strictReadonlyWrites: boolean;
       hookWrittenKeys: ReadonlySet<string> | undefined;
@@ -213,6 +228,10 @@ export class InsertFacet {
       const redefaulted = this.applyFieldDefaults(object, stripped, context, pass.nowSnap, redefaultPermissions);
       for (const k of taken) {
         if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+      }
+      const reseeded = this.initializeSummaryFields(object, stripped) as Record<string, unknown>;
+      for (const k of taken) {
+        if (stripped[k] == null && reseeded[k] !== undefined) stripped[k] = reseeded[k];
       }
     }
     return { row: stripped, taken };
@@ -309,14 +328,28 @@ export class InsertFacet {
   }
 
   /** The body of `ObjectQL#insert`; the method's docblock there is its contract. */
-  static async insert(this: Pick<InsertHost, '_registry' | 'admittedViolationSink' | 'applyAutonumbers' | 'applyFieldDefaults' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'assignment' | 'autonumberCounters' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'createWithAutonumberResync' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'getSummaryDescriptors' | 'homeAmountServing' | 'inAfterAbortUnit' | 'initializeSummaryFields' | 'insert' | 'insertRecomputeListeners' | 'invalidateOrganizationProbe' | 'isIssuedAutonumberCollision' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'releaseSecretHandles' | 'resolveDefaultPermissions' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'resolveSystemInsertOrganization' | 'staticReadonlyCreateStrip' | 'triggerHooks' | 'validationMessageContext' | 'valueShapeStrictFor' | 'warnAutonumberReadersUnserved'>, object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
+  static async insert(this: Pick<InsertHost, '_registry' | 'admittedViolationSink' | 'applyAutonumbers' | 'applyFieldDefaults' | 'assertReferencesResolve' | 'assertWriteAllowed' | 'assignment' | 'autonumberCounters' | 'buildDriverOptions' | 'buildEvalUser' | 'buildHookApi' | 'buildProvenance' | 'buildSession' | 'buildUser' | 'createWithAutonumberResync' | 'encryptSecretFields' | 'enforceTransactionOrigin' | 'executeWithMiddleware' | 'facade' | 'formulaFaultSink' | 'formulaOptionLabels' | 'getDriver' | 'getSchema' | 'getSummaryDescriptors' | 'homeAmountServing' | 'inAfterAbortUnit' | 'initializeSummaryFields' | 'insertRecomputeListeners' | 'invalidateOrganizationProbe' | 'isIssuedAutonumberCollision' | 'logger' | 'mediaValueShapeStrictFor' | 'opensAfterAbortUnit' | 'permissionResolution' | 'persistSecretRows' | 'publishDataEvent' | 'realtimeService' | 'recomputeSummaries' | 'refuseEmptyPasswordFields' | 'releaseSecretHandles' | 'resolveDefaultPermissions' | 'resolveFormulaPermissions' | 'resolveFormulaRelated' | 'resolveMasterDetailParents' | 'resolveObjectName' | 'resolveOptionPermissions' | 'resolvePredicateRelated' | 'resolveSystemInsertOrganization' | 'staticReadonlyCreateStrip' | 'triggerHooks' | 'validationMessageContext' | 'valueShapeStrictFor' | 'warnAutonumberReadersUnserved'>, object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
-    // [#22782] An aborting `afterInsert` rolls this write back — see `opensAfterAbortUnit`.
-    if (this.opensAfterAbortUnit('afterInsert', object, options?.context)) {
-      return this.inAfterAbortUnit(() => this.insert(object, data, options));
-    }
+    // [#22782, #34412] An aborting `afterInsert`, or a refusal after a `beforeInsert` hook's
+    // `ctx.api` write, rolls this write back with it — see `opensAfterAbortUnit`.
+    //
+    // [#35167] The unit opens around the ENGINE BODY (the executor below), as
+    // `update`'s does (#35142): the middleware chain runs first, outside it, as
+    // it does for an insert that opens no unit, so the authorization gate's
+    // reads do not hold a single-connection store's (SQLite) only connection
+    // while they run, and a middleware's work after `next()` runs after the
+    // commit on every object. Nothing between here and the executor writes.
+    const ownUnit = this.opensAfterAbortUnit('afterInsert', object, options?.context);
+    const inOwnUnit = <T>(body: () => Promise<T>): (() => Promise<T>) =>
+      ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
+    // [ADR-0153 D4] A `_sync_` provenance column is written by the sync-in pull
+    // alone, whatever the caller's context: judged on the caller's payload,
+    // before anything runs. The pull's mark is consumed here, so the hooks and
+    // flows this write triggers write as any other system caller.
+    const syncJudgedContext = refuseSyncProvenanceWrite(object, data, options?.context, 'insert');
+    if (syncJudgedContext !== options?.context) options = { ...options, context: syncJudgedContext } as typeof options;
     // [#8844] The organization set is about to change. Dropped BEFORE the write
     // rather than after it, so a concurrent read cannot repopulate the memo from
     // a snapshot this insert is in the middle of invalidating.
@@ -325,7 +358,7 @@ export class InsertFacet {
     // [#5351/#5696] Same-origin gate: refuse a cross-driver BUSINESS write,
     // carve an append-only system ledger out of the transaction. Before any
     // hook, default or validation runs, so a refusal costs nothing.
-    this.enforceTransactionOrigin(object, driver, 'insert');
+    this.enforceTransactionOrigin(object, driver, 'insert', options?.context?.transaction);
 
     // [#20308] A blank on a non-string-typed column is `null` from here on —
     // before the middleware, the caller snapshot, the defaults, the hooks and
@@ -350,7 +383,7 @@ export class InsertFacet {
       context: options?.context,
     };
 
-    await this.executeWithMiddleware(opCtx, async () => {
+    await this.executeWithMiddleware(opCtx, inOwnUnit(async () => {
       // Resolve field `defaultValue`s (including the `current_user` and
       // `NOW()` tokens)
       // BEFORE the beforeInsert hook runs, so a hook that DERIVES one field
@@ -544,6 +577,7 @@ export class InsertFacet {
         onFault: this.formulaFaultSink(object),
         relatedFor: (plan, records) => this.resolveFormulaRelated(this._registry.getObject(object), plan, records, opCtx.context),
         optionLabelsFor: (plan) => declaredOptionLabels(this._registry.getObject(object), plan),
+        workCalendarsFor: (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, opCtx.context),
       };
       if (storedExpressionPlan.length > 0) {
         const defaultedRows = (isBatch ? defaultedData : [defaultedData]) as Array<Record<string, unknown>>;
@@ -615,6 +649,8 @@ export class InsertFacet {
       // land on the SAME row object, so a hook mutating `ctx.input.data.x` in
       // place is mutating the engine's row exactly as it always has.
       const rowHookWrites: Array<HookWriteRecording | undefined> = [];
+      // [ADR-0153 D4] Each row's `_sync_` keys before the hooks, judged after the seal below.
+      const rowSyncBefore = (isBatch ? (defaultedData as any[]) : [defaultedData]).map((row) => snapshotSyncKeys(row));
       const rowHookContexts: HookContext[] = (isBatch ? (defaultedData as any[]) : [defaultedData]).map(
         (row, rowIndex) => {
           const recording =
@@ -673,6 +709,12 @@ export class InsertFacet {
         const sealed = rowHookWrites[i]?.seal(rowHookContexts[i]!.input.data);
         if (sealed) rowHookContexts[i]!.input.data = sealed.data as any;
         rowHookWrittenKeys[i] = sealed?.hookWrittenKeys;
+      }
+      // [ADR-0153 D4] A `_sync_` key a hook assigned, changed or removed is refused,
+      // the pull's own write included (sync-provenance-write.ts, "The hooks' own writes").
+      for (let i = 0; i < rowHookContexts.length; i++) {
+        if (undeclaredPerRow[i] !== undefined) continue;
+        refuseHookSyncProvenanceWrite(object, rowSyncBefore[i]!, rowHookContexts[i]!.input.data, 'insert');
       }
 
       // ── [#22306] HAND BACK what was withheld from beforeInsert ─────────────
@@ -1274,6 +1316,20 @@ export class InsertFacet {
           rows.filter((_, i) => rowErrors[i] === undefined) as Array<Record<string, unknown>>,
           homeServing.parentRows,
         );
+        // [ADR-0158 U5] The organization units the rows' unit codes name: ONE
+        // read per organization for the whole batch, before the validation
+        // loop judges each row against it (`assertUnitCodes`). Free (nothing
+        // is read) for an object with no unit code field, or rows naming only
+        // standard codes.
+        const unitOrganizationOf = (row: Record<string, unknown>) =>
+          ObjectQL.homeAmountOrganizationOf(row, opCtx.context, derivedOrganizationId);
+        const organizationUnits = await readOrganizationUnits(
+          (schemaForValidation as { fields?: unknown } | undefined)?.fields,
+          (rows.filter((r, i) => rowErrors[i] === undefined && r !== null && typeof r === 'object') as Array<Record<string, unknown>>)
+            .map((image) => ({ image, organizationId: unitOrganizationOf(image) })),
+          'insert',
+          organizationUnitRowsOf({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never) }, opCtx.context as Record<string, unknown> | undefined),
+        );
         if (homeAmountPlan.length > 0) {
           for (let i = 0; i < rows.length; i++) {
             if (rowErrors[i] !== undefined) continue;
@@ -1315,6 +1371,29 @@ export class InsertFacet {
         const batchSummaries = rows.length > 1
           ? createBatchSummaryAccumulator(this.getSummaryDescriptors(object), (schemaForValidation as any)?.fields)
           : undefined;
+        // [#34466] The same overlay for the master-detail header a field-level
+        // `parent.` predicate reads (`requiredWhen: parent.line_count >= 3`):
+        // `insertParentForRow` above was read once too, before the batch.
+        const insertParentMaster = batchSummaries && insertParentForRow
+          ? resolveMasterDetailRelation(schemaForValidation as any)?.master
+          : undefined;
+        const insertParentOf = (row: Record<string, unknown>) => {
+          const header = insertParentForRow?.(row);
+          return insertParentMaster ? batchSummaries!.overlayRow(insertParentMaster, header) : header;
+        };
+        // [#34821] And a formula or stored computed field of such a parent
+        // calculated from an accumulated roll-up (`remaining = budget -
+        // total`), computed again over the moved values as the predicate
+        // update's fold computes it. Loaded only for the parents a rule of
+        // this batch reads (a related binding or a header): an insert no rule
+        // reads a parent of pays nothing here.
+        if (batchSummaries) {
+          await attachInsertSummaryDependents(
+            this, batchSummaries, rows, insertRelatedForRow, insertParentMaster,
+            insertParentForRow ? (i) => insertParentForRow(rows[i]) : undefined,
+            opCtx.context, (i) => rowErrors[i] !== undefined,
+          );
+        }
         // [#18783] The subject's effective object permissions, for an option
         // gated on `current_user.can(…)`: ONE resolution for the whole batch,
         // and none at all unless a row picks such an option. A resolution
@@ -1333,11 +1412,19 @@ export class InsertFacet {
             // `ReadonlyValueScope` (record-validator.ts).
             normalizeMultiValueFields(schemaForValidation, rows[i], 'include');
             // [#22183] `keptOptionValues`: the option values an import kept for this write.
-            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues });
+            // [ADR-0113 D1, as amended] `'deferred'`: a field required only when shown
+            // is judged by `evaluateValidationRules` below, against its visibility.
+            validateRecordInScope(schemaForValidation, rows[i], 'insert', 'include', { mediaValueShapeStrict, valueShapeStrict, messages: msgCtx, onAdmittedValueShapeViolation, keptOptionValues: opCtx.context?.keptOptionValues }, 'deferred');
             // [ADR-0144 D8 rule 4] A `record`-mode amount is stored with its
             // currency code, or the row is refused (`ERR_CURRENCY_CODE_REQUIRED`).
             // [ADR-0144 D2, amended] A child amount's code is its parent's, laid on a copy of the row.
             assertRecordCurrencyCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i] && typeof rows[i] === 'object' ? followCodes(rows[i]) : rows[i], 'insert', undefined, undefined, msgCtx, parentCodeFieldServingOf(this._registry));
+            // [ADR-0158 U5, Open item 9] Each unit code the row stores is a
+            // standard code or one of its organization's non-retired units, of
+            // the declared dimension, and no quantity stands beside a blank one.
+            if (rows[i] && typeof rows[i] === 'object') {
+              assertUnitCodes(object, (schemaForValidation as { fields?: unknown } | undefined)?.fields, rows[i], 'insert', undefined, undefined, unitOrganizationOf(rows[i]), organizationUnits);
+            }
             // [#29029] A write that is not a system write has its references
             // checked BEFORE the record's validation rules: a reference the
             // caller cannot read answers `reference_not_found`, whatever a rule
@@ -1348,7 +1435,7 @@ export class InsertFacet {
               schemaForValidation, rows[i], suppliedPerRow[i], opCtx.context, msgCtx,
             );
             if (referencesFirst) await checkReferences();
-            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentForRow?.(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]) }), this.logger, object);
+            emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(schemaForValidation as any, rows[i], 'insert', { logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: msgCtx, parent: insertParentOf(rows[i]), related: batchSummaries ? batchSummaries.overlay(insertRelatedForRow(rows[i])) : insertRelatedForRow(rows[i]), permissions: insertPermissionsFor(rows[i]), formulaValues: formulaValuesFor(schemaForValidation, opCtx.context, insertPermissionsFor(rows[i])) }), this.logger, object);
             if (!referencesFirst) await checkReferences();
             // [#25579] Admitted: a later row of this batch reads it in the summary.
             batchSummaries?.accept(rows[i]);
@@ -1582,6 +1669,7 @@ export class InsertFacet {
           (plan, records) => this.resolveFormulaRelated(schemaForValidation, plan, records, opCtx.context),
           // [#26608] The 201 body is what the save toast names the record from.
           (plan) => this.formulaOptionLabels(schemaForValidation, plan, opCtx.context),
+          (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, opCtx.context),
         );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
@@ -1714,7 +1802,7 @@ export class InsertFacet {
         await this.releaseSecretHandles(object, writtenSecrets, opCtx.context, 'refused');
         throw e;
       }
-    });
+    }));
 
     return opCtx.result;
   }

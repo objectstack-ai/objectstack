@@ -44,7 +44,7 @@
  * naive shape the trap describes, and it also silently breaks the three
  * mutable, non-`sys_metadata` sources the merged answer depends on — see next.
  *
- * ## ⭐ Why only the row set is cached, and never the merged answer
+ * ## ⭐ Why THIS cache holds only the row set, and never the merged answer
  *
  * Measured on the shipped ref: `getMetaItems`' answer is a function of FOUR
  * mutable sources, and the write epoch observes only ONE of them.
@@ -61,6 +61,13 @@
  * keeps the cache's reach exactly co-extensive with what its key can validate:
  * the one source the epoch does see. That containment is the whole argument for
  * this shape, and it is the property to protect when editing this file.
+ *
+ * This is a statement about THIS module, not a ban on caching a merged answer
+ * anywhere. ADR-0156 states when a compiled metadata answer may be cached: only
+ * when every source it reads counts its own changes at its own mutation point,
+ * and a time bound covers what this process cannot see. A source in the table
+ * above without a counter makes such a cache decline. That cache lives in its
+ * own layer; it never moves this one below the merge.
  *
  * ## Invalidation
  *
@@ -294,6 +301,20 @@ const OVERLAY_READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne',
 /** Per-engine retirement counter. Compared, never interpreted. */
 interface OverlayWriteState {
   gen: number;
+  /**
+   * [#34554] When {@link gen} last moved (or the state was made). Every row
+   * set held under the current generation was read at or after it: an entry
+   * is stamped with the generation its read STARTED under and refused when it
+   * moved, so none can predate this. Read by {@link readOverlayCacheGenerationSince}.
+   */
+  since: number;
+}
+
+/** Move the generation and note when (the one place a generation moves). */
+function advance(state: OverlayWriteState): number {
+  state.gen += 1;
+  state.since = Date.now();
+  return state.gen;
 }
 
 /**
@@ -334,7 +355,7 @@ export function readOverlayCacheGeneration(engine: unknown): number | undefined 
   const seam = resolveWriteEpochSeam(engine);
   const register = (engine as { registerMiddleware?: unknown }).registerMiddleware;
   if (!seam || typeof register !== 'function') return undefined;
-  const state: OverlayWriteState = { gen: 0 };
+  const state: OverlayWriteState = { gen: 0, since: Date.now() };
   try {
     (register as (
       fn: (ctx: { object?: unknown; operation?: unknown }, next: () => Promise<void>) => Promise<void>,
@@ -350,11 +371,11 @@ export function readOverlayCacheGeneration(engine: unknown): number | undefined 
       try {
         await next();
       } finally {
-        state.gen += 1;
+        advance(state);
       }
     });
     seam.subscribe((_epoch, reason) => {
-      if (reason !== 'write') state.gen += 1;
+      if (reason !== 'write') advance(state);
     });
   } catch {
     overlayWriteStates.set(engine, null);
@@ -362,6 +383,40 @@ export function readOverlayCacheGeneration(engine: unknown): number | undefined 
   }
   overlayWriteStates.set(engine, state);
   return state.gen;
+}
+
+/**
+ * [#34206, ADR-0156 D5] Retire every row set this engine holds, from outside
+ * its write path, by advancing the generation the entries are stamped with.
+ * The shared compile cache (`meta-compile-cache.ts`) calls it each time it
+ * takes a reading of the store, so whatever it compiles under that reading
+ * reads rows at least as new as the reading: an entry here filled before
+ * another writer's change would otherwise feed a recompile the older rows,
+ * and that answer would then stand under the newer reading.
+ *
+ * ⛔ It does not move the engine's write epoch ({@link bumpWriteEpoch} does),
+ * which would retire the authorization cache that shares it. Returns the new
+ * generation, or `undefined` for an engine this cache does not cover.
+ */
+export function retireMetaOverlayCache(engine: unknown): number | undefined {
+  if (!engine || typeof engine !== 'object') return undefined;
+  const state = overlayWriteStates.get(engine);
+  if (!state) return undefined;
+  return advance(state);
+}
+
+/**
+ * [#34554] The wall-clock time the current generation began
+ * ({@link readOverlayCacheGeneration}): every row set this engine holds was
+ * read at or after it. `undefined` for an engine this cache does not cover.
+ *
+ * The shared compile cache reads it when a counter it watches moves, to keep
+ * the row sets instead of retiring them while its next bound still ends
+ * within one bound of this time (`meta-compile-cache.ts`).
+ */
+export function readOverlayCacheGenerationSince(engine: unknown): number | undefined {
+  if (!engine || typeof engine !== 'object') return undefined;
+  return overlayWriteStates.get(engine)?.since;
 }
 
 /**

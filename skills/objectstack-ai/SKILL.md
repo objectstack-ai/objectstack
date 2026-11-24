@@ -12,7 +12,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.5.0"
+  version: "18.6.0"
   domain: ai
   tags: agent, tool, skill, knowledge, llm, embedding, mcp
 ---
@@ -36,9 +36,9 @@ Agent  →  Skill  →  Tool
   └─ Autonomous actor with role, instructions, and guardrails
 ```
 
-Agents are platform-internal (☁️ `ask` / `build`; reference section at the
-bottom). **Skills are your entry point** — you extend the platform by authoring
-skills, and a skill reaches tools by naming them.
+**Skills are your entry point** — agents are platform-internal (reference
+section at the bottom), so you extend the platform by authoring skills, and a
+skill reaches tools by naming them.
 
 ---
 
@@ -67,11 +67,11 @@ conditions.
 
 ### Naming the tools: the resolution ladder
 
-A `skill.tools[]` entry resolves against the union of three sources
-(`collectToolUniverse` in `packages/lint/src/validate-ai-tool-references.ts`):
+A `skill.tools[]` entry resolves against the union of four sources
+(`packages/lint/src/validate-ai-tool-references.ts`):
 
-1. **`stack.tools[].name`** — records your own stack declares. ADR-0109: the
-   default third-party path declares **none** (see *Tool metadata* below).
+1. **`stack.tools[].name`** — records your own stack declares (none by
+   default: *Tool metadata* below).
 2. **`PLATFORM_PROVIDED_TOOL_NAMES`** — the statically-registered platform
    tools, flattened from `PLATFORM_TOOLS_BY_PACKAGE` in
    `packages/spec/src/system/constants/platform-tool-names.ts`: data /
@@ -81,8 +81,13 @@ A `skill.tools[]` entry resolves against the union of three sources
 3. **`action_<name>`** — one tool per AI-exposed Action of your own stack
    (`PLATFORM_TOOL_FAMILY_PREFIXES`). **The default path** for anything your app
    does.
+4. **`MCP_DOOR_TOOL_NAMES`** (same file) — every tool the MCP door registers
+   (`query_records`, `run_action`, the `MCP_FILE_TOOL_NAMES` file pair, …),
+   resolved only for a skill MCP can offer (`mcpPrompt` not `false`). On a
+   `mcpPrompt: false` skill a name only the door serves still warns, with its
+   own hint: no in-product turn registers it.
 
-A name in none of the three raises **`ai-skill-tool-unresolved`** (warning,
+A name none of them resolves raises **`ai-skill-tool-unresolved`** (warning,
 ADR-0078 advisory-first). The rule exists because one audited app shipped 10
 fictional tools across 6 skills through `validate` / `lint` clean, and became a
 copilot claiming abilities it did not have.
@@ -161,9 +166,16 @@ nests user params under `data` while keeping `recordIdParam` flat.
 
 **Human-in-the-loop.** `AIServicePlugin({ enableActionApproval: true })` (default
 `false`) persists an `ai_pending_actions` row instead of running a dangerous
-action and returns `{ status: 'pending_approval', pendingActionId }`; an operator
-approves or rejects in Studio's **AI Pending Actions** inbox (or via
-`GET/POST /api/v1/ai/pending-actions/...`). Whether *your* action is held is
+action and returns `{ status: 'pending_approval', pendingActionId }`. The queue
+is listed in Studio's **AI Pending Actions** inbox (or via
+`GET /api/v1/ai/pending-actions`), but deciding is the person's own act: only the
+person the call ran as approves or rejects the item, in the app on their
+signed-in session. Another user's `ai:approve` does not decide it; an API key
+or token (even the person's own) is refused, and so is an AI identity and any
+call that arrives through an AI door. The model's own confirmation does not
+decide the item, and neither does a `confirm` on the call: the item waits for
+the person. So an operator script lists items and never decides them; a second approver goes through the approvals engine (the `held`
+outcome). Whether *your* action is queued is
 decided entirely by the skip rule above — `actionSkipReason(action, ctx)` and
 `actionRequiresApproval(action)` (from `@objectstack/service-ai`) answer both
 questions, and Studio's "AI exposure" diagnostics use the same predicates.
@@ -175,7 +187,8 @@ questions, and Studio's "AI exposure" diagnostics use the same predicates.
 `@objectstack/mcp` publishes your app over the Model Context Protocol, so an
 external agent (Claude, Cursor, Codex, …) can read it and act on it with **no
 cloud licence**. (Consuming *external* MCP servers is the inbound sibling,
-`@objectstack/connector-mcp`.)
+`@objectstack/connector-mcp`.) Answering a question through those tools, as
+the connected agent, is **objectstack-ask**.
 
 ```ts
 import { MCPServerPlugin } from '@objectstack/mcp';
@@ -199,9 +212,17 @@ permissions and row-level security:
 | `query_records`, `get_record` | reads — filter, field selection, sorting, pagination |
 | `aggregate_records` | GROUP BY totals; registered only when the data bridge implements `aggregate` |
 | `validate_expression` | build-accurate CEL check before a formula is authored into metadata |
-| `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true` — ask the human first, then retry |
+| `create_record`, `update_record`, `delete_record` | writes; `delete_record` is refused with `ACTION_CONFIRMATION_REQUIRED` (428) unless it sends `confirm: true`. A request in which the human names the record to delete, with exactly one record matching, is their approval: send `confirm: true` on that call without asking again. When the name matches more than one record, or the request does not identify one, list the candidates, ask which one, and send `confirm: true` only after the answer |
 | `delete_records` | up to 200 records of one object per call (fewer under a smaller `OS_DATA_MAX_PAGE_SIZE` or `OS_DATA_QUERY_ROW_BUDGET`), by `where` or `recordIds`, not both; a call without `confirm: true` is the preview (match count, sample ids) and deletes nothing — show it to the human, and send `confirm: true` only once they approve; over OAuth it needs `data:read` and `data:write` |
-| `list_actions`, `run_action`, `resume_run` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above; registered only when the bridge implements `listActions` and `runAction` (the stdio bridge does not, so it serves none), `resume_run` only when it also implements `resumeRun`. An action flagged `ai.requiresConfirmation` (`list_actions` reports it) is refused with the same 428 unless the call sends `confirm: true`, and nothing runs — ask the human first, then retry. Under an AI service account's own key (an agent acting for itself, for no person) the call is refused whatever it sends and nothing runs: hand the action to a person, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. `resume_run` submits a paused screen flow's form under the same gates |
+| `list_actions`, `run_action`, `resume_run` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above; registered only when the bridge implements `listActions` and `runAction` (the stdio bridge does not, so it serves none), `resume_run` only when it also implements `resumeRun`. An action declaring `ai.requiresConfirmation: true` (`list_actions` reports it) never runs on the call: the host's pending-confirmation service hands it to the person the call runs as, who approves or rejects it in the app, and the answer is `status: 'pending_confirmation'` with a `pendingId` — a success, so relay its message and do not retry. Under an AI service account's own key (an agent acting for itself, for no person) the call is refused with the same 428, `details.reason: 'service_account'`, at every action door, and nothing runs: hand the action to a person, or its author declares `ai.requiresConfirmation: false` when it is safe unattended. `resume_run` submits a paused screen flow's form under the same gates; a handed-off run stays paused |
+
+**Never send `confirm` to `run_action` or `resume_run`:** a call carrying it is
+refused, on every action. A host with no such service (the open build ships
+none) refuses a gated call 428, `details.reason: 'no_confirmation_service'`: the
+person performs it in the app. On a long-lived (stdio) server whose bridge serves
+these tools, a client advertising form-mode `elicitation` is asked instead:
+`accept` runs it once; decline, dismissal or five minutes unanswered refuse it
+(`declined` / `cancelled` / `timed_out`). Over Streamable HTTP nobody is asked.
 
 ---
 
@@ -316,11 +337,27 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
    there is no storage backend to choose — and neither is a gate. For a gate
    that is **enforced**, use
    `enableActionApproval: true` (approval queue ☁️), `ai.requiresConfirmation` on
-   the **action**, or `approval: 'always'` on an MCP tool binding. AI metadata
-   edits are already gated: they land as drafts a human must publish (ADR-0033).
-   ⚠️ `requiresConfirmation` on the **tool** was REMOVED (ADR-0033 §2; retired
-   above). There is no `requireApprovalFor` field.
-2. **Indexing everything.** A knowledge source without a `where` filter and
+   the **action** (its door only, pitfall 2), or `approval: 'always'` on an MCP
+   tool binding. AI metadata edits are already gated: they land as drafts a
+   human must publish (ADR-0033). There is no `requireApprovalFor` field.
+2. **Gating the action, not the state.** `ai.requiresConfirmation` guards the
+   action's own door only: an agent can still write the field it changes with
+   `update_record` or any data write, and the write lands. An irreversible
+   transition is a gated action **plus a lock on that field**: a `script`
+   action, whose body writes elevated (`isSystem`), over a field a non-system
+   write cannot set. `readonly: true` binds every non-system caller (the value
+   is stripped, **objectstack-data** → `readonly`); a field permission without
+   `editable` (refused `403`) binds only a caller no held set grants it, and
+   Modify All grants it, so an admin's agent still writes the field. The body
+   skips the caller's edit right: declare who may run the action in its
+   `requiredPermissions` (ADR-0066). A declarative
+   `operation: 'update'` action, and a `flow` action under `runAs: 'user'`,
+   write as the caller, so the lock stops them too. `readonlyWhen` and a
+   `state_machine` rule bind the elevated body as well, so neither is the
+   door; a `state_machine` dead-end (`closed: []`) still makes the reached
+   state final for every writer (**objectstack-automation**
+   `references/state-machines-and-approvals.md`).
+3. **Indexing everything.** A knowledge source without a `where` filter and
    curated `contentFields` fills the index with drafts and boilerplate that
    pollute retrieval. Source hygiene is the metadata's job; relevance tuning
    belongs to the adapter.
@@ -334,10 +371,6 @@ there is **no top-level `temperature` / `maxTokens`** on an agent
 | Reusable skill | `src/skills/lead-qualification.skill.ts` | `defineSkill` — `instructions` + trigger conditions + a toolset where every name resolves; pick a `surface` |
 | Knowledge source | `src/knowledge/sales-kb.ts` | `KnowledgeSourceSchema` metadata, registered at boot via `KnowledgeServicePlugin({ sources })` |
 | Central registration | `defineStack({ skills: [...] })` | `agents` / `tools` / `skills` are the only AI stack collections — knowledge sources have none, agents are platform-supplied, and `tools` is not the default path |
-
-Default for metadata apps: push business capability into **skills**, expose
-business logic as **AI-exposed Actions**, wire domain knowledge through
-**knowledge sources**.
 
 ---
 
@@ -384,8 +417,12 @@ there but is read: `registerSkillPrompts` offers a skill on `prompts/list` /
 `prompts/get` only when its server lists every tool the skill binds — a plain
 name by that tool, a wildcard by any match, an `action_*` entry also by
 `run_action`. That covers the HTTP door and any host server that calls it; the
-plugin's own stdio transport lists every skill. Bind a tool no MCP family
-serves (the MCP table above) and no filtering server offers the skill.
+plugin's own stdio transport lists every skill except one with
+`mcpPrompt: false`. That optional key is the owner's opt-out: `false` = written
+for the in-product agents only, never offered over MCP on any connection,
+whatever the binding; absent or `true` = the binding rule above. Bind a tool no
+MCP family serves (the MCP table above) and no filtering server offers the
+skill.
 `visualize_data` is the only built-in that draws a chart (an inline `data-chart`
 part), auto-registered **only** when an analytics service (`IAnalyticsService`)
 is wired — `query_data` / `aggregate_data` return numbers, not charts.

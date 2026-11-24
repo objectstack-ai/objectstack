@@ -21,7 +21,10 @@ import { describe, expect, it } from 'vitest';
 // clocked window (`pnpm check:test-source-alias`).
 import '@objectstack/lint';
 import { PackageScopedNameRefusedError, type PackageScopedRefusal } from '@objectstack/core';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { publishedItemReader, runBuildProbes, type ProbeEngine, type ProbeItemProtocol } from './build-probes.js';
+import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const ALPHA = 'com.qa.alpha';
 const BETA = 'com.qa.beta';
@@ -185,4 +188,117 @@ describe('[#31700] the probes read a widget\'s dataset from the publishing packa
         // [#32967] …and the move, for a holder that already depends on the publishing package.
         expect(issue!.fix).toContain('would be a cycle, so move the dashboard into that package');
     });
+});
+
+/**
+ * [#34560] A widget whose dataset does not exist, read through the REAL
+ * by-name read: `getMetaItem` answers a missing item with its envelope
+ * (`{ type, name, item: undefined, lock, editable, … }`), never a throw and
+ * never `undefined`. The reader the publish uses (`publishedItemReader`, over
+ * the protocol facade) must hand the probes no body for it, so the widget
+ * takes the dangling-dataset path (an L1 graph finding, skipped here): it is
+ * not counted in `checked.widgets`, no dataset query runs, and no
+ * `widget_query_failed` is reported. The doubles above answer `undefined` for
+ * a missing item, which is why none of them reached this.
+ *
+ * The protocol here is `ObjectStackProtocolImplementation` itself over a
+ * registry double (the shape `protocol.item-execution-read.test.ts` drives),
+ * so the envelope is the one the read builds, not a hand-copied one.
+ */
+describe('[#34560] a missing widget dataset under the real getMetaItem envelope is skipped, not checked', () => {
+    const APP = 'com.qa.app';
+    const REGISTRY_ITEMS: Record<string, unknown> = {
+        'dashboard board': {
+            name: 'board',
+            widgets: [
+                { id: 'w_missing', dataset: 'missing_ds', values: ['total'] },
+                { id: 'w_own', dataset: 'own_ds', values: ['total'] },
+            ],
+        },
+        'dataset own_ds': { name: 'own_ds', object: 'task_item', measures: [{ name: 'total', aggregate: 'count' }] },
+    };
+    const held = (type: string, name: string): unknown => {
+        const item = REGISTRY_ITEMS[`${type} ${name}`];
+        return item === undefined ? undefined : structuredClone(item);
+    };
+
+    function realProtocol() {
+        const engine: Record<string, unknown> = {
+            registry: {
+                ...NO_PACKAGE_SCOPED_READS,
+                // `dataset` is read by package (ADR-0150 D3), as
+                // `SchemaRegistry` reads it: `own_ds` is held by package APP,
+                // and `missing_ds` by no one, so its read answers no item.
+                readsByPackage: (type: string): boolean => type === 'dataset' || NO_PACKAGE_SCOPED_READS.readsByPackage(type),
+                packageScopedHoldersOf: (type: string, name: string): string[] =>
+                    type === 'dataset' && held(type, name) !== undefined ? [APP] : [],
+                getPackageScopedItem: (type: string, name: string, packageId: string): unknown =>
+                    packageId === APP ? held(type, name) : undefined,
+                getItem: (type: string, name: string) => held(type, name),
+                getObject: () => undefined,
+                listItems: () => [],
+                getPackage: () => undefined,
+                getArtifactItem: () => undefined,
+                isPackageDisabled: () => false,
+                isObjectPackageDisabled: () => false,
+                registerItem: () => undefined,
+                registerObject: () => undefined,
+                applyNavContributions: (app: unknown) => app,
+            },
+            writeEpoch: { current: 0, bump: () => 1, subscribe: () => () => {} },
+            registerMiddleware: () => undefined,
+            find: async () => [],
+            findOne: async (table: string, q: Record<string, unknown> = {}) => {
+                assertEngineFindOnePredicate(table, q as never);
+                return null;
+            },
+        };
+        const services = new Map<string, unknown>();
+        return new ObjectStackProtocolImplementation(engine as never, () => services as Map<string, never>) as unknown as ProbeItemProtocol;
+    }
+
+    // The publish reads FROM the publishing package (`request.packageId`);
+    // with no package the dataset is read by name. Both arms of the reader.
+    for (const publisher of [APP, undefined]) {
+        const arm = publisher === undefined ? 'read by name' : `read from package ${publisher}`;
+
+        it(`${arm}: the real read answers a missing dataset with its envelope, and the reader hands the probes no body`, async () => {
+            const protocol = realProtocol();
+            const envelope = (await protocol.getMetaItem({
+                type: 'dataset', name: 'missing_ds', ...(publisher !== undefined ? { packageId: publisher } : {}),
+            })) as Record<string, unknown>;
+            expect(envelope, 'the by-name read answers an envelope, not undefined').toBeTypeOf('object');
+            expect(envelope).toMatchObject({ type: 'dataset', name: 'missing_ds' });
+            expect(Object.prototype.hasOwnProperty.call(envelope, 'item')).toBe(true);
+            expect(envelope.item).toBeUndefined();
+            expect(await publishedItemReader(protocol, publisher)('dataset', 'missing_ds')).toBeUndefined();
+        });
+
+        it(`${arm}: the widget takes the L1 skip path: not counted, not queried, no widget_query_failed`, async () => {
+            const queried: unknown[] = [];
+            const report = await runBuildProbes({
+                engine,
+                getItem: publishedItemReader(realProtocol(), publisher),
+                analytics: {
+                    // Refuses a body that binds no object, as a dataset query
+                    // over nothing can only fail: the shape of the false
+                    // `widget_query_failed` the envelope used to produce.
+                    queryDataset: async (dataset: any) => {
+                        queried.push(dataset?.name);
+                        if (typeof dataset?.object !== 'string') throw new Error('dataset binds no object');
+                        return { rows: [{ total: 1 }] };
+                    },
+                },
+                published: [{ type: 'dashboard', name: 'board' }],
+            });
+            expect({ checked: report.checked.widgets, codes: report.issues.map((i) => i.code), queried })
+                .toEqual({ checked: 1, codes: [], queried: ['own_ds'] });
+        });
+
+        it(`${arm}: CONTROL — a dataset the real read finds is handed over as its body`, async () => {
+            const body = await publishedItemReader(realProtocol(), publisher)('dataset', 'own_ds');
+            expect(body).toMatchObject({ name: 'own_ds', object: 'task_item' });
+            expect(body).not.toHaveProperty('item');
+        });
+    }
 });

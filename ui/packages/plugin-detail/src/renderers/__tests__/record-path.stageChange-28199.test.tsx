@@ -12,8 +12,9 @@
  * field — and every path that does not opt in — keeps the readout.
  *
  * The last two groups pin objectstack#30075 (ruling: option A): the
- * synthesized default record page's path carries the opt-in, mounted here as
- * the JSON document `buildDefaultPageSchema` emits, through the real
+ * synthesized strip's path carries the opt-in (since objectstack#35891 the
+ * default page places no strip itself; a slotted page places this one),
+ * mounted here as the JSON document `buildDefaultPageSchema` emits, through the real
  * `SchemaRenderer`; an authored `highlights` slot keeps its declared value;
  * and a stage the field's blocking `state_machine` cannot reach from the
  * stored value is never offered as a press.
@@ -56,7 +57,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import { RecordPathRenderer } from '../record-path';
-import { buildDefaultPageSchema } from '../../synth/buildDefaultPageSchema';
+import { buildDefaultHighlights, buildDefaultPageSchema } from '../../synth/buildDefaultPageSchema';
 // Registers `record:path` for the `SchemaRenderer` mounts below.
 import '../../index';
 
@@ -110,7 +111,7 @@ function mount(opts: MountOptions = {}) {
       data={{ id: 'q1', status: 'draft', updated_at: VERSION }}
       objectSchema={opts.objectSchema ?? OBJECT_SCHEMA}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         {opts.editing && <EnterEditing />}
@@ -137,7 +138,17 @@ beforeEach(() => {
   perms.writeDenied = [];
 });
 
-afterEach(() => cleanup());
+// objectstack#35928 — the stage confirm asks which flows the move would start.
+// Answered here as a deployment without that read (501), so the confirm reads as
+// it does without it and no request leaves for the network.
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 501, json: async () => ({}) })));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('record:path allowStageChange — a press writes the stage', () => {
   it('every stage but the current one is a button, on both rows', () => {
@@ -307,6 +318,14 @@ const MACHINE = {
   transitions: { draft: ['in_review', 'declined'], in_review: ['accepted', 'declined'] },
 };
 
+/**
+ * A slotted page placing the default strip (`buildDefaultHighlights` into the
+ * `highlights` slot). Since objectstack#35891 the default page draws no strip
+ * of its own; the sub-builder's path, which these pins read, is unchanged.
+ */
+const stripPage = (def: unknown): any =>
+  buildDefaultPageSchema(def as never, { slots: { highlights: buildDefaultHighlights(def as never) } } as never);
+
 /** Every `record:path` node among a synthesized page's top-level components. */
 const pathNodesOf = (page: any): any[] =>
   page.regions[0].components.filter((c: any) => c?.type === 'record:path');
@@ -321,7 +340,7 @@ function mountNode(node: unknown, opts: Omit<MountOptions, 'allowStageChange'> =
       data={{ id: 'q1', status: 'draft', updated_at: VERSION }}
       objectSchema={opts.objectSchema ?? QUOTE_DEF}
       dataSource={dataSource as any}
-      refresh={refresh}
+      reread={refresh}
     >
       <InlineEditProvider canEdit={opts.canEdit ?? true}>
         <SchemaRenderer schema={node as never} />
@@ -334,14 +353,14 @@ function mountNode(node: unknown, opts: Omit<MountOptions, 'allowStageChange'> =
 const buttonNames = (row: HTMLElement): (string | null)[] =>
   within(row).queryAllByRole('button').map((b) => b.getAttribute('aria-label'));
 
-describe('#30075 the default record page turns click-to-advance on', () => {
-  it('the synthesized page writes allowStageChange: true on its path node', () => {
-    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+describe('#30075 the synthesized strip turns click-to-advance on', () => {
+  it('the synthesized strip writes allowStageChange: true on its path node', () => {
+    const [path] = pathNodesOf(stripPage(QUOTE_DEF));
     expect(path.properties).toMatchObject({ statusField: 'status', allowStageChange: true });
   });
 
   it('a reader who may edit the stage field gets a press, with a confirmation, through the record update', async () => {
-    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const [path] = pathNodesOf(stripPage(QUOTE_DEF));
     const { container, dataSource, refresh } = mountNode(path);
     expect(rows(container)).toHaveLength(2);
     for (const row of rows(container)) {
@@ -358,7 +377,7 @@ describe('#30075 the default record page turns click-to-advance on', () => {
   });
 
   it('a reader the page may not let edit this record keeps the read-only path', () => {
-    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const [path] = pathNodesOf(stripPage(QUOTE_DEF));
     const { container } = mountNode(path, { canEdit: false });
     expect(rows(container)).toHaveLength(2);
     for (const row of rows(container)) expect(row.querySelectorAll('button,[tabindex]')).toHaveLength(0);
@@ -366,7 +385,7 @@ describe('#30075 the default record page turns click-to-advance on', () => {
 
   it('a reader without the edit grant on the stage field keeps the read-only path', () => {
     perms.writeDenied = ['status'];
-    const [path] = pathNodesOf(buildDefaultPageSchema(QUOTE_DEF as never));
+    const [path] = pathNodesOf(stripPage(QUOTE_DEF));
     const { container } = mountNode(path);
     expect(rows(container)).toHaveLength(2);
     for (const row of rows(container)) expect(row.querySelectorAll('button,[tabindex]')).toHaveLength(0);
@@ -395,7 +414,7 @@ describe('#30075 the press offers only the moves the field\'s state machine admi
   const MACHINED = { ...QUOTE_DEF, validations: [MACHINE] };
 
   it('a stage the machine cannot reach from the stored value is a readout, not a button', () => {
-    const [path] = pathNodesOf(buildDefaultPageSchema(MACHINED as never));
+    const [path] = pathNodesOf(stripPage(MACHINED));
     const { container } = mountNode(path, { objectSchema: MACHINED });
     for (const row of rows(container)) {
       expect(buttonNames(row)).toEqual(['Move to In review', 'Move to Declined']);
@@ -406,7 +425,7 @@ describe('#30075 the press offers only the moves the field\'s state machine admi
 
   it('control: a warning-severity machine does not narrow the press (the server would not refuse)', () => {
     const warned = { ...QUOTE_DEF, validations: [{ ...MACHINE, severity: 'warning' }] };
-    const [path] = pathNodesOf(buildDefaultPageSchema(warned as never));
+    const [path] = pathNodesOf(stripPage(warned));
     const { container } = mountNode(path, { objectSchema: warned });
     expect(buttonNames(rows(container)[0])).toEqual(['Move to In review', 'Move to Accepted', 'Move to Declined']);
   });
@@ -416,7 +435,7 @@ describe('#30075 the press offers only the moves the field\'s state machine admi
       code: 'VALIDATION_FAILED',
       fields: [{ field: 'amount', code: 'required', message: 'is required to send a quote for review' }],
     });
-    const [path] = pathNodesOf(buildDefaultPageSchema(MACHINED as never));
+    const [path] = pathNodesOf(stripPage(MACHINED));
     const { container, refresh } = mountNode(path, {
       objectSchema: MACHINED,
       dataSource: makeDataSource(async () => { throw refusal; }),
@@ -445,5 +464,77 @@ describe('record:path allowStageChange — a status field carrying an expression
         objectSchema: { name: 'crm_quote', fields: { status: { type: 'select', expression: "record.amount > 0 ? 'sent' : 'draft'" } } },
       }).container,
     );
+  });
+});
+
+// objectstack#35928 — under its sentence the confirm names the flows the move
+// would start (`POST /api/v1/automation/_record-starts`, read through
+// `../stageChangeStarts`, the reader the list cell's confirm shares); no flows,
+// a refused read and a malformed answer leave the sentence alone.
+describe('record:path allowStageChange — the confirmation names the flows the move starts (objectstack#35928)', () => {
+  const CLOSURE = { name: 'closure', label: 'Closure Sign-off', startsApproval: true };
+  const NOTIFY = { name: 'notify_owner', label: 'Notify Owner', startsApproval: false };
+  type StartsAnswer = { status: number; body: unknown } | 'network-error';
+
+  /** The global `fetch`, answering the read with `answer` and recording every request. */
+  function installStartsFetch(answer: StartsAnswer) {
+    const calls: Array<{ url: string; body: any }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { body?: unknown }) => {
+      calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (answer === 'network-error') throw new TypeError('Failed to fetch');
+      return { ok: answer.status < 400, status: answer.status, json: async () => answer.body };
+    }));
+    return calls;
+  }
+  const listed = (flows: unknown[]): StartsAnswer => ({ status: 200, body: { success: true, data: { flows } } });
+  const startsCalls = (calls: Array<{ url: string }>) => calls.filter((c) => c.url === '/api/v1/automation/_record-starts');
+  /** Let an answer that arrived land before reading that nothing was drawn for it. */
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  async function openConfirm(): Promise<HTMLElement> {
+    const { container } = mount({ allowStageChange: true });
+    fireEvent.click(within(rows(container)[0]).getByRole('button', { name: 'Move to Accepted' }));
+    return screen.findByRole('alertdialog');
+  }
+
+  it('list: asks for the record and the move, and names each flow under the sentence, approval marked', async () => {
+    const calls = installStartsFetch(listed([CLOSURE, NOTIFY]));
+    const dialog = await openConfirm();
+    const list = await within(dialog).findByTestId('stage-change-starts');
+    expect(within(dialog).getByText('Move this record to Accepted?')).toBeInTheDocument();
+    expect(list).toHaveTextContent('Saving this change starts these flows:');
+    const closure = list.querySelector('[data-stage-change-start="closure"]')!;
+    const notify = list.querySelector('[data-stage-change-start="notify_owner"]')!;
+    expect(closure).toHaveTextContent('Closure Sign-off');
+    expect(closure.querySelector('[data-stage-change-start-approval]')).toHaveTextContent('starts an approval');
+    expect(notify).toHaveTextContent('Notify Owner');
+    expect(notify.querySelector('[data-stage-change-start-approval]')).toBeNull();
+    expect(startsCalls(calls).map((c: any) => c.body)).toEqual([{ object: 'crm_quote', recordId: 'q1', changes: { status: 'accepted' } }]);
+  });
+
+  it('empty: no flows answered draws no list, and the sentence stands alone', async () => {
+    const calls = installStartsFetch(listed([]));
+    const dialog = await openConfirm();
+    await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+    await settle();
+    expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+    expect(within(dialog).getByText('Move this record to Accepted?')).toBeInTheDocument();
+  });
+
+  it('failure: a refused read, a network error and a malformed answer each draw no list', async () => {
+    const answers: StartsAnswer[] = [
+      { status: 404, body: { success: false, error: { code: 'RECORD_NOT_FOUND', message: 'no' } } },
+      'network-error',
+      { status: 200, body: { flows: [CLOSURE] } },
+    ];
+    for (const answer of answers) {
+      const calls = installStartsFetch(answer);
+      const dialog = await openConfirm();
+      await waitFor(() => expect(startsCalls(calls)).toHaveLength(1));
+      await settle();
+      expect(within(dialog).queryByTestId('stage-change-starts')).toBeNull();
+      expect(within(dialog).getByText('Move this record to Accepted?')).toBeInTheDocument();
+      cleanup();
+    }
   });
 });

@@ -199,8 +199,13 @@ export class ObjectStoreActionActivationStore extends ObjectStoreMetadataActivat
  * re-register" pin asserts.
  */
 export class ActionActivationProjection {
-    /** Actions the ledger marks inactive, keyed by declarative name. */
-    private readonly disabled = new Set<string>();
+    /**
+     * Actions the ledger marks inactive, keyed by declarative name, each with
+     * the package its row names (absent for an environment-authored action):
+     * the refusal sentence reads it to tell a platform action, which Studio
+     * offers no switch for, from an app's (objectstack#34724).
+     */
+    private readonly disabled = new Map<string, string | undefined>();
     private store: ActionActivationStore | null = null;
 
     /** Attach the durable ledger. Hosts call this at start(), after ObjectQL is up. */
@@ -229,7 +234,7 @@ export class ActionActivationProjection {
                 this.disabled.delete(row.name);
                 continue;
             }
-            this.disabled.add(row.name);
+            this.disabled.set(row.name, row.packageId);
             off.push(row.name);
         }
         return off;
@@ -245,7 +250,15 @@ export class ActionActivationProjection {
 
     /** Every action name the ledger currently switches off (operability reads). */
     disabledNames(): string[] {
-        return [...this.disabled];
+        return [...this.disabled.keys()];
+    }
+
+    /**
+     * The package the ledger row of a switched-off action names, or
+     * `undefined` when the action is not switched off or its row names none.
+     */
+    disabledPackageOf(name: string): string | undefined {
+        return this.disabled.get(name);
     }
 
     /**
@@ -283,7 +296,7 @@ export class ActionActivationProjection {
         }
         await this.store.setActive(row, options);
         if (row.active) this.disabled.delete(row.name);
-        else this.disabled.add(row.name);
+        else this.disabled.set(row.name, row.packageId);
     }
 
     /**
@@ -313,8 +326,14 @@ export class ActionActivationProjection {
      * (`@objectstack/types`), the one the flow refusal reads as too, so the
      * two switched-off packaged items are stated in one shape, not two that
      * agree today.
+     *
+     * `platform` is the caller's verdict that the row's package is a kernel
+     * package (`ObjectQL.describeDisabledAction` judges it against the
+     * registry): Studio offers no switch for a platform action (ADR-0146 D4
+     * as amended 2026-11-17), so that sentence names the activation door
+     * instead (maintainer ruling 6944409840).
      */
-    describeDisabled(_name: string): string {
-        return describeTurnedOffPackagedItem('action');
+    describeDisabled(_name: string, platform = false): string {
+        return describeTurnedOffPackagedItem('action', { platform });
     }
 }

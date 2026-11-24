@@ -146,7 +146,11 @@ export interface UnmanagedImportItem {
     name: string;
     /** The manifest key it came from. */
     key: string;
-    /** The body as the package declared it, less its protection lock in either spelling ({@link stripUnmanagedImportLock}). */
+    /**
+     * The body as the package declared it, less its protection lock in either
+     * spelling ({@link stripUnmanagedImportLock}), and a flow's
+     * `defaultActive` copied as its `status` ({@link copyUnmanagedFlowSwitch}).
+     */
     body: Record<string, unknown>;
     /** The view names a container expands into (empty for every other item). */
     expands: readonly string[];
@@ -283,6 +287,30 @@ export function stripUnmanagedImportLock(
             ...(typeof reason === 'string' ? { reason } : {}),
         },
     };
+}
+
+/**
+ * [#34655, ADR-0126 §4] A flow's `defaultActive`, copied as the switch the
+ * copy has. The key is the default of the packaged-flow switch (the
+ * activation ledger), and a copy is the environment's own flow, switched by
+ * its `status`: the engine refuses the key on such a flow. So the copy keeps
+ * what the package shipped, in the copy's own switch:
+ *  - `defaultActive: false` → `status: 'obsolete'` (switched off, as Studio's
+ *    switch writes it), unless the status already disarms the flow
+ *    (`obsolete` / `invalid`), which is kept;
+ *  - `defaultActive: true` → dropped, the status as declared.
+ *
+ * A value that is not a boolean is handed on untouched, so the save door
+ * judges the body as the package declared it and refuses it. Returns the SAME
+ * body when there is nothing to copy.
+ */
+export function copyUnmanagedFlowSwitch(type: string, body: Record<string, unknown>): Record<string, unknown> {
+    if (type !== 'flow' || typeof body.defaultActive !== 'boolean') return body;
+    const { defaultActive, ...rest } = body;
+    if (defaultActive === false && rest.status !== 'obsolete' && rest.status !== 'invalid') {
+        rest.status = 'obsolete';
+    }
+    return rest;
 }
 
 /** One reason a body cannot be imported, naming the key that carries it. */
@@ -491,7 +519,8 @@ export function planUnmanagedImport(
     // prefix. Without a `targetNamespace` it is the base's too (the stage-0
     // ACCEPT's Q3): the base must own that prefix for the save door's
     // namespace rule to admit the copied object names.
-    const sourceNamespace = stringKey(manifest, 'namespace') ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
+    const declaredNamespace = stringKey(manifest, 'namespace');
+    const sourceNamespace = declaredNamespace ?? deriveNamespaceFromPackageId(sourcePackageId) ?? undefined;
     if (sourceNamespace === undefined) {
         throw invalidRequest(
             `Cannot determine the namespace of package '${sourcePackageId}': it declares none, and none derives `
@@ -563,7 +592,8 @@ export function planUnmanagedImport(
             item.type, item.name, item.body, options.protectionDeclarationOf(item.type),
         );
         if (stripped) strippedLocks.push(stripped);
-        return body === item.body ? item : { ...item, body };
+        const copied = copyUnmanagedFlowSwitch(item.type, body);
+        return copied === item.body ? item : { ...item, body: copied };
     });
 
     // [#30794] ⭐ THE RENAME RUNS AFTER THE VIEW CONTAINERS ARE EXPANDED, through
@@ -589,6 +619,15 @@ export function planUnmanagedImport(
             items: items.map((item) => ({ type: item.type, name: item.name, body: item.body })),
             retryVerb: 'install',
         });
+        if (declaredNamespace === undefined) {
+            const contradicted = derivedNamespaceContradiction(
+                sourcePackageId,
+                sourceNamespace,
+                namespace,
+                items.filter((item) => item.type === 'object').map((item) => item.name),
+            );
+            if (contradicted !== undefined) throw unmanagedInstallRenameRefusal(sourcePackageId, namespace, contradicted);
+        }
         const refused: UnmanagedImportRenameRefusal[] = [];
         for (const item of items) {
             const reason = (item.type === 'object' ? planned.objectRefusal(item.name) : undefined)
@@ -633,6 +672,58 @@ export function planUnmanagedImport(
         items,
         strippedLocks,
     };
+}
+
+/**
+ * ⛔ A DERIVED NAMESPACE THE OBJECT NAMES CONTRADICT IS REFUSED, NEVER RENAMED.
+ * When the body declares no `namespace`, the source namespace is a guess
+ * (`deriveNamespaceFromPackageId`), and the rename engine trusts it: an object
+ * name without that prefix takes the target prefix in front of its whole name
+ * (ADR-0048 §3.5 as amended). When the producer's real namespace was dropped
+ * from the manifest, every object still carries it, and that rule turns the
+ * copy into `<target>_<real>_<name>` beside items the swap left alone, one app
+ * in three spellings.
+ *
+ * The signal is the object names' COMMON prefix, never one name's shape: a
+ * single name cannot tell a two-word short name (`purchase_order`) from a
+ * foreign prefix (`demoasset_site`). So only when there are at least two
+ * objects, every object name begins with the same first segment, that segment
+ * is not the derived namespace, and no object carries the derived prefix, is
+ * the copy refused: every object at its own name, naming the derived
+ * namespace and the common prefix, and asking for the missing key. Otherwise
+ * the ADR rename applies, unchanged. Object names only: ADR-0129 D2 puts the
+ * namespace on object names, while a package's flows, datasets or reports may
+ * be named without it, and its translation items are named by this planner.
+ * Without a rename the save door's own prefix rule refuses the same names
+ * (`NAMESPACE_PREFIX`), so this is asked only on the rename path.
+ *
+ * @returns one refusal per object, or `undefined` when the names do not
+ *   contradict the derived namespace.
+ */
+function derivedNamespaceContradiction(
+    sourcePackageId: string,
+    derivedNamespace: string,
+    targetNamespace: string,
+    objectNames: readonly string[],
+): UnmanagedImportRenameRefusal[] | undefined {
+    if (objectNames.length < 2) return undefined;
+    if (objectNames.some((name) => name.startsWith(`${derivedNamespace}_`))) return undefined;
+    const firstSegment = (name: string): string | undefined => {
+        const separator = name.indexOf('_');
+        return separator > 0 ? name.slice(0, separator) : undefined;
+    };
+    const common = firstSegment(objectNames[0]);
+    if (common === undefined || common === derivedNamespace) return undefined;
+    if (!objectNames.every((name) => firstSegment(name) === common)) return undefined;
+    return objectNames.map((name) => ({
+        type: 'object',
+        name,
+        reason: `Object '${name}' is not copied: package '${sourcePackageId}' declares no \`namespace\`, so its `
+            + `namespace was derived from its id as '${derivedNamespace}', but every one of its ${objectNames.length} `
+            + `object names begins '${common}_' instead. Renamed into namespace '${targetNamespace}' it would be `
+            + `'${targetNamespace}_${name}', keeping a prefix the package never declared. Declare \`namespace\` on `
+            + 'the package, the prefix its object names carry, then install again.',
+    }));
 }
 
 /** [#30794] One item the rename into a `targetNamespace` cannot copy, and why. */

@@ -111,7 +111,7 @@ interface Row {
 }
 
 /**
- * engine.ts and the modules `scripts/codemod-split-engine.mjs` (#29986) split
+ * engine.ts and the modules split by #30012 (the #29986 codemod)
  * out of it. A method there may keep its signature in engine.ts and its body in
  * one of these, so a {@link Row.via} helper is looked up across the set.
  */
@@ -182,6 +182,11 @@ const READERS: Record<string, Row> = {
     via: 'cascadeRelationBehavior',
     why: "counts a tenant column only once the cascade's own relation reading admits it, so a federated object's unprovisioned injected column is never counted",
   },
+  // [ruling 7035627429, option B] The organization delete removes its units.
+  'engine-cascade-planning.ts#removeOrganizationUnits :: resolveTenantFieldName()': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_unit rows, a platform table platform-objects owns (ADR-0158 U3), never a federated object's column",
+  },
   'engine-cascade-planning.ts#keepsOrganizationReference :: organization_id': {
     disposition: 'not-a-read',
     why: "names the attribution column a tenancy-disabled object keeps through an organization delete; the walk reads its relation through cascadeRelationBehavior; it reads no row",
@@ -223,6 +228,31 @@ const READERS: Record<string, Row> = {
   'engine-driver-options.ts#buildDriverOptions :: resolveTenantFieldName()': {
     disposition: 'exempt',
     why: 'resolves the wall column only after the federated exemption',
+  },
+  'engine-driver-options.ts#isDriverTenantScopedSchema :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: "the tenancy class a read's driver options follow: a federated object is handed no organization wall; it reads no row",
+  },
+  'relation-semi-join.ts#relationSemiJoinServes :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: 'a federated related object keeps the id read, so no subquery is compiled against it; it reads no row',
+  },
+  // The relation group join: a federated base object declines (its caller
+  // keeps the FK-expand), and a federated related object declines through
+  // `relationSemiJoinServes`, so no join is compiled against either.
+  'relation-group-join.ts#relationGroupRegistryDecline :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: 'a federated base object declines the join, so no statement is compiled against it; it reads no row',
+  },
+  'relation-group-join.ts#relationGroupRegistryDecline :: referenceTargetOf()': {
+    disposition: 'exempt',
+    why: 'names the related object only to judge the join beside the federated test; it reads no row',
+  },
+  // [latest per group] A federated object refuses the one-row-per-group read
+  // before anything is read, so no window is compiled against its remote table.
+  'latest-per.ts#latestPerRegistryRefusal :: isFederatedObject()': {
+    disposition: 'exempt',
+    why: 'a federated object refuses the latest-per read before anything is read; it reads no row',
   },
   // [#24197] The one-hop loader moved out of `resolvePredicateRelated` so
   // validation predicates and formula fields share it; a formula's hop is read
@@ -349,6 +379,16 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: VALIDATION_RULE,
   },
+  // [#33795] A batch scope keeps a roll-up a rule reads out of the deferral;
+  // the test names the object a rule's one hop reaches, from the declaration.
+  'summary-rule-reads.ts#summaryFieldsReadByRules :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: "names the object a validation rule's own one-hop relation path reaches, to judge whether it reads a summary field; it reads no row",
+  },
+  'summary-rule-reads.ts#keysReadFrom :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: "names the object a computed field's own one-hop expression reaches, to judge whether a rule reads a summary through it; it reads no row",
+  },
   'engine-summaries-and-expansion.ts#buildSummaryIndex :: referenceCarrierOf()': {
     disposition: 'author-declared',
     why:
@@ -401,6 +441,15 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the code backfill reads the organization it counts and scopes a row by, and leaves the column out of its read on a federated object',
   },
+  // [ADR-0158 U7 R1] The unit code backfill scopes its walk exactly as its currency twin does.
+  'unit-code-backfill.ts#resolveScope :: isFederatedUnprovisionedInjectedColumn()': {
+    disposition: 'skips',
+    why: 'the unit code backfill never selects an injected column a federated object does not provision',
+  },
+  'unit-code-backfill.ts#resolveScope :: organization_id': {
+    disposition: 'skips',
+    why: 'the unit code backfill reads the organization it counts, scopes a row by and judges its unit codes in, and leaves the column out of its read on a federated object',
+  },
   'stored-expression-backfill.ts#backfillStoredExpressions :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: 'the backfill never sends an injected column a federated object does not provision',
@@ -425,6 +474,10 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'declines to declare the __search companion column on an object the sync seam issues no DDL for; it reads no row',
   },
+  // The update stamps an all-dropped update leaves unwritten: a set of payload KEYS, judged
+  // against the payload in hand, never a column read.
+  'engine-update.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
+  'engine-update.ts#<module> :: updated_by': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
   'declared-read-columns.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
   'having-filter.ts#declaredReferenceNames :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
@@ -447,11 +500,16 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'the tenant index the registry declares on a provisioned tenant column',
   },
-  'registry.ts#<module> :: owning_business_unit_id': {
+  // [ADR-0153 D4] The provenance index's leading column.
+  'sync-provenance-index.ts#<module> :: organization_id': {
+    disposition: 'not-a-read',
+    why: 'leads the provenance index the registry declares on a synced object, a local copy whose columns the platform provisions; it reads no row',
+  },
+  'registry-top-level.ts#<module> :: owning_business_unit_id': {
     disposition: 'not-a-read',
     why: 'the name the injection writes the ADR-0117 D1 anchor under',
   },
-  'registry.ts#<module> :: queue': {
+  'registry-top-level.ts#<module> :: queue': {
     disposition: 'not-a-read',
     why: 'the name the injection writes the ADR-0142 D3 ownership-queue column under',
   },
@@ -478,6 +536,10 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: "keys an organization's sys_assignment_rule rows, a platform table plugin-sharing owns",
   },
+  'validation/unit-code-membership.ts#organizationUnitRowsOf :: organization_id': {
+    disposition: 'not-a-read',
+    why: "keys an organization's sys_unit rows, a platform table platform-objects owns (ADR-0158 U3), never a federated object's column",
+  },
   'assignment-rules.ts#organizationMemberStanding :: organization_id': {
     disposition: 'not-a-read',
     why: 'keys the sys_member row a user target is a member by, a platform table',
@@ -494,17 +556,17 @@ const READERS: Record<string, Row> = {
     disposition: 'not-a-read',
     why: 'names the metadata type the boot refusal lists; it reads no row',
   },
-  'registry.ts#declaresTenantIndex :: organization_id': {
+  'registry-top-level.ts#declaresTenantIndex :: organization_id': {
     disposition: 'not-a-read',
     why: 'reads an index declaration, not a row',
   },
-  'registry.ts#applyDeploymentTenancy :: organization_id': {
+  'registry-platform-global.ts#applyDeploymentTenancy :: organization_id': {
     disposition: 'not-a-read',
     why:
       "drops the platform's own injected definition from a declared object's schema (ADR-0131 D7); " +
       'it reads a definition, never a row',
   },
-  'registry.ts#setDeploymentPlatformGlobalObjects :: organization_id': {
+  'registry-platform-global.ts#setDeploymentPlatformGlobalObjects :: organization_id': {
     disposition: 'not-a-read',
     why:
       'tells an authored organization_id from the injection while re-planning registered schemas ' +
@@ -539,6 +601,14 @@ const READERS: Record<string, Row> = {
   'tenancy/system-write-organization.ts#buildRefusalMessage :: organization_id': {
     disposition: 'not-a-read',
     why: 'names the column in refusal text',
+  },
+  // ADR-0157 D2: a calendar or exception update may not change the row's organization.
+  'work-calendar-service.ts#refuseOrganizationChange :: organization_id': {
+    disposition: 'row-value',
+    why:
+      'compares the update payload in hand with the stored row the engine passed the hook, and names the column ' +
+      'in the refusal; it reads no storage, and its objects, sys_work_calendar and sys_work_calendar_exception, ' +
+      'are platform objects, never federated',
   },
   'federated-object.ts#isFederatedUnprovisionedInjectedColumn :: isFederatedObject()': {
     disposition: 'definition',
@@ -750,7 +820,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
     }
   }, SCAN_BUDGET_MS);
 
-  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute, the record-currency backfill and the stored-expression backfill', () => {
+  it('the sites that skip are exactly the cascade scan, its plan, the organization-delete count, the lifecycle tenant partition, the home-amount recompute, the record-currency backfill, the stored-expression backfill and the unit code backfill', () => {
     const skipping = new Set(
       Object.entries(READERS)
         .filter(([, row]) => row.disposition === 'skips')
@@ -764,6 +834,7 @@ describe('[#21918] every engine reader of an injected column has a disposition t
       'lifecycle/lifecycle-service.ts#tenantWindowsFor',
       'record-currency-backfill.ts#resolveScope',
       'stored-expression-backfill.ts#backfillStoredExpressions',
+      'unit-code-backfill.ts#resolveScope',
     ]);
   });
 

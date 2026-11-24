@@ -255,6 +255,67 @@ An environment that has adopted SSO still needs a user-management surface, and t
 > deployments are unchanged: the split by population above, break-glass included, holds there.
 > Cloud ADR-0024's own text is not amended here.
 
+> **Note (2026-11-16, objectstack, #33184; mirrors cloud ADR-0024, amended 2026-11-14, cloud#4465
+> rulings 7, 9 and 10, cloud PR #4474 @ 312f2e5e) — on a cloud-managed environment, credentials
+> live in the cloud; the roster and authorization live in the environment.** Every person on a
+> hosted environment (`OS_CLOUD_MANAGED=1`) remains their own cloud account and signs in through
+> the hosting cloud's identity provider, and the cloud's own sign-in gate (`cloud ADR-0024 D5.1`,
+> which stays in the cloud record) is unchanged. What moves is who starts a person's lifecycle: an
+> environment administrator adds, imports and deactivates people in Setup → Users. For hosted, the
+> managed side of D5.2's surface therefore reads: add and deactivate in the environment, the
+> invitation sent by the cloud on the environment's request, and password management still none.
+>
+> - **Add and import.** Setup → Users offers a platform administrator two actions, on a managed
+>   environment only: `packages/platform-objects/src/identity/sys-user.object.ts#add_sso_user` and
+>   `packages/platform-objects/src/identity/sys-user.object.ts#import_sso_users`. Their doors are
+>   `admin/add-sso-user` and `admin/import-sso-users`
+>   (`packages/plugins/plugin-auth/src/pending-sso-users.ts#runAddSsoUser`, `#runImportSsoUsers`).
+>   Each adds the person ahead of their first sign-in as a pending row: `sys_user.source` reads
+>   `idp_pending` (`packages/plugins/plugin-auth/src/pending-sso-marker.ts#PENDING_SSO_SOURCE`, a
+>   third stored value beside the two D2 names), with no password and no account link, and with
+>   the positions, permission sets and manager the administrator chose. The person's first sign-in
+>   through the hosting cloud's identity provider binds to that row.
+> - **Deactivate.** `admin/ban-user` and `admin/unban-user` deactivate and reactivate a person
+>   (`packages/plugins/plugin-auth/src/admin-ban-endpoints.ts#runAdminBanUser`, `#runAdminUnbanUser`),
+>   and `admin/remove-sso-user` removes one who is still pending
+>   (`packages/plugins/plugin-auth/src/pending-sso-users.ts#runRemoveSsoUser`).
+> - **The environment asks; the cloud invites.** The environment sends no invitation of its own.
+>   It reaches its host through one seam,
+>   `packages/plugins/plugin-auth/src/environment-user-host.ts#EnvironmentUserHost`, which the host
+>   wires as `packages/plugins/plugin-auth/src/auth-plugin.ts#environmentUserHost`: the host is told
+>   after a person is added, and asked before a person is deactivated, reactivated or removed. What
+>   the host does with the call is cloud-side, not in this repo. By the cloud record, the control
+>   plane invites the address as `member`, through better-auth's own `sys_invitation` and
+>   `sys_member` writes and every gate a console invitation passes (no second invitation store and
+>   no cloud-side roster, D9), and deactivating a plain member ends that membership.
+> - **An owner or admin is changed in the console only.** The seam carries a typed refusal for
+>   that case (`packages/plugins/plugin-auth/src/environment-user-host.ts#EnvironmentUserHostRefusal`):
+>   the host answers `409` and the row stays as it was, and a deactivation whose host call fails is
+>   refused too. The environment's own doors that invite a member, remove one or change a member's
+>   role answer `409` on a managed environment (`packages/plugins/plugin-auth/src/cloud-managed.ts`).
+>
+> **One authorization is projected from the cloud, and it is the only exception to D5**: an
+> organization owner or admin holds `admin_full_access` in the environment while that role lasts
+> (ruling 9). Every other position and permission set is assigned in the environment, and nothing
+> is projected upward, from the environment to the cloud. What gives and withdraws it as the
+> cloud role changes is cloud-side, not in this repo, and D5's derivation is not changed for it
+> (`packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding`).
+>
+> The same amendment's ruling 10, no local break-glass administrator on a hosted environment, is
+> the note above and is not restated here. The amendment also finds the cloud-to-environment SCIM
+> fan-out not needed: if hosted ever offers a bring-your-own identity provider with SCIM, that
+> provider provisions straight into the environment's roster through this repository's SCIM path
+> (D6), and whether such a person also holds a cloud membership is decided with that offer.
+> Unchanged: D1, self-hosted deployments (off a managed environment the two add doors answer
+> `409`, and the local doors hold as D5.2 states them) and the cloud console's own invitation.
+>
+> The D-bodies are not rewritten. For a hosted environment this note governs where they disagree,
+> as far as the roster lifecycle goes: D2 reads a managed person's row as a mirror of the directory
+> that owns it, and on a hosted environment the environment itself adds, imports and deactivates
+> that person while the credential stays the cloud's. What the amendment supersedes in the cloud's
+> own text and console copy is listed in the cloud record and stays there. The cloud record is the
+> decision: a difference between it and this note is this note's bug.
+
 ### D6 — SSO per production environment, configured in the environment
 
 A production environment federates login to the customer's own identity provider, and that

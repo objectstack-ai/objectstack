@@ -362,13 +362,26 @@ export const esES: PlatformTranslationData = {
         multi_factor: { title: 'Multifactor', description: 'Quién en esta organización debe proteger su cuenta con una app de autenticación (TOTP).' },
       },
       keys: {
-        allowed_ip_ranges: { label: 'Rangos de IP permitidos' },
-        session_idle_timeout_minutes: { label: 'Tiempo de inactividad (minutos)' },
-        session_absolute_max_hours: { label: 'Duración máxima de la sesión (horas)' },
-        max_concurrent_sessions_per_user: { label: 'Máximo de sesiones simultáneas por usuario' },
+        allowed_ip_ranges: {
+          label: 'Rangos de IP permitidos',
+          help: 'Rangos CIDR o IP exactas (una por línea o separadas por comas), p. ej. 203.0.113.0/24. Cuando se definen, la sesión de un miembro no se abre para esta organización desde fuera de estos rangos, y una sesión que más tarde llega desde fuera de ellos se cierra; lo mismo ocurre con cualquier solicitud cuya dirección de cliente el servidor no pueda determinar. Cada rango debe estar dentro de los rangos de IP permitidos de la implementación, si esta los define, y la lista debe incluir la dirección desde la que se guarda. Vacío = solo se aplican los rangos de la implementación. A los administradores de la plataforma solo se les aplican los rangos de la implementación.',
+        },
+        session_idle_timeout_minutes: {
+          label: 'Tiempo de inactividad (minutos)',
+          help: 'Cierra la sesión de un miembro tras estos minutos de inactividad. No puede superar el tiempo de inactividad de la implementación cuando esta define uno. 0 = el tiempo de inactividad de la implementación.',
+        },
+        session_absolute_max_hours: {
+          label: 'Duración máxima de la sesión (horas)',
+          help: 'Exige volver a autenticarse estas horas después de iniciar sesión, independientemente de la actividad. No puede superar la duración de la implementación cuando esta define una. 0 = la duración de la implementación.',
+        },
+        max_concurrent_sessions_per_user: {
+          label: 'Máximo de sesiones simultáneas por usuario',
+          help: 'Limita las sesiones iniciadas simultáneas de un miembro en esta organización; al superar el límite se cierran las más antiguas, y las sesiones en otras organizaciones no se cuentan ni se cierran. Se comprueba al iniciar sesión y cuando un miembro cambia a esta organización. No puede superar el límite de la implementación cuando esta define uno, que sigue contando todas las sesiones del miembro. 0 = solo el límite de la implementación.',
+        },
         mfa_required: {
           label: 'Exigir autenticación multifactor',
           options: { off: 'Desactivado', administrators: 'Administradores', everyone: 'Todos' },
+          help: 'Quién debe usar una app de autenticación: los administradores (de la plataforma, de la organización y delegados) o todos. Quienes estén obligados y no se hayan registrado quedan bloqueados del acceso a los datos al terminar el periodo de gracia de la implementación. Se rechaza un nivel más débil que el de la implementación; Desactivado = el requisito de la implementación. Requiere que la autenticación de dos factores esté activada en esta implementación; mientras esté desactivada, se rechaza guardar un requisito.',
         },
       },
     },

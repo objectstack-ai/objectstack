@@ -66,6 +66,10 @@ export const APP_ROUTE_METADATA_READS: ReadonlyArray<{ path: string; reads: read
   // AppReportIndexView (objectui#13020): the report list, and the dataset
   // list its read verdict needs, which it waits for itself; never the objects.
   { path: 'reports', reads: ['report'] },
+  // ReportNewPage (objectstack#36374): the report builder for a new report —
+  // the report list it names the new report against; the datasets it offers
+  // are read by the builder itself.
+  { path: 'reports/new', reads: ['report'] },
   // A page reads the objects its page binds, through its object scope
   // (`appObjectScope.ts`, objectui#12980), not the whole registry; `object`
   // stays for the routes where the scope does not apply (a record overlay).
@@ -74,11 +78,17 @@ export const APP_ROUTE_METADATA_READS: ReadonlyArray<{ path: string; reads: read
   { path: 'component/:ns/:name/*', reads: ALL_LAZY_METADATA_TYPES },
   // A redirect into Studio (objectstack#28578): the retired Packaged automation page.
   { path: 'component/automation/packaged', reads: NONE },
+  // A redirect into Studio (objectstack#34724): the retired Packaged Actions page.
+  { path: 'component/automation/packaged-actions', reads: NONE },
   { path: 'component/metadata/directory', reads: NONE },
   { path: 'component/metadata/resource/*', reads: NONE },
   { path: 'design/dashboard/:dashboardName', reads: ['dashboard'] },
   // SearchResultsPage: record-search targets, and nav labels for dashboards.
   { path: 'search', reads: ['object', 'dashboard'] },
+  // InboxPage (objectstack#36741): the right pane embeds RecordDetailView, and
+  // the rows name each item's object and app.
+  { path: 'inbox', reads: ['object', 'page'] },
+  { path: 'inbox/:inboxTab', reads: ['object', 'page'] },
   // The app designer's object pickers.
   { path: 'create-app', reads: OBJECT },
   { path: 'edit-app/:editAppName', reads: OBJECT },

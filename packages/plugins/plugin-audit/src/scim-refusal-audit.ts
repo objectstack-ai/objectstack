@@ -51,6 +51,35 @@
  * attribute value, the resource id or the error's `detail` text. The event
  * has no field for any of them, and every field it has is re-checked against
  * a bounded token shape here before it reaches the row.
+ *
+ * ## [#33918] `scim_manager_unresolved`: a served write whose manager names no User
+ *
+ * The second row this writer emits, on the same slot and through the same
+ * write. plugin-auth projects the SCIM Enterprise User `manager` attribute
+ * onto `sys_user.manager_id` (`scim-manager-projection.ts` there); a
+ * reference that names no User the connection provisioned does not refuse
+ * the write (maintainer ruling record 6909383114): the write is served,
+ * `manager_id` stays as it was, and the event is recorded with one operator
+ * warn and one row. plugin-auth hands the event over only for a request it
+ * answered below 400, after the response, and only when the warn's own bound
+ * (one per connection per window) admitted it, so the rows follow the warn's
+ * rate and carry its dropped count as `suppressed`.
+ *
+ *  - `action: 'scim_manager_unresolved'`; `actor` `svc:scim:CONNECTION_ID`;
+ *    `user_id` null (an identity provider acted, no human);
+ *  - `object_name: 'sys_user'`, `record_id`: the user the write was about, so
+ *    the row sits on that user's ledger history and is served under that
+ *    record's read gate;
+ *  - `tenant_id`: the connection's organization, as for `scim_refused`;
+ *  - `metadata`: `scim_connection_id`, `reference_kind` (`id`, the value
+ *    looked up, or `unreadable`, a `$ref` with no readable `/Users/{id}`
+ *    segment), `manager_reference` (the reference as the directory sent it,
+ *    at most {@link SCIM_MANAGER_REFERENCE_LIMIT} characters, with
+ *    `manager_reference_truncated` when it was longer) and `suppressed`.
+ *
+ * ⛔ Nothing else of the request or of the user: no body, no name, no email,
+ * no other attribute. The reference is the one value recorded, and it is
+ * bounded here as well as at the door.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -65,6 +94,12 @@ import { SCIM_CONNECTION_ID_KEY, SCIM_SERVICE_PRINCIPAL_PREFIX } from './scim-co
 
 /** The `sys_audit_log.action` value this writer emits. */
 export const SCIM_REFUSED_AUDIT_ACTION = 'scim_refused' as const;
+
+/** [#33918] The `sys_audit_log.action` value of a served write whose manager reference named no User. */
+export const SCIM_MANAGER_UNRESOLVED_AUDIT_ACTION = 'scim_manager_unresolved' as const;
+
+/** [#33918] The most characters of a manager reference a row records. */
+export const SCIM_MANAGER_REFERENCE_LIMIT = 256;
 
 /** `metadata.scim_connection_id` of a refusal whose bearer verified as no connection. */
 export const UNKNOWN_SCIM_CONNECTION = 'unknown';
@@ -96,6 +131,25 @@ export interface ScimRefusalAuditEvent {
   suppressed?: number;
 }
 
+/**
+ * [#33918] One served SCIM user write whose Enterprise `manager` reference
+ * named no User the connection provisioned.
+ */
+export interface ScimManagerUnresolvedAuditEvent {
+  /** The connection that sent the write. */
+  connectionId: string;
+  /** The connection's organization; the row's `tenant_id`. */
+  organizationId?: string;
+  /** The `sys_user` id the write was about. */
+  userId: string;
+  /** `id`: a value that named no User; `unreadable`: a `$ref` with no readable `/Users/{id}` segment. */
+  referenceKind: 'id' | 'unreadable';
+  /** The reference as the directory sent it; recorded up to {@link SCIM_MANAGER_REFERENCE_LIMIT} characters. */
+  reference: string;
+  /** Unresolvable references of the same connection the bound dropped since its last row. */
+  suppressed?: number;
+}
+
 /** What {@link createScimRefusalAuditWriter} adds to the `audit` slot. */
 export interface ScimRefusalAuditWriter {
   /**
@@ -104,6 +158,11 @@ export interface ScimRefusalAuditWriter {
    * cause.
    */
   recordScimRefusal(event: ScimRefusalAuditEvent): Promise<void>;
+  /**
+   * [#33918] Record one served SCIM write whose manager reference named no
+   * User. Never throws, and reports a lost row loudly, once per cause.
+   */
+  recordScimManagerUnresolved(event: ScimManagerUnresolvedAuditEvent): Promise<void>;
 }
 
 export interface ScimRefusalAuditWriterOptions {
@@ -205,6 +264,56 @@ export function buildScimRefusalAuditRow(
   return row;
 }
 
+/** A `sys_user` id the row records as its `record_id`. */
+const USER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
+
+/** The reference kinds. */
+const REFERENCE_KINDS: ReadonlySet<string> = new Set(['id', 'unreadable']);
+
+/**
+ * [#33918] The ledger row of one served SCIM write whose manager reference
+ * named no User, or `null` for an event that cannot name its connection, its
+ * user or its reference. Exported for the writer's tests.
+ */
+export function buildScimManagerUnresolvedAuditRow(
+  event: ScimManagerUnresolvedAuditEvent,
+  objectHasField: (objectName: string, field: string) => boolean,
+): Record<string, unknown> | null {
+  const connectionId = token(event?.connectionId, CONNECTION_ID);
+  const userId = token(event?.userId, USER_ID);
+  const kind = event?.referenceKind;
+  if (!connectionId || !userId || typeof kind !== 'string' || !REFERENCE_KINDS.has(kind)) return null;
+  if (typeof event.reference !== 'string' || event.reference === '') return null;
+  const organizationId = token(event.organizationId, CONNECTION_ID);
+  const truncated = event.reference.length > SCIM_MANAGER_REFERENCE_LIMIT;
+  const metadata: Record<string, unknown> = {
+    [SCIM_CONNECTION_ID_KEY]: connectionId,
+    reference_kind: kind,
+    manager_reference: truncated ? event.reference.slice(0, SCIM_MANAGER_REFERENCE_LIMIT) : event.reference,
+  };
+  if (truncated) metadata.manager_reference_truncated = true;
+  const suppressed = event.suppressed;
+  if (typeof suppressed === 'number' && Number.isInteger(suppressed) && suppressed > 0) {
+    metadata.suppressed = suppressed;
+  }
+  const row: Record<string, unknown> = {
+    action: SCIM_MANAGER_UNRESOLVED_AUDIT_ACTION,
+    // An identity provider acted, no human.
+    user_id: null,
+    // The user the write was about: the row sits on that record's history.
+    object_name: 'sys_user',
+    record_id: userId,
+    old_value: null,
+    new_value: null,
+    ip_address: null,
+    user_agent: null,
+    tenant_id: organizationId ?? null,
+    metadata: safeStringify(metadata),
+  };
+  if (objectHasField('sys_audit_log', 'actor')) row.actor = `${SCIM_SERVICE_PRINCIPAL_PREFIX}${connectionId}`;
+  return row;
+}
+
 /** Create the SCIM refusal writer for the `audit` service slot. */
 export function createScimRefusalAuditWriter(opts: ScimRefusalAuditWriterOptions): ScimRefusalAuditWriter {
   const { getEngine, logger } = opts;
@@ -218,21 +327,32 @@ export function createScimRefusalAuditWriter(opts: ScimRefusalAuditWriterOptions
    * the status and the cause; never the event's connection or address.
    */
   const reportedCauses = new Set<string>();
-  const reportWriteFailure = (status: unknown, err: unknown): void => {
+  const reportWriteFailure = (status: unknown, err: unknown, row: 'refusal' | 'manager' = 'refusal'): void => {
     const detail = String((err as any)?.message ?? err);
     try {
-      const cause = auditFailureCauseKey('sys_audit_log', err);
+      const cause = `${row}:${auditFailureCauseKey('sys_audit_log', err)}`;
       if (reportedCauses.has(cause)) {
-        logger?.debug?.('SCIM refusal audit write failed (already reported)', { status, err: detail, cause });
+        logger?.debug?.(
+          row === 'refusal'
+            ? 'SCIM refusal audit write failed (already reported)'
+            : 'SCIM manager reference audit write failed (already reported)',
+          { status, err: detail, cause },
+        );
         return;
       }
       reportedCauses.add(cause);
       const message =
-        `SCIM refusal audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the compliance trail is ` +
-        'now INCOMPLETE. The identity provider was answered its refusal exactly as it would have been without ' +
-        'the ledger, so nothing downstream looks broken; only the `sys_audit_log` row recording WHICH ' +
-        'connection was refused, and why, never landed, and nothing retries it. A SCIM console or SIEM feed ' +
-        'reading `scim_refused` rows keeps showing a connection with no errors. Every later refusal failing ' +
+        (row === 'refusal'
+          ? `SCIM refusal audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the compliance trail is ` +
+            'now INCOMPLETE. The identity provider was answered its refusal exactly as it would have been without ' +
+            'the ledger, so nothing downstream looks broken; only the `sys_audit_log` row recording WHICH ' +
+            'connection was refused, and why, never landed, and nothing retries it. A SCIM console or SIEM feed ' +
+            'reading `scim_refused` rows keeps showing a connection with no errors. Every later refusal failing '
+          : `SCIM manager reference audit write FAILED (${auditFailureCauseSummary(err, detail)}) — the ` +
+            'compliance trail is now INCOMPLETE. The user write was served and its operator warn was logged, so ' +
+            'nothing downstream looks broken; only the `sys_audit_log` row recording that the connection sent a ' +
+            'manager reference naming no User never landed, and nothing retries it. A console reading ' +
+            '`scim_manager_unresolved` rows shows no such reference. Every later row failing ') +
         'THIS WAY loses its row the same way (this CAUSE is reported ONCE — raise the log level to `debug` to ' +
         'see the rest; a DIFFERENT cause gets its own `error` line). ' +
         (isMissingTableError(err, 'sys_audit_log')
@@ -242,7 +362,9 @@ export function createScimRefusalAuditWriter(opts: ScimRefusalAuditWriterOptions
             'one the table was created in. Set `OS_TELEMETRY_DB=0` to keep every lifecycle-classed object on ' +
             'the primary datasource.'
           : 'Fix: resolve the driver fault quoted at the head of this line on the connection this write ran ' +
-            'on — every refused SCIM request that hits it loses its row until it is resolved.');
+            (row === 'refusal'
+              ? 'on — every refused SCIM request that hits it loses its row until it is resolved.'
+              : 'on — every unresolvable SCIM manager reference that hits it loses its row until it is resolved.'));
       if (logger?.error) {
         logger.error(message, err instanceof Error ? err : new Error(detail), { status });
       } else {
@@ -287,6 +409,31 @@ export function createScimRefusalAuditWriter(opts: ScimRefusalAuditWriterOptions
         // refusal was answered, the system looks normal, and the row that
         // says which connection was refused is simply absent.
         reportWriteFailure(event.status, err);
+      }
+    },
+
+    async recordScimManagerUnresolved(event: ScimManagerUnresolvedAuditEvent): Promise<void> {
+      if (!event) return;
+      const engine = getEngine();
+      if (!engine) return;
+      if (probe === undefined || probedEngine !== engine) {
+        probe = createFieldPresenceProbe(engine);
+        probedEngine = engine;
+      }
+      let row: Record<string, unknown> | null;
+      try {
+        row = buildScimManagerUnresolvedAuditRow(event, probe);
+      } catch (err) {
+        reportWriteFailure(undefined, err, 'manager');
+        return;
+      }
+      if (!row) return;
+      try {
+        await persistScimRefusalAuditRow(engine, row);
+      } catch (err) {
+        // The same durability degradation as a lost refusal row: the write
+        // was served, the system looks normal, and the row is absent.
+        reportWriteFailure(undefined, err, 'manager');
       }
     },
   };
