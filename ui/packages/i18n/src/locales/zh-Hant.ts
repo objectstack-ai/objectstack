@@ -5625,8 +5625,8 @@ const zhHant = {
     saveAndContinue: '儲存並繼續',
     nextStep: '已儲存 — 下一步',
     completed: '流程「{{flow}}」已完成',
-    alreadySubmitted: '上一步已提交成功，流程已進入目前步驟。',
-    noLongerWaiting: '這一步可能已經處理完成。請關閉對話框，確認記錄後再重試。',
+    alreadySubmitted: '上一步已提交成功，流程已進入當前步驟。',
+    noLongerWaiting: '這一步可能已經處理完成。請關閉對話方塊，確認記錄後再重試。',
   },
   appManagement: {
     title: '應用',
