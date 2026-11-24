@@ -559,6 +559,15 @@ describe('[ADR-0153 D7] the run record keeps the job run that drove the pull', (
 
         expect(await origins(h.ql)).toEqual([[null, null]]);
     });
+
+    it('[N2] a trigger outside the record\'s two values, or a job run id longer than its column, is left out and the pull runs', async () => {
+        const h = await harness(THREE, { runs: true });
+        const result = await pullConnectorSource(h.deps, {
+            mapping: MAPPING.name, context: JOB, jobRunId: 'r'.repeat(256), trigger: 'replay' as never,
+        });
+        expect(result.summary.created).toBe(3);
+        expect(await origins(h.ql)).toEqual([[null, null]]);
+    });
 });
 
 describe('[ADR-0153 D2, D7] a pull reads on from the position the last committed run stored', () => {
@@ -973,6 +982,59 @@ describe('[ADR-0153 D3] delete marking on a datasource source', () => {
         const third = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
         expect(third.source === 'datasource' && third.deletes).toMatchObject({ note: 'judged', marked: 0, cleared: 1 });
         expect(await marks(h.ql)).toEqual({ 'A-1': false, 'A-2': false, 'A-3': false });
+    });
+
+    it('floored path: a full read the floor answered under the cap marks the gone row; a NULL count over the cap is recorded as the cap plus one', async () => {
+        /** A plugin driver that applies the window's bounds and the NULL predicate, and stops at the limit it is sent. */
+        const matches = (row: Rec, where: unknown): boolean => {
+            if (!where || typeof where !== 'object') return true;
+            return Object.entries(where as Rec).every(([key, cond]) => {
+                if (key === '$and') return (cond as unknown[]).every((c) => matches(row, c));
+                const v = row[key];
+                if (cond === null || typeof cond !== 'object') return v === cond;
+                const c = cond as Rec;
+                if ('$null' in c) return (v === null || v === undefined) === c.$null;
+                if ('$ne' in c) return v !== c.$ne;
+                if ('$gte' in c && !(v !== null && v !== undefined && String(v) >= String(c.$gte))) return false;
+                if ('$lt' in c && !(v !== null && v !== undefined && String(v) < String(c.$lt))) return false;
+                return true;
+            });
+        };
+        let rows: Rec[] = [
+            { id: 'W-1', updated_at: at(1), amount: 1 },
+            { id: 'W-2', updated_at: at(2), amount: 2 },
+            { id: 'W-3', updated_at: at(3), amount: 3 },
+        ];
+        const WH_DEF = { name: 'wh', driver: 'com_vendor_wh', schemaMode: 'external', external: { rowCap: 4 } };
+        const h = await harness(
+            [],
+            {
+                source: { ...SOURCE, name: 'wh_order', datasource: 'wh', external: { remoteName: 'orders', columnMap: { ORDER_NO: 'id' } } },
+                mapping: { ...FULL, datasourceSource: { ...FULL.datasourceSource, object: 'wh_order' } },
+            },
+            (ql) => {
+                ql.registerDriver({
+                    name: 'wh', version: '0.0.1', supports: { transactionsUnsupported: true },
+                    async connect() {}, async disconnect() {}, async syncSchema() {},
+                    async find(_object: string, query: Rec = {}) {
+                        const hit = rows.filter((r) => matches(r, query.where)).map((r) => ({ ...r }));
+                        return typeof query.limit === 'number' ? hit.slice(0, query.limit) : hit;
+                    },
+                } as never);
+                ql.registerDatasourceDef(WH_DEF as never);
+            },
+        );
+        h.meta.datasource.set('wh', WH_DEF);
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        rows = rows.filter((r) => r.id !== 'W-2');
+        const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(second.source === 'datasource' && second.readPath).toBe('floored');
+        expect(second.source === 'datasource' && second.deletes).toEqual({ note: 'judged', marked: 1, cleared: 0, skippedNullWatermark: 0 });
+        expect(await marks(h.ql)).toEqual({ 'W-1': false, 'W-2': true, 'W-3': false });
+
+        rows = [...rows, ...Array.from({ length: 6 }, (_, i) => ({ id: `N-${i}`, updated_at: null, amount: i }))];
+        const third = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(third.source === 'datasource' && third.deletes).toMatchObject({ note: 'unjudged, null watermark', skippedNullWatermark: 5 });
     });
 
     it('the mark judges only rows the read could have read: a copied watermark below a raised start is left as it was', async () => {

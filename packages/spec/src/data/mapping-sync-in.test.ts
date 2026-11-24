@@ -24,7 +24,8 @@ import { MappingSchema } from './mapping.zod';
 import { defineStack } from '../stack.zod';
 
 describe('MappingSchema — the rules a sourced mapping states alone (parse)', () => {
-  const datasourceSource = { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01T00:00:00Z' } };
+  // A full pull on either source: the delete policy it carries (absent ⇒ mark) is honourable.
+  const datasourceSource = { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01T00:00:00Z' }, full: true };
   const connectorSource = { connector: 'orders_api', action: 'request' };
   const legal = {
     name: 'orders_sync',
@@ -80,6 +81,37 @@ describe('MappingSchema — the rules a sourced mapping states alone (parse)', (
     expect(parsed.datasourceSource).not.toHaveProperty('deletePolicy');
     const parsedConnector = MappingSchema.parse({ ...legal, connectorSource });
     expect(parsedConnector.connectorSource).not.toHaveProperty('deletePolicy');
+  });
+
+  describe('[ADR-0153 D3] an incremental source states how it learns of a delete', () => {
+    const incrementalDs = { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01T00:00:00Z' } };
+    const incrementalCs = { ...connectorSource, watermark: { field: 'updated_at', param: 'since' } };
+
+    it.each([
+      ['datasourceSource', incrementalDs, undefined],
+      ['datasourceSource', incrementalDs, 'mark'],
+      ['connectorSource', incrementalCs, undefined],
+      ['connectorSource', incrementalCs, 'mark'],
+    ] as const)('%s, incremental, deletePolicy %s and no deletedField: refused at `deletePolicy`', (key, block, deletePolicy) => {
+      const issues = issuesOf({ ...legal, [key]: { ...block, ...(deletePolicy ? { deletePolicy } : {}) } });
+      expect(issues.map((i) => i.path)).toEqual([[key, 'deletePolicy']]);
+      expect(issues[0]!.message).toContain('`deletedField`');
+    });
+
+    it.each([
+      ['datasourceSource', incrementalDs],
+      ['connectorSource', incrementalCs],
+    ] as const)("legal twins on %s: deletedField named, or deletePolicy 'ignore'", (key, block) => {
+      expect(issuesOf({ ...legal, [key]: { ...block, deletedField: 'is_deleted' } })).toEqual([]);
+      expect(issuesOf({ ...legal, [key]: { ...block, deletePolicy: 'mark', deletedField: 'is_deleted' } })).toEqual([]);
+      expect(issuesOf({ ...legal, [key]: { ...block, deletePolicy: 'ignore' } })).toEqual([]);
+    });
+
+    it('a full pull needs neither: it sees a delete as an absence', () => {
+      expect(issuesOf({ ...legal, datasourceSource: { ...incrementalDs, full: true } })).toEqual([]);
+      expect(issuesOf({ ...legal, connectorSource })).toEqual([]);
+      expect(issuesOf({ ...legal, datasourceSource: { ...incrementalDs, full: false, deletePolicy: 'ignore' } })).toEqual([]);
+    });
   });
 
   it('the watermark needs a field and a start; a near-miss spelling is pointed at the key', () => {

@@ -14,7 +14,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildFieldMetaMap, runImport } from '@objectstack/core';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { ObjectQL, SchemaRegistry } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 import { connectorNameResolver, mappingNameResolver } from './connector-package-scope.js';
 import { AutomationEngine } from './engine.js';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -985,5 +987,112 @@ describe('[ADR-0153 D4] a connector pull stamps provenance on a synced target', 
         expect(err.message).toContain('systemFields: false');
         expect(h.handler).not.toHaveBeenCalled();
         expect(h.writes).toEqual([]);
+    });
+});
+
+describe('[ADR-0153 D3] delete marking on a connector source, on a real engine', () => {
+    const SYNCED_CONTACT = {
+        name: 'contact',
+        label: 'Contact',
+        managedBy: 'synced',
+        fields: {
+            external_id: { name: 'external_id', label: 'External id', type: 'text' },
+            name: { name: 'name', label: 'Name', type: 'text' },
+            synced_at: { name: 'synced_at', label: 'Synced at', type: 'text' },
+        },
+    };
+    const SYS = { isSystem: true };
+    const rec = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id.toUpperCase(), updated_at: '2026-01-01', ...extra });
+
+    /** The pull over a real SQLite engine; each call of the action answers the next of `answers`. */
+    async function onEngine(source: Record<string, unknown>, answers: Array<Array<Record<string, unknown>>>) {
+        const ql = new ObjectQL();
+        ql.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }), true);
+        await ql.init();
+        ql.registry.registerObject(SYNCED_CONTACT as never);
+        await ql.syncSchemas();
+        await installDefaultOrganization(ql);
+        const mapping = baseMapping({ connectorSource: { connector: 'crm_api', action: 'request', ...source } });
+        let call = 0;
+        const handler = vi.fn(async () => ({ status: 200, ok: true, body: answers[Math.min(call++, answers.length - 1)] }));
+        const h = harness({ mapping });
+        h.deps.registry.resolveConnectorAction = (connector, action) => (connector === 'crm_api' && action === 'request' ? handler : undefined);
+        h.deps.protocol = {
+            async getMetaItem({ type, name }) {
+                if (type === 'mapping' && name === mapping.name) return { type, name, item: mapping };
+                if (type === 'object' && name === 'contact') return { type, name, item: SYNCED_CONTACT };
+                return undefined;
+            },
+            async findData({ object, query, context }) {
+                const { object: _o, count: _c, ...rest } = (query ?? {}) as Record<string, unknown>;
+                return { object, records: await ql.find(object, { ...rest, context } as never) };
+            },
+            async createData({ object, data, context }) { return ql.insert(object, data, { context } as never); },
+            async updateData({ object, id, data, context }) { return ql.update(object, data, { where: { id }, context } as never); },
+        };
+        const pull = async () => pullConnectorSource(h.deps, { mapping: 'crm_contacts', context: SYS });
+        const marks = async (): Promise<Record<string, boolean>> => {
+            const rows = await ql.find('contact', { context: SYS } as never);
+            return Object.fromEntries(rows.map((r: Record<string, unknown>) => [String(r.external_id), r._sync_deleted_at != null]));
+        };
+        return { ql, handler, pull, marks };
+    }
+
+    it("a full pull whose one response is the whole set (paging: { style: 'none' }) marks the record it no longer sends, and clears it when it comes back", async () => {
+        const e = await onEngine({ paging: { style: 'none' } }, [[rec('c1'), rec('c2'), rec('c3')], [rec('c1'), rec('c3')], [rec('c1'), rec('c2'), rec('c3')]]);
+        await e.pull();
+        const second = await e.pull();
+        expect(second.source === 'connector' && second.deletes).toEqual({ note: 'judged', marked: 1, cleared: 0 });
+        expect(await e.marks()).toEqual({ c1: false, c2: true, c3: false });
+        const third = await e.pull();
+        expect(third.source === 'connector' && third.deletes).toEqual({ note: 'judged', marked: 0, cleared: 1 });
+        expect(await e.marks()).toEqual({ c1: false, c2: false, c3: false });
+    });
+
+    it('a full pull with no paging declared marks nothing by absence: one response is not known to be the whole set', async () => {
+        const e = await onEngine({}, [[rec('c1'), rec('c2')], [rec('c1')]]);
+        await e.pull();
+        const second = await e.pull();
+        expect(second.source === 'connector' && second.deletes).toEqual({ note: 'unjudged, no paging declared', marked: 0, cleared: 0 });
+        expect(await e.marks()).toEqual({ c1: false, c2: false });
+    });
+
+    it('a full pull with a paging style the pull does not follow yet marks nothing by absence', async () => {
+        const e = await onEngine({ paging: { style: 'page', param: 'page' } }, [[rec('c1'), rec('c2')], [rec('c1')]]);
+        await e.pull();
+        const second = await e.pull();
+        expect(second.source === 'connector' && second.deletes).toMatchObject({ note: 'unjudged, pages not followed', marked: 0 });
+        expect(await e.marks()).toEqual({ c1: false, c2: false });
+    });
+
+    it('an incremental pull reads deletedField: a truthy value marks the record, a falsy one clears it', async () => {
+        const e = await onEngine(
+            { watermark: { field: 'updated_at', param: 'since' }, deletedField: 'archived' },
+            [[rec('c1'), rec('c2')], [rec('c2', { archived: true, updated_at: '2026-01-02' })], [rec('c2', { archived: false, updated_at: '2026-01-03' })]],
+        );
+        await e.pull();
+        const second = await e.pull();
+        expect(second.source === 'connector' && second.deletes).toEqual({ note: 'by deletedField', marked: 1, cleared: 0 });
+        expect(await e.marks()).toEqual({ c1: false, c2: true });
+        const third = await e.pull();
+        expect(third.source === 'connector' && third.deletes).toEqual({ note: 'by deletedField', marked: 0, cleared: 1 });
+        expect(await e.marks()).toEqual({ c1: false, c2: false });
+    });
+
+    it('an incremental source under mark with no deletedField is refused delete_policy_unhonourable (400) before the action is called', async () => {
+        const e = await onEngine({ watermark: { field: 'updated_at', param: 'since' } }, [[rec('c1')]]);
+        const err = await e.pull().then(() => undefined, (x: unknown) => x);
+        expect(err).toBeInstanceOf(ConnectorPullError);
+        expect([(err as ConnectorPullError).code, (err as ConnectorPullError).status, (err as ConnectorPullError).reason])
+            .toEqual(['VALIDATION_ERROR', 400, 'delete_policy_unhonourable']);
+        expect(e.handler).not.toHaveBeenCalled();
+    });
+
+    it("deletePolicy 'ignore' on a full pull leaves every row as it is", async () => {
+        const e = await onEngine({ paging: { style: 'none' }, deletePolicy: 'ignore' }, [[rec('c1'), rec('c2')], [rec('c1')]]);
+        await e.pull();
+        const second = await e.pull();
+        expect(second.source === 'connector' && second.deletes).toEqual({ note: 'ignored', marked: 0, cleared: 0 });
+        expect(await e.marks()).toEqual({ c1: false, c2: false });
     });
 });
