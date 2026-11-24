@@ -244,7 +244,7 @@ Every artifact carries a `_provenance` field:
 | `org` | Authored at runtime by a tenant via the metadata API. Set on first save. |
 | `env-forced` | Written via the emergency escape hatch (env variable or `?force=true` with `metadata.unlock_protected` permission). Triggers stronger audit. |
 
-> **Amendment note (2026-11-24, #37013 — PR #37021).** The enum gained a fourth value, `platform`: a record the platform's own code registers at boot (a built-in skill, agent or tool). The metadata service sets it on that registration only; every other door that stores or serves a body strips it, and the artifact door refuses an item that carries it (`VALIDATION_ERROR` at `_provenance`). It is a store-slot marker only (ADR-0150 D4's note of the same date).
+> **Amendment note (2026-11-24, #37013 — PR #37021).** The enum gained a fourth value, `platform`: a record the platform's own code registers at boot (a built-in skill, agent or tool). It is read at the item's own top-level `_provenance` key only. The metadata service sets it on that registration only; every other write the service and the metadata protocol make (a write without the option, the in-memory seeding, the loader save, the protocol's save door, and every rollback or restore) stores the body without it, a body served from a loader other than the stored rows' is served without it, and the artifact door refuses an item that carries it (`VALIDATION_ERROR` at `_provenance`). A stored row re-registered at boot keeps it only when the row held it. It is a store-slot marker only (ADR-0150 D4's note of the same date).
 
 Rules:
 
