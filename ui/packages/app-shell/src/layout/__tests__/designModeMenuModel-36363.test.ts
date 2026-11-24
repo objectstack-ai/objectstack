@@ -285,7 +285,7 @@ describe('the labels that are translations (objectstack#36504)', () => {
     const served: Menu = [servedZh, { id: 'sales', type: 'group', label: '销售', children: [] }];
     let edited = patchEntry(served, 'leads', { label: '潜在客户', icon: 'user' });
     edited = insertEntry(edited, 'sales', 0, { id: 'nav_item_1', type: 'url', label: '帮助', url: 'https://h' });
-    const split = splitLabelEdits(served, edited, storedEntriesById(served, [stored]), ZH);
+    const split = splitLabelEdits(served, edited, storedEntriesById(served, [stored]), ZH, 'zh-CN');
     expect([...split.labels]).toEqual([
       ['leads', '潜在客户'],
       ['nav_item_1', '帮助'],
@@ -298,7 +298,7 @@ describe('the labels that are translations (objectstack#36504)', () => {
 
   it('in the source language the split takes nothing, and hands back the menu given', () => {
     const edited = patchEntry([stored], 'leads', { label: 'Prospects' });
-    const split = splitLabelEdits([stored], edited, storedEntriesById([stored], [stored]), EN);
+    const split = splitLabelEdits([stored], edited, storedEntriesById([stored], [stored]), EN, 'en');
     expect(split.labels.size).toBe(0);
     expect(split.navigation).toBe(edited);
   });
