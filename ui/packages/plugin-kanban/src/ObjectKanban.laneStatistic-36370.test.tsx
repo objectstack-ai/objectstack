@@ -432,3 +432,82 @@ describe('readLaneFigures (objectstack#36520)', () => {
     expect(readLaneFigures([{ stage: 'a', sum_amount: 'x' }], { ...base, type: 'sum', laneIds: ['a'], foldCase: false }).a).toBeNull();
   });
 });
+
+/**
+ * objectstack#36880 — a `min` / `max` over a date is the latest (earliest)
+ * stored day the lane read answers, drawn at the foot through the date
+ * field's own cell renderer: the face its `format` declares, exactly as a
+ * card draws the same day, never the raw stored text.
+ */
+describe('a date lane statistic draws in the field\'s date format (objectstack#36880)', () => {
+  const OBJECT = 'dated_deal';
+  const DEF = {
+    name: OBJECT,
+    fields: {
+      name: { type: 'text', label: 'Name' },
+      close_date: { type: 'date', label: 'Close date', format: 'short' },
+      stage: {
+        type: 'select',
+        label: 'Stage',
+        options: [{ value: 'open', label: 'Open' }, { value: 'won', label: 'Won' }],
+      },
+    },
+  };
+  const DATED_ROWS: Row[] = [
+    { id: 'a', name: 'Alpha', stage: 'open', close_date: '2025-01-10' },
+    { id: 'b', name: 'Beta', stage: 'open', close_date: '2025-03-15' },
+    { id: 'c', name: 'Gamma', stage: 'won', close_date: '2024-12-01' },
+  ];
+
+  it('draws a lane\'s latest close date as its card draws that day', async () => {
+    const store = new ValueDataSource<Row>({ items: DATED_ROWS });
+    // The door answers a date's `max` as the stored day (ISO order), as the
+    // platform's aggregate does.
+    const queryGroupHeaders = vi.fn(async () => [
+      { stage: 'open', max_close_date: '2025-03-15' },
+      { stage: 'won', max_close_date: '2024-12-01' },
+    ]);
+    const source = {
+      find: vi.fn(async (object: string, params: any) => store.find(object, params)),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      getObjectSchema: vi.fn(async () => DEF),
+      queryGroupHeaders,
+    } as any;
+    render(
+      <SchemaRendererProvider dataSource={source}>
+        <ObjectKanban
+          schema={{
+            type: 'object-kanban',
+            objectName: OBJECT,
+            groupBy: 'stage',
+            cardFields: ['close_date'],
+            summary: { type: 'max', field: 'close_date' },
+          } as any}
+          dataSource={source}
+          lanePaging={{}}
+        />
+      </SchemaRendererProvider>,
+    );
+    const lane = (title: string) => screen.getByRole('group', { name: title });
+    const foot = (title: string) => lane(title).querySelector<HTMLElement>('[data-kanban-lane-statistic]');
+    await waitFor(() => expect(foot('Open')).not.toBeNull());
+    await waitFor(() => expect(within(lane('Open')).getByText('Beta')).toBeTruthy());
+
+    expect(queryGroupHeaders.mock.calls[0][1]).toMatchObject({
+      groupBy: ['stage'],
+      aggregations: [{ function: 'max', field: 'close_date', alias: 'max_close_date' }],
+    });
+    const figure = foot('Open')!.lastElementChild!.textContent;
+    expect(foot('Open')!.textContent).toContain('Max · Close date');
+    // The declared `short` face, the year written as `'25` — not the stored text.
+    expect(figure).toContain('\'25');
+    expect(figure).not.toContain('2025-03-15');
+    // The same day on Beta's card, through the same renderer.
+    const betaCard = within(lane('Open')).getAllByRole('listitem').find((card) => card.textContent?.includes('Beta'))!;
+    expect(betaCard.textContent).toContain(figure!);
+    expect(foot('Won')!.lastElementChild!.textContent).toContain('\'24');
+  });
+});
