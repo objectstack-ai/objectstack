@@ -1626,30 +1626,30 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "名前",
-        helpText: "snake_case の一意識別子"
+        helpText: "このダッシュボードの一意の内部名。英小文字・数字・アンダースコアを使い、先頭は英字にします（例: sales_overview）。"
       },
       label: {
         label: "表示名",
-        helpText: "表示名"
+        helpText: "利用者に表示されるダッシュボードのタイトル。"
       },
       description: {
         label: "説明"
       },
       columns: {
         label: "列",
-        helpText: "グリッド列（既定 12）"
+        helpText: "ウィジェットを並べる列数（1〜24）。空欄にすると、ウィジェットの幅に合わせて自動で決まります。"
       },
       gap: {
         label: "間隔",
-        helpText: "ウィジェット間の間隔、0.25rem 刻み（4 = 1rem）"
+        helpText: "ウィジェット同士の間隔。数値が大きいほど広がります。空欄にすると標準の間隔になります。"
       },
       refreshIntervalSeconds: {
         label: "更新間隔",
-        helpText: "自動更新（秒）"
+        helpText: "ダッシュボードがデータを再読み込みする間隔（秒）。空欄または 0 で自動再読み込みをオフにします。"
       },
       header: {
         label: "ヘッダー",
-        helpText: "ダッシュボードヘッダー設定（title, subtitle, actions）"
+        helpText: "ダッシュボード上部に表示する内容（タイトル、説明、操作ボタン）。"
       },
       "header.showTitle": {
         label: "タイトルを表示",
@@ -1677,7 +1677,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "ウィジェット",
-        helpText: "位置とサイズを持つダッシュボードウィジェット"
+        helpText: "このダッシュボードに置くグラフ・数値・表と、それぞれの配置。"
       },
       "widgets.id": {
         label: "ウィジェット ID"
@@ -1732,11 +1732,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日付範囲",
-        helpText: "既定の日付範囲セレクター"
+        helpText: "ダッシュボードを開いたときの期間と、閲覧者が日付を自分で選べるかどうか。"
       },
       globalFilters: {
         label: "グローバルフィルター",
-        helpText: "全ウィジェットに適用するフィルター"
+        helpText: "閲覧者がすべてのウィジェット、または指定したウィジェットだけをまとめて絞り込めるフィルター。"
       },
       "globalFilters.name": {
         label: "名前"
