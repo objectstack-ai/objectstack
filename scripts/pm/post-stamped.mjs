@@ -464,6 +464,9 @@
  * rows off three keys in one seat's shift, the measurement behind this rule; a whole shift of claims naming the
  * ceiling tier with nothing behind it, the measurement behind the fourth). `claimKeyedLineRefusals` carries the four
  * decisions that keep it a mirror and not a fifth dialect.
+ * One row is WRITE-time only: a comment that OPENS with `Claim:` carries the `Container & model:` line with its size and
+ * an `effort:` 定档 gives that size (`claimTierWriteRefusal`, `dispatch-gates.mjs`). Absence is a refusal there and nowhere
+ * else: the other readers also judge claims already written, whose authors cannot add the line.
  *
  * ## The first line is the seat's signature, or the body is refused (#27113)
  *
@@ -977,7 +980,7 @@ import { readClause2Line } from './clause2-line.mjs';
 // The fourth owner: the `model:` value of a claim's `Container & model:` line
 // is judged against the tier ladder `dispatch-gates.mjs` derives — the
 // ceiling's spellings live there, beside the constant, and are never restated.
-import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLOOR, ceilingTierSpellings, claimTierWriteRefusal, containerModelRefusal } from './dispatch-gates.mjs';
+import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLOOR, EFFORT_ABOVE_TABLE, EFFORT_BY_SIZE, ceilingTierSpellings, claimTierWriteRefusal, containerModelRefusal } from './dispatch-gates.mjs';
 // The record's `Local-runs:` line is read by the file that owns the record's
 // every other line — judged when present, an absent line not re-judged.
 // The mailbox doorbell is read by the same file: a knock's `To:` seat and its key come from `readMailboxLine`.
@@ -2000,7 +2003,8 @@ export const CLAIM_KEY_SPELLINGS = Object.freeze({
   Seat: '`Seat: domain:LANE#N` at the START of a line, lane and number both — e.g. `Seat: domain:skills#2`',
   'Thread-read': '`Thread-read: ID` at the START of a line — ONE comment id, or `none`, and nothing after it',
   'Clause-②': '`Clause-②: yes` or `Clause-②: no` at the START of a line — reasoning after the value is fine, a quotation around it is not',
-  'Container & model': '`Container & model: …, model: TIER (…)` at the START of a line — the ceiling tier (`CONTRACT_REVIEW_TIER`) carries, on the SAME line, the `MANDATORY` line `dispatch-gates --tier` printed for the card\'s paths (`--tier --repo owner/name PATH…` for a sister repo) or `reason: …` naming the per-card ruling; the default and floor tiers cite nothing. A claim being written carries the line, opening with its size and ending in its effort — `Container & model: SIZE, mode:…, model: TIER (…), effort: VALUE` — where XS and S read `medium`, M, L and XL read `high`, any other pairing carries `reason: …` inside the effort slot, and `xhigh` is for a `File surface:` naming `docs/adr/**` alone',
+  // The line's 定档 half prints its pairs FROM the table's one copy (`EFFORT_BY_SIZE`), never typed here.
+  'Container & model': `\`Container & model: …, model: TIER (…)\` at the START of a line — the ceiling tier (\`CONTRACT_REVIEW_TIER\`) carries, on the SAME line, the \`MANDATORY\` line \`dispatch-gates --tier\` printed for the card's paths (\`--tier --repo owner/name PATH…\` for a sister repo) or \`reason: …\` naming the per-card ruling; the default and floor tiers cite nothing. A claim being written carries the line, opening with its size and ending in its effort (\`Container & model: SIZE, mode:…, model: TIER (…), effort: VALUE\`) — ${Object.entries(EFFORT_BY_SIZE).map(([size, effort]) => `${size} \`${effort}\``).join(', ')}; any other pairing carries \`reason: …\` inside the effort slot, and \`${EFFORT_ABOVE_TABLE.value}\` is for a \`File surface:\` naming \`${EFFORT_ABOVE_TABLE.surface}**\` alone`,
 });
 
 /** PRESENCE only, `CLAIM_SEAT_DECLARATION_ANYWHERE`'s calibration one key along: case-SENSITIVE and demanding the whole
