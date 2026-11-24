@@ -52,7 +52,7 @@ import { ArrowUpDown, Check, ChevronLeft, GripVertical, Info, ListFilter, MoreHo
 import { FieldList } from '../conditions/FieldList';
 import { isQuickRowApplied } from '../conditions/FilterValuePanel';
 import { FilterPanel, SortPanel, describeConditionValue, useLookupValueNames } from '../conditions/ListConditionControls';
-import { chipsAreIndependent, removeCondition, type ConditionField } from '../conditions/conditionModel';
+import { chipsAreIndependent, removeCondition, sortDirectionLabel, type ConditionField } from '../conditions/conditionModel';
 import { useListConditionTranslation } from '../conditions/conditionTranslations';
 
 // ---------------------------------------------------------------------------
@@ -315,8 +315,6 @@ function useStaged<T, S>(open: boolean, value: T, firstStep: S): [T, React.Dispa
 // Sort
 // ---------------------------------------------------------------------------
 
-const DATE_SORT_TYPES = new Set(['date', 'datetime']);
-
 /**
  * The phone sort sheet's levels (objectstack#35884): each level on two lines,
  * the field over its direction, with a handle a finger drags (pointer events:
@@ -357,9 +355,10 @@ function PhoneSortLevels({ fields, value, onChange, onChangeField }: {
       {value.map((item, index) => {
         const field = fields.find((f) => f.value === item.field);
         const label = field?.label ?? item.field;
-        const direction = DATE_SORT_TYPES.has(field?.type ?? '')
-          ? { asc: t('sortBuilder.oldestFirst'), desc: t('sortBuilder.newestFirst') }
-          : { asc: t('sortBuilder.ascending'), desc: t('sortBuilder.descending') };
+        const direction = {
+          asc: sortDirectionLabel(field?.type, 'asc', t),
+          desc: sortDirectionLabel(field?.type, 'desc', t),
+        };
         return (
           <div
             key={item.id}
