@@ -2435,14 +2435,24 @@ jobs:
       contents: read
 
     # Both service images are pulled from mirror.gcr.io, Google's cache of
-    # Docker Hub: the same official image, tag and index digest. Pulled from
+    # Docker Hub: the same image, tag and index digest. Pulled from
     # Docker Hub directly they ride its anonymous per-IP quota, which shared
     # runner IPs exhaust, and `Initialize containers` then fails before any
     # step runs. A Docker Hub login is no fix: secrets never reach fork PRs
     # (#22541).
     services:
       postgres:
-        image: mirror.gcr.io/library/postgres:16
+        # [#37095] pgvector's image, not the plain official one: it is
+        # `postgres:16` (same major, entrypoint, `pg_isready`, `psql`) with the
+        # `vector` extension built in, so the pgvector-backed knowledge store
+        # has a real server here. An EXACT tag (pgvector 0.8.7 on PG 16), not
+        # the moving `pg16`: a new pgvector release reaches this job by a
+        # reviewed edit. Index digest on 2026-11-24, the same on mirror.gcr.io
+        # and Docker Hub: sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f.
+        # Pinned by `driver-sql`'s sql-driver-37095-pgvector-extension test,
+        # which the driver-sql step below runs: an image without the extension
+        # fails its CREATE EXTENSION.
+        image: mirror.gcr.io/pgvector/pgvector:0.8.7-pg16
         env:
           POSTGRES_PASSWORD: postgres
         ports:
