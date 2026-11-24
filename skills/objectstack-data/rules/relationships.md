@@ -340,8 +340,8 @@ InvoiceLine = {
 
 ### Detail-page related lists (the read-side mirror)
 
-You usually don't declare the **related list** on the parent's record detail page: every child relationship
-is shown **by default** as a tab with its count, a `master_detail` child too. The
+On the parent's record detail page every child relationship is a **related list**,
+shown **by default** as a tab with its count, a `master_detail` child too. The
 relationship flags *refine* that:
 
 ```typescript
@@ -357,22 +357,23 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 - `relatedList: false` — the child object is not shown on the parent record page.
 - `'primary'` — a full-width table in the record's details, with no tab. A parent field
   group naming a `master_detail` child (`relatedList: 'quote_line'`, written only when asked)
-  places its table there too; its tab stays unless a declared `relatedLists` omits it.
-- The parent's `relatedLists` is the tab list (objectstack-ui Record Page): absent,
-  nothing changes; declared, only the named lists show, in order, built-ins by name
+  places its table there too; its tab stays unless `relatedLists` omits it.
+- The parent's `relatedLists` is the tab list (objectstack-ui Record Page): declared,
+  only the named lists show, in order, built-ins by name
   (`sys_attachment`, `sys_approval_request`, `sys_activity`). An entry is the child,
-  `object.field` or `{ list, label, columns }`. A child in the stack with no inbound FK
+  `object.field` or `{ list, label, columns }`; its `label` translates at
+  `objects.{parent}._relatedLists.{list}.label` (none: nothing to translate).
+  A child in the stack with no inbound FK
   is refused everywhere; one that exists nowhere is refused by `os validate` /
   `os build` (bar a platform or sibling-artifact name) and by a metadata
   write naming no package (one into a package is stored, placing nothing).
 
 `relatedListTitle` / `relatedListColumns` override the derived title / columns
-(an entry's `label` / `columns` win); otherwise columns auto-derive from
-the child object's `highlightFields`. Audit FKs
+(columns: the child's `highlightFields`); an entry's `label` / `columns` win. Audit FKs
 (`created_by`/`updated_by`/`owner_id`) never become related lists. A child that
 references the parent through several FKs (e.g. `primary_account` +
 `partner_account`) yields **one related list per FK**; a self-referential FK
-(a hierarchy) surfaces a "children" list.
+surfaces a "children" list.
 
 ## Incorrect vs Correct
 
