@@ -44,14 +44,15 @@
 import { ENVIRONMENT_SCOPE_QUERY } from '../metadata-admin/catalog-scope.js';
 import { SETUP_DATASOURCES_PATH } from '../metadata-admin/metadataAreaHost.js';
 import { DESIGNER_SURFACE_PARAM } from '../metadata-admin/nav-selection.js';
+import { AREA_PILLAR_FOR_TYPE, isStudioAllPackagesScope } from './metadataArea.js';
 import {
-  AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
   STUDIO_METADATA_AREA,
-  isStudioAllPackagesScope,
-  studioMetadataAreaPath,
-  studioPillarItemPath,
-} from './metadataArea.js';
+  studioMetadataAreaAddress,
+  studioMetadataAreaRoot,
+  studioPackagePath,
+  studioPillarItemAddress,
+} from './studioAddress.js';
 import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 
 /** The menu's collapse state, kept apart from the app sidebar's `sidebar_state`. */
@@ -96,12 +97,13 @@ export function studioMenuScope(segment: string): StudioMenuScope {
 
 function typeEntryPath(scope: StudioMenuScope, type: string): string {
   if (scope.kind !== 'package') {
-    return `${studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)}/${encodeURIComponent(type)}?${ENVIRONMENT_SCOPE_QUERY}`;
+    return studioMetadataAreaAddress(STUDIO_ALL_PACKAGES_SEGMENT, encodeURIComponent(type), { query: ENVIRONMENT_SCOPE_QUERY });
   }
   // ADR-0146 D1 — a datasource is Setup's runtime configuration, as its directory tile says.
   if (type === 'datasource') return SETUP_DATASOURCES_PATH;
-  const pkg = encodeURIComponent(scope.packageId);
-  return `${studioMetadataAreaPath(scope.packageId)}/${encodeURIComponent(type)}?package=${pkg}`;
+  return studioMetadataAreaAddress(scope.packageId, encodeURIComponent(type), {
+    query: `package=${encodeURIComponent(scope.packageId)}`,
+  });
 }
 
 /**
@@ -126,18 +128,18 @@ export function buildStudioMenu(input: {
     groups.get('system')!.push({
       key: 'diagnostics',
       kind: 'diagnostics',
-      to: `${studioMetadataAreaPath(scope.packageId)}/_diagnostics`,
+      to: studioMetadataAreaAddress(scope.packageId, '_diagnostics'),
     });
     groups.get('security')!.push({
       key: 'owd',
       kind: 'owd',
-      to: studioPillarItemPath(scope.packageId, 'access', OWD_OVERVIEW_SURFACE),
+      to: studioPillarItemAddress(scope.packageId, 'access', OWD_OVERVIEW_SURFACE),
     });
   }
   groups.get('security')!.push({
     key: 'environment',
     kind: 'environment',
-    to: studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT),
+    to: studioMetadataAreaRoot(STUDIO_ALL_PACKAGES_SEGMENT),
   });
   return STUDIO_MENU_GROUPS.map((group) => ({ group, entries: groups.get(group)! })).filter(
     (g) => scope.kind === 'package' || g.entries.length > 0,
@@ -163,14 +165,14 @@ export function studioMenuCurrentKey(input: { segment: string; pathname: string;
   const { segment, pathname } = input;
   if (isStudioOrgScope(segment)) return 'orgFlows';
   const search = new URLSearchParams(input.search);
-  const areaRoot = studioMetadataAreaPath(segment);
+  const areaRoot = studioMetadataAreaRoot(segment);
   if (pathname === areaRoot || pathname.startsWith(`${areaRoot}/`)) {
     const [first] = pathname.slice(areaRoot.length).split('/').filter(Boolean);
     if (!first) return isStudioAllPackagesScope(segment) ? 'environment' : null;
     if (first === '_diagnostics') return isStudioAllPackagesScope(segment) ? null : 'diagnostics';
     return `type:${decodeURIComponent(first)}`;
   }
-  const prefix = `/studio/${encodeURIComponent(segment)}/`;
+  const prefix = `${studioPackagePath(segment)}/`;
   const raw = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : '';
   const pillar = raw.split('/')[0];
   if (pillar === STUDIO_METADATA_AREA) return null;
