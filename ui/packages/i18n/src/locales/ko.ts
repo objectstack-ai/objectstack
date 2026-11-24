@@ -2794,6 +2794,7 @@ const ko = {
       targetQueue: '대기열',
       queue: '대기열',
       queuePlaceholder: '대기열 선택',
+      declaredQueues: '또는 설치된 앱이 선언한 대기열',
       notify: '새 소유자에게 알림',
       alreadyOwner: '이 사용자는 이미 이 레코드의 소유자입니다.',
       submit: '소유자 변경',

@@ -3086,6 +3086,7 @@ const ar = {
       targetQueue: 'قائمة انتظار',
       queue: 'قائمة الانتظار',
       queuePlaceholder: 'اختر قائمة انتظار',
+      declaredQueues: 'أو قائمة انتظار يعلنها تطبيق مثبّت',
       notify: 'إشعار المالك الجديد',
       alreadyOwner: 'هذا الشخص هو مالك هذا السجل بالفعل.',
       submit: 'تغيير المالك',

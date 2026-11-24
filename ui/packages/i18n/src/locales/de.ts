@@ -2794,6 +2794,7 @@ const de = {
       targetQueue: 'Eine Warteschlange',
       queue: 'Warteschlange',
       queuePlaceholder: 'Warteschlange auswählen',
+      declaredQueues: 'Oder eine Warteschlange, die eine installierte App deklariert',
       notify: 'Neuen Besitzer benachrichtigen',
       alreadyOwner: 'Diese Person ist bereits Besitzer dieses Datensatzes.',
       submit: 'Besitzer ändern',

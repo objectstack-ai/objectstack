@@ -3473,6 +3473,7 @@ const en = {
       targetQueue: 'A queue',
       queue: 'Queue',
       queuePlaceholder: 'Pick a queue',
+      declaredQueues: 'Or a queue an installed app declares',
       notify: 'Notify the new owner',
       alreadyOwner: 'This person already owns this record.',
       submit: 'Change Owner',

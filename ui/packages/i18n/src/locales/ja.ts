@@ -2796,6 +2796,7 @@ const ja = {
       targetQueue: 'キュー',
       queue: 'キュー',
       queuePlaceholder: 'キューを選択',
+      declaredQueues: 'またはインストール済みアプリが宣言するキュー',
       notify: '新しい所有者に通知する',
       alreadyOwner: 'このユーザーはすでにこのレコードの所有者です。',
       submit: '所有者の変更',
