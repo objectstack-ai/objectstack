@@ -1017,8 +1017,9 @@ describe('[ADR-0153 D3] delete marking on a datasource source', () => {
                     name: 'wh', version: '0.0.1', supports: { transactionsUnsupported: true },
                     async connect() {}, async disconnect() {}, async syncSchema() {},
                     async find(_object: string, query: Rec = {}) {
-                        const hit = rows.filter((r) => matches(r, query.where)).map((r) => ({ ...r }));
-                        return typeof query.limit === 'number' ? hit.slice(0, query.limit) : hit;
+                        const hit = rows.filter((r) => matches(r, query.where));
+                        const page = typeof query.limit === 'number' ? hit.slice(0, query.limit) : hit;
+                        return page.map((r) => ({ ...r }));
                     },
                 } as never);
                 ql.registerDatasourceDef(WH_DEF as never);
