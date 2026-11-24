@@ -28,6 +28,11 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ReportDefaultInspector } from './ReportDefaultInspector';
 import type { DatasetCatalogEntry } from '../previews/useDatasetCatalog';
+// The inspector reaches the console's dynamic `@objectstack/lint` and
+// `@objectstack/formula` imports; their first load is paid here, at collection,
+// never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@objectstack/formula';
 
 type FormNode = { field?: unknown; fields?: unknown[] };
 type FormShape = { sections?: Array<{ fields?: unknown[] }> };
@@ -113,7 +118,7 @@ function renderJoined() {
 describe('ReportDefaultInspector — a declared `ref:dataset` block row is the dataset picker (objectui#11601)', () => {
   it('offers the inspector catalog in the block row, as the author text', async () => {
     renderJoined();
-    await userEvent.click(screen.getByRole('combobox', { name: 'Dataset' }));
+    await userEvent.click(screen.getByRole('combobox', { name: 'Data Source' }));
     const options = (await screen.findAllByRole('option')).map((o) => o.textContent);
     expect(options).toEqual([
       'Sales metrics (sales_metrics) — Won and open deals by stage',
@@ -123,7 +128,7 @@ describe('ReportDefaultInspector — a declared `ref:dataset` block row is the d
 
   it('picking a dataset binds THAT block to the dataset name, and nothing else moves', async () => {
     const onPatch = renderJoined();
-    await userEvent.click(screen.getByRole('combobox', { name: 'Dataset' }));
+    await userEvent.click(screen.getByRole('combobox', { name: 'Data Source' }));
     await userEvent.click(await screen.findByRole('option', { name: 'Support load (support_load)' }));
     expect(onPatch).toHaveBeenCalledTimes(1);
     expect(onPatch.mock.calls[0][0]).toStrictEqual({
