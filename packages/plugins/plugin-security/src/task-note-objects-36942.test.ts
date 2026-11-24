@@ -34,6 +34,11 @@
  * then, and under a walled posture it serves a declared rule once per
  * organization that exists — so the second boot is the one that serves
  * `sys_task_assignee` for this organization, as a running deployment does.
+ *
+ * One boot would not: a kernel that boots with no organization binds no
+ * per-record hook for a declared rule, and the organization created later is
+ * served the rule without one, so no grant is written until the next boot
+ * (filed as #36982). The two boots keep this test about the objects.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
