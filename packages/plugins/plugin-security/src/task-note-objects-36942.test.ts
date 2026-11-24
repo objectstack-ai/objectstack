@@ -21,30 +21,21 @@
  *    `edit`, and the member baseline's ownership floor (`owner_only_writes`,
  *    `created_by == current_user.id`) defers to that share.
  *
- * Real stack: an `ObjectKernel` with `ObjectQLPlugin` over a better-sqlite3
- * file, `PlatformObjectsPlugin`, `SecurityPlugin` with the platform permission
+ * Real stack: an `ObjectKernel` with `ObjectQLPlugin` over an in-memory
+ * better-sqlite3 database, `PlatformObjectsPlugin`, `SecurityPlugin` with the platform permission
  * sets only (every member resolves `member_default` and nothing else — no
  * application set) and `SharingServicePlugin`.
  *
- * ## Two boots over one database
+ * ## One boot, the organization created after it
  *
- * The organization and its members are written by a first boot, and the
- * assertions run on a second boot over the same file. The sharing service
- * binds its per-record rule hooks at boot, from the declared rules it serves
- * then, and under a walled posture it serves a declared rule once per
- * organization that exists — so the second boot is the one that serves
- * `sys_task_assignee` for this organization, as a running deployment does.
- *
- * One boot would not: a kernel that boots with no organization binds no
- * per-record hook for a declared rule, and the organization created later is
- * served the rule without one, so no grant is written until the next boot
- * (filed as #36982). The two boots keep this test about the objects.
+ * The organization and its members are inserted after `bootstrap()`, as a
+ * fresh environment's first sign-up does. The sharing service serves the
+ * declared `sys_task_assignee` rule for an organization created after boot
+ * and grants its records without a restart (#36982), so the assignee's share
+ * is written by the same kernel that serves every assertion here.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -81,7 +72,7 @@ const outcomeOf = (p: Promise<unknown>): Promise<Outcome> =>
     },
   );
 
-function sqliteDriverPlugin(filename: string): Plugin {
+function sqliteDriverPlugin(): Plugin {
   return {
     name: 'test.driver.sqlite',
     type: 'standard',
@@ -89,7 +80,7 @@ function sqliteDriverPlugin(filename: string): Plugin {
     async init(ctx: PluginContext) {
       ctx.registerService(
         'driver.default',
-        new SqlDriver({ client: 'better-sqlite3', connection: { filename }, useNullAsDefault: true }),
+        new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
       );
     },
   };
@@ -115,9 +106,9 @@ function identityPlugin(): Plugin {
   };
 }
 
-async function boot(filename: string): Promise<ObjectKernel> {
+async function boot(): Promise<ObjectKernel> {
   const kernel = new ObjectKernel({ logger: { level: 'silent' } } as never);
-  await kernel.use(sqliteDriverPlugin(filename));
+  await kernel.use(sqliteDriverPlugin());
   await kernel.use(new ObjectQLPlugin());
   await kernel.use(identityPlugin());
   await kernel.use(new PlatformObjectsPlugin());
@@ -135,30 +126,23 @@ const shutdown = async (kernel: ObjectKernel | undefined) => {
 };
 
 describe('sys_task and sys_note in a real runtime: registration, the completion stamp, and who reads and edits them', () => {
-  let dir: string | undefined;
   let kernel: ObjectKernel | undefined;
   let ql: ObjectQL;
 
   beforeAll(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'os-task-note-'));
-    const file = join(dir, 'data.sqlite');
-
-    const first = await boot(file);
-    const seed = first.getService<ObjectQL>('objectql');
-    await seed.insert('sys_organization', { id: ORG, name: 'Acme', slug: 'acme' }, { context: SYSTEM } as never);
-    for (const userId of PEOPLE) {
-      await seed.insert('sys_user', { id: userId, name: userId, email: `${userId}@acme.test`, email_verified: true }, { context: SYSTEM } as never);
-      await seed.insert('sys_member', { user_id: userId, organization_id: ORG, role: 'member' }, { context: SYSTEM } as never);
-    }
-    await shutdown(first);
-
-    kernel = await boot(file);
+    kernel = await boot();
     ql = kernel.getService<ObjectQL>('objectql');
+    // After bootstrap(): the organization did not exist when the sharing
+    // service bound its rule hooks.
+    await ql.insert('sys_organization', { id: ORG, name: 'Acme', slug: 'acme' }, { context: SYSTEM } as never);
+    for (const userId of PEOPLE) {
+      await ql.insert('sys_user', { id: userId, name: userId, email: `${userId}@acme.test`, email_verified: true }, { context: SYSTEM } as never);
+      await ql.insert('sys_member', { user_id: userId, organization_id: ORG, role: 'member' }, { context: SYSTEM } as never);
+    }
   }, 120_000);
 
   afterAll(async () => {
     await shutdown(kernel);
-    if (dir) rmSync(dir, { recursive: true, force: true });
   }, 30_000);
 
   const stored = async (object: string, id: string) =>
