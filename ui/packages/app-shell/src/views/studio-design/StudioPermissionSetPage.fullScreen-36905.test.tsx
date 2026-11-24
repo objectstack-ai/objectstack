@@ -206,6 +206,26 @@ describe('the full-screen header and tabs (objectstack#36905)', () => {
   });
 });
 
+describe('the status place says what a save does, or that nothing is saved (objectui#11781, #12453, #29674)', () => {
+  it('read-only: one read-only link carrying the sentence, and no save banner', async () => {
+    mount(BASE_PKG);
+    await title();
+    const links = screen.getAllByTestId('studio-readonly-link');
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute('title', en('engine.studio.access.bannerTitleReadOnly'));
+    expect(screen.queryByTestId('studio-item-status')).toBeNull();
+  });
+
+  it('CONTROL — writable, a set of a base\'s pair: the status chip names the base whose objects it lists', async () => {
+    mount(CUSTOM_PKG);
+    await title();
+    const chip = await screen.findByTestId('studio-item-status');
+    expect(chip).toHaveTextContent(tFormat('engine.studio.access.bannerPair', 'en', { package: BASE_PKG }));
+    expect(chip).toHaveAccessibleDescription(tFormat('engine.studio.access.bannerTitlePair', 'en', { package: BASE_PKG }));
+    expect(screen.queryByTestId('studio-readonly-link')).toBeNull();
+  });
+});
+
 describe('the draft discard (objectstack#36905)', () => {
   it('drops this set\'s draft at its package, after one question', async () => {
     clientImpl = makeClient([SET]);

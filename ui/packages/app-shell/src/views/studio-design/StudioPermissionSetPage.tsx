@@ -9,8 +9,8 @@
  * workbench: a set is chosen from its type's list, and × goes back there.
  *
  *  - The header is the full-screen detail's (`ResourceDetailHeader`, #36892):
- *    × to the list, ‹ › through it, the set's label, api name, type and
- *    package, and a ⋯ menu.
+ *    × to the list, ‹ › through it, the set's label (its machine name on the
+ *    title's tooltip, objectstack#34795), type and package, and a ⋯ menu.
  *  - The tab row is the five sections of the matrix, then the item tools of
  *    every item page (`ItemToolTabs`, #36901): References, History (with the
  *    audit log, for a caller the trail door admits) and Source. A tool tab
@@ -306,8 +306,14 @@ export function StudioPermissionSetPage({
         tabAddress={itemTab.address}
         locale={locale}
         icon={Shield}
-        label={parts.title}
-        apiName={name}
+        // objectstack#34795 / #35018 — the set's label is the title, whole; its
+        // machine name is the title's tooltip, never page text, so the header
+        // draws no api-name chip here.
+        label={
+          <span title={name} data-testid="perm-studio-title">
+            {parts.title}
+          </span>
+        }
         typeLabel={translateMetadataType('permission', locale)}
         packageLabel={packageId}
         status={status}

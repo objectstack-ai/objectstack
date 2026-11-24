@@ -257,9 +257,9 @@ async function leftAndGuardCleared(asked: number) {
 }
 
 /**
- * The open set's api name is its header's mono chip (the Delegated admin tab,
- * kept mounted, lists every set name too), so "the matrix shows set X" is
- * asked of that header alone.
+ * The open set's machine name is its header title's tooltip (the Delegated
+ * admin tab, kept mounted, lists every set name too), so "the matrix shows set
+ * X" is asked of that header alone.
  */
 const inSetHeader = () => within(screen.getByTestId('permission-detail-header'));
 
@@ -295,7 +295,7 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
     leave();
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     // Confirming the same departure discards and leaves; the unmounted
@@ -336,7 +336,7 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
     confirmSpy.mockReturnValueOnce(false);
     openOwd();
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     confirmSpy.mockReturnValueOnce(true);
@@ -361,7 +361,7 @@ describe('Studio — unsaved pillar edits guard (#2600)', () => {
     confirmSpy.mockReturnValueOnce(false);
     fireEvent.click(screen.getByTestId('studio-back-to-app'));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(inSetHeader().getByText('set_a')).toBeInTheDocument();
+    expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
     confirmSpy.mockReturnValueOnce(true);

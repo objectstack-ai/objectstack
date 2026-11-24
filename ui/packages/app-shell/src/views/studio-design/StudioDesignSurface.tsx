@@ -78,7 +78,6 @@ import {
   type StudioSavedDraft,
 } from './StudioPillarKit.js';
 import { AutomationsPillar } from './AutomationsPillar.js';
-import { AccessPillar } from './AccessPillar.js';
 import { DataPillar, renderStudioGridList } from './DataPillar.js';
 import {
   cn,
@@ -1685,8 +1684,9 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
 // objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.
 export { FlowStatusDot, type NewFlowTrigger };
 
-// objectstack#36893 — the Automations and Access pillars moved to their own modules; re-exported for their pins.
-export { AutomationsPillar, AccessPillar };
+// objectstack#36893 — the Automations pillar moved to its own module; re-exported for its pins.
+// objectstack#36905 — the Access pillar is gone: its addresses redirect (`accessPillarRedirect.ts`).
+export { AutomationsPillar };
 
 // objectstack#36893 — the Data pillar moved to its own module; re-exported for its pins.
 export { DataPillar, renderStudioGridList };

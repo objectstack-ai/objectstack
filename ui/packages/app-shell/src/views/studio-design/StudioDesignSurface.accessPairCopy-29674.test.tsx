@@ -310,7 +310,7 @@ describe('the header’s provenance chip follows the list’s mark (objectstack#
   it('a set created in the pair: Custom in the header', async () => {
     srv.pairDrafts.set(`permission/${CREATED}`, { name: CREATED, label: 'Pair auditor', objects: {}, fields: {} });
     renderAccess(CREATED);
-    await waitFor(() => expect(within(header()).getAllByText(CREATED).length).toBeGreaterThan(0), { timeout: 8000 });
+    await waitFor(() => expect(within(header()).getAllByTitle(CREATED).length).toBeGreaterThan(0), { timeout: 8000 });
     await waitFor(() => expect(chip()).toHaveTextContent(t('perm.badge.custom', 'en')), { timeout: 8000 });
   });
 

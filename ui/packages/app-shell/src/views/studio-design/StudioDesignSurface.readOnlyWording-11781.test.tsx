@@ -2,7 +2,8 @@
 
 /**
  * objectui#11781 — a read-only package says it is read-only, in the Data
- * pillar's Form view and in the Access pillar's banner.
+ * pillar's Form view (and in the Access banner, pinned now on the permission
+ * set's page, objectstack#36905).
  *
  * Measured on the showcase (a source-loaded, read-only package) in a Studio
  * browser pass: the Form view still read "Draft layout" and "Drag to reorder /
@@ -62,7 +63,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-import { AccessPillar, DataPillar } from './StudioDesignSurface';
+import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { t, tFormat } from '../metadata-admin/i18n';
 
@@ -139,33 +140,5 @@ describe('Data pillar Form view — a read-only package reads as read-only (obje
   });
 });
 
-describe('Access pillar banner — a read-only package saves no draft (objectui#11781)', () => {
-  function renderAccess(readOnly: boolean) {
-    render(
-      <MemoryRouter>
-        <AccessPillar packageId="com.example.showcase" readOnly={readOnly} />
-      </MemoryRouter>,
-    );
-  }
-
-  // objectui#12453 — the read-only note retires; its sentence is the header
-  // link's title.
-  it('read-only: says read-only, not "saved as draft"', async () => {
-    renderAccess(true);
-
-    const link = await screen.findByTestId('studio-readonly-link');
-    expect(link).toHaveAttribute('title', row('engine.studio.access.bannerTitleReadOnly'));
-    expect(screen.queryByText(absent('engine.studio.access.banner'))).toBeNull();
-  });
-
-  it('CONTROL — writable: still says its edits save as a draft', async () => {
-    renderAccess(false);
-
-    // objectui#12611 — the sentence is the status chip's tooltip and its
-    // accessible description (the objectui#12303 pattern), no longer a `title`.
-    const banner = await screen.findByText(row('engine.studio.access.banner'));
-    const chip = banner.closest('[data-testid="studio-item-status"]');
-    expect(chip).toHaveAccessibleDescription(row('engine.studio.access.bannerTitle'));
-    expect(screen.queryByTestId('studio-readonly-link')).toBeNull();
-  });
-});
+// objectstack#36905 — the Access pillar's banner pins moved with the banner to the permission
+// set's full-screen page (`StudioPermissionSetPage.fullScreen-36905.test.tsx`).
