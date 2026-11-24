@@ -191,7 +191,7 @@ const SIGNED_OUT_KEPT_LAYOUT_FAMILIES: readonly {
  */
 const LAYOUT_ROW_HEIGHTS: ReadonlySet<string> = new Set(['compact', 'short', 'medium', 'tall', 'extra_tall']);
 
-const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+const isLayoutObject = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** Whether `v` has no keys but `allowed`. */
@@ -204,7 +204,7 @@ function isNameList(v: unknown): boolean {
 }
 
 function isWidthMap(v: unknown): boolean {
-  return isPlainRecord(v) && Object.values(v).every((w) => typeof w === 'number' && Number.isFinite(w));
+  return isLayoutObject(v) && Object.values(v).every((w) => typeof w === 'number' && Number.isFinite(w));
 }
 
 /**
@@ -212,13 +212,13 @@ function isWidthMap(v: unknown): boolean {
  * and nothing else.
  */
 function holdsOnlyListLayout(value: unknown): boolean {
-  if (!isPlainRecord(value) || !hasOnlyKeys(value, ['viewOrder', 'perView'])) return false;
+  if (!isLayoutObject(value) || !hasOnlyKeys(value, ['viewOrder', 'perView'])) return false;
   if (value.viewOrder !== undefined && !isNameList(value.viewOrder)) return false;
   if (value.perView === undefined) return true;
-  if (!isPlainRecord(value.perView)) return false;
+  if (!isLayoutObject(value.perView)) return false;
   return Object.values(value.perView).every(
     (view) =>
-      isPlainRecord(view) &&
+      isLayoutObject(view) &&
       hasOnlyKeys(view, ['widths', 'rowHeight']) &&
       (view.widths === undefined || isWidthMap(view.widths)) &&
       (view.rowHeight === undefined || (typeof view.rowHeight === 'string' && LAYOUT_ROW_HEIGHTS.has(view.rowHeight))),
@@ -228,7 +228,7 @@ function holdsOnlyListLayout(value: unknown): boolean {
 /** `{ order?: FIELD[], widths?: { FIELD: px } }` and nothing else. */
 function holdsOnlyGridColumns(value: unknown): boolean {
   return (
-    isPlainRecord(value) &&
+    isLayoutObject(value) &&
     hasOnlyKeys(value, ['order', 'widths']) &&
     (value.order === undefined || isNameList(value.order)) &&
     (value.widths === undefined || isWidthMap(value.widths))
