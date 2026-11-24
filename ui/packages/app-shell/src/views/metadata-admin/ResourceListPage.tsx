@@ -226,11 +226,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const [queryDraft, setQueryDraft] = React.useState(urlListState.query);
   const navigationType = useNavigationType();
   const routeLocation = useLocation();
-  const urlQueryRef = React.useRef(urlListState.query);
-  urlQueryRef.current = urlListState.query;
   React.useEffect(() => {
-    if (navigationType !== 'REPLACE') setQueryDraft(urlQueryRef.current);
-  }, [routeLocation.key, navigationType]);
+    if (navigationType !== 'REPLACE') setQueryDraft(urlListState.query);
+  }, [routeLocation.key, navigationType, urlListState.query]);
   const listState: MetadataListState = { ...urlListState, query: queryDraft };
   const updateListState = React.useCallback(
     (patch: Partial<MetadataListState>) => {

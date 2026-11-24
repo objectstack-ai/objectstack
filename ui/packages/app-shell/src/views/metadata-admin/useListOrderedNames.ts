@@ -61,6 +61,7 @@ interface Row {
 }
 
 const EMPTY: readonly string[] = [];
+const DEFAULT_SEARCHABLE = ['name', 'label', 'description'];
 
 /** The ordered names of `type`'s list, for the detail open at the current address. */
 export function useListOrderedNames(type: string): ListOrderedNames {
@@ -82,7 +83,10 @@ export function useListOrderedNames(type: string): ListOrderedNames {
   const config = resolveResourceConfig(type, entries.find((e) => e.type === type));
   const listInclude = config.listInclude;
   const primaryKey = config.primaryKey ?? 'name';
-  const searchableFields = config.searchableFields ?? ['name', 'label', 'description'];
+  const searchableFields = config.searchableFields ?? DEFAULT_SEARCHABLE;
+  const searchKey = searchableFields.join('\n');
+  const listFilter = config.listFilter;
+  const bundleMemberField = config.bundleMemberField;
 
   const host = useMetadataAreaHost();
   const activePackage = envScope ? null : host ? host.packageId : urlPackage;
@@ -97,7 +101,6 @@ export function useListOrderedNames(type: string): ListOrderedNames {
   const [rows, setRows] = React.useState<{ type: string; rows: Row[] } | 'error' | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    setRows(null);
     client
       .list<any>(type, listInclude ? { include: listInclude } : undefined)
       .then((list) => {
@@ -120,23 +123,21 @@ export function useListOrderedNames(type: string): ListOrderedNames {
 
   // The activation ledger, read only when the status filter needs it.
   const needsLedger = state.status !== 'all' && envScope && hasCatalogActivation(type);
-  const [ledger, setLedger] = React.useState<CatalogLedgerRead | 'error' | null>(null);
+  const [ledgerRead, setLedgerRead] = React.useState<{ type: string; read: CatalogLedgerRead | 'error' } | null>(null);
   React.useEffect(() => {
-    if (!needsLedger) {
-      setLedger(null);
-      return;
-    }
+    if (!needsLedger) return;
     const controller = new AbortController();
     readCatalogLedger(type, controller.signal).then(
       (read) => {
-        if (!controller.signal.aborted) setLedger(read);
+        if (!controller.signal.aborted) setLedgerRead({ type, read });
       },
       () => {
-        if (!controller.signal.aborted) setLedger('error');
+        if (!controller.signal.aborted) setLedgerRead({ type, read: 'error' });
       },
     );
     return () => controller.abort();
   }, [needsLedger, type]);
+  const ledger = needsLedger && ledgerRead?.type === type ? ledgerRead.read : null;
 
   return React.useMemo((): ListOrderedNames => {
     if (rows === 'error') return { status: 'error', names: EMPTY, fromList };
@@ -144,14 +145,14 @@ export function useListOrderedNames(type: string): ListOrderedNames {
     if (state.customizedOnly && customizations.status === 'loading') return { status: 'loading', names: EMPTY, fromList };
     if (needsLedger && ledger === null) return { status: 'loading', names: EMPTY, fromList };
 
-    const scoped = scopeListRows(rows.rows, { listFilter: config.listFilter, unscoped, activePackage, pairId });
+    const scoped = scopeListRows(rows.rows, { listFilter, unscoped, activePackage, pairId });
     const markOf = (row: Row) =>
       customizations.status === 'read'
         ? customizationMarkOf(
             {
               type,
               name: String(row.item[primaryKey] ?? ''),
-              member: bundleMemberOf(row.item, config.bundleMemberField),
+              member: bundleMemberOf(row.item, bundleMemberField),
               packageId: (row.item as { _packageId?: string })._packageId,
             },
             customizations.index,
@@ -166,7 +167,7 @@ export function useListOrderedNames(type: string): ListOrderedNames {
     const read: ListRowReader<Row> = {
       name: (row) => String(row.item[primaryKey] ?? ''),
       label: (row) => (typeof row.item.label === 'string' ? row.item.label : undefined),
-      matches: (row, query) => matchesQuery(row.item, query, searchableFields),
+      matches: (row, query) => matchesQuery(row.item, query, searchKey.split('\n')),
       source: (row) => row.source,
       ...(customizedOffered ? { customized: (row: Row) => markOf(row) !== null } : {}),
       ...(envScope && hasCatalogActivation(type)
@@ -182,7 +183,6 @@ export function useListOrderedNames(type: string): ListOrderedNames {
         : {}),
     };
     return { status: 'ready', names: orderedListNames(scoped, state, read), fromList };
-    // `config` is rebuilt every render; key on the members read instead (AGENTS.md #10).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, type, state, fromList, customizations, needsLedger, ledger, unscoped, activePackage, pairId, primaryKey, config.listFilter, config.bundleMemberField, searchableFields.join('\n')]);
+    // Keyed on the config members read, never on `config`, rebuilt every render.
+  }, [rows, type, state, fromList, customizations, needsLedger, ledger, envScope, unscoped, activePackage, pairId, primaryKey, listFilter, bundleMemberField, searchKey]);
 }
