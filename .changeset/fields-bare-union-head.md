@@ -14,12 +14,10 @@ What narrows: `zodIssuesToFields` (`@objectstack/spec/api`, re-exported by `@obj
 
 **BREAKING** for a client that reads a refused request's `fields[]` by position, or that looks for an `invalid_shape` entry carrying `Invalid input`. That entry named only the slot the union sat on; the entries that name the key and the constraint were always further down the same list, and they are now first. Read entries by `field` and `code`, not by index.
 
-FROM → TO, for a value refused by a `z.union` slot whose branches explain the failure:
+For a value refused by a `z.union` slot whose branches explain the failure:
 
-| | Was | Now |
-|:--|:--|:--|
-| `fields[]` | `{ field: 'u', code: 'invalid_shape', message: 'Invalid input' }`, then `{ field: 'u.a', code: 'required', … }` | `{ field: 'u.a', code: 'required', … }` only |
-| a union nested in a union | one `invalid_shape` / `Invalid input` entry per level, then the cause | the cause only |
+- FROM: `fields[]` opened with `{ field: 'u', code: 'invalid_shape', message: 'Invalid input' }`, followed by the entries that explain it, such as `{ field: 'u.a', code: 'required', … }`. A union nested in a union added one such entry per level before the cause.
+- TO: `fields[]` holds the explaining entries only, such as `{ field: 'u.a', code: 'required', … }`, at every depth.
 
 The fix for a caller that read `fields[0]` expecting the union's slot: find the entry whose `field` equals the slot or starts with the slot and a dot.
 
