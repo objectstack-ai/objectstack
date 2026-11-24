@@ -11,7 +11,8 @@
 
 import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, SetupFirstPageSlotProvider, setupMetadataStudioPath, studioLandingPath, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, SetupFirstPageSlotProvider, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
+import { studioLandingPath } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
 import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest } from '@object-ui/permissions';
 import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
