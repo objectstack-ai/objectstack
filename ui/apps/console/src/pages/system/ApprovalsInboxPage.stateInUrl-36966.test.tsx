@@ -184,7 +184,7 @@ afterEach(cleanup);
 describe('Approvals Inbox — the reading state survives a request page and Back (objectstack#36966)', () => {
   it('All + Recalled + object + sort + search → open a row → Back: the same tab, filters, search, sort and rows', async () => {
     renderAt(INBOX);
-    await screen.findByText('INV-1001');
+    await screen.findAllByText('INV-1001');
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'All' }), { button: 0 });
     await waitFor(() => expect(rowTitles()).toEqual(['INV-1001', 'EXP-2002', 'INV-3003', 'INV-4004']));
@@ -192,9 +192,10 @@ describe('Approvals Inbox — the reading state survives a request page and Back
     await waitFor(() => expect(rowTitles()).toEqual(['EXP-2002', 'INV-4004']));
     await choose('All objects', 'Invoice');
     await choose('Newest first', 'Oldest first');
-    fireEvent.change(screen.getByPlaceholderText('Search record, process, requester…'), { target: { value: 'inv' } });
+    // A search both recalled requests match, so the object select stays drawn.
+    fireEvent.change(screen.getByPlaceholderText('Search record, process, requester…'), { target: { value: '00' } });
     await waitFor(() => expect(approvalsApiStub.listRequests).toHaveBeenCalledWith(
-      expect.objectContaining({ q: 'inv', status: 'recalled' })));
+      expect.objectContaining({ q: '00', status: 'recalled' })));
     await waitFor(() => expect(rowTitles()).toEqual(['INV-4004']));
 
     fireEvent.click(screen.getAllByRole('row').find((r) => r.textContent?.includes('INV-4004'))!);
@@ -206,10 +207,10 @@ describe('Approvals Inbox — the reading state survives a request page and Back
     expect(trigger('Recalled')).toBeInTheDocument();
     expect(trigger('Invoice')).toBeInTheDocument();
     expect(trigger('Oldest first')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Search record, process, requester…')).toHaveValue('inv');
+    expect(screen.getByPlaceholderText('Search record, process, requester…')).toHaveValue('00');
     const params = new URL(where(), 'http://x').searchParams;
     expect(Object.fromEntries(params)).toEqual({
-      scope: 'all', status: 'recalled', object: 'invoice', sort: 'oldest', q: 'inv',
+      scope: 'all', status: 'recalled', object: 'invoice', sort: 'oldest', q: '00',
     });
   });
 
@@ -244,7 +245,7 @@ describe('Approvals Inbox — the reading state survives a request page and Back
         </Routes>
       </MemoryRouter>,
     );
-    await screen.findByText('INV-1001');
+    await screen.findAllByText('INV-1001');
     fireEvent.mouseDown(screen.getByRole('tab', { name: 'All' }), { button: 0 });
     await waitFor(() => expect(rowTitles()).toHaveLength(4));
     await choose('All statuses', 'Approved');
@@ -257,7 +258,7 @@ describe('Approvals Inbox — the reading state survives a request page and Back
 
   it('values the inbox does not offer read as the defaults', async () => {
     renderAt(`${INBOX}?scope=bogus&status=approved&sort=sideways`);
-    await screen.findByText('INV-1001');
+    await screen.findAllByText('INV-1001');
     // An unknown tab is "My Pending"; a status there would hide rows behind a
     // control the tab does not draw, so it is not applied.
     expect(selectedTab()).toMatch(/^My Pending/);
