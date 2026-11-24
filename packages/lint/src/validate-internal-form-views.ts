@@ -28,9 +28,34 @@
  * public form. A form view under any other name is a NAMED form, which an
  * action of type `form` opens by its name and which keeps loading: never
  * reported either.
+ *
+ * ## A default or create form an action opens by name (#36545)
+ *
+ * Seat ruling 5 on #36425: "A form an action opens by name (action type
+ * `form`, `/forms/:name`, `/apps/:app/forms/:name`) is not the object's create
+ * or edit form and keeps loading." So a default or `OBJECT.create` form that
+ * some `type: 'form'` action in the stack targets is not reported either.
+ *
+ * "By name" is matched the way the Console resolves it, and no looser: the
+ * action runner routes the target to `/forms/:name` and `FormPage` reads
+ * `/meta/view/:name` with that string, so the target must EQUAL the name the
+ * form is served under. A stored item is served under its own `name`; a
+ * container's form is served under the name the spec's own expansion gives it
+ * ({@link servedFormNames}: `expandViewContainer`, collisions included, on the
+ * object `deriveViewContainerObject` binds), never a hand-built
+ * `<object>.<key>`. An interpolated target names no form statically and
+ * exempts nothing. The actions read are the registered ones (`actions[]`,
+ * `objects[].actions[]`) and a page component's inline `properties.action`.
  */
 
+import {
+  deriveViewContainerObject,
+  expandViewContainer,
+  isAggregatedViewContainer,
+} from '@objectstack/spec';
 import { collectionEntries } from './collection-entries.js';
+import { recordsOf } from './object-graph.js';
+import { walkPageComponents } from './page-walk.js';
 import { formViewSites, viewObjectName } from './view-walk.js';
 
 export const FORM_VIEW_INTERNAL_NOT_LOADED = 'form-view-internal-not-loaded';
@@ -62,6 +87,67 @@ function isPublicForm(form: AnyRec): boolean {
   return isRec(form.sharing) && form.sharing.enabled === true;
 }
 
+/**
+ * The literal target of a `type: 'form'` action — the view name the Console
+ * opens — or `undefined` for any other action and for an interpolated target.
+ */
+function formActionTarget(action: unknown): string | undefined {
+  if (!isRec(action) || action.type !== 'form') return undefined;
+  const target = strName(action.target);
+  return target && !target.includes('{') ? target : undefined;
+}
+
+/**
+ * Every view name a `type: 'form'` action in the stack opens: registered
+ * actions (top-level and object-bound) and the inline action a page component
+ * carries (`properties.action`, e.g. an `element:button`).
+ */
+function formNamesOpenedByAction(stack: AnyRec): Set<string> {
+  const opened = new Set<string>();
+  const add = (action: unknown) => {
+    const target = formActionTarget(action);
+    if (target) opened.add(target);
+  };
+  for (const action of recordsOf(stack.actions)) add(action);
+  for (const obj of recordsOf(stack.objects)) {
+    for (const action of recordsOf(obj.actions)) add(action);
+  }
+  const pages = recordsOf(stack.pages);
+  for (let i = 0; i < pages.length; i++) {
+    for (const { component } of walkPageComponents(pages[i], `pages[${i}]`)) {
+      if (isRec(component.properties)) add(component.properties.action);
+    }
+  }
+  return opened;
+}
+
+/**
+ * The names a view container's forms are served under, keyed by the site's
+ * `surface` (`form`, `formViews.KEY`): the spec's own expansion, run on the
+ * object the registrars bind the container to. Empty when the container binds
+ * no object, which the runtime does not expand either.
+ */
+function servedFormNames(view: AnyRec): Map<string, string> {
+  const names = new Map<string, string>();
+  if (!isAggregatedViewContainer(view)) return names;
+  const object = deriveViewContainerObject(view);
+  if (!object) return names;
+  const forms = expandViewContainer(object, view).filter((item) => item.viewKind === 'form');
+  // The expansion serves each `formViews` entry that is an object, in key
+  // order (its own skip test, copied), then `form` (the one item flagged
+  // `isDefault`).
+  const named = forms.filter((item) => item.isDefault !== true);
+  const keys = view.formViews && typeof view.formViews === 'object'
+    ? Object.entries(view.formViews).filter(([, v]) => !!v && typeof v === 'object').map(([k]) => k)
+    : [];
+  keys.forEach((key, i) => {
+    if (named[i]) names.set(`formViews.${key}`, named[i].name);
+  });
+  const defaultForm = forms.find((item) => item.isDefault === true);
+  if (defaultForm) names.set('form', defaultForm.name);
+  return names;
+}
+
 /** What the author reads: the card's sentence, the same at every site. */
 const HINT =
   'Internal forms are no longer loaded: use field groups (`fieldGroups`) for sections, and put required ' +
@@ -75,6 +161,7 @@ const HINT =
  */
 export function validateInternalFormViews(stack: AnyRec): InternalFormViewFinding[] {
   const findings: InternalFormViewFinding[] = [];
+  const openedByAction = formNamesOpenedByAction(stack);
 
   for (const { rec: view, path: viewPath } of collectionEntries(stack.views, 'views')) {
     // A container carries no name of its own: it is named by the object its
@@ -86,15 +173,17 @@ export function validateInternalFormViews(stack: AnyRec): InternalFormViewFindin
       ?? (isRec(view.form) ? viewObjectName(view.form) : undefined)
       ?? (isRec(view.list) ? viewObjectName(view.list) : undefined)
       ?? viewPath;
-    const sites: Array<{ form: AnyRec; path: string; surface: string }> = [];
+    // `served` is the name the Console opens the form under, when it has one.
+    const sites: Array<{ form: AnyRec; path: string; surface: string; served?: string }> = [];
+    const served = servedFormNames(view);
 
     for (const site of formViewSites(view, viewPath)) {
       if (site.kind === 'form') {
-        sites.push({ form: site.view, path: site.path, surface: site.surface });
+        sites.push({ form: site.view, path: site.path, surface: site.surface, served: served.get(site.surface) });
       } else if (site.kind === 'formView') {
         const key = site.surface.slice('formViews.'.length);
         if (key === 'create' || key === 'default') {
-          sites.push({ form: site.view, path: site.path, surface: site.surface });
+          sites.push({ form: site.view, path: site.path, surface: site.surface, served: served.get(site.surface) });
         }
       }
     }
@@ -107,12 +196,14 @@ export function validateInternalFormViews(stack: AnyRec): InternalFormViewFindin
       if (view.isDefault === true || isCreate) {
         const form = isRec(view.config) ? view.config : view;
         const path = isRec(view.config) ? `${viewPath}.config` : viewPath;
-        sites.push({ form, path, surface: isRec(view.config) ? 'config' : '' });
+        sites.push({ form, path, surface: isRec(view.config) ? 'config' : '', served: strName(view.name) });
       }
     }
 
     for (const site of sites) {
       if (isPublicForm(site.form)) continue;
+      // Opened by name by a `type: 'form'` action: it keeps loading (#36545).
+      if (site.served && openedByAction.has(site.served)) continue;
       const where = site.surface ? `view "${viewName}" · ${site.surface}` : `view "${viewName}"`;
       findings.push({
         severity: 'warning',

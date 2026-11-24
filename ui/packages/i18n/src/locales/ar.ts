@@ -3107,6 +3107,13 @@ const ar = {
       skipped_many: 'تم استبعاد {{count}} سجلًا من التحديد لأنها لا تتيح تغيير المالك.',
       skipped_other: 'تم استبعاد {{count}} سجل من التحديد لأنها لا تتيح تغيير المالك.',
       noClient: 'لا يمكن تغيير المالك هنا.',
+      cascadeHeading: 'نقل السجلات المرتبطة أيضًا',
+      cascadeHelp: 'تنتقل إلى المالك الجديد أيضًا السجلات المرتبطة التي تشير إلى هذا السجل ويملكها المالك السابق.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'تعذّرت قراءة السجلات المرتبطة التي يمكن نقلها معه: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): نُقل {{moved}}، وتعذّر نقل {{failed}}.',
+      cascadeRemaining: 'بقيت مع المالك السابق بعد تجاوز حد 500 سجل في التغيير الواحد: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): تعذّرت قراءة السجلات المرتبطة: {{message}}',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
@@ -6561,6 +6568,8 @@ const ar = {
     sourceDefault: "افتراضي المؤسسة",
     sourceBuiltin: "افتراضي",
     sourceMandatory: "إلزامي",
+    followOrganization: "اتباع إعداد المؤسسة",
+    followOrganizationFor: "{{setting}}: اتباع إعداد المؤسسة",
   },
   slackLink: {
     title: "رسائل Slack المباشرة",

@@ -240,6 +240,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
       },
+      "fields.transferBehavior": {
+        label: "所有者変更の連動",
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
+      },
       "fields.multiple": {
         label: "複数選択",
         helpText: "複数レコードの選択を許可"
@@ -768,6 +772,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
+      },
+      transferBehavior: {
+        label: "所有者変更の連動",
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
       },
       relatedListFilter: {
         label: "関連リストのフィルター",

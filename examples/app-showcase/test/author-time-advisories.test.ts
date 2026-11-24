@@ -131,7 +131,10 @@ export const ALLOWED_ADVISORIES: readonly Allowed[] = [
   },
 
   // ── Internal create / edit forms the Console no longer loads (warning) ────
-  { rule: 'form-view-internal-not-loaded', where: 'view "showcase_task" · form', reason: INERT_INTERNAL_FORM },
+  // Not here: `view "showcase_task" · form`. Three `type: 'form'` actions open it
+  // by its served name `showcase_task.form` (Log Time, New Task, the Overview's
+  // Create Task), so it keeps loading and the rule does not report it (#36545);
+  // the stale-entry direction below fails if it ever fires again.
   { rule: 'form-view-internal-not-loaded', where: 'view "showcase_project" · form', reason: INERT_INTERNAL_FORM },
   { rule: 'form-view-internal-not-loaded', where: 'view "showcase_business_unit" · form', reason: INERT_INTERNAL_FORM },
   { rule: 'form-view-internal-not-loaded', where: 'view "showcase_contact" · form', reason: INERT_INTERNAL_FORM },

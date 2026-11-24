@@ -18,6 +18,7 @@ import { SysApprovalRequestDetailPage } from './sys-approval-request.page.js';
 import { APPROVALS_INBOX_PATH, renderConfirmPage, renderResultPage } from './action-link-pages.js';
 import {
   ApprovalService,
+  actionRedemptionPage,
   requestVisibilitySourceOf,
   slotLabelSourceOf,
   ESCALATION_JOB_NAME,
@@ -575,13 +576,17 @@ export class ApprovalsServicePlugin implements Plugin {
         });
         rawApp.post(ACT_PATH, async (c: any) => {
           let token = '';
+          let comment: unknown;
           try {
             const body = await c.req.parseBody();
             token = String(body?.token ?? '');
+            comment = body?.comment;
           } catch { /* fall through to invalid */ }
-          const out = await svc.redeemActionToken(token);
-          if (!out.ok) return html(c, renderResultPage(out.reason, out.request, inboxHref()), 200);
-          return html(c, renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request, inboxHref()));
+          // [#35722] One page builder for both doors: a reject with no reason
+          // is answered the confirm page again, as `handleActionPage` answers it.
+          const out = await svc.redeemActionToken(token, { comment });
+          const page = actionRedemptionPage(out, { token, actPath: ACT_PATH, inboxHref: inboxHref() });
+          return html(c, page.html, page.status);
         });
         ctx.logger.info(`ApprovalsServicePlugin: actionable-link pages mounted at ${ACT_PATH}`);
       } catch { /* http server not installed */ }
