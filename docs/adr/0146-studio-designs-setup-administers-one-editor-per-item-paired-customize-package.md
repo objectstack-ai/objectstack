@@ -305,6 +305,40 @@ Where each of the epic's fifteen decisions is written:
 | 14 | Human drafts that exist at rollout | this amendment, *One save model* |
 | 15 | "From Studio" travels in the address | this amendment, *A dashboard or a report opens in the app* |
 
+> **Note (2026-11-24, epic [#36359](https://github.com/objectstack-ai/objectstack/issues/36359)).** D1 and the amendment above
+> speak of Studio. The running app is an editing surface too, for a workspace administrator. The maintainer's words
+> on the epic (2026-11-22), quoted in part: 「我同意先做页面上的「编辑」」 · 「按这个改，重画」 · 「而且不需要 studio
+> 打开了」. What is edited there, without opening Studio:
+>
+> - **The app's layout, in design mode** (`ui/packages/app-shell/src/layout/designMode.tsx`), entered from the
+>   app-name menu ([D5](#d5)'s note of the same date) and never offered on a phone. It edits the app's menu
+>   ([#36363](https://github.com/objectstack-ai/objectstack/issues/36363)) and, on an object's pages, which actions are pinned
+>   in the header ([#36366](https://github.com/objectstack-ai/objectstack/issues/36366), the object's `actionLayout`,
+>   [D10](#d10)'s notes). Changes are staged: Save commits them together, Cancel drops them.
+> - **A dashboard, on its own page** ([#36372](https://github.com/objectstack-ai/objectstack/issues/36372)), and **a report, on
+>   its builder page** ([#36374](https://github.com/objectstack-ai/objectstack/issues/36374)). Each has its own Save. Design
+>   mode and these two editors exclude each other
+>   ([#36692](https://github.com/objectstack-ai/objectstack/issues/36692)).
+> - **A list or kanban view's settings, on the view**
+>   ([#35955](https://github.com/objectstack-ai/objectstack/issues/35955),
+>   [#36370](https://github.com/objectstack-ai/objectstack/issues/36370)).
+>
+> Each save is one item's. The item's draft is written with the first-write pin and that item is published in the
+> same act (`ui/packages/app-shell/src/views/runtime-metadata-persistence.ts#saveAndPublishRuntimeMetadata`, ruling
+> record [`7058616478`](https://github.com/objectstack-ai/objectstack/issues/35955#issuecomment-7058616478)). Over a draft
+> already pending on the item nothing is written and the save says so: a draft left in Studio is never overwritten,
+> and never published on its saver's behalf. Every write is judged again by the server's metadata doors.
+>
+> Where a save lands follows [D2](#d2) and [D3](#d3) for the menu, the action arrangement and a dashboard: the
+> item's own package when the server lists it writable, otherwise the paired `.custom` package, asked of the ensure
+> door. There the app and a dashboard are written as declared overrides, and the action arrangement as the pair's
+> object extension ([D10](#d10)). A view created in the app is saved into the app's package when that is writable,
+> otherwise into its pair. A report's save, and a change to an existing view's settings, name no package: the server
+> addresses the item's stored row in a package when its rows are bound to exactly one, and the package-unbound row
+> otherwise.
+>
+> D1 and the amendment above are left as written; read "Studio owns all metadata" with this note.
+
 ### D2 — One mechanism: a customization of an installed package is an item of its paired `.custom` package, and overriding an existing item is a declaration in that item's body {#d2}
 
 **Where a customization lives.** Every change a customer makes to an installed base — HotCRM — is an item of the
@@ -621,6 +655,30 @@ still draw nothing. (#27356 row 12, letter B; landed as PR #28076, 2026-10-30.)
 
 Maintainer, verbatim: 「「Edit {app} in Studio」代码包/已安装包一律不画，合理吗？ai写完代码，人类需要进去确认啊」.
 
+> **Note (2026-11-24, [#36363](https://github.com/objectstack-ai/objectstack/issues/36363),
+> [#36485](https://github.com/objectstack-ai/objectstack/issues/36485) and
+> [#36758](https://github.com/objectstack-ai/objectstack/issues/36758)).** D5 names two places that draw the bridge, the app
+> switcher row and the app bar entry. From 768 px up the app shell now draws no top bar, and the page's button group
+> carries nothing that opens Studio or edits the app (`ui/packages/app-shell/src/layout/ShellPageActions.tsx`, PR
+> [#36621](https://github.com/objectstack-ai/objectstack/pull/36621)). There the entries are two rows of the sidebar's
+> app-name menu (`ui/packages/app-shell/src/layout/SidebarAppMenu.tsx`, PR
+> [#36789](https://github.com/objectstack-ai/objectstack/pull/36789); the maintainer's ruling on #36758:
+> 「编辑布局+编辑应用两行」, and on the wording, 「设计布局 编辑应用」):
+>
+> - **"Design layout"** (zh 「设计布局」) turns on the design mode for the app on screen ([D1](#d1)'s note of the
+>   same date) and opens no Studio. It is drawn for the principals D5's gate admits, for a writable package and a
+>   read-only one alike. On an installed app the mode's changes are saved as this environment's customization, in the
+>   App's paired `.custom` package ([D3](#d3); PR [#36437](https://github.com/objectstack-ai/objectstack/pull/36437)). For a
+>   read-only package it is not drawn where the customization door is walled off for the caller: an organization wall,
+>   and a caller who is not a platform administrator.
+> - **"Edit app"** (zh 「编辑应用」) is D5's bridge: it opens the app's package in Studio. For a read-only package the
+>   row reads "View in Studio" (zh 「在 Studio 中查看」) behind an eye, never a pencil.
+>
+> Where a top bar is still drawn, below 768 px and on an app's documentation pages, D5's two places are as D5 says:
+> the app switcher's Studio row keeps the pencil or the eye, and so does the bar's own entry where the bar has room
+> for it. Kernel packages and an unread or failed package list still draw nothing. D5 is left as written; read "the
+> app bar entry" with this note.
+
 ### D6 — Not done, recorded so silence cannot be read as consent {#d6}
 
 - **No per-organization override.** ADR-0131 D6's environment scope stands: `.custom` is the environment's package;
@@ -782,6 +840,37 @@ name suffixed, the base untouched (N-23c).
 > where it declares `relatedLists`, a group or field placement where it declares `fieldGroups`); elsewhere the base's
 > automatic arrangement stays and the boot log names the placement. Studio shows such an item read-only with its
 > source package, as it shows a contributed item ([D3](#d3)).
+
+> **Note (2026-11-24, [#36498](https://github.com/objectstack-ai/objectstack/issues/36498), built by
+> [#36517](https://github.com/objectstack-ai/objectstack/pull/36517)).** The rule of the 2026-11-22 note has one exception:
+> the paired `.custom` package of the App the object belongs to. Maintainer, verbatim:
+> 「软件包字段、子表自定义分三种，原始软件包，继承软件包和环境管理员覆盖，继承软件包 我记得已经有一套标准，只能申明插入位置，原始软件包、环境管理员
+> 应该可以申明完整的配置」. The pair's object extension may declare `fieldGroups` and `relatedLists`, in the shape an
+> object declares them in. Each key it writes replaces, whole, the result of the base's arrangement and every
+> extension's placements; a key it does not write keeps that result. Nothing is merged entry by entry. A field no
+> group lists still shows, after the last group. A tab no entry names still shows, after the listed ones: only
+> `{ list, hidden: true }` hides it. The registry fold applies the pair's keys last, after the placements
+> (`packages/objectql/src/registry-custom-arrangement.ts#applyCustomArrangement`).
+>
+> Any other package that writes either key on an extension is refused by one judge
+> (`packages/metadata-protocol/src/protocol-extension-arrangement.ts#judgeExtensionArrangement`): at the save, the
+> restore and the draft promotion of the item (`VALIDATION_ERROR` / 400), at `os validate` and `os build`, and at
+> marketplace install. The refusal prescribes `place`. A `.custom` package that is not the object's pair is not
+> applied, and the boot log names it. Where the App's pair and a per-package pair an earlier version created both
+> write a key, the App's pair is served ([D3](#d3)). The 2026-11-22 note is left as written; read "the base's
+> arrangement stays the base's" with this note.
+
+> **Note (2026-11-24, [#36366](https://github.com/objectstack-ai/objectstack/issues/36366), built by
+> [#36629](https://github.com/objectstack-ai/objectstack/pull/36629)).** `actionLayout` is the third key of that exception
+> (`packages/spec/src/data/field-customization.ts#CUSTOM_ARRANGEMENT_KEYS`). It arranges an object's actions for one
+> scope each, in a `list` arm and a `record` arm
+> ([ADR-0085](./0085-object-semantic-roles-over-surface-hint-blocks.md) §2's note of 2026-11-23). On an object
+> extension only the object's paired `.custom` package may write it. Any other package is refused by the same judge
+> at the same doors; for this key the refusal prescribes the action's own `locations` and `order`. Each arm the pair
+> writes replaces the served arm for that scope, whole; an arm it does not write stays. The server's doors refuse the
+> shape, not the reference: a name that is no action of the object, or one not placed in the arm's scope, is refused
+> by design mode's Save and by the CLI rule
+> (`packages/lint/src/validate-object-action-layout.ts#validateObjectActionLayout`) only.
 
 ### D11 — Migration, then closure: package-less overlay rows become declared overrides, the package-less write closes, and the stopgaps retire {#d11}
 
