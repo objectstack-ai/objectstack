@@ -49,7 +49,11 @@ export function resolveObjectGridActionsColumn({
   /**
    * objectstack#36911 — the approval locks of the rows on screen, the read the
    * select-first cells ask (`useRowApprovalLocks`). A row a read ANSWERED as
-   * locked offers no Edit; Delete is untouched.
+   * locked offers no Edit. Delete is untouched, which is right only while the
+   * read answers for a record held by ITS OWN approval: the server deletes such
+   * a record and cancels its request. A line held because its MASTER is held
+   * refuses delete too; if the read ever reports those lines, it must tell
+   * the two apart before this menu reads it (#37041).
    */
   approvalLocks: RowApprovalLocks;
   /**
@@ -99,8 +103,9 @@ export function resolveObjectGridActionsColumn({
   // NON-AUTHOR SURFACE — see the `maxInlineActions` prop below.
   const maxInlineRowActions: number = foldInlineRowActions ? 0 : ((schema as any).maxInlineRowActions ?? 1);
   /**
-   * objectstack#36911 — is this row held by a locking approval, by a lock read
-   * that ANSWERED? The row is handed to the hook as no row at all, so its
+   * objectstack#36911 — is this row held by its own locking approval, by a lock
+   * read that ANSWERED? (The batch read answers for the record's own approval
+   * only, not for a line under a held master; see `approvalLocks` above.) The row is handed to the hook as no row at all, so its
    * `approval_status` column does not stand in: a read refused (501), failed,
    * answering `null` (a row the reader cannot read) or not yet asked leaves
    * Edit where the menu had it. An answer arriving re-renders the grid. The

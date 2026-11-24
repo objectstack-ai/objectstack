@@ -1488,8 +1488,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   //
   // objectstack#36911 — the row menu reads the same locks: a row an approval
   // locks offers no Edit, as the record page offers none (objectstack#35593).
-  // Delete stays: the server lets a locked record be deleted and cancels its
-  // request. So the hook also runs on a grid whose rows offer Edit. It still
+  // Delete stays for a record held by its own approval: the server deletes it
+  // and cancels its request. (The batch read reports only that case today, not
+  // a line held because its master is held, which refuses delete too; #37041.) So the hook also runs on a grid whose rows offer Edit. It still
   // reads nothing until it is asked: by a cell being selected, or by a row's
   // actions being reached for (`demandRowActions` below).
   const rowMenuOffersEdit = canEdit && !!onEdit;

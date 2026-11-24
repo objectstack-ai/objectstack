@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup, act } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import React from 'react';
@@ -48,6 +48,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 import { ObjectGrid } from '../ObjectGrid';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { __resetApprovalsServiceLatch } from '../hooks/useRowApprovalLocks';
+import { useListPageScope } from '../listPageScope';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
 
@@ -70,7 +71,17 @@ const server = {
   door: { kind: 'answers', locked: {} } as LockDoor,
   lockCalls: [] as Array<{ recordIds: string[] }>,
   responses: [] as Promise<unknown>[],
+  /** Set by {@link hold}: lock answers wait here until `release` is called. */
+  gate: null as Promise<void> | null,
+  release: () => {},
+  hold() {
+    server.gate = new Promise<void>((resolve) => {
+      server.release = () => resolve();
+    });
+  },
   reset() {
+    server.gate = null;
+    server.release = () => {};
     server.door = { kind: 'answers', locked: { [LOCKED_ROW.id]: true, [OPEN_ROW.id]: false } };
     server.lockCalls = [];
     server.responses = [];
@@ -88,6 +99,7 @@ const apiFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<R
   };
   if (url === LOCKS_PATH) {
     server.lockCalls.push(body);
+    if (server.gate) await server.gate;
     const door = server.door;
     if (door.kind === 'network') {
       const failed = Promise.reject(new TypeError('Failed to fetch'));
@@ -113,7 +125,17 @@ const apiFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<R
   });
 };
 
-function renderGrid(rows: Array<Record<string, unknown>> = [LOCKED_ROW, OPEN_ROW]) {
+/** The fixture page bar: it registers its page column as a list page scope. */
+const PageBar: React.FC = () => {
+  const [scope, setScope] = React.useState<HTMLElement | null>(null);
+  useListPageScope(scope);
+  return <div ref={(el) => setScope(el?.parentElement ?? null)} data-testid="page-bar" />;
+};
+
+function renderGrid(
+  rows: Array<Record<string, unknown>> = [LOCKED_ROW, OPEN_ROW],
+  { listPage = false }: { listPage?: boolean } = {},
+) {
   const dataSource: any = {
     getObjectSchema: async (name: string) => ({
       name,
@@ -126,11 +148,15 @@ function renderGrid(rows: Array<Record<string, unknown>> = [LOCKED_ROW, OPEN_ROW
     columns: [{ field: 'name', label: 'Name' }],
     data: { provider: 'value', items: rows },
     pageSize: 500,
+    ...(listPage ? { selection: { type: 'multiple' } } : {}),
   };
   return render(
     <ActionProvider>
       <SchemaRendererProvider dataSource={dataSource} apiFetch={apiFetch}>
-        <ObjectGrid schema={schema} dataSource={dataSource} onEdit={() => {}} onDelete={() => {}} />
+        <div data-testid="page-column">
+          {listPage && <PageBar />}
+          <ObjectGrid schema={schema} dataSource={dataSource} onEdit={() => {}} onDelete={() => {}} />
+        </div>
       </SchemaRendererProvider>
     </ActionProvider>,
   );
@@ -227,5 +253,67 @@ describe('objectstack#36911 — the row menu follows the approval lock', () => {
     await waitFor(() => expect(server.lockCalls).toHaveLength(1));
     await settleReads();
     expect(await rowMenu(LOCKED_ROW.name)).toEqual({ edit: true, delete: true });
+  });
+});
+
+/**
+ * The list page draws no "⋮" column (objectstack#35554): one selected record's
+ * actions are offered by the selection bar, which resolves them from the same
+ * row menu props. Edit is a bar button there; Delete is a button or behind
+ * 「More」.
+ */
+async function selectionBarOffers(label: string): Promise<{ edit: boolean; delete: boolean }> {
+  const row = screen.getByText(label).closest('tr')!;
+  fireEvent.click(within(row).getByRole('checkbox'));
+  const bar = await screen.findByTestId('bulk-actions-bar');
+  await settleReads();
+  const offers = () => ({
+    edit: within(bar).queryByTestId('selection-action-edit') !== null
+      || screen.queryAllByTestId('row-action-builtin-edit').length > 0,
+    delete: within(bar).queryByTestId('selection-action-delete') !== null
+      || screen.queryAllByTestId('row-action-builtin-delete').length > 0,
+  });
+  const more = within(bar).queryByTestId('selection-actions-more');
+  if (more) await userEvent.click(more);
+  const answer = offers();
+  if (more) await userEvent.keyboard('{Escape}');
+  fireEvent.click(within(row).getByRole('checkbox'));
+  await waitFor(() => expect(screen.queryByTestId('bulk-actions-bar')).toBeNull());
+  return answer;
+}
+
+describe('objectstack#36911 — the list page selection bar follows the approval lock', () => {
+  it('a selected locked row offers no Edit and keeps Delete; a selected unlocked sibling keeps Edit', async () => {
+    const { container } = renderGrid([LOCKED_ROW, OPEN_ROW], { listPage: true });
+    await waitFor(() => expect(screen.getByText(LOCKED_ROW.name)).toBeInTheDocument());
+    // The list page scope: no Actions column, so the bar is the row's actions.
+    expect(container.querySelector('th[data-column-key="_actions"]')).toBeNull();
+    expect(server.lockCalls).toHaveLength(0);
+    // CONTROL first: the unlocked row offers Edit through the bar, so the pin
+    // below observes the lock, not a bar that never shows Edit.
+    expect(await selectionBarOffers(OPEN_ROW.name)).toEqual({ edit: true, delete: true });
+    expect(server.lockCalls).toHaveLength(1);
+    expect(await selectionBarOffers(LOCKED_ROW.name)).toEqual({ edit: false, delete: true });
+    expect(server.lockCalls).toHaveLength(1);
+  });
+});
+
+describe('objectstack#36911 — the read in flight', () => {
+  it('Edit shows while the lock read is on the wire, and leaves the open menu when it answers locked', async () => {
+    server.hold();
+    renderGrid();
+    await waitFor(() => expect(screen.getByText(LOCKED_ROW.name)).toBeInTheDocument());
+    const row = screen.getByText(LOCKED_ROW.name).closest('tr')!;
+    await userEvent.click(row.querySelector('[data-testid="row-action-trigger"]')!);
+    await waitFor(() => expect(server.lockCalls).toHaveLength(1));
+    // Unanswered: the menu is the one it always was.
+    expect(screen.getAllByTestId('row-action-builtin-edit').length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId('row-action-builtin-delete').length).toBeGreaterThan(0);
+    await act(async () => {
+      server.release();
+      await Promise.allSettled(server.responses);
+    });
+    await waitFor(() => expect(screen.queryAllByTestId('row-action-builtin-edit')).toHaveLength(0));
+    expect(screen.getAllByTestId('row-action-builtin-delete').length).toBeGreaterThan(0);
   });
 });
