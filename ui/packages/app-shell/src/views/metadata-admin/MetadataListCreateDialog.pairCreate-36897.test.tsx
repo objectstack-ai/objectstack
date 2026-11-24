@@ -18,7 +18,7 @@ import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const save = vi.fn(async () => ({}));
+const save = vi.fn(async (..._args: unknown[]) => ({}));
 vi.mock('./useMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useMetadataClient: () => ({ save }),

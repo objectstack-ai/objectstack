@@ -278,9 +278,12 @@ export function StudioMetadataArea({
   // server's write gate is the authority, and a failed probe must not lock an
   // author out of a writable package.
   const writable = useListedPackageWritable(packageId);
+  const readOnly = packageId !== null && writable === false;
+  // objectstack#36897 — the list offers a create exactly where `AreaCreate` opens one in the pair.
+  const pairCreate = readOnly && !!customization && !customization.walled;
   const host = React.useMemo<MetadataAreaHost>(
-    () => ({ packageId, readOnly: packageId !== null && writable === false, basePath }),
-    [packageId, writable, basePath],
+    () => ({ packageId, readOnly, basePath, ...(pairCreate ? { pairCreate } : {}) }),
+    [packageId, readOnly, basePath, pairCreate],
   );
   const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved, publishRefusalFor };
 

@@ -200,9 +200,9 @@ describe("a read-only base's create opens in its .custom pair (objectstack#36897
   const PAIR = `${READ_ONLY}.custom`;
   const customizationOf = (walled: boolean, ensurePackage: () => Promise<unknown>) =>
     ({ base: READ_ONLY, baseLabel: 'HR', basedOn: null, walled, pairId: null, ensure: async () => PAIR, ensurePackage }) as any;
-  function mountCustomized(customization: unknown) {
+  function mountCustomized(customization: unknown, at = `/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`) {
     return render(
-      <MemoryRouter initialEntries={[`/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`]}>
+      <MemoryRouter initialEntries={[at]}>
         <Where />
         <Routes>
           <Route path={`/studio/${READ_ONLY}/metadata/*`} element={<StudioMetadataArea packageId={READ_ONLY} customization={customization as any} />} />
@@ -228,6 +228,18 @@ describe("a read-only base's create opens in its .custom pair (objectstack#36897
     mountCustomized(customizationOf(false, ensurePackage));
     expect(await screen.findByTestId('studio-area-pair-create-refused')).toHaveTextContent('could not be created');
     expect(where()).toBe(`/studio/${READ_ONLY}/metadata/translation/new?package=${READ_ONLY}`);
+  });
+
+  it("the list is told it may offer the create exactly where the area opens one in the pair", async () => {
+    const list = `/studio/${READ_ONLY}/metadata/translation?package=${READ_ONLY}`;
+    mountCustomized(customizationOf(false, vi.fn()), list);
+    expect((await page()).host).toMatchObject({ readOnly: true, pairCreate: true });
+    cleanup();
+    mountCustomized(customizationOf(true, vi.fn()), list);
+    expect((await page()).host).not.toHaveProperty('pairCreate');
+    cleanup();
+    mount(list);
+    expect((await page()).host).not.toHaveProperty('pairCreate');
   });
 
   it('a walled door never asks, and lands on the list as before', async () => {

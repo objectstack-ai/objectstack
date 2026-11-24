@@ -116,7 +116,6 @@ import {
 } from './metadataListState.js';
 import { useListScrollRestore } from './useListScrollRestore.js';
 import { LIST_CREATE_DIALOG_TYPES, MetadataListCreateDialog } from './MetadataListCreateDialog.js';
-import { useCustomizeDoorWalled } from '../studio-design/StudioCustomizeControls.js';
 import { ObjectGrid } from '@object-ui/plugin-grid';
 import {
   LIST_PAGE_PARAM,
@@ -470,10 +469,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const [showCreateBase, setShowCreateBase] = React.useState(false);
   // objectstack#36897 — in the Studio area an object or a flow is created in
   // the list's own dialog (`MetadataListCreateDialog`), and on a read-only
-  // base every create lands in the base's `.custom` pair (ADR-0146 D3) — none
-  // where the ensure door refuses this caller, as on the pillars.
-  const customizeWalled = useCustomizeDoorWalled();
-  const createInPair = !!host?.readOnly && pairId !== null && !customizeWalled;
+  // base every create lands in the base's `.custom` pair (ADR-0146 D3) — where
+  // the area opens one there (`host.pairCreate`; none where the ensure door
+  // refuses this caller, as on the pillars).
+  const createInPair = !!host?.readOnly && host.pairCreate === true;
   const createInDialog = !!host?.packageId && LIST_CREATE_DIALOG_TYPES.includes(type);
   const [createOpen, setCreateOpen] = React.useState(false);
   const handleCreate = React.useCallback(() => {

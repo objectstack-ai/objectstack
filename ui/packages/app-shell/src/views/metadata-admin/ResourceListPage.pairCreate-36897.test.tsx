@@ -7,8 +7,9 @@
  *    package (ADR-0146 D3). An object and a flow open the list's own create
  *    dialog (`MetadataListCreateDialog`, whose landing is its own suite);
  *    another type goes to the area's create, which moves to the pair.
- *  - Under the customization wall nothing is offered: the server would
- *    refuse the pair's ensure for this caller.
+ *  - Where the area opens no create in the pair (`host.pairCreate`: the
+ *    customization wall, under which the server refuses the pair's ensure
+ *    for this caller) nothing is offered.
  *  - Setup (no area) is unchanged — the control: its 「新建」 goes to the
  *    item page's create and opens no dialog.
  */
@@ -45,11 +46,6 @@ vi.mock('../../hooks/useCanAuthorMetadata', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useCanAuthorMetadata: () => true,
 }));
-let walled = false;
-vi.mock('../studio-design/StudioCustomizeControls.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  useCustomizeDoorWalled: () => walled,
-}));
 
 import { MetadataResourceListPage } from './ResourceListPage';
 import { registerDefaultMetadataSchemas } from './default-schemas';
@@ -77,7 +73,6 @@ const fetchMock = vi.fn(async (url: string) => {
 });
 
 beforeEach(() => {
-  walled = false;
   fetchMock.mockClear();
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -86,7 +81,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const READ_ONLY_BASE: MetadataAreaHost = { packageId: BASE, readOnly: true, basePath: `/studio/${BASE}/metadata` };
+const READ_ONLY_BASE: MetadataAreaHost = { packageId: BASE, readOnly: true, basePath: `/studio/${BASE}/metadata`, pairCreate: true };
+/** The area opens no create in the pair: its ensure door refuses this caller (the wall), or it has no customization. */
+const NO_PAIR_CREATE: MetadataAreaHost = { ...READ_ONLY_BASE, pairCreate: false };
 
 function Location() {
   const l = useLocation();
@@ -131,9 +128,8 @@ describe('the list offers 「新建」 on a read-only base, into its pair (objec
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${BASE}/metadata/email_template/new?package=${BASE}`));
   });
 
-  it('under the customization wall nothing is offered', async () => {
-    walled = true;
-    mount(READ_ONLY_BASE, 'object');
+  it('where the area opens no create in the pair (the customization wall) nothing is offered', async () => {
+    mount(NO_PAIR_CREATE, 'object');
     await screen.findByTestId(`metadata-row-crm_object_one`);
     expect(createButton()).toBeNull();
   });
