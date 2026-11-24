@@ -143,6 +143,10 @@ import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel.js';
 import { buildAppSkeleton, type AppNavSeed } from './skeletons.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
+import { CommandPalette, type StudioPaletteSurface } from '../../chrome/CommandPalette.js';
+import { CommandPaletteProvider } from '../../context/CommandPaletteProvider.js';
+import { COMMAND_PALETTE_PARAM } from '../../urlParams.js';
+import { StudioPaletteGroups } from './StudioPaletteGroups.js';
 import { CreateItemDialog } from './CreateItemDialog.js';
 // objectui#11787 — the shared draft autosave, moved to its own module unchanged.
 import {
@@ -1237,6 +1241,39 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   // objectstack#26708 — a package that is not there has no menu.
   const showMenu = !pkgMissing;
 
+  // objectstack#36900 — ⌘K on every design page (decision 7 of #36890: an
+  // author switches items by ×, by ‹ › and by ⌘K). The palette lists this
+  // scope's menu, and on a package its items (`StudioPaletteGroups`); a pick
+  // leaves the way a menu entry does: it asks about unsaved work, and an
+  // address that is the page already open on another query re-enters the
+  // page, which reads its deep link once, at mount. The palette's own
+  // `?palette=` is not part of the page's query. A package that is not there
+  // has no menu, so its palette is the landing's.
+  const currentPathname = useLocation().pathname;
+  const openFromPalette = React.useCallback(
+    (to: string) => {
+      const [path, query = ''] = to.split('?');
+      if (path !== currentPathname) {
+        if (confirmLeavePillar()) shellNavigate(to);
+        return;
+      }
+      if (samePageQuery(query, currentSearch)) return;
+      if (reenterPillar()) shellNavigate(to);
+    },
+    [currentPathname, currentSearch, confirmLeavePillar, reenterPillar, shellNavigate],
+  );
+  const paletteSurface = React.useMemo<StudioPaletteSurface | undefined>(
+    () =>
+      showMenu
+        ? {
+            packageScope: packageId !== null,
+            renderGroups: (groupsProps) => <StudioPaletteGroups segment={scopeSegment} {...groupsProps} />,
+            open: openFromPalette,
+          }
+        : undefined,
+    [showMenu, packageId, scopeSegment, openFromPalette],
+  );
+
   const publishButton = (
     <button
       type="button"
@@ -1274,6 +1311,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   );
 
   return (
+    <CommandPaletteProvider>
     <SurfaceDeepLinkProvider onRequest={requestSurface}>
       <StudioSaveProvider value={saveBar.registry}>
       <StudioRightSlotContext.Provider value={slotHandle}>
@@ -1674,10 +1712,29 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
           }
         />
       </StudioMenuProvider>
+      {/* objectstack#36900 — the command palette, in its `studio` scope, with this page's groups. */}
+      <CommandPalette scope="studio" surface={paletteSurface} />
       </StudioRightSlotContext.Provider>
       </StudioSaveProvider>
     </SurfaceDeepLinkProvider>
+    </CommandPaletteProvider>
   );
+}
+
+/** The palette overlay's own query keys (`CommandPaletteProvider`: `?palette=`, alias `?cmdk=`). */
+const PALETTE_QUERY_KEYS = [COMMAND_PALETTE_PARAM, 'cmdk'];
+
+/**
+ * Whether `query` (no `?`) names the page `search` (with its `?`) already
+ * shows, the palette overlay's own keys aside and in any order.
+ */
+function samePageQuery(query: string, search: string): boolean {
+  const canonical = (params: URLSearchParams) => {
+    for (const key of PALETTE_QUERY_KEYS) params.delete(key);
+    params.sort();
+    return params.toString();
+  };
+  return canonical(new URLSearchParams(query)) === canonical(new URLSearchParams(search));
 }
 
 // objectstack#29988 — the Automations rail's flow helpers moved to their own module; re-exported for their pins.
