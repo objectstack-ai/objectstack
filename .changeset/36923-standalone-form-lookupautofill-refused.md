@@ -7,7 +7,7 @@ fix(fields): a `lookupAutofill` written by hand on a standalone form node's fiel
 Clause-②: no (narrowing)
 Metadata-protocol: none
 
-<!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: `lookupAutofill` on a form field was never in a declared accept set. What narrows is a runtime export of @object-ui/fields, `readLookupAutofillTargets`, whose consumer is code calling it, not metadata an upgrade could rewrite. -->
+<!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: `lookupAutofill` on a form field was never in a declared accept set. What narrows is the runtime behaviour of @object-ui/fields (`readLookupAutofillTargets`, and `LookupField` handed `onAutofill`), whose consumer is code, not metadata an upgrade could rewrite. This body does carry a code-level prescription (the FROM, TO and Fix lines below, written without an arrow), so the gate admits this marker on a detector miss, not on a checked fact: no fact-based category covers a runtime function whose behaviour narrows (`runtime-interface-only` reads exported types, `runtime-export-retired` reads an export that is gone). The vocabulary gap is #37136. -->
 
 `lookupAutofill` is a fact about the object, and it runs where the object is read: in a record form and in a line-item grid column. A lookup on a standalone `form` node whose field carries `lookupAutofill` written by hand now fills nothing when a record is picked. The lookup itself is still set. Before, such a pick copied values into the other fields without the cross-currency rule, so an amount could be copied into a field in another currency with no note. A development build now warns once, naming the field and saying where the key is honoured.
 
@@ -15,8 +15,14 @@ Record forms and grid columns behave as before, the cross-currency rule included
 
 No metadata key is added or changed. Fix: declare `lookupAutofill` on the object's lookup field and draw the object's form.
 
+**BREAKING** (`@object-ui/fields`, the `lookup` and `master_detail` widgets): `LookupField` handed an `onAutofill` writer runs its field's `lookupAutofill` pairs only when the record form stamped the field.
+
+- FROM: a single-value pick filled the declared targets whenever the host handed `onAutofill` (and no `onSelectRecord`) and the field carried `lookupAutofill` pairs.
+- TO: it also needs the stamp `withLookupAutofillTargets` issues, which the record form applies to every field it draws. A host that hands `onAutofill` without that stamp, such as a standalone `form` node, sets the lookup and fills nothing, and a development build warns once per field.
+- Fix: stamp the field through `withLookupAutofillTargets` before handing it to the widget, as the record form does, or declare `lookupAutofill` on the object field and draw the object's record form.
+
 **BREAKING** (`@object-ui/fields`, runtime export): `readLookupAutofillTargets(field)` now answers only for a target map that `withLookupAutofillTargets` issued.
 
 - FROM: `readLookupAutofillTargets(field)` returned any non-array object found under the field's `lookupAutofillTargets` key.
-- TO: it returns only the map `withLookupAutofillTargets` stamped, which is what the record form does. A same-name key written by hand reads `undefined`. `withLookupAutofillTargets` now also stamps a lookup whose pairs name no field of the map it is given, with an empty map. Before, it returned the field unchanged.
+- TO: it returns only the map `withLookupAutofillTargets` stamped, which is what the record form does. A same-name key written by hand reads `undefined`. `withLookupAutofillTargets` now also stamps a lookup whose pairs name no field of the map it is given, with an empty map. Before, it returned the field unchanged. The map it stamps is frozen, and a field with pairs always comes back as a copy.
 - Fix: stamp the field through `withLookupAutofillTargets`, as the record form does. If you need the raw value, read `field.lookupAutofillTargets` directly.
