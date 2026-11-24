@@ -109,6 +109,9 @@ import { StudioDesignSurface } from './StudioDesignSurface';
 // The source under test reaches dynamic imports of `@objectstack/lint`; their first
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
+// objectstack#36900 — the surface mounts the command palette, which reaches the
+// record preview's `lazy()` detail entry: its first load is paid here too.
+import '@object-ui/plugin-detail';
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 
