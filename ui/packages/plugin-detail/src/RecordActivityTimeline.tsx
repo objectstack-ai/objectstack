@@ -38,15 +38,15 @@ import { RichTextCommentInput } from './RichTextCommentInput';
 import { CommentAttachment, type Attachment } from './CommentAttachment';
 import { CommentBody } from './CommentAuthorControls';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { useRecordContext, useSafeFieldLabel } from '@object-ui/react';
+import { useRecordContext } from '@object-ui/react';
 import { useDetailTranslation } from './useDetailTranslation';
 import { CommentAuthorAvatar } from './CommentAuthorAvatar';
 import { FieldChangeItem } from './FieldChangeItem';
+import { useFieldChangeWording } from './fieldChangeText';
 import {
   foldFeedItems,
   readerRecordNameOf,
   withReaderRecordName,
-  type ActivityFieldChange,
   type ActivityTimelineEntry,
 } from './renderers/recordActivityFeed';
 import {
@@ -653,47 +653,13 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     });
   }, []);
 
-  // A changed field's label: the object's field label where the page has the
-  // object schema (`RecordContextProvider`), through the same translated
-  // `fieldLabel` the record's own sections use; the machine name otherwise.
-  const { fieldLabel, fieldOptionLabel } = useSafeFieldLabel();
-  const labelOfField = React.useCallback(
-    (name: string): string => {
-      const objectName = recordContext?.objectName;
-      const def = (recordContext?.objectSchema as { fields?: Record<string, { label?: unknown }> } | undefined)
-        ?.fields?.[name];
-      const authored = typeof def?.label === 'string' && def.label ? def.label : name;
-      return objectName ? fieldLabel(objectName, name, authored) : authored;
-    },
-    [recordContext?.objectName, recordContext?.objectSchema, fieldLabel],
-  );
-
-  // A changed field's side as this reader reads it, `null` when it is empty: an
-  // option by the field's option label in the reader's language (the served
-  // text, the label the writer read, when the field declares none for it), a
-  // yes/no by the pack's word, anything else by its served text.
-  const changeSideText = React.useCallback(
-    (change: FieldChangeEntry, side: 'old' | 'new'): string | null => {
-      const facts = change as ActivityFieldChange;
-      const option = side === 'old' ? facts.oldOption : facts.newOption;
-      const value = side === 'old' ? change.oldValue : change.newValue;
-      const display = side === 'old' ? change.oldDisplayValue : change.newDisplayValue;
-      if (option !== undefined) {
-        const objectName = recordContext?.objectName;
-        const options = (recordContext?.objectSchema as
-          | { fields?: Record<string, { options?: Array<{ value?: unknown; label?: unknown }> }> }
-          | undefined)?.fields?.[change.field]?.options;
-        const declared = Array.isArray(options) ? options.find((o) => String(o?.value) === option) : undefined;
-        const authored = typeof declared?.label === 'string' && declared.label ? declared.label : (display ?? option);
-        return objectName ? fieldOptionLabel(objectName, change.field, option, authored) : authored;
-      }
-      if (display !== undefined && display !== '') return display;
-      if (typeof value === 'boolean') {
-        return value ? t('common.yes', { defaultValue: 'Yes' }) : t('common.no', { defaultValue: 'No' });
-      }
-      return value === null || value === undefined || value === '' ? null : String(value);
-    },
-    [recordContext?.objectName, recordContext?.objectSchema, fieldOptionLabel, t],
+  // A changed field's label and each side of it as this reader reads it, from
+  // the object schema the page has (`RecordContextProvider`); the machine name
+  // and the served text otherwise. One wording with a field's change-history
+  // card (`useFieldChangeWording`).
+  const { labelOfField, changeSideText } = useFieldChangeWording(
+    recordContext?.objectName,
+    recordContext?.objectSchema,
   );
 
   const handleFilterChange = React.useCallback(

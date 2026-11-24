@@ -28,7 +28,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { FilterScopeProvider, RecordContextProvider, RecordPagePreferencesProvider, type RecordPagePreference } from '@object-ui/react';
 import { ComponentRegistry } from '@object-ui/core';
-import { RelatedList } from '../RelatedList';
+import { RelatedList, derivedAddOf } from '../RelatedList';
 import { resetRelatedTabConditionsForTests } from '../relatedTabConditions';
 
 // The related tab's conditions live in module memory for the visit (objectstack#35892).
@@ -76,9 +76,9 @@ const ROWS = [
   { id: 't2', subject: 'Call back', lead: 'L-1', owner_id: 'u-2', due_date: '2026-11-04' },
 ];
 const CANDIDATES = [
-  { id: 'c1', name: 'Alpha' },
-  { id: 'c2', name: 'Bravo' },
-  { id: 'c3', name: 'Charlie' },
+  { id: 'c1', name: 'Alpha', subject: 'Alpha' },
+  { id: 'c2', name: 'Bravo', subject: 'Bravo' },
+  { id: 'c3', name: 'Charlie', subject: 'Charlie' },
 ];
 
 interface Harness {
@@ -317,6 +317,63 @@ describe('「+ 添加」 is decided by the relationship, and a pick is one trans
       { object: 'task', action: 'create', data: { lead: 'L-1', product: 'c2' } },
       { object: 'task', action: 'create', data: { lead: 'L-1', product: 'c3' } },
     ]);
+  });
+
+  // objectstack#36659 — an account's 合同 tab: a contract is the account's
+  // master_detail child whose one other required lookup is its primary
+  // contact, scoped to the account by `dependsOn`, and a contract still needs
+  // its value and dates. Read as a catalog, the picker listed every account's
+  // contacts and a pick would have created a contract from a contact.
+  const CONTRACT_FIELDS = {
+    contract_number: { type: 'autonumber', label: 'Number', required: true },
+    lead: { type: 'master_detail', reference: 'lead', label: 'Account', required: true },
+    contact: { type: 'lookup', reference: 'contact', label: 'Primary Contact', required: true, dependsOn: ['lead'] },
+    contract_value: { type: 'currency', label: 'Value', required: true },
+    start_date: { type: 'date', label: 'Start', required: true },
+  };
+
+  it('a contract tab (required contact scoped by the account, value and dates to fill): 「+ 添加」 creates a contract directly, never a picker of contacts (objectstack#36659)', async () => {
+    const onNew = vi.fn();
+    const { dataSource } = renderList({ onNew, fields: CONTRACT_FIELDS });
+    await waitFor(() => expect(screen.getByText('Send quote')).toBeInTheDocument());
+    fireEvent.click(addButton()!);
+    expect(onNew).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('record-picker-dialog')).toBeNull();
+    expect(dataSource.find.mock.calls.some(([r]: [string]) => r === 'contact')).toBe(false);
+  });
+
+  it.each([
+    ['dependsOn names a field of the row', { dependsOn: ['lead'] }],
+    ['a lookupFilters comparand reads $record', { lookupFilters: [{ field: 'account', operator: 'eq', value: { $record: 'lead' } }] }],
+  ] as const)('a required lookup whose candidates depend on the row is no catalog: %s (objectstack#36659)', (_label, scope) => {
+    const fields = {
+      lead: { type: 'master_detail', reference: 'lead', required: true },
+      contact: { type: 'lookup', reference: 'contact', required: true, ...scope },
+    };
+    expect(derivedAddOf(fields, 'lead', 'task')).toBeUndefined();
+  });
+
+  it('a required lookup is no catalog while the child has another required field a pick leaves empty (objectstack#36659)', () => {
+    const fields = {
+      lead: { type: 'master_detail', reference: 'lead', required: true },
+      product: { type: 'lookup', reference: 'product', required: true },
+      contract_value: { type: 'currency', required: true },
+    };
+    expect(derivedAddOf(fields, 'lead', 'task')).toBeUndefined();
+  });
+
+  it('control: a line whose other required fields default, are read-only or computed keeps its catalog — and a static lookupFilters does not scope by the row (objectstack#36659)', () => {
+    const fields = {
+      line_number: { type: 'autonumber', required: true },
+      lead: { type: 'master_detail', reference: 'lead', required: true },
+      product: { type: 'lookup', reference: 'product', required: true, lookupFilters: [{ field: 'is_active', operator: 'eq', value: true }] },
+      quantity: { type: 'number', required: true, defaultValue: 1 },
+      stage: { type: 'select', required: true, options: [{ value: 'open', default: true }, { value: 'won' }] },
+      list_price: { type: 'currency', required: true, readonly: true },
+      total: { type: 'formula', required: true },
+      owner_id: { type: 'lookup', reference: 'sys_user' },
+    };
+    expect(derivedAddOf(fields, 'lead', 'task')).toEqual({ picker: { object: 'product' }, linkField: 'product' });
   });
 
   it('master_detail with no catalog: 「+ 添加」 creates a row directly', async () => {

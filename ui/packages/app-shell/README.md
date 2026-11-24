@@ -642,6 +642,12 @@ for admins and only when the app has an owning package (`_packageId`), and
 package writability stays a server-side concern — a read-only package opens in
 Studio as browse-only. For a read-only package the button draws an eye with the
 words "Open {app} in Studio" (ADR-0146 D5) instead of the pencil.
+From 768 px up, where no top bar is drawn, the sidebar's app menu carries the
+same entry on the same target and posture (`useAppStudioEntry`): "Edit app"
+behind a pencil, or "View in Studio" behind an eye for a read-only package.
+Beside it, "Design layout" turns on the shell's design mode, which edits the
+app's layout (its menu, header pins and page arrangement) in place; the mode's
+bar carries the same name.
 
 The way back is the 「‹ Back to app」 link at the left end of Studio's top bar
 (`StudioBackToApp`), followed by the app's name and the "Studio" mark. Entered
@@ -1435,6 +1441,14 @@ list offers "New OBJECT" for the app's objects the query names and "Create
 opens the object's create page (`/apps/APP/OBJECT/new`), the second with the
 words in its title field. An object is offered exactly where its list offers
 New. A footer names what Enter does to the selected entry.
+
+With nothing typed, the palette leads with a "Current page" group: on an
+object's list, the list's favorites entry and "Add view"; on a record page, the
+record's star and "Edit". Each row runs the page's own control and is listed
+only while the page draws that control. "Add view" and "Edit" are published by
+the page beside the control (`usePublishPageCommand`, `chrome/paletteCommands.ts`)
+with the control's own handler and verdict, so an Edit the header draws off is
+listed off, with the header's reason.
 
 ```tsx
 import { useCommandPalette } from '@object-ui/app-shell';

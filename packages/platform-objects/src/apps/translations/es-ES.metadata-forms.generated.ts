@@ -114,7 +114,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "Contraer",
-        helpText: "Si la sección se puede contraer, en el formulario de entrada y en la página de detalle del registro. Sin definir: none."
+        helpText: "Si la sección se puede contraer. El formulario de entrada lo aplica tal como está definido. En la página de registro predeterminada el lector puede contraer cualquier grupo con título, así que allí solo fija el estado inicial: Collapsed empieza contraído y los demás, abiertos. Sin definir: none."
       },
       "fieldGroups.visibleWhen": {
         label: "Condición de visibilidad",
@@ -239,6 +239,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.deleteBehavior": {
         label: "Comportamiento al eliminar",
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
+      },
+      "fields.transferBehavior": {
+        label: "Comportamiento al cambiar de propietario",
+        helpText: "Indica si «Cambiar propietario» en el registro referenciado también puede mover los registros que apuntan a él mediante este campo"
       },
       "fields.multiple": {
         label: "Selección múltiple",
@@ -468,6 +472,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.transfer": {
         label: "Cambiar propietario",
         helpText: "La acción Cambiar propietario, individual y masiva: activada la ofrece, desactivada la oculta. Sin definir: activada, salvo desactivada en un objeto de detalle controlled_by_parent. Solo se ofrece en un objeto cuyos registros tienen un propietario reasignable (ownership user o sin definir, sin managedBy, no es un objeto sys_, owner_id no es de solo lectura y, en un objeto externo, está declarado o mapeado); activarla en cualquier otro objeto se rechaza. Solo controla la acción, no una edición directa de owner_id. Un objeto {enabled, visibleWhen, disabledWhen} almacenado se edita clave por clave; escriba uno en el código fuente para condicionar la acción a cada registro."
+      },
+      actionLayout: {
+        label: "Disposición de acciones",
+        helpText: "El orden de las acciones de este objeto y cuáles son botones, por ámbito: pinned (como máximo 3 botones, en orden) y more (el orden del menú Más; una acción que no aparece en ninguno sigue en su orden predeterminado). Sin definir: cada superficie elige sus botones por el orden de las acciones, como antes."
+      },
+      "actionLayout.list": {
+        label: "Lista",
+        helpText: "La barra de herramientas de la página de lista, como {\"pinned\": [...], \"more\": [...]}: nombres de acciones colocadas en la barra de la lista; $import / $export solo en pinned. Como máximo 3 fijadas. Sin fijar, la página sigue mostrando su propio menú Importar / Exportar. os validate rechaza un nombre que no es una acción de este objeto o que no está en la barra de la lista; ese nombre no dibuja nada."
+      },
+      "actionLayout.record": {
+        label: "Registro",
+        helpText: "El encabezado del registro (página del registro, vista previa lateral, barra inferior del teléfono), como {\"pinned\": [...], \"more\": [...]}: nombres de acciones colocadas en el encabezado del registro o en su menú Más. Como máximo 3 fijadas. os validate rechaza un nombre que no es una acción de este objeto o que no está en la página del registro; ese nombre no dibuja nada."
       },
       editMode: {
         label: "Modo de edición",
@@ -756,6 +772,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "Comportamiento al eliminar",
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
+      },
+      transferBehavior: {
+        label: "Comportamiento al cambiar de propietario",
+        helpText: "Indica si «Cambiar propietario» en el registro referenciado también puede mover los registros que apuntan a él mediante este campo"
       },
       relatedListFilter: {
         label: "Filtro de lista relacionada",
@@ -2178,7 +2198,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Etiqueta"
       },
       description: {
-        label: "Descripción"
+        label: "Descripción",
+        helpText: "Una frase sobre lo que muestra este informe; aparece bajo su nombre."
       },
       type: {
         label: "Tipo",
@@ -2260,9 +2281,33 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rango de fechas",
         helpText: "Periodo predeterminado e interruptor de rango personalizado. La dimensión debe ser una dimensión de fecha del conjunto de datos; déjela vacía cuando el conjunto de datos tenga exactamente una."
       },
+      "dateRange.dimension": {
+        label: "Campo de fecha",
+        helpText: "La agrupación de fecha de la fuente de datos a la que se aplica el período. Déjelo vacío si la fuente de datos solo tiene una."
+      },
+      "dateRange.defaultRange": {
+        label: "Período predeterminado",
+        helpText: "El período con el que se abre el informe."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Permitir rango personalizado",
+        helpText: "Permite que cada persona elija sus propias fechas de inicio y fin."
+      },
       exportOptions: {
         label: "Opciones de exportación",
         helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto del conjunto de datos."
+      },
+      "exportOptions.formats": {
+        label: "Formatos",
+        helpText: "Los formatos de descarga ofrecidos. Sin definir, se ofrecen csv y xlsx; una lista vacía desactiva las descargas."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Incluir encabezados",
+        helpText: "Pone los nombres de columna en la primera fila del archivo descargado."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "Nombre de archivo",
+        helpText: "El inicio del nombre del archivo descargado, en lugar del nombre del informe."
       }
     }
   },

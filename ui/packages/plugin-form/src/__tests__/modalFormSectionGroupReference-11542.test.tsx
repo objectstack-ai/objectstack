@@ -14,10 +14,12 @@
  *
  * The console's More actions › Edit / New dialog and an action-opened modal do
  * not go through `ObjectForm`: `AppContent` and `useActionModal` in
- * `@object-ui/app-shell` mount `ModalForm` themselves and spread the object's
- * default form view into it through `resolveFormViewLayout`, which hands
- * `formView.sections` over exactly as authored (with `contentLayout: 'tabbed'`
- * for a tabbed view). `ObjectForm` resolves `{ group }` sections in
+ * `@object-ui/app-shell` mount `ModalForm` themselves. Until #36425 they spread
+ * the object's default form view into it, handing `formView.sections` over
+ * exactly as authored (with `contentLayout: 'tabbed'` for a tabbed view); since
+ * #36425 they load no form view and lay the record out by its field groups, so
+ * these pins hold `ModalForm`'s own handling of a `{ group }` section for any
+ * host that still passes one. `ObjectForm` resolves `{ group }` sections in
  * `withGroups`, above its routing fork, so its own modal route
  * (`formType: 'modal'`) was covered by objectui#7051 — but a host that skips
  * `ObjectForm` skipped that resolution too. A `{ group }` section reached

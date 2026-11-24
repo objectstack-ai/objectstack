@@ -114,7 +114,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
-        helpText: "Ob der Abschnitt im Eingabeformular und auf der Datensatz-Detailseite eingeklappt werden kann. Nicht gesetzt: nein."
+        helpText: "Ob der Abschnitt eingeklappt werden kann. Das Eingabeformular folgt der Einstellung. Auf der Standard-Datensatzseite kann der Leser jede Gruppe mit Titel einklappen; dort legt die Einstellung nur den Anfangszustand fest: Collapsed beginnt eingeklappt, die anderen offen. Nicht gesetzt: nein."
       },
       "fieldGroups.visibleWhen": {
         label: "Sichtbar wenn",
@@ -239,6 +239,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.deleteBehavior": {
         label: "Verhalten beim Löschen",
         helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
+      },
+      "fields.transferBehavior": {
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
       },
       "fields.multiple": {
         label: "Mehrfach",
@@ -468,6 +472,18 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "Inhaber ändern",
         helpText: "Die Aktion „Inhaber ändern“, einzeln und als Massenaktion: ein bietet sie an, aus blendet sie aus. Nicht gesetzt: ein, außer aus auf einem controlled_by_parent-Detailobjekt. Nur auf einem Objekt angeboten, dessen Datensätze einen neu zuweisbaren Inhaber haben (ownership user oder nicht gesetzt, kein managedBy, kein sys_-Objekt, owner_id nicht schreibgeschützt und auf einem externen Objekt deklariert oder zugeordnet); das Einschalten auf jedem anderen Objekt wird abgelehnt. Es steuert nur die Aktion, nicht eine einfache Bearbeitung von owner_id. Ein gespeichertes Objekt {enabled, visibleWhen, disabledWhen} wird Schlüssel für Schlüssel bearbeitet; schreiben Sie eines im Quelltext, um die Aktion von jedem Datensatz abhängig zu machen."
+      },
+      actionLayout: {
+        label: "Aktionsanordnung",
+        helpText: "Die Reihenfolge der Aktionen dieses Objekts und welche davon Schaltflächen sind, je Bereich: pinned (höchstens 3 Schaltflächen, in Reihenfolge) und more (die Reihenfolge des Menüs „Mehr“; eine in keinem von beiden genannte Aktion folgt in ihrer Standardreihenfolge). Nicht gesetzt: Jede Oberfläche wählt ihre Schaltflächen wie bisher nach der Reihenfolge der Aktionen."
+      },
+      "actionLayout.list": {
+        label: "Liste",
+        helpText: "Die Symbolleiste der Listenseite, als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Listen-Symbolleiste; $import / $export nur in pinned. Höchstens 3 angeheftet. Nicht angeheftet zeigt die Seite weiterhin ihr eigenes Import-/Export-Menü. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht in der Listen-Symbolleiste platziert ist; ein solcher Name zeichnet nichts."
+      },
+      "actionLayout.record": {
+        label: "Datensatz",
+        helpText: "Die Datensatzkopfzeile (Datensatzseite, Seitenvorschau, Leiste unten auf dem Telefon), als {\"pinned\": [...], \"more\": [...]}: Namen von Aktionen in der Datensatzkopfzeile oder ihrem Menü „Mehr“. Höchstens 3 angeheftet. os validate lehnt einen Namen ab, der keine Aktion dieses Objekts ist oder nicht auf der Datensatzseite platziert ist; ein solcher Name zeichnet nichts."
       },
       editMode: {
         label: "Bearbeitungsmodus",
@@ -756,6 +772,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "Verhalten beim Löschen",
         helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
+      },
+      transferBehavior: {
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
       },
       relatedListFilter: {
         label: "Filter der verknüpften Liste",
@@ -2178,7 +2198,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Bezeichnung"
       },
       description: {
-        label: "Beschreibung"
+        label: "Beschreibung",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Typ",
@@ -2260,9 +2281,33 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Datumsbereich",
         helpText: "Standardzeitraum und Umschalter für einen benutzerdefinierten Bereich. Die Dimension muss eine Datumsdimension des Datasets sein; leer lassen, wenn das Dataset genau eine hat."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Exportoptionen",
         helpText: "Download-Formate (csv, xlsx) und Dateiname. Wer herunterladen darf, regelt die Exportberechtigung für das Dataset-Objekt."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

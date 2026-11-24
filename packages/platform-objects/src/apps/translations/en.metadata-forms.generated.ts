@@ -114,7 +114,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Collapse",
-        helpText: "Whether the section can be collapsed, on the entry form and the record detail page. Unset: none."
+        helpText: "Whether the section can be collapsed. The entry form follows it as set. The default record page lets the reader fold every titled group, so there it only sets the first state: Collapsed starts closed, the others start open. Unset: none."
       },
       "fieldGroups.visibleWhen": {
         label: "Visible When",
@@ -239,6 +239,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.deleteBehavior": {
         label: "Delete Behavior",
         helpText: "What happens when the referenced record is deleted"
+      },
+      "fields.transferBehavior": {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
       },
       "fields.multiple": {
         label: "Multiple",
@@ -468,6 +472,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "Change Owner",
         helpText: "The Change Owner action, single and bulk: on offers it, off hides it. Unset: on, except off on a controlled_by_parent detail. Offered only on an object whose records have a reassignable owner (ownership user or unset, no managedBy, not a sys_ object, owner_id not readonly and, on an external object, declared or mapped); turning it on anywhere else is refused. It gates the action only, not a plain edit of owner_id. A stored {enabled, visibleWhen, disabledWhen} object is edited key by key; write one in source to gate the action on each record."
+      },
+      actionLayout: {
+        label: "Action Layout",
+        helpText: "The order of this object's actions and which are buttons, per scope: pinned (at most 3 buttons, in order) and more (the More menu's order; an action named in neither follows in its default order). Unset: each surface picks its buttons by the actions' order, as before."
+      },
+      "actionLayout.list": {
+        label: "List",
+        helpText: "The list page toolbar, as {\"pinned\": [...], \"more\": [...]}: action names placed on the list toolbar; $import / $export only in pinned. At most 3 pinned. Not pinned, the page still draws its own Import / Export menu. os validate refuses a name that is no action of this object or is not placed on the list toolbar; such a name draws nothing."
+      },
+      "actionLayout.record": {
+        label: "Record",
+        helpText: "The record header (record page, side preview, phone bar), as {\"pinned\": [...], \"more\": [...]}: action names placed in the record header or its More menu. At most 3 pinned. os validate refuses a name that is no action of this object or is not placed on the record page; such a name draws nothing."
       },
       editMode: {
         label: "Edit Mode",
@@ -756,6 +772,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "Delete Behavior",
         helpText: "What happens when referenced record is deleted"
+      },
+      transferBehavior: {
+        label: "Transfer Behavior",
+        helpText: "Whether Change Owner on the referenced record can also move the records that point at it through this field"
       },
       relatedListFilter: {
         label: "Related List Filter",
@@ -1387,7 +1407,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.size": {
         label: "Size",
-        helpText: "Overlay size bucket for the drawer detail: 'auto' (default — renderer derives from field count + viewport; AI writes nothing) or a coarse override sm/md/lg/xl/full. Prefer this over the pixel `width`; page mode ignores it."
+        helpText: "Width bucket for the record drawer: 'auto' (default) keeps the host's fixed default width, the same for every object whatever its field count (the console's record side panel opens at 460px), or a coarse override sm/md/lg/xl/full (a 480/720/960/1200/1600px cap, always clamped to the viewport). A width the reader drags wins over either. Prefer this over the pixel `width`; it has no effect where the record opens as a page (in the console, every record on a phone), nor on a phone-width screen, where the drawer fills it."
       },
       "navigation.width": {
         label: "Width",
@@ -2154,15 +2174,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dataset_binding: {
         label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        description: "Where the report’s numbers come from, how they are grouped and sorted, and which records open when you click a row."
       },
       joined_blocks: {
         label: "Joined blocks",
-        description: "Additional dataset-bound blocks stacked into a single report (joined reports only)."
+        description: "Other blocks stacked into the same report, each with its own data source (joined reports only)."
       },
       filter_and_chart: {
         label: "Filter & chart",
-        description: "Render-time scope filter and chart presentation."
+        description: "Filter conditions and how the chart is shown."
       },
       period_and_export: {
         label: "Period & export",
@@ -2178,45 +2198,46 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Label"
       },
       description: {
-        label: "Description"
+        label: "Description",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Type",
-        helpText: "Report type: tabular/summary/matrix/joined"
+        helpText: "Report type: tabular, summary, matrix or joined."
       },
       dataset: {
         label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        helpText: "The report reads its numbers from here; everyone sees only the records they have access to."
       },
       values: {
         label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        helpText: "The metrics to total or count (from the data source)."
       },
       rows: {
         label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        helpText: "The fields to group by (from the data source)."
       },
       columns: {
         label: "Columns",
-        helpText: "Dimension names across (matrix only)"
+        helpText: "Groups spread across the columns (matrix reports only)."
       },
       order: {
-        label: "Order",
-        helpText: "Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default."
+        label: "Sort Order",
+        helpText: "What to sort by, most important first (a grouping or a metric). Time groupings sort in date order by default."
       },
       "order.by": {
-        label: "Order By"
+        label: "Sort By"
       },
       "order.direction": {
         label: "Direction"
       },
       drilldown: {
         label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        helpText: "Click a summarized row or cell to open the records behind it."
       },
       blocks: {
         label: "Blocks",
-        helpText: "Dataset-bound sub-reports (joined report only)"
+        helpText: "Sub-reports, each with its own data source (joined reports only)."
       },
       "blocks.name": {
         label: "Name"
@@ -2231,38 +2252,62 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Block Type"
       },
       "blocks.dataset": {
-        label: "Dataset"
+        label: "Data Source"
       },
       "blocks.rows": {
-        label: "Rows"
+        label: "Group By"
       },
       "blocks.columns": {
-        label: "Columns"
+        label: "Group Columns By"
       },
       "blocks.values": {
-        label: "Values"
+        label: "Metrics"
       },
       "blocks.runtimeFilter": {
         label: "Runtime Filter"
       },
       "blocks.order": {
-        label: "Order"
+        label: "Sort Order"
       },
       runtimeFilter: {
         label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        helpText: "A filter applied whenever the report is shown, on top of the data source’s own conditions."
       },
       chart: {
         label: "Chart",
-        helpText: "Chart config (type, legend, colors)"
+        helpText: "Chart type and settings."
       },
       dateRange: {
         label: "Date Range",
-        helpText: "Default period and custom-range switch. The dimension must be a date dimension of the dataset; leave it empty when the dataset has exactly one."
+        helpText: "The period the report opens with, and whether people may choose their own range."
+      },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
       },
       exportOptions: {
         label: "Export Options",
-        helpText: "Download formats (csv, xlsx) and file name. Who may download is the export permission on the dataset object."
+        helpText: "Download formats (csv, xlsx) and file name. Who may download is set by the export permission on the data source’s object."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

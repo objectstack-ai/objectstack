@@ -111,3 +111,98 @@ describe('AutomationEngine.listRecordUpdateStarts (#35928)', () => {
         expect(asOther).toEqual([]);
     });
 });
+
+// [#36322] The approval mark follows the flows a run calls: a flow that
+// reaches its approval through a `subflow` node starts an approval as surely
+// as one holding the node, and the one approval test is asked of each flow.
+describe('AutomationEngine.listRecordUpdateStarts — approval reached through a subflow (#36322)', () => {
+    let engine: AutomationEngine;
+
+    beforeEach(() => {
+        engine = withLoaderSetFromPull(new AutomationEngine(createTestLogger()));
+        // Stand-ins for plugin-approvals' executor and the built-in subflow node's.
+        engine.registerNodeExecutor({ type: 'approval', async execute() { return { success: true }; } });
+        engine.registerNodeExecutor({ type: 'subflow', async execute() { return { success: true }; } });
+        engine.registerTrigger(recordChangeTrigger);
+    });
+
+    /** A flow no trigger starts: `start`, then an approval and/or a subflow call, then `end`. */
+    function calledFlow(name: string, options: { approval?: boolean; calls?: string } = {}) {
+        const middle = [
+            ...(options.approval
+                ? [{ id: 'review', type: 'approval', label: 'Review', config: { approvers: [{ type: 'user', value: 'u1' }] } }]
+                : []),
+            ...(options.calls ? [{ id: 'call', type: 'subflow', label: 'Call', config: { flowName: options.calls } }] : []),
+        ];
+        const chain = ['start', ...middle.map((n) => n.id), 'end'];
+        return {
+            name,
+            label: name,
+            type: 'autolaunched' as const,
+            nodes: [
+                { id: 'start', type: 'start' as const, label: 'Start' },
+                ...middle,
+                { id: 'end', type: 'end' as const, label: 'End' },
+            ],
+            edges: chain.slice(1).map((target, i) => ({ id: `e${i}`, source: chain[i], target })),
+        };
+    }
+
+    /** The record-change flow under test: on completion, call `child`. */
+    function closureCalling(child: string) {
+        const flow = updateFlow('closure', { condition: 'status == "completed"' }, { label: 'Project Closure' });
+        return {
+            ...flow,
+            nodes: [flow.nodes[0], { id: 'call', type: 'subflow', label: 'Call', config: { flowName: child } }, flow.nodes[1]],
+            edges: [
+                { id: 'e0', source: 'start', target: 'call' },
+                { id: 'e1', source: 'call', target: 'end' },
+            ],
+        };
+    }
+
+    const startsApproval = () =>
+        engine
+            .listRecordUpdateStarts({ object: 'project', previous: { ...STORED }, record: { ...STORED, status: 'completed' } })
+            .find((s) => s.name === 'closure')?.startsApproval;
+
+    it('marks a flow whose subflow holds the approval node', () => {
+        engine.registerFlow('signoff', calledFlow('signoff', { approval: true }));
+        engine.registerFlow('closure', closureCalling('signoff'));
+        expect(startsApproval()).toBe(true);
+    });
+
+    it('marks a flow whose approval sits two calls down', () => {
+        engine.registerFlow('signoff', calledFlow('signoff', { approval: true }));
+        engine.registerFlow('relay', calledFlow('relay', { calls: 'signoff' }));
+        engine.registerFlow('closure', closureCalling('relay'));
+        expect(startsApproval()).toBe(true);
+    });
+
+    it('does not mark a flow whose subflow holds no approval (CONTROL)', () => {
+        engine.registerFlow('notify', calledFlow('notify'));
+        engine.registerFlow('closure', closureCalling('notify'));
+        expect(startsApproval()).toBe(false);
+    });
+
+    it('ends on a flow that calls itself, and on a cycle of flows, without marking either', () => {
+        engine.registerFlow('closure', closureCalling('closure'));
+        expect(startsApproval()).toBe(false);
+
+        engine.unregisterFlow('closure');
+        engine.registerFlow('echo', calledFlow('echo', { calls: 'closure' }));
+        engine.registerFlow('closure', closureCalling('echo'));
+        expect(startsApproval()).toBe(false);
+    });
+
+    it('does not follow a call to a disabled flow: its run is refused, so it starts no approval', () => {
+        engine.registerFlow('signoff', { ...calledFlow('signoff', { approval: true }), status: 'obsolete' } as any);
+        engine.registerFlow('closure', closureCalling('signoff'));
+        expect(startsApproval()).toBe(false);
+    });
+
+    it('does not follow a call to a flow the engine does not hold', () => {
+        engine.registerFlow('closure', closureCalling('never_registered'));
+        expect(startsApproval()).toBe(false);
+    });
+});

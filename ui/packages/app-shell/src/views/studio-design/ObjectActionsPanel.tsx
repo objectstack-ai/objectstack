@@ -80,6 +80,7 @@ import { Ban, Zap, Plus, Trash2, ChevronDown, ChevronRight, Loader2, Power } fro
 import { Popover, PopoverTrigger, PopoverContent } from '@object-ui/components';
 import { getIcon } from '../../utils/getIcon.js';
 import { useRegisteredMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry.js';
+import type { FormViewSpec } from '../metadata-admin/form-spec.js';
 import type { I18nLabel } from '@objectstack/spec/ui';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { readFields } from '../metadata-admin/previews/object-fields-io.js';
@@ -167,6 +168,7 @@ export function ObjectActionsPanel({
   onPatch,
   disabled,
   actionSchema,
+  actionForm,
   onBlockingIssuesChange,
   onCelVerdictsChange,
   focus,
@@ -202,6 +204,13 @@ export function ObjectActionsPanel({
    * forward-compatible config panel for the action metadata.
    */
   actionSchema?: Record<string, unknown>;
+  /**
+   * The served FormView layout for the `action` type (`/meta/types`), handed
+   * to ActionDefaultInspector as `serverForm` so the rows it draws from the
+   * served form (the refusal catalogue and declared texts) take their served
+   * face, not the raw JSON editor (objectstack#35650).
+   */
+  actionForm?: FormViewSpec;
   /**
    * objectstack#30088 — on a read-only base's object, its pair: New saves the
    * action as an `action` item there (see the header). Absent, every action is
@@ -820,6 +829,7 @@ export function ObjectActionsPanel({
               readOnly={!editable(sel.name)}
               locale={locale}
               serverSchema={actionSchema}
+              serverForm={actionForm}
               onBlockingIssuesChange={(count) => reportCel(String(sel.name ?? ''), count)}
             />
           </>

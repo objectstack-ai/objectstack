@@ -114,7 +114,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "الطي",
-        helpText: "ما إذا كان يمكن طي القسم، في نموذج الإدخال وصفحة تفاصيل السجل. عند عدم التعيين: لا."
+        helpText: "ما إذا كان يمكن طي القسم. يتبع نموذج الإدخال الإعداد كما هو. في صفحة السجل الافتراضية يمكن للقارئ طي كل مجموعة لها عنوان، لذا يحدد الإعداد هناك الحالة الأولى فقط: Collapsed تبدأ مطوية والبقية مفتوحة. عند عدم التعيين: لا."
       },
       "fieldGroups.visibleWhen": {
         label: "مرئي عندما",
@@ -239,6 +239,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.deleteBehavior": {
         label: "سلوك الحذف",
         helpText: "ما يحدث عند حذف السجل المُشار إليه"
+      },
+      "fields.transferBehavior": {
+        label: "سلوك تغيير المالك",
+        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل"
       },
       "fields.multiple": {
         label: "متعدد",
@@ -468,6 +472,18 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "userActions.transfer": {
         label: "تغيير المالك",
         helpText: "إجراء تغيير المالك، فرديًا وجماعيًا: التشغيل يعرضه والإيقاف يخفيه. غير مُعيَّن: مُشغَّل، إلا أنه مُوقَف على كائن تفاصيل controlled_by_parent. يُعرض فقط على كائن لسجلاته مالك قابل لإعادة التعيين (ownership بقيمة user أو غير مُعيَّن، بلا managedBy، ليس كائن sys_، وowner_id ليس للقراءة فقط، وعلى كائن خارجي يكون owner_id مُعرَّفًا أو مربوطًا)؛ وتشغيله على أي كائن آخر مرفوض. يتحكم في الإجراء فقط، لا في التعديل العادي لـ owner_id. يُحرَّر كائن {enabled, visibleWhen, disabledWhen} المخزَّن مفتاحًا تلو الآخر؛ اكتب واحدًا في المصدر لتقييد الإجراء بكل سجل."
+      },
+      actionLayout: {
+        label: "ترتيب الإجراءات",
+        helpText: "ترتيب إجراءات هذا الكائن وأيّها يظهر أزرارًا، لكل نطاق: pinned (3 أزرار على الأكثر، بالترتيب) وmore (ترتيب قائمة «المزيد»؛ والإجراء غير المذكور في أيٍّ منهما يأتي بعدها بترتيبه الافتراضي). عند عدم التعيين: يختار كل سطح أزراره حسب ترتيب الإجراءات كما كان."
+      },
+      "actionLayout.list": {
+        label: "القائمة",
+        helpText: "شريط أدوات صفحة القائمة، بالصيغة {\"pinned\": [...], \"more\": [...]}: أسماء الإجراءات الموضوعة في شريط أدوات القائمة؛ $import / $export في pinned فقط. 3 مثبتة على الأكثر. وإن لم تُثبَّت، تظل الصفحة ترسم قائمة الاستيراد / التصدير الخاصة بها. يرفض os validate الاسم الذي ليس إجراءً لهذا الكائن أو غير الموضوع في شريط أدوات القائمة؛ ومثل هذا الاسم لا يرسم شيئًا."
+      },
+      "actionLayout.record": {
+        label: "السجل",
+        helpText: "رأس السجل (صفحة السجل، والمعاينة الجانبية، والشريط السفلي في الهاتف)، بالصيغة {\"pinned\": [...], \"more\": [...]}: أسماء الإجراءات الموضوعة في رأس السجل أو في قائمة «المزيد» الخاصة به. 3 مثبتة على الأكثر. يرفض os validate الاسم الذي ليس إجراءً لهذا الكائن أو غير الموضوع في صفحة السجل؛ ومثل هذا الاسم لا يرسم شيئًا."
       },
       editMode: {
         label: "وضع التحرير",
@@ -756,6 +772,10 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       deleteBehavior: {
         label: "سلوك الحذف",
         helpText: "ما يحدث عند حذف السجل المُشار إليه"
+      },
+      transferBehavior: {
+        label: "سلوك تغيير المالك",
+        helpText: "ما إذا كان «تغيير المالك» على السجل المشار إليه يمكنه أيضًا نقل السجلات التي تشير إليه عبر هذا الحقل"
       },
       relatedListFilter: {
         label: "عامل تصفية القائمة المرتبطة",
@@ -2178,7 +2198,8 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "التسمية"
       },
       description: {
-        label: "الوصف"
+        label: "الوصف",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "النوع",
@@ -2260,9 +2281,33 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "النطاق الزمني",
         helpText: "الفترة الافتراضية ومفتاح النطاق المخصّص. يجب أن يكون البُعد بُعدًا تاريخيًا من مجموعة البيانات؛ اتركه فارغًا حين لا تحتوي مجموعة البيانات إلا على بُعد واحد منه."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "خيارات التصدير",
         helpText: "صيغ التنزيل (csv، xlsx) واسم الملف. من يحق له التنزيل يحدده إذن التصدير على كائن مجموعة البيانات."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

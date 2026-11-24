@@ -190,7 +190,10 @@ and related-list columns). A relationship whose child field declares `relatedLis
 is part of the record's body: its list is a full-width table in the details, after the field
 sections drawn open, with no tab of its own. **动态**
 (`?related=timeline`) holds the record's system entries: its activity and, with
-`enable: { trackHistory: true }`, its field changes; there is no separate History tab. On the
+`enable: { trackHistory: true }`, its field changes; there is no separate History tab. An object
+with `enable: { feeds: false, activities: false }` and no `trackHistory` gives the stream
+nothing to show, so its page draws no **动态** tab, and a `relatedLists` entry
+`'sys_activity'` does not bring it back. On the
 desktop the record's comments are not in it but in the comment panel, opened from the
 comments icon in the record header ([the record's comment panel](/docs/frontend/plugins/plugin-detail#the-records-comment-panel)); on a phone they are still
 in **动态**, with its All / Activity / Discussion / Changes filter. A list's tab is that list's

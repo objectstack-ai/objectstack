@@ -5127,7 +5127,9 @@ const FORM_VIEW_INTERNAL_NOT_LOADED_EXPLANATION: RuleExplanation = {
       'its `formViews.default` and `formViews.create`, and a stored form view item that is the default ' +
       '(`isDefault`) or is named `<object>.create`. A form shared publicly (`sharing.enabled: true`) keeps ' +
       'loading at its own link and is never reported; neither is a form view under any other name, which ' +
-      'an action of type `form` opens by that name.',
+      'an action of type `form` opens by that name. Nor is a default or create form that an action of type ' +
+      '`form` opens by name: its `target` equals the name the form is served under (`<object>.form` for a ' +
+      'container\'s default form, `<object>.create` for its `formViews.create`), so it keeps loading there.',
     'The rule is a warning: the declared form still parses, installs and runs, and changes nothing. To ' +
       'clear it, move the sections into the object\'s field groups, put each required and show/hide rule ' +
       'on its field (a create-time default goes on the field\'s `defaultValue`), and delete the form.',
@@ -6538,6 +6540,140 @@ const FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// #35143 — the second batch of publish-time flow checks.
+
+const FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-trigger-object-missing',
+  covers: 'what a record-change start with no object watches',
+  paragraphs: [
+    'A record-change start (`triggerType: \'record-…\'`) names the object it watches in `config.objectName`. ' +
+      'With none, the trigger registers its hook with no object target, and the data engine reads an absent ' +
+      'target as every object. So the flow is not idle: it starts on a write to any object, with that row as ' +
+      '`record`, and its conditions and steps read fields that row usually does not have.',
+    'A blank name (`\'\'` or spaces) is refused too, for the opposite reason: the data engine refuses to ' +
+      'register a hook on an empty object name, so the trigger is never bound and the flow never starts.',
+    'An error: the start node alone settles it. Name the object whose records should start the flow.',
+  ],
+};
+
+const FLOW_CONDITION_OPTION_LABEL_EXPLANATION: RuleExplanation = {
+  rule: 'flow-condition-option-label',
+  covers: 'why a start condition compares option values',
+  paragraphs: [
+    'A select field stores the option\'s `value`, never its `label`. A record-change start condition that ' +
+      'reads the field and compares it with a quoted label (`record.stage == \'Closed Lost\'` where the option ' +
+      'is `{ value: \'closed_lost\', label: \'Closed Lost\' }`) is false on every record, or true on every ' +
+      'record for `!=`, so the condition never tells one record from another.',
+    'Reported only when the label is the comparand of that field: `F == \'L\'`, `F != \'L\'`, `\'L\' == F`, or ' +
+      'a member of `F in [...]`, with `F` read bare or as `record.F` / `previous.F`. A label quoted elsewhere ' +
+      'in the condition, such as the comparand of another field, is not. A label that is also some option\'s ' +
+      'value is never reported. Fields whose options come from a shared picklist are not judged: the stack ' +
+      'does not hold that list.',
+  ],
+};
+
+const FLOW_TIME_RELATIVE_SHADOWED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-shadowed',
+  covers: 'which trigger wins on a start with both',
+  paragraphs: [
+    'The engine picks one trigger per flow, in a fixed order: a `record-*` `triggerType` first, then a ' +
+      '`config.timeRelative` descriptor, then a schedule. A start node carrying both a `record-*` token and a ' +
+      'descriptor is therefore a record-change flow: the date sweep is never installed, and the flow runs only ' +
+      'when someone writes a record.',
+    'Keep the one you mean: remove `triggerType` for the date sweep, or remove `timeRelative` for the ' +
+      'record-change trigger.',
+  ],
+};
+
+const FLOW_TIME_RELATIVE_KEY_MISPLACED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-key-misplaced',
+  covers: 'where a sweep reads its filter and cap',
+  paragraphs: [
+    'A time-relative sweep reads `filter` and `maxRecords` from inside its descriptor ' +
+      '(`config.timeRelative.filter`, `config.timeRelative.maxRecords`). The start node\'s own `config` ' +
+      'hands the sweep only its `schedule` and `condition`, so a `filter` written beside the descriptor ' +
+      'narrows nothing (the flow runs for every record in the window, including those the filter meant to ' +
+      'skip), and a `maxRecords` there caps nothing.',
+    'Reported only when the descriptor does not carry the same key itself. Move the key inside the descriptor.',
+  ],
+};
+
+const FLOW_TIME_RELATIVE_DATE_FIELD_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-date-field-invalid',
+  covers: 'what field a sweep can run on',
+  paragraphs: [
+    'A sweep selects the records whose `dateField` falls in a window of days, as a range query on that ' +
+      'column. A field the swept object does not have, or one that is not a `date` or `datetime` field, ' +
+      'matches no record, so the flow never runs.',
+    'Judged only when this stack declares the swept object; an object it does not declare is ' +
+      '`flow-trigger-unknown-object`\'s. The platform\'s own timestamp columns (`created_at`, `updated_at`) ' +
+      'count as datetime fields.',
+  ],
+};
+
+const FLOW_SCHEDULE_TIMEZONE_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-schedule-timezone-missing',
+  covers: 'which zone a cron hour runs in',
+  paragraphs: [
+    'A cron schedule fires at its hour in the zone `timezone` names, and with none it fires in UTC. An ' +
+      'author who wants "every day at 9" for a team in another zone, and writes `0 9 * * *` with no zone, gets ' +
+      '09:00 UTC; one who converts the hour to UTC by hand records the conversion nowhere, so the next reader ' +
+      'takes the converted hour for the intended one.',
+    'A warning: UTC may be the intent. Name the zone the hour is meant in, ' +
+      '`{ type: \'cron\', expression: \'0 9 * * *\', timezone: \'Asia/Shanghai\' }`, or write `timezone: \'UTC\'` ' +
+      'to say so. Read on schedule flows and on a time-relative sweep\'s cadence.',
+  ],
+};
+
+const FLOW_SUBFLOW_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'flow-subflow-unknown',
+  covers: 'how a subflow step finds the flow it calls',
+  paragraphs: [
+    'A `subflow` or `map` step runs another flow by the name in `config.flowName`. When no flow has that ' +
+      'name, the step fails on every run, and every run of the calling flow fails with it.',
+    'A warning, and on the CLI only. Another installed package may ship the called flow, which this stack ' +
+      'cannot see. And the runtime publish gate judges one flow per write, so a call to another stored flow ' +
+      'could not be told from a call to a missing one there.',
+  ],
+};
+
+const FLOW_NODE_WRITE_UNKNOWN_OPTION_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-write-unknown-option',
+  covers: 'what a flow may write to a select field',
+  paragraphs: [
+    'A select field stores one of its options\' values. The record validator refuses a write of anything ' +
+      'else (`invalid_option`), and a flow\'s create or update step hands its `fields` to that validator like ' +
+      'any caller, so the step fails the run. The usual cause is the option\'s label written where its value ' +
+      'belongs (`stage: \'Closed Lost\'` for `closed_lost`).',
+    'Only literal values are judged; a CEL value envelope is evaluated at run time. Fields whose options come ' +
+      'from a shared picklist, and `readonly` fields, are not judged.',
+  ],
+};
+
+const FLOW_NODE_WRITE_DATE_HELPER_TEXT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-node-write-date-helper-text',
+  covers: 'how a flow computes a date it writes',
+  paragraphs: [
+    'A plain string in a flow\'s `fields` is written as the text it spells. `due: \'today()\'` writes the ' +
+      'seven characters `today()` to a date field, which the record validator refuses (`invalid_date`), so the ' +
+      'step fails the run. A date helper is evaluated only inside a CEL value envelope: ' +
+      '`{ dialect: \'cel\', source: \'isoDate(today())\' }` for a date, `isoDatetime(now())` for a datetime, ' +
+      '`isoDate(daysFromNow(7))` for a day offset.',
+  ],
+};
+
+const FLOW_CREATE_UPDATE_PAIR_EXPLANATION: RuleExplanation = {
+  rule: 'flow-create-update-pair',
+  covers: 'one rule written as two flows',
+  paragraphs: [
+    'Two record-change flows on the same object, one started after create and one after update, that run ' +
+      'the same steps are one rule written twice. The copies drift the first time only one of them is edited. ' +
+      'One flow with `triggerType: \'record-after-write\'` runs on both events; on the create run `previous` ' +
+      'is null, so its condition must allow that.',
+    'A warning: both copies run as written. Judged on the CLI, where the stack holds both flows.',
+  ],
+};
+
 const FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION: RuleExplanation = {
   rule: 'flow-http-timeout-missing',
   covers: 'why an http node needs a timeout',
@@ -6832,6 +6968,16 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION.rule]: FLOW_NODE_TYPE_NO_EXECUTOR_EXPLANATION,
   [FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION.rule]: FLOW_APPROVAL_DECISION_UNROUTED_EXPLANATION,
   [FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION.rule]: FLOW_HTTP_TIMEOUT_MISSING_EXPLANATION,
+  [FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION.rule]: FLOW_TRIGGER_OBJECT_MISSING_EXPLANATION,
+  [FLOW_CONDITION_OPTION_LABEL_EXPLANATION.rule]: FLOW_CONDITION_OPTION_LABEL_EXPLANATION,
+  [FLOW_TIME_RELATIVE_SHADOWED_EXPLANATION.rule]: FLOW_TIME_RELATIVE_SHADOWED_EXPLANATION,
+  [FLOW_TIME_RELATIVE_KEY_MISPLACED_EXPLANATION.rule]: FLOW_TIME_RELATIVE_KEY_MISPLACED_EXPLANATION,
+  [FLOW_TIME_RELATIVE_DATE_FIELD_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DATE_FIELD_INVALID_EXPLANATION,
+  [FLOW_SCHEDULE_TIMEZONE_MISSING_EXPLANATION.rule]: FLOW_SCHEDULE_TIMEZONE_MISSING_EXPLANATION,
+  [FLOW_SUBFLOW_UNKNOWN_EXPLANATION.rule]: FLOW_SUBFLOW_UNKNOWN_EXPLANATION,
+  [FLOW_NODE_WRITE_UNKNOWN_OPTION_EXPLANATION.rule]: FLOW_NODE_WRITE_UNKNOWN_OPTION_EXPLANATION,
+  [FLOW_NODE_WRITE_DATE_HELPER_TEXT_EXPLANATION.rule]: FLOW_NODE_WRITE_DATE_HELPER_TEXT_EXPLANATION,
+  [FLOW_CREATE_UPDATE_PAIR_EXPLANATION.rule]: FLOW_CREATE_UPDATE_PAIR_EXPLANATION,
   [STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION.rule]: STATE_MACHINE_NO_INITIAL_STATES_EXPLANATION,
   [ACTION_NO_OBJECT_BINDING_EXPLANATION.rule]: ACTION_NO_OBJECT_BINDING_EXPLANATION,
 });

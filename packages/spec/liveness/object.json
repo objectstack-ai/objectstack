@@ -30,6 +30,61 @@
       "evidence": "ui/packages/layout/src/NavigationRenderer.tsx#NavigationItemRenderer (an `object` navigation entry draws an ObjectIconTile coloured by `resolveTargetColor`); ui/packages/app-shell/src/hooks/useNavTargetIcon.ts#useNavTargetColor (reads the object's `color` from the metadata cache for the sidebar and the app-home menu); ui/packages/components/src/custom/object-icon-tile.tsx#ObjectIconTile (maps the palette name to the square's colour); ui/packages/app-shell/src/views/metadata-admin/inspectors/ObjectDefaultInspector.tsx#ObjectDefaultInspector (the designer writes it)",
       "note": "objectstack#35985: the colour of the rounded square the object's icon is drawn on, from the closed palette `OBJECT_COLORS`. Unset draws the neutral gray. The navigation (sidebar, app-home menu, phone menu) reads it; the other places that draw an object icon follow in the card's second PR."
     },
+    "actionLayout": {
+      "status": "live",
+      "verifiedAt": "2026-11-23",
+      "evidenceScope": "in-repo",
+      "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (the ONE reader: an arm's `pinned` actions become the header's buttons in pin order, the ones `more` names lead the overflow in that order, every other placed action follows in its default order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header reads `actionLayout.record`, staged arrangement included; the side preview and the phone's bottom bar draw the same header); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `page:header` with `placedActions: true` reads the same arm); ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header reads `actionLayout.list`, `$import` and `$export` among the actions); packages/objectql/src/registry-custom-arrangement.ts#applyCustomArrangement (only the base's paired `.custom` extension writes it, applied last, each arm it writes replaced whole; any other package's is refused at publish, os validate, os build and install); ui/packages/app-shell/src/layout/DesignModeHeaderPins.tsx#DesignModeHeaderPins (the design mode writes it)",
+      "note": "objectstack#36366: the order of the object's actions and which are buttons, per action scope (`list`, `record`): `pinned` is at most three buttons in order, `more` orders the 「More」 menu, and an action named in neither follows at the end of 「More」 in its default order. Absent (or an arm absent): the scope draws as before. An installed object is arranged through its customization package's `object_extension`.",
+      "children": {
+        "list": {
+          "status": "live",
+          "verifiedAt": "2026-11-23",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header draws the pinned toolbar actions and `$import` / `$export` as its buttons, in pin order); ui/packages/types/src/ui-action.ts#arrangedHeaderActions (the unpinned toolbar actions go to the bar's overflow)",
+          "note": "objectstack#36366: the list scope, drawn on the list page toolbar.",
+          "children": {
+            "pinned": {
+              "status": "live",
+              "verifiedAt": "2026-11-23",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (the list header draws the pinned toolbar actions and a pinned `$import` / `$export` as its buttons, in pin order); ui/packages/types/src/ui-action.ts#arrangedHeaderActions (a pinned toolbar action leads the bar's sort)",
+              "note": "objectstack#36366: the list toolbar's buttons, at most three, in order."
+            },
+            "more": {
+              "status": "live",
+              "verifiedAt": "2026-11-23",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (the toolbar actions `more` names lead the toolbar's ⋯ in that order, unnamed ones after); ui/packages/app-shell/src/views/objectViewPageHeader.tsx#PinnedListHeaderActions (draws them in the toolbar's ⋯)",
+              "note": "objectstack#36366: the order of the list toolbar's ⋯ menu."
+            }
+          }
+        },
+        "record": {
+          "status": "live",
+          "verifiedAt": "2026-11-23",
+          "evidenceScope": "in-repo",
+          "evidence": "ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the synthesized record header reads the arm); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `page:header` with `placedActions: true` reads it); ui/packages/types/src/ui-action.ts#arrangedHeaderActions (pinned actions placed at `record_header` in pin order, the rest at `record_more`)",
+          "note": "objectstack#36366: the record scope, drawn in the record header: the record page, the side preview and the phone's bottom bar.",
+          "children": {
+            "pinned": {
+              "status": "live",
+              "verifiedAt": "2026-11-23",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (a pinned action is placed at `record_header` and leads the sort, in pin order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header, side preview and phone bar draw them as buttons); ui/packages/components/src/renderers/layout/containers.tsx#PageHeaderActions (an authored `placedActions: true` header too)",
+              "note": "objectstack#36366: the record header's buttons, at most three, in order."
+            },
+            "more": {
+              "status": "live",
+              "verifiedAt": "2026-11-23",
+              "evidenceScope": "in-repo",
+              "evidence": "ui/packages/types/src/ui-action.ts#arrangedHeaderActions (an unpinned action is placed at `record_more`, the ones `more` names first in that order); ui/packages/app-shell/src/views/RecordDetailView.tsx#RecordDetailView (the record header's ⋯ draws them)",
+              "note": "objectstack#36366: the order of the record header's ⋯ menu."
+            }
+          }
+        }
+      }
+    },
     "displayNameField": {
       "status": "live",
       "note": "Deprecated alias of nameField (ADR-0079); still read by objectui RecordDetailView + resolveDisplayField back-compat."
@@ -245,7 +300,7 @@
       "status": "live",
       "verifiedAt": "2026-08-28",
       "evidence": "packages/spec/src/data/object.zod.ts#resolveCrudAffordances (`obj?.managedBy ?? 'platform'` selects the bucket's default CRUD affordance row — the `ui crudAffordances` half of this note); packages/plugins/plugin-security/src/system-write-guard.ts#assertEngineOwnedWriteAllowed (`const bucket = schema?.managedBy` — engine-owned buckets refuse user-context writes the bucket's affordances forbid); packages/spec/src/data/injected-system-columns.ts#resolveInjectedSystemColumns (a set `managedBy` withholds the ownership anchors, and `'better-auth'` withholds every injected column); packages/objectql/src/secret-fields.ts#collectMaskedReadFields (a `'better-auth'` table's own columns are exempted from password/secret masking, sibling `collectMaskedPasswordFields` the same); packages/core/src/security/effective-object-permissions.ts#clampManagedObjectWrites (the `/me/permissions` clamp closes a guarded bucket's writes; on `synced` whatever `userActions` says)",
-      "note": "default perms; ui crudAffordances. 2026-08-28: RE-ANCHORED (commit 93ea19bca) and REPOINTED — the citation was `registry.ts:208`, in range of that 3921-line file and landing on `merged.indexes = [...]`, the INDEX merge of a sibling key. registry.ts names `managedBy` on ten lines so the key-mention check passes, but nine of them are prose in comments and the tenth (:986) interpolates the value into a WARNING string — a diagnostic, not a decision. The decisions moved into @objectstack/spec (`resolveCrudAffordances`, `resolveInjectedSystemColumns`) and plugin-security: the consumer-promoted-into-another-package shape the gate's own guidance names. Re-closed by hand against c459da6bc. 2026-11-10 (ADR-0153 D4, #32061): the value `synced` lands with every mechanism ADR-0103 guards a bucket with — the engine write guard (`ENGINE_OWNED_BUCKETS`), the `apiMethods` reconciliation (through `resolveCrudAffordances`), the `/me/permissions` clamp (`GUARDED_WRITE_BUCKETS`), both `PLATFORM_INTERNAL_MANAGED_BUCKETS` mirrors and the `ui/` bucket union — and `userActions` cannot open a write on it (`MANAGED_BY_WRITE_LOCKED_BUCKETS`, refused at parse). Live as it lands: no pull writes into it until the P2 engine card, but every member write is refused today."
+      "note": "default perms; ui crudAffordances. 2026-08-28: RE-ANCHORED (commit 93ea19bca) and REPOINTED — the citation was `registry.ts:208`, in range of that 3921-line file and landing on `merged.indexes = [...]`, the INDEX merge of a sibling key. registry.ts names `managedBy` on ten lines so the key-mention check passes, but nine of them are prose in comments and the tenth (:986) interpolates the value into a WARNING string — a diagnostic, not a decision. The decisions moved into @objectstack/spec (`resolveCrudAffordances`, `resolveInjectedSystemColumns`) and plugin-security: the consumer-promoted-into-another-package shape the gate's own guidance names. Re-closed by hand against c459da6bc. 2026-11-10 (ADR-0153 D4, #32061): the value `synced` lands with every mechanism ADR-0103 guards a bucket with — the engine write guard (`ENGINE_OWNED_BUCKETS`), the `apiMethods` reconciliation (through `resolveCrudAffordances`), the `/me/permissions` clamp (`GUARDED_WRITE_BUCKETS`), both `PLATFORM_INTERNAL_MANAGED_BUCKETS` mirrors and the `ui/` bucket union — and `userActions` cannot open a write on it (`MANAGED_BY_WRITE_LOCKED_BUCKETS`, refused at parse). Live as it lands: no pull writes into it until the P2 engine card, but every member write is refused today. 2026-11-23 (#32062 slice 5, ADR-0153 D4): `resolveInjectedSystemColumns` plans the five `_sync_` provenance columns on `synced` only (`plan.sync`), the registry injects them with the (`organization_id`, `_sync_source`, `_sync_external_id`) index, both pulls stamp four of them on every write, and the engine refuses a `_sync_` key in any write but the pull's (`ERR_SYNC_PROVENANCE_WRITE_REFUSED`). `_sync_deleted_at` is planned but not stamped until D3's delete marking lands."
     },
     "ownership": {
       "status": "live",

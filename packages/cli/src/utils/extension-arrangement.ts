@@ -6,9 +6,10 @@
  *
  * The verdict is `@objectstack/metadata-protocol`'s `judgeExtensionArrangement`,
  * the one the save, restore, publish and install doors ask, so a green
- * validate is an artifact those doors admit: `fieldGroups` and `relatedLists`
- * on an `objectExtensions` entry only in a base's paired `.custom` package;
- * any other package places what it brings with `place`. This module only
+ * validate is an artifact those doors admit: `fieldGroups`, `relatedLists`
+ * and `actionLayout` on an `objectExtensions` entry only in a base's paired
+ * `.custom` package; any other package places what it brings with `place`,
+ * and its actions by their own `locations` and `order`. This module only
  * hands it the artifact's packages, the reading
  * `findExtensionFieldSuffixRefusals` (`./extension-field-suffix.ts`) takes. A
  * stack naming no package id is not judged, as the judge skips a write bound
@@ -25,7 +26,7 @@ export interface ExtensionArrangementRefusalRow {
   path: string;
   /** The code the active doors refuse the same key with. */
   code: 'VALIDATION_ERROR';
-  /** The key as written: `fieldGroups` or `relatedLists`. */
+  /** The key as written: `fieldGroups`, `relatedLists` or `actionLayout`. */
   key: string;
   /** The package the extension is declared in. */
   packageId: string;

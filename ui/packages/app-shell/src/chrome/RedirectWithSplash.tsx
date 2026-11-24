@@ -61,9 +61,15 @@ export interface RedirectWithSplashProps {
   to: string;
   /** Replace the current history entry instead of pushing a new one. */
   replace?: boolean;
+  /**
+   * Navigation state for the destination, as `<Navigate state>` takes it — so
+   * a hop that only re-addresses a visit (`/` → `/home` → the landing app,
+   * objectstack#36732) does not drop what the visit carried.
+   */
+  state?: unknown;
 }
 
-export function RedirectWithSplash({ to, replace }: RedirectWithSplashProps) {
+export function RedirectWithSplash({ to, replace, state }: RedirectWithSplashProps) {
   return (
     <>
       {/* Order is not load-bearing — `<Navigate>` renders null — but the
@@ -72,7 +78,7 @@ export function RedirectWithSplash({ to, replace }: RedirectWithSplashProps) {
           fallback, so on an app route after the session read it is the
           console's frame those gates were showing, and the splash elsewhere. */}
       <ConsoleBootFallback />
-      <Navigate to={to} replace={replace} />
+      <Navigate to={to} replace={replace} state={state} />
     </>
   );
 }

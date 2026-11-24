@@ -26,6 +26,11 @@ vi.mock('../previews/useObjectFields', () => ({
   useObjectFields: () => ({ fields: [], loading: false, error: null }),
 }));
 
+// The inspector reaches the console's dynamic `@objectstack/formula` and
+// `@objectstack/lint` imports (CEL authoring); their first load is paid here,
+// at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { FlowNodeInspector } from './FlowNodeInspector';
 
 beforeAll(() => {
@@ -81,7 +86,7 @@ describe('notify node — inspector renders its config fields', () => {
     // The node label input confirms we're on the notify node's inspector.
     expect(screen.getByDisplayValue('Notify approver')).toBeInTheDocument();
     // Each authored config field label the built-in descriptor documents.
-    for (const label of ['Recipients', 'Title', 'Message', 'Channels', 'Topic', 'Severity']) {
+    for (const label of ['Recipients', 'Title', 'Message', 'Channels', 'Category', 'Severity']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });

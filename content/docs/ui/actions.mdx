@@ -375,6 +375,56 @@ is collected, then the body runs with those values as its `input`.
 | `record_related` | Each row of a related list inside a parent record — there only, never on the object's own list views (unlike `list_item`). Declared, not yet placed: the console does not draw it on those rows yet |
 | `record_section` | Named action bars on record pages |
 
+### Choose the header's buttons
+
+A page header draws at most three of its actions as buttons and puts the rest in its
+「More」 menu. By default it picks the first three by each action's `order`. An object
+arranges them itself with `actionLayout`, one arm per action scope. Each arm has two
+parts: `pinned`, the buttons in the order drawn, and `more`, the order of 「More」:
+
+```typescript
+ObjectSchema.create({
+  name: 'crm_opportunity',
+  // ...
+  actionLayout: {
+    // the list scope: actions placed at list_toolbar, drawn on the list page toolbar
+    list: { pinned: ['mass_assign', '$export'], more: ['send_digest'] },
+    // the record scope: actions placed at record_header or record_more
+    record: { pinned: ['mark_won', 'mark_lost'], more: ['clone', 'share'] },
+  },
+});
+```
+
+- `pinned` is required in an arm and names at most three; `pinned: []` pins none.
+  `more` is optional. A name appears once, in one part.
+- An action the scope places that neither part names goes to the end of 「More」, in
+  its default order. A pinned action hidden by its `visible` predicate or its
+  permissions leaves its button out; no other action takes its place.
+- The `record` arm is a scope, not a page: it orders the record header wherever it is
+  drawn, on the record page, in the side preview and in a phone's bottom action bar.
+  It also orders the actions in a list row's ⋮ menu and right-click menu: the ones it
+  names first, `pinned` then `more`, then the rest as before. Which action a row draws
+  as its button does not change.
+  A record page whose `page:header` authors its own `actions` list keeps that list.
+- The list scope can also pin its built-in Import and Export as `$import` and
+  `$export`. A built-in is only ever pinned: not pinned, the list page draws it in its
+  own Import / Export menu, as without the key (also with `pinned: []`), so `more`
+  names actions only. The record scope has no built-ins: New, Edit and Delete keep
+  their places.
+- Leave an arm out (or `actionLayout` out) and that scope draws as before.
+- The schema refuses more than three pinned, a name given twice, a malformed name, a
+  built-in the scope does not have and a built-in in `more`. `os validate`, `os build` and `os lint` also
+  refuse a name that is no action of the object, or one the scope does not place.
+- An administrator sets the same arms in the running app: the app name at the top of
+  the sidebar, then 「Design layout」 in its menu, then 「Header buttons」 at the end of the
+  page header. Only the arm changed is saved. For
+  an installed object it is saved as this environment's customization, the
+  `object_extension` of the base's paired `.custom` package, whose arm replaces the
+  object's arm for that scope whole. Only that package writes `actionLayout` on an
+  extension: any other package's extension is refused it at publish, `os validate`,
+  `os build` and install, and places the actions it brings by their own `locations`
+  and `order`.
+
 Surfaces can also reference actions **by name**:
 
 ```typescript

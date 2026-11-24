@@ -13,7 +13,9 @@
  *  3. where the `.custom` extension writes `fieldGroups` or `relatedLists`
  *     (`CUSTOM_ARRANGEMENT_KEYS`), that key REPLACES the result of 1–2,
  *     whole. A key it does not write keeps that result. Nothing is merged
- *     entry by entry.
+ *     entry by entry. [objectstack#36366] Where it writes `actionLayout`,
+ *     each arm it writes (`list`, `record`) replaces the arm the result of
+ *     1–2 serves for that scope, whole; an arm it does not write stays.
  *
  * What the replacement leaves to the object's own rules:
  *
@@ -62,6 +64,7 @@
  */
 
 import {
+  OBJECT_ACTION_LAYOUT_SCOPES,
   extensionArrangementKeys,
   relatedListEntryHidden,
   relatedListEntryName,
@@ -180,7 +183,7 @@ export function applyCustomArrangement(
         note(writer, key,
           `declares \`${key}\`, which is not applied: only the object extension of a base's paired \`.custom\` ` +
           'package declares the whole arrangement of an object. An extension places the fields, groups and ' +
-          'child lists it brings with `place`.');
+          'child lists it brings with `place`, and the actions it brings by their own `locations` and `order`.');
         continue;
       }
       if (!pairs.includes(packageId)) {
@@ -190,8 +193,8 @@ export function applyCustomArrangement(
           '. Only the paired `.custom` package of the App an object belongs to declares its arrangement.');
         continue;
       }
-      if (!Array.isArray(writer.body[key])) {
-        note(writer, key, `declares \`${key}\` that is not a list, so it is not applied.`);
+      if (key === 'actionLayout' ? !isRecord(writer.body[key]) : !Array.isArray(writer.body[key])) {
+        note(writer, key, `declares \`${key}\` that is not ${key === 'actionLayout' ? 'an object' : 'a list'}, so it is not applied.`);
         continue;
       }
       admitted.push({ ...writer, packageId });
@@ -308,6 +311,25 @@ export function applyCustomArrangement(
       hidden,
       unlisted: before.length > 0 ? 'hidden' : 'shown',
     };
+  }
+
+  // ── actionLayout ────────────────────────────────────────────────────────
+  // [objectstack#36366] Arm by arm: each arm the pair writes replaces the
+  // arm steps 1–2 serve for that scope, whole (`pinned` and `more`
+  // together); an arm it does not write, or one that is no object, stays.
+  const layoutWriter = servedWriter('actionLayout');
+  if (layoutWriter !== undefined) {
+    const written = layoutWriter.body.actionLayout as AnyRecord;
+    const running = isRecord(record.actionLayout) ? record.actionLayout : {};
+    let layout: AnyRecord | undefined;
+    for (const scope of OBJECT_ACTION_LAYOUT_SCOPES) {
+      const arm = written[scope];
+      if (isRecord(arm)) layout = { ...(layout ?? running), [scope]: { ...arm } };
+    }
+    if (layout !== undefined) {
+      out.actionLayout = layout;
+      changed = true;
+    }
   }
 
   if (!changed) return { object, notes, relatedLists: undefined };

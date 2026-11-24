@@ -1,0 +1,304 @@
+<meta name="dash-one-writer">
+<style>
+  .eb { display: grid; gap: var(--cds-gap-lg); }
+  .eb-title { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; text-wrap: balance; }
+  .eb-lead { font-size: var(--cds-font-size-body); color: var(--color-fg); margin: 0; max-width: 68ch; line-height: 1.6; }
+  .eb-lead b { font-variant-numeric: tabular-nums; }
+  .eb-note { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); margin: 0; max-width: 72ch; line-height: 1.5; }
+  .eb-h { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0 0 var(--cds-gap-sm); }
+  .eb-wrap { overflow-x: auto; border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); background: var(--color-panel); }
+  .eb-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-body); }
+  .eb-table th, .eb-table td { text-align: left; padding: var(--cds-pad-sm) var(--cds-pad-md); border-bottom: 1px solid var(--color-border-line); vertical-align: top; }
+  .eb-table th { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-weight: var(--cds-font-weight-medium); white-space: nowrap; }
+  .eb-table td.num, .eb-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .eb-table td.zero { color: var(--color-fg-muted); }
+  .eb-table tr:last-child td { border-bottom: 0; }
+  .eb-table tr.sep td { border-top: 2px solid var(--color-border-line); }
+  .eb-name { min-width: 16rem; }
+  .eb-name small { display: block; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); margin-top: 2px; }
+  .eb-seats { min-width: 12rem; font-size: var(--cds-font-size-caption); }
+  .eb-bar { width: 7rem; height: 8px; border-radius: 4px; background: var(--cds-chart-grid); overflow: hidden; margin-top: 6px; }
+  .eb-bar > i { display: block; height: 100%; }
+  .eb-stack { display: flex; width: 9rem; height: 8px; border-radius: 4px; overflow: hidden; background: var(--cds-chart-grid); margin-top: 6px; }
+  .eb-stack > i { display: block; height: 100%; }
+  .eb-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm) var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin: 0 0 var(--cds-gap-sm); }
+  .eb-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--sw); }
+  .eb-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: var(--cds-font-size-caption); border: 1px solid var(--color-border-line); white-space: nowrap; }
+  .eb-pill.run { color: var(--color-ok); border-color: currentColor; }
+  .eb-pill.hold { color: var(--color-warn); border-color: currentColor; }
+  .eb-pill.done { color: var(--color-fg-muted); }
+  .eb-p1 { color: var(--color-bad); font-weight: var(--cds-font-weight-medium); }
+  .eb-warn { color: var(--color-warn); font-weight: var(--cds-font-weight-medium); }
+  .eb-tog { all: unset; cursor: pointer; display: inline-block; width: 1.1rem; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+  .eb-tog:focus-visible { outline: 2px solid var(--color-accent, currentColor); border-radius: 2px; }
+  .eb-branch { color: var(--color-fg-muted); margin-right: 4px; }
+  .eb-kids { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); margin-left: 6px; white-space: nowrap; }
+  tr.eb-group td { background: var(--color-panel); border-top: 2px solid var(--color-border-line); font-weight: var(--cds-font-weight-medium); }
+  tr.eb-group .eb-gmeta { font-weight: 400; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); margin-left: 8px; }
+  tr.eb-child td { background: color-mix(in srgb, var(--color-panel) 92%, var(--color-fg) 8%); }
+  .eb-sticky { position: sticky; top: 0; z-index: 3; background: var(--color-bg, var(--color-panel)); padding: var(--cds-pad-sm) 0; border-bottom: 1px solid var(--color-border-line); }
+  .eb-board { border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); background: var(--color-panel); }
+  .eb-board thead th { position: sticky; top: var(--eb-hh, 0px); z-index: 2; background: var(--color-panel); box-shadow: inset 0 -1px 0 var(--color-border-line); }
+  tr.eb-rest td { font-style: normal; }
+  tr.eb-rest .eb-name { color: var(--color-fg); }
+  .eb-tag { display: inline-block; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); border: 1px dashed var(--color-border-line); border-radius: 4px; padding: 0 6px; margin-right: 6px; }
+  @media (max-width: 760px) { .eb-board { overflow-x: auto; } .eb-board thead th { position: static; } .eb-sticky { position: static; } }
+  .eb-tabs { display: flex; gap: 6px; }
+  .eb-tabs button { all: unset; cursor: pointer; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--color-border-line); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .eb-tabs button[aria-selected="true"] { color: var(--color-fg); border-color: currentColor; font-weight: var(--cds-font-weight-medium); }
+  .eb-tabs button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+  .eb[data-repo="objectstack"] [data-repo-only="cloud"], .eb[data-repo="cloud"] [data-repo-only="objectstack"] { display: none; }
+  [data-dash-source-state=refreshing] { opacity: .5; }
+</style>
+
+<div class="eb" data-repo="objectstack">
+  <header id="eb-head" class="eb-sticky" style="display:grid;gap:var(--cds-gap-sm)">
+    <h1 class="eb-title">ObjectStack 专题与任务看板</h1>
+    <div class="eb-tabs" role="tablist" aria-label="仓库">
+      <button type="button" role="tab" data-tab="objectstack" aria-selected="true">objectstack 仓库</button>
+      <button type="button" role="tab" data-tab="cloud" aria-selected="false">cloud 仓库</button>
+    </div>
+    <p class="eb-lead" data-read lang="zh-CN" data-repo-only="objectstack">
+      <b data-draw="active" data-source="activeCount">—</b> 个专题在推进。共有
+      <b data-draw="open" data-source="totOpen">—</b> 张未完成的卡，其中 p1
+      <b data-draw="p1" data-source="totP1">—</b> 张；在做
+      <b data-draw="doing" data-source="totDoing">—</b> 张，排队
+      <b data-draw="queue" data-source="totQueue">—</b> 张，阻塞
+      <b data-draw="blocked" data-source="totBlocked">—</b> 张，等你裁决
+      <b data-draw="decide" data-source="totDecide">—</b> 张。
+    </p>
+    <p class="eb-lead" data-read lang="zh-CN" data-repo-only="cloud">
+      <b data-draw="activeC" data-source="activeCountC">—</b> 个专题在推进。共有
+      <b data-draw="openC" data-source="totOpenC">—</b> 张未完成的卡，其中 p1
+      <b data-draw="p1C" data-source="totP1C">—</b> 张；在做
+      <b data-draw="doingC" data-source="totDoingC">—</b> 张，排队
+      <b data-draw="queueC" data-source="totQueueC">—</b> 张，阻塞
+      <b data-draw="blockedC" data-source="totBlockedC">—</b> 张，等你裁决
+      <b data-draw="decideC" data-source="totDecideC">—</b> 张。
+    </p>
+    <p class="eb-legend" data-draw="legend"></p>
+  </header>
+
+  <section id="eb-board" data-repo-only="objectstack">
+    <div class="eb-board">
+      <table class="eb-table" data-source="epics" data-row-key="key">
+        <thead>
+          <tr>
+            <th class="num">卡号</th>
+            <th>area · 专题 · 专题以外的任务</th>
+            <th>状态</th>
+            <th class="num">未完成</th>
+            <th class="num">p1</th>
+            <th class="num">p2</th>
+            <th class="num">p3</th>
+            <th class="num">已完成</th>
+            <th class="num">关联卡</th>
+            <th class="num">未挂靠</th>
+          </tr>
+        </thead>
+        <tbody data-draw="boardRows"></tbody>
+      </table>
+    </div>
+    <p class="eb-note">快照时间 <span data-draw="asof" data-source="areas">—</span>，分诊每 3 小时从 GitHub 重新读取。按北极星的 8 个 area 分组：每组先列这个 area 的专题（子专题缩进在父专题下，点 ▾ 收起），最后一行是这个 area 里不属于任何专题的未完成卡。组标题的数字 = 本组顶层专题的未完成卡 + 专题以外的卡。专题的「关联卡」= 子卡、子卡的子卡，加上正文写明属于该专题但没挂上的未完成卡（「未挂靠」列）；父专题的数字包含子专题的卡。专题 = 标 <code>pm:epic</code>、标题以「专题」或 [Epic] 开头，或挂着未完成子卡的追踪卡；只列未关闭的。</p>
+  </section>
+
+  <section id="eb-board-cloud" data-repo-only="cloud">
+    <div class="eb-board">
+      <table class="eb-table" data-source="epics_cloud" data-row-key="key">
+        <thead>
+          <tr>
+            <th class="num">卡号</th>
+            <th>area · 专题 · 专题以外的任务</th>
+            <th>状态</th>
+            <th class="num">未完成</th>
+            <th class="num">p1</th>
+            <th class="num">p2</th>
+            <th class="num">p3</th>
+            <th class="num">已完成</th>
+            <th class="num">关联卡</th>
+            <th class="num">未挂靠</th>
+          </tr>
+        </thead>
+        <tbody data-draw="boardRowsCloud"></tbody>
+      </table>
+    </div>
+    <p class="eb-note">快照时间 <span data-draw="asofCloud" data-source="areas_cloud">—</span>，分诊每 3 小时从 GitHub 重新读取。按 cloud 仓库的 9 个 area 分组（<code>docs/strategy/core-functions.md</code>）：每组先列这个 area 的专题（子专题缩进在父专题下，点 ▾ 收起），最后一行是这个 area 里不属于任何专题的未完成卡。组标题的数字 = 本组顶层专题的未完成卡 + 专题以外的卡。专题的「关联卡」= 子卡、子卡的子卡，加上正文写明属于该专题但没挂上的未完成卡（「未挂靠」列）；父专题的数字包含子专题的卡。专题 = 标 <code>pm:epic</code>、标题以「专题」或 [Epic] 开头，或挂着未完成子卡的追踪卡；只列未关闭的。</p>
+  </section>
+</div>
+
+<script>
+  const AREA_ORDER = ['ai', 'build', 'data', 'workflow', 'ux', 'package', 'fleet', 'cloud'];
+  const AREA_ORDER_C = ['control', 'environment', 'marketplace', 'ai', 'enterprise', 'security', 'ops', 'ux', 'fleet'];
+  const AREA_NAME_C = { control: '云控制台', environment: '云环境', marketplace: '市场与发布', ai: '云端 AI', enterprise: '企业版', security: '云端安全', ops: '运维与上线', fleet: '车队工具', ux: '体验', '—': '未定 area' };
+  const AREA_NAME = { ai: 'AI', build: '搭建', data: '数据与权限', workflow: '流程与集成', ux: '体验', package: '包与安装', fleet: '车队', cloud: '云相关', '—': '未定 area' };
+  const ST = ['doing', 'queue', 'blocked', 'hold', 'decide', 'none'];
+  const segs = [
+    { key: 'doing', label: '在做', color: () => dash.colors[0] },
+    { key: 'queue', label: '排队', color: () => dash.colors[1] },
+    { key: 'blocked', label: '阻塞', color: () => dash.colors[2] },
+    { key: 'hold', label: '搁置', color: () => dash.colors[3] },
+    { key: 'decide', label: '待裁决', color: () => dash.colors[4] },
+    { key: 'none', label: '无状态', color: () => dash.colors[5] },
+  ];
+  const areaKey = (a) => (String(a || '').replace(/^（.*）$/, '') || '—');
+  const rootsOf = (epics) => { const known = new Set(epics.map((r) => r.epic)); return epics.filter((r) => r.parent == null || !known.has(r.parent)); };
+  const total = (key) => (epics, areas) => d3.sum(rootsOf(epics), (r) => +r[key] || 0) + d3.sum(areas, (r) => +r[key] || 0);
+  dash.calc('activeCount', { inputs: ['epics'], title: '在推进的专题数', description: '状态为「进行中」的专题个数。', fn: (epics) => epics.filter((r) => r.state === '进行中').length });
+  dash.calc('totOpen', { inputs: ['epics', 'areas'], title: '未完成卡数', description: '顶层专题的未完成关联卡 + 专题以外的未完成卡。', fn: total('open') });
+  dash.calc('totP1', { inputs: ['epics', 'areas'], title: 'p1 卡数', description: '同上口径的 p1（含 p0）。', fn: total('p1') });
+  dash.calc('totDoing', { inputs: ['epics', 'areas'], title: '在做卡数', description: '挂 pm:dispatched 的卡。', fn: total('doing') });
+  dash.calc('totQueue', { inputs: ['epics', 'areas'], title: '排队卡数', description: '挂 pm:queue 的卡。', fn: total('queue') });
+  dash.calc('totBlocked', { inputs: ['epics', 'areas'], title: '阻塞卡数', description: '挂 pm:blocked 的卡。', fn: total('blocked') });
+  dash.calc('totDecide', { inputs: ['epics', 'areas'], title: '待裁决卡数', description: '挂 needs-user-decision 或 pm:awaiting-maintainer 的卡。', fn: total('decide') });
+
+  dash.calc('activeCountC', { inputs: ['epics_cloud'], title: '在推进的专题数', description: '状态为「进行中」的专题个数。', fn: (epics) => epics.filter((r) => r.state === '进行中').length });
+  dash.calc('totOpenC', { inputs: ['epics_cloud', 'areas_cloud'], title: '未完成卡数', description: '顶层专题的未完成关联卡 + 专题以外的未完成卡。', fn: total('open') });
+  dash.calc('totP1C', { inputs: ['epics_cloud', 'areas_cloud'], title: 'p1 卡数', description: '同上口径的 p1（含 p0）。', fn: total('p1') });
+  dash.calc('totDoingC', { inputs: ['epics_cloud', 'areas_cloud'], title: '在做卡数', description: '挂 pm:dispatched 的卡。', fn: total('doing') });
+  dash.calc('totQueueC', { inputs: ['epics_cloud', 'areas_cloud'], title: '排队卡数', description: '挂 pm:queue 的卡。', fn: total('queue') });
+  dash.calc('totBlockedC', { inputs: ['epics_cloud', 'areas_cloud'], title: '阻塞卡数', description: '挂 pm:blocked 的卡。', fn: total('blocked') });
+  dash.calc('totDecideC', { inputs: ['epics_cloud', 'areas_cloud'], title: '待裁决卡数', description: '挂 needs-user-decision 或 pm:awaiting-maintainer 的卡。', fn: total('decide') });
+
+  const fmt = d3.format(',');
+  function single(name, id) {
+    dash.draw(name, (el) => { const s = dash.data(id); el.textContent = s.status === 'ok' && s.data != null ? fmt(s.data) : '—'; });
+  }
+  single('active', 'activeCount'); single('open', 'totOpen'); single('p1', 'totP1');
+  single('activeC', 'activeCountC'); single('openC', 'totOpenC'); single('p1C', 'totP1C');
+  single('doingC', 'totDoingC'); single('queueC', 'totQueueC'); single('blockedC', 'totBlockedC'); single('decideC', 'totDecideC');
+  single('doing', 'totDoing'); single('queue', 'totQueue'); single('blocked', 'totBlocked'); single('decide', 'totDecide');
+  dash.draw('asofCloud', (el) => { const s = dash.data('areas_cloud'); el.textContent = s.status === 'ok' && s.data.length ? s.data[0].asof : '—'; });
+  dash.draw('asof', (el) => { const s = dash.data('areas'); el.textContent = s.status === 'ok' && s.data.length ? s.data[0].asof : '—'; });
+  dash.draw('legend', (el) => {
+    el.replaceChildren(...segs.map((g) => { const s = document.createElement('span'); s.style.setProperty('--sw', g.color()); s.textContent = g.label; return s; }));
+  });
+
+  const head = document.getElementById('eb-head');
+  const setHH = () => document.documentElement.style.setProperty('--eb-hh', (window.matchMedia('(max-width: 760px)').matches ? 0 : head.offsetHeight) + 'px');
+  if (window.ResizeObserver) new ResizeObserver(setHH).observe(head);
+  setHH();
+
+  const stack = (r) => {
+    const n = d3.sum(ST, (k) => +r[k] || 0);
+    const bar = document.createElement('div'); bar.className = 'eb-stack';
+    if (!n) return bar;
+    for (const g of segs) {
+      const v = +r[g.key] || 0; if (!v) continue;
+      const i = document.createElement('i'); i.style.width = (100 * v / n).toFixed(1) + '%'; i.style.background = g.color();
+      i.title = `${g.label} ${v}`; bar.appendChild(i);
+    }
+    return bar;
+  };
+  const pillClass = { '进行中': 'run', '暂停': 'hold', '子卡已清空': 'done', '未拆卡': 'done' };
+  const collapsed = new Set();
+
+  const makeBoard = (EID, AID, ORDER, NAMES) => (tb) => {
+    const se = dash.data(EID), sa = dash.data(AID);
+    tb.replaceChildren();
+    if (se.status !== 'ok' || sa.status !== 'ok') return;
+    const epics = se.data, areas = sa.data;
+    const rank = { '进行中': 0, '暂停': 1, '未拆卡': 2, '子卡已清空': 3 };
+    const order = (a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9) || b.open - a.open || a.epic - b.epic;
+    const known = new Set(epics.map((r) => r.epic));
+    const kids = new Map();
+    for (const r of epics) { const p = r.parent != null && known.has(r.parent) ? r.parent : null; if (!kids.has(p)) kids.set(p, []); kids.get(p).push(r); }
+    for (const l of kids.values()) l.sort(order);
+    const rest = new Map(areas.map((r) => [areaKey(r.area), r]));
+    const groups = new Map();
+    for (const r of kids.get(null) || []) { const a = areaKey(r.area); if (!groups.has(a)) groups.set(a, []); groups.get(a).push(r); }
+    for (const a of rest.keys()) if (!groups.has(a)) groups.set(a, []);
+    const keys = [...groups.keys()].sort((a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99));
+    const countDesc = (n) => (kids.get(n) || []).reduce((x, r) => x + 1 + countDesc(r.epic), 0);
+
+    const row = (cls, key) => { const tr = document.createElement('tr'); if (cls) tr.className = cls; tr.dataset.key = key; return tr; };
+    const cell = (tr, text, cls) => { const c = document.createElement('td'); if (cls) c.className = cls; c.textContent = text; tr.appendChild(c); return c; };
+    const toggle = (key, label) => {
+      const open = !collapsed.has(key);
+      const t = document.createElement('button'); t.className = 'eb-tog'; t.type = 'button';
+      t.textContent = open ? '▾' : '▸'; t.setAttribute('aria-expanded', String(open)); t.setAttribute('aria-label', (open ? '收起' : '展开') + label);
+      t.addEventListener('click', () => { open ? collapsed.add(key) : collapsed.delete(key); render(); });
+      return t;
+    };
+    const nums = (tr, r, withProgress) => {
+      cell(tr, String(r.open ?? 0), 'num'); cell(tr, String(r.p1 ?? 0), +r.p1 > 0 ? 'num eb-p1' : 'num');
+      cell(tr, String(r.p2 ?? 0), 'num'); cell(tr, String(r.p3 ?? 0), 'num');
+      if (withProgress) { cell(tr, String(r.closed), 'num'); cell(tr, String(r.total), 'num'); cell(tr, String(r.unlinked ?? 0), +r.unlinked > 0 ? 'num eb-warn' : 'num zero'); }
+      else { cell(tr, '', 'num zero'); cell(tr, '', 'num zero'); cell(tr, '', 'num zero'); }
+    };
+
+    const render = () => {
+      tb.replaceChildren();
+      const walk = (list, depth) => {
+        list.forEach((r, idx) => {
+          const sub = kids.get(r.epic) || [];
+          const tr = row(depth > 0 ? 'eb-child' : '', EID + r.epic);
+          cell(tr, String(r.epic), 'num');
+          const name = document.createElement('td'); name.className = 'eb-name';
+          name.style.paddingLeft = `calc(var(--cds-pad-md) + ${(depth + 1) * 1.4}rem)`;
+          if (sub.length) name.appendChild(toggle(EID + r.epic, '子专题'));
+          else if (depth > 0) { const g = document.createElement('span'); g.className = 'eb-branch'; g.textContent = idx === list.length - 1 ? '└' : '├'; name.appendChild(g); }
+          name.append(document.createTextNode(r.title));
+          if (sub.length) { const k = document.createElement('span'); k.className = 'eb-kids'; k.textContent = `· ${sub.length} 个子专题`; name.appendChild(k); }
+          if (+r.total > 0) {
+            const bar = document.createElement('div'); bar.className = 'eb-bar';
+            const fill = document.createElement('i'); fill.style.width = (100 * r.closed / r.total).toFixed(1) + '%'; fill.style.background = dash.colors[0];
+            bar.appendChild(fill); name.appendChild(bar);
+          }
+          if (+r.open > 0) name.appendChild(stack(r));
+          const upd = document.createElement('small'); upd.textContent = '最近更新 ' + r.updated; name.appendChild(upd);
+          tr.appendChild(name);
+          const st = document.createElement('td'); const pill = document.createElement('span');
+          pill.className = 'eb-pill ' + (pillClass[r.state] || 'done'); pill.textContent = r.state; st.appendChild(pill); tr.appendChild(st);
+          nums(tr, r, true);
+          tb.appendChild(tr);
+          if (sub.length && !collapsed.has(EID + r.epic)) walk(sub, depth + 1);
+        });
+      };
+      for (const a of keys) {
+        const list = groups.get(a), rr = rest.get(a) || {};
+        const sum = {}; for (const k of ['open', 'p1', 'p2', 'p3', ...ST]) sum[k] = d3.sum(list, (r) => +r[k] || 0) + (+rr[k] || 0);
+        const g = EID + ':area:' + a;
+        const tr = row('eb-group', g);
+        cell(tr, '', 'num');
+        const name = document.createElement('td'); name.className = 'eb-name';
+        name.appendChild(toggle(g, ' ' + (NAMES[a] || a)));
+        name.append(document.createTextNode(NAMES[a] || a));
+        const m = document.createElement('span'); m.className = 'eb-gmeta';
+        m.textContent = `area:${a} · ${list.length + list.reduce((x, r) => x + countDesc(r.epic), 0)} 个专题 · 专题以外 ${+rr.open || 0} 张`;
+        name.appendChild(m); name.appendChild(stack(sum)); tr.appendChild(name);
+        cell(tr, '');
+        nums(tr, sum, false);
+        tb.appendChild(tr);
+        if (collapsed.has(g)) continue;
+        walk(list, 0);
+        if (+rr.open > 0) {
+          const t2 = row('eb-rest', 'rest:' + a);
+          cell(t2, '', 'num');
+          const n2 = document.createElement('td'); n2.className = 'eb-name';
+          n2.style.paddingLeft = 'calc(var(--cds-pad-md) + 1.4rem)';
+          const tag = document.createElement('span'); tag.className = 'eb-tag'; tag.textContent = '专题以外'; n2.appendChild(tag);
+          n2.append(document.createTextNode('不属于任何专题的未完成卡'));
+          n2.appendChild(stack(rr));
+          if (+rr.none > 0) { const w = document.createElement('small'); w.className = 'eb-warn'; w.textContent = `${rr.none} 张没有 pm 状态，漏了分诊`; n2.appendChild(w); }
+          t2.appendChild(n2);
+          cell(t2, '');
+          nums(t2, rr, false);
+          tb.appendChild(t2);
+        }
+      }
+    };
+    render();
+  };
+  dash.draw('boardRows', makeBoard('epics', 'areas', AREA_ORDER, AREA_NAME));
+  dash.draw('boardRowsCloud', makeBoard('epics_cloud', 'areas_cloud', AREA_ORDER_C, AREA_NAME_C));
+
+  const root = document.querySelector('.eb');
+  const pick = (repo) => {
+    root.dataset.repo = repo;
+    for (const b of document.querySelectorAll('.eb-tabs [data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === repo));
+    try { localStorage.setItem('eb-repo', repo); } catch (e) {}
+    setHH();
+  };
+  for (const b of document.querySelectorAll('.eb-tabs [data-tab]')) b.addEventListener('click', () => pick(b.dataset.tab));
+  try { const saved = localStorage.getItem('eb-repo'); if (saved === 'cloud' || saved === 'objectstack') pick(saved); } catch (e) {}
+</script>

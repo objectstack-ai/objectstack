@@ -61,6 +61,7 @@ import { useSafeFieldLabel } from '@object-ui/react';
 import { NON_EDITABLE_SYSTEM_FIELDS } from './systemFields';
 import { InlineFieldInput } from './InlineFieldInput';
 import { FieldInPlaceEditor, isToggleFieldType, type FieldInPlaceWriter } from './FieldInPlaceEditor';
+import { FieldHistoryButton, fieldHistoryOffered } from './FieldHistory';
 import { headerColorClass } from './headerColor';
 import { DetailsColumnCapContext, framelessSectionColumns, useDefaultRecordPage } from './defaultRecordPage';
 import { hasCellValue } from './emptiness';
@@ -343,6 +344,16 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   React.useEffect(() => {
     if (isEditing) setFieldsInPlace([]);
   }, [isEditing]);
+  /**
+   * objectstack#36290 — the record a field's change history is read for: the
+   * page's own record, as `inPlaceWriter` reads it, so a section drawing
+   * another record (or none) offers no history button.
+   */
+  const historyRecord =
+    recordCtx?.dataSource && recordCtx.recordId != null && recordCtx.recordId !== ''
+      && objectName && recordCtx.objectName === objectName
+      ? { dataSource: recordCtx.dataSource, objectName, recordId: recordCtx.recordId }
+      : null;
   const closeInPlace = React.useCallback((name: string) => {
     setFieldsInPlace((open) => open.filter((n) => n !== name));
   }, []);
@@ -1081,6 +1092,19 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
               </Tooltip>
             </TooltipProvider>
           )}
+          {/* objectstack#36290 — the field's change history, opened in place,
+              for a field of the object whose changes are recorded with their
+              values and that the reader may read. */}
+          {historyRecord && objectDefField && fieldHistoryOffered(perms, objectName, field.name, objectSchema) && (
+            <FieldHistoryButton
+              dataSource={historyRecord.dataSource}
+              objectName={historyRecord.objectName}
+              recordId={historyRecord.recordId}
+              field={field.name}
+              objectSchema={objectSchema}
+              className={frameless ? 'pointer-coarse:hidden' : undefined}
+            />
+          )}
           {/* On the field face an editable value is copied from the same
               hover / focus button a read-only one is: its click is the
               way into edit, so the button is the way to copy. Elsewhere
@@ -1224,11 +1248,13 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
 
   // objectstack#27055 — the frameless face of the default record page: the
   // section's title row over a hairline, then the field grid. No card border,
-  // no shadow. A collapsible section collapses from its title row (a native
+  // no shadow. Every titled section folds from its title row (a native
   // button carrying `aria-expanded`, as the card face's disclosure does,
-  // objectui#12625); a section its group declares `collapse: 'none'` keeps a
-  // plain heading — the author's declaration holds on every face. An untitled
-  // section is the grid alone.
+  // objectui#12625), whatever its group's `collapse`: on this page folding a
+  // group is the reader's action, and `collapse` only picks the first state
+  // (`defaultCollapsed`), so `'none'` and `'expanded'` both start open
+  // (objectstack#36269). Forms, the designer preview and every other face
+  // keep reading `collapsible`. An untitled section is the grid alone.
   if (frameless) {
     const titleRow = 'flex min-h-11 sm:min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-sm font-medium text-foreground';
     return (
@@ -1238,18 +1264,10 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
         data-detail-section-face="frameless"
         data-detail-section-list={listFace ? '' : undefined}
       >
-        {section.title && !section.collapsible && (
-          <div className={cn('border-b border-border', headerColorClass(section.headerColor))}>
-            <h3 className={titleRow}>
-              <span className="flex min-w-0 items-center gap-2">
-                {section.icon && <SectionIcon name={section.icon} />}
-                <span className="truncate">{section.title}</span>
-              </span>
-            </h3>
-          </div>
-        )}
-        {section.title && section.collapsible && (
-          <div className={cn('border-b border-border', headerColorClass(section.headerColor))}>
+        {section.title && (
+          // The disclosure sits inside the group's heading, so heading
+          // navigation still finds every titled group.
+          <h3 className={cn('border-b border-border', headerColorClass(section.headerColor))}>
             <button
               type="button"
               aria-expanded={!isCollapsed}
@@ -1268,7 +1286,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                 <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
               )}
             </button>
-          </div>
+          </h3>
         )}
         {section.description && !isCollapsed && (
           <p className="mt-1 text-xs text-muted-foreground">{section.description}</p>

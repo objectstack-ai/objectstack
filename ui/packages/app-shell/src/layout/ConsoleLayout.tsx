@@ -216,7 +216,7 @@ export function ConsoleLayout({
   const { apps: metadataApps } = useMetadata();
   const appBasePath = `/apps/${appAddressSegment(metadataApps, activeApp) ?? activeAppName}`;
   // objectstack#36362 — the app's design mode, held here so it stays on from
-  // page to page of the app; never on a phone, which has no 「Edit app」.
+  // page to page of the app; never on a phone, which has no 「Design layout」.
   const designMode = useDesignModeController({ appName: activeAppName, appBasePath, enabled: !phone });
   // objectstack#30043 — the page in view, handed to the dock as its
   // `context.surface` (cloud#1610's shape): the object of a list, the object

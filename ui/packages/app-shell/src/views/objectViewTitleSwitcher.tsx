@@ -36,6 +36,7 @@
  */
 
 import { createContext, createElement, useContext, useMemo, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { usePublishPageCommand } from '../chrome/paletteCommands.js';
 import { cn, Popover, PopoverContent, PopoverTrigger } from '@object-ui/components';
 import type { ViewTabItem } from '@object-ui/plugin-view';
 import { resolveViewId } from '@object-ui/core';
@@ -141,7 +142,14 @@ export function ObjectViewTitleSwitcher({
     create,
     t,
 }: ObjectViewTitleSwitcherProps) {
-    const [open, setOpen] = useState(false);
+    const [open, setOpenState] = useState(false);
+    // The ⌘K palette's 「Add view」 opens the dropdown on its create card; any
+    // other open shows the views.
+    const [startOnCreate, setStartOnCreate] = useState(false);
+    const setOpen = (next: boolean) => {
+        setOpenState(next);
+        if (!next) setStartOnCreate(false);
+    };
     const listState = useContext(ListRecordCountContext);
     const displayLocale = useDisplayLocale();
 
@@ -173,9 +181,25 @@ export function ObjectViewTitleSwitcher({
             onAddView={onAddView}
             phone={phone}
             footerEnd={footerEnd}
+            startOnCreate={startOnCreate}
             t={t}
         />
     );
+
+    // objectstack#36286 — 「Add view」 in the ⌘K palette's Current page group,
+    // offered exactly where the dropdown offers it, running what it runs: the
+    // create card in the dropdown, or the host's Create View dialog.
+    usePublishPageCommand(create || onAddView ? {
+        id: 'add-view',
+        run: () => {
+            if (create) {
+                setStartOnCreate(true);
+                setOpenState(true);
+            } else {
+                onAddView?.();
+            }
+        },
+    } : null);
 
     // objectstack#35883 / #35884 — in the list's phone toolbar the switcher is
     // its first pill (the view's name, its count, the caret) and opens the
@@ -309,7 +333,7 @@ export function useObjectViewTitleSwitcher({
     viewAccess,
     activeViewId,
     handleViewChange,
-    isAdmin,
+    canManageViews,
     handleAddView,
     setManageViewsOpen,
     pinnedViewId,
@@ -331,7 +355,12 @@ export function useObjectViewTitleSwitcher({
     viewAccess: ReturnType<typeof useMetaItemRefusal>;
     activeViewId: string | undefined;
     handleViewChange: (viewId: string) => void;
-    isAdmin: boolean;
+    /**
+     * May the reader change the object's views (objectstack#36448): an
+     * administrator holding `manage_metadata` (`mayManageViews`). Gates Add
+     * view and Manage views, whose every write the server refuses without it.
+     */
+    canManageViews: boolean;
     handleAddView: () => void;
     setManageViewsOpen: Dispatch<SetStateAction<boolean>>;
     /** The reader's pinned view for this object (`LIST_PINNED_VIEW_PREFERENCE`). */
@@ -423,7 +452,7 @@ export function useObjectViewTitleSwitcher({
     // the session-held `writable` verdict objectstack#35933 reads. Unknown
     // (unread, failed, unlisted) keeps the row as it was. Manage views only:
     // the switcher's sections above still read `authored` from `isSystem`.
-    const refusingPackages = usePackagesRefusingSaves(isAdmin
+    const refusingPackages = usePackagesRefusingSaves(canManageViews
         ? savedViews.map((sv: any) => studioPackageId(sv)).filter((id: string | null): id is string => id !== null)
         : []);
     // The reader's own views are switched to here but are no view the admin's
@@ -485,8 +514,8 @@ export function useObjectViewTitleSwitcher({
             onPinnedViewChange={setPinnedViewId}
             recentViewIds={recentViewIds}
             favorites={favorites}
-            onAddView={isAdmin ? handleAddView : undefined}
-            onManageViews={isAdmin ? () => setManageViewsOpen(true) : undefined}
+            onAddView={canManageViews ? handleAddView : undefined}
+            onManageViews={canManageViews ? () => setManageViewsOpen(true) : undefined}
             create={createOptions}
             onRenamePersonalView={onRenamePersonalView}
             onDeletePersonalView={onDeletePersonalView}

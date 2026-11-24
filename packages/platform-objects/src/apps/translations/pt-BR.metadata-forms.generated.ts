@@ -114,7 +114,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "Recolher",
-        helpText: "Se a seção pode ser recolhida, no formulário de entrada e na página de detalhes do registro. Não definido: nenhuma."
+        helpText: "Se a seção pode ser recolhida. O formulário de entrada segue a configuração. Na página de registro padrão, o leitor pode recolher qualquer grupo com título, então ali ela define só o estado inicial: Collapsed começa recolhida e as demais, abertas. Não definido: nenhuma."
       },
       "fieldGroups.visibleWhen": {
         label: "Visível quando",
@@ -239,6 +239,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.deleteBehavior": {
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
+      },
+      "fields.transferBehavior": {
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
       },
       "fields.multiple": {
         label: "Múltiplo",
@@ -468,6 +472,18 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "userActions.transfer": {
         label: "Alterar proprietário",
         helpText: "A ação Alterar proprietário, individual e em massa: ativada, é oferecida; desativada, fica oculta. Não definida: ativada, exceto desativada em um objeto de detalhe controlled_by_parent. Oferecida apenas em um objeto cujos registros têm um proprietário reatribuível (ownership user ou não definido, sem managedBy, não é um objeto sys_, owner_id não é somente leitura e, em um objeto externo, está declarado ou mapeado); ativá-la em qualquer outro objeto é recusado. Controla apenas a ação, não uma edição simples de owner_id. Um objeto {enabled, visibleWhen, disabledWhen} armazenado é editado chave por chave; escreva um no código-fonte para condicionar a ação a cada registro."
+      },
+      actionLayout: {
+        label: "Disposição das ações",
+        helpText: "A ordem das ações deste objeto e quais são botões, por escopo: pinned (no máximo 3 botões, em ordem) e more (a ordem do menu Mais; uma ação não nomeada em nenhum dos dois segue na sua ordem padrão). Sem definir: cada superfície escolhe seus botões pela ordem das ações, como antes."
+      },
+      "actionLayout.list": {
+        label: "Lista",
+        helpText: "A barra de ferramentas da página de lista, como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas na barra da lista; $import / $export apenas em pinned. No máximo 3 fixadas. Sem fixar, a página ainda mostra seu próprio menu Importar / Exportar. O os validate recusa um nome que não é uma ação deste objeto ou que não está na barra da lista; esse nome não desenha nada."
+      },
+      "actionLayout.record": {
+        label: "Registro",
+        helpText: "O cabeçalho do registro (página do registro, pré-visualização lateral, barra inferior do celular), como {\"pinned\": [...], \"more\": [...]}: nomes de ações colocadas no cabeçalho do registro ou no seu menu Mais. No máximo 3 fixadas. O os validate recusa um nome que não é uma ação deste objeto ou que não está na página do registro; esse nome não desenha nada."
       },
       editMode: {
         label: "Modo de edição",
@@ -756,6 +772,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
+      },
+      transferBehavior: {
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
       },
       relatedListFilter: {
         label: "Filtro da lista relacionada",
@@ -2178,7 +2198,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rótulo"
       },
       description: {
-        label: "Descrição"
+        label: "Descrição",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Tipo",
@@ -2260,9 +2281,33 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Intervalo de datas",
         helpText: "Período padrão e opção de intervalo personalizado. A dimensão deve ser uma dimensão de data do conjunto de dados; deixe-a em branco quando o conjunto de dados tiver exatamente uma."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Opções de exportação",
         helpText: "Formatos de download (csv, xlsx) e nome do arquivo. Quem pode baixar é definido pela permissão de exportação no objeto do conjunto de dados."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

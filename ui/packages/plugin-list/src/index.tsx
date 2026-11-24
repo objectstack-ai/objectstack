@@ -28,6 +28,11 @@ export { PhonePanelSheet, useListPhonePanels, PHONE_CHIP, PHONE_CHIP_ACTIVE } fr
 export type { PhonePanelSheetProps, ListPhonePanels } from './phone/PhoneListPanels';
 export type { UserFiltersProps, UserFiltersHandle } from './UserFilters';
 export { normalizeFilterCondition, normalizeFilters } from './ListView';
+// objectstack#36645 — the one mapping from an object definition's fields to the
+// Filter picker's field list, so the report builder's 「+ Filter」 offers the
+// same fields, labels and value pickers as a list's Filter panel.
+export { conditionCandidatesOf, conditionOptionsOf } from './ListView';
+export type { ConditionCandidateField } from './ListView';
 // The provider-less fallback table, exported so objectui#4401's mirror gate can
 // compare it against the `en` pack from a package that depends on both.
 export { LIST_DEFAULT_TRANSLATIONS } from './ListView';

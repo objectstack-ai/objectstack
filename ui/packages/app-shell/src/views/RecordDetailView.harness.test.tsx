@@ -61,6 +61,7 @@ import { recentItemObject } from '../console/home/recentItemTypeLabel';
 import { NavigationProvider, useNavigationContext } from '../context/NavigationContext';
 import { RecentItemsProvider, useRecentItems, type RecentItem } from '../context/RecentItemsProvider';
 import { RecordDetailView } from './RecordDetailView';
+import { usePageCommands, type PublishedPageCommand } from '../chrome/paletteCommands';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -3577,5 +3578,142 @@ describe('RecordDetailView.embeddedStageReread-36309', () => {
     await waitFor(() => expect(moreTrigger()).toBeTruthy());
     fireEvent.pointerDown(moreTrigger()!, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     await waitFor(() => expect(document.querySelector('[data-page-refresh]')).toBeTruthy());
+  });
+});
+
+describe('RecordDetailView.paletteEdit-36286', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'crm_deal_36286';
+  const ID = 'd1';
+  const defWith = (extra: Record<string, unknown> = {}) => ({
+    name: OBJECT,
+    label: 'Deal',
+    nameField: 'name',
+    fields: {
+      id: { label: 'Id', type: 'text' },
+      name: { label: 'Name', type: 'text' },
+      status: { label: 'Status', type: 'text' },
+    },
+    ...extra,
+  });
+
+  /** What the ⌘K palette reads: the commands the page publishes. */
+  let published: readonly PublishedPageCommand[] = [];
+  function CommandsProbe() {
+    const commands = usePageCommands();
+    React.useEffect(() => {
+      published = commands;
+    });
+    return null;
+  }
+
+  function renderDeal({ embedded = false, def = defWith() }: { embedded?: boolean; def?: ReturnType<typeof defWith> } = {}) {
+    const pages: any[] = [];
+    const metadata = {
+      objects: [def], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as any;
+    const ds = {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => ({ id: ID, name: 'Wayne deal', status: 'new' })),
+      create: vi.fn(async (_o: string, r: any) => r),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => def,
+    } as Record<string, any>;
+    const onEdit = vi.fn();
+    render(
+      <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${ID}`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <NavigationProvider>
+            <CommandsProbe />
+            <RecordDetailView
+              dataSource={ds as never}
+              objects={[def] as never}
+              onEdit={onEdit}
+              objectNameOverride={OBJECT}
+              recordIdOverride={ID}
+              embedded={embedded}
+            />
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    return { ds, onEdit };
+  }
+
+  /** The header row's Edit, as the page draws it. */
+  async function headerEdit(): Promise<HTMLButtonElement> {
+    return waitFor(
+      () => {
+        const header = document.querySelector('[data-record-top-bar-actions]') as HTMLElement | null;
+        expect(header).toBeTruthy();
+        const edit = within(header!).getAllByRole('button').find((b) => b.textContent?.trim() === 'Edit');
+        expect(edit).toBeTruthy();
+        return edit as HTMLButtonElement;
+      },
+      { timeout: 5000 },
+    );
+  }
+  const editCommand = () => published.find((command) => command.id === 'edit-record');
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+  });
+
+  beforeEach(() => {
+    published = [];
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it('the record page publishes the header\'s Edit, and running it runs what the button runs', async () => {
+    const { onEdit } = renderDeal();
+    const button = await headerEdit();
+    await waitFor(() => expect(editCommand()).toBeTruthy());
+    expect(editCommand()?.disabled).toBe(false);
+    expect(button.disabled).toBe(false);
+
+    act(() => editCommand()!.run());
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenLastCalledWith({ id: ID }, OBJECT);
+    fireEvent.click(button);
+    expect(onEdit).toHaveBeenCalledTimes(2);
+    expect(onEdit.mock.calls[1]).toEqual(onEdit.mock.calls[0]);
+  });
+
+  it('off exactly when the header\'s Edit is off (edit.disabledWhen holds on the record)', async () => {
+    renderDeal({ def: defWith({ userActions: { edit: { disabledWhen: "record.status == 'new'" } } }) });
+    const button = await headerEdit();
+    await waitFor(() => expect(button.disabled).toBe(true));
+    await waitFor(() => expect(editCommand()?.disabled).toBe(true));
+  });
+
+  it('CONTROL: a disabledWhen that does not hold leaves both pressable', async () => {
+    renderDeal({ def: defWith({ userActions: { edit: { disabledWhen: "record.status == 'closed'" } } }) });
+    const button = await headerEdit();
+    await waitFor(() => expect(editCommand()).toBeTruthy());
+    expect(button.disabled).toBe(false);
+    expect(editCommand()?.disabled).toBe(false);
+  });
+
+  it('CONTROL: a record in a drawer or pane publishes nothing (the page behind it is the list)', async () => {
+    const { ds } = renderDeal({ embedded: true });
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getAllByText('Wayne deal').length).toBeGreaterThan(0), { timeout: 5000 });
+    await act(async () => {});
+    expect(editCommand()).toBeUndefined();
   });
 });
