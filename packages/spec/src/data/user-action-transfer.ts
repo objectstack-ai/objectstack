@@ -54,10 +54,14 @@ import type { RowCrudPredicates } from './object.zod';
  *
  * The switch gates two consumers: the dedicated action — single, bulk and
  * cascade — and the offboarding hand-over of a user's assigned work
- * (`@objectstack/core`'s `user-assigned-work.ts`). Where it resolves off, the
- * hand-over's count reports the object's `owner_id` rows as held
- * (`transfer_off`) and its transfer leaves their owner where it is; the
- * hand-over reads only the resolved on/off, not the per-record predicates. It
+ * (`@objectstack/core`'s `user-assigned-work.ts`). Where an eligible object's
+ * switch resolves off, the hand-over's count reports the object's `owner_id`
+ * rows as held (`transfer_off`) and its transfer leaves their owner where it
+ * is; the hand-over reads only the resolved on/off, not the per-record
+ * predicates. An `owner_id` the platform does not provide (an object the
+ * platform gives no owner column, declaring its own `owner_id` user field) is
+ * app-authored work and is handed over like any other user field; a read-only
+ * `owner_id` is not handed over, or counted, at all. It
  * does not gate the raw write: a plain `owner_id` update stays governed by
  * `allowTransfer` alone, so import mappings and hooks are unaffected (ruling
  * point 2). An author who wants a hard block declares `owner_id` read-only.
