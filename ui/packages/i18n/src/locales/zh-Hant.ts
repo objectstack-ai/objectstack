@@ -2396,36 +2396,32 @@ const zhHant = {
       description: '同事開始使用之前，先設定好這幾項。每一項之後都可以在系統設定中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隱藏清單',
+      // objectstack#36739 — the popover's own action: hides the pill and Home's card here; its X only closes.
+      hideHere: '在本機隱藏',
       showDone: '顯示已完成的項（{{done}}）',
-      showDoneSplit: '顯示已完成的項（必做 {{required}} · 可選 {{optional}}）',
       hideDone: '收起已完成的項',
       optional: '可選',
       set: '設定',
       change: '修改',
       view: '檢視',
-      confirm: '確認',
       cancel: '取消',
       continue: '繼續',
-      prefilled: '尚未設定的項已按你的瀏覽器給出建議。確認之前不會儲存任何內容。',
-      organizationName: {
-        title: '為組織命名',
-        todo: '組織仍在使用建立時的名稱“{{name}}”。',
-        action: '重新命名',
+      showList: '檢視清單',
+      // objectstack#36739 — the one required platform row: one form, one save.
+      organizationBasics: {
+        title: '組織基本資訊',
+        todo: '組織名稱、預設語言和國家/地區、時區、貨幣，一次儲存。',
+        name: '組織名稱',
+        nameRequired: '請填寫組織名稱。',
+        prefilled: '尚未設定的項已按你的瀏覽器給出建議。點“儲存”之前不會儲存任何內容。',
+        save: '儲存',
+        saved: '組織基本資訊已儲存',
       },
-      languageCountry: {
-        title: '預設語言和國家/地區',
-        todo: '當前為{{language}}、{{country}}。請確認，或改選其他值。',
-        saved: '預設語言和國家/地區已儲存',
-      },
-      timezone: {
-        title: '系統時區',
-        todo: '仍為平台預設時區 {{current}}。系統時區決定公式中“今天”的含義，以及報表如何按日期分組。',
-        saved: '系統時區已設定為 {{zone}}',
-      },
-      currency: {
-        title: '預設貨幣',
-        todo: '尚未設定，金額暫不顯示幣種。',
-        saved: '預設貨幣已設定為 {{currency}}',
+      // The sidebar's progress pill, in every app (objectstack#36739).
+      pill: {
+        label: '開始使用',
+        count: '{{done}}/{{total}}',
+        aria: '開始使用：已完成 {{done}}/{{total}}',
       },
       mail: {
         title: '郵件傳送',
