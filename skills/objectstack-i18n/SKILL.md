@@ -183,16 +183,21 @@ book once carried stays retired), `mappings` (an import mapping's `label` by its
 `datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
 authored list carries every language), and a joined report's block headings sit at
 `reports.{report}.blocks.{block_name}.{label,description}`, keyed by the block's required `name`.
-Three keys sit deeper than their group's `label`: a `page:tabs` item at
+Four keys sit deeper than their group's `label`: a `page:tabs` item at
 `pages.{page}.components.{tabs_id}.items.{value}.label` (by the item's `value`; an item without
-one has no key), an approval step at `flows.{flow}.approvals.{node_id}.label`, and the text a
+one has no key), an approval step at `flows.{flow}.approvals.{node_id}.label`, any other step's
+name at `flows.{flow}.nodes.{node_id}.label` (a screen is named by its heading,
+`flows.{flow}.screens.{node_id}.title`, and takes a `nodes` key only beside a `title` of its own;
+`os i18n check` asks for a flow's top-level steps, and for one of `FLOW_TECHNICAL_NODE_TYPES` —
+`script`, `http`, `connector_action`, `assignment`, `boundary_event`, the four `*_record` types —
+only where a decision's branch leads to it), and the text a
 `create_record` / `update_record` writes into a field marked `{ dialect: 'template', source }` at
 `flows.{flow}.records.{node_id}.fields.{field}`. That text, and each sentence a hook or a `script`
 action declares in `texts` and writes through `ctx.text` — `hooks.{hook}.texts.{key}.message`,
 `_actions.{action_name}.texts.{key}.message` (also under `globalActions`) — is picked in the
 organization's language (the Localization setting if set, else `i18n.defaultLocale`; never the caller's).
 `os i18n extract --no-objects-only` scaffolds every group above but `messages` and
-`settingsCommon`, all three keys included. The `inlineTitle`, report-block, table-column and
+`settingsCommon`, all four keys included. The `inlineTitle`, report-block, table-column and
 mapping keys, as the shipped `app-crm`, `app-showcase` and platform bundles spell them for `zh-CN`
 (`rows` is the table field's `path`, `error.message` one column's):
 
@@ -296,8 +301,6 @@ was removed). To pluralize, select the form in application code before calling `
 
 ### `os i18n check`
 
-The working coverage path is the CLI:
-
 ```bash
 os i18n check                          # every locale found in the config
 os i18n check --locales=zh-CN          # scope to specific locales
@@ -324,11 +327,8 @@ os i18n extract <config> --locales=zh-CN,ja-JP --fill=default \
 fails if that differs from what is committed in `--out`, naming each stale or
 missing file and printing the regenerate command.
 
-**Use both gates — they answer different questions.** `os i18n check` asks *are
-the strings translated?* (coverage: human work). `extract --check` asks *are the
-generated bundles still what the schema produces?* (freshness: machine output).
-Renaming a label or removing a spec key leaves coverage at 100% while bundles go
-stale — how the platform's own ended up translating keys the schema had deleted.
+**Use both gates:** renaming a label or removing a spec key leaves coverage at
+100% while the bundles go stale.
 
 It runs in the same **merge mode** as a normal extract, so it never asks for
 re-translation: an up-to-date bundle re-extracts byte-identically. Requires
@@ -413,8 +413,6 @@ produced; a client renders it as received.
 ## Translation Workflow Best Practices
 
 ### 1. Extract Skeletons from Metadata
-
-Scaffold ready-to-edit translation files from your stack config:
 
 ```bash
 os i18n extract --locales=zh-CN --out=./src/translations
