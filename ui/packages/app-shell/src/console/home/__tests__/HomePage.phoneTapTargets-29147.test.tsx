@@ -178,7 +178,7 @@ describe('the greeting row (objectstack#29147)', () => {
   });
 
   it('"Build an app" and "Build with AI" are 44 px below sm and 32 px from sm', async () => {
-    state.agents = [{ name: 'builder' }];
+    state.agents = [{ name: 'build' }];
     state.buildAgent = true;
     render(<HomePage />);
     expectPhoneTarget(await screen.findByTestId('home-build-app'), ['h-8'], ['max-sm:h-11']);

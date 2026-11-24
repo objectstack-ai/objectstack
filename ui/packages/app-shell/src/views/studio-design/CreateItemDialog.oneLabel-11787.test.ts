@@ -81,9 +81,12 @@ describe('Studio create dialogs say what the create does (objectui#11787, object
     }
   });
 
-  it('CONTROL — the enumeration reaches each live dialog once, the New permission set one included', () => {
+  it('CONTROL — the enumeration reaches each live dialog, the New permission set one included', () => {
     const live = createDialogSites().filter((site) => LIVE_TITLES.includes(titleKeyOf(site) ?? ''));
-    expect(live.map(titleKeyOf).sort()).toEqual([...LIVE_TITLES].sort());
+    // An object and a flow are created from their pillar AND from the metadata
+    // list (objectstack#36897, `MetadataListCreateDialog.tsx`): each title is
+    // reached, by one site or more.
+    expect([...new Set(live.map(titleKeyOf))].sort()).toEqual([...LIVE_TITLES].sort());
     for (const site of live) expect(site.submitLabel).toBe(LIVE_LABEL);
   });
 

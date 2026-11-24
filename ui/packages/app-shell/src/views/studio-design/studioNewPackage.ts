@@ -14,6 +14,8 @@
  * listed in `urlParams.ts`; it collides with none of the names reserved there.
  */
 
+import { studioLandingPath } from './studioAddress.js';
+
 /** The landing's query param that names what to create on arrival. */
 export const STUDIO_NEW_PARAM = 'new';
 
@@ -21,4 +23,4 @@ export const STUDIO_NEW_PARAM = 'new';
 export const STUDIO_NEW_PACKAGE_VALUE = 'package';
 
 /** Studio's new-package flow: the landing, with the create-package dialog open. */
-export const STUDIO_NEW_PACKAGE_PATH = `/studio?${STUDIO_NEW_PARAM}=${STUDIO_NEW_PACKAGE_VALUE}`;
+export const STUDIO_NEW_PACKAGE_PATH = studioLandingPath({ query: `${STUDIO_NEW_PARAM}=${STUDIO_NEW_PACKAGE_VALUE}` });

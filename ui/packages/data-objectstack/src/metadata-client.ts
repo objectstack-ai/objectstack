@@ -36,6 +36,7 @@ import {
   FindReferencesToMetaResponseSchema,
   FlowRegistrationSchema,
   GetMetaItemLayeredResponseSchema,
+  GetMetaItemsResponseSchema,
 } from '@objectstack/spec/api';
 // objectui#8676 - the object-metadata write invariant, applied HERE because this
 // is a DOOR and not a writer. Every `client.save('object', ...)` call site in the
@@ -285,8 +286,14 @@ export interface MetadataListOptions {
  * `flow`, a server with no automation service, or one that predates the key —
  * and absence means no engine judged the flow, ⛔ never `registered`. A name
  * the map has no entry for is unjudged in the same way.
+ *
+ * `changedAt` is when each listed item's served row last changed, keyed by the
+ * item's `name` (objectstack#36894): an ISO-8601 instant, present only for an
+ * item served from a stored row. A code-shipped item has no entry, and a
+ * server that predates the key sends none — either way the item has no known
+ * change time, ⛔ never a stand-in.
  */
-export type MetadataListAnswer<T = unknown> = { items: T[] } & Pick<GetMetaItemsResponse, 'registrations'>;
+export type MetadataListAnswer<T = unknown> = { items: T[] } & Pick<GetMetaItemsResponse, 'registrations' | 'changedAt'>;
 
 /**
  * Keep the verdicts of a list answer's `registrations` that parse with the
@@ -300,6 +307,23 @@ function readRegistrations(raw: unknown): Record<string, FlowRegistration> | und
   for (const [name, verdict] of Object.entries(raw as Record<string, unknown>)) {
     const parsed = FlowRegistrationSchema.safeParse(verdict);
     if (parsed.success) out[name] = parsed.data;
+  }
+  return out;
+}
+
+/**
+ * objectstack#36898 — keep the entries of a list answer's `changedAt` that
+ * parse with the spec's own rule (`GetMetaItemsResponseSchema.changedAt`, an
+ * ISO-8601 instant), one entry at a time: an entry that does not parse is not
+ * a time this client can read, so its item has no change time — what absence
+ * already means — and the others stand.
+ */
+function readChangedAt(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [name, at] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof at !== 'string') continue;
+    if (GetMetaItemsResponseSchema.safeParse({ type: 'list', items: [], changedAt: { [name]: at } }).success) out[name] = at;
   }
   return out;
 }
@@ -1209,8 +1233,9 @@ export class MetadataClient {
 
   /**
    * The same list read as {@link list}, with what the server serves beside
-   * the items (objectui#12349): today that is the automation engine's
-   * `registrations` on a `flow` list — see {@link MetadataListAnswer}.
+   * the items (objectui#12349): the automation engine's `registrations` on a
+   * `flow` list and each item's `changedAt` (objectstack#36898) — see
+   * {@link MetadataListAnswer}.
    *
    * One request for both methods: `list` is this read with the items picked
    * out, so a caller asking both at once shares one in-flight GET.
@@ -1229,7 +1254,12 @@ export class MetadataClient {
       if (Array.isArray(data)) return { items: data as T[] };
       if (data && Array.isArray((data as { items?: unknown[] }).items)) {
         const registrations = readRegistrations((data as { registrations?: unknown }).registrations);
-        return { items: (data as { items: T[] }).items, ...(registrations ? { registrations } : {}) };
+        const changedAt = readChangedAt((data as { changedAt?: unknown }).changedAt);
+        return {
+          items: (data as { items: T[] }).items,
+          ...(registrations ? { registrations } : {}),
+          ...(changedAt ? { changedAt } : {}),
+        };
       }
       return { items: [] };
     });

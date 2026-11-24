@@ -26,29 +26,39 @@
  *   is a grant, not work, and moving it would move the person's permissions.
  * - a column the platform registers but provisions no storage for (an injected
  *   anchor on a federated object, `unprovisionedInjectedColumns`).
- * - the owner column (`owner_id`) of a `controlled_by_parent` detail. On a
- *   detail the owner records who did the work, not who holds it: on a
- *   timesheet, an expense or a line item it is the person who did it, and
- *   handing it over would make the successor appear to have done the
- *   leaver's work. A detail row that names its master is reached through
- *   that master (ADR-0055), so handing the master over hands over its
- *   access. A detail row whose master reference is empty, on an OPTIONAL
- *   master (ADR-0055 as amended), has no master: its owner reads and writes
- *   it, beside View All / Modify All on the detail. That row's owner is left
- *   out too, because the skip is per object. After a ban only View All /
- *   Modify All holders reach such a row, and a holder of Modify All on the
- *   detail moves it by filtering the detail by owner and editing the owner
- *   by hand. The maintainer's ruling on Change Owner turns transfer off on a
- *   detail by default; until an object can say otherwise, the hand-over
- *   leaves the detail's owner where it is. The detail's own user fields (an
- *   `approver`, an `assignee`) are app-authored work and still count. It is
- *   left out rather than counted as not transferable: the only reason the
- *   count answer can give today (`transferable: false`) reads as a
- *   multi-valued field.
  *
- * A multi-valued user field is counted (any member names the user) but never
- * transferred: replacing one member of a list is a different edit from
- * reassigning a record, and the answer says `transferable: false`.
+ * ## Counted, but not handed over
+ *
+ * Two kinds of holding are counted and never moved, and the count answer says
+ * which (`transferable: false` with a {@link UserAssignedWorkHoldReason}):
+ *
+ * - `multi_valued`: a multi-valued user field (any member names the user).
+ *   Replacing one member of a list is a different edit from reassigning a
+ *   record.
+ * - `transfer_off`: the platform owner column (`owner_id`) of an object whose
+ *   Change Owner switch is off. Whether an object's owner can be handed to
+ *   someone else is a property of the object, not of this door, so the
+ *   hand-over asks the one resolution Change Owner asks
+ *   (`resolveUserActionTransfer`, `@objectstack/spec/data`;
+ *   `change-record-owner.ts` refuses by it): an object that turns
+ *   `userActions.transfer` off keeps its owners where they are, and an object
+ *   that omits the switch takes the default its `sharingModel` implies. That
+ *   default is off on a `controlled_by_parent` detail, where the owner is
+ *   usually the person who did the work (a timesheet, an expense, a line
+ *   item) and a row that names its master is reached through that master
+ *   (ADR-0055), so handing the master over hands over its access. An author
+ *   whose detail has a real owner (a contact under an account) turns the
+ *   switch on, and the hand-over then moves that owner like any other. The
+ *   rule is per object, so on a switched-off detail with an OPTIONAL master
+ *   (ADR-0055 as amended) a row whose master reference is empty keeps its
+ *   owner too; a holder of Modify All on the detail moves it by hand. The
+ *   switch governs only `owner_id`, and only where it is the platform's
+ *   reassignable owner (`isTransferEligible`): the object's own user fields
+ *   (an `approver`, an `assignee`) are app-authored work and are handed over
+ *   whatever the switch says.
+ *
+ * Both are still counted, so the administrator knows the records exist and
+ * why they stay.
  *
  * ## Whose reads and writes
  *
@@ -72,7 +82,12 @@
  * ban itself neither waits for nor depends on any of this: a ban can be urgent.
  */
 
-import { referenceTargetOf, unprovisionedInjectedColumns } from '@objectstack/spec/data';
+import {
+  isTransferEligible,
+  referenceTargetOf,
+  resolveUserActionTransfer,
+  unprovisionedInjectedColumns,
+} from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { isUserBanInForce, USER_BAN_FIELDS } from './user-ban.js';
 
@@ -80,19 +95,21 @@ import { isUserBanInForce, USER_BAN_FIELDS } from './user-ban.js';
 const USER_OBJECT = 'sys_user';
 
 /**
- * Does this object's access follow a master record (`sharingModel:
- * 'controlled_by_parent'`, ADR-0055)? Read on the flat and the nested spot,
- * as the access gates read it (`masterGovernsRowWrites` in
- * `@objectstack/plugin-security`, `effectiveSharingModel` in
- * `@objectstack/plugin-sharing`), so the hand-over treats as a detail exactly
- * the objects whose rows the gates answer through a master. Those packages
- * depend on this one and `@objectstack/spec` exports no object-level
- * predicate, so the reading is spelled here; a raw-registered object can
- * reach the registry without the parse, which is why the nested spot is read.
+ * Why a counted holding is not handed over: a multi-valued user field, or the
+ * owner column of an object whose Change Owner switch is off.
  */
-function accessFollowsMaster(obj: ObjectLike): boolean {
-  const model = obj.sharingModel ?? obj.security?.sharingModel;
-  return model === 'controlled_by_parent';
+export type UserAssignedWorkHoldReason = 'multi_valued' | 'transfer_off';
+
+/**
+ * Does this object keep its platform owner where it is? True when `owner_id`
+ * is the platform's reassignable owner (`isTransferEligible`) and the object's
+ * Change Owner switch resolves off (`resolveUserActionTransfer`, the one
+ * resolution Change Owner refuses by). An `owner_id` that is not the platform
+ * owner (an author-declared field on an object the platform gives no owner)
+ * answers false: that field is app-authored work.
+ */
+function ownerTransferOff(obj: unknown): boolean {
+  return isTransferEligible(obj) && !resolveUserActionTransfer(obj).enabled;
 }
 
 /** At most this many (object, field) pairs are counted in one answer. */
@@ -110,14 +127,16 @@ export interface UserAssignedWorkField {
   field: string;
   /** A multi-valued user field: counted, never transferred. */
   multiple: boolean;
+  /** Whether a hand-over moves this field's records. */
+  transferable: boolean;
+  /** Why not, present exactly when `transferable` is false. */
+  reason?: UserAssignedWorkHoldReason;
 }
 
 interface ObjectLike {
   name?: unknown;
   managedBy?: unknown;
   fields?: unknown;
-  sharingModel?: unknown;
-  security?: { sharingModel?: unknown } | null;
 }
 
 /**
@@ -136,15 +155,22 @@ export function userAssignedWorkFields(
     if (obj.managedBy !== undefined && obj.managedBy !== null) continue;
     if (!obj.fields || typeof obj.fields !== 'object') continue;
     const phantom = new Set(unprovisionedInjectedColumns(obj as any));
-    const detail = accessFollowsMaster(obj);
+    let ownerOff: boolean | undefined;
     for (const [field, def] of Object.entries(obj.fields as Record<string, unknown>)) {
       if (phantom.has(field)) continue;
-      if (detail && field === SystemFieldName.OWNER_ID) continue;
       if (referenceTargetOf(def) !== USER_OBJECT) continue;
       const d = def as { readonly?: unknown; multiple?: unknown };
       if (d.readonly === true) continue;
       if (fields.length >= cap) return { fields, truncated: true };
-      fields.push({ object: name, field, multiple: d.multiple === true });
+      const multiple = d.multiple === true;
+      const reason: UserAssignedWorkHoldReason | undefined = multiple
+        ? 'multi_valued'
+        : field === SystemFieldName.OWNER_ID && (ownerOff ??= ownerTransferOff(obj))
+          ? 'transfer_off'
+          : undefined;
+      fields.push(reason
+        ? { object: name, field, multiple, transferable: false, reason }
+        : { object: name, field, multiple, transferable: true });
     }
   }
   return { fields, truncated: false };
@@ -182,7 +208,10 @@ export interface UserAssignedWorkCount {
   object: string;
   field: string;
   count: number;
+  /** Whether a hand-over moves these records. */
   transferable: boolean;
+  /** Why not, present exactly when `transferable` is false. */
+  reason?: UserAssignedWorkHoldReason;
 }
 
 /** What {@link countUserAssignedWork} answers. */
@@ -218,7 +247,9 @@ export async function countUserAssignedWork(
       continue;
     }
     if (!(count > 0)) continue;
-    objects.push({ object: ref.object, field: ref.field, count, transferable: !ref.multiple });
+    objects.push(ref.reason
+      ? { object: ref.object, field: ref.field, count, transferable: false, reason: ref.reason }
+      : { object: ref.object, field: ref.field, count, transferable: true });
     total += count;
   }
   return { userId, objects, total, truncated, unreadable: [...unreadable] };
@@ -357,7 +388,7 @@ export async function transferUserAssignedWork(
 
   const only = options.objects && options.objects.length > 0 ? new Set(options.objects) : undefined;
   const { fields } = userAssignedWorkFields(servedObjects(engine));
-  const refs = fields.filter((ref) => !ref.multiple && (!only || only.has(ref.object)));
+  const refs = fields.filter((ref) => ref.transferable && (!only || only.has(ref.object)));
   let budget = options.rowCap ?? USER_WORK_TRANSFER_ROW_CAP;
   const objects: UserWorkTransferOutcome[] = [];
   let updated = 0;

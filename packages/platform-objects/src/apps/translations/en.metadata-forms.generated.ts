@@ -1088,15 +1088,54 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Seed Data",
-    description: "Fixture / initialization data applied on publish"
+    description: "Fixture / initialization data applied on publish",
+    fields: {
+      object: {
+        label: "Object"
+      },
+      mode: {
+        label: "Mode"
+      }
+    }
   },
   picklist: {
     label: "Picklist",
-    description: "Shared option list that select fields reference by name"
+    description: "Shared option list that select fields reference by name",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      options: {
+        label: "Options"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   mapping: {
     label: "Import Mapping",
-    description: "Reusable import/export field mapping (rename + transforms), referenced by name at import"
+    description: "Reusable import/export field mapping (rename + transforms), referenced by name at import",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      targetObject: {
+        label: "Target Object"
+      },
+      mode: {
+        label: "Mode"
+      },
+      sourceFormat: {
+        label: "Source Format"
+      }
+    }
   },
   view: {
     label: "View",
@@ -1420,6 +1459,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Locked By",
         helpText: "User who locked the view configuration"
+      },
+      object: {
+        label: "Object"
       }
     }
   },
@@ -2576,7 +2618,24 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Background Job"
+    label: "Background Job",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      schedule: {
+        label: "Schedule"
+      },
+      enabled: {
+        label: "Enabled"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   datasource: {
     label: "Datasource"
@@ -2586,10 +2645,41 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API Endpoint",
-    description: "A stable HTTP URL that other systems call to run a flow or work with records in the app"
+    description: "A stable HTTP URL that other systems call to run a flow or work with records in the app",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      method: {
+        label: "Method"
+      },
+      path: {
+        label: "Path"
+      },
+      type: {
+        label: "Type"
+      },
+      "objectParams.object": {
+        label: "Object"
+      },
+      "objectParams.operation": {
+        label: "Operation"
+      }
+    }
   },
   translation: {
-    label: "Translation"
+    label: "Translation",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      locale: {
+        label: "Locale"
+      }
+    }
   },
   email_template: {
     label: "Email Template",
@@ -2666,11 +2756,45 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Documentation",
-    description: "A help page written in Markdown that a package ships or you write yourself"
+    description: "A help page written in Markdown that a package ships or you write yourself",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      group: {
+        label: "Group"
+      },
+      tags: {
+        label: "Tags"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   book: {
     label: "Documentation Book",
-    description: "A table of contents that groups help pages into ordered sections"
+    description: "A table of contents that groups help pages into ordered sections",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      audience: {
+        label: "Audience"
+      },
+      groups: {
+        label: "Groups"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   permission: {
     label: "Permission Set",
@@ -2774,15 +2898,66 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Sharing Rule",
-    description: "A rule a package declares to share records; organizations author their own in Setup"
+    description: "A rule a package declares to share records; organizations author their own in Setup",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      object: {
+        label: "Object"
+      },
+      sharedWith: {
+        label: "Shared With"
+      },
+      accessLevel: {
+        label: "Access Level"
+      }
+    }
   },
   queue: {
     label: "Queue",
-    description: "A named set of people records can sit in until one of them takes the record; organizations staff their own in Setup"
+    description: "A named set of people records can sit in until one of them takes the record; organizations staff their own in Setup",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      members: {
+        label: "Members"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   assignment_rule: {
     label: "Assignment Rule",
-    description: "A rule a package declares to route new records to a queue or a person"
+    description: "A rule a package declares to route new records to a queue or a person",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Label"
+      },
+      object: {
+        label: "Object"
+      },
+      entries: {
+        label: "Entries"
+      },
+      active: {
+        label: "Active"
+      },
+      description: {
+        label: "Description"
+      }
+    }
   },
   agent: {
     label: "AI Agent",
@@ -2864,6 +3039,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Guardrails",
         helpText: "Safety rules and content policies"
+      },
+      "model.model": {
+        label: "Model"
       }
     }
   },

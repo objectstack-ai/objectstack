@@ -122,6 +122,7 @@ import { ProtocolCheckSkippedNote } from '../../console/marketplace/ProtocolChec
 import type { InstalledPackageAtEitherStage } from '@objectstack/spec/api-assembled';
 import type { PackagePublishResult } from '@objectstack/spec/system';
 import type { ReassignOrphanedMetadataResponse } from '@objectstack/spec/api';
+import { studioHomePath } from '../studio-design/studioAddress.js';
 import {
   PACKAGE_SOURCES,
   PACKAGES_ADMIN_FACE,
@@ -612,7 +613,7 @@ function InstalledAppUpdateCell({ rowId, read }: { rowId: string; read: UpdateRe
  * administration face's create lands here, and its "Open in Studio" link
  * points here (objectstack#36834).
  */
-const studioPackagePath = (packageId: string) => `/studio/${encodeURIComponent(packageId)}/data`;
+const studioPackagePath = (packageId: string) => studioHomePath(packageId);
 
 /* -------------------------------------------------------------------------- */
 /* Create-package dialog                                                       */
