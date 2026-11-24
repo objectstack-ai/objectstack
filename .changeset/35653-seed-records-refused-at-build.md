@@ -1,12 +1,14 @@
 ---
 '@objectstack/cli': minor
 '@objectstack/lint': minor
+'@objectstack/spec': minor
 ---
 
 feat(cli): `os validate` and `os build` refuse seed records the seed load would drop: one its own validation rule refuses, or a keyed one with a blank key field
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
+Skills-docs: follow-up owed — skills/objectstack-data/references/seeds.md (its sentence that `os validate` does not run validation rules on seed rows becomes false)
 
 <!-- adr-0087: registered seed-record-refused-before-load -->
 
