@@ -35,6 +35,11 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 import { resolveHref } from '@object-ui/layout';
 import { PackagesPage, type InstalledPackageRow } from './PackagesPage';
 import { t } from './i18n';
+// The page's package form reaches the CEL authoring helpers, which load these
+// two lazily; loaded here so their first load is paid at import, not inside a
+// test's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../runtime-config';
 // The designer rows this suite reads in zh live in `@object-ui/i18n`'s `studio`
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
