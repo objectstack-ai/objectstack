@@ -167,7 +167,11 @@ describe('LookupField opens its candidate panel in a bottom drawer on a phone (o
       fireEvent.click(last);
     });
     expect(onChange).toHaveBeenCalledWith('acc_25');
-    await waitFor(() => expect(screen.queryByTestId('lookup-drawer')).toBeNull());
+    // Closed: gone, or (while vaul plays its exit) marked closed.
+    await waitFor(() => {
+      const after = screen.queryByTestId('lookup-drawer');
+      expect(after === null || after.getAttribute('data-state') === 'closed').toBe(true);
+    });
   });
 
   it('the search box is not focused when the drawer opens', async () => {
