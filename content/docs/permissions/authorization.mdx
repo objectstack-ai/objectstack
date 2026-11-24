@@ -168,9 +168,9 @@ nothing about the field does not restore it. A Modify All set still votes on
 every field, its own entries included. Otherwise union without deny is
 unchanged. A set that carries `viewAllFields` on the object casts the same
 read vote as View All, under the same own-entry exception, and never an edit
-vote. From v19 View All and Modify All stop voting on fields: where a role
+vote. From v19 View All and Modify All stop voting on fields: where a set
 should read every field, grant
-[`viewAllFields`](/docs/permissions/field-level-security#viewallfields-a-role-that-reads-every-field).
+[`viewAllFields`](/docs/permissions/field-level-security#viewallfields-a-set-that-reads-every-field).
 Until the muting layer lands, protect sensitive fields by granting them only
 in the sets that need them, grant the object without Modify All to a set that
 must withhold a field from its own holders, and treat "sensitive field on a

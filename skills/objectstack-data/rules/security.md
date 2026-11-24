@@ -205,10 +205,10 @@ rowLevelSecurity: [
 ## Field visibility and `viewAllFields`
 
 Fields are visible by default: a field no set names follows the object grant,
-and across sets the most permissive answer wins. Write only the exceptions:
+and across sets the most permissive answer wins. Write only exceptions:
 
 - **Ordinary:** nothing.
-- **Role-dependent:** `fields` rows in the sets that differ.
+- **Position-dependent:** `fields` rows in the sets that differ.
 - **High-sensitivity** (salary, ID numbers): `requiredPermissions` on the
   field (§ Sensitive fields).
 

@@ -22,8 +22,8 @@ of them:
 that holds `viewAllRecords` on an object also reads every field of it, and a
 set that holds `modifyAllRecords` reads and edits every field (the exact votes
 are under [Server-side enforcement](#server-side-enforcement-of-declared-rules)).
-Do not build on that: where a role should read every field, grant
-[`viewAllFields`](#viewallfields-a-role-that-reads-every-field).
+Do not build on that: where a set should read every field, grant
+[`viewAllFields`](#viewallfields-a-set-that-reads-every-field).
 </Callout>
 
 ## Choosing by sensitivity
@@ -35,7 +35,7 @@ by how sensitive the field is:
 | The field is | Write | Why |
 |:---|:---|:---|
 | **Ordinary** | Nothing. | It follows the object grant. |
-| **Role-dependent**: one role reads or edits it, another does not | `fields` rows in the permission sets that differ. | Rows union across a user's sets, and the most permissive answer wins. |
+| **Position-dependent**: one position reads or edits it, another does not | `fields` rows in the permission sets that differ. | Rows union across a user's sets, and the most permissive answer wins. |
 | **High-sensitivity**: salary, ID numbers | `requiredPermissions` on the field itself, plus `maskingRule` where a partial value is needed. | The capability gate is applied after the sets are merged, so no field row, `viewAllFields`, View All or Modify All re-opens the field. |
 
 ```typescript
@@ -57,10 +57,10 @@ A caller who does not hold the capability gets `salary` stripped from every
 record and reads `id_number` as its masked value. A write to either field is
 refused.
 
-## `viewAllFields`: a role that reads every field
+## `viewAllFields`: a set that reads every field
 
 `viewAllFields: true` on a set's object entry casts a read vote on every field
-of that object, fields added later included. Use it for admin-like roles that
+of that object, fields added later included. Use it for admin-like sets that
 must read everything:
 
 ```typescript
@@ -296,7 +296,7 @@ rows included (`security-superuser-field-mask-inert` warns on such a row),
 until v19, when View All and Modify All stop voting on fields — so
 gate a high-sensitivity field with `requiredPermissions`
 ([Choosing by sensitivity](#choosing-by-sensitivity)), grant a
-role-dependent field only in the sets that need
+position-dependent field only in the sets that need
 it, and treat a sensitive field on a broadly-granted object as a
 review smell — see the
 [FLS posture warning](/docs/permissions/authorization#combination-semantics-the-fixed-order).
