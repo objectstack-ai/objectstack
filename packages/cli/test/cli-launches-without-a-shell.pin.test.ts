@@ -6,7 +6,8 @@
  * Over every `.ts` file under `packages/cli/src`, read as a TypeScript AST
  * (comments and strings cannot match). A `child_process` binding is a named,
  * renamed, namespace or default import, a `require(…)` / `import(…)` held in
- * a variable or destructured, or such a load used inline. Four rules:
+ * a variable or destructured, or such a load used inline; a `require` made by
+ * `createRequire(…)`, held or called inline, counts as `require`. Four rules:
  *
  *   - `exec-non-literal` — a call to `exec` / `execSync` (by its binding, as a
  *     member of a namespace binding, or as a member of an inline load) whose
@@ -25,7 +26,7 @@
  *     `execFileSync` whose program is a shell named by a string literal
  *     (`sh`, `bash`, `cmd`, `powershell`, `pwsh`, … with or without a
  *     directory or `.exe`), or is read from `process.env.SHELL` /
- *     `process.env.ComSpec`.
+ *     `process.env.ComSpec`, alone or as either side of `||`, `??` or `?:`.
  *
  * The findings must equal {@link ALLOWED} exactly, by file, rule, enclosing
  * function and the statement that holds the finding: a new launch of any kind
@@ -42,6 +43,24 @@
  * command, which they typed into their own shell, so the shell reads nothing
  * that user did not already hand it. Text from anywhere else (a server, a
  * file, an environment variable, another program) is never in a command line.
+ *
+ * Known limits: what this pin cannot see, so review still owns it.
+ *
+ *   - A `spawn`-family binding aliased (`const run = spawn`), promisified, or
+ *     destructured from a namespace binding: its calls are not read for a
+ *     shell program.
+ *   - A shell program held in a variable or returned by a function, rather
+ *     than written at the call.
+ *   - A computed `shell` key, or options spread in from a file that does not
+ *     load `child_process`.
+ *   - A launcher dependency (`execa`, `cross-spawn`; none today).
+ *   - A TypeScript `import cp = require('child_process')`, or a module name
+ *     written with an escape; the text prefilter skips the second as well.
+ *   - An allowance input reassigned after its declaration.
+ *   - The detector battery calls the detector directly, so a future rule that
+ *     needs no `child_process` load would pass there and still be filtered
+ *     out of the tree walk by the prefilter: such a rule changes the
+ *     prefilter in the same edit.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -145,15 +164,29 @@ const SHELL_ENV = new Set(['SHELL', 'ComSpec', 'COMSPEC']);
 
 const collapse = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
-/** `require('child_process')` / `import('node:child_process')`, awaited or not, parenthesized or not. */
-function isChildProcessLoad(node: ts.Node | undefined): boolean {
+/** `createRequire(…)` or `module.createRequire(…)`. */
+function isCreateRequire(node: ts.Node): boolean {
+  if (!ts.isCallExpression(node)) return false;
+  const callee = node.expression;
+  return (ts.isIdentifier(callee) && callee.text === 'createRequire')
+    || (ts.isPropertyAccessExpression(callee) && callee.name.text === 'createRequire');
+}
+
+/**
+ * `require('child_process')` / `import('node:child_process')`, awaited or not,
+ * parenthesized or not; `require` may be a name `requires` holds (a
+ * `createRequire(…)` result) or a `createRequire(…)` called inline.
+ */
+function isChildProcessLoad(node: ts.Node | undefined, requires: ReadonlySet<string> = new Set()): boolean {
   if (!node) return false;
   let inner: ts.Node = node;
   while (ts.isParenthesizedExpression(inner) || ts.isAwaitExpression(inner)) inner = inner.expression;
   if (!ts.isCallExpression(inner)) return false;
   const [arg] = inner.arguments;
-  const loads = inner.expression.kind === ts.SyntaxKind.ImportKeyword
-    || (ts.isIdentifier(inner.expression) && inner.expression.text === 'require');
+  const callee = inner.expression;
+  const loads = callee.kind === ts.SyntaxKind.ImportKeyword
+    || (ts.isIdentifier(callee) && (callee.text === 'require' || requires.has(callee.text)))
+    || isCreateRequire(callee);
   return loads && !!arg && ts.isStringLiteralLike(arg) && CHILD_PROCESS.test(arg.text);
 }
 
@@ -203,6 +236,12 @@ function enclosingStatement(node: ts.Node): ts.Node {
 /** Whether `node` is the program-name argument's shell: a literal shell name, or `process.env.SHELL` / `ComSpec`. */
 function namesAShell(node: ts.Expression | undefined): boolean {
   if (!node) return false;
+  if (ts.isParenthesizedExpression(node)) return namesAShell(node.expression);
+  if (ts.isConditionalExpression(node)) return namesAShell(node.whenTrue) || namesAShell(node.whenFalse);
+  if (ts.isBinaryExpression(node) && (node.operatorToken.kind === ts.SyntaxKind.BarBarToken
+    || node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)) {
+    return namesAShell(node.left) || namesAShell(node.right);
+  }
   if (ts.isStringLiteralLike(node)) {
     const base = node.text.split(/[\\/]/).pop()!.toLowerCase().replace(/\.exe$/, '');
     return SHELL_PROGRAMS.has(base);
@@ -229,6 +268,17 @@ function launchFindings(source: string, fileName = 'file.ts'): Finding[] {
     findings.push({ rule, fn: enclosingFunctionName(node), site: collapse(enclosingStatement(node).getText(sf)) });
   };
   let loadsChildProcess = false;
+
+  // Pass 0: the names a `createRequire(…)` result is held in.
+  const requires = new Set<string>();
+  const findRequires = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && isCreateRequire(node.initializer)) {
+      requires.add(node.name.text);
+    }
+    ts.forEachChild(node, findRequires);
+  };
+  findRequires(sf);
+  const isLoad = (node: ts.Node | undefined): boolean => isChildProcessLoad(node, requires);
 
   const bindDestructure = (pattern: ts.ObjectBindingPattern): void => {
     for (const el of pattern.elements) {
@@ -264,8 +314,8 @@ function launchFindings(source: string, fileName = 'file.ts'): Finding[] {
         }
       }
     }
-    if (isChildProcessLoad(node)) loadsChildProcess = true;
-    if (ts.isVariableDeclaration(node) && isChildProcessLoad(node.initializer)) {
+    if (isLoad(node)) loadsChildProcess = true;
+    if (ts.isVariableDeclaration(node) && isLoad(node.initializer)) {
       if (ts.isIdentifier(node.name)) {
         namespaces.add(node.name.text);
         declarations.add(node.name);
@@ -277,7 +327,7 @@ function launchFindings(source: string, fileName = 'file.ts'): Finding[] {
   collect(sf);
 
   const isNamespace = (node: ts.Node): boolean =>
-    (ts.isIdentifier(node) && namespaces.has(node.text)) || isChildProcessLoad(node);
+    (ts.isIdentifier(node) && namespaces.has(node.text)) || isLoad(node);
   /** `cp.exec` / `cp['exec']` / `require('child_process').exec`. */
   const execMember = (node: ts.Node): boolean => {
     if (!ts.isPropertyAccessExpression(node) && !ts.isElementAccessExpression(node)) return false;
@@ -340,7 +390,7 @@ function launchFindings(source: string, fileName = 'file.ts'): Finding[] {
       }
     }
     // An inline load that escapes: held, destructured, a member read or a bare statement are its only uses.
-    if (isChildProcessLoad(node) && !ts.isAwaitExpression(node) && !ts.isParenthesizedExpression(node)) {
+    if (isLoad(node) && !ts.isAwaitExpression(node) && !ts.isParenthesizedExpression(node)) {
       const wrapper = loadWrapper(node);
       const parent = wrapper.parent;
       const held = ts.isVariableDeclaration(parent) && parent.initializer === wrapper;
@@ -491,6 +541,8 @@ describe('the CLI starts programs from an argv array, without a shell', () => {
     ['exec-non-literal', "require('child_process').exec(cmd);"],
     ['exec-non-literal', "async function f() { (await import('node:child_process')).execSync(cmd); }"],
     ['exec-non-literal', "import * as cp from 'node:child_process'; cp['exec'](cmd);"],
+    ['exec-non-literal', "import { createRequire } from 'node:module'; const req = createRequire(import.meta.url); req('child_process').exec(cmd);"],
+    ['exec-non-literal', "const { execSync } = createRequire(import.meta.url)('node:child_process'); execSync(cmd);"],
     ['exec-as-value', "import { promisify } from 'node:util'; import { exec } from 'node:child_process'; const run = promisify(exec);"],
     ['exec-as-value', "import { exec } from 'node:child_process'; const run = exec;"],
     ['exec-as-value', "import * as cp from 'node:child_process'; const { exec } = cp;"],
@@ -509,6 +561,7 @@ describe('the CLI starts programs from an argv array, without a shell', () => {
     ['shell-option', "const opts = { shell: true }; require('child_process').spawn('a', [], opts);"],
     ['shell-option', "import { spawn } from 'node:child_process'; const o = {}; o.shell = true; spawn('a', [], o);"],
     ['shell-option', "import { spawn } from 'node:child_process'; options['shell'] = isWin; spawn('a', [], options);"],
+    ['shell-option', "import module from 'node:module'; const load = module.createRequire(__filename); const { spawn } = load('child_process'); spawn('a', [], { shell: true });"],
     ['shell-program', "import { spawn } from 'node:child_process'; spawn('sh', ['-c', line]);"],
     ['shell-program', "import { spawnSync } from 'node:child_process'; spawnSync('/bin/bash', ['-c', line]);"],
     ['shell-program', "import { execFile } from 'child_process'; execFile('cmd.exe', ['/c', line]);"],
@@ -516,6 +569,9 @@ describe('the CLI starts programs from an argv array, without a shell', () => {
     ['shell-program', "require('child_process').spawn('pwsh', ['-c', line]);"],
     ['shell-program', "import { spawn } from 'node:child_process'; spawn(process.env.ComSpec, ['/c', line]);"],
     ['shell-program', "import { spawn } from 'node:child_process'; spawn(process.env['SHELL'], ['-c', line]);"],
+    ['shell-program', "import { spawn } from 'node:child_process'; spawn(process.env.ComSpec || 'cmd.exe', ['/c', line]);"],
+    ['shell-program', "import { spawnSync } from 'node:child_process'; spawnSync(isWin ? 'cmd.exe' : 'sh', [flag, line]);"],
+    ['shell-program', "import { spawn } from 'node:child_process'; spawn((process.env.SHELL ?? '/bin/sh'), ['-c', line]);"],
   ];
   const QUIET: readonly string[] = [
     "import { exec } from 'node:child_process'; exec('git --version');",
@@ -536,6 +592,8 @@ describe('the CLI starts programs from an argv array, without a shell', () => {
     "// exec(`open ${url}`) and { shell: true } in a comment",
     "const s = 'exec(`x ${y}`) { shell: true }';",
     "type O = { shell: boolean };",
+    "import { createRequire } from 'node:module'; const req = createRequire(import.meta.url); req('node:fs').exec(cmd);",
+    "import { spawn } from 'node:child_process'; spawn(process.env.EDITOR || 'vi', [file]);",
   ];
 
   it('the detector sees every spelling it claims to, and nothing it does not', () => {
@@ -546,10 +604,10 @@ describe('the CLI starts programs from an argv array, without a shell', () => {
   it('the detector battery keeps its floor: every rule has its loud cases, and the quiet set is whole', () => {
     // A floor per rule, not one total: a battery falling to a few cases still prints a count.
     const FLOOR: Readonly<Record<Rule, number>> = {
-      'exec-non-literal': 9,
+      'exec-non-literal': 11,
       'exec-as-value': 11,
-      'shell-option': 7,
-      'shell-program': 7,
+      'shell-option': 8,
+      'shell-program': 10,
     };
     const perRule = new Map<Rule, number>();
     for (const [rule] of LOUD) perRule.set(rule, (perRule.get(rule) ?? 0) + 1);
@@ -557,6 +615,6 @@ describe('the CLI starts programs from an argv array, without a shell', () => {
       expect(perRule.get(rule) ?? 0, rule).toBeGreaterThanOrEqual(floor);
     }
     expect([...perRule.keys()].sort()).toEqual(Object.keys(FLOOR).sort());
-    expect(QUIET.length).toBeGreaterThanOrEqual(18);
+    expect(QUIET.length).toBeGreaterThanOrEqual(20);
   });
 });

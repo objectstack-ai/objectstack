@@ -28,6 +28,7 @@
 
 import { ObjectStackClient } from '@objectstack/client';
 import { browserOpenNotice, openBrowser } from './open-browser.js';
+import { terminalText } from './terminal-text.js';
 
 export interface AuthFlowUser {
   id?: string;
@@ -128,7 +129,7 @@ export async function loginWithBrowser(
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(
-      `Device request failed (${res.status}): ${(err as any)?.error_description || (err as any)?.message || res.statusText}`,
+      `Device request failed (${terminalText(res.status)}): ${terminalText((err as any)?.error_description || (err as any)?.message || res.statusText)}`,
     );
   }
   const deviceData = (await res.json()) as any;
@@ -154,9 +155,9 @@ export async function loginWithBrowser(
   } else if (!silent) {
     console.log('  To authorize this CLI, visit:');
     console.log('');
-    console.log(`  ${verificationUrl}`);
+    console.log(`  ${terminalText(verificationUrl)}`);
     console.log('');
-    console.log(`  User code: ${user_code}`);
+    console.log(`  User code: ${terminalText(user_code)}`);
     console.log('');
   }
 
@@ -221,7 +222,7 @@ export async function loginWithBrowser(
       );
     } else if (!pollRes.ok) {
       throw new Error(
-        `Polling failed (${pollRes.status}): ${pollJson?.error_description || pollJson?.message || pollRes.statusText}`,
+        `Polling failed (${terminalText(pollRes.status)}): ${terminalText(pollJson?.error_description || pollJson?.message || pollRes.statusText)}`,
       );
     }
 

@@ -52,13 +52,19 @@ function onPlatform(platform: NodeJS.Platform): void {
   Object.defineProperty(process, 'platform', { value: platform, configurable: true });
 }
 
-/** A server answering the device-code request with `address`, then `poll` on every poll. */
-function stubServer(address: string, poll: { status: number; body: unknown }): void {
+/**
+ * A server answering the device-code request with `address`, then `poll` on
+ * every poll; or refusing the device-code request with `deviceError`.
+ */
+function stubServer(address: string, poll: { status: number; body: unknown }, userCode = 'ABCD-EFGH', deviceError?: string): void {
   vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    if (String(input).endsWith('/device/code') && deviceError !== undefined) {
+      return new Response(JSON.stringify({ error_description: deviceError }), { status: 400 });
+    }
     if (String(input).endsWith('/device/code')) {
       return new Response(JSON.stringify({
         device_code: 'dev-code',
-        user_code: 'ABCD-EFGH',
+        user_code: userCode,
         verification_uri: 'https://sign-in.example.test/device',
         verification_uri_complete: address,
         expires_in: 5,
@@ -71,16 +77,18 @@ function stubServer(address: string, poll: { status: number; body: unknown }): v
 }
 
 const FLOWS = {
-  'os cloud login (utils/auth-flows)': async (address: string) => {
-    stubServer(address, { status: 200, body: { access_token: 'token' } });
+  'os cloud login (utils/auth-flows)': async (address: string, userCode?: string, deviceError?: string) => {
+    stubServer(address, { status: 200, body: { access_token: 'token' } }, userCode, deviceError);
     await loginWithBrowser('https://server.example.test');
   },
-  'os login': async (address: string) => {
-    stubServer(address, { status: 400, body: { error: 'access_denied' } });
+  'os login': async (address: string, userCode?: string, deviceError?: string) => {
+    stubServer(address, { status: 400, body: { error: 'access_denied' } }, userCode, deviceError);
     const flow = (AuthLogin.prototype as unknown as {
       loginWithBrowser(client: unknown, url: string, noBrowser: boolean, json?: boolean): Promise<void>;
     }).loginWithBrowser;
-    await expect(flow.call({}, undefined, 'https://server.example.test', false, false)).rejects.toThrow('Login denied by user.');
+    const pending = flow.call({}, undefined, 'https://server.example.test', false, false);
+    if (deviceError !== undefined) return pending;
+    await expect(pending).rejects.toThrow('Login denied by user.');
   },
 } as const;
 
@@ -142,12 +150,12 @@ describe.each(Object.entries(FLOWS))('%s: the sign-in page opens from an argv ar
     expect(logged.some((line) => line.includes('Browser opened automatically'))).toBe(false);
   });
 
-  for (const address of [
+  [
     'http://sign"in.example.test/device',
     'https://sign-in.example.test/device?user_code=AB|CD',
     'https://sign-in.example.test/device?user_code={AB}^CD',
-  ]) {
-    it(`an http(s) address holding a character outside the plain URL set is printed, not launched: ${JSON.stringify(address)}`, async () => {
+  ].forEach((address, index, all) => {
+    it(`${index + 1} of ${all.length}: an http(s) address holding a character outside the plain URL set is printed, not launched`, async () => {
       for (const platform of ['darwin', 'linux', 'win32'] as const) {
         onPlatform(platform);
         logged = [];
@@ -158,10 +166,10 @@ describe.each(Object.entries(FLOWS))('%s: the sign-in page opens from an argv ar
         expect(logged.some((line) => line.includes('not an http or https address in plain URL characters'))).toBe(true);
       }
     });
-  }
+  });
 
-  for (const address of ['file:///etc/hosts', 'javascript:void(0)', 'ms-settings:privacy', 'sign-in.example.test/device', 'not a url']) {
-    it(`an address that is not http or https is never launched, and is printed instead: ${JSON.stringify(address)}`, async () => {
+  ['file:///etc/hosts', 'javascript:void(0)', 'ms-settings:privacy', 'sign-in.example.test/device', 'not a url'].forEach((address, index, all) => {
+    it(`${index + 1} of ${all.length}: an address that is not http or https is never launched, and is printed instead`, async () => {
       onPlatform('linux');
       await run(address);
 
@@ -170,7 +178,38 @@ describe.each(Object.entries(FLOWS))('%s: the sign-in page opens from an argv ar
       expect(logged.some((line) => line.includes('Browser opened automatically'))).toBe(false);
       expect(logged.some((line) => line.includes('not an http or https address'))).toBe(true);
     });
-  }
+  });
+
+  /** A line break, CR, cursor moves, an OSC clipboard write, C1, DEL and the Unicode separators. */
+  const HOSTILE = `\n  https://other.example.test/\r\x1b[1A\x1b[2K\x1b]52;c;ZXZpbA==\x07${String.fromCharCode(0x9b, 0x85, 0x2028, 0x202e)}\t\x7f`;
+  const unprintable = (line: string): boolean => Array.from(line).some((character) => {
+    const code = character.codePointAt(0)!;
+    return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029 || (code >= 0x202a && code <= 0x202e);
+  });
+  const printed = (): string[] => logged.join('\n').split('\n');
+
+  it('1: the printed sign-in address and user code carry no control byte, and the browser opens the parsed address unchanged', async () => {
+    onPlatform('linux');
+    await run(PLAIN, 'ABCD-EFGH');
+    const plainLines = printed();
+
+    logged = [];
+    cp.spawn.mockClear();
+    const address = `${PLAIN}${HOSTILE}`;
+    await run(address, `ABCD${HOSTILE}`);
+
+    expect(printed().filter(unprintable)).toEqual([]);
+    expect(printed()).toHaveLength(plainLines.length);
+    expect(printed().filter((line) => line.includes('User code:'))).toHaveLength(1);
+    const opened = cp.spawn.mock.calls.map((call) => (call[1] as string[]).at(-1));
+    expect(opened).toEqual([new URL(address).href]);
+  });
+
+  it('2: the server\'s error text reaches the thrown error as one line', async () => {
+    const error = await run(PLAIN, undefined, `denied${HOSTILE}`).then(() => undefined, (e: Error) => e);
+    expect(error?.message).toContain('Device request failed (400): denied');
+    expect(unprintable(error!.message)).toBe(false);
+  });
 });
 
 describe('os mcp connect starts the client from an argv array, without a shell', () => {
@@ -211,7 +250,7 @@ describe('os mcp connect starts the client from an argv array, without a shell',
       isFile: (candidate) => { probed.push(candidate); return true; },
     });
 
-    expect(lookup('.;bin;..\\tools;\\rooted\\no-drive;"relative"')).toEqual({ kind: 'missing' });
+    expect(lookup('.;bin;..\\tools;\\rooted\\no-drive;"relative";\\\\server-only')).toEqual({ kind: 'missing' });
     expect(probed).toEqual([]);
     // The same lookup does search a drive-rooted entry, so the empty answer above is the filter's.
     expect(lookup('.;C:\\tools')).toEqual({ kind: 'found', path: 'C:\\tools\\claude.com' });
@@ -230,6 +269,17 @@ describe('os mcp connect starts the client from an argv array, without a shell',
     expect(command).toBe('claude');
     expect(args).toEqual(ARGS);
     expect(options.shell).toBe(false);
+  });
+
+  it('win32: a UNC share entry is fully qualified, so it is searched', () => {
+    const lookup = (PATH: string) => resolveClientExecutable('claude', {
+      platform: 'win32',
+      env: { PATH },
+      isFile: (candidate) => candidate === '\\\\server\\share\\bin\\claude.exe',
+    });
+    expect(lookup('.;\\\\server\\share\\bin')).toEqual({ kind: 'found', path: '\\\\server\\share\\bin\\claude.exe' });
+    // The forward-slash spelling names the same share.
+    expect(lookup('//server/share/bin')).toEqual({ kind: 'found', path: '\\\\server\\share\\bin\\claude.exe' });
   });
 
   it('the Windows lookup takes, per PATH entry, the file `cmd.exe` would run for the name', () => {

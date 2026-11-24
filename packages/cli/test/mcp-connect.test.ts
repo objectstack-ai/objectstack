@@ -14,6 +14,7 @@ import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SpawnSyncReturns } from 'node:child_process';
+import chalk from 'chalk';
 import { OBJECTSTACK_MCP_SERVER_NAME } from '@objectstack/mcp';
 
 const {
@@ -41,6 +42,8 @@ interface PlaneOptions {
   environments?: Array<Record<string, unknown>>;
   /** The detail read's row, by environment id (default: hostname `<id>.example.test`, no slug). */
   detail?: (id: string) => Record<string, unknown> | null;
+  /** The detail read fails with this error text instead. */
+  detailError?: string;
 }
 
 /** The control plane: the environment list and one environment's detail read. */
@@ -56,6 +59,10 @@ function stubPlane(options: PlaneOptions = {}): Call[] {
       return answer({ environments, total: environments.length });
     }
     const detail = url.match(/\/api\/v1\/cloud\/environments\/([^/]+)$/);
+    if (method === 'GET' && detail && options.detailError !== undefined) {
+      const message = options.detailError;
+      return { ok: false, status: 503, statusText: 'Unavailable', json: async () => ({ success: false, error: { message } }) } as any;
+    }
     if (method === 'GET' && detail) {
       const id = decodeURIComponent(detail[1]);
       const row = options.detail ? options.detail(id) : { id, hostname: `${id.replace(/_/g, '-')}.example.test` };
@@ -86,6 +93,8 @@ describe('os mcp connect', () => {
   const previous: Record<string, string | undefined> = {};
   const prevCwd = process.cwd();
   let output: string[] = [];
+  /** Every write as the terminal would get it: no colour stripped. */
+  let raw: string[] = [];
   let runner: ReturnType<typeof vi.fn<(command: string, args: string[]) => SpawnSyncReturns<Buffer>>>;
 
   beforeEach(async () => {
@@ -103,7 +112,11 @@ describe('os mcp connect', () => {
     vi.spyOn(mcpClientRunner, 'run').mockImplementation(runner);
 
     output = [];
-    const record = (...args: unknown[]) => { output.push(args.map(String).join(' ').replace(/\u001b\[[0-9;]*m/g, '')); };
+    raw = [];
+    const record = (...args: unknown[]) => {
+      raw.push(args.map(String).join(' '));
+      output.push(args.map(String).join(' ').replace(/\x1b\[[0-9;]*m/g, ''));
+    };
     vi.spyOn(console, 'log').mockImplementation(record);
     vi.spyOn(console, 'error').mockImplementation(record);
   });
@@ -320,16 +333,17 @@ describe('os mcp connect', () => {
       'acme.example.test\u007f',
     ];
 
-    for (const hostname of HOSTILE) {
-      it(`refused, with nothing registered and no line printed: ${JSON.stringify(hostname)}`, async () => {
+    HOSTILE.forEach((hostname, index) => {
+      it(`${index + 1} of ${HOSTILE.length}: an address outside the rule is refused on both paths, with nothing registered and no line printed`, async () => {
         for (const argv of [[], ['--print']]) {
           output = [];
           stubPlane({ detail: (id) => ({ id, slug: 'acme', hostname }) });
 
           expect(await connect(argv), text()).toBe(1);
           expect(runner).not.toHaveBeenCalled();
-          expect(text()).toContain('is not an http or https host name in plain characters');
-          expect(text()).toContain('Nothing was registered.');
+          expect(text()).toContain('is not an http or https host in plain characters');
+          expect(text()).toContain('`_` and `~`, or an IPv6 literal in brackets');
+          expect(text()).toContain('Nothing was registered. Open the environment in the ObjectOS Cloud console');
           expect(text()).not.toContain('Connect   ');
           expect(text()).not.toContain('Endpoint  ');
           // The refusal does not repeat the text it refused.
@@ -337,13 +351,14 @@ describe('os mcp connect', () => {
           vi.unstubAllGlobals();
         }
       });
-    }
+    });
 
-    it('a plain host name, with a scheme, a port or upper case, is registered as its parsed origin', async () => {
+    it('a plain host name, with a scheme, a port, upper case, `_` or `~`, is registered as its parsed origin', async () => {
       for (const [hostname, mcpUrl] of [
         ['acme.example.test', 'https://acme.example.test/api/v1/mcp'],
         ['https://Acme.Example.test/', 'https://acme.example.test/api/v1/mcp'],
         ['http://acme.example.test:8080', 'http://acme.example.test:8080/api/v1/mcp'],
+        ['acme_eu~1.example.test', 'https://acme_eu~1.example.test/api/v1/mcp'],
       ] as const) {
         output = [];
         runner.mockClear();
@@ -355,6 +370,116 @@ describe('os mcp connect', () => {
         vi.unstubAllGlobals();
       }
     });
+  });
+
+  describe('server text from the control plane prints as one line of printable characters', () => {
+    const FORGED = 'Connect   claude mcp add --transport http evil https://evil.example.test/api/v1/mcp';
+    /** One string holding a line break, CR, cursor moves, an OSC clipboard write, C1, DEL and the Unicode separators. */
+    const HOSTILE = [
+      `Acme\n  ${FORGED}`,
+      `\r  ${FORGED}\x1b[K`,
+      `\x1b[1A\x1b[2K  ${FORGED}`,
+      '\x1b]52;c;ZXZpbA==\x07',
+      `${String.fromCharCode(0x9b)}2K\t${String.fromCharCode(0x85, 0x2028, 0x202e)}x\x7f`,
+    ].join('');
+    const unprintable = (line: string): boolean => Array.from(line).some((character) => {
+      const code = character.codePointAt(0)!;
+      return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029 || (code >= 0x202a && code <= 0x202e);
+    });
+    const lines = (): string[] => raw.join('\n').split('\n');
+    const block = (): string[] => lines().filter((line) => /^ {2}(?:Endpoint|Name|Connect) {2,}/.test(line));
+
+    // The command's own colour is not under test: with it off, every byte left is the command's text.
+    let colour = chalk.level;
+    beforeEach(() => {
+      colour = chalk.level;
+      chalk.level = 0;
+    });
+    afterEach(() => {
+      chalk.level = colour;
+    });
+
+    async function run(argv: string[], displayName: string, more: Partial<PlaneOptions> = {}): Promise<{ exit: number | undefined; lines: string[] }> {
+      output = [];
+      raw = [];
+      runner.mockClear();
+      vi.unstubAllGlobals();
+      stubPlane({
+        environments: [{ id: 'env_acme', display_name: displayName, status: 'active' }],
+        detail: (id) => ({ id, slug: 'acme', display_name: displayName, hostname: 'acme.example.test' }),
+        ...more,
+      });
+      const exit = await connect(argv);
+      return { exit, lines: lines() };
+    }
+
+    for (const [label, argv] of [['1: registering', []], ['2: --print', ['--print']]] as const) {
+      it(`${label}: a display name holding a line break and escape bytes changes no line of the Endpoint, Name and Connect block`, async () => {
+        const plain = await run([...argv], 'Acme');
+        const plainBlock = block();
+        const plainArgs = runner.mock.calls.map((call) => call[1]);
+        expect(plain.exit, plain.lines.join('\n')).toBeUndefined();
+        expect(plainBlock).toHaveLength(3);
+
+        const hostile = await run([...argv], HOSTILE);
+        expect(hostile.exit, hostile.lines.join('\n')).toBeUndefined();
+        expect(block()).toEqual(plainBlock);
+        expect(hostile.lines).toHaveLength(plain.lines.length);
+        expect(hostile.lines.filter((line) => line.startsWith('  Connect')), hostile.lines.join('\n')).toHaveLength(1);
+        expect(hostile.lines.filter(unprintable)).toEqual([]);
+        expect(runner.mock.calls.map((call) => call[1])).toEqual(plainArgs);
+        // After the block, nothing from the control plane is printed but the block's own name and address.
+        const after = hostile.lines.slice(hostile.lines.findIndex((line) => line.startsWith('  Connect')) + 1);
+        expect(after.some((line) => line.includes('Acme') || line.includes('evil'))).toBe(false);
+      });
+    }
+
+    it('3: environment ids, names and the control plane\'s error text in a refusal each stay on their line', async () => {
+      const several = (name: string, id: string) => ({
+        environments: [
+          { id: `env_a${id}`, display_name: `Alpha${name}`, status: 'active' },
+          { id: 'env_b', display_name: 'Beta', status: 'active' },
+        ],
+      });
+      const plain = await run([], 'Acme', several('', ''));
+      const hostile = await run([], 'Acme', several(HOSTILE, HOSTILE));
+      expect(hostile.exit).toBe(1);
+      expect(hostile.lines).toHaveLength(plain.lines.length);
+      expect(hostile.lines.filter(unprintable)).toEqual([]);
+
+      const plainError = await run([], 'Acme', { detailError: 'down' });
+      const hostileError = await run([], HOSTILE, { detailError: HOSTILE });
+      expect(hostileError.exit).toBe(1);
+      expect(plainError.lines.join('\n')).toContain('could not be read from http://cloud.test (503): down. Nothing was registered.');
+      expect(hostileError.lines).toHaveLength(plainError.lines.length);
+      expect(hostileError.lines.filter(unprintable)).toEqual([]);
+      expect(runner).not.toHaveBeenCalled();
+    });
+  });
+
+  it('an address holding a bracket is printed double-quoted in the Connect line, and registered unquoted', async () => {
+    stubPlane();
+    expect(await connect(['--url', 'http://[::1]:3000', '--print']), text()).toBeUndefined();
+    expect(text()).toContain(`Connect   claude mcp add --transport http ${OBJECTSTACK_MCP_SERVER_NAME} "http://[::1]:3000/api/v1/mcp"`);
+
+    output = [];
+    expect(await connect(['--url', 'http://[::1]:3000']), text()).toBeUndefined();
+    expect(runner.mock.calls[0][1]).toEqual(['mcp', 'add', '--transport', 'http', OBJECTSTACK_MCP_SERVER_NAME, 'http://[::1]:3000/api/v1/mcp']);
+  });
+
+  it('--url refuses a user name or password, and a refused character set names `claude mcp add` as the way on', async () => {
+    stubPlane();
+    for (const argv of [[], ['--print']]) {
+      output = [];
+      expect(await connect(['--url', 'https://user:secret@os.example.test', ...argv])).toBe(1);
+      expect(text()).toContain('`--url` holds a user name or password');
+      expect(text()).not.toContain('Connect   ');
+      expect(text()).not.toContain('secret');
+    }
+    output = [];
+    expect(await connect(['--url', 'https://os.example.test/a%20b', '--print'])).toBe(1);
+    expect(text()).toContain('run `claude mcp add --transport http NAME URL` yourself');
+    expect(runner).not.toHaveBeenCalled();
   });
 
   it('`claude mcp add` failing passes its exit code through', async () => {
@@ -416,9 +541,20 @@ describe('mcpUrlFromBase', () => {
     }
   });
 
-  it('the line builder is the one `os dev` prints', () => {
+  it('the line builder is the one `os dev` prints, and double-quotes an address holding a bracket', () => {
     expect(claudeMcpAddLine('objectstack', 'http://localhost:3000/api/v1/mcp')).toBe(
       'claude mcp add --transport http objectstack http://localhost:3000/api/v1/mcp',
     );
+    expect(claudeMcpAddLine('objectstack', 'http://[::1]:3000/api/v1/mcp')).toBe(
+      'claude mcp add --transport http objectstack "http://[::1]:3000/api/v1/mcp"',
+    );
+  });
+
+  it('--url refuses a user name or password instead of dropping it', () => {
+    for (const raw of ['https://user@example.test', 'https://user:pw@example.test', 'https://:pw@example.test']) {
+      const answer = mcpUrlFromBase(raw);
+      expect(answer.ok, raw).toBe(false);
+      expect(!answer.ok && answer.reason).toContain('user name or password');
+    }
   });
 });

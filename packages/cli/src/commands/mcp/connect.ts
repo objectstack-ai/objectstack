@@ -20,10 +20,17 @@
  * it came from `--url` ({@link mcpUrlFromBase}) or from the control plane
  * ({@link mcpUrlFromOrigin}): it parses with `new URL`, it is `http:` or
  * `https:`, it is rebuilt from the parsed `origin`, its text holds no control
- * character, and the rebuilt address holds only {@link LINE_SAFE_URL}'s
- * characters, so the printed Connect line, which a user may paste into a
- * shell, holds no shell syntax. Anything else is refused, with nothing
- * registered and no Connect line printed.
+ * character, it holds no user name or password, and the rebuilt address
+ * holds only {@link LINE_SAFE_URL}'s characters, so the printed Connect line,
+ * which a user may paste into a shell, is read as plain words. Anything else
+ * is refused, with nothing registered and no Connect line printed.
+ *
+ * ## Server text prints as one line
+ *
+ * Every other string the control plane supplies (the environment's name and
+ * id, an error text) is printed through `terminalText`, as one line of
+ * printable characters. After the Endpoint, Name and Connect block, nothing
+ * from the control plane is printed but the block's own name and address.
  *
  * ## Which name
  *
@@ -62,6 +69,7 @@ import { printError, printHeader, printStep, printSuccess, isExitSignal } from '
 import { DEFAULT_CLOUD_URL, resolveCloudCredential } from '../../utils/cloud-config.js';
 import { describeEnvironment, resolveInstallTarget } from '../../utils/install-target.js';
 import { readCloudEnvironment } from '../../utils/served-version.js';
+import { terminalText } from '../../utils/terminal-text.js';
 
 /** Where every ObjectStack server mounts its MCP endpoint. */
 export const MCP_ENDPOINT_PATH = '/api/v1/mcp';
@@ -74,8 +82,11 @@ const SERVER_NAME = /^[A-Za-z0-9_-]+$/;
 
 /**
  * Every character a registered and printed MCP URL may hold: letters,
- * digits, `-._~`, `:` and `/`, and `[`/`]` for an IPv6 literal host. No shell
- * in common use (sh, cmd.exe, PowerShell) reads any of them as syntax.
+ * digits, `-._~`, `:` and `/`, and `[`/`]` (an IPv6 literal host; a `--url`
+ * path prefix may hold them too). None is a separator, quote, substitution,
+ * redirection or variable sigil in sh, cmd.exe or PowerShell. `[` and `]` are
+ * pattern characters in the sh family, so {@link claudeMcpAddLine} quotes an
+ * address that holds one.
  */
 export const LINE_SAFE_URL = /^[A-Za-z0-9._~:/[\]-]+$/;
 
@@ -90,10 +101,13 @@ export function claudeMcpAddArgs(name: string, url: string): string[] {
 /**
  * The `claude mcp add` line, as `os dev`'s banner and this command print it.
  * This command prints it only for a `name` matching {@link SERVER_NAME} and a
- * `url` matching {@link LINE_SAFE_URL}, so the line needs no quoting.
+ * `url` matching {@link LINE_SAFE_URL}. An address holding `[` or `]` is
+ * double-quoted, which every one of sh, cmd.exe and PowerShell reads as one
+ * plain word for these characters; no other part of the line needs quoting.
  */
 export function claudeMcpAddLine(name: string, url: string): string {
-  return ['claude', ...claudeMcpAddArgs(name, url)].join(' ');
+  const shown = /[[\]]/.test(url) ? `"${url}"` : url;
+  return ['claude', ...claudeMcpAddArgs(name, shown)].join(' ');
 }
 
 /**
@@ -112,8 +126,8 @@ export function environmentServerName(env: { id: string; slug?: string; displayN
 
 /**
  * `--url` as a server base URL: `http(s)://host[:port][/prefix]`, with no
- * query and no fragment. The MCP path is added here, so a URL that already
- * ends in it is refused rather than doubled.
+ * user name or password, no query and no fragment. The MCP path is added
+ * here, so a URL that already ends in it is refused rather than doubled.
  */
 export function mcpUrlFromBase(raw: string): { ok: true; mcpUrl: string } | { ok: false; reason: string } {
   if (CONTROL_CHARACTER.test(raw.trim())) {
@@ -127,6 +141,13 @@ export function mcpUrlFromBase(raw: string): { ok: true; mcpUrl: string } | { ok
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { ok: false, reason: `\`--url\` must be an http or https URL, not ${parsed.protocol}` };
+  }
+  if (parsed.username || parsed.password) {
+    return {
+      ok: false,
+      reason: '`--url` holds a user name or password, which this command does not register: the MCP client signs in '
+        + 'itself. Pass the base URL without them.',
+    };
   }
   if (parsed.search || parsed.hash) {
     return { ok: false, reason: '`--url` takes the server\'s base URL, with no query or fragment.' };
@@ -142,8 +163,9 @@ export function mcpUrlFromBase(raw: string): { ok: true; mcpUrl: string } | { ok
   if (!LINE_SAFE_URL.test(mcpUrl)) {
     return {
       ok: false,
-      reason: '`--url` may hold only letters, digits, `-`, `.`, `_`, `~`, `:`, `/` and an IPv6 host\'s brackets, '
-        + 'so the printed Connect line is safe to paste into a shell.',
+      reason: '`--url` may hold only letters, digits, `-`, `.`, `_`, `~`, `:`, `/`, `[` and `]`, '
+        + 'so the printed Connect line is safe to paste into a shell. To register this server anyway, run '
+        + '`claude mcp add --transport http NAME URL` yourself, with its MCP address as URL.',
     };
   }
   return { ok: true, mcpUrl };
@@ -160,7 +182,8 @@ export function mcpUrlFromBase(raw: string): { ok: true; mcpUrl: string } | { ok
 export function mcpUrlFromOrigin(origin: string): { ok: true; mcpUrl: string } | { ok: false; reason: string } {
   const refused = {
     ok: false as const,
-    reason: 'is not an http or https host name in plain characters (letters, digits, `-`, `.`, and an optional port)',
+    reason: 'is not an http or https host in plain characters (letters, digits, `-`, `.`, `_` and `~`, or an IPv6 '
+      + 'literal in brackets) with an optional port',
   };
   if (CONTROL_CHARACTER.test(origin)) return refused;
   let parsed: URL;
@@ -175,8 +198,12 @@ export function mcpUrlFromOrigin(origin: string): { ok: true; mcpUrl: string } |
   return LINE_SAFE_URL.test(mcpUrl) ? { ok: true, mcpUrl } : refused;
 }
 
-/** A Windows path rooted at a drive letter: `C:\…` or `C:/…`. */
-const DRIVE_ROOTED = /^[A-Za-z]:[\\/]/;
+/**
+ * A fully qualified Windows path: rooted at a drive letter (`C:\…`, `C:/…`)
+ * or a UNC path (`\\server\share\…`, `\\?\…`). Never relative to the
+ * current directory or to the current drive.
+ */
+const FULLY_QUALIFIED = /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)/;
 
 /**
  * The file test {@link resolveClientExecutable} uses on Windows. A seam, so a
@@ -197,8 +224,9 @@ export const clientFileProbe = {
  *
  * Off Windows the bare name is the answer: `spawnSync` walks `PATH` itself.
  * On Windows it is the file `cmd.exe` would have run for the name, minus the
- * current directory: the first `PATH` entry, of those rooted at a drive letter
- * (`C:\…`; a relative entry and one rooted without a drive are skipped),
+ * current directory: the first `PATH` entry, of those fully qualified (rooted
+ * at a drive letter, `C:\…`, or a UNC path, `\\server\share\…`; a relative
+ * entry and one rooted at the current drive, `\…`, are skipped),
  * holding `NAME.com`, `NAME.exe`, `NAME.bat` or `NAME.cmd` (that order in
  * each entry). An `.exe` or `.com` is `found` by its absolute path. A
  * batch-file shim (`.cmd`/`.bat`, what an npm global install writes) runs
@@ -218,7 +246,7 @@ export function resolveClientExecutable(
   const dirs = (read('PATH') ?? '')
     .split(';')
     .map((dir) => dir.trim().replace(/^"(.*)"$/, '$1'))
-    .filter((dir) => DRIVE_ROOTED.test(dir));
+    .filter((dir) => FULLY_QUALIFIED.test(dir));
   const isFile = options.isFile ?? ((candidate: string): boolean => clientFileProbe.isFile(candidate));
   for (const dir of dirs) {
     for (const ext of ['.com', '.exe', '.bat', '.cmd']) {
@@ -293,24 +321,22 @@ export default class McpConnect extends Command {
 
     try {
       if (flags.name !== undefined && !SERVER_NAME.test(flags.name)) {
-        printError(`\`--name ${flags.name}\` is not a server name: use letters, digits, \`-\` and \`_\` only.`);
+        printError(`\`--name ${terminalText(flags.name)}\` is not a server name: use letters, digits, \`-\` and \`_\` only.`);
         this.exit(1);
         return;
       }
 
       let mcpUrl: string;
       let name: string;
-      let where: string;
       if (flags.url !== undefined) {
         const local = mcpUrlFromBase(flags.url);
         if (!local.ok) {
-          printError(local.reason);
+          printError(terminalText(local.reason));
           this.exit(1);
           return;
         }
         mcpUrl = local.mcpUrl;
         name = flags.name ?? OBJECTSTACK_MCP_SERVER_NAME;
-        where = new URL(mcpUrl).origin;
       } else {
         const { token, baseUrl } = await resolveCloudCredential({ token: flags.token, server: flags.server });
         if (!token) {
@@ -336,18 +362,18 @@ export default class McpConnect extends Command {
         }
         const env = await readCloudEnvironment({ baseUrl, token, environmentId: target.environmentId });
         const displayName = target.displayName ?? (env.ok ? env.displayName : undefined);
-        where = describeEnvironment({ id: target.environmentId, displayName });
+        const where = describeEnvironment({ id: target.environmentId, displayName });
         if (!env.ok) {
           printError(
-            `${where}'s address could not be read from ${baseUrl}`
-            + `${env.status ? ` (${env.status})` : ''}: ${env.error}. Nothing was registered.`,
+            `${where}'s address could not be read from ${terminalText(baseUrl)}`
+            + `${env.status ? ` (${terminalText(env.status)})` : ''}: ${terminalText(env.error)}. Nothing was registered.`,
           );
           this.exit(1);
           return;
         }
         if (!env.origin) {
           printError(
-            `${baseUrl} reports no hostname for ${where}, so it has no MCP URL to register. `
+            `${terminalText(baseUrl)} reports no hostname for ${where}, so it has no MCP URL to register. `
             + 'Open the environment in the ObjectOS Cloud console to check it is provisioned. Nothing was registered.',
           );
           this.exit(1);
@@ -355,7 +381,11 @@ export default class McpConnect extends Command {
         }
         const derived = mcpUrlFromOrigin(env.origin);
         if (!derived.ok) {
-          printError(`The address ${baseUrl} reports for ${where} ${derived.reason}. Nothing was registered.`);
+          printError(
+            `The address ${terminalText(baseUrl)} reports for ${where} ${terminalText(derived.reason)}. Nothing was registered. `
+            + 'Open the environment in the ObjectOS Cloud console to check its address, or pass `--url` with a base URL '
+            + 'you know to be right.',
+          );
           this.exit(1);
           return;
         }
@@ -383,7 +413,7 @@ export default class McpConnect extends Command {
           printError(
             client.kind === 'missing'
               ? notFound
-              : `The \`claude\` on your PATH is a batch-file shim (${client.path}), which this command does not run: `
+              : `The \`claude\` on your PATH is a batch-file shim (${terminalText(client.path)}), which this command does not run: `
                 + 'it starts programs without a shell. Run the Connect line above yourself, '
                 + "or install Claude Code's native Windows build and run `os mcp connect` again.",
           );
@@ -396,14 +426,14 @@ export default class McpConnect extends Command {
           printError(
             missing
               ? notFound
-              : `\`claude\` could not be started: ${ran.error.message}. Run the Connect line above yourself.`,
+              : `\`claude\` could not be started: ${terminalText(ran.error.message)}. Run the Connect line above yourself.`,
           );
           this.exit(1);
           return;
         }
         if (ran.status !== 0) {
           printError(
-            `\`claude mcp add\` exited ${ran.status ?? `on ${ran.signal}`}; its reason is above. `
+            `\`claude mcp add\` exited ${terminalText(ran.status ?? `on ${ran.signal}`)}; its reason is above. `
             + `If ${name} is already registered, remove it with \`claude mcp remove ${name}\` or pick another --name.`,
           );
           this.exit(ran.status || 1);
@@ -414,11 +444,11 @@ export default class McpConnect extends Command {
 
       console.log('');
       console.log(
-        `  Sign-in   In Claude Code, run /mcp and authenticate ${name}: your browser shows ${where}'s sign-in and consent. `
+        `  Sign-in   In Claude Code, run /mcp and authenticate ${name}: your browser shows the environment's sign-in and consent. `
         + 'This command stored no token.',
       );
       console.log(
-        `  Revoke    In ${where}'s console: Account → Connect an AI Assistant → your authorized assistants → Revoke.`,
+        '  Revoke    In the environment\'s console: Account → Connect an AI Assistant → your authorized assistants → Revoke.',
       );
       console.log(
         '  Model     MCP reads the environment for context. A managed package\'s content changes through its source '
@@ -426,7 +456,7 @@ export default class McpConnect extends Command {
       );
     } catch (error) {
       if (isExitSignal(error)) throw error;
-      printError((error as Error).message);
+      printError(terminalText((error as Error).message));
       this.exit(1);
     }
   }
