@@ -105,7 +105,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 });
 
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
-import { DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { DataPillar } from './StudioDesignSurface';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 
 afterEach(() => {
@@ -115,35 +115,6 @@ afterEach(() => {
 });
 
 describe('Studio rails converge on an AI copilot apply (objectui#7255)', () => {
-  it('Interfaces rail grows the new nav item on the pulse, in place', async () => {
-    render(
-      <MemoryRouter initialEntries={['/studio/b2r4/interfaces']}>
-        <InterfacesPillar packageId="b2r4" />
-      </MemoryRouter>,
-    );
-
-    // Baseline: the two blueprint items, and NOT the copilot's.
-    await screen.findByTitle('object · b2r4_customer');
-    expect(screen.queryByTitle('object · b2r4_follow_up_record')).toBeNull();
-
-    // The copilot turn lands server-side …
-    applyCopilotTurn();
-    // … and is still invisible until something tells this tree to re-read:
-    // the bug was that nothing did.
-    expect(screen.queryByTitle('object · b2r4_follow_up_record')).toBeNull();
-
-    await act(async () => {
-      emitMetadataRefresh();
-    });
-
-    await waitFor(() =>
-      expect(screen.getByTitle('object · b2r4_follow_up_record')).toBeInTheDocument(),
-    );
-    // Refresh, don't rebuild (AGENTS.md #8): the pre-existing entries are the
-    // same tree, not a remounted one — a `key=` bump would have blown away the
-    // rail and re-run the mount-time first-leaf selection.
-    expect(screen.getByTitle('object · b2r4_customer')).toBeInTheDocument();
-  });
 
   it('Data rail grows the new object on the pulse', async () => {
     render(

@@ -202,7 +202,7 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
     const current = nav().getByRole('link', { current: 'page' });
     expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/metadata`);
     // The builder's header stays: the package chip, its pillars, the area.
-    expect(nav().getAllByRole('link')).toHaveLength(5);
+    expect(nav().getAllByRole('link')).toHaveLength(4);
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
     // The surface and the area share the one package-list read.
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/v1/packages')).toHaveLength(1);

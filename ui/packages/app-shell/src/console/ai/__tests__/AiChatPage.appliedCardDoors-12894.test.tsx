@@ -172,7 +172,7 @@ describe('objectui#12894 — 查看变更并发布 opens Studio\'s 变更 drawer
     const onReviewDrafts = props.onReviewDrafts as (packageId: string) => void;
     expect(typeof onReviewDrafts).toBe('function');
     act(() => onReviewDrafts('app.hcpl'));
-    expect(screen.getByTestId('location').textContent).toBe('/studio/app.hcpl/interfaces?changes=review');
+    expect(screen.getByTestId('location').textContent).toBe('/studio/app.hcpl/data?changes=review');
   });
 
   it('on one of the package\'s Studio pillars: the same pillar and selection, with the param added', () => {
@@ -186,7 +186,7 @@ describe('objectui#12894 — 查看变更并发布 opens Studio\'s 变更 drawer
   it('CONTROL: on ANOTHER package\'s Studio, the card\'s own package opens', () => {
     const props = renderPane('/studio/app.other/data', 'app.other');
     act(() => (props.onReviewDrafts as (packageId: string) => void)('app.hcpl'));
-    expect(screen.getByTestId('location').textContent).toBe('/studio/app.hcpl/interfaces?changes=review');
+    expect(screen.getByTestId('location').textContent).toBe('/studio/app.hcpl/data?changes=review');
   });
 });
 

@@ -32,7 +32,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 // Module-scope import of the lazily loaded dashboard renderer (AGENTS.md,
 // flaky-test discipline).
@@ -136,7 +136,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-import { DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { DataPillar } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { DashboardPreview } from '../metadata-admin/previews/DashboardPreview';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
@@ -153,7 +153,6 @@ afterEach(() => {
   clients = [client];
 });
 
-const NO_DESIGNER = /cannot be previewed or designed here/;
 // "The object opened" reads as its Records body being drawn: the pillar draws
 // it once the object loaded. (objectui#12511 — it read the header's More menu,
 // which retired; the grid here is the real one over an empty data source, so
@@ -167,14 +166,6 @@ function canvas(): HTMLElement {
   return main;
 }
 
-function interfacesTree() {
-  return (
-    <MemoryRouter initialEntries={['/studio/com.acme.app/interfaces']}>
-      <InterfacesPillar packageId="com.acme.app" />
-    </MemoryRouter>
-  );
-}
-
 function dataTree() {
   return (
     <MemoryRouter initialEntries={['/studio/com.acme.app/data']}>
@@ -182,40 +173,6 @@ function dataTree() {
     </MemoryRouter>
   );
 }
-
-describe('Interfaces pillar — a leaf with no load of its own, opened while a load is in flight (objectui#11331)', () => {
-  it('the report leaf shows its own canvas state, during and after the dashboard load it cancelled', async () => {
-    const openDashboard = hold('dashboard/customer_dashboard');
-    render(interfacesTree());
-    // The first leaf, the dashboard, opened itself and its load is in flight.
-    await waitFor(() => expect(reads('dashboard', 'customer_dashboard')).toBe(1));
-    expect(within(canvas()).getByText('Loading…')).toBeInTheDocument();
-
-    fireEvent.click(await screen.findByTitle('report · sales_report'));
-    // The report leaf loads nothing, so nothing is left to wait for.
-    expect(await within(canvas()).findByText(NO_DESIGNER)).toBeInTheDocument();
-    expect(within(canvas()).queryByText('Loading…')).toBeNull();
-
-    // The cancelled load lands late: it was cancelled, so it changes nothing.
-    await openDashboard();
-    expect(within(canvas()).getByText(NO_DESIGNER)).toBeInTheDocument();
-    expect(within(canvas()).queryByText('Loading…')).toBeNull();
-  });
-
-  it('control: the same click after the dashboard rendered shows the same state', async () => {
-    const { container } = render(interfacesTree());
-    await waitFor(
-      () => {
-        if (!container.querySelector('[style*="grid-column"]')) throw new Error('dashboard grid not rendered yet');
-      },
-      { timeout: 4000 },
-    );
-
-    fireEvent.click(screen.getByTitle('report · sales_report'));
-    expect(await within(canvas()).findByText(NO_DESIGNER)).toBeInTheDocument();
-    expect(within(canvas()).queryByText('Loading…')).toBeNull();
-  });
-});
 
 describe('Data pillar — a new metadata client while the open object loads (objectui#11331)', () => {
   it('the re-run loads the object again: the cancelled load installed nothing', async () => {

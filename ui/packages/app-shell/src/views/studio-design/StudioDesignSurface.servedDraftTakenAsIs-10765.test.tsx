@@ -32,16 +32,6 @@ import { t } from '../metadata-admin/i18n';
 
 const PKG = 'com.acme.app';
 
-const NAV = [{ id: 'nav_home', type: 'page', label: 'Home', pageName: 'home' }];
-
-/** The published app carries a `label`; its pending draft deleted it. */
-const PUBLISHED_APP = { name: 'acme_app', label: 'Acme', navigation: NAV };
-const DRAFT_APP_WITHOUT_LABEL = { name: 'acme_app', navigation: NAV };
-
-/** The published page carries a `description`; its pending draft deleted it. */
-const PUBLISHED_PAGE = { name: 'home', label: 'Home', kind: 'blocks', blocks: [], description: 'published description' };
-const DRAFT_PAGE_WITHOUT_DESCRIPTION = { name: 'home', label: 'Home (draft)', kind: 'blocks', blocks: [] };
-
 /** The published object has an OWD model set; its pending draft set it back to unset (the key is gone). */
 const FIELDS = [{ name: 'title', label: 'Title', type: 'text' }];
 const PUBLISHED_OBJECT = { name: 'crm_contact', label: 'Contact', sharingModel: 'private', fields: FIELDS };
@@ -119,7 +109,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { InterfacesPillar, DataPillar, AutomationsPillar } from './StudioDesignSurface';
+import { DataPillar, AutomationsPillar } from './StudioDesignSurface';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataPreview, getMetadataPreview } from '../metadata-admin/preview-registry';
@@ -163,45 +153,6 @@ afterEach(() => {
 });
 
 describe('StudioDesignSurface — every load site takes the served draft as-is, never spread over `effective` (objectui#10765)', () => {
-  it('Interfaces pillar: the APP draft and the SURFACE draft it opens are the served drafts, not the published rows underneath them', async () => {
-    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
-    server.drafts.set(key('app', 'acme_app'), wire(DRAFT_APP_WITHOUT_LABEL));
-    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
-    server.drafts.set(key('page', 'home'), wire(DRAFT_PAGE_WITHOUT_DESCRIPTION));
-
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-
-    // APP SITE — red on base: the spread kept the published `label`, so the
-    // heading read "Acme · Navigation". The draft deleted `label`, and the
-    // pillar falls back to the app's `name`.
-    await screen.findByText('acme_app · Navigation', undefined, { timeout: 8000 });
-    expect(screen.queryByText('Acme · Navigation')).toBeNull();
-
-    // SURFACE SITE — red on base: the spread put the published `description`
-    // back under the draft's own `label`.
-    await waitFor(() => expect(surfaceDraft().label).toBe('Home (draft)'), { timeout: 8000 });
-    expect(surfaceDraft()).not.toHaveProperty('description');
-    expect(surfaceDraft()).toStrictEqual(wire(DRAFT_PAGE_WITHOUT_DESCRIPTION));
-  });
-
-  it('Interfaces pillar, CONTROL: with no pending draft the surface shows the published baseline unchanged', async () => {
-    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
-    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
-
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-
-    await screen.findByText('Acme · Navigation', undefined, { timeout: 8000 });
-    await waitFor(() => expect(surfaceDraft().label).toBe('Home'), { timeout: 8000 });
-    expect(surfaceDraft()).toStrictEqual(wire(PUBLISHED_PAGE));
-  });
 
   it('Data pillar: an OWD model the object draft set back to unset reads as unset, not as the published value', async () => {
     server.active.set(key('object', 'crm_contact'), wire(PUBLISHED_OBJECT));

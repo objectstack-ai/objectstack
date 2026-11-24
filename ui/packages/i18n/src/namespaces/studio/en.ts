@@ -3494,6 +3494,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pillar.automations': 'Automations',
   'engine.studio.pillar.interfaces': 'Interfaces',
   'engine.studio.pillar.access': 'Access',
+  // objectstack#36502 — the notice on a retired Interfaces link's landing.
+  'engine.studio.interfacesRetired.sentence': 'Interface edits have moved into the app.',
+  'engine.studio.interfacesRetired.backToApp': 'Back to the app',
+  'engine.studio.interfacesRetired.dismiss': 'Dismiss',
   // objectstack#28561 — the "All metadata" area beside the pillars (ADR-0146 D1).
   'engine.studio.pillar.metadata': 'All metadata',
   // Header · package-level publish + app bridge

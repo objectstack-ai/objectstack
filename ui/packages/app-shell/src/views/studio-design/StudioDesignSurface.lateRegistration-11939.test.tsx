@@ -82,7 +82,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { getMetadataPreview, registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { getMetadataInspector, registerMetadataInspector } from '../metadata-admin/inspector-registry';
@@ -132,12 +132,6 @@ function LateObjectInspector(props: MetadataInspectorProps) {
 function UnrelatedInspector() {
   return <div data-testid="unrelated-inspector" />;
 }
-function LatePagePreview(props: MetadataPreviewProps) {
-  return <div data-testid="late-page-preview">{props.name}</div>;
-}
-function UnrelatedPreview() {
-  return <div data-testid="unrelated-preview" />;
-}
 function LateFlowPreview(props: MetadataPreviewProps) {
   return <div data-testid="late-flow-preview">{props.name}</div>;
 }
@@ -182,39 +176,6 @@ describe('Data pillar field rail — a late object inspector fills the open rail
     const late = await screen.findByTestId('late-object-inspector');
     expect(late).toHaveTextContent('title');
     expect(document.querySelector('aside')).not.toHaveTextContent(MISSING);
-  });
-});
-
-describe('Interfaces pillar canvas — a late page preview replaces the fallback (objectui#11939)', () => {
-  it('late preview rendered: true', async () => {
-    assertModuleGraphLoaded();
-    expect(getMetadataPreview('page')).toBeUndefined();
-
-    render(
-      <MemoryRouter initialEntries={['/studio/com.acme.app/interfaces']}>
-        <InterfacesPillar packageId="com.acme.app" />
-      </MemoryRouter>,
-    );
-    fireEvent.click(await screen.findByTitle('page · home_page'));
-    await waitFor(() => expect(screen.getByTestId('canvas-mode-toggle')).toBeInTheDocument(), {
-      timeout: 4000,
-    });
-
-    // Before: today's fallback. Which of its two sentences shows depends on
-    // whether ANY designer is registered (objectui#6795 part C), and that is
-    // shared module state here — both end in the same clause.
-    const FALLBACK = /cannot be previewed or designed here\.$/;
-    expect(await screen.findAllByText(FALLBACK)).not.toHaveLength(0);
-    expect(screen.queryByTestId('late-page-preview')).toBeNull();
-
-    // Control: another type's preview changes nothing on this leaf.
-    act(() => registerMetadataPreview('report', UnrelatedPreview));
-    expect(screen.queryByTestId('unrelated-preview')).toBeNull();
-    expect(screen.queryAllByText(FALLBACK)).not.toHaveLength(0);
-
-    act(() => registerMetadataPreview('page', LatePagePreview));
-    expect(await screen.findByTestId('late-page-preview')).toHaveTextContent('home_page');
-    expect(screen.queryAllByText(FALLBACK)).toHaveLength(0);
   });
 });
 

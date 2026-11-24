@@ -37,9 +37,6 @@ import { t } from '../metadata-admin/i18n';
 
 const PKG = 'com.acme.app';
 
-const NAV = [{ id: 'nav_home', type: 'page', label: 'Home', pageName: 'home' }];
-const PUBLISHED_APP = { name: 'acme_app', label: 'Acme', navigation: NAV };
-const PUBLISHED_PAGE = { name: 'home', label: 'Home', kind: 'blocks', blocks: [] };
 const FIELDS = [{ name: 'title', label: 'Title', type: 'text' }];
 const PUBLISHED_OBJECT = { name: 'crm_contact', label: 'Contact', sharingModel: 'private', fields: FIELDS };
 const PUBLISHED_FLOW = { name: 'notify_owner', label: 'Notify owner', status: 'active', nodes: [] };
@@ -135,7 +132,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { InterfacesPillar, DataPillar, AutomationsPillar } from './StudioDesignSurface';
+import { DataPillar, AutomationsPillar } from './StudioDesignSurface';
 import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataPreview, getMetadataPreview } from '../metadata-admin/preview-registry';
@@ -210,14 +207,6 @@ afterEach(() => {
   if (realPreviews.flow) registerMetadataPreview('flow', realPreviews.flow);
 });
 
-function renderInterfaces() {
-  render(
-    <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-      <InterfacesPillar packageId={PKG} />
-    </MemoryRouter>,
-  );
-}
-
 function renderData() {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
@@ -243,34 +232,6 @@ function renderAutomations() {
 }
 
 describe('StudioDesignSurface — a draft the server refuses to read is not "no draft" (objectstack#29148)', () => {
-  it('Interfaces pillar, APP: no nav buffer over the refused app draft; the strip says why, the nav is not offered to edit, and no save is sent', async () => {
-    const stored = seedRefused('app', 'acme_app', PUBLISHED_APP);
-    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
-    renderInterfaces();
-
-    await waitFor(() => expect(mockClient.getDraft).toHaveBeenCalledWith('app', 'acme_app', { packageId: PKG }), {
-      timeout: 8000,
-    });
-    await expectRefusalStrip();
-    // The published navigation is not installed: no leaf opens under it, and
-    // no Edit offers it.
-    expect(screen.queryByTestId('surface-draft')).toBeNull();
-    expect(screen.queryByTitle(t('engine.studio.if.editNavTitle', 'en-US'))).toBeNull();
-
-    await pastTheAutosave();
-    expect(server.saves).toEqual([]);
-    expect(server.drafts.get(key('app', 'acme_app'))).toStrictEqual(stored);
-  });
-
-  it('Interfaces pillar, APP, CONTROL: with no pending app draft the published nav opens its leaf, and Edit offers it', async () => {
-    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
-    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
-    renderInterfaces();
-
-    await screen.findByTestId('surface-draft', undefined, { timeout: 8000 });
-    expect(await screen.findByTitle(t('engine.studio.if.editNavTitle', 'en-US'))).toBeInTheDocument();
-    expect(screen.queryByText(t('engine.studio.refusal.draftUnreadable', 'en-US'))).toBeNull();
-  });
 
   it('Data pillar, OBJECT: no buffer over the refused object draft; the strip says why, and no save is sent', async () => {
     const stored = seedRefused('object', 'crm_contact', PUBLISHED_OBJECT);
@@ -330,98 +291,3 @@ describe('StudioDesignSurface — a draft the server refuses to read is not "no 
   });
 });
 
-describe('StudioDesignSurface — a pending draft is edited as stored, not as served (objectstack#30859)', () => {
-  const NAV2 = [...NAV, { id: 'nav_reports', type: 'page', label: 'Reports', pageName: 'reports' }];
-  const APP_DRAFT = { ...PUBLISHED_APP, navigation: NAV2 };
-  /** The app draft as a zh-CN console's `?state=draft` read serves it. */
-  const APP_SERVED = {
-    ...PUBLISHED_APP,
-    label: '极致',
-    navigation: [
-      { ...NAV2[0], label: '主页' },
-      { ...NAV2[1], label: '报表' },
-    ],
-  };
-  const PAGE_DRAFT = { ...PUBLISHED_PAGE, blocks: [{ id: 'b1', type: 'heading', title: 'Welcome' }] };
-  const PAGE_SERVED = { ...PUBLISHED_PAGE, label: '主页', blocks: [{ id: 'b1', type: 'heading', title: '欢迎' }] };
-  const CJK = /主页|报表|极致|欢迎/;
-
-  function seedApp(stored: boolean) {
-    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
-    server.drafts.set(key('app', 'acme_app'), wire(APP_DRAFT));
-    server.servedAs.set(key('app', 'acme_app'), wire(APP_SERVED));
-    if (stored) server.draftLayer.add(key('app', 'acme_app'));
-    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
-  }
-
-  it('Interfaces pillar, APP, zh-CN: the nav shows and saves the author’s labels, never the served translation', async () => {
-    seedApp(true);
-    renderInterfaces();
-
-    await screen.findByRole('button', { name: 'Home Page' }, { timeout: 8000 });
-    expect(screen.getByRole('button', { name: 'Reports Page' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /主页|报表/ })).toBeNull();
-    expect(mockClient.layered).toHaveBeenCalledWith('app', 'acme_app', { packageId: PKG });
-
-    await userEvent.click(screen.getByTitle(t('engine.studio.if.editNavTitle', 'en-US')));
-    const removes = await screen.findAllByRole('button', { name: 'Remove nav item' }, { timeout: 8000 });
-    await userEvent.click(removes[removes.length - 1]);
-    await pastTheAutosave();
-
-    const appSaves = server.saves.filter((x) => x.type === 'app');
-    expect(appSaves).toHaveLength(1);
-    expect(appSaves[0].body.label).toBe('Acme');
-    expect((appSaves[0].body.navigation as Array<{ label: string }>).map((n) => n.label)).toEqual(['Home']);
-    expect(JSON.stringify(appSaves[0].body)).not.toMatch(CJK);
-  });
-
-  it('Interfaces pillar, APP: a pending draft the layers do not serve installs no nav buffer, says why, and saves nothing', async () => {
-    seedApp(false);
-    renderInterfaces();
-
-    expect(
-      await screen.findByText(t('engine.studio.refusal.draftUnreadable', 'en-US'), undefined, { timeout: 8000 }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /主页|报表/ })).toBeNull();
-    expect(screen.queryByTestId('surface-draft')).toBeNull();
-    expect(screen.queryByTitle(t('engine.studio.if.editNavTitle', 'en-US'))).toBeNull();
-    await pastTheAutosave();
-    expect(server.saves).toEqual([]);
-  });
-
-  it('Interfaces pillar, LEAF, zh-CN: the canvas gets and saves the stored page draft, never the served translation', async () => {
-    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
-    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
-    server.drafts.set(key('page', 'home'), wire(PAGE_DRAFT));
-    server.servedAs.set(key('page', 'home'), wire(PAGE_SERVED));
-    server.draftLayer.add(key('page', 'home'));
-    renderInterfaces();
-
-    await waitFor(
-      () => expect(JSON.parse(screen.getByTestId('surface-draft').textContent ?? '{}')).toStrictEqual(wire(PAGE_DRAFT)),
-      { timeout: 8000 },
-    );
-    await userEvent.click(screen.getByTestId('surface-patch'));
-    await pastTheAutosave();
-
-    const pageSaves = server.saves.filter((x) => x.type === 'page');
-    expect(pageSaves).toHaveLength(1);
-    expect(pageSaves[0].body).toMatchObject({ label: 'Home', description: 'Edited here', blocks: PAGE_DRAFT.blocks });
-    expect(JSON.stringify(pageSaves[0].body)).not.toMatch(CJK);
-  });
-
-  it('Interfaces pillar, LEAF: a pending page draft the layers do not serve installs no buffer, says why, and saves nothing', async () => {
-    server.active.set(key('app', 'acme_app'), wire(PUBLISHED_APP));
-    server.active.set(key('page', 'home'), wire(PUBLISHED_PAGE));
-    server.drafts.set(key('page', 'home'), wire(PAGE_DRAFT));
-    server.servedAs.set(key('page', 'home'), wire(PAGE_SERVED));
-    renderInterfaces();
-
-    expect(
-      await screen.findByText(t('engine.studio.refusal.draftUnreadable', 'en-US'), undefined, { timeout: 8000 }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/欢迎/)).toBeNull();
-    await pastTheAutosave();
-    expect(server.saves).toEqual([]);
-  });
-});
