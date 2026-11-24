@@ -2702,8 +2702,9 @@ and is read as `vars["current_user"]` / `vars["vars"]`.
    it `record.budget != null`, which both doors accept, and `has()` is no guard.
    The columns the platform adds count too: `owner_id`, `created_by`,
    `updated_by`, `owning_business_unit_id`, `queue` and `organization_id` are
-   `null` on a row a system write, a seed or a guest left them empty in, so they
-   need the same guard; `created_at` and `updated_at` are stamped on every
+   `null` on a row a system write, a seed or a guest left them empty in, and a
+   `synced` object's `_sync_` columns can be `null` too, so they need the same
+   guard; `created_at` and `updated_at` are stamped on every
    stored row and need none.
 </Callout>
 
