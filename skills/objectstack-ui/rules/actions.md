@@ -26,6 +26,21 @@ in `language: 'js'` (an `expression` body has no I/O) with
 | `list_item`      | Per-row action in list views |
 | `list_toolbar`   | Toolbar button; one ticked row is its `recordId`, several are refused (no `_selectedIds`) |
 
+## Button Order (`actionLayout`)
+
+Absent, each surface orders an object's actions by their `order`. The object's
+`actionLayout` arranges one scope per arm:
+`{ record: { pinned: ['crm_convert_lead'], more: ['crm_print_a3'] } }`. `pinned`
+(required; `[]` pins none) names at most 3 buttons, in drawn order; every other
+action goes to the ⋯ menu, those `more` names first. The `record` arm takes
+actions placed at `record_header` / `record_more` wherever that header draws
+(record page, side preview, phone action bar; a row's ⋮ menu lists in its
+order); `list` takes `list_toolbar` actions and may pin the list page's
+`$import` / `$export` (never in `more`). Refused: a fourth pin, a name given
+twice, and by `os validate` a name that is no action of the object or not placed
+in the arm's scope. On an installed object only its paired `.custom` package's
+extension writes it, like `fieldGroups` (objectstack-data), each arm whole.
+
 ## Visibility, Disable & Feedback
 
 - `visible` — a bare CEL predicate over the current record (prefer the `P\`...\`` template; `record.<field>` resolves identically on every surface, never `${…}`- or `{…}`-wrapped — see `objectstack-formula`); when false the action is **hidden**.
