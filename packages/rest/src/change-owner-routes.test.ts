@@ -368,7 +368,7 @@ describe('[#35402] POST /data/:object/change-owner — bulk', () => {
 describe('[#36261] Change Owner on an object of a disabled package', () => {
   it('the single door answers the /data door\'s 404 OBJECT_PACKAGE_DISABLED: no write, no notification', async () => {
     const engine = mockEngine(undefined, ['lead']);
-    const messaging = { emit: vi.fn(async () => ({})) };
+    const messaging = { emit: vi.fn(async () => ({ delivered: 0, enqueued: 1 })) };
     const { single } = buildServer(engine, { messaging });
     const res = mockRes();
     await single!.handler(req({ object: 'lead', id: 'l1' }, { ownerId: 'u_next', notify: true }), res);
@@ -381,7 +381,7 @@ describe('[#36261] Change Owner on an object of a disabled package', () => {
 
   it('the bulk door refuses the whole call 404 OBJECT_PACKAGE_DISABLED: no write, no notification', async () => {
     const engine = mockEngine(undefined, ['lead']);
-    const messaging = { emit: vi.fn(async () => ({})) };
+    const messaging = { emit: vi.fn(async () => ({ delivered: 0, enqueued: 1 })) };
     const { bulk } = buildServer(engine, { messaging });
     const res = mockRes();
     await bulk!.handler(req({ object: 'lead' }, { ids: ['l1', 'l2'], ownerId: 'u_next', notify: true }), res);

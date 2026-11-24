@@ -405,7 +405,7 @@ describe('[#36261] an object of a disabled package', () => {
 
   it('single: refused 404 OBJECT_PACKAGE_DISABLED, nothing read, written or sent', async () => {
     const engine = fakeEngine({ disabledPackageObjects: ['lead'] });
-    const messaging = { emit: vi.fn(async () => ({})) };
+    const messaging = { emit: vi.fn(async () => SENT) };
     const err = await refusalOf(changeRecordOwner(engine, 'lead', 'l1', { ownerId: 'u_next' }, CALLER, { notify: true, messaging }));
     expect({ code: err.code, status: err.status, object: err.object }).toEqual({ ...DISABLED, object: 'lead' });
     expect(engine.calls).toEqual([]);
@@ -415,7 +415,7 @@ describe('[#36261] an object of a disabled package', () => {
 
   it('bulk: refused as a whole, 404 OBJECT_PACKAGE_DISABLED, nothing read, written or sent', async () => {
     const engine = fakeEngine({ disabledPackageObjects: ['lead'] });
-    const messaging = { emit: vi.fn(async () => ({})) };
+    const messaging = { emit: vi.fn(async () => SENT) };
     const err = await refusalOf(changeRecordsOwner(engine, 'lead', ['l1', 'l2'], { ownerId: 'u_next' }, CALLER, { notify: true, messaging }));
     expect({ code: err.code, status: err.status, object: err.object }).toEqual({ ...DISABLED, object: 'lead' });
     expect(engine.calls).toEqual([]);
