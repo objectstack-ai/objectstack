@@ -134,10 +134,14 @@ function carriesInclude(node: ts.Node | undefined): boolean {
         ts.isPropertyAssignment(p) &&
         (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
         p.name.text === 'credentials' &&
-        ts.isStringLiteralLike(p.initializer) &&
-        p.initializer.text === 'include',
+        isIncludeLiteral(unwrap(p.initializer)),
     )
   );
+}
+
+/** `'include'`, also written `'include' as const`. */
+function isIncludeLiteral(node: ts.Expression): boolean {
+  return ts.isStringLiteralLike(node) && node.text === 'include';
 }
 
 function unwrap(node: ts.Expression): ts.Expression {
@@ -238,6 +242,7 @@ describe('cookie-only same-server fetch ratchet (app-shell + console)', () => {
       ["await globalThis.fetch(u, { credentials: 'include' } as RequestInit);", 1],
       ["await (apiFetch ?? fetch)('/api/v1/x', { credentials: 'include' });", 1],
       ["const init: RequestInit = { credentials: 'include' }; await fetch(u, init);", 1],
+      ["const opts = { credentials: 'include' as const }; await fetch(u, opts);", 1],
       ["await sharedGetJson(u, { credentials: 'include' });", 1],
       ["await authFetch('/api/v1/packages', { credentials: 'include' });", 0],
       ["await createAuthenticatedFetch()('/api/v1/x', { credentials: 'include' });", 0],
