@@ -32,8 +32,9 @@ import {
   RelatedCountStore,
   ObjectIconTile,
   RecordHeaderBarContext,
+  toast,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -2655,17 +2656,38 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     setDeleteTarget(row);
   }, []);
 
+  const { objectLabel } = useObjectLabel();
+  /**
+   * objectstack#36851 — a delete the server REFUSES (a hook, a record lock:
+   * `409 RECORD_LOCKED`) says so, in the toast the object's list page shows
+   * for the same refusal (`recordDelete` in `@object-ui/core`): "Failed to
+   * delete LABEL", described by the producer-marked `userMessage` when the
+   * refusal carries one (verbatim, `declaredUserMessage`), the read-only
+   * sentence for an external datasource (ADR-0015), else the server's own
+   * sentence with its machine prefix stripped. It used to reach the console
+   * only, so the dialog closed and the row simply stayed. The row stays and
+   * the dialog closes as before: the toast is the whole answer.
+   */
   const handleConfirmDelete = React.useCallback(async () => {
     if (deleteTarget) {
       try {
         await onRowDelete?.(deleteTarget);
         setRefreshNonce((n) => n + 1); // reflect the removal
       } catch (err) {
-        console.error('[RelatedList] remove failed', err);
+        const label = objectLabel({ name: api ?? '', label: objectSchema?.label ?? api ?? '' });
+        const description =
+          declaredUserMessage(err)
+          ?? (isExternalWriteRefusal(err)
+            ? t('form.readOnlyExternalSource', { defaultValue: 'This table is read-only. Its records come from an external data source that does not accept changes.' })
+            : extractWriteErrorMessage(err));
+        toast.error(
+          t('objectActions.deleteFailed', { label, defaultValue: `Failed to delete ${label}` }),
+          description ? { description } : undefined,
+        );
       }
     }
     setDeleteTarget(null);
-  }, [deleteTarget, onRowDelete]);
+  }, [deleteTarget, onRowDelete, objectLabel, api, objectSchema, t]);
   // objectstack#35892 — the related tab's floating bar deletes the selected
   // rows (up to every matching row, with "select all"): one confirm that
   // counts them, then the data source's batch delete in one call where it
@@ -2674,7 +2696,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // outcome stays on screen: how many went, and how many did not.
   const [bulkDeleteTargets, setBulkDeleteTargets] = React.useState<any[] | null>(null);
   const [bulkDeleteOutcome, setBulkDeleteOutcome] = React.useState<{ succeeded: number; failed: number } | null>(null);
-  const { objectLabel } = useObjectLabel();
   const handleBulkDeleteRows = React.useCallback((rows: any[]) => {
     if (rows.length > 0) setBulkDeleteTargets(rows);
   }, []);
