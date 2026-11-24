@@ -480,7 +480,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 134 once objectstack-ai/objectstack#36758 named the design mode by its
     // door in `empty.appMenuEmptyDescription` („Layout
     // gestalten“) — one literal span.
-    expect(okSpans, 'correctly paired spans').toBe(134);
+    // 135 once objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`,
+    // the ban dialog's line naming the action that is off („Besitzer ändern“) —
+    // one literal span.
+    expect(okSpans, 'correctly paired spans').toBe(135);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -617,7 +620,8 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `designMode.pins`, four more matched pairs.
     // 134 / 134 / 0 after objectstack-ai/objectstack#36758 named the design
     // mode „Layout gestalten“ in `empty.appMenuEmptyDescription`, one more pair.
-    expect({ open, close, rdq }).toEqual({ open: 134, close: 134, rdq: 0 });
+    // 135 / 135 / 0 after objectstack-ai/objectstack#35399 added `console.assignedWork.ownerKept`.
+    expect({ open, close, rdq }).toEqual({ open: 135, close: 135, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
