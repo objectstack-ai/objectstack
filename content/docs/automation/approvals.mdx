@@ -1199,6 +1199,29 @@ out-edges, a loop back or a `subflow` / `map` / `loop` node, and `ahead` reads
 `decided` for a request already decided. The older `flow_steps` member is the
 graph's first branch at every decision, not the route; nothing draws it.
 
+A decided request's route also says where the record's approval stands now,
+in `outcome`, so its step line can answer "what happened next":
+
+```jsonc
+// getRequest, for the manager's request after the manager approved:
+"flow_route": {
+  "steps": [{ "id": "manager_review", "label": "Manager", "state": "done" }],
+  "ahead": "decided",
+  "outcome": {
+    "step": { "id": "finance_only", "label": "Finance" },  // the run's latest, later request
+    "status": "pending",                                     // it waits on its decision
+    "ended": false                                           // the run goes on
+  }
+}
+```
+
+`step` is the run's latest request opened after this one (a pending one first),
+and is absent when none was opened; `status` is that request's status, or this
+request's own without a `step`; `ended` says the run has stopped for good.
+`outcome` is left out when nothing past the request is known: no later request
+and the run still going, a run that cannot be read, or several later requests
+pending at once.
+
 Approval **notifications deep-link into the request**: `notify()` rewrites the
 inbox action URL to `/system/approvals?request=<id>`, so clicking the bell opens
 that request's drawer directly instead of a generic list.
