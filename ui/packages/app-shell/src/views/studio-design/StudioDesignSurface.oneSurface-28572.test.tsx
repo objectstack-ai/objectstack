@@ -662,7 +662,8 @@ describe('items another package contributes are drawn greyed, with the package (
       { timeout: 8000 },
     );
     expect(card).toHaveTextContent('Acme score');
-    // Never a drag source, yet still a card a click selects: not announced as disabled.
+    // objectstack#36505: arranged in the pair's layout like any field, and a
+    // card a click selects: not announced as disabled.
     expect(card).not.toHaveAttribute('aria-disabled', 'true');
     expect(within(card).getByTestId('contribution-mark')).toHaveTextContent(FROM_ACME);
     expect(card.getAttribute('title')).toBe(
@@ -680,7 +681,8 @@ describe('items another package contributes are drawn greyed, with the package (
     );
 
     // CONTROL: the base's own field opens in the pair's display-property mode, not read-only.
-    fireEvent.click(screen.getByLabelText(tFormat('engine.studio.designer.fieldAriaReadOnly', 'en', { label: 'Account Name' })));
+    // objectstack#36505: its card is arranged in the pair, so it reads as draggable.
+    fireEvent.click(screen.getByLabelText(tFormat('engine.studio.designer.fieldAria', 'en', { label: 'Account Name' })));
     await waitFor(() => expect(screen.getByTestId('data-field-inspector').querySelector('[data-disabled-reason]')).toBeNull());
   });
 
