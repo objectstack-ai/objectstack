@@ -1225,19 +1225,19 @@ function ApprovalsQueue() {
       .catch(() => { /* best-effort */ });
   }, [identities]);
 
-  /** Unique process labels present in current rows (for filter dropdown). */
-  const processOptions = useMemo(() => {
+  /** Unique process labels present in current rows. */
+  const rowProcesses = useMemo(() => {
     const set = new Set<string>();
     for (const r of rows) set.add(processLabel(r));
     return Array.from(set).sort();
   }, [rows]);
 
   /**
-   * Unique objects present in current rows (for filter dropdown): filtered by
-   * machine name, shown by the label the row serves, which the approvals door
-   * picks in the reader's language (objectstack#26883).
+   * Unique objects present in current rows: filtered by machine name, shown by
+   * the label the row serves, which the approvals door picks in the reader's
+   * language (objectstack#26883).
    */
-  const objectOptions = useMemo(() => {
+  const rowObjects = useMemo(() => {
     const byName = new Map<string, string>();
     for (const r of rows) if (r.object_name && !byName.has(r.object_name)) byName.set(r.object_name, objectDisplay(r));
     return Array.from(byName, ([value, label]) => ({ value, label }))
@@ -1245,21 +1245,46 @@ function ApprovalsQueue() {
   }, [rows]);
 
   /**
-   * objectstack#36966 — a process or object the address names (a reload, a
-   * copied link) is data, not a fixed vocabulary, so it is checked against
-   * the rows: once, at the first load that answers rows, a value none of them
-   * carries reads as "all" and leaves the address. A filter picked from the
-   * dropdowns is always one of the rows' own, and is never second-guessed.
+   * The filter dropdowns: the rows' own values, and the filter in force when no
+   * loaded row carries it (objectstack#36966). On the paginated tabs the rows
+   * are the pages loaded so far, so a filter the address names can sit past
+   * them; the dropdown still shows it, and the reader can see and clear it.
+   * An object no loaded row labels is shown by its machine name.
+   */
+  const processOptions = useMemo(
+    () => (processFilter !== 'all' && !rowProcesses.includes(processFilter)
+      ? [...rowProcesses, processFilter].sort()
+      : rowProcesses),
+    [rowProcesses, processFilter],
+  );
+  const objectOptions = useMemo(
+    () => (objectFilter !== 'all' && !rowObjects.some((o) => o.value === objectFilter)
+      ? [...rowObjects, { value: objectFilter, label: objectFilter }].sort((a, b) => a.label.localeCompare(b.label))
+      : rowObjects),
+    [rowObjects, objectFilter],
+  );
+
+  /**
+   * objectstack#36966 — a process or object the address names (Back, a
+   * reload, a copied link) is data, not a fixed vocabulary, so it is checked
+   * against the rows: once, at the first load that answers rows. Only when
+   * those rows are the WHOLE answer — the pending tab, which is unpaginated,
+   * or a paginated tab whose first load holds every row (`total`) — does a
+   * value none of them carries read as "all" and leave the address. A value
+   * past the first page of a paginated tab is kept (see the dropdowns above).
+   * A filter picked from the dropdowns is never second-guessed.
    */
   const seedFiltersChecked = useRef(false);
   useEffect(() => {
     if (seedFiltersChecked.current || loading || error || rows.length === 0) return;
     seedFiltersChecked.current = true;
+    const wholeAnswer = tab === 'pending' || total === null || rows.length >= total;
+    if (!wholeAnswer) return;
     const patch: Partial<InboxUrlState> = {};
-    if (processFilter !== 'all' && !processOptions.includes(processFilter)) patch.process = 'all';
-    if (objectFilter !== 'all' && !objectOptions.some((o) => o.value === objectFilter)) patch.object = 'all';
+    if (processFilter !== 'all' && !rowProcesses.includes(processFilter)) patch.process = 'all';
+    if (objectFilter !== 'all' && !rowObjects.some((o) => o.value === objectFilter)) patch.object = 'all';
     if (patch.process || patch.object) writeUrlState(patch);
-  }, [loading, error, rows.length, processFilter, processOptions, objectFilter, objectOptions, writeUrlState]);
+  }, [loading, error, rows.length, tab, total, processFilter, rowProcesses, objectFilter, rowObjects, writeUrlState]);
 
   // objectstack#29070: the list follows the search box at a deferred
   // priority, so a keystroke repaints the box first and the rows after,

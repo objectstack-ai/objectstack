@@ -23,7 +23,7 @@ import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-rou
 const APP = 'com.objectstack.account';
 const INBOX = `/apps/${APP}/system/approvals`;
 
-const { approvalsApiStub, ADAPTER, AUTH, I18N, ROWS } = vi.hoisted(() => {
+const { approvalsApiStub, ADAPTER, AUTH, I18N, ROWS, listAll } = vi.hoisted(() => {
   const row = (id: string, status: string, process: string, object: string, title: string, at: string) => ({
     id,
     process_name: `flow:${process.toLowerCase().replace(/ /g, '_')}`,
@@ -45,16 +45,18 @@ const { approvalsApiStub, ADAPTER, AUTH, I18N, ROWS } = vi.hoisted(() => {
     row('req_3', 'approved', 'Invoice Approval', 'invoice', 'INV-3003', '2026-11-02T09:00:00.000Z'),
     row('req_4', 'recalled', 'Invoice Approval', 'invoice', 'INV-4004', '2026-11-01T09:00:00.000Z'),
   ];
+  /** Every matching row in one page: the loaded rows are the whole answer. */
+  const listAll = async (params?: Record<string, unknown>): Promise<{ data: unknown[]; total?: number }> => {
+    if (params?.approverId) return { data: ROWS.filter((r) => r.status === 'pending') };
+    // objectui#12608's environment count: nothing waits on anyone else here.
+    if (params?.limit === 1) return { data: [], total: 0 };
+    const q = typeof params?.q === 'string' ? params.q.toLowerCase() : '';
+    const data = ROWS.filter((r) => (!params?.status || r.status === params.status)
+      && (!q || r.record_title.toLowerCase().includes(q)));
+    return { data, total: data.length };
+  };
   const approvalsApiStub = {
-    listRequests: vi.fn(async (params?: Record<string, unknown>): Promise<{ data: unknown[]; total?: number }> => {
-      if (params?.approverId) return { data: ROWS.filter((r) => r.status === 'pending') };
-      // objectui#12608's environment count: nothing waits on anyone else here.
-      if (params?.limit === 1) return { data: [], total: 0 };
-      const q = typeof params?.q === 'string' ? params.q.toLowerCase() : '';
-      const data = ROWS.filter((r) => (!params?.status || r.status === params.status)
-        && (!q || r.record_title.toLowerCase().includes(q)));
-      return { data, total: data.length };
-    }),
+    listRequests: vi.fn(listAll),
     getRequest: vi.fn(async () => ({ data: undefined })),
     listActions: vi.fn(async () => ({ data: [] })),
     approve: vi.fn(async () => ({ data: undefined, finalized: true })),
@@ -67,7 +69,7 @@ const { approvalsApiStub, ADAPTER, AUTH, I18N, ROWS } = vi.hoisted(() => {
       String(options?.defaultValue ?? key).replace(/\{\{(\w+)\}\}/g, (_, k) => String(options?.[k] ?? '')),
     language: 'en',
   };
-  return { approvalsApiStub, ADAPTER, AUTH, I18N, ROWS };
+  return { approvalsApiStub, ADAPTER, AUTH, I18N, ROWS, listAll };
 });
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
@@ -180,6 +182,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   for (const fn of Object.values(approvalsApiStub)) fn.mockClear();
+  approvalsApiStub.listRequests.mockImplementation(listAll);
 });
 afterEach(cleanup);
 
@@ -275,11 +278,29 @@ describe('Approvals Inbox — the reading state survives a request page and Back
     expect(reads.every((p) => p?.status === undefined)).toBe(true);
   });
 
-  it('a process or object no row carries reads as "all" and leaves the address; one a row carries is kept', async () => {
+  it('with every row loaded, a process or object no row carries reads as "all" and leaves the address; one a row carries is kept', async () => {
     renderAt(`${INBOX}?scope=all&object=gone_object&process=Expense%20Approval`);
     await waitFor(() => expect(new URL(where(), 'http://x').searchParams.get('object')).toBeNull());
     expect(new URL(where(), 'http://x').searchParams.get('process')).toBe('Expense Approval');
     await waitFor(() => expect(rowTitles()).toEqual(['EXP-2002']));
+  });
+
+  it('on a paginated tab whose first page lacks them, a process and object the address names are kept, in the address and the controls', async () => {
+    // Page 1 of 60: only invoice requests, so the expense filter sits past it.
+    const page1 = ROWS.filter((r) => r.object_name === 'invoice' && r.status !== 'recalled');
+    approvalsApiStub.listRequests.mockImplementation(async (params?: Record<string, unknown>) =>
+      (params?.limit === 50 ? { data: page1, total: 60 } : listAll(params)));
+    renderAt(`${INBOX}?scope=all&process=Expense%20Approval&object=expense`);
+
+    await waitFor(() => expect(approvalsApiStub.listRequests).toHaveBeenCalledWith(expect.objectContaining({ limit: 50 })));
+    // The toolbar draws once the page lands; the filters show what is in force.
+    expect(await screen.findByText('0 of 2')).toBeInTheDocument();
+    expect(trigger('Expense Approval')).toBeInTheDocument();
+    expect(trigger('expense')).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(Object.fromEntries(new URL(where(), 'http://x').searchParams)).toEqual({
+      scope: 'all', process: 'Expense Approval', object: 'expense',
+    });
   });
 
   it('changing tab clears the filters, search and sort from the address and keeps every other param', async () => {
