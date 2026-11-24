@@ -1,4 +1,41 @@
-// MEASURE (temporary): the cell on main before any change.
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+//
+// [#35524, epic ruling 6781691009, #34348 ruling (b), ADR-0150 D3/D5] A
+// bundled type's name no package ships, held as stored rows by an authored
+// base WA (its `en-US` row) and an authored dependent WD that declares WA (its
+// `fr-FR` row, a bundle addition). At the named non-canonical member `fr-FR`
+// only WD holds a row, and the read naming no package takes the row-held
+// base's address there (#33210 (c), pinned unchanged in
+// `meta-disabled-holder-served-stack.test.ts` M1, M2, S2): 404. The write
+// naming no package now resolves its address as that read does: the bare
+// save (the REST door and in process, publish and draft mode) writes WA's
+// row or draft at `fr-FR`, exactly as the save naming WA does, WD's row stays
+// byte-unchanged, and the next bare read serves what was saved. The draft
+// doors naming no package (the strict draft read, the per-item publish and
+// the draft discard) take the same draft address, so the draft a bare draft
+// save writes is the one they read, promote and discard; at this cell the
+// dependent's own draft is reached at its own `?package=`, as the request
+// naming WA answers. Driven on a booted kernel (the real protocol, metadata
+// service, registry and `sys_metadata` store).
+//
+// FROM (`main` a73edb3cd7, measured through these doors): the bare read at
+// `fr-FR` answered 404, the bare save answered 200 and rewrote WD's row, and
+// the bare read after it answered 404 on a kernel whose registry had hydrated
+// both rows at boot, or 409 RESOURCE_CONFLICT (the base's address names WA,
+// the registry then named WD the holder) where the rows were stored after
+// boot. The bare draft save wrote WD's draft, the bare draft read served it,
+// and the bare publish promoted it into WD's row; the bare publish and
+// discard of WD's draft promoted or removed it.
+//
+// Measured beside it, pinned as they read: the canonical member a base and
+// its dependent both hold (the #34681 cell) and the canonical member only the
+// dependent holds (#33210 contract review S1) keep their writes; two holders
+// with no base relation are still refused 409 at a member both hold; a base
+// that ships the name in code keeps answering as it does today (the bare read
+// 404, the bare save writing the dependent's customization row: not moved by
+// this change, see the PR's acceptance notes); a read-only base holding rows
+// answers the bare save as `?package=<base>` does.
+
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -92,154 +129,170 @@ const bareRead = async (b: Booted, name: string, query: Record<string, string> =
 };
 const settle = (call: Promise<any>): Promise<any> => call.then(
     (resolved) => ({ ok: resolved?.success ?? true, message: resolved?.message }),
-    (error: any) => ({ code: error?.code, status: error?.status ?? error?.httpStatus, message: String(error?.message ?? '').slice(0, 160) }),
+    (error: any) => ({ code: error?.code, status: error?.status ?? error?.httpStatus, message: String(error?.message ?? '') }),
 );
 const putFr = (b: Booted, name: string, subject: string, query: Record<string, string> = {}) =>
     dispatch(b.kernel, 'PUT', `/meta/email_template/${name}`, query, { name, ...template('fr-FR', subject) });
 const saveFr = (b: Booted, name: string, subject: string, extra: Record<string, unknown> = {}) =>
     settle(b.protocol.saveMetaItem({ type: 'email_template', name, item: { name, ...template('fr-FR', subject) }, ...extra }));
 
-describe('MEASURE', () => {
+const fr = { member: 'fr-FR' };
+/** Every stored column of the dependent's `fr-FR` row, for a byte-identity comparison. */
+const dependentRow = async (engine: ObjectQL, name: string, dependent = WD) => JSON.stringify(((await engine.find('sys_metadata', { where: { type: 'email_template', name, package_id: dependent }, context: { isSystem: true } } satisfies EngineQueryOptions)) as any[])
+    .filter((row) => row.bundle_member === 'fr-FR'));
+/** The rows of `name` with the name blanked, to compare two names' writes. */
+const shapeOf = async (engine: ObjectQL, name: string) => (await rowsOf(engine, name)).map((row) => row.replace(name, 'NAME'));
+
+describe('[#35524] the bare save at a member only the dependent holds writes the row-held base\'s row the bare read addresses', () => {
     const dirs: string[] = [];
-    let b: Booted;
-    beforeAll(async () => {
+    afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
+    const freshFile = () => {
         const dir = mkdtempSync(join(tmpdir(), 'os-meta-dep-member-db-'));
         dirs.push(dir);
-        b = await boot(join(dir, 'meta.sqlite'));
-    }, 120_000);
-    afterAll(async () => { await b.kernel.shutdown(); dirs.push(b.root); for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
-    const out: Record<string, unknown> = {};
-    afterAll(() => { console.log('MEASURED ' + JSON.stringify(out, null, 1)); });
+        return join(dir, 'meta.sqlite');
+    };
+    const down = async (b: Booted) => {
+        if (b.kernel.getState() === 'running') await b.kernel.shutdown();
+        dirs.push(b.root);
+    };
 
-    it('measures', async () => {
-        const fr = { member: 'fr-FR' };
-        // 3-step, REST
-        await layCell(b.engine, 'm1', WA, WD);
-        out.m1_step1 = await bareRead(b, 'm1', fr);
-        const put = await putFr(b, 'm1', 'edited fr');
-        out.m1_step2 = [put.status, codeOf(put.body), String(put.body?.error?.message ?? '').slice(0, 200)];
-        out.m1_rows = await rowsOf(b.engine, 'm1');
-        out.m1_step3 = await bareRead(b, 'm1', fr);
-        out.m1_step3_WD = await bareRead(b, 'm1', { ...fr, package: WD });
-        out.m1_step3_WA = await bareRead(b, 'm1', { ...fr, package: WA });
-        out.m1_en = await bareRead(b, 'm1');
-        const reg: any = b.engine.registry;
-        out.m1_registry = { holders: reg.packageScopedHoldersOf?.('email_template', 'm1', null, { includeDisabledPackages: true }), env: reg.getEnvironmentScopedItem?.('email_template', 'm1', 'fr-FR') !== undefined };
-        // in process bare
-        await layCell(b.engine, 'm1p', WA, WD);
-        out.m1p_save = await saveFr(b, 'm1p', 'edited fr');
-        out.m1p_rows = await rowsOf(b.engine, 'm1p');
-        out.m1p_read = await bareRead(b, 'm1p', fr);
-        // named WA
-        await layCell(b.engine, 'm2', WA, WD);
-        out.m2_save_named = await saveFr(b, 'm2', 'base fr', { packageId: WA });
-        out.m2_rows = await rowsOf(b.engine, 'm2');
-        out.m2_read = await bareRead(b, 'm2', fr);
-        out.m2_read_WD = await bareRead(b, 'm2', { ...fr, package: WD });
-        await layCell(b.engine, 'm2r', WA, WD);
-        const putNamed = await putFr(b, 'm2r', 'base fr', { package: WA });
-        out.m2r_put_named = [putNamed.status, codeOf(putNamed.body)];
-        out.m2r_rows = await rowsOf(b.engine, 'm2r');
-        // draft bare / named
-        await layCell(b.engine, 'm3', WA, WD);
-        out.m3_draft_bare = await saveFr(b, 'm3', 'drafted fr', { mode: 'draft' });
-        out.m3_rows = await rowsOf(b.engine, 'm3');
-        const dr = await settle(b.protocol.getMetaItem({ type: 'email_template', name: 'm3', member: 'fr-FR', state: 'draft' }).then((r: any) => ({ success: true, message: `${r?.item?.subject}|${r?.item?._packageId}` })));
-        out.m3_draft_read = dr;
-        out.m3_publish = await settle(b.protocol.publishMetaItem({ type: 'email_template', name: 'm3', member: 'fr-FR' }));
-        out.m3_rows_after_publish = await rowsOf(b.engine, 'm3');
-        out.m3_read_after_publish = await bareRead(b, 'm3', fr);
-        await layCell(b.engine, 'm3b', WA, WD);
-        out.m3b_draft_bare = await saveFr(b, 'm3b', 'drafted fr', { mode: 'draft' });
-        out.m3b_discard = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'm3b', member: 'fr-FR', state: 'draft' }));
-        out.m3b_rows = await rowsOf(b.engine, 'm3b');
-        await layCell(b.engine, 'm4', WA, WD);
-        out.m4_draft_named = await saveFr(b, 'm4', 'drafted fr', { mode: 'draft', packageId: WA });
-        out.m4_rows = await rowsOf(b.engine, 'm4');
-        out.m4_draft_read_named = await settle(b.protocol.getMetaItem({ type: 'email_template', name: 'm4', member: 'fr-FR', state: 'draft', packageId: WA }).then((r: any) => ({ success: true, message: `${r?.item?.subject}|${r?.item?._packageId}` })));
-        out.m4_publish_named = await settle(b.protocol.publishMetaItem({ type: 'email_template', name: 'm4', member: 'fr-FR', packageId: WA }));
-        out.m4_rows_after_publish = await rowsOf(b.engine, 'm4');
-        await layCell(b.engine, 'm4b', WA, WD);
-        out.m4b_draft_named = await saveFr(b, 'm4b', 'drafted fr', { mode: 'draft', packageId: WA });
-        out.m4b_discard_named = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'm4b', member: 'fr-FR', state: 'draft', packageId: WA }));
-        out.m4b_rows = await rowsOf(b.engine, 'm4b');
-        // other doors bare at fr-FR
-        await layCell(b.engine, 'd1', WA, WD);
-        out.d1_delete = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'd1', member: 'fr-FR' }));
-        out.d1_rows = await rowsOf(b.engine, 'd1');
-        await layCell(b.engine, 'd2', WA, WD);
-        await layRow(b.engine, 'email_template', 'd2', WD, template('fr-FR', 'addon fr draft'), 'draft');
-        out.d2_discard = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'd2', member: 'fr-FR', state: 'draft' }));
-        out.d2_rows = await rowsOf(b.engine, 'd2');
-        await layCell(b.engine, 'd3', WA, WD);
-        await layRow(b.engine, 'email_template', 'd3', WD, template('fr-FR', 'addon fr draft'), 'draft');
-        out.d3_publish = await settle(b.protocol.publishMetaItem({ type: 'email_template', name: 'd3', member: 'fr-FR' }));
-        out.d3_rows = await rowsOf(b.engine, 'd3');
-        await layCell(b.engine, 'd4', WA, WD);
-        expect((await saveFr(b, 'd4', 'addon fr v2', { packageId: WD })).ok).toBe(true);
-        const hb = await b.protocol.historyMetaItem({ type: 'email_template', name: 'd4', member: 'fr-FR' }).then((r: any) => ({ events: r?.events?.length, pkg: r?.packageId }), (e: any) => ({ code: e?.code }));
-        const hWA = await b.protocol.historyMetaItem({ type: 'email_template', name: 'd4', member: 'fr-FR', packageId: WA }).then((r: any) => ({ events: r?.events?.length }), (e: any) => ({ code: e?.code }));
-        const hWD = await b.protocol.historyMetaItem({ type: 'email_template', name: 'd4', member: 'fr-FR', packageId: WD }).then((r: any) => ({ events: r?.events?.length }), (e: any) => ({ code: e?.code }));
-        out.d4_history = { bare: hb, WA: hWA, WD: hWD };
-        out.d4_diff = await settle(b.protocol.diffMetaItem({ type: 'email_template', name: 'd4', member: 'fr-FR' }));
-        out.d4_rollback = await settle(b.protocol.rollbackMetaItem({ type: 'email_template', name: 'd4', member: 'fr-FR', toVersion: 1 }));
-        out.d4_rows = await rowsOf(b.engine, 'd4');
-        // controls
-        await layCell(b.engine, 'c_unrel', WA, WU);
-        out.c_unrel_read = await bareRead(b, 'c_unrel', fr);
-        out.c_unrel_save = await saveFr(b, 'c_unrel', 'x');
-        out.c_unrel_rows = await rowsOf(b.engine, 'c_unrel');
-        await layRow(b.engine, 'email_template', 'c_unrel2', WA, template('en-US', 'a en'));
-        await layRow(b.engine, 'email_template', 'c_unrel2', WU, template('en-US', 'u en'));
-        out.c_unrel2_read = await bareRead(b, 'c_unrel2');
-        out.c_unrel2_save = await settle(b.protocol.saveMetaItem({ type: 'email_template', name: 'c_unrel2', item: { name: 'c_unrel2', ...template('en-US', 'x') } }));
-        await layRow(b.engine, 'email_template', 'shipmail', D, template('fr-FR', 'addon fr'));
-        out.c_ship_read = await bareRead(b, 'shipmail', fr);
-        out.c_ship_save = await saveFr(b, 'shipmail', 'edited');
-        out.c_ship_rows = await rowsOf(b.engine, 'shipmail');
-        await layCell(b.engine, 'c_ro', A, D);
-        out.c_ro_read = await bareRead(b, 'c_ro', fr);
-        out.c_ro_save = await saveFr(b, 'c_ro', 'edited');
-        out.c_ro_save_A = await saveFr(b, 'c_ro', 'edited', { packageId: A });
-        out.c_ro_save_D = await saveFr(b, 'c_ro', 'edited', { packageId: D });
-        out.c_ro_rows = await rowsOf(b.engine, 'c_ro');
-        // canonical member en-US pair (as #35450): bare save writes base
-        await layRow(b.engine, 'email_template', 'c_can', WA, template('en-US', 'base en'));
-        await layRow(b.engine, 'email_template', 'c_can', WD, template('en-US', 'addon en'));
-        await layRow(b.engine, 'email_template', 'c_can', WD, template('fr-FR', 'addon fr'));
-        out.c_can_save = await settle(b.protocol.saveMetaItem({ type: 'email_template', name: 'c_can', item: { name: 'c_can', ...template('en-US', 'edited en') } }));
-        out.c_can_rows = await rowsOf(b.engine, 'c_can');
-        // S1 mirror: dependent's canonical over base of other member
-        await layRow(b.engine, 'email_template', 'c_s1', WA, template('fr-FR', 'base fr'));
-        await layRow(b.engine, 'email_template', 'c_s1', WD, template('en-US', 'addon en'));
-        out.c_s1_read = await bareRead(b, 'c_s1');
-        out.c_s1_save = await settle(b.protocol.saveMetaItem({ type: 'email_template', name: 'c_s1', item: { name: 'c_s1', ...template('en-US', 'edited en') } }));
-        out.c_s1_rows = await rowsOf(b.engine, 'c_s1');
-    }, 120_000);
-});
-
-describe('MEASURE reboot', () => {
-    it('measures across reboots', async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'os-meta-dep-member-db-'));
-        const file = join(dir, 'meta.sqlite');
-        const out: Record<string, unknown> = {};
-        const fr = { member: 'fr-FR' };
+    it('the bare save (REST door and in process) writes what ?package=<base> writes, leaves the dependent\'s row byte-unchanged, and the bare read then serves it, before and after a restart', async () => {
+        const file = freshFile();
         let b = await boot(file);
-        await layCell(b.engine, 'r1', WA, WD);
-        out.a_read_before_reboot = await bareRead(b, 'r1', fr);
-        await b.kernel.shutdown();
+        try {
+            for (const name of ['dm_rest', 'dm_proc', 'dm_named']) await layCell(b.engine, name, WA, WD);
+        } finally {
+            await down(b);
+        }
+        // Booted over the stored rows, so the registry hydrated both packages' rows.
         b = await boot(file);
-        out.b_read_after_reboot = await bareRead(b, 'r1', fr);
-        const put = await putFr(b, 'r1', 'edited fr');
-        out.c_put = [put.status, codeOf(put.body)];
-        out.c_rows = await rowsOf(b.engine, 'r1');
-        out.d_read_after_put = await bareRead(b, 'r1', fr);
-        await b.kernel.shutdown();
+        try {
+            expect(await bareRead(b, 'dm_rest', fr)).toEqual([404, 'RESOURCE_NOT_FOUND', expect.any(String)]);
+            const before = await dependentRow(b.engine, 'dm_rest');
+            const put = await putFr(b, 'dm_rest', 'edited fr');
+            expect(put.status, JSON.stringify(put.body)).toBe(200);
+            expect(await dependentRow(b.engine, 'dm_rest')).toBe(before);
+            const proc = await saveFr(b, 'dm_proc', 'edited fr');
+            expect(proc.message, JSON.stringify(proc)).toContain(`package=${WA}`);
+            const named = await saveFr(b, 'dm_named', 'edited fr', { packageId: WA });
+            expect(named.ok, JSON.stringify(named)).toBe(true);
+            const expected = [`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`, `active:${WA}:fr-FR:edited fr`];
+            for (const name of ['dm_rest', 'dm_proc', 'dm_named']) {
+                expect([name, ...await rowsOf(b.engine, name)]).toEqual([name, ...expected]);
+                expect(await bareRead(b, name, fr)).toEqual([200, 'edited fr', WA]);
+                expect(await bareRead(b, name, { ...fr, package: WD })).toEqual([200, 'addon fr', WD]);
+            }
+            expect(await shapeOf(b.engine, 'dm_rest')).toEqual(await shapeOf(b.engine, 'dm_named'));
+        } finally {
+            await down(b);
+        }
         b = await boot(file);
-        out.e_read_after_second_reboot = await bareRead(b, 'r1', fr);
-        out.e_read_WA = await bareRead(b, 'r1', { ...fr, package: WA });
-        await b.kernel.shutdown();
-        rmSync(dir, { recursive: true, force: true });
-        console.log('MEASURED-REBOOT ' + JSON.stringify(out, null, 1));
+        try {
+            expect(await bareRead(b, 'dm_rest', fr)).toEqual([200, 'edited fr', WA]);
+        } finally {
+            await down(b);
+        }
     }, 120_000);
+
+    describe('one boot', () => {
+        let b: Booted;
+        beforeAll(async () => { b = await boot(freshFile()); }, 120_000);
+        afterAll(async () => { if (b) await down(b); });
+
+        it('rows stored after boot: the bare save writes the base\'s row and the bare read serves it (it answered 409 after the save)', async () => {
+            await layCell(b.engine, 'dm_cold', WA, WD);
+            expect((await bareRead(b, 'dm_cold', fr))[0]).toBe(404);
+            const put = await putFr(b, 'dm_cold', 'edited fr');
+            expect(put.status, JSON.stringify(put.body)).toBe(200);
+            expect(await rowsOf(b.engine, 'dm_cold')).toEqual([`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`, `active:${WA}:fr-FR:edited fr`]);
+            expect(await bareRead(b, 'dm_cold', fr)).toEqual([200, 'edited fr', WA]);
+        });
+
+        it('the bare draft save writes the base\'s draft, as ?package=<base> does; the bare draft read, publish and discard act on that draft', async () => {
+            await layCell(b.engine, 'dd_bare', WA, WD);
+            await layCell(b.engine, 'dd_named', WA, WD);
+            const before = await dependentRow(b.engine, 'dd_bare');
+            const bare = await saveFr(b, 'dd_bare', 'drafted fr', { mode: 'draft' });
+            const named = await saveFr(b, 'dd_named', 'drafted fr', { mode: 'draft', packageId: WA });
+            expect(bare.message, JSON.stringify(bare)).toContain(`package=${WA}`);
+            expect(named.ok, JSON.stringify(named)).toBe(true);
+            expect(await rowsOf(b.engine, 'dd_bare')).toEqual([`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`, `draft:${WA}:fr-FR:drafted fr`]);
+            expect(await shapeOf(b.engine, 'dd_bare')).toEqual(await shapeOf(b.engine, 'dd_named'));
+            expect(await dependentRow(b.engine, 'dd_bare')).toBe(before);
+            const read = await b.protocol.getMetaItem({ type: 'email_template', name: 'dd_bare', member: 'fr-FR', state: 'draft' });
+            expect([read?.item?.subject, read?.item?._packageId]).toEqual(['drafted fr', WA]);
+            const published = await settle(b.protocol.publishMetaItem({ type: 'email_template', name: 'dd_bare', member: 'fr-FR' }));
+            expect(published.ok, JSON.stringify(published)).toBe(true);
+            expect(await rowsOf(b.engine, 'dd_bare')).toEqual([`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`, `active:${WA}:fr-FR:drafted fr`]);
+            expect(await bareRead(b, 'dd_bare', fr)).toEqual([200, 'drafted fr', WA]);
+            // The discard removes the draft the bare draft save wrote.
+            await layCell(b.engine, 'dd_discard', WA, WD);
+            expect((await saveFr(b, 'dd_discard', 'drafted fr', { mode: 'draft' })).ok).toBe(true);
+            const discarded = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name: 'dd_discard', member: 'fr-FR', state: 'draft' }));
+            expect(discarded.message, JSON.stringify(discarded)).toContain(`(package=${WA})`);
+            expect(await rowsOf(b.engine, 'dd_discard')).toEqual([`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`]);
+        });
+
+        it('the dependent\'s own draft at the cell: the bare publish and discard answer what ?package=<base> answers, and ?package=<dependent> reaches it', async () => {
+            const outcome = (answer: any) => (answer.code !== undefined ? [answer.code, answer.status] : ['ok', answer.ok]);
+            const seen: Record<string, unknown> = {};
+            for (const [label, at] of [['bare', {}], ['named', { packageId: WA }]] as const) {
+                const name = `dd_own_${label}`;
+                await layCell(b.engine, name, WA, WD);
+                await layRow(b.engine, 'email_template', name, WD, template('fr-FR', 'addon fr draft'), 'draft');
+                const publish = await settle(b.protocol.publishMetaItem({ type: 'email_template', name, member: 'fr-FR', ...at }));
+                const discard = await settle(b.protocol.deleteMetaItem({ type: 'email_template', name, member: 'fr-FR', state: 'draft', ...at }));
+                seen[label] = { publish: outcome(publish), discard: outcome(discard), rows: await shapeOf(b.engine, name) };
+            }
+            expect(seen.bare, JSON.stringify(seen)).toEqual(seen.named);
+            expect(seen.bare).toMatchObject({ rows: [`active:${WD}:fr-FR:addon fr`, `active:${WA}:-:base en`, `draft:${WD}:fr-FR:addon fr draft`] });
+            const own = await settle(b.protocol.publishMetaItem({ type: 'email_template', name: 'dd_own_bare', member: 'fr-FR', packageId: WD }));
+            expect(own.ok, JSON.stringify(own)).toBe(true);
+            expect(await rowsOf(b.engine, 'dd_own_bare')).toEqual([`active:${WD}:fr-FR:addon fr draft`, `active:${WA}:-:base en`]);
+        });
+
+        it('a read-only base holding rows: the bare save at the dependent\'s member answers what ?package=<base> answers', async () => {
+            await layCell(b.engine, 'ro_cell', A, D);
+            const bare = await saveFr(b, 'ro_cell', 'edited');
+            const named = await saveFr(b, 'ro_cell', 'edited', { packageId: A });
+            expect([bare.code, bare.status], JSON.stringify(bare)).toEqual(['WRITABLE_PACKAGE_REQUIRED', 422]);
+            expect([bare.code, bare.status]).toEqual([named.code, named.status]);
+            expect(bare.message).toContain(`'${A}'`);
+            expect(await rowsOf(b.engine, 'ro_cell')).toEqual([`active:${D}:fr-FR:addon fr`, `active:${A}:-:base en`]);
+        });
+
+        it('CONTROLS: the canonical member keeps its writes, unrelated holders are still refused at a shared member, and a shipped base answers as it did', async () => {
+            // The #34681 cell: base and dependent both hold the canonical member; the bare save writes the base's row.
+            await layRow(b.engine, 'email_template', 'c_shared', WA, template('en-US', 'base en'));
+            await layRow(b.engine, 'email_template', 'c_shared', WD, template('en-US', 'addon en'));
+            await layRow(b.engine, 'email_template', 'c_shared', WD, template('fr-FR', 'addon fr'));
+            const shared = await settle(b.protocol.saveMetaItem({ type: 'email_template', name: 'c_shared', item: { name: 'c_shared', ...template('en-US', 'edited en') } }));
+            expect(shared.message, JSON.stringify(shared)).toContain(`package=${WA}`);
+            expect(await rowsOf(b.engine, 'c_shared')).toEqual([`active:${WD}:-:addon en`, `active:${WD}:fr-FR:addon fr`, `active:${WA}:-:edited en`]);
+            // The S1 mirror: the canonical member only the dependent holds is served and written at the dependent.
+            await layRow(b.engine, 'email_template', 'c_s1', WA, template('fr-FR', 'base fr'));
+            await layRow(b.engine, 'email_template', 'c_s1', WD, template('en-US', 'addon en'));
+            expect(await bareRead(b, 'c_s1')).toEqual([200, 'addon en', WD]);
+            const s1 = await settle(b.protocol.saveMetaItem({ type: 'email_template', name: 'c_s1', item: { name: 'c_s1', ...template('en-US', 'edited en') } }));
+            expect(s1.message, JSON.stringify(s1)).toContain(`package=${WD}`);
+            expect(await rowsOf(b.engine, 'c_s1')).toEqual([`active:${WD}:-:edited en`, `active:${WA}:fr-FR:base fr`]);
+            // Two packages, neither declaring the other, at a member both hold: refused 409 naming both.
+            await layRow(b.engine, 'email_template', 'c_unrel', WA, template('en-US', 'a en'));
+            await layRow(b.engine, 'email_template', 'c_unrel', WU, template('en-US', 'u en'));
+            expect((await bareRead(b, 'c_unrel')).slice(0, 2)).toEqual([409, 'RESOURCE_CONFLICT']);
+            const unrel = await settle(b.protocol.saveMetaItem({ type: 'email_template', name: 'c_unrel', item: { name: 'c_unrel', ...template('en-US', 'x') } }));
+            expect([unrel.code, unrel.status], JSON.stringify(unrel)).toEqual(['RESOURCE_CONFLICT', 409]);
+            for (const id of [WA, WU]) expect(unrel.message).toContain(id);
+            // …and at a member only one of them holds, that package's row is read and written.
+            await layCell(b.engine, 'c_unrel_fr', WA, WU);
+            expect(await bareRead(b, 'c_unrel_fr', fr)).toEqual([200, 'addon fr', WU]);
+            expect((await saveFr(b, 'c_unrel_fr', 'x')).message).toContain(`package=${WU}`);
+            // A base that ships the name in code: answered as today (not moved here).
+            await layRow(b.engine, 'email_template', 'shipmail', D, template('fr-FR', 'addon fr'));
+            expect((await bareRead(b, 'shipmail', fr))[0]).toBe(404);
+            const ship = await saveFr(b, 'shipmail', 'edited');
+            expect(ship.message, JSON.stringify(ship)).toContain(`package=${D}`);
+            expect(await rowsOf(b.engine, 'shipmail')).toEqual([`active:${D}:fr-FR:edited`]);
+        });
+    });
 });
