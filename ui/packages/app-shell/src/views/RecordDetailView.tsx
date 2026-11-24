@@ -4915,8 +4915,22 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // reports, and draws a placeholder until it does. So the report is the
   // record's title once the page holds the record, and the short id only for a
   // held record with nothing to be named by; a read in flight reports nothing,
-  // and the bar never reads the raw id while the record loads.
-  const paneRecordTitle = recordTitle || (holdsRouteRecord && recordCrumbName ? recordCrumbName : undefined);
+  // and the bar never reads the raw id while the record loads. A page that
+  // settles WITHOUT the record (not found, deleted, access ended, forbidden,
+  // failed, the object unknown, the named page refused) reports the name its
+  // crumb draws then, the object's label, so the bar's placeholder ends with
+  // the read instead of standing over the page's own state.
+  const settledWithoutRecord = !isLoading && (
+    !objectDef
+    || namedPageState === 'refused'
+    || recordDeleted
+    || pageRecordStatus === 'missing'
+    || pageRecordStatus === 'accessEnded'
+    || pageRecordStatus === 'forbidden'
+    || pageRecordStatus === 'failed'
+  );
+  const paneRecordTitle = recordTitle
+    || ((holdsRouteRecord || settledWithoutRecord) && recordCrumbName ? recordCrumbName : undefined);
   useEffect(() => {
     if (embedded && recordId) paneBar?.reportTitle(recordId, paneRecordTitle);
   }, [embedded, paneBar, recordId, paneRecordTitle]);
