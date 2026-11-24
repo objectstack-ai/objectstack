@@ -4,7 +4,7 @@
     {
       "id": 1,
       "prompt": "Every night at 02:00, mark `subscription` records whose `renewal_date` has passed as `lapsed`; `status` is a readonly field only automation may change.",
-      "expected_output": "A `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *' }` (no top-level `schedule`), `runAs: 'system'` (a readonly field is stripped under `runAs: 'user'`); one `update_record` with a where-map `filter` (`renewal_date: { $lt: '{today}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
+      "expected_output": "A `defineFlow` with `type: 'schedule'`, the cadence on the START NODE's `config.schedule: { type: 'cron', expression: '0 2 * * *', timezone: 'UTC' }` (no top-level `schedule`; the request names no zone, and a cron with none warns `flow-schedule-timezone-missing`), `runAs: 'system'` (a readonly field is stripped under `runAs: 'user'`); one `update_record` with a where-map `filter` (`renewal_date: { $lt: '{today}' }`) and `fields: { status: 'lapsed' }` (not `values`), `label` on every node, `edges` (never `next`), an `end` node.",
       "files": [],
       "assertions": {
         "must_contain": [
