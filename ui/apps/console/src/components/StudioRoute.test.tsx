@@ -100,7 +100,7 @@ vi.mock('../../../../packages/auth/src/useAuth', async (importOriginal) => ({
  * metadata backend; what this file measures is whether the router ever reaches
  * them at all.
  */
-const builderLanding = vi.fn();
+const studioEntry = vi.fn();
 const designSurface = vi.fn();
 
 // `@object-ui/app-shell` is aliased to `packages/app-shell/src`
@@ -126,9 +126,11 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
     </div>
   ),
   getProductName: () => 'ObjectOS',
-  BuilderLanding: () => {
-    builderLanding();
-    return <div data-testid="studio-front-door">pick a package</div>;
+  // objectstack#36908 — bare `/studio` is Studio's entry, which draws no page:
+  // the stub records the capability set the gate hands it.
+  StudioEntryRedirect: ({ systemPermissions }: { systemPermissions?: string[] }) => {
+    studioEntry(systemPermissions);
+    return <div data-testid="studio-entry">entry</div>;
   },
   StudioDesignSurface: () => {
     designSurface();
@@ -234,10 +236,10 @@ function answerWith(systemPermissions: unknown) {
 beforeEach(() => {
   auth = { isAuthenticated: true, isLoading: false, user: { id: 'u1' } };
   fetchCalls = [];
-  builderLanding.mockClear();
+  studioEntry.mockClear();
   designSurface.mockClear();
   answerWith(TENANT_OWNER_CAPS);
-  // The landing mounts the real `AppHeader` (objectui#11863), which reads its
+  // A screen that mounts the real `AppHeader` reads its
   // user-scoped feeds and the AI agent catalogue on mount; each answers empty
   // here, so no request leaves the process. The entry gate's own read goes
   // through the mocked `createAuthenticatedFetch`, not this.
@@ -291,9 +293,9 @@ describe('/studio/* — the entry decision, both ways', () => {
     await expectRefusedAt('/studio/', '/home');
     // The load-bearing half: not "a notice was drawn" but "the builder was
     // never mounted", so nothing inside it could render or fetch.
-    expect(builderLanding).not.toHaveBeenCalled();
+    expect(studioEntry).not.toHaveBeenCalled();
     expect(designSurface).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('studio-front-door')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('studio-entry')).not.toBeInTheDocument();
     expect(screen.queryByTestId('studio-pillar-builder')).not.toBeInTheDocument();
     expect(screen.queryByTestId('home-launcher')).not.toBeInTheDocument();
   });
@@ -349,13 +351,14 @@ describe('/studio/* — the entry decision, both ways', () => {
     expect(designSurface).not.toHaveBeenCalled();
   });
 
-  it('NEGATIVE CONTROL: a holder still gets the front door, unchanged', async () => {
+  it("NEGATIVE CONTROL: a holder still gets Studio's entry, handed the set the gate read", async () => {
     // A gate that refused everyone would pass every assertion above.
     answerWith(OPERATOR_CAPS);
     renderStudioDeepLink('/studio/');
 
-    await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
-    expect(builderLanding).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId('studio-entry')).toBeInTheDocument());
+    // objectstack#36908 — the entry chooses the package list by these.
+    expect(studioEntry).toHaveBeenCalledWith(OPERATOR_CAPS);
     expect(pathname()).toBe('/studio/');
     // ...and is never shown the refusal (objectui#12035).
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
@@ -370,21 +373,6 @@ describe('/studio/* — the entry decision, both ways', () => {
     expect(designSurface).toHaveBeenCalled();
     expect(pathname()).toBe('/studio/hotcrm/data');
     expect(screen.queryByText(NOTICE)).not.toBeInTheDocument();
-  });
-
-  it("the front door's header brand walks back to the same home the gate's refusal names", async () => {
-    // Two affordances one route apart — this brand (the `studio` variant of
-    // `AppHeader` since objectui#11863, the wordmark before it) and the pillar
-    // builder's header Home button — must not name two different homes; that
-    // asymmetry is the defect objectui#7256 measured and objectui#7373 finished
-    // removing.
-    answerWith(OPERATOR_CAPS);
-    renderStudioDeepLink('/studio/', CONTROL_PLANE_APPS);
-
-    await waitFor(() => expect(screen.getByTestId('studio-front-door')).toBeInTheDocument());
-    // The mark is named 「PRODUCT home」 since objectui#12605 (the ruled
-    // accessible name: product name + home); its target is unchanged.
-    expect(screen.getByRole('link', { name: 'ObjectOS home' })).toHaveAttribute('href', '/home');
   });
 
   it('the package-less scope\'s bare leg lands on its one pillar, the builder mounted (objectui#11553)', async () => {

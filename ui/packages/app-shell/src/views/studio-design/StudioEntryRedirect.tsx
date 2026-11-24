@@ -28,7 +28,7 @@
 
 import * as React from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import { useRecentItems } from '../../context/RecentItemsProvider.js';
+import { useRecentItems, type RecentNamedItem } from '../../context/RecentItemsProvider.js';
 import { SETUP_NEW_PACKAGE_PATH, SETUP_PACKAGES_PATH } from '../metadata-admin/packageSource.js';
 import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataArea.js';
 import { fetchListedPackageIds } from './packages-io.js';
@@ -67,7 +67,9 @@ export function StudioEntryRedirect({
   const [searchParams] = useSearchParams();
   const { recentItems } = useRecentItems();
   // Newest first, as the store keeps them; a package once, at its newest.
-  const remembered = recentItems.filter((item) => item.type === 'package').map((item) => item.name);
+  const remembered = recentItems
+    .filter((item): item is RecentNamedItem => item.type === 'package')
+    .map((item) => item.name);
   const rememberedKey = remembered.join('\n');
   const [target, setTarget] = React.useState<string | null>(null);
   const fallback = studioEntryFallbackPath(systemPermissions);

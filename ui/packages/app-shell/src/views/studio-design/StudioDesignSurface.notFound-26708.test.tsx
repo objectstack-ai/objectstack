@@ -6,8 +6,9 @@
  * `/studio/<id>` for an id the package list does not hold rendered the full
  * writable builder (New object, Create app, Publish) for a package that does
  * not exist, and every save there went to a phantom package. It now renders
- * "package not found", with no menu and no package actions, and a way back
- * to the Studio landing. And `/studio/<pkg>/<segment>` for a segment no pillar
+ * "package not found", with no menu and no package actions, and a way out
+ * to Setup → Packages, the package list (objectstack#36908: the Studio home
+ * it used to walk back to was removed). And `/studio/<pkg>/<segment>` for a segment no pillar
  * has fell through to the Interfaces pillar with nothing highlighted; it now
  * renders a not-found state, the left menu (objectstack#36899, which replaced
  * the pillars above it) still beside it, nothing in it current. (The
@@ -26,7 +27,7 @@ import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.r34d';
 const KERNEL_ID = 'com.objectstack.platform';
@@ -99,11 +100,17 @@ function servePackages(opts: { fail?: boolean } = {}) {
   return fetchMock;
 }
 
+/** Setup → Packages, with the query it was opened with. */
+function SetupPackages() {
+  const { search } = useLocation();
+  return <div data-testid="setup-packages">{search}</div>;
+}
+
 function renderAt(path: string, surface: React.ReactElement = <StudioDesignSurface />) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/studio" element={<div data-testid="studio-landing" />} />
+        <Route path="/apps/setup/component/developer/packages" element={<SetupPackages />} />
         <Route path="/studio/:packageId/:tab" element={surface} />
       </Routes>
     </MemoryRouter>,
@@ -164,12 +171,12 @@ describe('Studio: a package id no package has renders "package not found" (objec
     expect(packageListReads(fetchMock)).toBe(1);
   });
 
-  it('its one action walks back to the Studio landing', async () => {
+  it('its one action opens Setup → Packages, on its administration face', async () => {
     servePackages();
     renderAt(`/studio/${PHANTOM}/data`);
     const notFound = await screen.findByTestId('studio-package-not-found');
-    within(notFound).getByRole('button', { name: t('engine.studio.landingHome', 'en') }).click();
-    expect(await screen.findByTestId('studio-landing')).toBeInTheDocument();
+    within(notFound).getByRole('button', { name: t('engine.studio.notFound.packageList', 'en') }).click();
+    expect(await screen.findByTestId('setup-packages')).toHaveTextContent('?face=admin');
   });
 
   it('CONTROL — a listed package renders its builder', async () => {
