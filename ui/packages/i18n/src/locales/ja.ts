@@ -65,6 +65,7 @@ const ja = {
     autofillCurrencyDiffers: '{{field}}は入力されませんでした。選択した金額は {{amount}}（{{from}}）ですが、ここでの{{field}}は {{to}} です。{{to}} で入力してください。',
     autofillSourceNoCurrency: '{{field}}は入力されませんでした。選択した金額 {{amount}} には通貨がありませんが、ここでの{{field}}は {{to}} です。{{to}} で入力してください。',
     autofillNoCurrency: '{{field}}は入力されませんでした。選択した金額は {{amount}} ですが、ここではまだ通貨が選択されていません。通貨を選択してから{{field}}を入力してください。',
+    createdOutsideFilters: 'レコードは作成されましたが、この項目の絞り込み条件に一致しないため、ここでは選択できません。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

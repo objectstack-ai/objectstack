@@ -1625,6 +1625,39 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     perms,
   }).allowed;
   const canCreate = !!onCreateNew || (allowCreate && createGranted && (hasActionProvider || hasDataSource));
+  // objectstack#36865 — a record made through quick-create is selected only
+  // when this picker could have offered it. The create form takes whatever the
+  // user enters, so the new record can fail the field's `lookupFilters` (a
+  // `draft` where the field asks for `approved`); selected anyway, it sat in
+  // the field until the server refused the save or the action. So the new id
+  // is re-read through the picker's own filter — `popoverFilter` merged with
+  // the id through `mergeFilterNodes`, the recents rail's query — and the
+  // SERVER decides, exactly as it does for every listed candidate. Absent
+  // from the answer: not selected, and the picker reopens saying why. A
+  // picker with no filter, or no data source to ask, selects as before.
+  // A failed re-read is reported, never read as a pass.
+  const admitCreated = useCallback(
+    async (created: Record<string, unknown>): Promise<boolean> => {
+      if (!popoverFilter || !dataSource || !referenceTo) return true;
+      const rid = recordValue(created, idField);
+      if (rid === undefined || rid === null) return true;
+      let admitted = false;
+      try {
+        const res = await dataSource.find(referenceTo, {
+          $filter: mergeFilterNodes(popoverFilter, { [idField]: rid }),
+          $top: 1,
+        } as QueryParams);
+        const rows = (res as any)?.data ?? res ?? [];
+        admitted = Array.isArray(rows) && rows.length > 0;
+        if (!admitted) setCreateError(t('lookup.createdOutsideFilters'));
+      } catch (err) {
+        setCreateError(err instanceof Error ? err.message : String(err));
+      }
+      if (!admitted) setIsOpen(true);
+      return admitted;
+    },
+    [popoverFilter, dataSource, referenceTo, idField, t],
+  );
   const handleCreateNew = useCallback(
     async (q: string) => {
       const label = (q || '').trim();
@@ -1665,6 +1698,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           },
         } as any);
         if (result?.success && result.data) {
+          if (!(await admitCreated(result.data))) return;
           const opt = recordToOption(result.data, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo);
           handleSelect(opt, result.data);
           return;
@@ -1681,6 +1715,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       setCreating(true);
       try {
         const created = await (dataSource as any).create(referenceTo, { ...(dependentFilter ?? {}), [displayField]: label });
+        if (!(await admitCreated(created))) return;
         const opt = recordToOption(created, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, perms, referenceTo);
         handleSelect(opt, created);
       } catch (err) {
@@ -1689,7 +1724,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         setCreating(false);
       }
     },
-    [onCreateNew, allowCreate, createGranted, referenceTo, hasActionProvider, execute, dataSource, displayField, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, handleSelect, perms, dependentFilter],
+    [onCreateNew, allowCreate, createGranted, referenceTo, hasActionProvider, execute, dataSource, displayField, declaredDisplayField, idField, effectiveDescriptionField, refObjectSchema, handleSelect, perms, dependentFilter, admitCreated],
   );
 
   /**

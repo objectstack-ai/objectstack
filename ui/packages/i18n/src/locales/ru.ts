@@ -67,6 +67,7 @@ const ru = {
     autofillCurrencyDiffers: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}} в {{from}}, а здесь «{{field}}» указывается в {{to}}. Введите её в {{to}}.',
     autofillSourceNoCurrency: 'Поле «{{field}}» не заполнено: у выбранной суммы {{amount}} не указана валюта, а здесь «{{field}}» указывается в {{to}}. Введите её в {{to}}.',
     autofillNoCurrency: 'Поле «{{field}}» не заполнено: выбранная сумма — {{amount}}, но валюта здесь ещё не выбрана. Выберите валюту, затем введите «{{field}}».',
+    createdOutsideFilters: 'Запись создана, но не соответствует фильтрам этого поля, поэтому её нельзя выбрать здесь.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

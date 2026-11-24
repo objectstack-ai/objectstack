@@ -65,6 +65,7 @@ const ko = {
     autofillCurrencyDiffers: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액은 {{amount}}({{from}})이지만 여기의 {{field}}은(는) {{to}} 기준입니다. {{to}}(으)로 직접 입력하세요.',
     autofillSourceNoCurrency: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액 {{amount}}에는 통화가 없지만 여기의 {{field}}은(는) {{to}} 기준입니다. {{to}}(으)로 직접 입력하세요.',
     autofillNoCurrency: '{{field}}이(가) 입력되지 않았습니다. 선택한 금액은 {{amount}}이지만 여기에는 아직 통화가 선택되지 않았습니다. 통화를 선택한 후 {{field}}을(를) 입력하세요.',
+    createdOutsideFilters: '레코드가 생성되었지만 이 필드의 필터 조건에 맞지 않아 여기에서 선택할 수 없습니다.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

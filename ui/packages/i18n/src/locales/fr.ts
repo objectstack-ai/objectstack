@@ -66,6 +66,7 @@ const fr = {
     autofillCurrencyDiffers: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}} en {{from}}, mais ici {{field}} est en {{to}}. Saisissez-le en {{to}}.',
     autofillSourceNoCurrency: '{{field}} n’a pas été rempli : le montant choisi {{amount}} n’indique aucune devise, mais ici {{field}} est en {{to}}. Saisissez-le en {{to}}.',
     autofillNoCurrency: '{{field}} n’a pas été rempli : le montant choisi est de {{amount}}, mais aucune devise n’est encore choisie ici. Choisissez la devise, puis saisissez {{field}}.',
+    createdOutsideFilters: 'L’enregistrement a été créé, mais il ne correspond pas aux filtres de ce champ ; il ne peut donc pas être choisi ici.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

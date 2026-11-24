@@ -74,6 +74,7 @@ const zh = {
     autofillCurrencyDiffers: '未填入{{field}}：所选金额为 {{amount}}（{{from}}），而此处的{{field}}以 {{to}} 计。请按 {{to}} 手动填写。',
     autofillSourceNoCurrency: '未填入{{field}}：所选金额 {{amount}} 未注明币种，而此处的{{field}}以 {{to}} 计。请按 {{to}} 手动填写。',
     autofillNoCurrency: '未填入{{field}}：所选金额为 {{amount}}，但此处尚未选择币种。请先选择币种，再填写{{field}}。',
+    createdOutsideFilters: '记录已创建，但不符合此字段的筛选条件，因此不能在这里选择。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
