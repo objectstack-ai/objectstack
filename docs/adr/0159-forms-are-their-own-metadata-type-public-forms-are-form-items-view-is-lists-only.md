@@ -1,6 +1,6 @@
 # ADR-0159: Forms are their own metadata type — a `form` item is a named form with a consumer, public forms are `form` items, and `view` is lists only
 
-**Status**: Proposed — 2026-11-24, written for objectstack#36868 on the maintainer's ruling of that day (ruling records [`7123091354`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7123091354) on #36444 and [`7123091586`](https://github.com/objectstack-ai/objectstack/issues/36505#issuecomment-7123091586) on #36505). `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by an authorized approval or the maintainer's merge of the PR that carries it, and is in force from that merge. **This record declares; it implements nothing** — no schema, no code, no changeset; every mechanism below is cut as a card after the merge ([Execution plan](#execution-plan-after-acceptance)). It **amends** [ADR-0017](./0017-object-has-many-view.md) (`viewKind` becomes list-only; the form arm is tombstoned on [D7](#d7)'s schedule) and [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D2 (`form` joins the overridable types) — each record's Status line carries the dated pointer.
+**Status**: Proposed — 2026-11-24, written for objectstack#36868 on the maintainer's ruling of that day (ruling records [`7123091354`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7123091354) on #36444 and [`7123091586`](https://github.com/objectstack-ai/objectstack/issues/36505#issuecomment-7123091586) on #36505). **The five merge questions are ruled, all option A** (ruling record [`7131569242`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7131569242) on #36868, 2026-11-24; [the questions](#the-five-merge-questions-as-ruled)): the record now carries no open default. `docs/adr/**` is Tier H (Prime Directive #14): this record becomes **Accepted** by an authorized approval or the maintainer's merge of the PR that carries it, and is in force from that merge. **This record declares; it implements nothing** — no schema, no code, no changeset; every mechanism below is cut as a card after the merge ([Execution plan](#execution-plan-after-acceptance)). It **amends** [ADR-0017](./0017-object-has-many-view.md) (`viewKind` becomes list-only; the form arm is tombstoned on [D7](#d7)'s schedule) and [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) D2 (`form` joins the overridable types) — each record's Status line carries the dated pointer.
 
 - **Date**: 2026-11-24
 - **Decided by**: the maintainer, 2026-11-24, verbatim and untranslated, as the card and the two ruling records carry them:
@@ -8,6 +8,7 @@
   - 05:22Z: 「如果分拆的话，对外表单的功能就不用单独开发了，就合并到这个元数据类型中。」
   - 05:23Z: 「现在对外表单开发的任务先暂停」 (pause record [`7122924165`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7122924165)).
   - 05:33Z, on the decision card 「表单要不要从 view 拆成独立的 form 元数据类型？」, option picked: **「拆成 form 类型，对外表单并入」**. Not taken: keep forms in `view` and retire only the container shape; keep everything as is.
+  - On this record's five merge questions, put to the maintainer with the four-axis options of dev report [`7129798720`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7129798720), each with recommendation A: 「表单拆成独立 form 元数据类型的 5 个合并问题 都同意」 (ruling record [`7131569242`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7131569242), recorded 2026-11-24T12:31Z). All five are option A.
 - **The ruling, as the card records it** (this record executes it; ⛔ none of it is re-opened here):
   1. A new metadata type **`form`**, addressed by name, bound to one object (it carries `object` itself), body = today's form view schema. Its content is named forms that have a consumer: **public forms** (the main content, `sharing` included) and forms an action of `type: 'form'` opens.
   2. **Public forms are not a separate feature**: they are `form` items. Their list, detail and edit come from the `form` type, not from a separate Studio page.
@@ -29,7 +30,7 @@
 7. **Translations get a `forms` family**; the form tails under `objects.OBJECT._views` are read as a fallback until the major ([D8](#d8)).
 8. **Shipped work is kept and re-pointed**: Setup's page reads `form`, the paused designer becomes the `form` editor, the Studio Developer page and the Form-tab switch retire ([D9](#d9)).
 9. **Five cards, in order**; ②, ③ and ④ are additive, ⑤ is the major ([Execution plan](#execution-plan-after-acceptance)).
-10. **Five points the ruling is silent on are decided here with a default** and listed for the maintainer's merge, each with its options on four axes ([Decided here where the ruling was silent](#decided-here-where-the-ruling-was-silent-for-the-maintainers-merge)).
+10. **Five points the first ruling is silent on were put to the maintainer and are ruled, all option A**: `defineForm` is the type's factory, the name stays `OBJECT.KEY`, a taken public address is refused, the reader of old withdrawals is exempt from the age-out, and the body is at the top level ([The five merge questions, as ruled](#the-five-merge-questions-as-ruled)).
 
 ---
 
@@ -80,7 +81,7 @@ Measured on `62692b7f8b` with `git grep -lE "formViews|viewKind: 'form'|viewKind
 
 ### One name already taken
 
-`packages/spec/src/ui/view.zod.ts#defineForm` is a published export, and it is **not** this type's factory: it builds a schema-bound form for Studio's metadata editors (`data.provider: 'schema'`), used by 17 `*.form.ts` modules under `packages/spec/src`. The obvious factory name and the obvious file suffix for the new type both collide with it in meaning. Merge question 1 below.
+`packages/spec/src/ui/view.zod.ts#defineForm` is a published export, and it is **not** this type's factory: it builds a schema-bound form for Studio's metadata editors (`data.provider: 'schema'`), used by 17 `*.form.ts` modules under `packages/spec/src`. The obvious factory name and the obvious file suffix for the new type both collide with it in meaning. [Ruled question 1](#q1) settles it: the name goes to the new type and the Studio helper is renamed.
 
 ---
 
@@ -115,7 +116,7 @@ ADR-0088's three clauses, each on a fact measured above:
 ```
 
 - **One Zod source** (Prime Directive 7): a `FormSchema` in `packages/spec/src/ui/`, derived **by reference** from `FormViewSchema`'s shape, never transcribed. `FormViewSchema` stays as the body schema; the schema-bound Studio forms and the React form block keep using it.
-- **The body is at the top level.** There is no `viewKind` and no `config` wrapper: the type is the discriminator, and "body = today's form view schema" is read literally. Merge question 5 records the wrapped alternative.
+- **The body is at the top level.** There is no `viewKind` and no `config` wrapper: the type is the discriminator, and "body = today's form view schema" is read literally. Ruled so ([question 5](#q5), which keeps the wrapped alternative as the option not taken).
 - **Identity keys**: `name` and `object` required; `label` optional (the display name in lists and in Setup; when absent a surface shows `title`, then the name). The item carries the envelope every standalone item carries: `protection`, the ADR-0010 fields, and ADR-0146's `overrides` declaration.
 - **Not carried over from the view item**: `viewKind`, `config`, `isDefault` (a record-form role, ruling item 3), `order` (the switcher's order) and `scope` (the registry's provenance already says package or runtime).
 - **The object binding has one rung.** A `form` item's object is its `object`. The body's `data` key is not authored on a `form` item: the schema refuses it by name with the prescription "bind the form with `object`". A form bound to a JSON Schema (`data.provider: 'schema'`) is not a `form` item — it has no consumer among the three. The four-rung resolution of `anonymousFormObjectName` survives only inside the projection of the old shapes ([D5](#d5)) and leaves with them.
@@ -129,9 +130,9 @@ ADR-0088's three clauses, each on a fact measured above:
 - **Why this name.** It is the name every form is served under today — a stored item's own `name`, and for a container's form the name `expandViewContainer` gives it. An action's `target`, a `/forms/:name` link, a `.custom` override's key and the withdrawal judgement's identity are all this string. Keeping it means the migration renames nothing, and a withdrawal recorded against a name keeps closing that name ([D6](#d6)). Under ADR-0150 D1 it is an object-derived literal name, the bucket `view` is in; `form` takes the same bucket and no (package, name) resolution.
 - **Separate from lists.** After the split a list `crm_lead.all` and a form `crm_lead.all` are items of two types and do not collide. Until the old shapes are tombstoned they still share the `view` type's name space wherever the old shapes are stored, and the container name-collision refusal keeps judging them there.
 - **One form per name per package.** Inside a base's dependency closure ADR-0146 D2's rule applies unchanged: an undeclared same-name item of a dependent is refused at publish.
-- **The public address (slug) is a second identity**, declared in `sharing.publicLink`. Two different forms on one slug are not refused today. Merge question 3 decides that the `form` write door refuses it.
+- **The public address (slug) is a second identity**, declared in `sharing.publicLink`. Two different forms on one slug are not refused today. By [ruled question 3](#q3) the `form` write door, `os validate` and publish refuse it.
 
-Merge question 2 records the alternative (a short name addressed by package).
+The name is ruled ([question 2](#q2)); the alternative not taken is a short name addressed by package.
 
 ### D4 — Overrides: `form` joins ADR-0146 D2's list {#d4}
 
@@ -166,7 +167,7 @@ This is the security-sensitive part. ADR-0138 D2 row 1 is unchanged: the admissi
 7. **A body that cannot be read closes what it names.** A stored `view` body that carries form content the projection cannot turn into items is not skipped: every public link it names is treated as withdrawn, and the boot says so once at `error`, naming the row and the ceremony of [D7](#d7).
 8. **A switched-off form answers `404 FORM_NOT_FOUND`**, as a form that does not exist (ruling record 7100386248, F3 = A). The tenancy intake rule is unchanged and runs after the match.
 9. **Write-time judgements cover `form`.** The tenancy intake advisory and the organization-scoped refusal of a save that would leave a withdrawn form open judge a `form` write as they judge a `view` write, over the same two-type layer.
-10. **The reader of old-shape withdrawals outlives the old shapes.** See [D7](#d7) and merge question 4.
+10. **The reader of old-shape withdrawals outlives the old shapes.** See [D7](#d7) and [ruled question 4](#q4).
 
 **Pins card ② owes, each with an ablation** (remove the named read, watch the pin turn red, restore):
 
@@ -201,7 +202,7 @@ Each pin asserts the refusal's status and `code` and that no record was written,
 - Internal record forms in stored rows are reported and left for the administrator to delete; the ceremony deletes nothing it did not move.
 - The ceremony can be run from the release that adds the type. It **must** be run before a deployment moves to major 19: that release's upgrade refuses to proceed while a stored old-shape form row exists, naming the ceremony.
 
-**The withdrawal reader is exempt from the kit age-out** (merge question 4). ADR-0087, as amended on 2026-10-26, lets a retired conversion and its tombstone leave the tree one major after they retire. The reader that finds a withdrawal in a stored old-shape body does not follow that clock: it stays as long as such a row can exist, and it is removed only by a release whose upgrade precheck has refused every deployment that still holds one. A withdrawal nobody reads would re-open a form, and that direction is never taken by a clean-up.
+**The withdrawal reader is exempt from the kit age-out** ([ruled question 4](#q4)). ADR-0087, as amended on 2026-10-26, lets a retired conversion and its tombstone leave the tree one major after they retire. The reader that finds a withdrawal in a stored old-shape body does not follow that clock: it stays as long as such a row can exist, and it is removed only by a release whose upgrade precheck has refused every deployment that still holds one. A withdrawal nobody reads would re-open a form, and that direction is never taken by a clean-up.
 
 **After the major**: `ViewSchema` is lists (`list`, `listViews`), `ViewKindSchema` is `list` alone, the projection serves no content, and `anonymousFormObjectName`'s list rung is gone.
 
@@ -239,7 +240,7 @@ Each pin asserts the refusal's status and `code` and that no record was written,
 - **ADR-0146 D2** is amended: `form` is in "Which types".
 - **ADR-0084** needs no change: its Interface pillar row already reads "app · page · view · form · dashboard · report".
 - **ADR-0138** is not changed: D2 row 1's condition and grant stand; [D6](#d6) changes only which metadata type carries the `sharing` declaration.
-- **ADR-0150** D1's table has no `form` row. This record places `form` with `view` ([D3](#d3)); when merge question 2 is accepted as written, the landing seat adds the row to the open "ADR revisions" card, as for any record a later change makes incomplete.
+- **ADR-0150** D1's table has no `form` row. This record places `form` with `view` ([D3](#d3)); [question 2](#q2) is ruled as written, so after this record merges the landing seat adds the row to the open "ADR revisions" card, as for any record a later change makes incomplete.
 - **ADR-0088** is applied, not amended ([D1](#d1)).
 
 ---
@@ -256,6 +257,7 @@ Five cards, in this order. ⛔ None lands before this record is accepted. The de
 | ④ | Sources and teaching: move this repository's examples and HotCRM's forms to `forms:`, their translation keys, the skills and docs | `domain:spec` (examples, skills, docs) and HotCRM's lane | `none` | ② |
 | ⑤ | Major 19: tombstone the three old shapes, the two conversions and the chain entry, the stored-row ceremony and the upgrade precheck, `view` reads lists only | `domain:spec` with `domain:server` | `narrowed` | ③ and ④ |
 
+- **② carries four of the five rulings as requirements** ([the questions](#the-five-merge-questions-as-ruled)): the `defineForm` factory with the Studio helper renamed `defineMetadataForm`, after measuring outside use of today's `defineForm` (question 1); the public-address clash refusal at the `form` write door, `os validate` and publish (question 3); the reader of old-shape withdrawals built as exempt from the kit age-out and anchored as such (question 4); the top-level document shape (question 5). Question 2 asks ② for no change: the name is the one served today. ⑤ carries question 4's other half, the upgrade precheck of major 19.
 - **② is one releasable change.** It adds and removes nothing an author wrote: `view` reads, old-shape writes and the shipped console behave as before. It owes [D6](#d6)'s pins and ablations, the showcase's `examples/app-showcase/src/coverage.ts#KIND_COVERAGE` row (its coverage test holds exact registry membership), and the same-change override row of [D4](#d4).
 - **③ carries PR #36784's work.** #36444 stays paused until ③ is filed and then carries `Blocked-by:` ③. #36505 is closed (merged as `5c2d5cf2c4`); the public-forms part of its item 4 is superseded by this record and needs no card.
 - **④ may run beside ③.** After ④ no first-party source authors an old shape, which is what lets ⑤ measure "zero first-party" before it tombstones.
@@ -263,15 +265,17 @@ Five cards, in this order. ⛔ None lands before this record is accepted. The de
 
 ---
 
-## Decided here where the ruling was silent (for the maintainer's merge)
+## The five merge questions, as ruled
 
-Merging accepts each default; an objection names the number. Each is analysed on the four fixed axes: the real business need, long-term soundness, how hard it is for an AI author to get wrong, and not spreading scope at this stage.
+The ruling this record executes is silent on five points. This record decided each with a default and put it to the maintainer, analysed on the four fixed axes: the real business need, long-term soundness, how hard it is for an AI author to get wrong, and not spreading scope at this stage.
+
+**Ruled, all five, on 2026-11-24: option A on each.** The maintainer's words, verbatim: 「表单拆成独立 form 元数据类型的 5 个合并问题 都同意」. Ruling record [`7131569242`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7131569242) on #36868 records them against the presentation of the five questions in dev report [`7129798720`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7129798720). Each section below keeps its options and its four-axis table as the record of what was weighed, and ends with its ruling, what the ruling asks of the cards, and its `Ruling-ref:`. ⛔ None of the five is open any more: changing one is a new decision (Prime Directive 13), not an objection at merge.
 
 ### 1. The factory name: `defineForm` is taken {#q1}
 
 `defineForm` is a published export that builds a schema-bound Studio metadata form. The new type needs a factory, and `define` + the type name is the pattern every type follows (`defineView`, `defineFlow`, `defineApp`).
 
-- **A — `defineForm` becomes the `form` type's factory; the Studio one is renamed `defineMetadataForm`, both in card ②** (default). A published export changes meaning: a compiler-carried break (ADR-0087 D9's category), declared in card ②'s changeset.
+- **A — `defineForm` becomes the `form` type's factory; the Studio one is renamed `defineMetadataForm`, both in card ②** (ruled). A published export changes meaning: a compiler-carried break (ADR-0087 D9's category), declared in card ②'s changeset.
 - **B — the new factory takes a new name (`defineFormItem`); `defineForm` is untouched.** No break.
 - **C — no factory in card ②**; authors write `forms: [{ … }]` entries typed by the schema, and the name is decided later.
 
@@ -282,11 +286,18 @@ Merging accepts each default; an objection names the number. Each is analysed on
 | AI-author error | An AI that guesses `defineForm({ name, object, … })` is right. An old caller fails to compile and fails to parse: loud | The guess fails loudly (`schemaId` is required), then the AI must find the other name | No wrong name to guess; no compile-time help either |
 | Scope now | One rename across 18 files plus a declared export change | Smallest | Smallest |
 
-Recommendation: **A**. The long-term name leads; its cost is a loud, one-time, compiler-carried break in a helper measured as platform-internal. If outside use of `defineForm` is found before card ②, the fallback is B, not a dual-meaning overload.
+Recommendation, as put: **A**. The long-term name leads; its cost is a loud, one-time, compiler-carried break in a helper measured as platform-internal.
+
+**Ruled: A.** `defineForm` is the `form` type's factory. The existing Studio schema-bound metadata-form helper is renamed `defineMetadataForm`. Both land in card ②, as a declared compiler-carried export break.
+
+- **For the cards.** Card ② owns the factory and the rename (the 17 `*.form.ts` modules under `packages/spec/src` and the one file under `ui/`), and its changeset declares the export change with the FROM and TO mapping.
+- **The premise, measured before card ② lands.** The ruling rests on outside use of today's `defineForm` being platform-internal. Card ② measures it first. If outside use is found, card ② falls back to a new factory name and ⛔ never to a dual-meaning overload, and **that fallback returns to the maintainer for a word** before it is built: it is not the dev's or the seat's to take.
+
+Ruling-ref: [`7131569242`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7131569242) — the maintainer, 2026-11-24, 「表单拆成独立 form 元数据类型的 5 个合并问题 都同意」
 
 ### 2. The name: `OBJECT.KEY`, or a short name addressed by package {#q2}
 
-- **A — keep `OBJECT.KEY`, ADR-0150 bucket 1 with `view`** (default, [D3](#d3)).
+- **A — keep `OBJECT.KEY`, ADR-0150 bucket 1 with `view`** (ruled, [D3](#d3)).
 - **B — a short name (`web_to_lead`) addressed by (package, name), ADR-0150 bucket 2 with `page`.**
 
 | Axis | A | B |
@@ -296,13 +307,19 @@ Recommendation: **A**. The long-term name leads; its cost is a loud, one-time, c
 | AI-author error | The prefix-equals-`object` check refuses a mismatch at parse | A bare short name is ambiguous across packages until resolved |
 | Scope now | No rename, no reference rewrite; the withdrawal identity carries over untouched | Renames every form and rewrites every reference inside a security-sensitive migration |
 
-Recommendation: **A**. B's one advantage has no measured pull, and B moves the identity the kill switch matches on.
+Recommendation, as put: **A**. B's one advantage has no measured pull, and B moves the identity the kill switch matches on.
+
+**Ruled: A.** A `form` item keeps the `OBJECT.KEY` name, in ADR-0150 bucket 1 with `view`. There is no rename: action targets, deep links, stored overrides and the withdrawal identity keep working.
+
+- **For the cards.** No card renames a form or rewrites a reference to one. Card ② enforces the prefix-equals-`object` check of [D3](#d3); the migration of card ⑤ moves each form under the name it is served as today. The ADR-0150 D1 row for `form` is the landing seat's entry on the open "ADR revisions" card ([D10](#d10)).
+
+Ruling-ref: [`7131569242`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7131569242) — the maintainer, 2026-11-24, 「表单拆成独立 form 元数据类型的 5 个合并问题 都同意」
 
 ### 3. Two forms on one public address {#q3}
 
 Today nothing server-side refuses it; the first candidate in list order is served.
 
-- **A — the `form` write door, `os validate` and publish refuse a `form` whose open `publicLink` slug another form in the environment already holds** (default). A new refusal, on the new type only; old-shape writes keep today's behaviour until they retire.
+- **A — the `form` write door, `os validate` and publish refuse a `form` whose open `publicLink` slug another form in the environment already holds** (ruled). A new refusal, on the new type only; old-shape writes keep today's behaviour until they retire.
 - **B — keep first-match; the designer's client-side check is the only guard.**
 
 | Axis | A | B |
@@ -312,13 +329,19 @@ Today nothing server-side refuses it; the first candidate in list order is serve
 | AI-author error | A clash is refused with both names | A second form on a taken slug saves clean and is silently never served, or silently takes over |
 | Scope now | One check at one door, and one lint rule | None |
 
-Recommendation: **A**. It is a refusal on a new type, so it narrows nothing an author has today.
+Recommendation, as put: **A**. It is a refusal on a new type, so it narrows nothing an author has today.
+
+**Ruled: A.** The `form` write door, `os validate` and publish refuse a form whose open slug another form already holds. It is a refusal on the new type only; nothing an author has today narrows.
+
+- **For the cards.** Card ② builds the refusal at all three places, naming both forms. Old-shape writes keep today's first-match behaviour until card ⑤ retires them; the designer's client-side check (card ③) stays as the early message and is no longer the only guard.
+
+Ruling-ref: [`7131569242`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7131569242) — the maintainer, 2026-11-24, 「表单拆成独立 form 元数据类型的 5 个合并问题 都同意」
 
 ### 4. The withdrawal reader is exempt from the retirement-kit age-out {#q4}
 
 ADR-0087 (amended 2026-10-26) removes a retired conversion one major after it retires. Applied here without exception, a stored old-shape body that withdraws a form would stop being read two majors on, and the form would re-open.
 
-- **A — the reader of old-shape withdrawals is exempt: it leaves only by a release whose upgrade precheck refuses a deployment that still holds an old-shape form row** (default, [D7](#d7)); and major 19's own upgrade carries that precheck.
+- **A — the reader of old-shape withdrawals is exempt: it leaves only by a release whose upgrade precheck refuses a deployment that still holds an old-shape form row** (ruled, [D7](#d7)); and major 19's own upgrade carries that precheck.
 - **B — no exemption: the ceremony is documented as required, and the reader ages out on ADR-0087's clock.**
 
 | Axis | A | B |
@@ -328,11 +351,19 @@ ADR-0087 (amended 2026-10-26) removes a retired conversion one major after it re
 | AI-author error | Not an authoring surface | Not an authoring surface |
 | Scope now | One precheck and a reader kept longer | None |
 
-Recommendation: **A**. This is a permission boundary, so it is put to the maintainer by name and not left as a reading of ADR-0087.
+Recommendation, as put: **A**. This is a permission boundary, so it is put to the maintainer by name and not left as a reading of ADR-0087.
+
+**Ruled: A** — a permission boundary, ruled by the maintainer by name. The reader of old-shape withdrawals is **exempt from ADR-0087's kit age-out**. It leaves only by a release whose upgrade precheck refuses a deployment still holding an old-shape form row; protocol major 19's upgrade carries that precheck. No withdrawn public form may re-open.
+
+- **For the cards.** Card ② builds the reader inside the two-type withdrawal layer ([D6](#d6)) and marks it exempt where it lives: this record's id in the code and an anchor in `scripts/adr-anchors/`, so a later kit clean-up finds the exemption before it finds the reader. Card ⑤ keeps the reader when it tombstones the old shapes, and carries major 19's upgrade precheck with its security pins ([D7](#d7)).
+- **What the exemption does not license.** Removing the reader is neither card's work. It is a later release with its own precheck, and that removal is a new decision.
+- **Scope of the exemption.** It is this one reader. ADR-0087's age-out stands as amended for every other retired conversion and tombstone, the rest of this record's kit included.
+
+Ruling-ref: [`7131569242`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7131569242) — the maintainer, 2026-11-24, 「表单拆成独立 form 元数据类型的 5 个合并问题 都同意」
 
 ### 5. The document shape: body at the top level, or under `config` {#q5}
 
-- **A — `name`, `object` and the body keys at the top level** (default, [D2](#d2)).
+- **A — `name`, `object` and the body keys at the top level** (ruled, [D2](#d2)).
 - **B — `{ name, object, config: FormView }`, the view item's shape without `viewKind`.**
 
 | Axis | A | B |
@@ -342,7 +373,13 @@ Recommendation: **A**. This is a permission boundary, so it is put to the mainta
 | AI-author error | No `config` to forget or misspell; an unknown top-level key is refused by name. The view item's history records `confg` parsing clean before it was closed | One more nesting level to get wrong |
 | Scope now | The projection and the designer's read and write adapt once | The designer's code is closer to as written |
 
-Recommendation: **A**.
+Recommendation, as put: **A**.
+
+**Ruled: A.** The `form` document carries `name`, `object` and the form body keys at the top level. There is no `config` wrapper.
+
+- **For the cards.** Card ② declares `FormSchema` in that shape ([D2](#d2)) and the projection of [D5](#d5) lifts an old-shape `config` to the top level; card ③'s designer reads and writes the item itself; card ⑤'s conversion and ceremony write the same shape.
+
+Ruling-ref: [`7131569242`](https://github.com/objectstack-ai/objectstack/issues/36868#issuecomment-7131569242) — the maintainer, 2026-11-24, 「表单拆成独立 form 元数据类型的 5 个合并问题 都同意」
 
 ---
 
@@ -353,7 +390,7 @@ Recommendation: **A**.
 - **Until major 19 there are two readers of form content** (the type and the projection). The cost is bounded by the rule that the projection is the only reader of the old shapes.
 - **The anonymous doors read two types for at least one major.** [D6](#d6)'s pins are the price; a withdrawal is honoured in both.
 - **A deployment must run a ceremony before major 19**, and that upgrade refuses without it.
-- **`defineForm` changes meaning** if merge question 1 is accepted as written.
+- **`defineForm` changes meaning** in card ② ([ruled question 1](#q1)): a declared, compiler-carried export break, on the premise that its outside use is platform-internal.
 - **First-party work**: about 100 non-test source files and about 160 test files name the old shapes; they move in ②, ③ and ④ and the remainder falls to ⑤.
 
 ## Alternatives considered
@@ -393,5 +430,5 @@ The card cites positions read at `14f4d8f8`. Each was read again. The numbers be
 ## Refs
 
 - Card: [#36868](https://github.com/objectstack-ai/objectstack/issues/36868). Paused work: [#36444](https://github.com/objectstack-ai/objectstack/issues/36444), PR [#36784](https://github.com/objectstack-ai/objectstack/pull/36784). Merged: PR [#36697](https://github.com/objectstack-ai/objectstack/pull/36697), [#36505](https://github.com/objectstack-ai/objectstack/issues/36505), [#36425](https://github.com/objectstack-ai/objectstack/issues/36425).
-- Ruling records: `7123091354`, `7123091586`, `7122924165`, `7118881549`, `7100386248`.
+- Ruling records: `7123091354`, `7123091586`, `7122924165`, `7118881549`, `7100386248`; on #36868, `7131569242` (the five merge questions, all option A).
 - Touching cards named by #36868: #36797 and #36798 (Studio rail and docs on named default and create forms — re-read against [D1](#d1)), #36860 (the metadata list columns row, [D9](#d9)).
