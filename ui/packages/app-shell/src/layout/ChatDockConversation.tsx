@@ -34,6 +34,7 @@ import { makerConvergedOnBuild, resolveSurfaceAgent } from '../hooks/surfaceAgen
 import { useCanAuthorMetadata } from '../hooks/useCanAuthorMetadata.js';
 import { isAiStudioEnabled } from '../runtime-config.js';
 import type { ChatSurfaceContext } from './chatSurfaceContext.js';
+import { useConversationFocus } from './chatFocus.js';
 import {
   ambientAppPackage,
   sameDockTarget,
@@ -306,6 +307,11 @@ export function ChatDockConversation({
   // ADR-0028 — the composer's picked model, held here so it outlives the keyed
   // pane's remount when the first send mints the conversation.
   const [selectedModelId, setSelectedModelId] = React.useState<string | undefined>(undefined);
+  // objectstack#36999 — the thread's focus (the record the user pinned it to),
+  // held here for the same reason. It rides on the thread the scope resolved
+  // and never re-keys it: a focus does not change which conversation the
+  // drawer shows (ADR-0057 as amended for objectui#10926).
+  const conversationFocus = useConversationFocus(paneConversationId);
 
   // ── The drawer's own controls over its thread ───────────────────────────
   // The launcher, the app switcher and the handoff in the pane open targets
@@ -424,6 +430,7 @@ export function ChatDockConversation({
             activeAppPackageId={appPackageId}
             surfaceContext={surfaceContext}
             surfaceArtifactLabel={surfaceArtifactLabel}
+            conversationFocus={conversationFocus}
             initialMessages={paneInitialMessages}
             pendingFirstMessageRef={pendingFirstMessageRef}
             pendingFirstMessageSeq={pendingFirstMessageSeq}
