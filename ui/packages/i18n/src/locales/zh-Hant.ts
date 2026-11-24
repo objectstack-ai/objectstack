@@ -2972,6 +2972,13 @@ const zhHant = {
       skipped: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       skipped_one: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       skipped_other: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
+      cascadeHeading: '同時轉移相關記錄',
+      cascadeHelp: '指向此記錄且屬於原負責人的相關記錄，也會轉給新負責人。',
+      cascadeOption: '{{object}}（{{field}}）',
+      cascadesFailed: '無法讀取可一併轉移的相關記錄：{{message}}',
+      cascadeReport: '{{object}}（{{field}}）：已轉移 {{moved}} 條，{{failed}} 條無法轉移。',
+      cascadeRemaining: '超出單次更改 500 條上限、仍歸原負責人的記錄：{{count}} 條。',
+      cascadeReadFailure: '{{object}}（{{field}}）：無法讀取相關記錄：{{message}}',
       gridOnly: '如需一次更改多條記錄的負責人，請切換到表格檢視。',
     },
     objectView: {
@@ -5966,6 +5973,8 @@ const zhHant = {
     sourceDefault: "組織預設",
     sourceBuiltin: "預設",
     sourceMandatory: "必收",
+    followOrganization: "跟隨組織設定",
+    followOrganizationFor: "{{setting}}：跟隨組織設定",
   },
   slackLink: {
     title: "Slack 私信",

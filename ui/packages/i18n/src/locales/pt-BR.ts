@@ -2878,6 +2878,13 @@ const pt = {
       skipped_one: '{{count}} registro selecionado não oferece Alterar proprietário e foi deixado de fora.',
       skipped_many: '{{count}} de registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
       skipped_other: '{{count}} registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
+      cascadeHeading: 'Transferir também os registros relacionados',
+      cascadeHelp: 'Os registros relacionados que apontam para este e pertencem ao proprietário anterior também passam para o novo proprietário.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'Não foi possível ler os registros relacionados que podem ser transferidos: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): {{moved}} transferidos, {{failed}} não puderam ser transferidos.',
+      cascadeRemaining: 'Ficaram com o proprietário anterior, acima do limite de 500 registros por alteração: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): não foi possível ler os registros relacionados: {{message}}',
       gridOnly: 'Para alterar o proprietário de vários registros de uma vez, mude para uma visualização em grade.',
     },
     objectView: {
@@ -6064,6 +6071,8 @@ const pt = {
     sourceDefault: "Padrão da organização",
     sourceBuiltin: "Padrão",
     sourceMandatory: "Obrigatório",
+    followOrganization: "Seguir a configuração da organização",
+    followOrganizationFor: "{{setting}}: seguir a configuração da organização",
   },
   slackLink: {
     title: "Mensagens diretas do Slack",

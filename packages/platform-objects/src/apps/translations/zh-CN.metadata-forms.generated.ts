@@ -240,6 +240,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"
       },
+      "fields.transferBehavior": {
+        label: "转移行为",
+        helpText: "更改被引用记录的负责人时，是否也可一并转移通过此字段指向它的记录"
+      },
       "fields.multiple": {
         label: "多选",
         helpText: "允许选择多条记录"
@@ -768,6 +772,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "删除行为",
         helpText: "被引用记录删除时的处理方式"
+      },
+      transferBehavior: {
+        label: "转移行为",
+        helpText: "更改被引用记录的负责人时，是否也可一并转移通过此字段指向它的记录"
       },
       relatedListFilter: {
         label: "关联列表筛选",

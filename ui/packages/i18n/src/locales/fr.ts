@@ -2879,6 +2879,13 @@ const fr = {
       skipped_one: '{{count}} enregistrement sélectionné ne propose pas « Changer de propriétaire » et est ignoré.',
       skipped_many: '{{count}} d\'enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
       skipped_other: '{{count}} enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
+      cascadeHeading: 'Transférer aussi les enregistrements liés',
+      cascadeHelp: 'Les enregistrements liés qui pointent vers celui-ci et appartiennent à l\'ancien propriétaire passent aussi au nouveau propriétaire.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'Impossible de lire les enregistrements liés transférables : {{message}}',
+      cascadeReport: '{{object}} ({{field}}) : {{moved}} transférés, {{failed}} n\'ont pas pu l\'être.',
+      cascadeRemaining: 'Restés à l\'ancien propriétaire, au-delà de la limite de 500 enregistrements par changement : {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}) : impossible de lire les enregistrements liés : {{message}}',
       gridOnly: 'Pour changer le propriétaire de plusieurs enregistrements à la fois, passez à une vue en grille.',
     },
     objectView: {
@@ -6065,6 +6072,8 @@ const fr = {
     sourceDefault: "Par défaut de l'organisation",
     sourceBuiltin: "Par défaut",
     sourceMandatory: "Obligatoire",
+    followOrganization: "Suivre le réglage de l'organisation",
+    followOrganizationFor: "{{setting}} : suivre le réglage de l'organisation",
   },
   slackLink: {
     title: "Messages directs Slack",

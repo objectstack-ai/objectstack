@@ -1238,6 +1238,7 @@
     "summaryFunctionReadsField (function)",
     "textComparandRefusalReason (function)",
     "textOperatorDoorVerdict (function)",
+    "transferCascadeIneligibilityReason (function)",
     "transferIneligibilityReason (function)",
     "undeclaredActionRefusalAtRun (function)",
     "undeclaredActionRefusalCodeAtSave (function)",

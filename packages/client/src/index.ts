@@ -285,8 +285,39 @@ export interface UserWorkTransferReport {
  * one. `notify` tells a person target; a queue target refuses it.
  */
 export type ChangeOwnerRequest =
-  | { ownerId: string; queue?: undefined; notify?: boolean }
-  | { queue: string; ownerId?: undefined; notify?: undefined };
+  | { ownerId: string; queue?: undefined; notify?: boolean; cascade?: ChangeOwnerCascadeRelation[] }
+  | { queue: string; ownerId?: undefined; notify?: undefined; cascade?: undefined };
+
+/**
+ * [#35315 phase 2] One relationship a Change Owner cascades along: the child
+ * object, and its reference field to the parent, which declares
+ * `transferBehavior: 'cascade'`. A request naming any other is refused `400`.
+ */
+export interface ChangeOwnerCascadeRelation {
+  object: string;
+  field: string;
+}
+
+/** [#35315 phase 2] A declared cascade `data.changeOwnerCascades` lists, with the labels the child serves. */
+export interface ChangeOwnerCascadeCandidate extends ChangeOwnerCascadeRelation {
+  label: string;
+  fieldLabel: string;
+}
+
+/**
+ * [#35315 phase 2] One cascaded relationship's outcome: the child rows owned by
+ * the parent's previous owner that moved, every one refused listed with its
+ * code and sentence, and those the row cap left with the previous owner.
+ */
+export interface ChangeOwnerCascadeOutcome {
+  object: string;
+  field: string;
+  updated: number;
+  failed: number;
+  failures: Array<{ id: string; code: string; message: string }>;
+  remaining: number;
+  readFailure?: { code: string; message: string };
+}
 
 /** [#35402] `data.changeOwner`'s answer: the record's new owner, or the queue it now sits in. */
 export interface ChangeOwnerResult {
@@ -296,6 +327,8 @@ export interface ChangeOwnerResult {
   ownerId: string | null;
   queue?: string;
   notified: boolean;
+  /** One outcome per relationship the request named in `cascade`; absent when it named none. */
+  cascade?: ChangeOwnerCascadeOutcome[];
 }
 
 /**
@@ -311,6 +344,8 @@ export interface ChangeOwnerReport {
   failed: number;
   failures: Array<{ id: string; code: string; message: string }>;
   notified: boolean;
+  /** One outcome per relationship the request named in `cascade`; absent when it named none. */
+  cascade?: ChangeOwnerCascadeOutcome[];
 }
 
 /**
@@ -8361,6 +8396,24 @@ export class ObjectStackClient {
             { method: 'POST', body: JSON.stringify({ ...request, ids }) },
         );
         return this.unwrapResponse<ChangeOwnerReport>(res);
+    },
+
+    /**
+     * [#35315 phase 2] The relationships a Change Owner of `object` may cascade
+     * to — `GET /data/:object/change-owner/cascades`: each child reference
+     * field to `object` that declares `transferBehavior: 'cascade'`, on a child
+     * that offers Change Owner itself. Whether the caller may transfer on each
+     * child is the explain engine's `transfer` operation, asked separately; the
+     * write path judges every cascaded row again. Refused `403
+     * CHANGE_OWNER_DISABLED` on an object that does not offer the action.
+     */
+    changeOwnerCascades: async (object: string): Promise<{ object: string; cascades: ChangeOwnerCascadeCandidate[] }> => {
+        const route = this.getRoute('data');
+        const res = await this.fetch(
+            `${this.baseUrl}${route}/${encodeURIComponent(object)}/change-owner/cascades`,
+            { method: 'GET' },
+        );
+        return this.unwrapResponse<{ object: string; cascades: ChangeOwnerCascadeCandidate[] }>(res);
     },
 
     /**

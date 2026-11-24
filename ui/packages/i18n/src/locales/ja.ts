@@ -2809,6 +2809,13 @@ const ja = {
       skipped: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
       skipped_one: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
       skipped_other: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
+      cascadeHeading: '関連レコードも移管する',
+      cascadeHelp: 'このレコードを参照し、以前の所有者が所有する関連レコードも新しい所有者に移ります。',
+      cascadeOption: '{{object}}（{{field}}）',
+      cascadesFailed: '一緒に移管できる関連レコードを読み込めませんでした: {{message}}',
+      cascadeReport: '{{object}}（{{field}}）: {{moved}} 件を移管、{{failed}} 件は移管できませんでした。',
+      cascadeRemaining: '1 回の変更の上限 500 件を超え、以前の所有者のままのレコード: {{count}} 件。',
+      cascadeReadFailure: '{{object}}（{{field}}）: 関連レコードを読み込めませんでした: {{message}}',
       gridOnly: '複数のレコードの所有者をまとめて変更するには、グリッドビューに切り替えてください。',
     },
     objectView: {
@@ -5908,6 +5915,8 @@ const ja = {
     sourceDefault: "組織の既定値",
     sourceBuiltin: "既定",
     sourceMandatory: "必須",
+    followOrganization: "組織の設定に従う",
+    followOrganizationFor: "{{setting}}：組織の設定に従う",
   },
   slackLink: {
     title: "Slack のダイレクトメッセージ",

@@ -3486,6 +3486,13 @@ const en = {
       skipped: '{{count}} selected records do not offer Change Owner and are left out.',
       skipped_one: '{{count}} selected record does not offer Change Owner and is left out.',
       skipped_other: '{{count}} selected records do not offer Change Owner and are left out.',
+      cascadeHeading: 'Also move related records',
+      cascadeHelp: 'Related records that point at this one and belong to its previous owner go to the new owner too.',
+      cascadeOption: '{{object}} ({{field}})',
+      cascadesFailed: 'The related records that can move along could not be read: {{message}}',
+      cascadeReport: '{{object}} ({{field}}): moved {{moved}}, {{failed}} could not be moved.',
+      cascadeRemaining: 'Left with the previous owner, past the 500-record limit of one change: {{count}}.',
+      cascadeReadFailure: '{{object}} ({{field}}): the related records could not be read: {{message}}',
       gridOnly: 'To change the owner of several records at once, switch to a grid view.',
     },
     objectView: {
@@ -6843,6 +6850,8 @@ const en = {
     sourceDefault: "Organization default",
     sourceBuiltin: "Default",
     sourceMandatory: "Required",
+    followOrganization: "Follow organization setting",
+    followOrganizationFor: "Follow organization setting for {{setting}}",
   },
   slackLink: {
     title: "Slack direct messages",
