@@ -603,8 +603,12 @@ export function PeoplePicker({
         )}
       </div>
 
-      {/* Candidate area */}
-      <ScrollArea className="min-h-0 flex-1" data-testid="people-picker-list">
+      {/* Candidate area. `flex flex-col` makes the viewport a flex item that
+          shrinks to the room this area is given: a container capped only by
+          `max-h-*` (the inline popover, the desktop dialog) has no definite
+          height, so the viewport's own `h-full` falls back to its content
+          height and the list is clipped instead of scrolling. */}
+      <ScrollArea className="flex min-h-0 flex-1 flex-col" data-testid="people-picker-list">
         <div
           id="people-picker-list"
           role="listbox"
