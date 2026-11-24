@@ -70,25 +70,33 @@ export const CommentsPanel: React.FC<CommentsPanelProps> = ({ onClose, focusThre
   // follows a thread the reader (or anyone) adds.
   const listRef = React.useRef<HTMLDivElement>(null);
   const threadCount = threads.length;
+  // objectstack#36410 — a linked comment holds the list where it scrolled to
+  // it: the foot is followed again only once a thread is added after.
+  const threadsAtFocus = React.useRef<number | null>(null);
   React.useLayoutEffect(() => {
     const list = listRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [threadCount, loading]);
-  // After it, so a linked comment wins over the foot: scrolled to once the
-  // thread is drawn; a thread that is not here (deleted, or a stale link)
-  // leaves the list as it opens.
+    if (!list) return;
+    if (focusKey && (settledFocus !== focusKey || threadsAtFocus.current === threadCount)) return;
+    list.scrollTop = list.scrollHeight;
+  }, [threadCount, loading, focusKey, settledFocus]);
+  // The linked comment, scrolled to once its thread is drawn; a thread that
+  // is not here (deleted, or a stale link) leaves the list at its foot.
   React.useLayoutEffect(() => {
     if (!focusKey || !focusThreadId || settledFocus === focusKey) return;
     const list = listRef.current;
     if (!list) return;
     if (focusThread) {
       if (scrollCommentIntoView(list, targetId ?? focusThreadId) || scrollCommentIntoView(list, focusThreadId)) {
+        threadsAtFocus.current = threadCount;
         setSettledFocus(focusKey);
       }
       return;
     }
-    if (!loading) setSettledFocus(focusKey);
-  }, [focusKey, focusThreadId, targetId, settledFocus, focusThread, shown, loading]);
+    if (loading) return;
+    threadsAtFocus.current = null;
+    list.scrollTop = list.scrollHeight;
+    setSettledFocus(focusKey);
+  }, [focusKey, focusThreadId, targetId, settledFocus, focusThread, shown, loading, threadCount]);
 
   let body: React.ReactNode;
   if (denied) {
