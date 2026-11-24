@@ -1,0 +1,32 @@
+{
+  "number": 36877,
+  "kind": "issue",
+  "title": "refusals: one throw answers one declared sentence — an action that refuses a selection for several reasons at once cannot list them in the person's language (after #34273)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T06:12:52Z",
+  "updated_at": "2026-11-24T06:34:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36877",
+  "body": "## What\n\nSince #34273 a `type: 'script'` action can declare a `refusals` catalogue, and the server answers a refusal in the request's `Accept-Language`. That works — but **one throw answers exactly one declared sentence**: one `code`, at most one `reason`, one flat `params` object.\n\nAn action that checks a whole selection and refuses all-or-nothing has several things to say at once — one sentence per offending record, each with its own reason and its own values. That answer cannot be expressed through the catalogue, so such an action has to choose between a list in the author's language and a single reason in the person's language.\n\nThe resolver is shared with hooks (`resolveSandboxedRefusal`), so a hook that wants to name several reasons in one refusal meets the same limit. Only the action side was measured.\n\n## Where we hit it\n\nHotCRM 6.6.0, `crm_expense.submit_for_reimbursement` and `submit_trip_for_reimbursement` (one shared script body). A person selects expenses and submits them; when some cannot go, nothing is submitted and the answer lists why, today as English literals:\n\n```\nExpense Taxi 12 is already on an expense report.\nExpense Hotel 7 is already approved.\nTravel request TR-00001 is not approved yet. Only an approved travel request can be reported against.\n2 selected expenses are not yours, or no longer exist.\nNothing was submitted.\n```\n\nIn a zh-CN console the person reads this in English (objectstack-ai/hotcrm#2759). Moving it into `refusals` is not possible without either dropping the list or leaving it untranslated.\n\n## Measured on 18.6.0\n\nBooted stack through `@objectstack/verify`, `POST /api/v1/actions/crm_expense/submit_for_reimbursement`, once with `accept-language: en` and once with `zh-CN`. Probe catalogue on the action, with zh-CN rows under `objects.crm_expense._actions.submit_for_reimbursement.refusals.…`:\n\n```ts\nrefusals: {\n  PROBE_PLAIN: { message: 'Probe plain sentence.' },\n  PROBE: {\n    message: 'Probe entry {{ name }} x{{ count }}.',\n    status: 409,\n    params: ['name', 'count'],\n    reasons: {\n      on_report: { message: 'Expense {{ name }} is already on an expense report ({{ count | number }}).' },\n      approved: { message: 'Expense {{ name }} is already approved.' },\n    },\n  },\n},\n```\n\n| The body throws an `Error` carrying | Answer |\n|---|---|\n| `{ code: 'PROBE_PLAIN' }` | 400, `declaredCode: PROBE_PLAIN`; `Probe plain sentence.` / `探针：普通句子。` — works |\n| `{ code: 'PROBE', reason: 'on_report', params: { name: 'Taxi 12', count: 3 } }` | 409; `Expense Taxi 12 is already on an expense report (3).` / `费用 Taxi 12 已在报销单上（3）。` — works |\n| `params.name = ['Taxi 12', 'Hotel 7']` | the array is rendered as JSON: `Expense [\"Taxi 12\",\"Hotel 7\"] is already on an expense report (2).` |\n| `reason: ['on_report', 'approved']` | ignored — the entry sentence, once |\n| `reasons: [ … ]` | ignored — the entry sentence, once |\n| `refusals: [ { code, reason, params }, … ]` | ignored — the entry sentence with empty holes: `Probe entry  x.` |\n| `params: [ { … }, { … } ]` | ignored — holes empty |\n| an undeclared reason or code (computed at run), no code with its own `userMessage`, a plain `Error`, an `AggregateError` | 500 `INTERNAL_ERROR` |\n| a declared code plus its own `userMessage` and `status` | both ignored; the catalogue sentence and status answer |\n\nIn source (`@objectstack/runtime` `readRefusalAddress` / `declaredAnswer`): the address read off the error is `reason` only when it is a non-empty string and `params` only when it is a non-array object. The `template` dialect's formatters (`upper lower trim number currency percent date datetime truncate default json`) have no list or repeat construct, so \"one line per record\" cannot be written inside one declared sentence either.\n\n## Expected\n\nOne refusal can name several declared reasons, each with its own params, and the answer carries each one's sentence in the person's language, in the order thrown. For example a throw carrying, under one declared code, an ordered list of `{ reason, params }` — every reason checked against the catalogue as a single reason is today (refused at save when written literally, a fault at run otherwise), each rendered from its translated sentence, the entry's own `message` available as the closing line (`Nothing was submitted.`). How the list is shaped on the wire and in the console is yours to rule; the app only needs each declared sentence to arrive translated.\n\nA list formatter in the template would cover the simplest case (the same sentence over several names) but not this one, where the lines have different reasons.\n\n## Workaround\n\nNone that keeps the rule that no hook or action composes language itself. Once `refusals` is declared, text outside the catalogue never reaches the person (the rows above), which is the right contract — and the reason the app cannot bridge this. Pre-rendering the lines into a string param leaves the list in the author's language inside a translated frame; refusing on the first problem alone drops the list the person relies on. HotCRM leaves these sentences in English and waits: objectstack-ai/hotcrm#2759 is blocked by this card.\n"
+}

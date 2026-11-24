@@ -1,0 +1,36 @@
+{
+  "number": 36833,
+  "kind": "issue",
+  "title": "Studio 首页的定制数量不计页签排列：只有排列定制的包显示为未定制",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T03:10:35Z",
+  "updated_at": "2026-11-24T08:10:52Z",
+  "closed_at": "2026-11-24T08:10:52Z",
+  "closed_by": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36833",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a product defect with a named site, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7120821905). Source: L1 record 7120715954 on PR #36818 (#36626). That PR does not introduce it.\n\n## What happens\n\nThe Studio landing page's per-package customization count is built in `ui/packages/app-shell/src/views/studio-design/customizationMarks.ts`. `customizationCountsByType` and `customizationTotal` count the read's overrides and extensions only (read on `origin/main`, around l.89–100). The package customizations read now also lists tab `arrangements` (#36626). So a package whose only customization is a tab arrangement shows as uncustomized on the landing page.\n\nreach: read from the code, not run in a browser. It reaches every admin who customizes only the tab order of a package's records.\n\n## Expected\n\nThe landing page's count, per type and in total, includes the arrangements the customizations read lists, so the page reflects every customization.\n\n## Acceptance\n\n- A unit pin: a read with one arrangement and no overrides or extensions gives a non-zero total and a per-type count on the arranged type.\n- Today's overrides and extensions counts are unchanged.\n\nDedupe: open issues for `customizationMarks` return only #36626 (in flight, the read that now lists arrangements)."
+}

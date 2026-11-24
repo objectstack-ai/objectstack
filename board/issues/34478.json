@@ -1,7 +1,7 @@
 {
   "number": 34478,
   "kind": "issue",
-  "title": "[PM seat] repo:objectstack · seat 2 — 🟢 os-steve · 由 os-steve 账户的项目负责 · area:ai",
+  "title": "[PM seat] repo:objectstack · seat 2 — ⏳ vacant (last: os-steve, clocked out 2026-11-24)",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,18 +13,16 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-16T21:45:45Z",
-  "updated_at": "2026-11-22T16:54:03Z",
+  "updated_at": "2026-11-24T02:54:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/34478",
-  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 2** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n\n## Current PM — 🟢 os-steve\n\n- **Holder:** `os-steve` · `session_01ADHkmRY38EZf38Yy3zthbY`, seated 2026-11-22T04:59Z on the maintainer's summons in the os-steve fleet project, verbatim: 「加载最新的车队skills，开一个 objectstack 全仓座位，开始处理 area:ai」, then 「优先处理 p1 p2 优先处理专题任务」. The project's account is responsible for this seat.\n- **Successor-of:** `session_01ADHkmQ2SN4K183oqAvUajA` (same account; that shift ended 2026-11-17 with every in-flight card handed to seat 3 and its patrol disabled, but no clock-out was written here). Nothing of that shift's lease table is inherited; it stays in this post's previous body revision.\n- **Intake:** open `area:ai` cards landing in this repository, `priority:p1` and `priority:p2` only (p3 dispatch paused by the maintainer, 2026-11-15T22:50Z); children of an epic first, then the rest. At most 5 running cards; a PR that only waits on an approval does not count. Excluded: cloud cards, security advisories, epic #34571 and every card another seat holds (a `Claim:` not followed by a `Release:`, an assignee, a `lease:` label).\n- **Mailbox:** PR #34479 (kept: same seat, same account; subscribed by this session). **Patrol:** `trig_01WhaUK8trK8iUrYLz62nPiu` · `59 * * * *` (hourly, self-bound).\n- **Posture ledger lives in the project:** the labels, the assignee, the `Claim:` comments carrying `Seat: repo:objectstack#2`, and the `head:claude/` PRs.\n\n## Leases\n\nNone (below the area threshold). Area names would carry the `a2-` prefix.\n\n## Hot-file serial queue\n\n- None at seating. Before each claim this seat reads the in-flight claims of seats 1, 3, 4, 5 and 7 and runs `overlap-check.mjs` / `git merge-tree` on overlapping open PRs.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Contract (L2) reviews: per `references/contract-review.md`; this seat uses no Fable agent for them (the maintainer, 2026-11-15T21:53Z).\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 2** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n\n## Current PM — ⏳ vacant\n\n- **Last holder:** `os-steve` · `session_01ADHkmRY38EZf38Yy3zthbY`, seated 2026-11-22T04:59Z, clocked out 2026-11-24T02:52Z on the maintainer's word in the os-steve fleet project, verbatim: 「下班」 (2026-11-24T02:49Z, relayed by the project coordinator). Wind-down since 2026-11-23T03:55Z: 「然后不再接新任务」; 2026-11-23T05:20Z: 「你没开始开发的都交给 objectstack #1」.\n- **Handover check:** `check-handover.mjs --session=session_01ADHkmRY38EZf38Yy3zthbY --account=os-steve` exit 0 (no unreleased claim, no decision outside the inbox).\n- **Mailbox:** PR #34479, closed at clock-out. **Patrol:** `trig_01WhaUK8trK8iUrYLz62nPiu`, deleted at clock-out.\n- **Successor:** none named. A successor sits with `/pm-dispatch 接手`, reads this post first, and opens its own mailbox.\n\n## Ledger at clock-out\n\n- **In flight:** none. Last landing: PR #36525 (#35315) merged 2026-11-24T01:50Z.\n- **Queue snapshot:** this seat holds no card. Not-started work went to `repo:objectstack#1` (mailbox #36555) on the maintainer's 05:20Z order; the route comments are on each card.\n- **Decision inbox:** nothing from this seat awaits the maintainer.\n- **Follow-ups filed, with triage (mailbox #36743):** #36713 (skills docs for `transferBehavior`), #36714 (lint), #36736 (regen script), #36693 (activity-tab auto-hide), #36640 and #36648 (flakes).\n- **Serial queue:** none.\n- **Cross-lane memo:** #36753 (macOS case-pair build, p1) was routed to seat 1 at 2026-11-23T15:45Z; one pair came from this seat's PR #36629.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

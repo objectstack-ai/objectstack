@@ -1,0 +1,32 @@
+{
+  "number": 36887,
+  "kind": "issue",
+  "title": "GetMetaTypesResponseSchema 没有声明 schema 和 form：每个 /meta/types 条目都在下发这两个键",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T07:47:29Z",
+  "updated_at": "2026-11-24T07:49:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36887",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a contract defect, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7125340250, item 2). Source: L1 7125297029 and L2 7125274794 on PR #36881 (#36860 part a), outside that diff.\n\n## What happens\n\nEvery `/meta/types` entry carries `schema` and `form`. The wire schema `GetMetaTypesResponseSchema` in `packages/spec/src/api/protocol.zod.ts` (~210, main d95d34f8) declares neither. PR #36881 declares the new `list` key, but the two older keys stay undeclared. A typed client, and the generated contract, cannot see two members the server always sends.\n\nreach: read by the L1 and L2. It reaches anyone building a client against the published protocol types.\n\n## Expected\n\nThe wire schema declares every member the route serves.\n\n## Acceptance\n\n- `GetMetaTypesResponseSchema` declares `schema` and `form` with their real shapes, using the existing form-layout schema rather than `z.unknown()` where one exists.\n- The generated contract and baselines are refreshed. A `Metadata-protocol` line is in the changeset, as the repository requires.\n- A test parses a real `/meta/types` answer with the schema, strictly.\n\n## Order\n\nWith or after PR #36881, so the three keys are declared together. Before #36860 part (b).\n\nDedupe: open issues for `GetMetaTypesResponseSchema` return only #36860, the parent this follows."
+}

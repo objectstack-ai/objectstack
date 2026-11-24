@@ -1,0 +1,33 @@
+{
+  "number": 36891,
+  "kind": "issue",
+  "title": "Studio 重构（0-1）：修订 ADR-0084 和 ADR-0146 D1——四个分区改成左侧分组菜单，写定类型到分组的对照表",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T08:05:00Z",
+  "updated_at": "2026-11-24T08:19:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36891",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (maintainer epic; rulings quoted there, decisions 1–15). Part of #36890.\n\n## 为什么\n\n专题 #36890 去掉 Studio 顶部的四个分区，改成左侧按类型分组的菜单 → 列表 → 右侧全屏详情。ADR-0084 的标题就是「four content pillars」（`docs/adr/0084-*.md:1, 17-22`），ADR-0146 D1 写着「A pillar type opened from the directory opens its pillar」（`SD/metadataArea.ts:60` 引用）。不先改 ADR，后面的卡会各自发明分组和叫法。\n\n## 要做的\n\n1. ADR-0084：四个分区改成左侧菜单的分组，内容不变；写明 Studio 是「某个应用的开发界面」，左上角返回应用。\n2. ADR-0146 D1：全部元数据区成为唯一入口；对象、流程、权限集在元数据地址上打开全屏设计器，不再跳分区。同步改 D3、D4 里引用「分区」的地方。\n3. 写定**类型到分组的对照表**（决定 11）：spec 的六个域 data、ui、automation、system、security、ai（`packages/spec/src/kernel/metadata-plugin.zod.ts:387`）对应 数据、界面、自动化、平台、访问、AI；agent、tool、skill 归 AI。`~org`（组织级流程）在自动化，组织级默认共享总览在访问，诊断在平台，`~all`（跨包环境目录）的位置也写清。\n4. 把专题的决定 1–15 里影响架构的几条写进 ADR：右侧内容区全屏 + 可折叠左侧菜单、详情地址、‹ › 顺序来源（决定 10）、浏览器后退不拦（决定 12）、仪表盘和报表的「新建」落点（决定 13，和 #36359、#36692 两条裁决的关系）、「在哪个应用里打开」三步规则（决定 6）。\n5. 在 #36513 上记一条：顶部导航那一半由本专题取代。\n\n## 不做的\n\n- 不改代码。\n\n## 验收\n\n- ADR 文本和专题决定一致；对照表覆盖 spec 里全部元数据类型，没有无归属的类型。\n- `pnpm` 的 ADR / docs 检查通过（照仓库的 ADR 修订流程，见 #36086 的做法）。\n\nGrading: `area:ux · Task · Studio shell and navigation (ADR text out of step with the decided shape) · builders, every Studio session after the redesign · evidence: read from code`. Maintainer-sourced topic child ⇒ p2.\nDedupe: covered by #36890's queries; plus `ADR-0084 pillars` (open: #36086 rolling ADR checklist, not this change).\nReader: seat repo:objectstack#3, one os-dev card. Size S. `Metadata-protocol: none`. Wave 0 (can start now)."
+}

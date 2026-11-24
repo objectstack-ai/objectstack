@@ -1,0 +1,31 @@
+{
+  "number": 36910,
+  "kind": "issue",
+  "title": "Studio 重构（4-2）：新形态的端到端测试、总走查，更新平台测试清单、文档和技能里的 Studio 地址与说法",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T08:09:43Z",
+  "updated_at": "2026-11-24T08:21:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36910",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890. Part of #36890.\n\n每张设计器卡和 3-4 已各自带 HotCRM 与自建应用各一次的浏览器走查；本卡做总走查和收口。\n\n## 要做的（读代码确认，主干 0819cab1）\n\n1. 新端到端用例：左侧菜单 → 列表筛选 → 右侧全屏详情 → × 回来筛选还在 → ‹ › → ⌘K。今天 7 个端到端或 dogfood 文件写了 `/studio`（其中 `ui/e2e/live/studio-customize-journey.spec.ts` 在 #36502 的文件面里），按新地址更新。\n2. 总走查覆盖：只读包和 `.custom` 合并、`~all`、`~org`、环境范围、手机宽度、折叠菜单、Studio 入口权限门、应用里的深链接入口（「对象设置」、记录页「配置页面」、页面「在 Studio 里编辑」`AS/views/PageView.tsx:395-475`、仪表盘编辑器的 Studio 链接、空菜单应用「去 Studio」`AS/console/AppNoAccessEmptyState.tsx:150`）、AI 对话里跳到产物的链接（`artifactStudioPath.ts`）和 MCP 返回的审阅链接。\n3. 平台测试清单：`docs/qa/platform-checklist/areas/studio-authoring.json`（64 处 `/studio` 地址）及 platform-core、automation、access-security、i18n 里的相关条目，按新形态改写（走 checklist-author 的流程）。\n4. 文档：`content/docs` 下约 22 个、`skills/` 下 2 个文件提到分区或 Studio 地址，改成新说法。\n\n## 验收\n\n- 新端到端用例在 CI 里通过；走查记录（含截图）贴在本卡；清单、文档、技能的检查通过。\n\nBlocked-by: #36909\n\nGrading: `area:ux · Task · verification and docs after the redesign · builders reading docs, fleet running the checklist · evidence: read from code (counts)`. Topic child ⇒ p2.\nDedupe: covered by #36890.\nReader: seat repo:objectstack#3, one os-dev card. Size L (or spread the checklist and docs across the cards; seat decides). `Metadata-protocol: none`. Wave 4."
+}

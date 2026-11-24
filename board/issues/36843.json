@@ -1,0 +1,36 @@
+{
+  "number": 36843,
+  "kind": "issue",
+  "title": "35442 验收：用 MCP 连托管环境（已装 HotCRM）问两个问题，确认 AI 查了应用手册和流程定义",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "domain:cloud",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T04:00:54Z",
+  "updated_at": "2026-11-24T05:05:28Z",
+  "closed_at": "2026-11-24T05:04:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36843",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbX11yNi4DyGhuzqBpV\n\nMaintainer action for objectstack#35442 (p1, area:cloud). Both halves have landed and are in production: objectstack PR #35564 (MCP door tools `search_package_docs` / `read_package_doc` and the app-docs answer order) and cloud#4905 / PR #4917 (hosted doors that inject their own `initialize` text also carry that order), deployed to production 2026-11-24 01:35Z on cloud `6618e65a`. What remains is the live acceptance on a hosted environment, which the seat cannot run: this container cannot reach the hosted domains.\n\n## 维护者速读\n\n- 要做的：用你自己的 AI（比如 Claude）通过 MCP 连接一个**装了 HotCRM 的托管环境**，问两个问题，看 AI 是不是真的查了应用手册和流程定义，而不是编的。\n- 问题 1：「什么是回款？」 期望：工具清单里有查找和阅读应用文档的工具；AI 读到《订单与回款手册》的相应篇目，并给出页面地址。\n- 问题 2：「商机的审批流程是怎样的？」 期望：AI 既读手册，也读 `opportunity_approval` 的流程定义，配置和手册不一致时以配置为准，并说明出处。\n- 两个都符合：在这张卡上回一句「通过」，我关闭 objectstack#35442 和本卡。不符合：贴一下 AI 的回答，我重开 cloud#4905 排查。\n\n## Done when\n\nThe owner records the result of both questions here; on a pass the seat closes this card and objectstack#35442, on a fail the seat reopens cloud#4905 with the transcript.\n\nPart of objectstack-ai/objectstack#35442"
+}

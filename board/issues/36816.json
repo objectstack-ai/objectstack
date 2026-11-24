@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T01:51:34Z",
-  "updated_at": "2026-11-24T01:52:37Z",
+  "updated_at": "2026-11-24T08:18:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36816",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a product defect with a named site, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7119495399). Source: seat 3's ux-D work on #36447 (report 7119456005), split off by the seat. #36447 covers the report panel only.\n\n## What happens\n\nThe dashboard's default settings panel draws its hints straight from `packages/spec/src/ui/dashboard.form.ts`, and several are written for developers rather than for the person building a dashboard (read on `origin/main`):\n\n- `name`: \"snake_case unique identifier\"\n- `gap`: \"Space between widgets, in steps of 0.25rem (4 = 1rem)\"\n- `columns`: \"Grid columns (default 12)\"\n- `header`: \"Dashboard header config (title, subtitle, actions)\"\n- `widgets`: \"Dashboard widgets with position and sizing\"\n\nThe widget panel is not affected: it draws studio `engine.inspector.widget.*` strings, not spec text.\n\nreach: read from the code, not run in a browser. It reaches every builder who opens a dashboard's settings in Studio.\n\n## Expected\n\nThe dashboard panel's hints use business wording, the way #36447 does for the report panel, in the same locales.\n\n## Acceptance\n\n- Each `helpText` in `dashboard.form.ts` reads as a builder would say it, with no CSS units, casing jargon or \"config\".\n- The translated bundles follow the repository's usual rule for changed user text.\n- A pin or snapshot that names the rewritten rows.\n\nDedupe: open issues for `dashboard.form` return none. #36447 is the report-panel sibling and is in flight with repo:objectstack#3."

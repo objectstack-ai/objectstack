@@ -1,0 +1,37 @@
+{
+  "number": 36831,
+  "kind": "issue",
+  "title": "两步屏幕流：第一步已成功执行，界面又把第一步的输入提交给第二步，报 Invalid screen input（HotCRM 生成报价单，已建出报价却显示失败）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T03:06:36Z",
+  "updated_at": "2026-11-24T06:24:25Z",
+  "closed_at": "2026-11-24T06:12:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36831",
+  "body": "### 环境\n云端，平台 18.6.0，hotcrm 6.6.0（2026-11-24，Irene 操作）。HotCRM 流程：`src/revenue/flows/quote-generation.flow.ts`（商机 →「生成报价单」）。\n\n### 现象\n1. 在商机上点「生成报价单」，第一步填报价名称、有效期（天）30、折扣 0，点「下一步」。\n2. 报价单**已经生成**（库里出现一张草稿报价，创建时间比报错早约半分钟）。\n3. 但弹窗仍停在第一步，顶部 toast 和弹窗内都报：\n   `Invalid screen input: Unknown screen field \"quoteName\" — not declared on this screen; Unknown screen field \"expirationDays\" — not declared on this screen; Unknown screen field \"discount\" — not declared on this screen — declared fields: 'quoteLink'`\n\n即流程已进入第二步（结果页，只声明了 `quoteLink`），界面却把第一步的输入又提交给了第二步。\n\n### 影响\n- 成功了却显示失败，用户会再点一次或回去重新生成，造成重复报价。\n- 报错是英文的引擎原文，用户看不懂。\n\n### 期望\n- 第一步提交成功后，界面切到第二步（显示生成的报价链接），不再重复提交第一步的输入。\n- 若确实发生重复提交，服务端按幂等处理或给出可读的中文提示（例如「报价单已生成，点此打开」），不显示字段名原文。\n\n需要开发判断是控制台重复提交（双击 / 自动重试）还是两步屏幕流在推进后没有刷新当前屏幕；HotCRM 侧的流程定义见上面的文件。\n\n优先级：priority:p1（产品负责人 Irene 2026-11-24 调整）。\n\n"
+}

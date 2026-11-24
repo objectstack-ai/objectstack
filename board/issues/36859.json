@@ -1,0 +1,32 @@
+{
+  "number": 36859,
+  "kind": "issue",
+  "title": "formula: the build-time refusal of working-day functions in a field defaultValue misses fields added through objectExtensions",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T05:06:34Z",
+  "updated_at": "2026-11-24T06:35:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36859",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a build-check gap, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7122583643). Source: the contract delta record 7122552709 on PR #36796 (Fixes #35356), item N6. It is outside that card.\n\n## What happens\n\nPR #36796 refuses at build an expression `defaultValue` that calls the working-day functions (`addWorkingDays`, `workingDaysBetween`, `addWorkingHours`). The refusal is `workingDayValueSiteIssues`, and it walks `stack.objects` only.\n\nA field added through an `objectExtensions` entry with such a `defaultValue` is not refused at build. `runStackExpressionPasses` judges an extension field's `expression` in its own walk, but that walk has no `defaultValue` counterpart.\n\nAt run time the default comes out blank with a warning, the same as before. It is never a wrong value.\n\nreach: read from the contract delta record, not measured. It reaches builders who put a working-day function in the default of an extension field, which is rare.\n\n## Expected\n\nThe same build-time refusal for a working-day `defaultValue` on an object's own field and on a field an `objectExtensions` entry adds.\n\n## Acceptance\n\n- `workingDayValueSiteIssues` (or the extension walk in `runStackExpressionPasses`) also judges `objectExtensions` fields' `defaultValue`.\n- A test: a working-day `defaultValue` on an extension field is refused at build with the same message as on an own field. The control: an extension field whose default does not use those functions stays green.\n\n## Order\n\nAfter PR #36796 merges. The function is not on main until then.\n\nBlocked-by: #36796\n\nDedupe: open issues for `workingDayValueSiteIssues`, and for objectExtensions plus defaultValue plus working day, return none."
+}

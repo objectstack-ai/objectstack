@@ -2,8 +2,8 @@
   "number": 36692,
   "kind": "issue",
   "title": "Design mode: creating a report inside it shows two Save/Cancel sets and can silently detach. Make report editing its own entry, mutually exclusive with design mode (Twenty's model)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:build",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T11:58:10Z",
-  "updated_at": "2026-11-23T13:53:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T08:00:57Z",
+  "closed_at": "2026-11-24T08:00:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36692",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\n① product defect · Source: maintainer (Warren), 2026-11-23, UI review thread. The browser review of latest main (https://claude.ai/artifact/Nh8ZCYjSKEG8SLZJCsBK8b) logged this as item 07, and Warren asked for it to be evaluated (11:00Z 「评估 07 怎么解决，和我沟通」). At 11:14Z he pointed at Twenty's source: 「布局设计和仪表盘编辑，是两个不同的入口」. At 11:55Z he ruled on the decision card 「07 按 Twenty 的做法把报表编辑和设计模式分成两个入口吗？」 → **「照 Twenty 分开」**.\n\n**What happens (measured on main 9348f02b, showcase app, admin).**\n1. Enter design mode (app menu → 编辑应用), then Add menu item → Reports → 「New report…」. The report builder opens at `reports/new` while design mode stays on.\n2. The screen now has two Save/Cancel sets: the design-mode top bar (取消 / 保存) and the builder's own. Nothing says which one saves what.\n3. Click the top bar's 取消 while the builder is open. Design mode ends with no message, but the builder stays open and its hint disappears. Saving it then creates the report with **no menu entry**, which is the opposite of what the author started.\n\nScreenshots: project files `ui-review-2026-11-23/07-设计模式里两套保存.png` and `07b-顶栏取消后搭建页悄悄脱离设计模式.png`.\n\n**The model to follow: Twenty (twentyhq/twenty main 86bde5cd, read).**\n- Layout customization, the blue top bar (`layout-customization/components/LayoutCustomizationBar.tsx`), covers only the menu, actions, object colours and record page layouts. One Save/Cancel commits all of it.\n- Dashboard editing is a separate entry: the page header's Edit, whose Save/Cancel appear in the same place.\n- The two are mutually exclusive in both directions:\n  - `useEnterLayoutCustomizationMode.ts` refuses to enter while a dashboard is being edited, with the toast \"Save or cancel dashboard changes before editing the layout.\"\n  - The Edit Dashboard command's availability requires `not isLayoutCustomizationModeEnabled`.\n  - `useSetIsPageLayoutInEditMode.ts` ignores a dashboard edit request while customization is on.\n- The menu only links existing dashboards. Creating one happens on its own list.\n\n**Change (the ruled option).**\n1. **Design mode stops hosting the report builder.** Remove 「New report…」 from design mode's Add menu item → Reports picker, so design mode only links existing reports.\n   - Remove the cross-mode hand-off that existed only for it: `ui/packages/app-shell/src/layout/designModeReportSlot.ts`, the slot block in `DesignModeMenu.tsx` (around lines 425–490), and the slot branch in `ReportNewPage.tsx`.\n   - Remove the `report` kind of `designModeMenuCreate.ts`.\n   - Update the pinning tests, such as `ReportNewPage.menuSlot-36364.test.tsx`.\n2. **A report is created from the report's own entry.** Today `reports/new` is linked only from design mode (read: `AppContent.tsx:188/1690`, `DesignModeMenu.tsx:463`). The reports index (`AppReportIndexView.tsx`) has no create action. Add a 「New report」 action there, admin-gated the same way as the builder.\n   - The builder's Save/Cancel stay in its page header, so the screen shows one set at a time.\n3. **Report and dashboard editing are mutually exclusive with design mode, both ways.**\n   - While design mode is on, the dashboard header's Edit (`DashboardEditButton` in `DashboardInPageEditor.tsx`) and the report page's Edit (`ReportView.tsx`, `ReportBuilderHost`) are not offered.\n   - While a dashboard or report editor is open, 编辑应用 (`useEnterDesignMode` in `SidebarAppMenu.tsx`) refuses with a prompt to save or cancel those changes first.\n   - Read on main c1e6cf75: neither side checks the other today. Not yet measured in the browser.\n4. Design mode's 「New dashboard…」 is out of scope and stays as it is. It already saves the menu and leaves design mode before opening the dashboard editor (`dashboardEditArrival`), so only one bar shows.\n\n**Expected.** At any moment the screen shows exactly one Save/Cancel set, and it belongs to what is being edited. No path leaves an editor running after its mode has ended. Adding a brand-new report to the menu takes two steps: create it from Reports, then link it in design mode.\n\n**Acceptance.**\n- Design mode's Reports picker has no 「New report…」 row.\n- The reports index offers 「New report」, which opens the builder with only its own Save/Cancel.\n- Tests pin both exclusion directions:\n  - the dashboard and report Edit are absent while design mode is active;\n  - 编辑应用 is refused, with the prompt, while an editor is open.\n- The slot module is deleted, not left unused.\n- Browser screenshots of the showcase app show:\n  - the reports index with 「New report」;\n  - the design-mode picker without it;\n  - the refusal prompt.\n\n**Skills/docs.** Any docs or skills page that teaches \"New report… from design mode\" is updated in the same PR. Search `content/docs` and `skills/` for `New report`.\n\nGrading (proposed): `area:build` · Bug · confusing double save plus a silent wrong result (a report saved without the menu entry the author asked for), hit by every admin who builds a report from design mode ⇒ p2. The seat grades by its own table. Evidence: measured (screenshots) + read (code on main c1e6cf75; Twenty source).\n\nDedupe: searched open issues and PRs for `designModeReportSlot` and 「New report」 + design mode on 2026-11-23: no open card on this mechanism. It changes the mechanism #36364 (report half) and #36374 added."

@@ -1,0 +1,34 @@
+{
+  "number": 36840,
+  "kind": "issue",
+  "title": "托管云端「打印报价」报 Route Not Found: /print/records：打印服务未启用（18.6.0）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "area:cloud",
+    "bug",
+    "domain:cloud",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T03:38:49Z",
+  "updated_at": "2026-11-24T04:23:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36840",
+  "body": "### 环境\n托管云端，平台 18.6.0，hotcrm 6.6.0（2026-11-24，Irene 操作，Claude 在同一会话里抓到请求）。\n\n### 现象\n报价单详情页点「打印报价」，toast 报英文 `Route Not Found: /print/records`，没有生成 PDF。\n\n### 请求证据\n```\nPOST /api/v1/actions/crm_quote/print_quote → 404\n{\"success\":false,\"error\":{\"code\":\"ROUTE_NOT_FOUND\",\"message\":\"Route Not Found: /print/records\",\"httpStatus\":404,\"route\":\"/print/records\",\"hint\":\"No route is registered for this path. ...\"}}\n```\nHotCRM 的 `print_quote`（hotcrm#2312）通过打印服务（service-print）的 `/print/records` 出 PDF。这个托管环境上该路由没有注册，看起来是打印服务没有启用（本地需要 `OS_PRINT_CHROMIUM_PATH` 等配置才可用）。\n\n### 期望\n1. 托管环境启用打印服务，「打印报价」能生成 PDF 并按 hotcrm 流程归档、把报价标记为已提交。\n2. 打印服务不可用时，不要显示「打印报价」按钮，或给出可读的中文提示（例如「当前环境未启用打印服务」），不显示路由原文。\n\n优先级：priority:p1（产品负责人 Irene 2026-11-24 调整）。\n\n"
+}

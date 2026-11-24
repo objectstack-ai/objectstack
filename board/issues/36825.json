@@ -1,0 +1,37 @@
+{
+  "number": 36825,
+  "kind": "issue",
+  "title": "弹窗里的查找选择器：下拉底部的「+ 新建」被弹窗边缘裁掉，只露出半行，点不到（#34362 同类，18.6.0 仍在）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "huangyiirene",
+    "id": 7665279,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T02:39:50Z",
+  "updated_at": "2026-11-24T05:22:16Z",
+  "closed_at": "2026-11-24T05:20:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36825",
+  "body": "- 环境：云端，平台 18.6.0，hotcrm 6.6.0（Irene 2026-11-24 截图）。\n- 复现：商机 → 商机产品明细 → 新建，在「新建商机产品明细」弹窗里点「产品」选择器。下拉列出「最近使用」1 条 +「全部结果」2 条，最底下的「+ 新建」只露出上半截，被弹窗下边缘挡住，点不到；下拉自身也没有滚动到它的余地。\n- 相关：#34362（下拉向下展开空间不够、最后一项被裁，已关闭）——这次是同一个空间计算问题，被裁的是固定在底部的「+ 新建」。\n- 期望：下面空间不够时向上展开，或把下拉限制在可视区域内、可滚动，保证「+ 新建」始终完整可点。\n\n优先级：priority:p1（产品负责人 Irene 2026-11-24 调整）。\n"
+}

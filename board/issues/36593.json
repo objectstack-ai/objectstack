@@ -2,8 +2,8 @@
   "number": 36593,
   "kind": "issue",
   "title": "Record page: a declared field group whose fields are all empty is not drawn in read mode and not counted by 「显示空字段」",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T01:19:20Z",
-  "updated_at": "2026-11-24T01:17:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T05:21:44Z",
+  "closed_at": "2026-11-24T05:20:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36593",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFound by the #36404 dev (PR #36590, the synthesized 「更多详情」 group's empty field is now revealed and counted by 「显示空字段」), outside that card's scope. Filed by the seat, not claimed. Related: #36404.\n\nSuggested-grade: p2\nSuggested-domain: `domain:ui`\n\n## What happens\n\nOn the default record page, when every field of a field group that the object declares (`fieldGroups`) is empty, read mode draws nothing for the group, and the 「显示 N 个空字段」 button's count leaves those fields out. Pressing the button does not reveal them. It is the same symptom #36404 fixes for the synthesized 「更多详情」 group, but for a declared group.\n\n## Why it is not fixed in #36404\n\nThe quick fix, writing `hideEmpty: false` on the group reference the default page builds, would change how every declared group behaves, which is wider than #36404.\n\n## Ask\n\n1. Reproduce on main after PR #36590: an object with a declared group whose fields are all empty on one record.\n2. Make 「显示空字段」 count and reveal a fully empty declared group's fields, without changing how a group with some values draws. Say in the PR what an all-empty group shows before the button is pressed (nothing, or its heading), with the reason.\n\n## Re-check\n\nOn such a record in read mode, press 「显示 N 个空字段」: the group and its fields appear and N counts them when this is fixed."

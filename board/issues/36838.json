@@ -1,0 +1,37 @@
+{
+  "number": 36838,
+  "kind": "issue",
+  "title": "报表表单两套用词：顶层行仍是 Dataset/Values/Rows/Columns，区块表格已改为 Data Source/Metrics/Group By",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T03:26:55Z",
+  "updated_at": "2026-11-24T07:43:47Z",
+  "closed_at": "2026-11-24T07:42:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36838",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a shipped-text defect, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7121083225). Source: L1 record 7121034256 on PR #36814 (Fixes #36447, landed), items N1–N4, outside that card.\n\n## What happens\n\nThe server-served report form now speaks two vocabularies for the same keys:\n\n- **N1**: the top-level rows read `Dataset` / `Values` / `Rows` / `Columns`, while the same keys in the form's blocks grid read `Data Source` / `Metrics` / `Group By` / `Group Columns By`.\n- **N2**: the `values` hint, \"The metrics to total or count\", is narrower than what a measure can be.\n- **N3**: the `fileNamePrefix` hint says \"instead of the report name\", but the runtime replaces the report **label** and falls back to the name.\n- **N4**: the console zh-CN overlay hints for `dateRange` and `runtimeFilter` trail the plainer English.\n\nreach: read by the PR's L1, not measured in a browser. It reaches every builder editing a report in Studio.\n\n## Expected\n\nOne vocabulary across the top-level rows and the blocks grid, and hints that say what the runtime does, in en and zh-CN.\n\n## Acceptance\n\n- The top-level row labels match the blocks grid's terms (N1).\n- The `values` and `fileNamePrefix` hints match the runtime (N2, N3).\n- The zh-CN overlay hints for `dateRange` and `runtimeFilter` follow the current English (N4).\n- The locale packs follow the repository's usual rule for changed user text.\n\nDedupe: open issues for the report form's top-level row labels return none. #36835 (Default Period option labels) and #36836 (ja-JP and es-ES re-translation) are the sibling follow-ups and stay separate."
+}

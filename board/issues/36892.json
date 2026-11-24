@@ -1,0 +1,34 @@
+{
+  "number": 36892,
+  "kind": "issue",
+  "title": "Studio 重构（0-2）：全屏详情的头部组合件——用 StudioItemHeader 的插槽放 ×、来源包、‹ › 加序号、⋯ 和主按钮",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T08:05:12Z",
+  "updated_at": "2026-11-24T08:18:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36892",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (maintainer epic; rulings quoted there). Part of #36890.\n\n## 为什么\n\n所有类型的全屏详情要同一个头部：左上 × 回列表，类型 + 标签 + API 名称，来源包和状态标签，右上 ‹ › 加「序号 / 总数」，⋯ 更多，主按钮。维护者：「对象弹出之后不用再下拉了吧？关闭回到列表重新选就行。」「也不需要在应用打开的按钮。」「上一个下一个可以保留」。\n\n## 今天（读代码确认，主干 0819cab1）\n\n- `SD/StudioItemHeader.tsx`（783 行）已经是「图标 + 标签 + API 名称 + 标签 + 状态 + 操作 + 页签行 + ⋯ 折叠菜单」，带窄宽度让位规则（文件头注释列了八次修正），有 `leading`、`actions`、`tabs`、`foldMenu` 插槽（`:591-634`）。\n- 通用详情页今天用的是 `MA/PageShell.tsx`（387 行）。\n\n（`SD/` = `ui/packages/app-shell/src/views/studio-design/`，`MA/` = `…/views/metadata-admin/`。）\n\n## 要做的\n\n1. 新文件里做一个**薄的组合件**，用 `StudioItemHeader` 的插槽组合出上面的头部。**不改 `StudioItemHeader.tsx` 本身**（#36502 认领了整个 `SD/**`）。\n2. 定下 ‹ › 的数据接口：组合件接收「当前列表的有序名字」和当前名字，算出序号、上一个、下一个；来源由 1-1a 提供（决定 10：筛选和排序带在详情地址里，没有上下文按名称排序）。\n3. × 和 ‹ › 走离开拦截（`AS/chrome/unsavedEdits.ts` 的现有接缝）。\n4. 不放切换下拉，不放「在应用里打开」。\n5. 单测：序号计算、首尾禁用、窄宽度折叠沿用 `StudioItemHeader` 的规则；键盘：Esc 触发 ×，‹ › 可用键盘到达。\n\n## 不做的\n\n- 不接入任何页面（2-1、3-1、3-2、3-3 接）。\n\n## 验收\n\n- 组合件有单测和故事/测试页覆盖宽、窄两种宽度。\n- 不改 `StudioItemHeader.tsx`，不新增产品命名的 widget 或 hook 之外的公共接口。\n\nGrading: `area:ux · Feature · Studio shell (one detail header for every type) · builders, every item they open · evidence: read from code`. Maintainer-sourced topic child ⇒ p2.\nDedupe: covered by #36890's queries.\nReader: seat repo:objectstack#3, one os-dev card. Size S. `Metadata-protocol: none`. Wave 0 (can start now)."
+}

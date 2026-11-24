@@ -1,0 +1,32 @@
+{
+  "number": 36876,
+  "kind": "issue",
+  "title": "设计模式改名：标签是内联多语言映射时，用源语言改名会把整个映射替换成一个字符串，其他语言的译文丢失",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T06:08:37Z",
+  "updated_at": "2026-11-24T06:10:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36876",
+  "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① a defect, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7123598133, item 2). Source: seat 3's ux-A dev on #36504 (PR #36858). It existed before that PR.\n\n## What happens\n\nA label can be authored as an inline locale map, for example `{ en: 'Orders', 'zh-CN': '订单' }`. When a builder renames such an item in design mode in the source language, the save writes the new text as a plain string over the whole map, and every other locale's value is lost from the stored metadata.\n\nreach: reported by the dev, not measured in a browser. It reaches builders renaming in the source language an item whose label is an inline locale map, which is uncommon. Packages usually keep translations in locale packs.\n\n## Expected\n\nA source-language rename over an inline locale map replaces only the source-language entry and keeps the other locales' values.\n\n## Acceptance\n\n- The design-mode rename write path (menus and record tabs) updates only the source-language entry of an inline locale-map label.\n- A test renames such a label in the source language and reads back every other locale's value unchanged.\n\nDedupe: open issues for a rename over an inline locale-map label return none. #36504 is the related parent."
+}

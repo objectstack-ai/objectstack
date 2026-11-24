@@ -1,0 +1,32 @@
+{
+  "number": 36862,
+  "kind": "issue",
+  "title": "analytics: $contains on a single-value media field answers three different ways across the data door, the dataset native and ObjectQL faces and the draft preview",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T05:16:37Z",
+  "updated_at": "2026-11-24T05:35:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36862",
+  "body": "repo:objectstack#7 · os-alice · session_011y7As5bdhV5T4N9vpjmZzH\n\n## Finding\n\n`$contains` on a single-value media field (`image` / `file`) stored as a JSON string gets three different answers on four faces, all `200`:\n\nMeasured at PR #36771's head `fe18f109` on the #36190 fixture (stored `pic` values are the JSON strings `\"file_1\"` and `\"file_2\"`; two rows null), through the production composition each door calls (engine find behind `POST /api/v1/data/:object/query`; `queryDataset` behind `POST /api/v1/analytics/dataset/query`):\n\n| Filter | Data door | Dataset native face | Dataset ObjectQL face | Draft preview |\n|:--|:--|:--|:--|:--|\n| `pic {$contains: 'file_1'}` | 0 rows | count 1 | count 0 | count 1 |\n| `pic {$contains: 'file'}` | 0 rows | count 2 | count 0 | count 2 |\n| `pic {$contains: '\"file_1\"'}` | 0 rows | count 1 | count 0 | count 0 |\n\n## Why\n\n- Native face: `whereContainsMembershipSql` (`packages/services/service-analytics/src/contains-membership-sql.ts`) asks only the declared shape, so a single-value media column falls to a text match over the stored JSON text.\n- Preview: `matchesWhere` in `preview-evaluator.ts` text-matches the bare drafted id.\n- Data door and ObjectQL face: driver-sql's JSON membership finds no member in a single JSON string.\n\nSeam: `spec:FILTER_OPERATORS.$contains` → `NativeSQLStrategy.buildFilterClause` / `whereContainsMembershipSql` | `preview-evaluator matchesWhere`. Found in the #36190 dev's rework report (comment 7122766475 on #36190); #36771 deliberately leaves `$contains` out of its refusal set.\n\n## Done when\n\nOne answer for `$contains` on a single-value media column across the four faces (which answer — refusal, text match or membership — is the card's first ruling; follow the data door's precedent unless a ruling says otherwise), pinned on the #36190 fixture."
+}

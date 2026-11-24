@@ -1,0 +1,32 @@
+{
+  "number": 36901,
+  "kind": "issue",
+  "title": "Studio 重构（2-1）：通用详情换新头部，六个侧边抽屉改成页签（详情、预览、相关、被引用、历史、源码），出一套设计器也能用的页签组件",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T08:07:24Z",
+  "updated_at": "2026-11-24T08:07:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36901",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (decisions 4, 8, 10). Part of #36890.\n\n## 今天（读代码确认，主干 0819cab1）\n\n- `MA/ResourceEditPage.tsx:3897-4045` 有分层、审查、被引用、相关、历史、审计六个 `Sheet`，开关在 `:2892-2990`。`openSheet` 已镜像到 `?tab=`（`:1611-1668`）。\n- 组件：`LayeredDiff`、`ReferencesPanel`、`HistoryPanel`、`AuditPanel`、`JsonSourceEditor` 在 `AS/views/item-tools/`；审查 `MA/DraftReviewPanel.tsx`、相关 `MA/RelatedPanel.tsx`。\n- 设计器页头是另一套 `item-tools/StudioItemTools.tsx`（分层、被引用、历史、审计、源码），挂在 `SDS:4612, 7659, 10034`。\n- 「相关」只对登记了锚点的类型有（`:1590-1592`）；历史和审计只给 `canReadTrail` 的人（`:2969-2990`）。\n- 「预览」就是编辑画布：登记了预览的类型进页面就进入编辑（`:1918-1935`），画布拥有部分顶层键（`:362-368`），操作按钮让给画布工具栏（`:3017-3025, 3172`）。`MA/previews/index.ts` 24 条登记（去掉别名和归设置管的 datasource 是 21 种）。\n- 第三条编辑路径：邮件模板、翻译和只读包上的数据集打开的是 `SD/StudioBundleItemEditor.tsx`（`SD/metadataArea.ts:117, 127`，`SD/StudioMetadataArea.tsx:167-182`）。\n- 独立历史路由 `/:type/:name/history`（`StudioMetadataArea.tsx:255`）；嵌入模式 `embedded`（`:1591, 1613`）不显示页签。\n- `?review=1` 是 MCP、CLI 和控制台草稿审阅链接的落点（`packages/runtime/src/domains/mcp-authoring.ts:1294`）。\n\n## 要做的\n\n1. `ResourceEditPage` 和 `StudioBundleItemEditor` 都用 0-2 的头部组合件；‹ › 用 1-1a 的有序名字列表。\n2. 六个抽屉改页签（决定 8）：详情、预览（有画布的类型）、相关（有锚点的类型）、被引用、历史（合并审计，按 `canReadTrail` 显示）、源码（合并分层对比，只读用户也能看分层）。审查改成头部状态标签，**保留 `?review=1`**。页签写进地址（沿用 `?tab=`），独立历史路由并进「历史」页签并留重定向。\n3. 有画布的类型：定默认页签、详情表单和画布是否共用一份草稿和一次保存（决定 4），PR 里写明。\n4. 把页签做成两边共用的组件，3-1、3-2、3-3 接入，不各做一遍。\n5. 保留 `embedded` 分支、画布拥有的键、诊断和冲突保护（`:1060`）：在原文件里改结构，不重写。\n6. 可以先做头部和页签骨架一个 PR，再把预览类型一个 PR。\n\n## 验收\n\n- 普通类型（如钩子）、有画布的类型（如邮件模板）、`StudioBundleItemEditor` 类型（如翻译）各走一次：头部、页签、地址、刷新、‹ ›。\n- `?review=1` 和旧 `/history` 地址仍能打开对应页签。\n- 引用详情页的测试（137 个文件，直接断言抽屉的个位数）通过。\n\nBlocked-by: #36892\nBlocked-by: #36896\n\nGrading: `area:ux · Feature · metadata detail (six tools hidden in side sheets) · builders, every item · evidence: read from code`. Topic child ⇒ p2.\nDedupe: `ResourceEditPage sheets tabs` (no open card).\nReader: seat repo:objectstack#3, one os-dev card. Size L. `Metadata-protocol: none`. Wave 1–2 (detail line)."
+}

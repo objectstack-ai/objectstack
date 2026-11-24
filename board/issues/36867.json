@@ -1,0 +1,36 @@
+{
+  "number": 36867,
+  "kind": "pull_request",
+  "title": "fix(auth): sign-out keeps the list layout for the same person; a change of user still clears it",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T05:32:16Z",
+  "updated_at": "2026-11-24T06:59:32Z",
+  "closed_at": "2026-11-24T06:59:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T06:59:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36867",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBDHJBvzScLgkhKgms97sNuU)_\n\nrepo:objectstack#3 · os-support-ai · session_01WGufzhoBbwh8URjwQHde8v\n\nFixes #36110\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 控制台用户退出登录（或会话自行过期）后再以同一账号登录，列表的列宽、行高和视图标签顺序都还在；换另一个人在同一浏览器登录，仍然全部清空、回到视图默认。\n- 落实维护者在列表布局只存浏览器这一裁决里的第一点：布局不再有服务器副本，退出登录不能再把它清掉。\n- 出错的话，最坏是同一人退出后布局又被清空（与今天一样），或者存了布局以外的东西的条目被当作普通数据清掉；可以直接撤回本改动。\n- 无。\n\n## What changes\n\n- `@object-ui/auth`: the sign-out tier (`purgeSignedOutUserClientState`, run on `signOut()` and on every session read that answers \"no session\", including the 401 re-check) now keeps two `localStorage` key families by prefix, the first prefix exception to the allowlist sweep: `list-layout:` (app-shell's list layout store: tab order, per-view widths and row height) and `grid-columns-` (the grid's own copy of column widths and order, read by a record page's related tab). An entry is kept **only while its value holds that layout and nothing more** (`holdsOnlyListLayout` / `holdsOnlyGridColumns`: view ids, field names, finite widths, one of the five spec row heights). Anything else under those prefixes (a filter, a search term, rows, unparsable text) is swept like any other key. `sessionStorage` is untouched by the exception.\n- The change-of-user tier (`purgePreviousUserClientState`) is unchanged and keeps none of it.\n- Both prefixes are spelled out in auth (it depends on neither app-shell nor plugin-grid), following the file's existing \"held together by a behaviour test\" pattern. `listLayoutStore.ts` and `objectGridColumnState.ts` get comment-only notes pointing at the exception.\n- `ui/packages/auth/README.md` sign-out section, the P1 checklist item `identity-auth.console-sign-out-and-ended-session` (revision 4: title, acceptance[0], new acceptance[1], negative[1]/[2], steps), and one `@object-ui/auth` patch changeset.\n\n## Tests\n\n- New `ui/packages/auth/src/__tests__/signOutKeepsListLayout-36110.test.tsx`: well-formed entries kept byte for byte; every row height kept; 13 not-only-layout values removed; sessionStorage copies removed; look-alike prefixes removed; change of user removes both families; a same-person re-adopt removes nothing.\n- `ui/packages/app-shell/src/context/__tests__/signOutPurge.test.tsx` rewritten for the new behaviour. Both families are written by their **real writers** (`useObjectListLayout`; `ObjectGrid` resize + reorder), then: `signOut()` keeps them byte for byte; the same person signing back in gets the layout back through the hook; a \"no session\" read and a 401 re-check (sessions that end on their own) keep them; every `ROW_HEIGHT_TO_DENSITY_MODE` row height written through the writer survives; a different person signing in clears both families and opens at `{}`; with nobody signed in nothing is written. The shape pin therefore applies to what the writers store: a writer that adds a part loses its entry and these cases go red.\n\n<details><summary>Runs and ablations</summary>\n\n- `pnpm --dir ui exec vitest run packages/auth/ packages/app-shell/src/context/__tests__/signOutPurge.test.tsx`: 51 files, 530 passed and 2 failed: the two change-of-user cases in the pin, which failed on test isolation, not on the purge. After the fix (described under Acceptance notes) the pin passed 10/10 (`VERDICT command-exit 0`).\n- `pnpm --filter @object-ui/auth --filter @object-ui/app-shell run type-check`: both `Done`, `VERDICT command-exit 0`.\n- Ablation 1, via `scripts/ablation-replace.mjs` (`isKeptListLayoutEntry` dropped from the sign-out sweep): 13 failed / 17 passed across the two files, i.e. every \"kept\" case in both. Restored, blob == HEAD.\n- Ablation 2 (value shape check replaced by `raw !== null`): the 13 \"removes an entry holding …\" cases failed. Restored, blob == HEAD.\n- Tests resolve `@object-ui/auth` to `src` through the vitest alias, so no dist rebuild was needed for the ablations.\n\n</details>\n\n## Acceptance notes\n\n- What I measured, not assumed: tab order lives in `list-layout:` (`viewOrder`). The only browser-only layout families are `list-layout:` and `grid-columns-`. The grid copy also stores **column order** (`order`, field names) next to widths. The card's To-do 1 keeps that family as a whole, and the ruling's \"object names, field names, widths and view ids\" covers it, so the shape allows `order` there.\n- The main list hands the grid a `columnState` (falls back to `{}`), so on the list page `grid-columns-` is written but never read. Only the related tab reads it. A related tab mounts after its record loads, which is after `AuthProvider`'s adopt effect has purged a previous owner's keys. So the kept copy is never read by a different person.\n- `pnpm check:platform-checklist` is red on `origin/main` itself, from an ABSENT SYMBOL anchor in `areas/access-security.json` (`anonymousFormExplicitWithdrawals`). This diff does not touch that area, and `identity-auth.json` passes.\n- The app-shell pin plants `auth-session-user-id` in `beforeEach`, because `SessionUserScope` keeps its owner in memory across the cases of one file. The comment there explains why.\n\n## Verification\n\nRead first: (1) `ActiveOrganizationStorage.ts`, `holdsOnlyListLayout` / `isKeptListLayoutEntry` and the one-argument change in `purgeSignedOutUserClientState`; (2) `signOutPurge.test.tsx`, the grid writer cases; (3) the checklist item's acceptance[0].\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/app-shell/src/context/__tests__/signOutPurge.test.tsx` should report 10 passed.\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzhoBbwh8URjwQHde8v -->\n"
+}

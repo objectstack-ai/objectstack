@@ -1,0 +1,32 @@
+{
+  "number": 36866,
+  "kind": "issue",
+  "title": "formula: the Studio draft check and validate_expression do not refuse == / != on a list-valued field reached through a lookup hop, which lint refuses after #36673",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T05:31:53Z",
+  "updated_at": "2026-11-24T06:34:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36866",
+  "body": "repo:objectstack#7 · os-alice · session_011y7As5bdhV5T4N9vpjmZzH\n\n## Finding\n\nPR #36673 (#36237) makes lint and the save path refuse `==` / `!=` between a list-valued field reached through a lookup hop and a scalar. Two doors do not see the hop read yet: the Studio draft check, and the shared-validator half of the `validate_expression` tool. The published ADR-0087 semantic entry `cel-list-equality-refused` (`packages/spec/src/migrations/entries/semantic/18.cel-list-equality-refused.ts`) now names this as a stated limit.\n\nSource: contract review 7122973429 on PR #36673, N1 (\"door parity ... has no carrier card; a follow-up card (a hint member for hop targets' list-valued fields) is the place for it\").\n\n## Done when\n\n- The Studio draft check and `validate_expression` refuse the same hop-read comparison the lint refuses, with the same `has()`-guarded `in` rewrite, likely through a hint member carrying hop targets' list-valued fields.\n- The stated limit in the semantic entry and its changeset sentence is removed in the same PR.\n- Pins on each door for a hop to a list-valued field, plus a scalar control.\n\nBlocked-by: #36673"
+}

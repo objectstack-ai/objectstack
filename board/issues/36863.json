@@ -1,0 +1,36 @@
+{
+  "number": 36863,
+  "kind": "pull_request",
+  "title": "fix(fields): on a phone a lookup's candidates open in a bottom drawer that scrolls by touch",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T05:24:11Z",
+  "updated_at": "2026-11-24T06:51:37Z",
+  "closed_at": "2026-11-24T06:51:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T06:51:35Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36863",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBTDAJKyXUan6fJCKsZUf5Pv)_\nFixes #36832\n\nrepo:objectstack#3 · os-support-ai · session_01WGufziG2t1d9cfRQJDrHkB\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：在手机上点查找字段，候选列表改为从底部弹出的抽屉：顶部搜索、中间列表可用手指滑动、底部固定「+ 新建」和「查看全部结果」；电脑端不变。\n- 为什么做：维护者在 iPhone 的新建表单里滑不动查找下拉列表，要求按 Attio 的样式「搜索，中间区域滚动，最下面固定增加」，且新建按权限显示。\n- 出错会怎样：最坏是手机上抽屉高度或键盘遮挡不理想，仍可在搜索框里输入缩小范围或用旁边的表格按钮选；可整体撤回这一个提交。\n- 要你做什么：无\n\n## What changes\n\nConfirmed cause, reproduced before any code change (Chromium, iPhone 13 emulation with touch, 390x844, a lookup with 25 of 60 candidates inside a Radix `Dialog` built from `MobileDialogContent`, as the phone create form is):\n\n- 4 swipes over the list: `scrollTop` 0 before and after; 40 of 40 `touchmove` events had `preventDefault` called, all from `react-remove-scroll`'s document-level listener (`shouldPrevent`, the isolation branch).\n- Why: Radix Dialog mounts `RemoveScroll` on its overlay with the dialog content as its only shard. The lookup popover portals to `document.body`, outside that shard and outside the lock's React tree, so every move over it is treated as an outside scroll and cancelled. CONTROL: the same lookup with no dialog scrolled 840px with no move cancelled.\n- The hypothesis on the card was right. The same lock also cancels the desktop wheel over the popover in a dialog (6 of 6 wheel events cancelled); that half, and the pinned footer, landed with the sibling card 36825 (PR 36844), which this branch builds on.\n- With the keyboard up (emulated by shrinking the window to 470px; Chromium has no on-screen keyboard), the popover kept a 255px list showing 4 rows and the create row sat 1000px below, unreachable.\n\nThe fix, in `ui/packages/fields/src/widgets/LookupField.tsx` only, consuming the existing `Drawer` (vaul) and `useIsMobile` from `@object-ui/components`:\n\n- below the phone breakpoint (`useIsMobile`, the width the search-first variant's sheet already switches at) the candidate panel opens in a bottom `Drawer` (85dvh, titled with the field's label) instead of the popover. The drawer is its own modal layer, so its list is inside the topmost scroll lock and scrolls by touch.\n- the panel body is the same `lookupPanelBody` (recents, preview lines, keyboard and IME handling, `readListMore` fades, quick-create, `canCreate`), with a layout variant: the list takes the height between the search row and the pinned footer (`flex-1`, `overscroll-contain`) instead of the popover's `max-h-64` cap, and the footer pads for the safe area.\n- the search box is not focused on open (vaul's default), so the keyboard does not cover the list until the user taps it; when it does come up, vaul's `repositionInputs` keeps the drawer above it.\n- desktop popover, the list cell's editor and the search-first variant are unchanged by this PR.\n\n## Tests\n\n- New `LookupField.phoneDrawer-36832.test.tsx`: phone width opens the drawer and no popover; CONTROL desktop width opens the popover and no drawer; the drawer holds the search row, the listbox and the pinned footer, with create and \"show all\" outside the listbox; a user without create sees no create row in the drawer; picking a candidate fills the field and closes the drawer; the search box is not focused on open.\n- The pinned-footer pins (`LookupField.createPinned-36825.test.tsx`, the footer rows in `LookupField.createGrant-12082.test.tsx`) come from PR 36844 and run against both faces' shared footer.\n- Package suite, gates and the ablations: readings in the os-dev-report comment on this PR, with the head sha they were taken on.\n\n## Acceptance notes\n\n- Not measured: the list cell's editor inside a modal dialog (for example a subform grid) and the search-first variant's inline desktop popover; both are portalled the same way, outside this card's fence.\n- The on-screen keyboard cannot be emulated in Chromium; the keyboard-up readings shrink the window instead, which is what Android's resizes-content mode does. On iOS the drawer relies on vaul's visual-viewport repositioning, not measured here.\n\n## Verification\n\nRead first: `LookupField.tsx` at the `panelFace === 'drawer'` branch (the drawer and its trigger), then the listbox class switch inside `lookupPanelBody`.\n\nTwo minutes: on a phone (or a 390px-wide window with touch emulation), open a create form with a lookup and tap it: a drawer rises with the search box on top, the list swipes to its last row, and 「+ 新建」 / 「查看全部结果」 stay at the bottom.\n\n<details><summary>Browser readings (harness: Dialog + MobileDialogContent + LookupField, zh-Hans, 25 of 60 candidates)</summary>\n\n| case | panel | list height | rows in view | touch / wheel scroll | moves cancelled | create in view without scrolling |\n|---|---|---|---|---|---|---|\n| before, phone 390x844 | popover | 256 | 4 | 0 to 0 of 1168 | 40 of 40 | no (y=1806, in list) |\n| before, phone 390x470 (keyboard up) | popover | 255 | 4 | 0 to 0 of 1169 | 40 of 40 | no (y=1437, in list) |\n| after, phone 390x844 | drawer | 542 | 10 | 0 to 794 of 794 | 20 (overscroll guard; the list reached its end) | yes (y=796-840, footer) |\n| after, phone 390x470 (keyboard up), 8 swipes | drawer | 225 | 4 | 0 to 1111 of 1111 | 10 (overscroll guard; the list reached its end) | yes (y=421-465, footer) |\n| after, desktop 1280x800 in dialog (CONTROL face) | popover | 153 | 2 | wheel 0 to 1183 of 1183 | 2 | yes (footer) |\n\nPicking the last candidate filled the field and closed the panel in every row. Quick-create through an action provider on both faces: the create dialog opened and stayed open with focus inside it; saving filled the field, cancelling (Escape) closed only the create dialog, and the form dialog stayed open in both.\n\nScreenshots are kept in the dev's scratchpad (the relay takes no uploads).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufziG2t1d9cfRQJDrHkB)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufziG2t1d9cfRQJDrHkB -->\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 36844,
+  "kind": "pull_request",
+  "title": "fix(fields): lookup quick-create stays whole and clickable in a short popover; its list scrolls in dialogs",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T04:07:30Z",
+  "updated_at": "2026-11-24T05:20:37Z",
+  "closed_at": "2026-11-24T05:20:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T05:20:34Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36844",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBTDAJKyXUan6fJCKsZUf5Pv)_\nFixes #36825\n\nrepo:objectstack#3 · os-support-ai · session_01WGufziG2t1d9cfRQJDrHkB\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：在弹窗里打开查找选择器时，「+ 新建」和「查看全部结果」固定在下拉底部，无论下拉多矮都完整可点；弹窗里的下拉列表也能用滚轮和手指滚动了。\n- 为什么做：产品负责人在「新建商机产品明细」弹窗里点「产品」时，「+ 新建」只露出半行、点不到，列表也滚不动（最高优先级）。\n- 出错会怎样：最坏是下拉打开时点页面别处需要先点一下关掉下拉，或屏幕阅读器暂时读不到下拉后面的页面；可整体撤回这一个提交。\n- 要你做什么：无\n\n## What changes\n\nConfirmed cause, reproduced before any code change (desktop, Chromium, a lookup in a Radix `Dialog` built from `MobileDialogContent`, the 450px-high window of the report's shape, 1 recent + 2 results, readings below):\n\n1. **The create row was the last child of the list's scroll container.** The popover is held to `--radix-popover-content-available-height`; when that room is shorter than the list, the list (`min-h-0`) is what shrinks, so the rows at its end are cut first. Measured: popover opened upwards with 270px of room (natural height 306px), the listbox ended at y=269 while the create row spanned y=266-302, so 3px of it showed and a hit test at its centre landed elsewhere.\n2. **Inside a modal form the list could not be scrolled to it.** Radix Dialog mounts `react-remove-scroll` on its overlay with the dialog content as the only shard. The popover portals to `document.body`, outside that shard, so the lock's document-level `wheel` / `touchmove` listener takes the isolation branch and calls `preventDefault` on every move over the popover. Measured: 5 wheel ticks over the list, `scrollTop` 0 before and after, every wheel event prevented, while the same list outside a dialog scrolled 1080px.\n\nThe fix, in `ui/packages/fields/src/widgets/LookupField.tsx` only:\n\n- quick-create and \"show all results\" move out of the scroll container into a footer pinned under the list (`lookup-panel-footer`): one row, create on the left (a long typed name truncates), \"show all\" on the right. The list gives way, the footer does not, on either side the popover opens to. The footer reads the unchanged `canCreate`; with nothing to create and nothing more to show it is not drawn; an empty result keeps its centred create button inside the list.\n- the popover is `modal`, its own scroll-lock layer (top of the lock stack, its content the lock's own tree), so wheel and touch scroll its list inside a dialog. Consumption of an existing Radix prop, no change in `@object-ui/components`.\n- the list cell's editor (`inCell`) is unchanged: it keeps both rows at the end of its list.\n\nBehaviour that comes with `modal`, the same as Radix `Select` and `DropdownMenu` already do here: while the popover is open the page behind it is `aria-hidden`, focus stays in the popover (Escape closes it), and a click outside closes the popover before it reaches what it landed on.\n\n## Tests\n\n- New `LookupField.createPinned-36825.test.tsx`: long list (create and \"show all\" in the footer, outside the listbox), CONTROL short list (the same footer), no create grant and nothing to show (no footer), no grant with more to show (\"show all\" alone), empty result (centred create, no footer), ↑/↓ reach the last option with `aria-activedescendant` inside the listbox, and the page behind an open popover is hidden (the observable half of `modal`).\n- `LookupField.createGrant-12082.test.tsx`: two rows added, the footer offers \"Create new\" only with the target's create grant.\n- `LookupField.pickedLabel-10559.test.tsx`: its chip read now passes `hidden: true`, because it reads the chip while the (now modal) dropdown is open; the assertion is unchanged.\n- jsdom/happy-dom do no layout, so the unit pins hold the structure; the geometry is the browser readings below. No Playwright geometry spec was added in `ui/e2e/` (outside this card's file surface).\n- Package suite, gates and one ablation per new pin: readings in the os-dev-report comment on this PR, with the head sha they were taken on.\n\n## Acceptance notes\n\n- Same mechanism, not changed here: the search-first lookup variant's desktop popover (`PeoplePicker` inline) is non-modal too and would be scroll-locked in a dialog the same way; not measured, out of this card's fence.\n- The phone face (touch scroll in the mobile create dialog, a bottom drawer) is the sibling card 36832, built on top of this change.\n\n## Verification\n\nRead first: `LookupField.tsx` around `pinnedFooter` (the footer gate) and the `modal` Popover (the behaviour change).\n\nTwo minutes: open any create dialog with a lookup near its bottom on a short window, open the lookup: 「+ 新建」 sits whole under a divider at the popover's bottom and the list scrolls with the wheel.\n\n<details><summary>Browser readings (harness: Dialog + MobileDialogContent + LookupField, zh-Hans, 1280 wide)</summary>\n\n| case | side | popover y | listbox y | create y | create whole / hit | wheel scrollTop |\n|---|---|---|---|---|---|---|\n| before, 450 high, 1 recent + 2 | top | 0-270 | 49-269 | 266-302 (in list) | no / no | 0 to 0 of 37 |\n| after, same | top | 0-270 | 49-224 | 229-265 (footer) | yes / yes | 0 to 46 of 46 |\n| after, 600 high, 25 of 60 | top | 130-481 | 179-435 | 440-476 (footer) | yes / yes | 0 to 1000 of 1080 |\n| after, 800 high, ample room (CONTROL) | bottom | 485-801 | 534-755 | 760-796 (footer) | yes / yes | fits |\n\nScreenshots are kept in the dev's scratchpad (the relay takes no uploads).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01WGufziG2t1d9cfRQJDrHkB)_\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufziG2t1d9cfRQJDrHkB -->\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 36832,
+  "kind": "issue",
+  "title": "手机上 lookup 下拉列表滑不动；「新建」改为底部固定（手机用抽屉，桌面固定页脚）",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T03:07:19Z",
+  "updated_at": "2026-11-24T06:52:45Z",
+  "closed_at": "2026-11-24T06:51:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36832",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n① product defect (③ maintainer direct order) · Source: maintainer (os-support-ai), 2026-11-24, lookup picker discussion thread.\n- 03:01Z, with an Attio screenshot: 「这是 attio 的效果，搜索，中间区域滚动，最下面固定增加」 (search on top, the middle scrolls, \"create\" pinned at the bottom).\n- 03:02Z: 「能否增加应该按照权限判断吧。」 (whether \"create\" shows must follow permissions; it already does, see below, keep it).\n- 03:02Z, with an iPhone screenshot of a create form: 「还有我在手机上滚动不了」 (on my phone the lookup list does not scroll).\n- 03:05Z, after the direction below was proposed: 「立卡派发」.\n\nGrading: `area:ux · Bug · UX problem on a core feature (④ main operations on a phone; every lookup pick on a phone) · end users, daily · evidence: measured by the maintainer on a real iPhone (screenshot in the thread) + read from code`. UX rule ⇒ **p1**. Workaround today: type in the search box to narrow the list, or the table button beside the field (Browse all).\n\nDedupe: `gh api search/issues` on `lookup scroll mobile`, `lookup popover scroll`, `lookup picker phone`, `LookupField mobile drawer`, `popover dialog touch scroll`, `lookup create new pinned` (~130 hits, closed included). No open card on the same mechanism. Nearest closed: #34362 (popover available-height / flip in a dialog, the reason the popover is `max-h-(--radix-popover-content-available-height)` today), #36479 (phone: chip tap inside an option preview). Related open epic #34571 (console core operations incl. phone): the seat decides whether this hangs under it.\n\nReader: seat objectstack#3 (area:ux), one dev card, `domain:ui`. Paths below are on main 14f4d8f8.\n\n## What the user sees\n\n1. **Phone: the lookup list does not scroll.** On a phone the create/edit form is a full-screen Radix Dialog (`ui/packages/components/src/custom/mobile-dialog-content.tsx`, `MobileDialogContent`, which locks body scroll). The lookup's quick-select is a Radix Popover whose content portals to `document.body` (`ui/packages/components/src/ui/popover.tsx`), outside the dialog's DOM. On the maintainer's iPhone the list cannot be scrolled by touch. With the keyboard up the popover flips above the trigger and gets only the space above it, so 3.5 rows show and the rest is unreachable without typing.\n2. **\"Create\" sits at the end of the scrolling list, not pinned.** In `ui/packages/fields/src/widgets/LookupField.tsx` (`lookupPanelBody`, around lines 2060–2180) the search row is pinned (`shrink-0`) and the list scrolls (`max-h-64 … overflow-y-auto`), but the quick-create button (「新建」/「新建 \"<query>\"」) and 「显示全部 N 条结果」 are rendered **inside** the scroll container after the last option. With many candidates the user must scroll to the bottom to find them.\n\n## Root cause: reproduce first (step 1 is mandatory)\n\nThe scroll cause above is **read from code, not yet reproduced**. Hypothesis: the dialog's scroll lock (`react-remove-scroll` under Radix Dialog) swallows `touchmove` on the portalled popover, possibly combined with iOS keyboard / visual-viewport behaviour. Before changing anything:\n- Reproduce in a phone-emulated browser (Playwright device emulation with touch, CDP `Input.synthesizeScrollGesture` or dispatched touch events) on a lookup inside the mobile create dialog, keyboard focus in the search box. Record which element receives the touch and whether `preventDefault` is called.\n- Write the confirmed cause in the PR body. If the hypothesis is wrong, say what the real cause is; the fix below (no popover on a phone) still applies, but the desktop popover must also be checked inside a dialog.\n\n## Change (direction agreed in the thread)\n\n1. **Phone (below the existing phone breakpoint, `use-mobile` / `use-viewport-below` in `@object-ui/components`): open the candidate panel in the existing generic `Drawer` or `Sheet` block (`ui/packages/components/src/ui/drawer.tsx` / `sheet.tsx`) instead of the Popover.** Layout: search pinned at the top, the candidate list scrolls natively in the middle (takes the remaining height, survives the keyboard via `dvh`/visual viewport), and a footer pinned at the bottom with quick-create and 「显示全部 N 条结果」. Reuse `lookupPanelBody`'s content and logic (recents, preview lines, keyboard/IME, `readListMore`); do not fork the candidate logic. No new named widget, hook or namespace: a layout variant of the existing field.\n2. **Desktop: keep the Popover, move quick-create and 「显示全部 N 条结果」 out of the scroll container into a pinned footer** (separated by a border, like the Attio reference), so they stay visible whatever the list length. The empty-result state keeps its centred create button.\n3. **Permission gate unchanged and shared by both faces.** Today \"create\" shows only when `allowCreate` (default on for user-facing objects, off for `sys_`/`cloud_`/`ai_` and the user directory; explicit `allowCreate: false` opts out) **and** `resolveAffordance('lookupCreateNew')` on the target object allows it (create grant, managed-object policy, server API operation set; objectui#12082). The pinned footer must read the same `canCreate`; when it is false and there is nothing to \"show all\", the footer is not drawn.\n4. The in-cell face (`data-in-cell-face=\"panel\"`, list/grid cell editor) and the PeoplePicker search variant are out of scope unless the reproduction shows the same scroll failure there; if so, note it in the PR, don't widen silently.\n\nNo spec or protocol change: `Metadata-protocol: none`.\n\n## Acceptance\n\n- Phone emulation (390×844, touch): open a lookup inside the mobile create dialog with ≥20 candidates, keyboard up; the list scrolls by touch to the last candidate; the footer's create button is visible without scrolling; picking a candidate fills the field and closes the panel.\n- Desktop: with ≥20 candidates the create row and 「显示全部」 are visible without scrolling the list; keyboard navigation (↑/↓/Enter) still reaches every option; `aria-activedescendant` still points into the listbox.\n- A user without create on the target object sees no create row on either face (existing `LookupField.createGrant-12082` test keeps passing; add a footer assertion).\n- Existing `LookupField.*` tests stay green; new tests cover the pinned footer and the phone face.\n- Screenshots (phone + desktop, zh) in the PR body."
+}

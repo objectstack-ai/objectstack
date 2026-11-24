@@ -1,0 +1,34 @@
+{
+  "number": 36851,
+  "kind": "issue",
+  "title": "console: a refused delete from a record page's related list is silent: 409 RECORD_LOCKED with a userMessage, and the user sees no toast or error",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T04:44:27Z",
+  "updated_at": "2026-11-24T08:08:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36851",
+  "body": "## What happens\n\nDeleting a row from a record page's related list, when the server refuses the delete, shows the user nothing. The confirm dialog closes, no toast appears, no inline error appears, and the row is still in the list. The only trace is in the browser console: `[RelatedList] remove failed …`.\n\nThe server's answer carries a ready, translated `userMessage`. Editing the same locked row from the same list does show that message, so the two paths of one list disagree.\n\n## Reproduce\n\nPlatform `@objectstack/*` 18.6.0, console at `/_console`, UI locale zh-CN, HotCRM 6.6.0 metadata (any child object whose delete is refused by a hook or a record lock reproduces it).\n\n1. Open a sales order that is already confirmed (its lines are locked by the package's rule).\n2. Open the **Order Lines** related tab.\n3. On a line, open the row menu → Delete → confirm.\n\nReproduced twice on the same line.\n\n## Evidence\n\n```\n409 DELETE /api/v1/data/crm_sales_order_line/<id>\n{\"error\":\"订单…已确认，因此不能再添加、修改或删除它的订单行。请先把它退回草稿再修改。\",\"code\":\"RECORD_LOCKED\",…,\"userMessage\":\"…\"}\n```\n\nConsole: `[RelatedList] remove failed …`. On screen: the dialog closes, nothing else changes.\n\n## Expected\n\nA refused delete from a related list tells the user it was refused, with the response's `userMessage`, the way a refused edit of the same row and a refused delete from a list page do.\n\n## Secondary\n\nThe row menu still offers Edit and Delete on a row the server will refuse for `RECORD_LOCKED`. Hiding or disabling them is a nicety; the missing message is the defect.\n\n## Why p1\n\nThe user confirms a delete and gets silence. They cannot tell a refusal from a slow refresh, and the business rule that explains what to do instead (return the order to draft first) is written, translated, sent, and dropped by the console.\n\nFound in a browser walkthrough of HotCRM on the pinned platform.\n"
+}

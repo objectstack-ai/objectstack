@@ -1,0 +1,32 @@
+{
+  "number": 36896,
+  "kind": "issue",
+  "title": "Studio 重构（1-1a）：元数据列表的搜索、筛选、排序和滚动位置写进地址，并提供「当前筛选下的有序名字列表」给详情页的 ‹ › 用",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-support-ai",
+    "id": 318092878,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T08:06:08Z",
+  "updated_at": "2026-11-24T08:06:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36896",
+  "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (「× 回到列表，筛选和滚动位置保留」; decision 10). Part of #36890.\n\n## 为什么\n\n专题里点一行在右侧全屏打开详情，× 回来时筛选和滚动位置要还在；详情页的 ‹ › 要按列表当前筛选的顺序走，直接打开详情（刷新、分享、⌘K）时按名称排序（决定 10）。\n\n## 今天（读代码确认，主干 0819cab1）\n\n- 搜索词、来源筛选、已定制筛选、状态筛选都是组件状态（`MA/ResourceListPage.tsx:200-201, 237, 249`），只有 `package` 和 `scope` 在地址里；列表没有排序。\n\n## 要做的\n\n1. 在**现有表格**上把搜索、来源包、来源、已定制、状态筛选和排序写进地址参数；滚动位置在 × 返回时恢复。\n2. 加列表排序（至少按标签、API 名称；有 1-2a 后按修改时间）。\n3. 提供一个「当前筛选和排序下的有序名字列表」的来源（hook 或纯函数），详情页没有列表上下文时按名称排序；接口和 0-2 头部组合件对齐。\n4. 详情地址带上列表上下文参数（决定 10）。\n\n## 不做的\n\n- 不换表格组件（1-1b）。\n\n## 验收\n\n- 筛选后点进详情再 ×，筛选和滚动位置都在；刷新列表页筛选还在。\n- 有序名字列表有单测：有筛选、无上下文两种情况。\n\nBlocked-by: #36860 — only its part (a) PR (server-served `list` columns and the console read order; the card split it on 2026-11-24 06:04Z). Both touch `ResourceListPage.tsx`; this card can be dispatched as soon as that PR merges, without waiting for part (b).\n\nGrading: `area:ux · Feature · metadata list (filters lost on every round trip to a detail) · builders, every list visit · evidence: read from code`. Topic child ⇒ p2.\nDedupe: `ResourceListPage filter url` (no open card).\nReader: seat repo:objectstack#3, one os-dev card. Size M. `Metadata-protocol: none`. Wave 1."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 36839,
+  "kind": "issue",
+  "title": "security(knowledge): search hits skip the API-exposure decision and field-level read rules every other row-serving door applies, now that the MCP door serves search_knowledge",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1",
+    "security"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T03:31:12Z",
+  "updated_at": "2026-11-24T04:45:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36839",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nCarries the E1 escalation of the contract review on PR #36823 (comment 7120785446, section ③) for card #36650; #36650 keeps its own scope (serve `search_knowledge` on MCP). Filed by the seat from its own readings and the maintainer's ruling below. Sub-issue of #36650.\n\n## Defect (class, location, function)\n\n`KnowledgeService` (`packages/services/service-knowledge/src/knowledge-service.ts`, `applyPermissionFilter`) re-checks an object-source hit only with a row-level read of the hit ids under the caller's context. It does not ask:\n- the spec's one exposure decision for rows served outside the data routes (object `apiEnabled` / `apiMethods`, the disabled-package refusal, the `sys_*` read posture), which the MCP record tools, the analytics door and cross-object search all ask;\n- the caller's field-level read rules: a passage is built at index time, under a system context, from every `contentFields` member (and the record `title`), so a caller who may read the row receives text from a field a field-level rule hides from them.\n\nThe limit is documented (`content/docs/protocol/knowledge.mdx` §7.1, \"Phase 1 enforces row-level only\"). PR #36823 is what first puts it in front of end-user principals on the open distribution. The exposure pin `packages/core/src/security/row-serving-door-exposure.pin.test.ts` lists knowledge search as named-but-unconstrained on the ground that it has no HTTP door, which that PR ends; `packages/qa/dogfood/test/authz-conformance.matrix.ts` states the MCP door applies RLS / FLS / tenant exactly as REST `/data`.\n\n## Maintainer ruling\n\nRecorded by seat repo:objectstack#4 from the maintainer's own words in the seat's session (`session_01QSeKYpEsWWE9Y5YtSsDgqZ`), in the turn that filed this card. The seat presented options A–G with a four-axis analysis and the recommendation \"D, in the knowledge service, at source granularity, fail closed, no new spec key\", plus a timing choice 甲 (this card first, PR #36823 lands after it) / 乙 (PR first, this card follows). The maintainer answered, verbatim:\n\n> 以上都同意\n\nRead as: **option D** and **timing 甲**.\n\n## Expected (option D)\n\n1. In the knowledge service's permission filter (every door inherits it; the system context still bypasses), drop a hit whose object fails the caller's exposure decision (`canServeApiOperation` / the shared exposure path, the disabled-package refusal, the `sys_*` read posture).\n2. At source granularity: when any `contentFields` member of a source, or the `title` it carries, is not readable / queryable by the caller (the `security` service's `getReadableFields` / `getQueryableFields`; absent that service, the contract's fallback — every field declaring a `maskingRule` is not queryable), the source is not searched for that caller. Fail closed.\n3. No new spec key. The narrowing is stated (changeset, `knowledge.mdx` §5/§7.1/§9) so a restricted caller's empty answer is explained, not silent.\n4. The exposure pin file classifies knowledge search as constrained; the conformance matrix line becomes true.\n5. Pins: refusal and preservation halves per gate, through the real service, with a caller who reads the row but not the field, and an object with `apiEnabled: false`.\n\nPremises the dispatch verifies first (any false ⇒ report a fork, do not force it): the knowledge plugin can resolve the `security` service and `getQueryableFields` exists on it; an object's `enable` block is readable from the knowledge service; the disabled-package check needs an injected hook (`isObjectOfDisabledPackage` lives in metadata-protocol, which service-knowledge does not depend on).\n\nGoverning text: ADR-0090 D10 rule 1 — \"An over-privileged agent prompted by an under-privileged user must not leak what the user could never see.\" ADR-0049 — \"A security property that parses but does nothing is **worse than absent**\".\n\n## Order\n\nPR #36823 (card #36650) lands after this card's PR merges."
+}
