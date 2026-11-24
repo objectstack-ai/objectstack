@@ -762,3 +762,80 @@ describe('an aggregate run reports its BulkActionResult per row', () => {
     expect(screen.queryByTestId('bulk-aggregate-unreadable')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * objectstack#36915 — a per-record bulk `type: 'flow'` action whose run ended
+ * `refused` (an `end` node with `outcome: 'refused'`). The handler answers
+ * `success: true` with the refusal on `refusal`; before the fix the grid read
+ * only `success`, so the result said "Succeeded 3 / 3". Now each record is
+ * dispatched with `reportsRefusal` (so the console's handler opens no notice of
+ * its own) and a refused record is counted and listed apart, with its own
+ * sentence and no Retry.
+ */
+describe('a per-record bulk flow that refuses some records (objectstack#36915)', () => {
+  const CREATE_CAMPAIGN = { name: 'create_campaign', label: 'Add to Campaign', type: 'flow', target: 'enroll' };
+  const LEADS = [
+    { id: 'l1', name: 'Ann' },
+    { id: 'l2', name: 'Bea' },
+    { id: 'l3', name: 'Cy' },
+  ];
+  const SENTENCE: Record<string, string> = {
+    l1: 'Ann has opted out of email, so the lead was not added to the campaign.',
+    l3: 'Cy has opted out of email, so the lead was not added to the campaign.',
+  };
+
+  /** The console's flow handler, as it answers: a refused run is a handed-off success carrying `refusal`. */
+  function flowHandler(refusing: string[]) {
+    return vi.fn(async (action: any, _ctx: any) => {
+      const id = String(action.params?._rowRecord?.id);
+      return refusing.includes(id)
+        ? { success: true, silent: true, handedOff: true, refusal: { message: SENTENCE[id] } }
+        : { success: true, data: { status: 'completed' } };
+    });
+  }
+
+  async function runOn(rows: typeof LEADS, refusing: string[]) {
+    const handler = flowHandler(refusing);
+    const ds = renderGrid({
+      objectActions: [CREATE_CAMPAIGN],
+      schema: { bulkActions: ['create_campaign'] },
+      handlers: { flow: handler },
+      rows,
+    });
+    await waitFor(() => expect(screen.getByText(rows[0].name)).toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('thead [role="checkbox"]')).toBeTruthy());
+    fireEvent.click(document.querySelector('thead [role="checkbox"]') as HTMLElement);
+    fireEvent.click(await screen.findByTestId('bulk-action-create_campaign'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(handler).toHaveBeenCalledTimes(rows.length));
+    return { handler, ds };
+  }
+
+  it("the card's repro: 1 succeeded and 2 refused, each refused record with its own sentence and no Retry", async () => {
+    const { handler } = await runOn(LEADS, ['l1', 'l3']);
+
+    // Every record went out with `reportsRefusal`, the signal the console's
+    // flow handler reads to open no notice of its own.
+    expect(handler.mock.calls.map(([, ctx]) => ctx.reportsRefusal)).toEqual([true, true, true]);
+    await waitFor(() => expect(screen.getByText(/Succeeded 1 \/ 3/)).toBeInTheDocument());
+    expect(screen.getByText(/Refused 2/)).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-refused-row-l1')).toHaveTextContent(`Ann: ${SENTENCE.l1}`);
+    expect(screen.getByTestId('bulk-refused-row-l3')).toHaveTextContent(`Cy: ${SENTENCE.l3}`);
+    expect(screen.queryByTestId('bulk-refused-row-l2')).not.toBeInTheDocument();
+    // A refusal is no failure: nothing in the error list, no Retry to offer.
+    expect(screen.queryByTestId('bulk-error-inspector')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-error-retry-l1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-error-retry-l3')).not.toBeInTheDocument();
+    expect(screen.getByTestId('bulk-succeeded-records')).toHaveTextContent('Bea');
+    expect(screen.getByTestId('bulk-succeeded-records')).not.toHaveTextContent('Ann');
+  });
+
+  it('a single refused record reads Succeeded 0 / 1 with its sentence', async () => {
+    await runOn([LEADS[0]], ['l1']);
+
+    await waitFor(() => expect(screen.getByText(/Succeeded 0 \/ 1/)).toBeInTheDocument());
+    expect(screen.getByText(/Refused 1/)).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-refused-row-l1')).toHaveTextContent(SENTENCE.l1);
+    expect(screen.queryByTestId('bulk-error-retry-l1')).not.toBeInTheDocument();
+  });
+});
