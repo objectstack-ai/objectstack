@@ -172,6 +172,27 @@ describe('a standalone form node does not run a lookupAutofill written on its fi
     expect(refusals(warn, 'bare_product')).toHaveLength(1);
   });
 
+  it('a production build copies nothing and says nothing', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { container } = renderBareForm({
+        name: 'prod_product',
+        label: 'Product',
+        type: 'lookup',
+        reference: 'fx_product',
+        lookupAutofill: PAIRS,
+      });
+      await pick(await screen.findByTestId('lookup-trigger-prod_product'), 'Widget');
+
+      await waitFor(() => expect(screen.getByTestId('lookup-trigger-prod_product').textContent).toContain('Widget'));
+      expect(valueOf(container, 'description')).toBe('');
+      expect(refusals(warn, 'prod_product')).toHaveLength(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('a lookupAutofillTargets key written by hand is no stamp: the pick still copies nothing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { container } = renderBareForm({
