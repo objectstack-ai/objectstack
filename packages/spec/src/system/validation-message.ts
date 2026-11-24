@@ -67,6 +67,16 @@
  * `Supplier + Type`), never the API names, and `{{rows}}` the row numbers that
  * carry the key, both filled by the runner.
  *
+ * `import_blank_match_key` and `import_multi_value_match_key` are its two
+ * other ROW refusals, in the same row report and read the same way. The first
+ * is a row blank on every ordered key set (`BLANK_MATCH_KEY`): `{{label}}` is
+ * the key sets by field LABEL, a set's fields joined with ` + ` and the sets
+ * with `; `. The second fails every row of a run whose match key names a field
+ * holding a list or a structured value (`VALIDATION_ERROR`, for a caller that
+ * reaches the runner without the import door): `{{label}}` is those fields by
+ * LABEL, joined with `, `. The API name stands in only for a field with no
+ * label, and the row's `field` keeps the API name for a machine reader.
+ *
  * ## Interpolation
  *
  * `{{name}}` placeholders, matching `II18nService.t()`'s convention, filled from
@@ -170,6 +180,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_reference_ambiguous: '{{label}}: "{{value}}" matches more than one record — use a unique value or the record id',
     import_reference_not_found: '{{label}}: no record matches "{{value}}"',
     import_duplicate_match_key: 'Rows {{rows}} of this import have the same match key ({{label}}), so none of them was written: keep one row per key and import again',
+    import_blank_match_key: 'The row has no match key: every key set ({{label}}) has a blank field on it',
+    import_multi_value_match_key: 'The match key cannot use {{label}}: a match key compares one value per field, and a field holding a list or a structured value has no one value to compare. Match on single-value fields (a code, a name, an email) instead.',
   },
   'zh-CN': {
     required: '{{label}}不能为空',
@@ -221,6 +233,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_reference_ambiguous: '{{label}}:“{{value}}”匹配到多条记录,请改用唯一值或记录 ID',
     import_reference_not_found: '{{label}}:未找到与“{{value}}”匹配的记录',
     import_duplicate_match_key: '本次导入的第 {{rows}} 行匹配键({{label}})相同,因此均未写入:每个匹配键只保留一行后重新导入',
+    import_blank_match_key: '该行没有匹配键:每组匹配键({{label}})在该行都有空白字段',
+    import_multi_value_match_key: '不能用{{label}}作为匹配键:匹配键逐个字段比较一个值,而存放列表或结构化值的字段没有单一的值可比较。请改用单值字段(如编码、名称、邮箱)匹配',
   },
   'ja-JP': {
     required: '{{label}}は必須です',
@@ -269,6 +283,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_reference_ambiguous: '{{label}}:「{{value}}」に複数のレコードが一致します。一意の値かレコード ID を指定してください',
     import_reference_not_found: '{{label}}:「{{value}}」に一致するレコードが見つかりません',
     import_duplicate_match_key: 'このインポートの {{rows}} 行目は一致キー({{label}})が同じため、いずれも書き込まれませんでした。キーごとに 1 行だけ残して、もう一度インポートしてください',
+    import_blank_match_key: 'この行には一致キーがありません。どの一致キーの組み合わせ({{label}})にも空欄の項目があります',
+    import_multi_value_match_key: '{{label}} は一致キーに使えません。一致キーは項目ごとに 1 つの値を比較しますが、リストや構造化された値を持つ項目には比較できる 1 つの値がありません。単一値の項目(コード、名前、メールアドレスなど)で照合してください',
   },
   'es-ES': {
     required: '{{label}} es obligatorio',
@@ -317,6 +333,8 @@ export const BUILTIN_VALIDATION_MESSAGES: Record<string, Record<string, string>>
     import_reference_ambiguous: '{{label}}: «{{value}}» coincide con más de un registro; use un valor único o el id del registro',
     import_reference_not_found: '{{label}}: ningún registro coincide con «{{value}}»',
     import_duplicate_match_key: 'Las filas {{rows}} de esta importación tienen la misma clave de coincidencia ({{label}}), así que no se escribió ninguna: deje una sola fila por clave e importe de nuevo',
+    import_blank_match_key: 'La fila no tiene clave de coincidencia: cada conjunto de claves ({{label}}) tiene un campo vacío en ella',
+    import_multi_value_match_key: 'La clave de coincidencia no puede usar {{label}}: una clave de coincidencia compara un valor por campo, y un campo que contiene una lista o un valor estructurado no tiene un único valor que comparar. Use campos de un solo valor (un código, un nombre, un correo) en su lugar.',
   },
 };
 

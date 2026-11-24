@@ -832,11 +832,13 @@ const yieldToEventLoop = (): Promise<void> =>
  * map does not carry is judged by nobody, as cell coercion passes it through.
  *
  * One rule, two callers: the import door refuses the request with it
- * (`prepareImportRequest`, `400 INVALID_REQUEST`) before any row, and
- * {@link runImport} fails every row with it for a caller that reaches the
- * runner without that door (the connector pull writes a mapping's
- * `upsertKey` straight through), before any row is read or written.
- * `keyedBy` names what the caller read the key from.
+ * (`prepareImportRequest`, `400 INVALID_REQUEST`, this `message`) before any
+ * row, and {@link runImport} fails every row on its `fields` for a caller that
+ * reaches the runner without that door (the connector pull writes a mapping's
+ * `upsertKey` straight through), before any row is read or written. The row
+ * sentence is the runner's own, in the request locale and by field label
+ * (`validation.field.import_multi_value_match_key`), as the other sentences of
+ * the row report are. `keyedBy` names what the door read the key from.
  */
 export function multiValueMatchKeyRefusal(
   matchFields: string[] | string[][],
@@ -1077,13 +1079,32 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
    * key set is named by field LABEL, the API name only where a field has none,
    * as the cell failures name their column; the row numbers are kept.
    */
+  const fieldLabel = (f: string): string => metaMap.get(f)?.label?.trim() || f;
   const duplicateMatchKeyMessage = (rowNos: readonly number[], keySet: readonly string[]): string =>
     renderValidationMessage(
       {
         messageKey: 'import_duplicate_match_key',
-        label: keySet.map((f) => metaMap.get(f)?.label?.trim() || f).join(' + '),
+        label: keySet.map(fieldLabel).join(' + '),
         params: { rows: rowNos.join(', ') },
       },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
+  /**
+   * The importer's two other ROW refusals, read the same way as
+   * {@link duplicateMatchKeyMessage}: a row blank on every ordered key set
+   * (`validation.field.import_blank_match_key`, the sets by label, a set's
+   * fields joined with ` + ` and the sets with `; `), and a match key naming a
+   * field that holds a list or a structured value
+   * (`validation.field.import_multi_value_match_key`, those fields by label).
+   */
+  const blankMatchKeyMessage = (sets: readonly (readonly string[])[]): string =>
+    renderValidationMessage(
+      { messageKey: 'import_blank_match_key', label: sets.map((set) => set.map(fieldLabel).join(' + ')).join('; ') },
+      { locale: coerceCtx.locale, translate: coerceCtx.translate },
+    );
+  const multiValueMatchKeyMessage = (fields: readonly string[]): string =>
+    renderValidationMessage(
+      { messageKey: 'import_multi_value_match_key', label: fields.map(fieldLabel).join(', ') },
       { locale: coerceCtx.locale, translate: coerceCtx.translate },
     );
 
@@ -1576,9 +1597,10 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
     // here; this answers the callers that reach the runner without it.
     const refusedKey = writeMode === 'insert' ? undefined : multiValueMatchKeyRefusal(matchFields, metaMap);
     if (refusedKey) {
+      const error = multiValueMatchKeyMessage(refusedKey.fields);
       for (let i = 0; i < rows.length; i++) {
         results[i] = {
-          row: i + 1, ok: false, action: 'failed', field: refusedKey.fields[0], code: 'VALIDATION_ERROR', error: refusedKey.message,
+          row: i + 1, ok: false, action: 'failed', field: refusedKey.fields[0], code: 'VALIDATION_ERROR', error,
         };
       }
       errCount = rows.length;
@@ -1625,7 +1647,7 @@ export function runImport(opts: RunImportOptions): Promise<ImportRunSummary> {
               errCount++;
               results[i] = {
                 row: rowNo, ok: false, action: 'failed', code: 'BLANK_MATCH_KEY',
-                error: `The row has no match key: every key set in matchFields (${keySets.map((set) => set.join(' + ')).join('; ')}) has a blank field on it`,
+                error: blankMatchKeyMessage(keySets),
               };
               handled = true;
             } else if (existing === 'blank' && (skipBlankMatchKey || writeMode === 'update')) {
