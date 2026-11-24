@@ -151,11 +151,12 @@ interface FocusState {
   key: string | undefined;
   entry: ChatFocusEntry;
   /**
-   * The id that arrives next takes this conversation's focus: set by a first
-   * send (`markSending`) and by a `setChatFocus` hand-off that landed before
-   * the host had an id ("pin, then open the drawer"). Any other arrival of an
-   * id — a resumed thread resolving, a history row, the scope blanking the id
-   * between apps — reads that conversation's own stored focus instead.
+   * The id that arrives next takes this conversation's focus: set by a
+   * `setChatFocus` hand-off that landed before the host had an id ("pin, then
+   * open the drawer"); a first send says the same through `markSending`. Any
+   * other arrival of an id — a resumed thread resolving, a history row, the
+   * scope blanking the id between apps — reads that conversation's own stored
+   * focus instead.
    */
   carry: boolean;
 }
@@ -175,10 +176,16 @@ export function useConversationFocus(conversationId: string | undefined): Conver
     entry: readStoredChatFocus(conversationId),
     carry: false,
   }));
+  // A first send in flight: a ref, not state, so marking it re-renders
+  // nothing while the pane holds the message it is creating the row for.
+  const sendingRef = React.useRef(false);
   let current = state;
   if (state.key !== conversationId) {
     const carried =
-      state.key === undefined && conversationId !== undefined && state.carry && state.entry.focus !== null;
+      state.key === undefined &&
+      conversationId !== undefined &&
+      (state.carry || sendingRef.current) &&
+      state.entry.focus !== null;
     current = {
       key: conversationId,
       entry: carried ? state.entry : readStoredChatFocus(conversationId),
@@ -193,6 +200,10 @@ export function useConversationFocus(conversationId: string | undefined): Conver
   React.useEffect(() => {
     if (key !== undefined) writeStoredChatFocus(key, entry);
   }, [key, entry]);
+  // The send's id has arrived (or another one did): the mark is spent.
+  React.useEffect(() => {
+    if (key !== undefined) sendingRef.current = false;
+  }, [key]);
 
   const setFocus = React.useCallback((focus: ChatFocus | null) => {
     setState((s) =>
@@ -203,7 +214,7 @@ export function useConversationFocus(conversationId: string | undefined): Conver
     setState((s) => (s.entry.declined ? s : { ...s, entry: { ...s.entry, declined: true } }));
   }, []);
   const markSending = React.useCallback(() => {
-    setState((s) => (s.key !== undefined || s.carry ? s : { ...s, carry: true }));
+    sendingRef.current = true;
   }, []);
   // The setter's hand-off: applied here, and carried onto the id the host
   // resolves next when it has none yet.
