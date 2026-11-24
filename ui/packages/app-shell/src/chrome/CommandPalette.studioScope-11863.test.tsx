@@ -200,7 +200,7 @@ describe('the palette in the `studio` scope lists the Studio, not an app (object
     mountStudio();
     await studioListed();
     pick('studio-object Account ');
-    await waitFor(() => expect(locationNow()).toBe('/studio/com.acme.crm/data?surface=object%3Acrm_account'));
+    await waitFor(() => expect(locationNow()).toBe('/studio/com.acme.crm/metadata/object/crm_account'));
   });
 
   it("opens a packaged flow in its package's Automations pillar, on that flow", async () => {

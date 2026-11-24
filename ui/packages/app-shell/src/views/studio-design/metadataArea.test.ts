@@ -14,8 +14,10 @@ import {
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
   areaItemOpensFormEditor,
+  areaItemOpensObjectDesigner,
   areaItemPillarPath,
   areaLocationRedirect,
+  dataPillarRedirect,
   isStudioAllPackagesScope,
   studioMetadataAreaPath,
 } from './metadataArea';
@@ -92,9 +94,8 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
   const open = (type: string, q = '', packageId: string | null = PKG) =>
     areaItemPillarPath({ packageId, type, name: 'n_1', search: search(q) });
 
-  it('object, flow and permission open their pillar with `?surface=`', () => {
+  it('flow and permission open their pillar with `?surface=`', () => {
     const expected: Record<string, string> = {
-      object: 'data',
       flow: 'automations',
       permission: 'access',
     };
@@ -110,7 +111,8 @@ describe('areaItemPillarPath — a pillar type opens its pillar', () => {
 
   it('every other type opens the generic item page', () => {
     // objectstack#36502 — page, dashboard, report and view lost their pillar with Interfaces.
-    for (const type of ['translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
+    // objectstack#36904 — an object opens its designer on its own address.
+    for (const type of ['object', 'translation', 'email_template', 'agent', 'position', 'sharing_rule', 'app', 'page', 'dashboard', 'report', 'view']) {
       expect(open(type), type).toBeNull();
     }
   });
@@ -160,5 +162,38 @@ describe('areaItemOpensFormEditor — a read-only package’s dataset opens its 
     // CONTROL: a type no editor customizes stays on the generic page.
     expect(areaItemOpensFormEditor(at('flow', true))).toBe(false);
     expect(areaItemOpensFormEditor(at('object', true))).toBe(false);
+  });
+});
+
+describe('the object designer on its address, and the retired Data pillar (objectstack#36904)', () => {
+  const at = (q = '', packageId: string | null = PKG, type = 'object') =>
+    areaItemOpensObjectDesigner({ packageId, type, search: new URLSearchParams(q) });
+
+  it("an object opens its designer on a package's leg", () => {
+    expect(at()).toBe(true);
+    expect(at('package=' + PKG + '&tab=hooks')).toBe(true);
+  });
+
+  it('keeps the generic page for the cross-package leg, the environment scope and the draft review', () => {
+    expect(at('', null)).toBe(false);
+    expect(at('scope=environment')).toBe(false);
+    expect(at('review=1')).toBe(false);
+    // CONTROL: another type never opens it.
+    expect(at('', PKG, 'flow')).toBe(false);
+  });
+
+  it('the old object address lands on its designer, keeping `?action=` and dropping `?view=` and `?nav=`', () => {
+    expect(dataPillarRedirect(PKG, '?surface=object%3Aaccount')).toBe(`/studio/${PKG}/metadata/object/account`);
+    expect(dataPillarRedirect(PKG, 'surface=object:account&view=account.all&nav=n1&action=approve')).toBe(
+      `/studio/${PKG}/metadata/object/account?action=approve`,
+    );
+    // A name the URL encodes stays one segment.
+    expect(dataPillarRedirect(PKG, `?surface=${encodeURIComponent('object:a/b')}`)).toBe(`/studio/${PKG}/metadata/object/a%2Fb`);
+  });
+
+  it('the old home and any other surface land on the object list, with the query kept (the draft review link)', () => {
+    expect(dataPillarRedirect(PKG, '')).toBe(`/studio/${PKG}/metadata/object`);
+    expect(dataPillarRedirect(PKG, '?changes=review')).toBe(`/studio/${PKG}/metadata/object?changes=review`);
+    expect(dataPillarRedirect(PKG, '?surface=flow%3Anotify')).toBe(`/studio/${PKG}/metadata/object`);
   });
 });

@@ -162,6 +162,6 @@ describe('the folded list menu leads with Object settings (objectstack#36487)', 
 
     confirm.mockReturnValue(true);
     act(() => entry.onClick());
-    expect(where()).toBe('/studio/com.example.my_base/data?surface=object:account');
+    expect(where()).toBe('/studio/com.example.my_base/metadata/object/account');
   });
 });

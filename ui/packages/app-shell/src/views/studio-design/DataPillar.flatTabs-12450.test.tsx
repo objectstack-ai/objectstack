@@ -1,24 +1,19 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12450 — the Data pillar's flat tab row. The object header's icon
- * buttons this file also pinned retired with objectui#12511; the header's
- * actions are pinned in `DataPillar.headerActions-12511.test.tsx`.
+ * objectui#12450, objectstack#36904 — the object designer's tab row.
  *
- * Decision B of epic objectui#12446 (maintainer, 2026-10-15): seven flat tabs
- * — Records, Form, Validations, Hooks, Actions, API, Settings — when the
- * content column is 1000 px or wider; narrower, the last five fold back into
- * "Advanced ▾". The folded form keeps its own pins in
- * `DataPillar.advancedKeepsName-11794.test.tsx`; this file pins the flat form.
+ * #36513 section 一 (kept by epic objectstack#36890), verbatim: 「记录、字段布局
+ * （或表单）、验证、操作、设置、钩子、API」; narrow widths fold 钩子 and API
+ * first. The item tools follow as tabs (epic decision 8): References,
+ * History, Source. The open tab is in the address (`?tab=`).
  *
  * What a DOM test can and cannot see: happy-dom evaluates no container query,
- * so both forms are in the tree here, exactly as they are in a browser, and
- * which one is DISPLAYED is decided by CSS this environment does not run. The
- * pins therefore read what decides it — the content column is the query
- * container, the five flat tabs carry the class that displays them at the
- * fold width and above, the Advanced trigger carries the class that hides it
- * there, and both classes name `DATA_TABS_FOLD_WIDTH` — and the browser
- * screenshots on the pull request show the two widths rendered.
+ * so every form is in the tree here, exactly as in a browser, and which one is
+ * DISPLAYED is decided by CSS this environment does not run. The pins read
+ * what decides it — the content column is the query container, each flat tab
+ * and each "Advanced ▾" trigger carries the class for its width band, and the
+ * classes name the two widths.
  *
  * The REAL `DataPillar`; the records grid and two panels are stubbed, because
  * only which panel is open is under test, not what it draws.
@@ -72,13 +67,21 @@ import { SurfaceDeepLinkProvider } from './surfaceDeepLinkChannel';
 import {
   DATA_CONTENT_CONTAINER,
   DATA_TAB_FLAT_ONLY,
+  DATA_TAB_FLAT_WIDE_ONLY,
+  DATA_TAB_FOLDED_FIRST_ONLY,
   DATA_TAB_FOLDED_ONLY,
+  DATA_TABS_FOLD_FIRST_WIDTH,
   DATA_TABS_FOLD_WIDTH,
 } from './dataTabsFold';
 import { t } from '../metadata-admin/i18n';
 
-const FLAT_KEYS = ['rules', 'hooks', 'actions', 'api', 'settings'] as const;
-const ROW_NAMES = ['records', 'form', ...FLAT_KEYS].map((k) => t(`engine.studio.data.tab.${k}`, 'en'));
+const FLAT_KEYS = ['rules', 'actions', 'settings'] as const;
+const FOLD_FIRST_KEYS = ['hooks', 'api'] as const;
+// #36513's order: records, field layout, validations, actions, settings, hooks, API.
+const ROW_NAMES = ['records', 'form', 'rules', 'actions', 'settings', 'hooks', 'api'].map((k) =>
+  t(`engine.studio.data.tab.${k}`, 'en'),
+);
+const TOOL_NAMES = ['references', 'history', 'source'].map((k) => t(`engine.studio.itemTabs.${k}`, 'en'));
 const ADVANCED = t('engine.studio.data.tab.advanced', 'en');
 
 afterEach(() => {
@@ -88,9 +91,9 @@ afterEach(() => {
 
 async function renderPillar(props: { readOnly?: boolean } = {}) {
   render(
-    <MemoryRouter initialEntries={['/studio/com.example.showcase/data']}>
+    <MemoryRouter initialEntries={['/studio/com.example.showcase/metadata/object/showcase_account']}>
       <SurfaceDeepLinkProvider>
-        <DataPillar packageId="com.example.showcase" readOnly={props.readOnly} />
+        <DataPillar packageId="com.example.showcase" objectName="showcase_account" readOnly={props.readOnly} />
       </SurfaceDeepLinkProvider>
     </MemoryRouter>,
   );
@@ -109,20 +112,23 @@ function classesOf(el: Element): string[] {
   return (el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean);
 }
 
-describe('the Data pillar’s seven flat tabs (objectui#12450)', () => {
-  it('both class strings name the fold width, so the rule and its constant cannot drift apart', () => {
-    const query = `@min-[${DATA_TABS_FOLD_WIDTH}px]:`;
-    expect(DATA_TABS_FOLD_WIDTH).toBe(1000);
-    expect(DATA_TAB_FLAT_ONLY.split(' ')).toEqual(['hidden', `${query}inline-flex`]);
-    expect(DATA_TAB_FOLDED_ONLY.split(' ')).toEqual([`${query}hidden`]);
+describe('the object designer’s tab row (objectui#12450, objectstack#36904)', () => {
+  it('the class strings name the two widths, so the rule and its constants cannot drift apart', () => {
+    const fold = `@min-[${DATA_TABS_FOLD_WIDTH}px]:`;
+    const first = `@min-[${DATA_TABS_FOLD_FIRST_WIDTH}px]:`;
+    expect([DATA_TABS_FOLD_WIDTH, DATA_TABS_FOLD_FIRST_WIDTH]).toEqual([1000, 1200]);
+    expect(DATA_TAB_FLAT_ONLY.split(' ')).toEqual(['hidden', `${fold}inline-flex`]);
+    expect(DATA_TAB_FLAT_WIDE_ONLY.split(' ')).toEqual(['hidden', `${first}inline-flex`]);
+    expect(DATA_TAB_FOLDED_ONLY.split(' ')).toEqual([`${fold}hidden`]);
+    expect(DATA_TAB_FOLDED_FIRST_ONLY.split(' ')).toEqual(['hidden', `${fold}inline-flex`, `${first}hidden`]);
   });
 
-  it('the tab row holds the seven tabs in the artboard’s order, then the folded trigger', async () => {
+  it('the row holds the seven views in #36513’s order, the two folded triggers, then the item tools', async () => {
     await renderPillar();
-    const row = tabRow();
-    const buttons = within(row).getAllByRole('button');
-    expect(buttons.map((b) => b.textContent)).toEqual([...ROW_NAMES, ADVANCED]);
-    expect(buttons.at(-1)).toBe(screen.getByTestId('data-tabs-advanced'));
+    const buttons = within(tabRow()).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual([...ROW_NAMES, ADVANCED, ADVANCED, ...TOOL_NAMES]);
+    expect(buttons[7]).toBe(screen.getByTestId('data-tabs-advanced-first'));
+    expect(buttons[8]).toBe(screen.getByTestId('data-tabs-advanced'));
   });
 
   it('the content column is the query container, and it holds the tab row it measures for', async () => {
@@ -132,24 +138,31 @@ describe('the Data pillar’s seven flat tabs (objectui#12450)', () => {
     expect(column).toContainElement(tabRow());
   });
 
-  it('the five panels’ flat tabs display only at the fold width and above; the trigger only below it', async () => {
+  it('Hooks and API fold first; Validations, Actions and Settings fold below the fold width', async () => {
     await renderPillar();
-    for (const key of FLAT_KEYS) {
-      const tab = screen.getByTestId(`data-tab-flat-${key}`);
-      for (const cls of DATA_TAB_FLAT_ONLY.split(' ')) expect(classesOf(tab)).toContain(cls);
-      // `cn` merges the tab's own `inline-flex` away: an unconditional
-      // display class left beside `hidden` would show the tab at every width.
-      expect(classesOf(tab)).not.toContain('inline-flex');
+    for (const [keys, cls] of [
+      [FLAT_KEYS, DATA_TAB_FLAT_ONLY],
+      [FOLD_FIRST_KEYS, DATA_TAB_FLAT_WIDE_ONLY],
+    ] as const) {
+      for (const key of keys) {
+        const tab = screen.getByTestId(`data-tab-flat-${key}`);
+        for (const c of cls.split(' ')) expect(classesOf(tab), key).toContain(c);
+        // `cn` merges the tab's own `inline-flex` away: an unconditional
+        // display class left beside `hidden` would show the tab at every width.
+        expect(classesOf(tab), key).not.toContain('inline-flex');
+      }
     }
-    const trigger = screen.getByTestId('data-tabs-advanced');
-    expect(classesOf(trigger)).toContain(DATA_TAB_FOLDED_ONLY);
-    expect(classesOf(trigger)).not.toContain('hidden');
+    for (const c of DATA_TAB_FOLDED_FIRST_ONLY.split(' ')) {
+      expect(classesOf(screen.getByTestId('data-tabs-advanced-first'))).toContain(c);
+    }
+    expect(classesOf(screen.getByTestId('data-tabs-advanced'))).toContain(DATA_TAB_FOLDED_ONLY);
+    expect(classesOf(screen.getByTestId('data-tabs-advanced'))).not.toContain('hidden');
   });
 
-  it('CONTROL: Records and Form are displayed at every width', async () => {
+  it('CONTROL: Records, Field layout and the item tools are displayed at every width', async () => {
     await renderPillar();
     const row = tabRow();
-    for (const name of ROW_NAMES.slice(0, 2)) {
+    for (const name of [...ROW_NAMES.slice(0, 2), ...TOOL_NAMES]) {
       const tab = within(row).getByRole('button', { name });
       expect(classesOf(tab)).toContain('inline-flex');
       expect(classesOf(tab)).not.toContain('hidden');
@@ -165,14 +178,16 @@ describe('the Data pillar’s seven flat tabs (objectui#12450)', () => {
     await userEvent.click(validations);
     await waitFor(() => expect(screen.getByTestId('rules-panel')).toBeInTheDocument());
     expect(validations).toHaveAttribute('aria-pressed', 'true');
-    // The two forms say the same thing: at the narrower width the trigger is
-    // the one on screen, and it shows a power panel is open.
     expect(screen.getByTestId('data-tabs-advanced')).toHaveAttribute('aria-pressed', 'true');
+    // Validations is not one of the two the middle band folds.
+    expect(screen.getByTestId('data-tabs-advanced-first')).toHaveAttribute('aria-pressed', 'false');
+    expect(new URL(window.location.href).searchParams.get('tab')).toBe('validations');
 
     await userEvent.click(screen.getByTestId('data-tab-flat-settings'));
     await waitFor(() => expect(screen.getByTestId('settings-panel')).toBeInTheDocument());
     expect(screen.queryByTestId('rules-panel')).toBeNull();
     expect(validations).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('data-tab-flat-settings')).toHaveAttribute('aria-pressed', 'true');
+    expect(new URL(window.location.href).searchParams.get('tab')).toBe('settings');
   });
 });

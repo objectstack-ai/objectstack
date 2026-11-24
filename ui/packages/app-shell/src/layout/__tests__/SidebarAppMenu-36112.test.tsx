@@ -402,7 +402,7 @@ describe('「Edit app」 in the app menu opens this app in Studio (objectstack#3
     expect(item).toHaveTextContent(/^Edit app$/);
     expect(item!.querySelector('svg.lucide-pencil')).not.toBeNull();
     // The app switcher's target: the object route opens the package's Data tab on that object.
-    expect(item).toHaveAttribute('href', '/studio/com.acme.crm/data?surface=object:crm_lead');
+    expect(item).toHaveAttribute('href', '/studio/com.acme.crm/metadata/object/crm_lead');
     expect(viewInStudio()).toBeNull();
   });
 
@@ -419,7 +419,7 @@ describe('「Edit app」 in the app menu opens this app in Studio (objectstack#3
     expect(item).not.toBeNull();
     expect(item).toHaveTextContent(/^View in Studio$/);
     expect(item!.querySelector('svg.lucide-eye')).not.toBeNull();
-    expect(item).toHaveAttribute('href', '/studio/com.acme.crm/data?surface=object:crm_lead');
+    expect(item).toHaveAttribute('href', '/studio/com.acme.crm/metadata/object/crm_lead');
   });
 
   it('it is drawn with no shell holding the design mode: its gate is Studio\'s, not the mode\'s', async () => {

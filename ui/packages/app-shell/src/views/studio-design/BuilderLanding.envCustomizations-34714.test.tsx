@@ -343,7 +343,7 @@ describe('the panel’s rows and labels (objectstack#34714)', () => {
     const hrefs = (objects?: Record<string, string>) =>
       customizationRowsOf(HOTCRM, read, objects).map((r) => [r.name, r.href]);
     expect(hrefs({ clone_opportunity: 'opportunity' })).toEqual([
-      ['clone_opportunity', '/studio/app.objectstack.hotcrm/data?surface=object%3Aopportunity&action=clone_opportunity'],
+      ['clone_opportunity', '/studio/app.objectstack.hotcrm/metadata/object/opportunity?action=clone_opportunity'],
       ['export_all', '/studio/app.objectstack.hotcrm/metadata/action/export_all'],
     ]);
     // With no object read (none made, or it failed), every action opens its own page.
