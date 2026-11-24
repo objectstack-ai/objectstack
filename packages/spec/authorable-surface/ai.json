@@ -222,6 +222,7 @@
     "ai/KnowledgeChunk:index",
     "ai/KnowledgeChunk:metadata",
     "ai/KnowledgeDocument:content",
+    "ai/KnowledgeDocument:docHash",
     "ai/KnowledgeDocument:id",
     "ai/KnowledgeDocument:metadata",
     "ai/KnowledgeDocument:permissions",

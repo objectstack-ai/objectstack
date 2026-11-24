@@ -60,6 +60,7 @@ const result = KnowledgeChunkSchema.parse(data);
 | **title** | `string` | optional |  |
 | **metadata** | `Record<string, any>` | optional (default: `{}`) |  |
 | **permissions** | `string[]` | optional |  |
+| **docHash** | `string` | optional | Service-computed hash of the assembled document (content, title, metadata); stored and returned as stored by the adapter |
 
 
 ---
