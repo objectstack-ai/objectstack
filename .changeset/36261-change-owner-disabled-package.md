@@ -2,6 +2,7 @@
 '@objectstack/core': patch
 '@objectstack/metadata-protocol': patch
 '@objectstack/spec': patch
+'@objectstack/rest': patch
 ---
 
 fix(core)!: Change Owner refuses an object of a disabled package with the data door's `404 OBJECT_PACKAGE_DISABLED`
