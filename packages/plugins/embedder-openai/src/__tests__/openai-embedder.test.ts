@@ -6,6 +6,7 @@ import {
   createOpenAIEmbedder,
   OPENAI_COMPATIBLE_PRESETS,
 } from '../index';
+import { estimateTokens } from '@objectstack/spec/shared';
 
 function mockFetch(body: unknown, status = 200): typeof fetch {
   return vi.fn(async () =>
@@ -217,8 +218,105 @@ describe('OpenAIEmbedder batching (per-request input cap)', () => {
 
       // A known model, or an explicit override, stays silent.
       new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-3-small', fetch: f as unknown as typeof fetch });
-      new OpenAIEmbedder({ apiKey: 'k', model: 'my-gateway-model', maxBatchSize: 50, fetch: f as unknown as typeof fetch });
+      new OpenAIEmbedder({
+        apiKey: 'k',
+        model: 'my-gateway-model',
+        maxBatchSize: 50,
+        maxInputTokens: 4096,
+        fetch: f as unknown as typeof fetch,
+      });
       expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe('OpenAIEmbedder input limit (refused, not truncated)', () => {
+  function okFetch(): ReturnType<typeof vi.fn> {
+    return vi.fn(async (_url: string, init: RequestInit) => {
+      const { input } = JSON.parse(init.body as string) as { input: string[] };
+      return new Response(JSON.stringify({ data: input.map(() => ({ embedding: [1] })) }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+  }
+  /** `n` CJK characters: estimateTokens = ceil(n × 1.5 × 1.1). */
+  const cjk = (n: number) => '数'.repeat(n);
+
+  it('refuses an over-limit input before sending anything, naming input, model, estimate and limit', async () => {
+    const f = okFetch();
+    // BAAI/bge-large-zh-v1.5 is documented at 512 tokens per input.
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-large-zh-v1.5', fetch: f as unknown as typeof fetch });
+    const over = cjk(311); // 311 × 1.5 × 1.1 = 513.15 → 514
+    expect(estimateTokens(over)).toBe(514);
+    const err = await e.embed(['short', over]).then(
+      () => undefined,
+      (x: unknown) => x as Error,
+    );
+    expect(err).toBeInstanceOf(Error);
+    expect(err?.message).toContain('input 1 (0-based)');
+    expect(err?.message).toContain("'BAAI/bge-large-zh-v1.5'");
+    expect(err?.message).toContain('estimated at 514 tokens');
+    expect(err?.message).toContain('512-token input limit');
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('sends an under-limit input unchanged', async () => {
+    const f = okFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', model: 'BAAI/bge-large-zh-v1.5', fetch: f as unknown as typeof fetch });
+    const atLimit = cjk(310); // 310 × 1.5 × 1.1 = 511.5 → 512, exactly the limit
+    expect(estimateTokens(atLimit)).toBe(512);
+    await e.embed([atLimit]);
+    const sent = JSON.parse((f.mock.calls[0][1] as RequestInit).body as string) as { input: string[] };
+    expect(sent.input).toEqual([atLimit]);
+  });
+
+  it('applies each known model its documented limit', async () => {
+    const f = okFetch();
+    const big = cjk(1300); // 1300 × 1.5 × 1.1 = 2145 → over 2048, under 3072 and 8192
+    const v2 = new OpenAIEmbedder({ apiKey: 'k', model: 'text-embedding-v2', fetch: f as unknown as typeof fetch });
+    await expect(v2.embed([big])).rejects.toThrow(/2048-token input limit/);
+    const zhipu = new OpenAIEmbedder({ apiKey: 'k', model: 'embedding-3', fetch: f as unknown as typeof fetch });
+    await zhipu.embed([big]);
+    const openai = new OpenAIEmbedder({ apiKey: 'k', fetch: f as unknown as typeof fetch });
+    await openai.embed([big]);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('honours an explicit maxInputTokens over the known-model limit', async () => {
+    const f = okFetch();
+    const e = new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: 10, fetch: f as unknown as typeof fetch });
+    await expect(e.embed([cjk(7)])).rejects.toThrow(/estimated at 12 tokens, over the 10-token input limit/);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('refuses a maxInputTokens that is not a positive integer', () => {
+    for (const bad of [0, -1, 1.5, Number.NaN]) {
+      expect(() => new OpenAIEmbedder({ apiKey: 'k', maxInputTokens: bad })).toThrow(
+        /maxInputTokens must be a positive integer/,
+      );
+    }
+  });
+
+  it('sets no limit for an unknown model, with one warning per instance', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const f = okFetch();
+      const e = new OpenAIEmbedder({
+        apiKey: 'k',
+        model: 'my-gateway-model',
+        maxBatchSize: 50,
+        fetch: f as unknown as typeof fetch,
+      });
+      const huge = cjk(20000);
+      await e.embed([huge]);
+      await e.embed([huge]);
+      expect(f).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain("'my-gateway-model'");
+      expect(String(warn.mock.calls[0][0])).toContain('maxInputTokens');
     } finally {
       warn.mockRestore();
     }
