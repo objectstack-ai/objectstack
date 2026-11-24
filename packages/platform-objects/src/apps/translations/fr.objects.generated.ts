@@ -4627,5 +4627,90 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "Tâche",
+    pluralLabel: "Tâches",
+    description: "Choses à faire, avec un responsable et une échéance.",
+    fields: {
+      title: {
+        label: "Titre"
+      },
+      description: {
+        label: "Description"
+      },
+      status: {
+        label: "Statut",
+        options: {
+          todo: "À faire",
+          in_progress: "En cours",
+          done: "Terminée"
+        }
+      },
+      due_at: {
+        label: "Échéance"
+      },
+      assignee_id: {
+        label: "Responsable"
+      },
+      completed_at: {
+        label: "Terminée le",
+        help: "Renseigné par la plateforme quand le statut passe à Terminée, et effacé quand il ne l'est plus."
+      },
+      owner_id: {
+        label: "Propriétaire"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "Qui me sont assignées",
+        emptyState: {
+          title: "Aucune tâche ne vous est assignée",
+          message: "Les tâches ouvertes qui vous sont assignées apparaissent ici."
+        }
+      },
+      created_by_me: {
+        label: "Créées par moi",
+        emptyState: {
+          title: "Aucune tâche pour l'instant",
+          message: "Les tâches que vous créez apparaissent ici."
+        }
+      },
+      all: {
+        label: "Toutes les tâches"
+      }
+    }
+  },
+  sys_note: {
+    label: "Note",
+    pluralLabel: "Notes",
+    description: "Notes : un titre et un corps mis en forme.",
+    fields: {
+      title: {
+        label: "Titre"
+      },
+      body: {
+        label: "Corps"
+      },
+      heading: {
+        label: "Intitulé",
+        help: "Le titre, ou la première ligne du corps quand le titre est vide. Tenu à jour par la plateforme."
+      },
+      owner_id: {
+        label: "Propriétaire"
+      }
+    },
+    _views: {
+      mine: {
+        label: "Mes notes",
+        emptyState: {
+          title: "Aucune note pour l'instant",
+          message: "Les notes que vous écrivez apparaissent ici."
+        }
+      },
+      all: {
+        label: "Toutes les notes"
+      }
+    }
   }
 };
