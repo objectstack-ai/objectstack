@@ -123,6 +123,15 @@ describe('planSlices: balance by weight, not by file count', () => {
     for (let s = 1; s <= 3; s++) expect(heavy.filter((_, i) => slices[i] === s)).toHaveLength(2);
   });
 
+  it('places the heaviest file first even when it comes last in path order', () => {
+    // Placed in path order, six 1 s files would split 3/3 and the 6 s file
+    // would land on top of one half (9 against 3); placed heaviest first, it
+    // takes a slice and the six fill the other (6 against 6).
+    const list = [...Array.from({ length: 6 }, (_, i) => entry(`test/a${i}.test.ts`, 1)), entry('test/z.test.ts', 6)];
+    const slices = planSlices(list, 2, 1);
+    expect(totals(list, slices, 2)).toEqual([6, 6]);
+  });
+
   it('keeps every slice within one file of the mean when no single file dominates (LPT bound)', () => {
     const list = Array.from({ length: 200 }, (_, i) => entry(`test/f${i}.test.ts`, 1 + ((i * 31) % 50)));
     const slices = planSlices(list, 3, 1);
