@@ -184,7 +184,7 @@ describe('defineStack — the rules a sourced mapping needs the stack for (build
       { source: 'id', target: 'external_id' },
       { source: 'updated_at', target: 'source_updated_at' },
     ],
-    datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01T00:00:00Z' }, ...ds },
+    datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01T00:00:00Z' }, full: true, ...ds },
     ...extra,
   });
   const stack = (parts: { source?: unknown; target?: unknown; mapping?: unknown } = {}) => ({
