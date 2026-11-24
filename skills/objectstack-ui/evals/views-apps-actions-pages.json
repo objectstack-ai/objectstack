@@ -230,6 +230,16 @@
         "must_contain": ["perRecord", "bulkActions: [", "ctx.record"],
         "must_not_contain": ["succeeded:", "{ succeeded", "{ failed"]
       }
+    },
+    {
+      "id": 24,
+      "prompt": "`crm_opportunity` has five record actions, all placed at `record_header`: `mark_won`, `mark_lost`, `clone`, `share`, `archive`. The team wants Mark Won, Mark Lost, Clone and Share as header buttons in that order, Archive under More, and on the list page Export as a button after the `mass_assign` toolbar action. Write the metadata that does this.",
+      "expected_output": "One key on the object, no page file and no edit to any action: `actionLayout: { record: { pinned: ['mark_won', 'mark_lost', 'clone'], more: ['share', 'archive'] }, list: { pinned: ['mass_assign', '$export'] } }`. The answer says an arm pins at most three buttons, so the fourth requested button, Share, leads `more` instead (a fourth name in `pinned` is refused). The `record` arm holds for the record page, the side preview and the phone action bar alike. `$export` is the list page's built-in, named only in the `list` arm's `pinned`; `mass_assign` must be placed at `list_toolbar` or `os validate` refuses the name. Not four names in `pinned`, not an `order` renumbering on each action (shared by every surface, and it names no buttons), not `$export` in `more`, and not a `definePage` header listing action ids.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["actionLayout", "pinned", "more", "$export"],
+        "must_not_contain": ["'clone', 'share']", "definePage"]
+      }
     }
   ]
 }

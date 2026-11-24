@@ -23,12 +23,19 @@
  *    expression check reports an error, hold the Save with a named clause.
  *  - Each save is pinned to the draft version the list read served
  *    (objectui#11773); a new hook's first write asserts no draft row.
+ *  - objectstack#36726 — and each Save's publish to the published hook the
+ *    load read (`/layers`' `overlayVersion`, at the package the publish
+ *    writes): a hook another editor published since is refused and asked
+ *    about (reload, overwrite, keep editing), never replaced in silence. A
+ *    published hook pinned so is buffered from that same answer, so the pin
+ *    always describes the body it publishes. A new hook's publish asserts no
+ *    published row.
  */
 
 import * as React from 'react';
-import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
+import { authoredPublished, extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
-import { readDraftForSave, useDraftSaveGuard, type DraftPin } from '../metadata-admin/DraftConflictDialog.js';
+import { publishedPinOf, readDraftForSave, useDraftSaveGuard, type DraftPin } from '../metadata-admin/DraftConflictDialog.js';
 import type { HookTargetScope } from '../metadata-admin/inspectors/HookDefaultInspector.js';
 import { t, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { loadPackageSurfaces } from './packageSurfaces.js';
@@ -141,10 +148,15 @@ export function useObjectHooksBuffer({
   const [saving, setSaving] = React.useState(false);
   const [nonce, setNonce] = React.useState(0);
   const reloadHooks = React.useCallback(() => setNonce((n) => n + 1), []);
-  const { save: saveHookDraft, recordRead: recordHookRead, forget: forgetHookVersion, dialog } = useDraftSaveGuard(
-    client,
-    reloadHooks,
-  );
+  const {
+    save: saveHookDraft,
+    recordRead: recordHookRead,
+    forget: forgetHookVersion,
+    // objectstack#36726 — the published hook each buffer was loaded at, for the Save's publish.
+    recordPublished: recordHookPublished,
+    publish: publishHook,
+    dialog,
+  } = useDraftSaveGuard(client, reloadHooks);
   React.useEffect(() => {
     forgetHookVersion();
   }, [publishNonce, forgetHookVersion]);
@@ -265,14 +277,41 @@ export function useObjectHooksBuffer({
             if (read.answer !== null) pending.add(n);
           }
         });
+        // objectstack#36726 — each listed hook's layers at the package its
+        // publish writes: the published version its Save's publish is pinned
+        // to. A published hook with no pending draft is buffered from that same
+        // answer, so the pin describes the body; an answer that pins nothing
+        // (a server that serves no version, a read that failed) leaves the
+        // listed body and an unpinned publish, as before.
+        const listedNames = [...byName.keys()];
+        const layers = await Promise.all(
+          listedNames.map((n) =>
+            Promise.resolve()
+              .then(() => client.layered<Record<string, unknown>>('hook', n, { packageId }))
+              .catch(() => null),
+          ),
+        );
+        if (cancelled) return;
+        const publishedPins = new Map<string, DraftPin | null>();
+        listedNames.forEach((n, i) => {
+          const pin = publishedPinOf(layers[i]);
+          publishedPins.set(n, pin);
+          if (!pin || pending.has(n) || refused.has(n)) return;
+          const body = authoredPublished('hook', layers[i]) as HookItem;
+          if (body.name !== undefined && targetsObject(body, objectName)) byName.set(n, body);
+          // The layers say the hook no longer fires here: its publish is not this buffer's to pin.
+          else publishedPins.set(n, null);
+        });
         setListed([...byName.values()]);
         setRefusedHooks(refused);
         setDrafted(pending);
-        // A hook whose buffer holds an unsent edit keeps the pin that edit was built on.
+        // A hook whose buffer holds an unsent edit keeps the pins that edit was built on.
         const open = bufferRef.current;
         for (const [n, pin] of pins) {
           if (publishNonceRef.current !== publishAtStart) break;
-          if (!(open.dirty && open.hook === n)) recordHookRead('hook', n, packageId, pin);
+          if (open.dirty && open.hook === n) continue;
+          recordHookRead('hook', n, packageId, pin);
+          recordHookPublished('hook', n, packageId, publishedPins.get(n) ?? null);
         }
       } catch (e) {
         if (!cancelled) setError(formatMetadataError(e));
@@ -283,7 +322,7 @@ export function useObjectHooksBuffer({
     return () => {
       cancelled = true;
     };
-  }, [client, packageId, objectName, nonce, recordHookRead, live]);
+  }, [client, packageId, objectName, nonce, recordHookRead, recordHookPublished, live]);
 
   // Load the selected hook into the buffer: on a selection change and when the
   // list changes, except over an unsent edit of that same hook.
@@ -362,7 +401,15 @@ export function useObjectHooksBuffer({
         setEdited(false);
         return { kind: 'declined' };
       }
-      const outcome = await publishSavedItem(client, { type: 'hook', name, packageId }, hadDraft);
+      // objectstack#36726 — a new hook's publish asserts no published row of its name.
+      if (isNew) recordHookPublished('hook', name, packageId, { ifNoneMatch: '*' });
+      const outcome = await publishSavedItem(client, { type: 'hook', name, packageId }, hadDraft, publishHook);
+      // The published hook moved and the author chose to reload: the list re-read installs it.
+      if (!outcome.ok && 'reloaded' in outcome) {
+        if (isNew) setCreated(null);
+        setEdited(false);
+        return { kind: 'declined' };
+      }
       if (!outcome.ok) {
         if (outcome.draftDiscarded) {
           recordHookRead('hook', name, packageId, { ifNoneMatch: '*' });
@@ -403,7 +450,7 @@ export function useObjectHooksBuffer({
     } finally {
       setSaving(false);
     }
-  }, [client, draft, draftFor, created, drafted, packageId, objectName, saveHookDraft, recordHookRead]);
+  }, [client, draft, draftFor, created, drafted, packageId, objectName, saveHookDraft, recordHookRead, recordHookPublished, publishHook]);
 
   const cancel = React.useCallback(() => {
     setError(null);
