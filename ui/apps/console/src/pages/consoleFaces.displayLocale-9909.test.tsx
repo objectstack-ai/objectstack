@@ -101,7 +101,10 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 vi.mock('@object-ui/auth', async (importOriginal) => {
-  const authFetch = async () => new Response('{}', { status: 200 });
+  // A case that stubs the wire (the audit log's ledger read, which goes through
+  // the authenticated fetch) is answered by its stub; every other read gets `{}`.
+  const authFetch = async (input: RequestInfo | URL, init?: RequestInit) =>
+    vi.isMockFunction(globalThis.fetch) ? globalThis.fetch(input, init) : new Response('{}', { status: 200 });
   return {
     ...(await importOriginal<Record<string, unknown>>()),
     useAuth: () => AUTH,
