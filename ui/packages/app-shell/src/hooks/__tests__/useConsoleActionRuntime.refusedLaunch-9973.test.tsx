@@ -154,7 +154,9 @@ describe('objectui#11092 — a paused list-action launch names the flow by its s
       screen: { nodeId: 'confirm', title: 'Confirm', fields: [] },
     });
 
-    expect(result).toEqual({ success: true, silent: true, handedOff: true });
+    // The pause also rides on the result (objectstack#36931), for a caller
+    // that counts outcomes; the runner below is still this launch's surface.
+    expect(result).toEqual({ success: true, silent: true, handedOff: true, paused: { runId: 'run-1' } });
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Confirm' })).toBeTruthy();
     expect(within(dialog).getByText('Duplicate Screening')).toBeTruthy();
