@@ -62,12 +62,12 @@ function stubActions(): void {
     vi.fn(async (url: string) =>
       /\/approvals\/requests\/req_1\/actions$/.test(String(url))
         ? ({
-            ok: true,
+            headers: new Headers(), ok: true,
             json: async () => ({
               data: [{ id: 'a1', request_id: 'req_1', action: 'approve', actor_id: 'u2', actor_name: 'Wang Fang', created_at: STORED }],
             }),
           } as unknown as Response)
-        : ({ ok: false, status: 404, json: async () => ({}) } as unknown as Response),
+        : ({ headers: new Headers(), ok: false, status: 404, json: async () => ({}) } as unknown as Response),
     ),
   );
 }

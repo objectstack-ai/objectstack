@@ -49,7 +49,7 @@ const DRAFT_TICKET = {
 };
 
 function ok(body: unknown) {
-  return { ok: true, status: 200, json: async () => body };
+  return { headers: new Headers(), ok: true, status: 200, json: async () => body };
 }
 
 const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -57,7 +57,7 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
   if (url.includes('/_drafts')) return ok({ drafts: DRAFT_ROWS });
   if (/\/meta\/object(\?|$)/.test(url)) return ok([{ name: 'st_ticket' }]);
   if (url.includes('/meta/object/st_ticket')) return ok(url.includes('state=draft') ? DRAFT_TICKET : PUBLISHED_TICKET);
-  return { ok: false, status: 404, json: async () => ({}) };
+  return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
 });
 
 const find = vi.fn(async () => ({ data: [], total: 3 }));

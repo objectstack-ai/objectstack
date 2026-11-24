@@ -111,7 +111,7 @@ const DRAFT_TICKET = {
 function mockRoutes() {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
     if (url.includes('/_drafts')) {
       return ok([{ type: 'object', name: 'ticket', packageId: 'com.x' }]);
     }
@@ -124,7 +124,7 @@ function mockRoutes() {
     if (/\/meta\/object(\?|$)/.test(url)) {
       return ok([{ name: 'ticket' }]);
     }
-    return { ok: false, status: 404, json: async () => ({}) };
+    return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
   }) as unknown as typeof fetch;
 }
 
@@ -192,7 +192,7 @@ function mockRoutesRecording(
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     urls.push(url);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
     if (url.includes('/_drafts')) {
       return ok(drafts.map((d) => ({ packageId: 'com.x', ...d })));
     }

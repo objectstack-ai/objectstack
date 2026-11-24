@@ -142,19 +142,19 @@ function stubApprovalsApi(row: Record<string, unknown> | null, listStatus = 200)
   approvalsFetch = vi.fn(async (url: string) => {
     const u = String(url);
     if (u.includes(`/approvals/requests/${REQUEST_ID}/actions`)) {
-      return { ok: true, json: async () => ({ data: [] }) } as any;
+      return { headers: new Headers(), ok: true, json: async () => ({ data: [] }) } as any;
     }
     if (u.endsWith(`/approvals/requests/${REQUEST_ID}`)) {
       // `getRequest` — the read that attaches the `viewer` block.
-      return { ok: true, json: async () => row } as any;
+      return { headers: new Headers(), ok: true, json: async () => row } as any;
     }
     if (u.includes('/approvals/requests?object=')) {
       if (listStatus !== 200) {
-        return { ok: false, status: listStatus, json: async () => ({ code: 'NOT_FOUND' }) } as any;
+        return { headers: new Headers(), ok: false, status: listStatus, json: async () => ({ code: 'NOT_FOUND' }) } as any;
       }
-      return { ok: true, json: async () => ({ data: row ? [row] : [] }) } as any;
+      return { headers: new Headers(), ok: true, json: async () => ({ data: row ? [row] : [] }) } as any;
     }
-    return { ok: true, json: async () => ({ data: [] }) } as any;
+    return { headers: new Headers(), ok: true, json: async () => ({ data: [] }) } as any;
   });
   vi.stubGlobal('fetch', approvalsFetch);
 }

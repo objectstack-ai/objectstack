@@ -130,13 +130,13 @@ function stubFetch() {
   const dataCalls: string[] = [];
   const fn = vi.fn(async (url: string) => {
     if (url.startsWith('/api/v1/meta/object/')) {
-      return { json: async () => ({ item: { name: OBJECT, fields: OBJECT_FIELDS } }) } as any;
+      return { headers: new Headers(), json: async () => ({ item: { name: OBJECT, fields: OBJECT_FIELDS } }) } as any;
     }
     if (url.startsWith('/api/v1/data/')) {
       dataCalls.push(url);
-      return { json: async () => ({ records: [] }) } as any;
+      return { headers: new Headers(), json: async () => ({ records: [] }) } as any;
     }
-    return { json: async () => ({}) } as any;
+    return { headers: new Headers(), json: async () => ({}) } as any;
   });
   vi.stubGlobal('fetch', fn);
   return { fn, dataCalls };

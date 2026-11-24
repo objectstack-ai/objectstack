@@ -106,7 +106,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   fetchMock = vi.fn(async (url: string) => {
     if (String(url).endsWith('/api/v1/packages')) {
-      return { ok: true, status: 200, json: async () => PACKAGES_PAYLOAD };
+      return { headers: new Headers(), ok: true, status: 200, json: async () => PACKAGES_PAYLOAD };
     }
     throw new Error(`unexpected request: ${url}`);
   });

@@ -151,9 +151,9 @@ function stubApi(rows: StubAction[], opts: StubOptions = {}) {
     vi.fn(async (url: string) => {
       if (/\/approvals\/requests\/[^/]+\/actions$/.test(String(url))) {
         if (opts.withholdActions) return new Promise<never>(() => {});
-        return { ok: true, json: async () => ({ data: rows }) } as any;
+        return { headers: new Headers(), ok: true, json: async () => ({ data: rows }) } as any;
       }
-      return { ok: false, status: 404, json: async () => ({}) } as any;
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) } as any;
     }),
   );
 }
