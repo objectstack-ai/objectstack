@@ -527,6 +527,7 @@ describe('a package switch: Automations and Data open nothing of the previous pa
       <MemoryRouter initialEntries={[`/studio/${PKG}/${tab}`]}>
         <PackageDoor to={`/studio/${PKG_B}/${tab}`} />
         <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>
       </MemoryRouter>

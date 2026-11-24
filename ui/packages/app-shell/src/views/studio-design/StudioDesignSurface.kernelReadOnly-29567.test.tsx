@@ -197,6 +197,7 @@ function renderAt(packageId: string) {
   return render(
     <MemoryRouter initialEntries={[`/studio/${packageId}/data`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

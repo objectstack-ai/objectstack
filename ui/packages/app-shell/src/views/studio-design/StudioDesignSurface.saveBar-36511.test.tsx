@@ -132,6 +132,7 @@ async function mountAndEdit(): Promise<HTMLElement> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

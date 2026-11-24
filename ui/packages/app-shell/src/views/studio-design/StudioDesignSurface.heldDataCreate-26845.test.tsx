@@ -162,6 +162,7 @@ async function openTask(): Promise<void> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/data`]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,

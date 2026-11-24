@@ -157,6 +157,7 @@ async function publishAt(path: string, expectPosts: number): Promise<void> {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -312,6 +313,7 @@ describe('a publish that put an app or object live points the author to Access (
     render(
       <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
         <Routes>
+          <Route path="/studio/:packageId/metadata/*" element={<><StudioDesignSurface area="metadata" /><LocationProbe /></>} />
           <Route path="/studio/:packageId/:tab" element={<><StudioDesignSurface /><LocationProbe /></>} />
         </Routes>
       </MemoryRouter>,

@@ -1501,9 +1501,14 @@ export function DataPillar({
   // which drops every pending draft of the package, the author's own too; the
   // confirm says so. There is no per-turn undo.
   const [discardingDrafts, setDiscardingDrafts] = React.useState(false);
+  // objectstack#36904 — what the discard refused, kept apart from `error`:
+  // the discard re-reads the object, and a load clears `error` as it starts,
+  // so the refusal set here was wiped by the very read it asked for.
+  const [discardRefusal, setDiscardRefusal] = React.useState<StudioRefusal | null>(null);
   const discardAllDrafts = React.useCallback(async () => {
     if (!adapter || !window.confirm(t('engine.studio.copilotChanges.discardConfirm', locale))) return;
     setDiscardingDrafts(true);
+    setDiscardRefusal(null);
     try {
       const result = await adapter.getClient().packages.discardDrafts(packageId);
       if (!result.success || result.failedCount > 0) {
@@ -1514,13 +1519,13 @@ export function DataPillar({
         const items = [...new Set(result.failed.map(labelOf))].join(
           t('engine.studio.copilotChanges.itemSeparator', locale),
         );
-        setError({
+        setDiscardRefusal({
           message: tFormat('engine.studio.copilotChanges.discardFailed', locale, { items }),
           detail: result.failed.map((f) => `${f.type}/${f.name}: ${f.error}`).join('\n') || undefined,
         });
       }
     } catch (e) {
-      setError(plainRefusal(e));
+      setDiscardRefusal(plainRefusal(e));
     } finally {
       setDiscardingDrafts(false);
       reloadObjDraft();
@@ -2102,9 +2107,9 @@ export function DataPillar({
             />
           ) : (
             <>
-              {error && (
+              {(error ?? discardRefusal) && (
                 <StudioRefusalStrip
-                  refusal={error}
+                  refusal={(error ?? discardRefusal)!}
                   locale={locale}
                   // objectui#11785 — "Show me" opens the named field's inspector,
                   // or (objectstack#26736) the named action, and (objectstack#26730)

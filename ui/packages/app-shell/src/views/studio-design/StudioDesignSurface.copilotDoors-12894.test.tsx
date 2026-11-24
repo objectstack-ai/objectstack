@@ -251,6 +251,7 @@ function renderStudio(entry = `/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_
     <MemoryRouter initialEntries={[entry]}>
       <LocationProbe />
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
@@ -319,6 +320,7 @@ describe('the Studio copilot\'s composer (objectui#12725 Target item 4)', () => 
       <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
         <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_borrowing`]}>
           <Routes>
+            <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
             <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
           </Routes>
         </MemoryRouter>

@@ -125,6 +125,7 @@ async function renderSurface() {
   render(
     <MemoryRouter initialEntries={['/studio/app.a/interfaces']}>
       <Routes>
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>
     </MemoryRouter>,
