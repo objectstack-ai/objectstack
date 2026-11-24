@@ -61,11 +61,11 @@ Read at `254e396a29`:
 - **Search returns passages.** `search` returns chunk-level hits, filtered by the caller's permissions and cut at `topK` (#36993 covers the missing refill). Several passages of one record take several slots.
 - **The adapter contract** is `upsert`, `search`, `delete` and an optional `healthCheck` (`packages/spec/src/contracts/knowledge-adapter.ts#IKnowledgeAdapter`).
 - **A source is a code registration, not metadata.** The note on `packages/spec/src/ai/knowledge-source.zod.ts#KnowledgeSourceSchema` reads "the shape of a **runtime registration**, ⛔ not a governed metadata type", while `content/docs/protocol/knowledge.mdx` says a source "is stored as metadata (versioned, environment-scoped) just like a view or a flow". The schema note is the true one: no knowledge entry exists in `packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY`.
-- **Some declared keys have no reader.** No file under `packages/services/service-knowledge/src`, `packages/plugins/knowledge-memory/src` or `packages/plugins/knowledge-ragflow/src` (tests aside) reads a source's `embedding`, `vectorStore` or `refresh.cron`, nor the `file` kind's `prefix` and `mimeTypes`, nor the `http` kind's `urls` and `userAgent`. For a `file` or `http` source `reindexSource` answers `ok: false` and tells the caller to trigger ingestion "through the adapter directly".
+- **Some declared keys have no reader.** No file under `packages/services/service-knowledge/src`, `packages/plugins/knowledge-memory/src` or `packages/plugins/knowledge-ragflow/src` (tests aside) reads a source's `embedding`, `vectorStore` or `refresh.cron`, nor the `file` kind's `prefix` and `mimeTypes`, nor the `http` kind's `urls` and `userAgent`. For a `file` or `http` source `reindexSource` answers `ok: false` and tells the caller to trigger ingestion through the adapter.
 
 ### The consumer that exists
 
-#4606 and #4672 both waited for "a real object source". One exists. The BrightRule application mounts `KnowledgeServicePlugin` with one object source over its policy clauses and a vector adapter; the body of #36650 describes it and its evaluation over the MCP door. That card's own defect, no knowledge tool on the MCP door, is fixed by PR #36823. What it leaves is the application's own vector code and derived mirror, which the epic names as the thing the platform takes over.
+The work written under #4606 waited for a real object source: the knowledge plugin's comments say "until a real object source justifies" the addition, and the ruling on #4672 says 「待真实 object 源出现」. One exists. The BrightRule application mounts `KnowledgeServicePlugin` with one object source over its policy clauses and a vector adapter; the body of #36650 describes it and its evaluation over the MCP door. That card's own defect, no knowledge tool on the MCP door, is fixed by PR #36823. What it leaves is the application's own vector code and derived mirror, which the epic names as the thing the platform takes over.
 
 ### What cloud ADR-0119 requires of open code
 
@@ -262,7 +262,7 @@ The epic holds the contract shut until this record merges ("No new adapter-contr
 |:--|:--|:--|:--|
 | 1 | **Enumerate**: a paged listing of the documents an index holds for a source, with their record ids | to find documents whose record is gone or no longer matches | row 2 (the reindex purge); row 15 (the daily reconcile) reads it next |
 | 2 | **Drop**: remove a source's whole index, or one generation of it | a removed source; a superseded generation | row 2; row 8 for a generation |
-| 3 | **Capabilities**: the adapter states which of these additions it supports | so the service refuses a source by name when its adapter lacks what the source needs, and never degrades silently | row 2, with the contract test suite |
+| 3 | **Capabilities**: the adapter states which of these additions it supports | so the service refuses a source by name when its adapter lacks what the source needs, and never degrades silently | row 2, with the contract test suite. #36990's rule names "capabilities" among the members that wait for this record; placing it with row 2 is this record's reading, because the purge is the first thing an adapter may lack |
 | 4 | **Chunk channel**: the write path carries the platform's passages (`packages/spec/src/ai/knowledge-document.zod.ts#KnowledgeChunkSchema`) instead of whole documents for the adapter to split | structural split is the platform's (K1) | row 6 |
 | 5 | **Fingerprint and generation**: the adapter is told the generation on write and on search, and stores and reports its fingerprint | K7 | row 8 |
 | 6 | **Organization filter**: a typed organization constraint on write and on search | one store holds several organizations' documents with no cross-read | row 8 |
@@ -327,7 +327,7 @@ The children are the epic's. ⛔ The session that wrote this record files none o
 | 8 | `knowledge-pgvector` | K7; K8 items 5 and 6 |
 | 9 | the open runtime registers the knowledge service when a source exists | point 2; the default shape of #33933 |
 | 10 | record-level return (`granularity`, `groupBy`) | K1 (record-level return) |
-| 3 | the `knowledge_source` type with its loader | K4, K5, K6; points 1, 2 and 4 must be ruled first |
+| 3 | the `knowledge_source` type with its loader | K4, K5, K6; points 1 and 4 as merged or as struck; point 2 must be ruled before it |
 | 4, 5, 5b | lint and `os validate` checks; the Studio form; the skill and the MCP authoring schema | K4's reference checks; K6 item 6 |
 | 7 | `knowledge-turso` moves here and takes the shared splitter | cloud ADR-0119 D5; K1; K7 |
 | 11, 12 | the scope filter; the tool's new arguments | K8 item 7; K9 rule 2 |
