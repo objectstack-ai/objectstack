@@ -25,6 +25,9 @@ import '@testing-library/jest-dom';
 import { renderComponent } from './test-utils';
 // Registers the renderers at module scope (objectui#3010/#3021).
 import '../renderers';
+// `react-page` reaches a dynamic `import('@object-ui/react-runtime')`: pay its load
+// at collection, never inside a case's clocked window (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 const columns = [
   { header: 'Name', accessorKey: 'name' },
