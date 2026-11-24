@@ -120,26 +120,6 @@ describe('KnowledgeRagflowAdapter', () => {
     expect(last.init.headers.authorization).toBe('Bearer k');
   });
 
-  it('search serves only chunks of the searched source when two sources share one dataset', async () => {
-    // Retrieval answers the whole dataset. A chunk stamped with another
-    // source's id is that source's passage and is never served as this one;
-    // an unstamped chunk (RAGFlow's own ingestion) stays this source's.
-    const { fetch } = fakeFetch(() => ({
-      code: 0,
-      data: {
-        chunks: [
-          { id: 'own', content: 'mine', similarity: 0.9, metadata: { objectstack_doc_id: 'docs:r1', objectstack_source_id: 'docs' } },
-          { id: 'foreign', content: 'theirs', similarity: 0.95, metadata: { objectstack_doc_id: 'hr:r9', objectstack_source_id: 'hr_notes', objectstack_record_id: 'r9' } },
-          { id: 'ingested', content: 'page', similarity: 0.5, metadata: {} },
-        ],
-      },
-    }));
-    const a = new KnowledgeRagflowAdapter({ endpoint: 'http://r', apiKey: 'k', fetch });
-    const hits = await a.search('q', { source, topK: 5 });
-    expect(hits.map((h) => h.chunkId)).toEqual(['own', 'ingested']);
-    expect(hits.every((h) => h.sourceId === 'docs')).toBe(true);
-  });
-
   it('search honours rerankModel + similarityThreshold + filter', async () => {
     const { fetch, calls } = fakeFetch(() => ({ code: 0, data: { chunks: [] } }));
     const a = new KnowledgeRagflowAdapter({ endpoint: 'http://r', apiKey: 'k', fetch });

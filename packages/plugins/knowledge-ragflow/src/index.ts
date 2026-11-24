@@ -165,17 +165,7 @@ export class KnowledgeRagflowAdapter implements IKnowledgeAdapter {
       body: JSON.stringify(body),
     });
     const data = (res?.data ?? {}) as { chunks?: RagflowChunkHit[] };
-    // A dataset can hold the chunks of more than one source (two sources
-    // configured with one `datasetId`), and retrieval answers the whole
-    // dataset. Every chunk `upsert` writes is stamped with its source's id, so
-    // a chunk stamped with ANOTHER source's id is that source's passage — it is
-    // dropped rather than served as this one, whose admission is the only one
-    // the caller's search asked. A chunk with no stamp was ingested by RAGFlow
-    // itself (a file / http source) and stays this source's.
-    const chunks = (data.chunks ?? []).filter((c) => {
-      const stamped = (c.metadata as Record<string, unknown> | undefined)?.objectstack_source_id;
-      return stamped === undefined || stamped === null || stamped === opts.source.id;
-    });
+    const chunks = data.chunks ?? [];
     return chunks.slice(0, opts.topK).map<KnowledgeHit>((c) => {
       const md = (c.metadata ?? {}) as Record<string, unknown>;
       const docId =
