@@ -1104,3 +1104,69 @@ describe('ConditionChipRow — an operator only the advanced panel writes (objec
     expect(chipTexts()).toEqual(['Deal Value: >= 10', 'Deal Value: != 0']);
   });
 });
+
+// objectstack#37034 — a date condition's value reads as a date in the viewer's
+// language, by the field's type, on every condition row: a drilled month
+// bucket's two bounds (the rows `drillListConditions` writes from the dataset
+// answer's `{ $gte, $lt }`, ISO instants at UTC midnight) included.
+describe('date condition values read as dates (objectstack#37034)', () => {
+  const ISSUED_ON: ConditionField = { value: 'issued_on', label: '开具日期', type: 'date' };
+  const CREATED_AT: ConditionField = { value: 'created_at', label: '创建时间', type: 'datetime' };
+  const STARTS_AT: ConditionField = { value: 'starts_at', label: 'Starts at', type: 'time' };
+  const rows = (conditions: Array<[string, string, unknown]>): FilterBuilderRowGroup => ({
+    id: 'root',
+    logic: 'and',
+    conditions: conditions.map(([field, operator, value], i) => ({ id: `r${i}`, field, operator, value }) as FilterBuilderRow),
+  });
+  function zhChips(filters: FilterBuilderRowGroup, field: string): string[] {
+    render(
+      <I18nProvider config={{ defaultLanguage: 'zh-CN', detectBrowserLanguage: false }} persistLanguage={false}>
+        <ConditionChipRow
+          sort={[]}
+          sortFields={[ISSUED_ON, CREATED_AT]}
+          onSortChange={() => {}}
+          filters={filters}
+          filterFields={[ISSUED_ON, CREATED_AT]}
+          onFiltersChange={() => {}}
+          renderAdvanced={() => <div />}
+          renderSortLevels={() => <div />}
+        />
+      </I18nProvider>,
+    );
+    return screen.getAllByTestId(`filter-chip-open-${field}`).map((b) => b.textContent ?? '');
+  }
+
+  it('a drilled month bucket on a date field shows its range as two date rows, not ISO', () => {
+    const chips = zhChips(rows([
+      ['issued_on', 'greater_than_or_equal', '2026-10-01T00:00:00.000Z'],
+      ['issued_on', 'before', '2026-11-01T00:00:00.000Z'],
+    ]), 'issued_on');
+    expect(chips).toHaveLength(2);
+    // A day bound at UTC midnight names that day in every zone.
+    expect(chips[0]).toContain('2026年10月1日');
+    expect(chips[1]).toContain('2026年11月1日');
+    for (const chip of chips) {
+      expect(chip).toContain('开具日期');
+      expect(chip).not.toMatch(/T\d\d:\d\d/);
+    }
+  });
+
+  it('a datetime field reads as a localized date and time, not ISO', () => {
+    // Noon UTC: the same calendar day in every zone a test runner sits in.
+    const [chip] = zhChips(rows([['created_at', 'greater_than_or_equal', '2026-10-15T12:00:00.000Z']]), 'created_at');
+    expect(chip).toContain('创建时间');
+    expect(chip).toContain('2026年10月15日');
+    expect(chip).not.toContain('2026-10-15T12:00:00.000Z');
+  });
+
+  it('a date between reads both ends as dates', () => {
+    const [chip] = zhChips(rows([['issued_on', 'between', ['2026-10-01', '2026-10-31']]]), 'issued_on');
+    expect(chip).toContain('2026年10月1日 – 2026年10月31日');
+  });
+
+  it('CONTROL: a time field and an unreadable value are shown as written', () => {
+    const { t } = { t: (k: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[k] ?? k };
+    expect(describeConditionValue(STARTS_AT, 'after', '09:30', t as never, undefined, 'zh-CN')).toBe('after 09:30');
+    expect(describeConditionValue(ISSUED_ON, 'after', 'not a date', t as never, undefined, 'zh-CN')).toBe('after not a date');
+  });
+});
