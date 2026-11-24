@@ -40,7 +40,7 @@ export const zhHant: TranslationData = {
         group_overview: { label: '總覽' },
         group_apps: { label: '應用程式' },
         nav_marketplace_browse: { label: '瀏覽應用程式市場' },
-        nav_marketplace_installed: { label: '已安裝應用程式' },
+        nav_packages: { label: '套件' },
         nav_cloud_connection: { label: '雲端連線' },
         group_people_org: { label: '人員與組織' },
         group_access_control: { label: '存取控制' },

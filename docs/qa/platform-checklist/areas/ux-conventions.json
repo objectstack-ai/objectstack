@@ -329,7 +329,7 @@
       "title": "Where a label exists users see the label — machine names, raw ids and spec paths appear only as secondary text",
       "since": "v17.7",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -343,7 +343,7 @@
           "read access to the served metadata of every sampled surface — labels are read from metadata, never assumed"
         ],
         "knownGaps": [
-          "objectui#11862 is FIXED for the rows that still failed at 1fb1ced36243 (QA run #23953 at objectui daeb77fc84dd): the Access permission-set list, the Changes panel and the Lookup inspector's Display-field picker now lead with the label, as do Explain access's principal line (pin AccessExplainPanel.principalPerson-11862.test.tsx) and the nav editor's items — regression rows, expected PASS. Explain's server-built Principal resolution prose names the person too — 'Principal NAME (EMAIL; id USER_ID)' (packages/plugins/plugin-security/src/explain-engine.ts; #23157, closed). Regression rows, expected PASS since QA run #24570 (objectui 4016370a, two fresh loads each): (a) Explain access's principal card draws its position and permission-set chips by label and the result banner names the object by its label; (b) Studio Interfaces' list-view 'Columns' rows draw each field's label, its api name on the row's title (objectstack-ai/objectui#12693, closed by objectui PR #12834, cda4076b, in the console pin 4016370a and on objectui main). ⚠️ Explain's Principal resolution 'Contributed by' chips are a different surface from (a): QA run #24570 found them on machine names at 4016370a and extracted objectstack-ai/objectui#13056, since FIXED: each layer's 'Contributed by' line draws the item's label (ui/packages/app-shell/src/views/metadata-admin/AccessExplainPanel.tsx; pin AccessExplainPanel.contributorLabels-13056.test.tsx), and QA run #33094 did not reproduce it — a regression row, expected PASS",
+          "objectui#11862 is FIXED for the rows that still failed at 1fb1ced36243 (QA run #23953 at objectui daeb77fc84dd): the Access permission-set list, the Changes panel and the Lookup inspector's Display-field picker now lead with the label, as do Explain access's principal line (pin AccessExplainPanel.principalPerson-11862.test.tsx) and the nav editor's items — regression rows, expected PASS. Explain's server-built Principal resolution prose names the person too — 'Principal NAME (EMAIL; id USER_ID)' (packages/plugins/plugin-security/src/explain-engine.ts; #23157, closed). Regression rows, expected PASS since QA run #24570 (objectui 4016370a, two fresh loads each): (a) Explain access's principal card draws its position and permission-set chips by label and the result banner names the object by its label; (b) Studio Interfaces' list-view 'Columns' rows (retired with that pillar in #36502; not a row any more) drew each field's label, its api name on the row's title (objectstack-ai/objectui#12693, closed by objectui PR #12834, cda4076b, in the console pin 4016370a and on objectui main). ⚠️ Explain's Principal resolution 'Contributed by' chips are a different surface from (a): QA run #24570 found them on machine names at 4016370a and extracted objectstack-ai/objectui#13056, since FIXED: each layer's 'Contributed by' line draws the item's label (ui/packages/app-shell/src/views/metadata-admin/AccessExplainPanel.tsx; pin AccessExplainPanel.contributorLabels-13056.test.tsx), and QA run #33094 did not reproduce it — a regression row, expected PASS",
           "FIXED, regression row, expected PASS (objectui#11866): Profile states the access the console resolves rather than the auth library's raw user.role ('user') (objectui apps/console/src/pages/system/ProfilePage.tsx; pin ProfilePage.access.test.tsx)",
           "FIXED, regression row, expected PASS (objectui#11778): the flow inspector's Node Type select offers the add-node palette's display names instead of raw snake_case types such as connector_action and try_catch (http_request, the old example, is a retired callout name the flow schema refuses since spec 18, use 'http': packages/spec/src/automation/flow-reserved-node-types.ts) (pin FlowNodeInspector.nodeTypeOptions-11778.test.tsx); QA run #23163 read the Node Type value as its label",
           "Regression rows, expected PASS: the audit-log actor and composite field values render as people and labels since objectstack-ai/objectui#11697."
@@ -352,7 +352,7 @@
       "variants": [
         "Studio → Access → Explain access result (the principal line)",
         "Studio → Access → permission-set list (scratch package)",
-        "Studio → Interfaces → nav editor items (scratch package)",
+        "the running app's design-mode menu editor items (scratch package; this variant read Studio → Interfaces → nav editor items until that pillar retired with #36502)",
         "Studio → Changes panel (pending items)",
         "Studio → flow inspector Node Type select",
         "Studio → field type picker and the object pickers (Lookup related object, flow trigger object)",
@@ -436,7 +436,8 @@
           "date": "2026-11-14",
           "change": "acceptance[0].verify, knownGaps[0] and knownGaps[2] re-pointed (ledger rows 11 and 267 of #32908: QA run #32949 card body, and QA run #33094, comment 6852480973). acceptance[0] carves out the position half of a security-assignment title per #32106 ruling A, which keeps the catalog machine name. knownGaps[0]: objectui#13056 is fixed (AccessExplainPanel.tsx and its pin) and did not reproduce. knownGaps[2] no longer cites http_request, which spec 18 retired (flow-reserved-node-types.ts). Read at base 82838e83",
           "ref": "#33328"
-        }
+        },
+        { "revision":  6, "date":  "2026-11-24", "change":  "variants[2] reads the running app's design-mode menu editor, and knownGaps[0](b) marks Studio Interfaces' list-view Columns rows as retired with that pillar (#36502). No clause changed", "ref":  "#36502" }
       ]
     }
   ]

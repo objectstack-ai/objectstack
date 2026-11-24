@@ -136,7 +136,7 @@ async function mountAndEdit(): Promise<HTMLElement> {
       </Routes>
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }, { timeout: 4000 }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }, { timeout: 4000 }));
   await addFieldFromFormToolbar(undefined, { label: 'Due' });
   return screen.getByTestId('studio-shell-header');
 }

@@ -1243,7 +1243,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       compactToolbar: {
         label: "Compact Toolbar",
-        helpText: "Collapse Group/Color/Density/Hide-fields into a single View settings popover"
+        helpText: "Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key."
       },
       rowHeight: {
         label: "Row Height",
@@ -1630,30 +1630,30 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Name",
-        helpText: "snake_case unique identifier"
+        helpText: "A unique internal name for this dashboard: lowercase letters, numbers and underscores, starting with a letter (for example sales_overview)."
       },
       label: {
         label: "Label",
-        helpText: "Display name"
+        helpText: "The title people see for this dashboard."
       },
       description: {
         label: "Description"
       },
       columns: {
         label: "Columns",
-        helpText: "Grid columns (default 12)"
+        helpText: "How many columns the widgets are laid out on, from 1 to 24. Leave it empty and the dashboard picks a width that fits its widgets."
       },
       gap: {
         label: "Gap",
-        helpText: "Space between widgets, in steps of 0.25rem (4 = 1rem)"
+        helpText: "How much space to leave between widgets. Larger numbers spread them further apart; leave it empty for the standard spacing."
       },
       refreshIntervalSeconds: {
         label: "Refresh Interval Seconds",
-        helpText: "Auto-refresh (seconds)"
+        helpText: "How often the dashboard reloads its data, in seconds. Leave it empty or enter 0 to turn automatic reloading off."
       },
       header: {
         label: "Header",
-        helpText: "Dashboard header config (title, subtitle, actions)"
+        helpText: "What shows at the top of the dashboard: its title, its description and action buttons."
       },
       "header.showTitle": {
         label: "Show Title",
@@ -1681,7 +1681,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Dashboard widgets with position and sizing"
+        helpText: "The charts, numbers and tables on this dashboard, and where each one sits."
       },
       "widgets.id": {
         label: "Widget ID"
@@ -1736,11 +1736,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Date Range",
-        helpText: "Default date range selector"
+        helpText: "The period the dashboard opens with, and whether viewers may pick their own dates."
       },
       globalFilters: {
         label: "Global Filters",
-        helpText: "Filters applied to all widgets"
+        helpText: "Filters viewers can use to narrow every widget at once, or only the widgets you choose."
       },
       "globalFilters.name": {
         label: "Name"
@@ -2210,19 +2210,19 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         helpText: "Report type: tabular, summary, matrix or joined."
       },
       dataset: {
-        label: "Dataset",
+        label: "Data Source",
         helpText: "The report reads its numbers from here; everyone sees only the records they have access to."
       },
       values: {
-        label: "Values",
-        helpText: "The metrics to total or count (from the data source)."
+        label: "Metrics",
+        helpText: "The metrics to show, such as totals, counts, averages or ratios (from the data source)."
       },
       rows: {
-        label: "Rows",
+        label: "Group By",
         helpText: "The fields to group by (from the data source)."
       },
       columns: {
-        label: "Columns",
+        label: "Group Columns By",
         helpText: "Groups spread across the columns (matrix reports only)."
       },
       order: {
@@ -2311,7 +2311,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "exportOptions.fileNamePrefix": {
         label: "File Name",
-        helpText: "The start of the downloaded file’s name, used instead of the report name."
+        helpText: "The start of the downloaded file’s name. Left empty, the file is named after the report’s label, or its name when it has no label."
       }
     }
   },

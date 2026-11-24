@@ -107,7 +107,7 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     await addFieldFromFormToolbar();
     await screen.findByText('Type', { selector: 'label' }, { timeout: 4000 });
     const apiName = (controlUnder('API name') as HTMLInputElement).value;
@@ -141,7 +141,7 @@ describe('Studio data page — a held Picklist reads as a sentence (objectui#117
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     await addFieldFromFormToolbar();
     await screen.findByText('Type', { selector: 'label' }, { timeout: 4000 });
     const apiName = (controlUnder('API name') as HTMLInputElement).value;

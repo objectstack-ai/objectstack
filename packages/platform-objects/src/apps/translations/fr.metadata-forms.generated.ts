@@ -1630,30 +1630,30 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Nom",
-        helpText: "Identifiant unique snake_case"
+        helpText: "Nom interne unique de ce tableau de bord : lettres minuscules, chiffres et tirets bas, en commençant par une lettre (par exemple sales_overview)."
       },
       label: {
         label: "Libellé",
-        helpText: "Nom d’affichage"
+        helpText: "Le titre que les utilisateurs voient pour ce tableau de bord."
       },
       description: {
         label: "Description"
       },
       columns: {
         label: "Colonnes",
-        helpText: "Colonnes de la grille (12 par défaut)"
+        helpText: "Nombre de colonnes sur lesquelles les widgets sont disposés, de 1 à 24. Laissez vide pour que le tableau de bord choisisse une largeur adaptée à ses widgets."
       },
       gap: {
         label: "Espacement",
-        helpText: "Espace entre les widgets, par pas de 0,25rem (4 = 1rem)"
+        helpText: "Espace à laisser entre les widgets. Plus le nombre est grand, plus ils sont espacés ; laissez vide pour l’espacement standard."
       },
       refreshIntervalSeconds: {
         label: "Intervalle d’actualisation (secondes)",
-        helpText: "Actualisation automatique (secondes)"
+        helpText: "Fréquence à laquelle le tableau de bord recharge ses données, en secondes. Laissez vide ou saisissez 0 pour désactiver le rechargement automatique."
       },
       header: {
         label: "En-tête",
-        helpText: "Configuration de l’en-tête du tableau de bord (titre, sous-titre, actions)"
+        helpText: "Ce qui s’affiche en haut du tableau de bord : son titre, sa description et les boutons d’action."
       },
       "header.showTitle": {
         label: "Afficher le titre",
@@ -1681,7 +1681,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Widgets du tableau de bord avec leur position et leur taille"
+        helpText: "Les graphiques, chiffres et tableaux de ce tableau de bord, et l’emplacement de chacun."
       },
       "widgets.id": {
         label: "ID du widget"
@@ -1736,11 +1736,11 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Plage de dates",
-        helpText: "Sélecteur de plage de dates par défaut"
+        helpText: "La période affichée à l’ouverture du tableau de bord, et si les utilisateurs peuvent choisir leurs propres dates."
       },
       globalFilters: {
         label: "Filtres globaux",
-        helpText: "Filtres appliqués à tous les widgets"
+        helpText: "Filtres que les utilisateurs peuvent utiliser pour restreindre tous les widgets à la fois, ou seulement ceux que vous choisissez."
       },
       "globalFilters.name": {
         label: "Nom"

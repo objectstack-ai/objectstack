@@ -756,3 +756,87 @@ describe('useBulkExecutor — an aggregate run reads its BulkActionResult per ro
     expect(r).toEqual({ total: 3, succeeded: 3, failed: 0, errors: [] });
   });
 });
+
+// objectstack#36915 — a per-record dispatch that answers a refusal (a flow run
+// that ended `refused`) resolves with a refusal verdict. The record is counted
+// as refused, apart from succeeded and failed, with its own sentence.
+describe('useBulkExecutor — a refused per-record dispatch is counted apart', () => {
+  const promoted = (): BulkActionDef => ({
+    name: 'create_campaign',
+    operation: 'custom',
+    actionDef: { name: 'create_campaign', type: 'flow', target: 'enroll' },
+  } as BulkActionDef);
+  const ds = () => ({ update: vi.fn(), delete: vi.fn() });
+  const SENTENCES: Record<string, string> = {
+    l1: 'Ann has opted out of email, so the lead was not added to the campaign.',
+    l3: 'Cy has opted out of email, so the lead was not added to the campaign.',
+  };
+  const refusingFor = (ids: string[]) => vi.fn(async (_def: BulkActionDef, row: Record<string, unknown>) => {
+    const id = String(row.id);
+    return ids.includes(id) ? { refusal: { message: SENTENCES[id] ?? '' } } : undefined;
+  });
+
+  it("the card's repro: two refused with different sentences and one succeeded read 1 succeeded, 2 refused", async () => {
+    const runAction = refusingFor(['l1', 'l3']);
+    const { result } = renderHook(() => useBulkExecutor({ resource: 'crm_lead', dataSource: ds(), runAction }));
+
+    await act(async () => {
+      await result.current.run(promoted(), [{ id: 'l1' }, { id: 'l2' }, { id: 'l3' }], {});
+    });
+
+    expect(runAction).toHaveBeenCalledTimes(3);
+    expect(result.current.result).toMatchObject({ total: 3, succeeded: 1, failed: 0, errors: [] });
+    expect(result.current.result?.refused).toEqual([
+      { id: 'l1', message: SENTENCES.l1 },
+      { id: 'l3', message: SENTENCES.l3 },
+    ]);
+    expect(result.current.progress).toMatchObject({ done: 1, failed: 0, refused: 2, inFlight: false });
+  });
+
+  it('a single refused record reads 0 succeeded, 1 refused', async () => {
+    const { result } = renderHook(() =>
+      useBulkExecutor({ resource: 'crm_lead', dataSource: ds(), runAction: refusingFor(['l1']) }));
+
+    await act(async () => {
+      await result.current.run(promoted(), [{ id: 'l1' }], {});
+    });
+
+    expect(result.current.result).toMatchObject({ total: 1, succeeded: 0, failed: 0, errors: [] });
+    expect(result.current.result?.refused).toEqual([{ id: 'l1', message: SENTENCES.l1 }]);
+  });
+
+  it('control: a run with no refusal carries no refused list', async () => {
+    const { result } = renderHook(() =>
+      useBulkExecutor({ resource: 'crm_lead', dataSource: ds(), runAction: refusingFor([]) }));
+
+    await act(async () => {
+      await result.current.run(promoted(), [{ id: 'l1' }, { id: 'l2' }], {});
+    });
+
+    expect(result.current.result).toMatchObject({ total: 2, succeeded: 2, failed: 0 });
+    expect(result.current.result?.refused).toBeUndefined();
+  });
+
+  it('retry() of a failed record that comes back refused moves it to refused and is no success', async () => {
+    let attempt = 0;
+    const runAction = vi.fn(async () => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('timeout');
+      return { refusal: { message: SENTENCES.l1 } };
+    });
+    const { result } = renderHook(() => useBulkExecutor({ resource: 'crm_lead', dataSource: ds(), runAction }));
+
+    await act(async () => {
+      await result.current.run(promoted(), [{ id: 'l1' }], {});
+    });
+    expect(result.current.result).toMatchObject({ succeeded: 0, failed: 1 });
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.retry('l1');
+    });
+    expect(ok).toBe(false);
+    expect(result.current.result).toMatchObject({ succeeded: 0, failed: 0, errors: [] });
+    expect(result.current.result?.refused).toEqual([{ id: 'l1', message: SENTENCES.l1 }]);
+  });
+});

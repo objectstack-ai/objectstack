@@ -203,6 +203,9 @@ export function paramToField(param: ActionParamDef): Record<string, any> {
       lookupColumns: param.lookupColumns,
       lookupFilters: param.lookupFilters,
       lookupPageSize: param.lookupPageSize,
+      // The borrowed field's `allowCreate`, the spelling `LookupField` reads;
+      // undefined leaves the picker's own default in place.
+      allowCreate: param.allowCreate,
       // ⭐ objectui#7357 retired `depends_on`, objectui's snake_case twin of
       // the spec's field-level cascade key. This emit was the ONE in-repo
       // framework producer of that spelling on a widget field-metadata bag —

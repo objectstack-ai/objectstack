@@ -14,6 +14,36 @@
  */
 
 import { defineForm } from './view.zod';
+import { DATE_RANGE_DEFAULT_RANGES, type DateRangeDefaultRange } from './dashboard.zod';
+
+/**
+ * The name each Default Period choice reads by — one per member of the shared
+ * preset table, so a preset added there fails to compile here until it is named.
+ * The words are the ones the report page's period chip shows for the same
+ * presets (the console's `dashboard.filters.range.*` and
+ * `dashboard.filters.custom` rows), so the period an author picks reads the
+ * same as the period a viewer sees. `custom` names no window: it opens the
+ * picker with no preset applied.
+ */
+const DEFAULT_PERIOD_LABELS: Record<DateRangeDefaultRange, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  this_week: 'This week',
+  last_week: 'Last week',
+  this_month: 'This month',
+  last_month: 'Last month',
+  next_month: 'Next month',
+  this_quarter: 'This quarter',
+  last_quarter: 'Last quarter',
+  next_quarter: 'Next quarter',
+  this_year: 'This year',
+  last_year: 'Last year',
+  last_7_days: 'Last 7 days',
+  last_30_days: 'Last 30 days',
+  last_90_days: 'Last 90 days',
+  next_30_days: 'Next 30 days',
+  custom: 'Custom…',
+};
 
 export const reportForm = defineForm({
   schemaId: 'report',
@@ -38,11 +68,16 @@ export const reportForm = defineForm({
       // A `joined` report carries its data on `blocks` instead.
       visibleWhen: "data.type != 'joined'",
       fields: [
-        { field: 'dataset', widget: 'ref:dataset', helpText: 'The report reads its numbers from here; everyone sees only the records they have access to.' },
-        { field: 'values', widget: 'string-tags', helpText: 'The metrics to total or count (from the data source).' },
-        { field: 'rows', widget: 'string-tags', helpText: 'The fields to group by (from the data source).' },
+        // #36838 — the four row titles are the blocks grid's terms below (and
+        // `JoinedReportBlockSchema`'s `.meta({ title })`), so one form never
+        // names the same key in two vocabularies. Without a `label` these rows
+        // read the prettified keys Dataset / Values / Rows / Columns.
+        { field: 'dataset', label: 'Data Source', widget: 'ref:dataset', helpText: 'The report reads its numbers from here; everyone sees only the records they have access to.' },
+        // A measure may be any dataset measure (sum, count, average, ratio, derived).
+        { field: 'values', label: 'Metrics', widget: 'string-tags', helpText: 'The metrics to show, such as totals, counts, averages or ratios (from the data source).' },
+        { field: 'rows', label: 'Group By', widget: 'string-tags', helpText: 'The fields to group by (from the data source).' },
         // CEL visibility — only Matrix reports pivot across a second dimension.
-        { field: 'columns', widget: 'string-tags', visibleWhen: "data.type == 'matrix'", helpText: 'Groups spread across the columns (matrix reports only).' },
+        { field: 'columns', label: 'Group Columns By', widget: 'string-tags', visibleWhen: "data.type == 'matrix'", helpText: 'Groups spread across the columns (matrix reports only).' },
         // #3916 — ordering is authorable here or it is not authorable at all:
         // `DatasetSelection.order` has always existed on the wire, but a report
         // author had no channel to reach it. Optional — a selected time
@@ -134,7 +169,15 @@ export const reportForm = defineForm({
           helpText: 'The period the report opens with, and whether people may choose their own range.',
           fields: [
             { field: 'dimension', label: 'Date Field', helpText: 'The date grouping of the data source the period applies to. Leave it empty when the data source has only one.' },
-            { field: 'defaultRange', label: 'Default Period', helpText: 'The period the report opens with.' },
+            // Each choice is named (`DEFAULT_PERIOD_LABELS`): with no options a
+            // select names its choices by their stored values.
+            {
+              field: 'defaultRange',
+              type: 'select',
+              label: 'Default Period',
+              helpText: 'The period the report opens with.',
+              options: DATE_RANGE_DEFAULT_RANGES.map((value) => ({ label: DEFAULT_PERIOD_LABELS[value], value })),
+            },
             { field: 'allowCustomRange', label: 'Allow Custom Range', helpText: 'Let people pick their own start and end dates.' },
           ],
         },
@@ -145,7 +188,10 @@ export const reportForm = defineForm({
           fields: [
             { field: 'formats', label: 'Formats', helpText: 'The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off.' },
             { field: 'includeHeaders', label: 'Include Headers', helpText: 'Put the column names in the first row of the downloaded file.' },
-            { field: 'fileNamePrefix', label: 'File Name', helpText: 'The start of the downloaded file’s name, used instead of the report name.' },
+            // The prefix replaces the report's label, which falls back to its
+            // name (`buildExportFileName` in @object-ui/core, called by the
+            // report export control); the date and time follow it.
+            { field: 'fileNamePrefix', label: 'File Name', helpText: 'The start of the downloaded file’s name. Left empty, the file is named after the report’s label, or its name when it has no label.' },
           ],
         },
       ],

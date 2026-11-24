@@ -170,7 +170,7 @@ async function openActionVisible(): Promise<HTMLTextAreaElement> {
   return rawEditorIn(root);
 }
 
-const leaveToForm = () => fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+const leaveToForm = () => fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
 
 describe('DataPillar — a rule guard that does not parse holds with the draft (objectstack#27629)', () => {
   it('leaving the Validations tab keeps the hold, and the held line names the rule', async () => {

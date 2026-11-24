@@ -24,13 +24,25 @@
  * posture, and reads 「View in Studio」 (zh 「在 Studio 中查看」) for an
  * installed (read-only) package. Real subject added: the built-in en and
  * zh-Hans packs, for the words.
+ *
+ * objectstack#36692 — while a dashboard's or a report's own editor is open,
+ * 「Design layout」 stays drawn and choosing it refuses with the prompt to
+ * save or cancel those changes first; the mode stays off. `sonner`'s toast is
+ * spied.
  */
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import * as React from 'react';
 import type { ReactNode } from 'react';
+
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock('sonner', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  toast: { error: toastError, success: vi.fn() },
+}));
 
 type MockProps = Record<string, unknown> & { children?: ReactNode; onSelect?: () => void; className?: string };
 
@@ -95,7 +107,7 @@ vi.mock('../../runtime-config', async (importOriginal) => ({
 
 import { builtInLocales } from '@object-ui/i18n/locales';
 import { SidebarAppMenu, APP_MENU_SEARCH_FROM } from '../SidebarAppMenu';
-import { DesignModeProvider, useDesignModeController } from '../designMode';
+import { DesignModeProvider, useDesignModeController, useHoldDesignModeOut } from '../designMode';
 
 const CRM = { name: 'crm', label: 'CRM', icon: 'flame', _packageId: 'com.acme.crm' };
 const SERVICE = { name: 'service', label: 'Service', icon: 'headset' };
@@ -141,6 +153,7 @@ afterEach(() => {
   admin = false;
   canAuthor = true;
   authOverride = {};
+  toastError.mockReset();
   vi.unstubAllGlobals();
 });
 
@@ -346,7 +359,7 @@ describe('「Edit app」 in the app menu opens this app in Studio (objectstack#3
 
   it('it follows the route the way the app switcher\'s Studio row does: a dashboard opens its design surface', async () => {
     await mountMenu({ route: '/apps/crm/dashboard/pipeline' });
-    expect(editInStudio()).toHaveAttribute('href', '/studio/com.acme.crm/interfaces?surface=dashboard:pipeline');
+    expect(editInStudio()).toHaveAttribute('href', '/studio/com.acme.crm/metadata/dashboard/pipeline');
   });
 
   it('an installed (read-only) package\'s app: 「View in Studio」 behind an eye, never the pencil', async () => {
@@ -403,5 +416,74 @@ describe('the words: the door and the bar share one name (objectstack#36758)', (
       expect(pack.topbar.designLayout, locale).not.toBe(pack.topbar.editApp);
     }
     expect(EN.designMode.title).toBe('Design layout');
+  });
+});
+
+describe('「Design layout」 refuses while a dashboard or report editor is open (objectstack#36692)', () => {
+  /** The shell's hold on the mode, and a page whose own editor can be opened and closed. */
+  function Shell({ children }: { children: ReactNode }) {
+    const mode = useDesignModeController({ appName: 'crm', appBasePath: '/apps/crm', enabled: true });
+    return (
+      <DesignModeProvider value={mode}>
+        <output data-testid="mode">{mode.active ? 'on' : 'off'}</output>
+        {children}
+      </DesignModeProvider>
+    );
+  }
+  function EditorPage() {
+    const [open, setOpen] = React.useState(false);
+    useHoldDesignModeOut(open);
+    return (
+      <button type="button" data-testid="editor-toggle" onClick={() => setOpen((o) => !o)}>
+        {open ? 'close editor' : 'open editor'}
+      </button>
+    );
+  }
+
+  async function mountMenu() {
+    render(
+      <MemoryRouter initialEntries={['/apps/crm/dashboard/ops_board']}>
+        <Shell>
+          <SidebarAppMenu activeAppName="crm" onAppChange={vi.fn()} />
+          <EditorPage />
+        </Shell>
+      </MemoryRouter>,
+    );
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+  }
+
+  const designLayout = () => menu().queryByTestId('sidebar-app-menu-design-layout');
+
+  beforeEach(() => {
+    apps = [CRM, SERVICE, SETUP];
+    admin = true;
+  });
+
+  it('it stays drawn; choosing it says to save or cancel those changes first, and the mode stays off', async () => {
+    await mountMenu();
+    fireEvent.click(screen.getByTestId('editor-toggle'));
+    expect(designLayout()).not.toBeNull();
+    await act(async () => fireEvent.click(designLayout()!));
+    expect(screen.getByTestId('mode')).toHaveTextContent('off');
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError).toHaveBeenCalledWith('Save or cancel your dashboard or report changes before designing the layout.');
+  });
+
+  it('control: the editor closed, choosing it enters the mode and says nothing', async () => {
+    await mountMenu();
+    fireEvent.click(screen.getByTestId('editor-toggle'));
+    fireEvent.click(screen.getByTestId('editor-toggle'));
+    await act(async () => fireEvent.click(designLayout()!));
+    expect(screen.getByTestId('mode')).toHaveTextContent('on');
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('the prompt is in every built-in pack, and zh-Hans reads as the design mode is named', () => {
+    const packs = builtInLocales as unknown as Record<string, { designMode: { editorOpen?: string; title: string } }>;
+    for (const [locale, pack] of Object.entries(packs)) {
+      expect(pack.designMode.editorOpen, locale).toBeTruthy();
+    }
+    expect(packs['zh-Hans'].designMode.editorOpen).toContain(packs['zh-Hans'].designMode.title);
   });
 });

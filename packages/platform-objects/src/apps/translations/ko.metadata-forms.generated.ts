@@ -1630,30 +1630,30 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "이름",
-        helpText: "snake_case 고유 식별자"
+        helpText: "이 대시보드의 고유한 내부 이름입니다. 영문 소문자, 숫자, 밑줄을 사용하며 영문자로 시작합니다(예: sales_overview)."
       },
       label: {
         label: "레이블",
-        helpText: "표시 이름"
+        helpText: "사용자에게 보이는 대시보드 제목입니다."
       },
       description: {
         label: "설명"
       },
       columns: {
         label: "열",
-        helpText: "그리드 열 수(기본값 12)"
+        helpText: "위젯을 배치할 열 수로, 1부터 24까지입니다. 비워 두면 대시보드가 위젯 너비에 맞는 폭을 고릅니다."
       },
       gap: {
         label: "간격",
-        helpText: "위젯 사이의 간격으로, 0.25rem 단위입니다(4 = 1rem)"
+        helpText: "위젯 사이에 둘 간격입니다. 숫자가 클수록 더 넓게 벌어지며, 비워 두면 기본 간격을 사용합니다."
       },
       refreshIntervalSeconds: {
         label: "새로 고침 간격(초)",
-        helpText: "자동 새로 고침(초)"
+        helpText: "대시보드가 데이터를 다시 불러오는 주기(초)입니다. 비워 두거나 0을 입력하면 자동으로 다시 불러오지 않습니다."
       },
       header: {
         label: "헤더",
-        helpText: "대시보드 헤더 구성(제목, 부제목, 작업)"
+        helpText: "대시보드 상단에 표시할 내용으로, 제목, 설명, 작업 버튼입니다."
       },
       "header.showTitle": {
         label: "제목 표시",
@@ -1681,7 +1681,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "위젯",
-        helpText: "위치와 크기가 지정된 대시보드 위젯"
+        helpText: "이 대시보드의 차트, 숫자, 표와 각각의 위치입니다."
       },
       "widgets.id": {
         label: "위젯 ID"
@@ -1736,11 +1736,11 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "날짜 범위",
-        helpText: "기본 날짜 범위 선택기"
+        helpText: "대시보드를 열 때 적용되는 기간과 보는 사람이 직접 날짜를 고를 수 있는지 여부입니다."
       },
       globalFilters: {
         label: "전역 필터",
-        helpText: "모든 위젯에 적용되는 필터"
+        helpText: "보는 사람이 모든 위젯을 한 번에, 또는 지정한 위젯만 좁혀 볼 수 있는 필터입니다."
       },
       "globalFilters.name": {
         label: "이름"

@@ -154,8 +154,9 @@ export type ExpressionBody = z.input<typeof ExpressionBodySchema>;
  * L2 — Sandboxed JavaScript source.
  *
  * The `source` is the **function body only** (not a full module). The runtime
- * wraps it in `new AsyncFunction('ctx', source)` for hooks, or
- * `new AsyncFunction('input', 'ctx', source)` for actions, then executes
+ * runs it as the body of an async arrow, `(async (ctx) => { source })` for
+ * hooks and jobs, or `(async (input, ctx) => { source })` for actions (the one
+ * spelling of each lives in `@objectstack/lint`'s `action-body-wrapper.ts`),
  * inside an isolated VM.
  *
  * Forbidden inside `source` (CLI build will reject):

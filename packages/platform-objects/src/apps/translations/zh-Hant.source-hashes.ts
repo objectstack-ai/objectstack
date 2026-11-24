@@ -74,7 +74,7 @@ export const zhHantSourceHashes: Readonly<Record<string, string>> = {
   'apps.setup.navigation.group_overview.label': 'eebdbe1cc7b59cdf',
   'apps.setup.navigation.group_apps.label': '699b367291abcbe6',
   'apps.setup.navigation.nav_marketplace_browse.label': '2afbe021f5419fdd',
-  'apps.setup.navigation.nav_marketplace_installed.label': '93bd5d458e05db60',
+  'apps.setup.navigation.nav_packages.label': '8cd8f29658025f73',
   'apps.setup.navigation.nav_cloud_connection.label': '3a7caad0cb98e71d',
   'apps.setup.navigation.group_people_org.label': 'd313f656b6f0ab65',
   'apps.setup.navigation.group_access_control.label': 'a1a4dd47bcbfaf67',

@@ -203,6 +203,11 @@ export { firstDayOfWeek, type WeekdayIndex } from './utils/index.js';
 // flow embed.
 export {
   activeFlowsBundle,
+  flowsResolveOptions,
+  flowsLocaleChain,
+  withDeclaredFlowsFallback,
+  DECLARED_FLOWS_FALLBACK_KEY,
+  type DeclaredFlowsFallback,
   type FlowsTranslation,
   type TranslationResourceReader,
 } from './flowsBundle.js';

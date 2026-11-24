@@ -1223,7 +1223,19 @@ export interface ActionContext {
   
   /** Current user */
   user?: Record<string, any>;
-  
+
+  /**
+   * The caller reports a refused run itself, so a handler opens no refusal
+   * surface of its own and only answers the refusal on
+   * {@link ActionResult.refusal}. Set for one dispatch, through
+   * `ActionRunner.execute`'s `callContext`, by a caller that runs one action
+   * over many records and lists every refused record in its own result: the
+   * grid's per-record bulk fan-out. One notice per refused record would stack
+   * N dialogs, and one shared notice would show a single record's sentence.
+   * Unset, a handler shows the refusal the way it always has.
+   */
+  reportsRefusal?: boolean;
+
   /** Additional context data */
   [key: string]: any;
 }
@@ -1339,6 +1351,17 @@ export interface ActionResult {
    * completes with the flow's own success copy is `silent` and still hops.
    */
   handedOff?: boolean;
+
+  /**
+   * The run answered a deliberate refusal: a `flow` that ended on an `end`
+   * node declaring `outcome: 'refused'`. Set only beside `success: true` and
+   * `handedOff: true` (a refusal is a successful evaluation whose answer was
+   * no), so a caller that counts outcomes reads it as refused, never as done.
+   * `message` is the engine-rendered sentence (`refusalMessage`), `''` when
+   * the producer sent none. A caller that set
+   * {@link ActionContext.reportsRefusal} shows it itself.
+   */
+  refusal?: { message: string };
 
   /**
    * An undoable operation captured by the handler (e.g. an `undoable` update
