@@ -472,8 +472,10 @@ Offered only on an object the platform gives a reassignable owner and whose
 `userActions.transfer` switch is on. The switch defaults to on, and to off on a
 `controlled_by_parent` detail. Any other object is refused as a whole with
 `403 CHANGE_OWNER_DISABLED`, whoever asks, a `modifyAllRecords` holder
-included. The switch gates this action only: a plain `owner_id` update (an
-import, a hook, a `PATCH`) still needs the transfer grant and nothing else.
+included. The same switch decides whether a banned user's hand-over
+(`/api/v1/security/users/USER_ID/assigned-work`) moves the object's owners.
+It gates these two actions only: a plain `owner_id` update (an import, a hook,
+a `PATCH`) still needs the transfer grant and nothing else.
 
 **Body**: exactly one target, and an optional notification.
 
