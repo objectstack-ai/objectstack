@@ -970,7 +970,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   );
 
   const cellClass = inSetup ? 'align-middle' : 'align-top';
-  const firstCell = (info: MetadataRowInfo, ci: number, c: ListColumns[number]) => {
+  const firstCell = (info: MetadataRowInfo, c: ListColumns[number]) => {
     const { row } = info;
     const value = valueAtPath(row.item, c.key);
     const cell = c.render ? c.render(row.item[c.key], row.item) : defaultCell(value);
@@ -1042,7 +1042,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     cellDraws[metadataGridField(ci)] = (_value, rec) => {
       const info = rowInfoOf(rec);
       if (!info) return null;
-      if (ci === 0) return firstCell(info, ci, c);
+      if (ci === 0) return firstCell(info, c);
       const value = info.row.item[c.key];
       const cell = c.render ? c.render(value, info.row.item) : defaultCell(valueAtPath(info.row.item, c.key));
       // objectstack#27356 — two lines at most, so a row stays a row on a
