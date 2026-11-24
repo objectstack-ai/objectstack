@@ -60,6 +60,16 @@ const GROUP_ICONS: Record<StudioMenuGroup, LucideIcon> = {
   ai: Sparkles,
 };
 
+/**
+ * objectui#12795 — every `SidebarGroupLabel` call site hides its label from
+ * focus and the accessibility tree in the icon sidebar (the primitive's own
+ * `opacity-0` leaves it reachable). This menu is `offcanvas`, never `icon`, so
+ * the classes never apply here; it carries them as every call site does.
+ */
+const HIDDEN_ICON_LABEL_NOT_FOCUSABLE =
+  'group-data-[state=collapsed]:group-data-[collapsible=icon]:invisible ' +
+  'group-data-[state=collapsed]:group-data-[collapsible=icon]:transition-[margin,opacity,visibility]';
+
 const ENTRY_LABEL_KEYS: Record<Exclude<StudioMenuEntry['kind'], 'type'>, string> = {
   orgFlows: 'engine.studio.menu.orgFlows',
   owd: 'engine.studio.menu.owd',
@@ -200,7 +210,7 @@ export function StudioMenu({ segment, locale, onReenterPillar }: StudioMenuProps
             const typeCount = entries.filter((e) => e.kind === 'type').length;
             return (
               <SidebarGroup key={group} className="py-1" data-testid={`studio-menu-group-${group}`}>
-                <SidebarGroupLabel id={labelId} className="gap-1.5">
+                <SidebarGroupLabel id={labelId} className={cn('gap-1.5', HIDDEN_ICON_LABEL_NOT_FOCUSABLE)}>
                   <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                   <span className="flex-1 truncate">{translateMetadataDomain(group, locale)}</span>
                   <span
