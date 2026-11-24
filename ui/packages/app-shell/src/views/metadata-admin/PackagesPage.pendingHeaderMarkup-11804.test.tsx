@@ -39,7 +39,7 @@ let errors: string[];
 
 function respond(body: unknown) {
   const text = JSON.stringify(body);
-  return { ok: true, status: 200, text: async () => text, json: async () => JSON.parse(text) } as unknown as Response;
+  return { ok: true, status: 200, text: async () => text, headers: new Headers(), json: async () => JSON.parse(text) } as unknown as Response;
 }
 
 beforeEach(() => {

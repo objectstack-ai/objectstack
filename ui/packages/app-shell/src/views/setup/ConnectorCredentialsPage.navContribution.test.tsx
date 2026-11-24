@@ -36,6 +36,7 @@ beforeEach(() => {
     vi.fn(async () => ({
       ok: true,
       status: 200,
+      headers: new Headers(),
       json: async () => ({ success: true, data: { credentialRefs: [], total: 0 } }),
     }) as unknown as Response),
   );

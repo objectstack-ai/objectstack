@@ -49,6 +49,7 @@ function stubBody(status: number, body: unknown) {
     vi.fn(async () => ({
       ok: status >= 200 && status < 300,
       status,
+      headers: new Headers(),
       text: async () => JSON.stringify(body),
     })) as unknown as typeof fetch,
   );
