@@ -2778,6 +2778,7 @@ const de = {
       summary: 'Datensätze, die Sie lesen können: {{total}}. Besitzer: {{owned}}, zugewiesen: {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Enthält mehrere Personen und kann hier nicht übergeben werden.',
+      ownerKept: 'Wird nicht übergeben: Dieses Objekt behält den Besitzer jedes Datensatzes bei („Besitzer ändern“ ist dafür aus).',
       truncated: 'Nicht alle Benutzerfelder wurden gezählt; diese Person kann weitere halten.',
       unreadable: 'Nicht gezählt, weil Sie sie nicht lesen können: {{objects}}',
       handoverTo: 'Übergeben an',

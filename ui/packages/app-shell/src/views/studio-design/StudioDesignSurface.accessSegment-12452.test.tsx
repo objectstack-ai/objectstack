@@ -1,34 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12452 — Access is a segment of the Studio pillar nav, and the More
- * overflow that held it alone is gone.
+ * objectui#12452, objectstack#36899 — Access is a place of its own in Studio's
+ * navigation.
  *
- * Since objectui#5813 Access sat in a "More" popover beside the primary
- * pillars, and objectui#11794 pinned that trigger's name. The overflow held one
- * pillar, so it was a one-item menu. The epic's decision A (objectui#12446)
- * puts Access in the segmented control as a first-class pillar and retires
- * More; this file replaces the More trigger's pin.
+ * objectui#12452 made Access a first-class segment of the pillar nav and
+ * retired the "More" overflow that held it alone. objectstack#36899 replaced
+ * the pillar nav with the left menu of six domain groups (ADR-0084, amended):
+ * Access is now a group, and the Access pillar is reached from its
+ * permission-set entry. This file keeps the two facts the segment's pins held,
+ * read on the menu:
  *
- * Two facts are pinned:
+ * 1. The menu's Access group holds the permission-set entry, a real router
+ *    link, with no "More" trigger anywhere; the group carries the shield glyph,
+ *    the Data group's is not it.
+ * 2. With the Access pillar open (under any package id) that entry is the
+ *    current page and carries the active state; with Data open it carries
+ *    neither, and the object entry carries both.
  *
- * 1. The nav reads Data, Automations, Access (objectstack#36502 retired the
- *    Interfaces segment that stood third), each a real router link to its
- *    pillar, with no trigger of any kind beside them. Access carries the
- *    shield glyph, compared with lucide's own `Shield`.
- * 2. With Access open (under any package id) the Access segment is the current
- *    page and carries the active look the open primary pillar carries; with
- *    Data open it carries neither, and Data carries both.
- *
- * A third fact, "leaving an unsaved pillar through Access asks as through
- * Data does", was read on the Interfaces pillar's nav edit, the one pillar
- * other than Access that reported an unsaved edit; it retired with that
- * pillar. The surface's one leave guard stays pinned from Access itself in
- * `pillarNavGuard`.
- *
- * The package-less scope's single pillar stays pinned where it is:
- * `packageLessFlows-11553` asserts no Access link there. Re-clicking the open
- * Access segment is `pillarNavGuard`'s case.
+ * Leaving an unsaved pillar is `pillarNavGuard`'s case.
  *
  * Rendered through the real `StudioDesignSurface`; only data I/O and heavy
  * docks are doubled.
@@ -39,7 +29,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { Shield } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 
 const PKG = 'com.acme.app';
 
@@ -98,7 +88,11 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
     useMetadataTypes: () => ({
       loading: false,
       error: null,
-      entries: [{ type: 'permission', label: 'Permission', allowEnvironmentOverlay: true }],
+      entries: [
+        { type: 'object', label: 'Object', domain: 'data' },
+        { type: 'flow', label: 'Flow', domain: 'automation' },
+        { type: 'permission', label: 'Permission', domain: 'security', allowEnvironmentOverlay: true },
+      ],
     }),
   };
 });
@@ -150,11 +144,10 @@ window.matchMedia = ((query: string) => ({
 
 const key = (type: string, name: string) => `${type}/${name}`;
 
-const DATA = t('engine.studio.pillar.data', 'en');
-const AUTOMATIONS = t('engine.studio.pillar.automations', 'en');
-const ACCESS = t('engine.studio.pillar.access', 'en');
-/** The class tokens the open pillar's segment carries (objectui#12459). */
-const ACTIVE = ['bg-background', 'font-medium', 'text-foreground', 'shadow-sm'];
+/** The menu's own name for the `security` group (the shared dictionary keeps "Security"). */
+const ACCESS = t('engine.studio.menu.groupSecurity', 'en');
+const OBJECT_ENTRY = 'studio-menu-entry-type:object';
+const PERMISSION_ENTRY = 'studio-menu-entry-type:permission';
 
 // This environment ships no window.confirm: the surface's leave prompt.
 let confirmSpy: ReturnType<typeof vi.fn>;
@@ -197,62 +190,54 @@ function renderAt(path: string) {
   );
 }
 
-const pillarNav = () => screen.getByTestId('studio-pillar-nav');
-const segment = (name: string) => within(pillarNav()).getByRole('link', { name });
+const menu = () => screen.getByTestId('studio-menu');
+const entry = (testId: string) => within(menu()).getByTestId(testId);
 
-/** The markup of lucide's own `Shield`, for the Access segment's glyph. */
+/** The markup of lucide's own `ShieldCheck`, the Access group's glyph. */
 function shieldMarkup(): string {
-  const { container, unmount } = render(<Shield />);
+  const { container, unmount } = render(<ShieldCheck />);
   const markup = container.querySelector('svg')!.innerHTML;
   unmount();
   return markup;
 }
 
-describe('Studio pillar nav: Access is a segment of its own, and More is gone (objectui#12452)', () => {
-  it('reads Data, Automations, Access, each a link to its pillar, with no trigger beside them', async () => {
+describe('Studio menu: Access is a group of its own, and More is gone (objectui#12452, objectstack#36899)', () => {
+  it('the Access group holds the permission-set entry, a link to the area list, with no More trigger', async () => {
     renderAt(`/studio/${PKG}/data`);
     await screen.findByTestId('studio-shell-header');
 
-    const links = within(pillarNav()).getAllByRole('link');
-    // objectstack#28561 — the "All metadata" area follows the pillars.
-    // objectstack#36502 — Interfaces is retired: no segment, no link.
-    expect(links.map((a) => a.textContent)).toEqual([DATA, AUTOMATIONS, ACCESS, t('engine.studio.pillar.metadata', 'en')]);
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['data', 'automations', 'access', 'metadata'].map((p) => `/studio/${PKG}/${p}`),
+    const group = within(menu()).getByTestId('studio-menu-group-security');
+    expect(group).toHaveTextContent(ACCESS);
+    expect(within(group).getByTestId(PERMISSION_ENTRY)).toHaveAttribute(
+      'href',
+      `/studio/${PKG}/metadata/permission?package=${PKG}`,
     );
-    // No More trigger, under its old test id or any other name.
-    expect(within(pillarNav()).queryAllByRole('button')).toEqual([]);
     expect(screen.queryByTestId('studio-nav-more')).toBeNull();
-    // The shield glyph the overflow entry carried; the Data segment's is not it.
+    expect(screen.queryByTestId('studio-pillar-nav')).toBeNull();
     const shield = shieldMarkup();
-    expect(segment(ACCESS).querySelector('svg')!.innerHTML).toBe(shield);
-    expect(segment(DATA).querySelector('svg')!.innerHTML).not.toBe(shield);
+    expect(group.querySelector('svg')!.innerHTML).toBe(shield);
+    expect(within(menu()).getByTestId('studio-menu-group-data').querySelector('svg')!.innerHTML).not.toBe(shield);
   });
 
-  it.each(['app.objectstack.hotcrm', PKG])('with Access open in %s, Access is the current page and carries the active look', async (pkg) => {
+  it.each(['app.objectstack.hotcrm', PKG])('with Access open in %s, the permission-set entry is the current page', async (pkg) => {
     fetchPackagesMock.mockResolvedValue([{ id: pkg, name: 'Pkg', writable: true, namespace: 'pkg' }]);
     renderAt(`/studio/${pkg}/access`);
     await screen.findByTestId('studio-shell-header');
 
-    const access = segment(ACCESS);
+    const access = entry(PERMISSION_ENTRY);
     expect(access).toHaveAttribute('aria-current', 'page');
-    expect(access).toHaveClass(...ACTIVE);
-    expect(access.querySelector('svg')).toHaveClass('text-primary');
-    // No other segment is the open one.
-    for (const name of [DATA, AUTOMATIONS]) {
-      expect(segment(name)).not.toHaveAttribute('aria-current');
-      expect(segment(name)).not.toHaveClass('shadow-sm');
-    }
+    expect(access).toHaveAttribute('data-active', 'true');
+    expect(entry(OBJECT_ENTRY)).not.toHaveAttribute('aria-current');
+    expect(entry(OBJECT_ENTRY)).toHaveAttribute('data-active', 'false');
   });
 
-  it('control: with Data open, Access carries neither, and Data carries both', async () => {
+  it('control: with Data open, the permission-set entry carries neither, and the object entry carries both', async () => {
     renderAt(`/studio/${PKG}/data`);
     await screen.findByTestId('studio-shell-header');
 
-    expect(segment(ACCESS)).not.toHaveAttribute('aria-current');
-    expect(segment(ACCESS)).not.toHaveClass('shadow-sm');
-    expect(segment(ACCESS).querySelector('svg')).not.toHaveClass('text-primary');
-    expect(segment(DATA)).toHaveAttribute('aria-current', 'page');
-    expect(segment(DATA)).toHaveClass(...ACTIVE);
+    expect(entry(PERMISSION_ENTRY)).not.toHaveAttribute('aria-current');
+    expect(entry(PERMISSION_ENTRY)).toHaveAttribute('data-active', 'false');
+    expect(entry(OBJECT_ENTRY)).toHaveAttribute('aria-current', 'page');
+    expect(entry(OBJECT_ENTRY)).toHaveAttribute('data-active', 'true');
   });
 });
