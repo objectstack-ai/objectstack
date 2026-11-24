@@ -3533,11 +3533,12 @@ const en = {
       resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
       personalized: 'Personalized',
       personalizedHeading: 'Your list differs from this view in',
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: 'Discard',
+        discard: 'Reset',
         discardTitle: 'Puts the list back as its view declares it: filters, sort, grouping, columns and layout. Column widths and row height stay.',
-        save: 'Save',
+        save: 'Update view',
         heading: 'Unsaved changes',
         partSeparator: ', ',
         saveToView: 'Save to this view',

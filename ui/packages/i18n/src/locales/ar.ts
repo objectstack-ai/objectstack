@@ -3152,11 +3152,12 @@ const ar = {
       resetViewTitle: "يعيد عوامل التصفية والبحث والترتيب والتجميع وترتيب الأعمدة والحقول المخفية والكثافة والتخطيط ولون الصف وأرقام الصفوف والتحرير المضمّن الخاصة بهذا العرض. تبقى طرق العرض المثبتة والمفضلة وطريقة فتح السجلات كما هي. تتغير قائمتك فقط.",
       personalized: "مخصّصة",
       personalizedHeading: "تختلف قائمتك عن هذا العرض في",
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: "تجاهل",
+        discard: "إعادة تعيين",
         discardTitle: "يعيد القائمة كما يحددها العرض: عوامل التصفية والفرز والتجميع والأعمدة والتخطيط. يبقى عرض الأعمدة وارتفاع الصفوف كما هما.",
-        save: "حفظ",
+        save: "تحديث العرض",
         heading: "تغييرات غير محفوظة",
         partSeparator: "، ",
         saveToView: "حفظ في هذا العرض",

@@ -31,7 +31,7 @@ import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
 import { isSetupAppSegment } from '../console/setupApp.js';
 import { authoredBodyTableIds, deriveRelatedLists } from '../utils/deriveRelatedLists.js';
-import { RECORD_TABS_CONFIG_ACTION, useRecordTabsConfig } from './RecordTabsConfig.js';
+import { useRecordTabsConfig } from './RecordTabsConfig.js';
 import { pruneUnregisteredRecordPageObjects, recordPageChildObjects } from './recordPageChildObjects.js';
 import { stripDiscussionNodes, hasExplicitAttachments, hasExplicitApprovals } from '../utils/pageSchemaIntrospect.js';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
@@ -2623,10 +2623,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // `resolveRecordHeaderActionGates(objectDef, perms)`: the affordance-to-grant
   // map asks both itself (objectui#12082), so this view no longer threads
   // either one by hand.
-  // objectstack#36499 — 「Configure tabs」: an administrator arranges this
-  // object's record-page tabs in place. While its edit state is on, the page
-  // is drawn from the object with the draft's `relatedLists`
-  // (`tabsConfig.previewObject`), the preview of what Save writes.
+  // objectstack#36499 — an administrator arranges this object's record-page
+  // tabs in place, as part of the design mode (objectstack#36737): while the
+  // mode is on, the tab row is the editor, and the page is drawn from the
+  // object with the draft's `relatedLists` (`tabsConfig.previewObject`), the
+  // preview of what the mode's Save writes.
   const canReadChild = useMemo(
     () => (permissionsLoaded ? (name: string) => canOnObject(name, 'read') : undefined),
     [permissionsLoaded, canOnObject],
@@ -5399,24 +5400,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : onEdit({ id: pureRecordId }, objectName)),
       } as any);
     }
-    // objectstack#36499 — 「Configure tabs」, the first item of the `⋯`
-    // (`leadsMenu`, ahead of Refresh), for an administrator who may arrange
-    // this object's tabs (`useRecordTabsConfig`'s gate: never on a phone, a
-    // drawer or a pane).
-    if (tabsConfig.offered && !tabsConfig.active && !recordEditState) {
-      items.push({
-        name: RECORD_TABS_CONFIG_ACTION,
-        leadsMenu: true,
-        label: t('designMode.recordTabs.entry', { defaultValue: 'Configure tabs' }),
-        icon: 'panels-top-left',
-        type: 'script',
-        locations: ['record_header'],
-        variant: 'outline',
-        order: 101,
-        component: 'action:menu',
-        onClick: () => tabsConfig.enter(),
-      } as any);
-    }
+    // objectstack#36737 — the record's tabs are arranged in the design mode
+    // (its tab row is the editor while the mode is on), so the `⋯` holds no
+    // entry of its own for them.
     // The record's favorites control is the star beside the record's name
     // (objectstack#36246), drawn by `page:header` from the record context
     // below, so the `⋯` holds no second entry. A print page draws no
@@ -6139,7 +6125,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     <RecordHeaderStateContext.Provider value={recordHeaderState}>
     <RecordReadReportContext.Provider value={objectName === SYS_APPROVAL_REQUEST_OBJECT ? reportRecordRead : null}>
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
-      {tabsConfig.bar}
       {pageBar}
       {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
       {embedded && paneBar && <RecordPaneBarToggles>{panelToggles}</RecordPaneBarToggles>}
@@ -6152,15 +6137,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             'absolute right-2 sm:right-4 z-50 flex items-center gap-2',
             // Under a phone's one 44 px bar row; in a pane, over the page's
             // top-right corner, level with its first row (objectstack#35745).
-            // While the tab configuration's bar is drawn: its 48 px (3rem)
-            // plus the page's own top-2 / sm:top-4 gap under it.
             pageBar
               ? 'top-12'
-              : tabsConfig.bar
-                ? 'top-[calc(3rem+0.5rem)] sm:top-[calc(3rem+1rem)]'
-                : headerBarForRecord
-                  ? 'top-3'
-                  : 'top-2 sm:top-4',
+              : headerBarForRecord
+                ? 'top-3'
+                : 'top-2 sm:top-4',
           )}
         >
           {sharedChrome}

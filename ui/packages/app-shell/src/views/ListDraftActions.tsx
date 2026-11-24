@@ -1,21 +1,27 @@
 /**
- * objectstack#35955 — Discard and Save on a Console list, drawn while the list
- * holds a DRAFT: a change the reader made on the list (`./listDraftStore.ts`)
- * that applies at once and is not saved anywhere. It replaces the
- * 「Personalized · Reset」 marker (objectstack#28950) at the end of the
- * condition row (objectstack#35878); with no draft the slot is empty.
+ * objectstack#35955 — Reset and Update view on a Console list, drawn while
+ * the list holds a DRAFT: a change the reader made on the list
+ * (`./listDraftStore.ts`) that applies at once and is not saved anywhere. It
+ * replaces the 「Personalized · Reset」 marker (objectstack#28950) at the end of
+ * the condition row (objectstack#35878); with no draft the slot is empty.
  *
- * - **Discard** puts the list back as its view declares it (the host's
+ * - **Reset** puts the list back as its view declares it (the host's
  *   `onDiscard`).
- * - **Save** opens its choices: 「Save to this view」 (`onSaveToView`, offered
- *   only where the host may write the open view) and 「Save as my view」
- *   (`onSaveAsMyView`, which asks a name first). The menu names what is
+ * - **Update view** opens its choices: 「Save to this view」 (`onSaveToView`,
+ *   offered only where the host may write the open view) and 「Save as my
+ *   view」 (`onSaveAsMyView`, which asks a name first). The menu names what is
  *   unsaved, so a reader sees what a save keeps.
  *
+ * The two read as the view's own actions, not as a page's Cancel and Save
+ * (objectstack#36737, Twenty's 「Reset / Update view」): a view is its own
+ * thing and saves on its own, so they stay drawn, and live, while the app's
+ * design mode is on, under the mode's bar (the maintainer's correction:
+ * 「tweetty 编辑布局时，列表视图还是正常显示保存」).
+ *
  * As the list narrows (the phone list draws this same control in its chip
- * row, objectstack#35883), the two faces fold into ONE Save whose menu also
- * holds Discard: one control, one save path, at every width. Where no save
- * is offered, both faces are Discard alone.
+ * row, objectstack#35883), the two faces fold into ONE Update view whose menu
+ * also holds Reset: one control, one save path, at every width. Where no save
+ * is offered, both faces are Reset alone.
  *
  * Nothing here is configurable: no metadata key or option reaches it.
  */

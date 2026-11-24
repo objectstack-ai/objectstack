@@ -3006,11 +3006,12 @@ const zh = {
       resetViewTitle: '恢复此视图自身的筛选、搜索、排序、分组、列布局、隐藏字段、密度、布局、行颜色、行号和行内编辑。固定的视图、收藏和记录的打开方式保持不变。只影响你自己的列表。',
       personalized: '已个性化',
       personalizedHeading: '你的列表与此视图不同之处',
-      // objectstack#35955 — a list's unsaved changes: Discard and Save.
+      // objectstack#35955 — a list's unsaved changes: Reset and Update view
+      // (objectstack#36737, the view's own actions, as Twenty's).
       draft: {
-        discard: '放弃',
+        discard: '重置',
         discardTitle: '把列表恢复成视图本来的样子：筛选、排序、分组、列和布局。列宽和行高不变。',
-        save: '保存',
+        save: '更新视图',
         heading: '未保存的改动',
         partSeparator: '、',
         saveToView: '保存到这个视图',
