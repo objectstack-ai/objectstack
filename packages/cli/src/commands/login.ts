@@ -97,6 +97,8 @@ import { Command, Flags } from '@oclif/core';
 import type { CliExitCode } from '../utils/format.js';
 import { printHeader, printSuccess, printError, printKV, emitJson, errorCodeFields } from '../utils/format.js';
 import { writeAuthConfig, readAuthConfig } from '../utils/auth-config.js';
+import { browserOpenNotice, openBrowser } from '../utils/open-browser.js';
+import { terminalText } from '../utils/terminal-text.js';
 import { ObjectStackClient } from '@objectstack/client';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -226,16 +228,6 @@ async function promptPassword(promptText: string): Promise<string> {
   });
 }
 
-/**
- * Open a URL in the system default browser (cross-platform).
- */
-async function openBrowser(url: string): Promise<void> {
-  const { exec } = await import('node:child_process');
-  const platform = process.platform;
-  const cmd = platform === 'darwin' ? `open "${url}"` : platform === 'win32' ? `start "" "${url}"` : `xdg-open "${url}"`;
-  exec(cmd, () => { /* best-effort */ });
-}
-
 export default class AuthLogin extends Command {
   static override description = 'Authenticate and store session credentials';
 
@@ -288,7 +280,7 @@ export default class AuthLogin extends Command {
             if (flags.json) {
               await emitRecord({ success: false, error: 'Already logged in', email: existing.email });
             } else {
-              printSuccess(`Already logged in as ${existing.email || existing.userId}`);
+              printSuccess(`Already logged in as ${terminalText(existing.email || existing.userId)}`);
               console.log('');
               console.log('  Run `os logout` first to switch accounts, or use --force to re-authenticate.');
               console.log('');
@@ -302,7 +294,7 @@ export default class AuthLogin extends Command {
 
       if (!flags.json) {
         printHeader('ObjectStack Login');
-        printKV('Server', flags.url);
+        printKV('Server', terminalText(flags.url));
         console.log('');
       }
 
@@ -370,7 +362,7 @@ export default class AuthLogin extends Command {
         await emitRecord({ success: false, error: error.message, ...errorCodeFields(error) });
         this.exit(1);
       }
-      printError(error.message || String(error));
+      printError(terminalText(error.message || String(error)));
       this.exit(1);
     }
   }
@@ -405,8 +397,8 @@ export default class AuthLogin extends Command {
       await emitRecord({ success: true, email: user?.email || email, userId: user?.id });
     } else {
       printSuccess('Authentication successful');
-      printKV('Email', user?.email || email);
-      if (user?.id) printKV('User ID', user.id);
+      printKV('Email', terminalText(user?.email || email));
+      if (user?.id) printKV('User ID', terminalText(user.id));
       console.log('');
       console.log('  Credentials stored in ~/.objectstack/credentials.json');
       console.log('');
@@ -429,7 +421,7 @@ export default class AuthLogin extends Command {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(`Device request failed (${res.status}): ${(err as any)?.error_description || (err as any)?.message || res.statusText}`);
+      throw new Error(`Device request failed (${terminalText(res.status)}): ${terminalText((err as any)?.error_description || (err as any)?.message || res.statusText)}`);
     }
     const deviceData = await res.json() as any;
     const {
@@ -455,15 +447,14 @@ export default class AuthLogin extends Command {
     } else {
       console.log('  To authorize this CLI, visit:');
       console.log('');
-      console.log(`  ${verificationUrl}`);
+      console.log(`  ${terminalText(verificationUrl)}`);
       console.log('');
-      console.log(`  User code: ${user_code}`);
+      console.log(`  User code: ${terminalText(user_code)}`);
       console.log('');
     }
 
     if (!noBrowser && !jsonOutput) {
-      await openBrowser(verificationUrl);
-      console.log('  (Browser opened automatically. Press Ctrl+C to cancel.)');
+      console.log(browserOpenNotice(openBrowser(verificationUrl)));
       console.log('');
     }
 
@@ -521,8 +512,8 @@ export default class AuthLogin extends Command {
           await emitRecord({ success: true, email: user?.email, userId: user?.id });
         } else {
           printSuccess('Authentication successful');
-          if (user?.email) printKV('Email', user.email);
-          if (user?.id) printKV('User ID', user.id);
+          if (user?.email) printKV('Email', terminalText(user.email));
+          if (user?.id) printKV('User ID', terminalText(user.id));
           console.log('');
           console.log('  Credentials stored in ~/.objectstack/credentials.json');
           console.log('');
@@ -543,7 +534,7 @@ export default class AuthLogin extends Command {
             : 'Login timed out or device code is no longer valid. Please run `os login` again.',
         );
       } else if (!pollRes.ok) {
-        throw new Error(`Polling failed (${pollRes.status}): ${pollJson?.error_description || pollJson?.message || pollRes.statusText}`);
+        throw new Error(`Polling failed (${terminalText(pollRes.status)}): ${terminalText(pollJson?.error_description || pollJson?.message || pollRes.statusText)}`);
       }
 
       if (!jsonOutput) {

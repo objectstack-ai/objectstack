@@ -1162,14 +1162,59 @@ export const ACTION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
 const ACTION_PAGE_PATH = '/api/v1/approvals/act';
 
 /** An action page, answered the way the self-hosted mount answers it. */
-function actionPageResponse(html: string): Response {
-  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+function actionPageResponse(html: string, status = 200): Response {
+  return new Response(html, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
 }
 
 /** Outcome of redeeming (or peeking) an actionable-link token. */
 export type ActionTokenOutcome =
   | { ok: true; action: 'approve' | 'reject'; request: ApprovalRequestRow; approverId: string }
-  | { ok: false; reason: 'invalid' | 'expired' | 'consumed' | 'not_pending' | 'not_approver'; request?: ApprovalRequestRow };
+  | { ok: false; reason: 'invalid' | 'expired' | 'consumed' | 'not_pending' | 'not_approver'; request?: ApprovalRequestRow }
+  // A reject link's form came back with no reason. The link is still live —
+  // nothing was consumed or decided — so the page asks again.
+  | { ok: false; reason: 'reason_required'; action: 'reject'; request: ApprovalRequestRow; approverId: string };
+
+/**
+ * The issues a reject's reason raises — empty when it may be recorded. The ONE
+ * judge for every door that records a reject: {@link ApprovalService.decide}
+ * and the action link's {@link ApprovalService.redeemActionToken} both ask it,
+ * by the rules the `approval_reject` action door applies to its required
+ * `textarea` param (`validateActionParams`): missing, blank, or not a string
+ * is refused.
+ */
+function rejectReasonIssues(comment: unknown) {
+  return validateActionParams([{ name: 'comment', required: true, type: 'textarea' }], { comment });
+}
+
+/**
+ * The page a POST to the ADR-0043 action page answers, from its redemption
+ * outcome — built once, so the plugin's self-hosted mount and
+ * {@link ApprovalService.handleActionPage} answer the same status and bytes.
+ *
+ *  - decided: the result page, `200`;
+ *  - a dead link: its explanatory result page, `200` (ADR-0043 tells a dead
+ *    link on the page, never as an error status);
+ *  - a reject sent with no reason: the same confirm page again, carrying the
+ *    refusal, `400` — the link is live, and what was refused is the input.
+ */
+export function actionRedemptionPage(
+  out: ActionTokenOutcome,
+  page: { token: string; actPath: string; inboxHref: string },
+): { status: number; html: string } {
+  if (out.ok) {
+    return { status: 200, html: renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request, page.inboxHref) };
+  }
+  if (out.reason === 'reason_required') {
+    return {
+      status: 400,
+      html: renderConfirmPage({
+        request: out.request, action: out.action, approverId: out.approverId,
+        token: page.token, actPath: page.actPath, refusal: 'reason_required',
+      }),
+    };
+  }
+  return { status: 200, html: renderResultPage(out.reason, out.request, page.inboxHref) };
+}
 
 /**
  * System-elevated context for this service's own metadata reads and writes.
@@ -6615,7 +6660,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * answers, judged by the same rules (`validateActionParams` over the
    * `textarea` param that action declares). Every human door reaches this
    * member (the REST route, the SDK, the action door that forwards to the
-   * route, the action link with its fixed text). The SLA sweep's auto-reject
+   * route, the action link with the reason its confirm page asks for). The SLA sweep's auto-reject
    * calls `decideAndResume` and the revision-limit reject writes its own row,
    * so neither passes through here. An approve keeps its comment optional.
    */
@@ -6625,7 +6670,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     context: ExecutionContext,
   ): Promise<ApprovalDecisionResult> {
     if (input?.decision === 'reject') {
-      const issues = validateActionParams([{ name: 'comment', required: true, type: 'textarea' }], { comment: input.comment });
+      const issues = rejectReasonIssues(input.comment);
       if (issues.length > 0) {
         throw Object.assign(
           new Error(`Invalid action params: ${issues.map((i) => i.message).join('; ')}`),
@@ -8085,10 +8130,21 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
   /**
    * POST redemption: consume the token FIRST (a failed decide still burns
    * it — replay-safe), then decide as the bound approver.
+   *
+   * A reject records the reason the approver typed on the confirm page
+   * (`input.comment`), judged as every reject door judges it
+   * ({@link rejectReasonIssues}). A missing or blank one is answered
+   * `reason_required` BEFORE the token is consumed: nothing was decided, so
+   * the link stays live and the page asks again. An approve keeps its fixed
+   * comment and reads no field.
    */
-  async redeemActionToken(rawToken: string): Promise<ActionTokenOutcome> {
+  async redeemActionToken(rawToken: string, input?: { comment?: unknown }): Promise<ActionTokenOutcome> {
     const res = await this.resolveActionToken(rawToken);
     if (!res.ok) return res;
+    const rejecting = res.token.action === 'reject';
+    if (rejecting && rejectReasonIssues(input?.comment).length > 0) {
+      return { ok: false, reason: 'reason_required', action: 'reject', request: res.request, approverId: res.token.approver_id };
+    }
     await this.engine.update('sys_approval_token', {
       id: res.token.id, consumed_at: this.clock.now().toISOString(),
     }, { context: SYSTEM_CTX });
@@ -8105,7 +8161,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     const out = await this.decide(res.token.request_id, {
       decision: res.token.action,
       actorId: res.token.approver_id,
-      comment: 'Via action link',
+      comment: rejecting ? (input!.comment as string) : 'Via action link',
     }, person ? { ...SYSTEM_CTX, userId: person } : SYSTEM_CTX);
     return { ok: true, action: res.token.action, request: out.request, approverId: res.token.approver_id };
   }
@@ -8127,8 +8183,11 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    *
    *  - `GET` renders: the token comes from the `token` query parameter, and it
    *    never decides (mail gateways prefetch every link in a message).
-   *  - `POST` redeems: the token comes from the `token` field of the form body.
-   *    A body that is not a form carries no token, and is told "invalid".
+   *  - `POST` redeems: the token comes from the `token` field of the form body,
+   *    and a reject's reason from its `comment` field (the last of each, as
+   *    the mount reads a repeated field). A body that is not a form carries no
+   *    token, and is told "invalid". A reject with no reason is answered the
+   *    confirm page again, with `400` ({@link actionRedemptionPage}).
    *  - A dead link is told on the page, with `200`, never as an error status.
    *  - Any other method: `405` with `Allow: GET, POST`. The contract and
    *    ADR-0043 name only these two methods, and answering a third as either
@@ -8150,17 +8209,19 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
     }
     if (request.method === 'POST') {
       let token = '';
+      let comment: unknown;
       try {
-        // The LAST `token` field, as the self-hosted mount's body parser reads
-        // a repeated field — so the two doors agree on every body.
-        const fields = (await request.formData()).getAll('token');
-        token = String(fields[fields.length - 1] ?? '');
+        // The LAST `token` / `comment` field, as the self-hosted mount's body
+        // parser reads a repeated field — so the two doors agree on every body.
+        const form = await request.formData();
+        const tokens = form.getAll('token');
+        token = String(tokens[tokens.length - 1] ?? '');
+        const comments = form.getAll('comment');
+        comment = comments[comments.length - 1];
       } catch { /* not a form body: no token, told "invalid" below */ }
-      const out = await this.redeemActionToken(token);
-      if (!out.ok) return actionPageResponse(renderResultPage(out.reason, out.request, this.approvalsInboxLink()));
-      return actionPageResponse(
-        renderResultPage(out.action === 'approve' ? 'approved' : 'rejected', out.request, this.approvalsInboxLink()),
-      );
+      const out = await this.redeemActionToken(token, { comment });
+      const page = actionRedemptionPage(out, { token, actPath: ACTION_PAGE_PATH, inboxHref: this.approvalsInboxLink() });
+      return actionPageResponse(page.html, page.status);
     }
     return new Response(null, { status: 405, headers: { Allow: 'GET, POST' } });
   }

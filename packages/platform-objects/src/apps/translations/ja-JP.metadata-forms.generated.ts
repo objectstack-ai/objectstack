@@ -114,7 +114,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "折りたたみ",
-        helpText: "セクションを折りたためるかどうか。入力フォームとレコード詳細ページに適用されます。未設定の場合は none です。"
+        helpText: "セクションを折りたためるかどうか。入力フォームは設定どおりに動作します。既定のレコードページでは閲覧者がタイトル付きのグループをすべて折りたためるため、そこでは初期状態だけを決めます。collapsed は閉じた状態、それ以外は開いた状態で始まります。未設定の場合は none です。"
       },
       "fieldGroups.visibleWhen": {
         label: "表示条件",
@@ -239,6 +239,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.deleteBehavior": {
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
+      },
+      "fields.transferBehavior": {
+        label: "所有者変更の連動",
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
       },
       "fields.multiple": {
         label: "複数選択",
@@ -768,6 +772,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "削除動作",
         helpText: "参照先レコード削除時の動作"
+      },
+      transferBehavior: {
+        label: "所有者変更の連動",
+        helpText: "参照先レコードの所有者を変更するとき、このフィールドでそのレコードを参照しているレコードも一緒に移せるかどうか"
       },
       relatedListFilter: {
         label: "関連リストのフィルター",
@@ -2190,7 +2198,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "表示名"
       },
       description: {
-        label: "説明"
+        label: "説明",
+        helpText: "このレポートで何がわかるかを一文で。名前の下に表示されます。"
       },
       type: {
         label: "型",
@@ -2272,9 +2281,33 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日付範囲",
         helpText: "既定の期間とカスタム範囲の切り替え。ディメンションはデータセットの日付ディメンションである必要があります。データセットに日付ディメンションが 1 つだけの場合は空欄のままにします。"
       },
+      "dateRange.dimension": {
+        label: "日付フィールド",
+        helpText: "期間を適用する、データソースの日付グループ。データソースに日付グループが 1 つしかない場合は空のままにします。"
+      },
+      "dateRange.defaultRange": {
+        label: "既定の期間",
+        helpText: "レポートを開いたときに表示される期間。"
+      },
+      "dateRange.allowCustomRange": {
+        label: "カスタム範囲を許可",
+        helpText: "開始日と終了日を利用者が自分で選べるようにします。"
+      },
       exportOptions: {
         label: "エクスポートオプション",
         helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データセットのオブジェクトのエクスポート権限で決まります。"
+      },
+      "exportOptions.formats": {
+        label: "形式",
+        helpText: "ダウンロードできる形式。未設定なら csv と xlsx の両方、空のリストならダウンロードはオフになります。"
+      },
+      "exportOptions.includeHeaders": {
+        label: "見出しを含める",
+        helpText: "ダウンロードしたファイルの 1 行目に列名を入れます。"
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "ファイル名",
+        helpText: "ダウンロードするファイル名の先頭部分。レポート名の代わりに使われます。"
       }
     }
   },

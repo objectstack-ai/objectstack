@@ -2975,6 +2975,19 @@ export function InterfacesPillar({
   // block tree, so `selection` never populates; without this the panel would
   // sit permanently on the "click a block" empty state.
   const DefaultInspector = useRegisteredMetadataDefaultInspector(current?.type ?? '');
+  // objectstack#36725 — a global action opened from an app nav leaf gets the
+  // served `action` type row (`/meta/types`), its schema and its form, as the
+  // full-page editor and the object's Actions view hand it over: the action
+  // designer draws its "More fields" from the schema and its refusal catalogue
+  // and declared texts from their served form rows. Scoped to `action`: the
+  // page, report and dashboard home inspectors keep drawing their bundled
+  // forms on this rail.
+  const { entries: servedTypes } = useMetadataTypes(client);
+  const servedActionType = React.useMemo(
+    () => servedTypes.find((e) => e.type === 'action'),
+    [servedTypes],
+  );
+  const servedHomeType = current?.type === 'action' ? servedActionType : undefined;
   // objectui#6795 part C — WHY the three reads above can be `undefined` decides
   // what this pillar may truthfully say, and there are exactly two causes:
   //   1. no designer is registered for THIS type (others are) — a product fact;
@@ -4986,6 +4999,8 @@ export function InterfacesPillar({
             name={current.name}
             draft={draft}
             onPatch={onPatch}
+            serverSchema={servedHomeType?.schema}
+            serverForm={servedHomeType?.form}
             onSelectionChange={setSelection}
             onBlockingIssuesChange={(count: number) =>
               setBlockingReport({ key: inspectorKey, count })
@@ -7901,7 +7916,12 @@ export function DataPillar({
                   onBlockingIssuesChange={reportPanelBlocking}
                 />
               ) : viewMode === 'hooks' ? (
-                <ObjectHooksPanel buffer={hooksBuffer} disabled={readOnly} hookSchema={typeSchemas.hook} />
+                <ObjectHooksPanel
+                  buffer={hooksBuffer}
+                  disabled={readOnly}
+                  hookSchema={typeSchemas.hook}
+                  hookForm={typeForms.hook}
+                />
               ) : viewMode === 'actions' ? (
                 <div ref={actionsPanelRef} className="contents">
                   <ObjectActionsPanel

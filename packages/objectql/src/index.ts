@@ -320,6 +320,15 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // holding the other realm's copy of the class gets `instanceof` === false,
 // silently.
 export { ReadonlyFieldRejectedError, READONLY_FIELD_REJECTED_CODE } from './readonly-strict-errors.js';
+// [ADR-0153 D4] The sync-in pull's write mark and the refusal of a `_sync_`
+// provenance column in any other write. The mark is the pull's alone
+// (`@objectstack/service-automation`); see `sync-provenance-write.ts`.
+export {
+  SYNC_PULL_WRITE,
+  markSyncPullWrite,
+  SyncProvenanceWriteRefusedError,
+  SYNC_PROVENANCE_WRITE_REFUSED_CODE,
+} from './sync-provenance-write.js';
 // [#32768] What `ObjectQL#judgeFieldWriteLock` answers for a field its
 // `readonlyWhen` locks now: the drop reason and the strict refusal's phrase.
 export type { FieldWriteLock } from './engine-field-write-lock.js';
