@@ -69,6 +69,25 @@ import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
 /** The record a host that edits none hands `{ $record }` resolution: nothing to read. */
 const NO_EDITED_RECORD: Readonly<Record<string, unknown>> = Object.freeze({});
 
+const warnedAutofillRefused = new Set<string>();
+
+/**
+ * The development-build warning for a `lookupAutofill` this host does not
+ * run, said once per field: the pick then fills no other field, and the
+ * warning says why, so the author who wrote the key on a standalone form
+ * finds where it is honoured.
+ */
+function warnAutofillRefused(field: string): void {
+  if ((globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === 'production') return;
+  if (warnedAutofillRefused.has(field)) return;
+  warnedAutofillRefused.add(field);
+  console.warn(
+    `[LookupField] lookupAutofill on "${field || '(unnamed)'}" is not executed here: a pick fills other fields only `
+      + 'in a record form (the object\'s own lookup field) and in a line-item grid column. Declare lookupAutofill on '
+      + 'the object field and draw the object\'s form; on a standalone form node the key is ignored.',
+  );
+}
+
 export interface LookupOption {
   value: string | number;
   label: string;
@@ -1222,9 +1241,24 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
    * no `onSelectRecord` and supplies `onAutofill`, the writer for the sibling
    * fields of the record being edited. A host that owns the pick (the line-item
    * grid) applies the pairs itself.
+   *
+   * The pairs are an object fact, honoured where the object is read: a record
+   * form says so by the stamp it puts on every lookup declaring them
+   * (`withLookupAutofillTargets`, read by `readLookupAutofillTargets`). A
+   * lookup without that stamp — a standalone `form` node whose field carries
+   * the key written by hand — fills nothing, and a development build names
+   * the field once.
    */
-  const autofillPairs: readonly LookupAutofillPair[] | undefined =
+  const declaredPairs: readonly LookupAutofillPair[] | undefined =
     !multiple && !onSelectRecord && props.onAutofill ? fieldMeta?.lookupAutofill : undefined;
+  const autofillTargets = declaredPairs?.length ? readLookupAutofillTargets(fieldMeta) : undefined;
+  const autofillPairs: readonly LookupAutofillPair[] | undefined = autofillTargets ? declaredPairs : undefined;
+  const refusedAutofillField = declaredPairs?.length && !autofillTargets
+    ? String(props.name || lookupField?.name || fieldMeta?.name || '')
+    : undefined;
+  useEffect(() => {
+    if (refusedAutofillField !== undefined) warnAutofillRefused(refusedAutofillField);
+  }, [refusedAutofillField]);
   const onAutofill = props.onAutofill;
 
   /**
@@ -1238,10 +1272,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
    * for the parent the record holds, as the amount box itself does.
    */
   const { currency: homeCurrency } = useLocalization();
-  const autofillTargets = autofillPairs?.length ? readLookupAutofillTargets(fieldMeta) : undefined;
+  // A stamp that names no target (the schema had not loaded, or no target is
+  // a field of the object) judges no currency: every value copies as before.
+  const currencyTargets = autofillTargets && Object.keys(autofillTargets).length > 0 ? autofillTargets : undefined;
   const followingTarget = useMemo(
-    () => (autofillTargets ? Object.values(autofillTargets).find((d) => recordCurrencyPath(d as never)) : undefined),
-    [autofillTargets],
+    () => (currencyTargets ? Object.values(currencyTargets).find((d) => recordCurrencyPath(d as never)) : undefined),
+    [currencyTargets],
   );
   const { record: editedRecordForCurrency, state: followedParentState } = useFollowedParentRead(
     followingTarget as never,
@@ -1254,17 +1290,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // (`targetCurrencyUnread`).
   const followedParentPending = followedParentState === 'pending';
   const followedParentUnread = followedParentState === 'unread';
-  const autofillCurrency = !!autofillTargets;
+  const autofillCurrency = !!currencyTargets;
   /** The currency context of a pick of `row` (`crossCurrencyRefusal`), or none without stamped targets. */
   const currencyFor = useCallback(
     (row: Record<string, unknown>): AutofillCurrencyContext | undefined => {
-      if (!autofillTargets) return undefined;
+      if (!currencyTargets) return undefined;
       const sourceFields = (refObjectSchema as { fields?: Record<string, unknown> } | null)?.fields;
       return {
         home: homeCurrency,
         sourceCurrency: (source, v) => pickedAmountCurrencyOf(sourceFields?.[source] as never, v, row),
         targetCurrency: (target, writes) => {
-          const def = autofillTargets[target];
+          const def = currencyTargets[target];
           if (followedParentUnread && recordCurrencyPath(def as never)) {
             return amountCurrencyOf(def as never) ? { kind: 'unread' } : undefined;
           }
@@ -1272,7 +1308,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         },
       };
     },
-    [autofillTargets, refObjectSchema, homeCurrency, editedRecordForCurrency, followedParentUnread],
+    [currencyTargets, refObjectSchema, homeCurrency, editedRecordForCurrency, followedParentUnread],
   );
   /** What the last fill left empty, for the record it picked; said under the field. */
   const [withheldFill, setWithheldFill] = useState<{ picked: string; items: readonly WithheldAutofill[] } | null>(null);
