@@ -176,7 +176,7 @@ export class KnowledgeService implements IKnowledgeService {
    *
    * ## Paging
    *
-   * The walk reads at most {@link REINDEX_PAGE_SIZE} rows per `find`, in
+   * The walk reads at most `REINDEX_PAGE_SIZE` (100) rows per `find`, in
    * `id` order, each page continuing after the last id of the one before
    * (`where AND id > cursor` — a keyset walk, so a page never re-reads or skips
    * a row the way an offset does when rows land meanwhile), and upserts each
@@ -200,7 +200,7 @@ export class KnowledgeService implements IKnowledgeService {
    * Walks of one source run one after another in this process: a second
    * `reindexSource` of a source waits until the first has finished, so their
    * pages never interleave (the same promise chain as the record sync,
-   * {@link chainAfter}). Walks of different sources run concurrently.
+   * `chainAfter`). Walks of different sources run concurrently.
    *
    * Documents of rows that no longer exist or no longer match are NOT removed
    * by a reindex.
@@ -318,7 +318,7 @@ export class KnowledgeService implements IKnowledgeService {
         return stopped('the page was indexed, but its last row carries no id, so the walk cannot continue after it.');
       }
       if (lastId === cursor) {
-        return stopped(`the page was indexed, but its last row's id did not move past the cursor, so the walk cannot continue.`);
+        return stopped("the page was indexed, but its last row's id did not move past the cursor, so the walk cannot continue.");
       }
       cursor = lastId;
     }
