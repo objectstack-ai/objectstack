@@ -54,3 +54,8 @@ export * from './epoch.zod';
 // the same way, so both reach consumers on the `@objectstack/spec/shared`
 // subpath and neither widens the root entry.
 export * from './duration.zod';
+// The ONE token estimate (`estimateTokens`): a conservative, tokenizer-free
+// upper estimate of a text's length in tokens, read by the embedders (refusing
+// an input over a model's limit) and by knowledge chunking, so the two never
+// measure the same text differently. Pure; imports nothing.
+export * from './token-estimate';
