@@ -554,6 +554,43 @@ export interface PermissionStudioChrome {
    * `sourcePackage`.
    */
   onCloneSourceRead?: (name: string, sourcePackage: string | undefined) => void;
+  /**
+   * objectstack#36905 — the full-screen item page's frame (`StudioPermissionSetPage`):
+   * the host draws the header (`StudioDetailHeader`) from the parts this page
+   * hands it, and its tab row carries the item tools (References, History,
+   * Source) after the five section tabs, so History is a tab there and this
+   * page draws no History button. Omitted (the Access pillar), the page draws
+   * its own `StudioItemHeader`, as before.
+   */
+  frame?: PermissionStudioFrame;
+}
+
+/** The pieces of the page's header a {@link PermissionStudioFrame} host composes. */
+export interface PermissionStudioHeaderParts {
+  /** The set's label, or its name before one is known. */
+  title: string;
+  /** The line under the title: provenance, default and lock labels. */
+  note: React.ReactNode;
+  /** The granted-object and field-override counts, once loaded. */
+  meta?: string;
+  /** The page's own actions: the save status, the environment's Save, the artifact tier's Clone. */
+  actions: React.ReactNode;
+  /** The page's own ⋯ items (`DropdownMenuItem`s): the name and label editor. */
+  menuItems: React.ReactNode;
+  /** The five section tabs (`StudioTab`s), none active while {@link PermissionStudioFrame.toolOpen}. */
+  sectionTabs: React.ReactNode;
+}
+
+export interface PermissionStudioFrame {
+  /** Draw the header from the page's parts. */
+  renderHeader: (parts: PermissionStudioHeaderParts) => React.ReactNode;
+  /**
+   * An item tool's panel is open in place of the sections: they stay mounted
+   * and hidden, so an edit survives the visit, and no section tab is active.
+   */
+  toolOpen?: boolean;
+  /** The open tool's panel, drawn in the body while {@link toolOpen}. */
+  toolPanel?: React.ReactNode;
 }
 
 export interface PermissionMatrixEditPageProps {
@@ -2417,33 +2454,64 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     // set's machine name is the title's tooltip, and the provenance, default
     // and lock labels are the line under it.
     const studioTitle = headerLabel || name;
+    const frame = chrome.frame;
+    const titleNoteEl = (
+      <span className="inline-flex items-center gap-1.5" data-testid="perm-studio-title-note">
+        {/* Same test id and the same answer as the page's badge. */}
+        {/* objectstack#35018 — in the builder's words: a set the app
+            brings reads 「随应用提供」, not the package term 「包内置」. */}
+        <span data-testid="perm-provenance-badge">
+          {shippedByPackage ? t('engine.studio.access.origin.app') : t('perm.badge.custom')}
+        </span>
+        {!!draft.isDefault && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{t('perm.badge.default')}</span>
+          </>
+        )}
+        {/* A host-locked package says so in the pillar's note; the
+            other gates (type, artifact, wall) keep their own badge. */}
+        {!readOnly && lockBadgeEl}
+      </span>
+    );
+    const basicsItemEl = (
+      <DropdownMenuItem onSelect={() => setBasicsOpen((o) => !o)}>{t('perm.basics.editHint')}</DropdownMenuItem>
+    );
+    const sectionTabsEl = PERMISSION_STUDIO_TABS.map((tab) => (
+      <StudioTab
+        key={tab.key}
+        active={!frame?.toolOpen && chrome.tab === tab.key}
+        data-testid={`perm-tab-${tab.key}`}
+        onClick={() => chrome.onTabChange(tab.key)}
+      >
+        {t(tab.labelKey)}
+      </StudioTab>
+    ));
     return (
       <div className="flex h-full flex-col">
+        {frame ? (
+          frame.renderHeader({
+            title: studioTitle,
+            note: titleNoteEl,
+            meta,
+            actions: (
+              <>
+                {autosaveStatusEl}
+                {envSaveEl}
+                {lockedByArtifactTier && cloneButton}
+              </>
+            ),
+            menuItems: basicsItemEl,
+            sectionTabs: sectionTabsEl,
+          })
+        ) : (
         <StudioItemHeader
           testId="access-item-header"
           leading={chrome.leading}
           icon={Shield}
           title={studioTitle}
           titleProps={{ title: name, 'data-testid': 'perm-studio-title' }}
-          note={
-            <span className="inline-flex items-center gap-1.5" data-testid="perm-studio-title-note">
-              {/* Same test id and the same answer as the page's badge. */}
-              {/* objectstack#35018 — in the builder's words: a set the app
-                  brings reads 「随应用提供」, not the package term 「包内置」. */}
-              <span data-testid="perm-provenance-badge">
-                {shippedByPackage ? t('engine.studio.access.origin.app') : t('perm.badge.custom')}
-              </span>
-              {!!draft.isDefault && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span>{t('perm.badge.default')}</span>
-                </>
-              )}
-              {/* A host-locked package says so in the pillar's note; the
-                  other gates (type, artifact, wall) keep their own badge. */}
-              {!readOnly && lockBadgeEl}
-            </span>
-          }
+          note={titleNoteEl}
           meta={meta}
           actions={
             <>
@@ -2475,26 +2543,13 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
                     <MoreHorizontal className="h-4 w-4" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => setBasicsOpen((o) => !o)}>
-                    {t('perm.basics.editHint')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
+                <DropdownMenuContent align="end">{basicsItemEl}</DropdownMenuContent>
               </DropdownMenu>
             </>
           }
           tabs={
             <>
-              {PERMISSION_STUDIO_TABS.map((tab) => (
-                <StudioTab
-                  key={tab.key}
-                  active={chrome.tab === tab.key}
-                  data-testid={`perm-tab-${tab.key}`}
-                  onClick={() => chrome.onTabChange(tab.key)}
-                >
-                  {t(tab.labelKey)}
-                </StudioTab>
-              ))}
+              {sectionTabsEl}
               {/* The pillar's draft / read-only note, whole, at the tab row's
                   right: in the title row it squeezed the label and the counts
                   at the 1280 px design width. */}
@@ -2502,14 +2557,23 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
             </>
           }
         />
+        )}
+        {frame?.toolOpen && <div className="min-h-0 flex-1 overflow-auto">{frame.toolPanel}</div>}
         {loading ? (
-          <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> {t('perm.loading').replace('{name}', name)}
-          </div>
+          !frame?.toolOpen && (
+            <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> {t('perm.loading').replace('{name}', name)}
+            </div>
+          )
         ) : draftRefusedEl ? (
-          draftRefusedEl
+          !frame?.toolOpen && draftRefusedEl
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          // objectstack#36905 — kept mounted under an open item tool, so an
+          // edit survives the visit.
+          <div
+            className={cn('flex min-h-0 flex-1 flex-col overflow-hidden', frame?.toolOpen && 'hidden')}
+            data-testid="perm-studio-sections"
+          >
             {noticesEl}
             {basicsOpen && (
               <div className="shrink-0 border-b pt-3" data-testid="perm-basics">

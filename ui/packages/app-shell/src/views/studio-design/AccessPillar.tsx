@@ -32,7 +32,13 @@ import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { publishSavedItem } from './studioSaveBar.js';
 import { studioPillarItemPath } from './metadataArea.js';
 import { PermissionSetCloneDialog } from '../metadata-admin/PermissionSetCloneDialog.js';
-import { permissionSetCloneNoticeText, type PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
+import { type PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
+import {
+  NEW_SIMILAR_ARRIVAL_STATE,
+  NewSimilarStripNotice,
+  readNewSimilarArrival,
+  type NewSimilarStrip,
+} from './permissionNewSimilar.js';
 import { useWalledCatalogReadOnly } from '../metadata-admin/catalog-scope.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
@@ -40,6 +46,7 @@ import { useSurfaceDeepLink, resolveSurfaceDeepLink } from './useSurfaceDeepLink
 import { buildPermissionSkeleton } from './skeletons.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
+import { accessSuggestionStrings } from './accessSuggestionStrings.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { suggestedSetLabel as suggestedSetLabelOf } from '../../components/suggestedSetLabel.js';
 import {
@@ -82,43 +89,6 @@ function StudioNameLabel({ label, name }: { label: string; name?: string }): Rea
       ) : null}
     </span>
   );
-}
-
-/**
- * objectstack#28573 — what the Access pillar's "New similar" strip says: the
- * copy the clone door saved (shown on that copy, in the package the answer
- * named), or an answer the pillar could not open (no copy named, or no
- * package). `notice` is the server's sentence, and `noticeCode` the code it
- * names it by (objectstack#29727): shown in the console's language for a known
- * code, as sent otherwise.
- */
-type NewSimilarStrip =
-  | { kind: 'landed'; name: string; package: string; notice: string; noticeCode?: string }
-  | { kind: 'noPackage'; name: string; notice: string; noticeCode?: string }
-  | { kind: 'noName'; notice: string; noticeCode?: string };
-
-/** The navigation-state key the copy's landing rides to the copy's pillar on. */
-const NEW_SIMILAR_ARRIVAL_STATE = 'accessNewSimilar';
-
-/**
- * The landing a "New similar" navigation carried, for the pillar it opened:
- * kept only when it names THIS package, so a stale history entry of another
- * package's pillar shows nothing.
- */
-function readNewSimilarArrival(state: unknown, packageId: string): NewSimilarStrip | null {
-  const arrival = (state as Record<string, unknown> | null | undefined)?.[NEW_SIMILAR_ARRIVAL_STATE] as
-    | Partial<Extract<NewSimilarStrip, { kind: 'landed' }>>
-    | undefined;
-  if (!arrival || arrival.kind !== 'landed' || arrival.package !== packageId || typeof arrival.name !== 'string') {
-    return null;
-  }
-  return {
-    kind: 'landed',
-    name: arrival.name,
-    package: packageId,
-    notice: typeof arrival.notice === 'string' ? arrival.notice : '',
-    ...(typeof arrival.noticeCode === 'string' ? { noticeCode: arrival.noticeCode } : {}),
-  };
 }
 
 /**
@@ -734,45 +704,7 @@ export function AccessPillar({
     ) : null;
   const newSimilarStripEl =
     newSimilarStrip && !owdOpen && (newSimilarStrip.kind !== 'landed' || newSimilarStrip.name === current) ? (
-      <div
-        role={newSimilarStrip.kind === 'landed' ? 'status' : 'alert'}
-        data-testid="access-new-similar-strip"
-        className="mx-3 mt-2 flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
-      >
-        <Copy className="mt-0.5 h-4 w-4 shrink-0" />
-        <div className="min-w-0 flex-1 space-y-1">
-          <p>
-            {newSimilarStrip.kind === 'landed'
-              ? tFormat('engine.studio.access.newSimilar.done', locale, {
-                  name: newSimilarStrip.name,
-                  package: newSimilarStrip.package,
-                })
-              : newSimilarStrip.kind === 'noPackage'
-                ? tFormat('engine.studio.access.newSimilar.noPackage', locale, { name: newSimilarStrip.name })
-                : t('perm.clone.noName', locale)}
-          </p>
-          {/* objectstack#29727 — in the console's language for its known code, else as sent. */}
-          {newSimilarStrip.notice && (
-            <p>
-              {permissionSetCloneNoticeText(
-                {
-                  notice: newSimilarStrip.notice,
-                  noticeCode: newSimilarStrip.noticeCode,
-                  package: newSimilarStrip.kind === 'landed' ? newSimilarStrip.package : null,
-                },
-                locale,
-              )}
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={() => setNewSimilarStrip(null)}
-          className="shrink-0 rounded-md px-1.5 text-[12px] hover:bg-amber-100 dark:hover:bg-amber-900/40"
-        >
-          {t('engine.studio.access.newSimilar.dismiss', locale)}
-        </button>
-      </div>
+      <NewSimilarStripNotice strip={newSimilarStrip} locale={locale} onDismiss={() => setNewSimilarStrip(null)} />
     ) : null;
   const accessHeaderEl = (
     <StudioItemHeader
@@ -813,41 +745,7 @@ export function AccessPillar({
       <SuggestedBindingsPanel
         packageId={railPackageId}
         className="mx-3 mt-2"
-        strings={{
-          describe: (s) =>
-            tFormat(
-              s.anchor === 'guest'
-                ? 'engine.studio.access.suggestPromptGuest'
-                : 'engine.studio.access.suggestPromptEveryone',
-              locale,
-              { set: suggestedSetLabel(s) },
-            ),
-          confirm: t('engine.studio.access.suggestConfirm', locale),
-          confirming: t('engine.studio.access.suggestConfirming', locale),
-          dismiss: t('engine.studio.access.suggestDismiss', locale),
-          confirmedToast: (s) =>
-            tFormat('engine.studio.access.suggestConfirmedToast', locale, {
-              set: suggestedSetLabel(s),
-              anchor: s.anchor,
-            }),
-          dismissedToast: (s) =>
-            tFormat('engine.studio.access.suggestDismissedToast', locale, { set: suggestedSetLabel(s) }),
-          guestUnsupported: t('engine.studio.access.suggestGuestUnsupported', locale),
-          acceptedState: (s) =>
-            tFormat('engine.studio.access.suggestAcceptedState', locale, { set: suggestedSetLabel(s) }),
-          notInForceState: (s) =>
-            tFormat('engine.studio.access.suggestNotInForceState', locale, { set: suggestedSetLabel(s) }),
-          dismissedState: (s) =>
-            tFormat('engine.studio.access.suggestDismissedState', locale, { set: suggestedSetLabel(s) }),
-          revoke: t('engine.studio.access.suggestRevoke', locale),
-          revoking: t('engine.studio.access.suggestRevoking', locale),
-          revokedToast: (s) =>
-            tFormat('engine.studio.access.suggestRevokedToast', locale, { set: suggestedSetLabel(s) }),
-          reopen: t('engine.studio.access.suggestReopen', locale),
-          reopening: t('engine.studio.access.suggestReopening', locale),
-          reopenedToast: (s) =>
-            tFormat('engine.studio.access.suggestReopenedToast', locale, { set: suggestedSetLabel(s) }),
-        }}
+        strings={accessSuggestionStrings(locale, suggestedSetLabel)}
       />
 
       <div className="relative flex min-h-0 flex-1">
