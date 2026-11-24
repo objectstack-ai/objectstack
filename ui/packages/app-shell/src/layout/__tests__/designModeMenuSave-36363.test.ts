@@ -39,9 +39,12 @@ function doors(opts: {
   pairWritable?: boolean;
   save?: () => Promise<unknown>;
   publish?: () => Promise<unknown>;
+  /** The deployment's languages; absent, the doors read none. */
+  locales?: DeploymentLocales;
 }) {
   const calls: Array<[string, ...unknown[]]> = [];
   const d: AppMenuSaveDoors = {
+    ...(opts.locales ? { readLocales: async () => opts.locales! } : {}),
     listPackages: async () =>
       new Map([
         ['com.acme.crm', { id: 'com.acme.crm', name: 'CRM', writable: opts.writable, manifest: opts.version ? { version: opts.version } : {} }],
@@ -561,5 +564,59 @@ describe('the deployment\'s languages, its source language among them (objectsta
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     expect(await fetchDeploymentLocales()).toBeNull();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('a source-language rename over an inline locale-map label keeps the other languages (objectstack#36876)', () => {
+  /** An English-source app: the stored label is the app's own text, in its own map. */
+  const LOCALES: DeploymentLocales = { codes: ['en', 'zh-CN'], defaultLocale: 'en', sourceLocale: 'en' };
+  const ORDERS = { id: 'orders', type: 'object', objectName: 'sales_order' };
+  const stored = (label: unknown): Menu => [{ ...ORDERS, label }, ...NAV];
+  /** A catalog translating the menu's other entry, so the translator walks the menu; none for `orders`. */
+  const BUNDLE = { en: { apps: { crm: { navigation: { leads: { label: 'Leads' } } } } } };
+  /** The menu as served: the stored app through the translator. */
+  const servedOf = (menu: Menu): Menu =>
+    withEntryIds(inShownOrder(translateApp({ name: 'crm', navigation: menu as never[] }, BUNDLE as never, { locale: 'en' }).navigation as Menu));
+  /** Rename `orders` to `name` (`undefined` clears it) in `language`, and read back what was stored. */
+  async function rename(label: unknown, name: string | undefined, language: string) {
+    const { d, calls } = doors({ writable: true, stored: stored(label), locales: LOCALES });
+    const served = servedOf(stored(label));
+    await saveAppMenu(
+      { appName: 'crm', packageId: 'com.acme.crm', served, navigation: patchEntry(served, 'orders', { label: name }), labels: { language } },
+      TEXTS,
+      d,
+    );
+    expect(calls.filter(([c, t]) => c === 'save' && t === 'translation')).toEqual([]);
+    return savedNav(calls);
+  }
+
+  it('the served label is the stored map itself, so the rename goes to the stored label', () => {
+    expect(servedOf(stored({ en: 'Orders', 'zh-CN': '订单' }))[0].label).toEqual({ en: 'Orders', 'zh-CN': '订单' });
+  });
+
+  it('only the source-language entry takes the new name; every other locale keeps its value', async () => {
+    const nav = await rename({ en: 'Orders', 'zh-CN': '订单' }, 'Sales orders', 'en');
+    expect(nav[0]).toEqual({ ...ORDERS, label: { en: 'Sales orders', 'zh-CN': '订单' } });
+    expect(nav.slice(1)).toEqual(NAV);
+  });
+
+  it('the entry replaced is the one the editor showed: a regional session over a bare-language key', async () => {
+    const nav = await rename({ en: 'Orders', 'zh-CN': '订单' }, 'Sales orders', 'en-US');
+    expect(nav[0].label).toEqual({ en: 'Sales orders', 'zh-CN': '订单' });
+  });
+
+  it('a map without a source-language entry gains one; the others are kept', async () => {
+    const nav = await rename({ 'zh-CN': '订单' }, 'Sales orders', 'en');
+    expect(nav[0].label).toEqual({ 'zh-CN': '订单', en: 'Sales orders' });
+  });
+
+  it('a cleared name drops only the source-language entry', async () => {
+    const nav = await rename({ en: 'Orders', 'zh-CN': '订单' }, undefined, 'en');
+    expect(nav[0].label).toEqual({ 'zh-CN': '订单' });
+  });
+
+  it('CONTROL: a plain-string stored label still becomes the plain string typed', async () => {
+    const nav = await rename('Orders', 'Sales orders', 'en');
+    expect(nav[0]).toEqual({ ...ORDERS, label: 'Sales orders' });
   });
 });

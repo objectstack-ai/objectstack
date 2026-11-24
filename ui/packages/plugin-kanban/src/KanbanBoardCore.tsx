@@ -36,6 +36,13 @@ export interface KanbanBoardCoreProps {
   schema: KanbanBoardCoreSchema;
   /** Forwarded unchanged — see `KanbanRendererProps.objectFields`. */
   objectFields?: KanbanRendererProps['objectFields'];
+  /**
+   * The swimlane field's referenced object definition — see
+   * `KanbanBoardProps.swimlaneTargetDef` (objectstack#36930). A PROP, never a
+   * schema key: only `ObjectKanban`, which holds a data source to read it
+   * with, supplies it.
+   */
+  swimlaneTargetDef?: KanbanBoardProps['swimlaneTargetDef'];
   /** Forwarded unchanged — see `KanbanRendererProps.onCardMove`. */
   onCardMove?: KanbanRendererProps['onCardMove'];
   /**
@@ -116,6 +123,7 @@ export interface KanbanBoardCoreProps {
 export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   schema,
   objectFields,
+  swimlaneTargetDef,
   onCardMove,
   cardsMovable,
   rowOpensRecord,
@@ -156,6 +164,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         coverImageField={schema.coverImageField}
         conditionalFormatting={schema.conditionalFormatting}
         objectFields={objectFields}
+        swimlaneTargetDef={swimlaneTargetDef}
         swimlaneField={schema.swimlaneField}
         countsAreWindowed={schema.countsAreWindowed}
       />

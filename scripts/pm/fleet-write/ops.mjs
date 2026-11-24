@@ -609,7 +609,7 @@
  *   `advisory_report`            `POST …/security-advisories/reports`            `summary`, `description`; optional `severity`, `cwe_ids`
  *   `advisory_create`            `POST …/security-advisories`                    the report's keys, and `packages`
  *   `advisory_collaborators_add` `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and logins
- *   `advisory_versions`          `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `versions`: package, range, patched versions
+ *   `advisory_versions`          `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `versions`: package, range, patched versions; optional `drop`: packages
  *   `advisory_state`             `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `draft`, `closed` or `published`
  *
  * `advisory_create` is the maintainer's naming of a second way in, verbatim
@@ -627,17 +627,26 @@
  * here is `closed` once its fix merges, so `advisory_state` first moves it back
  * to `draft` (the reopen); `advisory_versions` then sets each affected
  * package's vulnerable range and patched versions; and `advisory_state` last
- * moves it to `published`. The versions row carries NO prose: its one key
- * beside the id is `versions`, a capped list of closed entries, each exactly
+ * moves it to `published`. The versions row carries NO prose: its keys
+ * beside the id are `versions`, a capped list of closed entries, each exactly
  * `package` (`NPM_PACKAGE_SHAPE`), `vulnerable_version_range`
  * (`ADVISORY_VERSION_RANGE_SHAPE`: one comparator, or a lower bound then an
- * upper bound, each an operator, one space and a release version) and
+ * upper bound, each an operator, one space and a release version or a
+ * pre-release of one, `17.0.0-rc.6` — GitHub's guide to affected versions
+ * admits one and orders it before its release — never a build tag) and
  * `patched_versions` (`ADVISORY_PATCHED_VERSIONS_SHAPE`: one to
  * `MAX_ADVISORY_PATCHED_VERSIONS` release versions, a comma and a space
- * between). `advisoryVersionEntryFailure` judges each, and also refuses a pair
- * whose bounds do not rise and a patched version inside its own range. Its
+ * between), and an optional `drop`, a capped list of npm names the action
+ * removes from the advisory. `advisoryVersionEntryFailure` judges each entry,
+ * and also refuses a pair whose bounds do not rise and a patched version
+ * inside its own range, both by semver precedence (`compareAdvisoryVersions`);
+ * the validator refuses a `drop` name that is no npm name, named twice, or
+ * also set by `versions` (`advisoryDropOverlap`) — by its position, ⛔ never
+ * its name. A drop never empties the list: `versions` names at least one
+ * entry, and the list the PATCH leaves is exactly those entries. Its
  * PATCH body is `{ vulnerabilities }` alone: per entry the npm ecosystem, the
- * name and the two version strings, never a vulnerable function.
+ * name and the two version strings, never a vulnerable function, and never
+ * the `drop`, which is the fence's and the read-back's.
  *
  * `published` is reached by ONE row and ONE transition: `advisory_state`, from
  * `draft` alone, and only once the executor's own GET reads at least one
@@ -703,7 +712,9 @@
  *     `advisoryVersionsLandedText`, `advisoryStateLandedText` and
  *     `advisoryFenceText` are the only spellings of an advisory row. An id
  *     exposes no content, but it is public in the log. A draft's package names
- *     and the versions row's entries are `quiet` too: a refusal never echoes one.
+ *     and the versions row's entries and `drop` names are `quiet` too: a
+ *     refusal never echoes one, and a `drop` name is spoken of by its position
+ *     in the action (`drop[1]`) alone.
  *
  * The executor's five paths (`execute.mjs`, in the shape of the hierarchy rows'):
  *
@@ -732,10 +743,13 @@
  *     `versions` fence holds. The PATCH REPLACES the whole list — GitHub's own
  *     example of the call: "To add vulnerable versions, include existing
  *     versions in the array" — so every package the advisory already lists
- *     must be one the action names, and no listed entry may be another
+ *     must be one the action names, set by `versions` or removed by name in
+ *     `drop`, so a silent drop stays impossible; every `drop` name must be a
+ *     package the advisory lists; and no listed entry may be another
  *     ecosystem's, nameless, or carry `vulnerable_functions`, which this row
  *     does not write and the PATCH would drop. It LANDS only when the answer,
- *     still `draft`, lists exactly the entries sent (`advisoryVersionsReadBack`);
+ *     still `draft`, lists exactly the entries sent and no dropped package
+ *     (`advisoryVersionsReadBack`);
  *   - `advisory_state` reads the advisory the same way and refuses an illegal
  *     transition with nothing sent (`ADVISORY_TRANSITIONS`: `draft` from
  *     `triage` — the accept — or from `closed` — the reopen; `closed` from
@@ -1865,14 +1879,28 @@ export const ADVISORY_VERSIONS_STATES = Object.freeze(['draft']);
 
 /** One release version as the versions row spells one: MAJOR.MINOR.PATCH, no leading zero, no pre-release or build tag. */
 const RELEASE_VERSION = '(?:0|[1-9][0-9]{0,5})\\.(?:0|[1-9][0-9]{0,5})\\.(?:0|[1-9][0-9]{0,5})';
-/** A release version, whole. */
+/**
+ * One pre-release identifier as semver 2.0.0 spells one: a number with no leading zero, or letters, digits and hyphens
+ * carrying at least one non-digit — each capped, like a release version's parts.
+ */
+const PRERELEASE_IDENTIFIER = '(?:0|[1-9][0-9]{0,5}|(?=[0-9]*[A-Za-z-])[0-9A-Za-z-]{1,20})';
+/**
+ * A range bound (header): a release version, or a pre-release of one — a hyphen and one to four dot-separated
+ * identifiers, as in `17.0.0-rc.6` or `19.0.0-next.1` — and never a build tag. GitHub's own guide to an advisory's
+ * affected versions admits one ("The version must begin with a number followed by any number of numbers, letters,
+ * dots, dashes, or underscores", its example `>= 3.4.0-rc.0, <= 3.4.9`), and orders a pre-release before its release.
+ */
+const BOUND_VERSION = `${RELEASE_VERSION}(?:-${PRERELEASE_IDENTIFIER}(?:\\.${PRERELEASE_IDENTIFIER}){0,3})?`;
+/** A release version, whole — what `patched_versions` names. */
 export const ADVISORY_VERSION_SHAPE = new RegExp(`^${RELEASE_VERSION}$`);
+/** A range bound, whole: a release version or a pre-release of one. */
+export const ADVISORY_BOUND_VERSION_SHAPE = new RegExp(`^${BOUND_VERSION}$`);
 /**
  * A `vulnerable_version_range` in the spelling of GitHub's own example (`>= 1.0.0, < 1.0.1`): ONE comparator — an
- * operator, one space, a release version — or a lower bound (`>`, `>=`) then an upper bound (`<`, `<=`), a comma and
- * a space between. `advisoryVersionEntryFailure` also requires a pair's bounds to rise.
+ * operator, one space, a release version or a pre-release of one — or a lower bound (`>`, `>=`) then an upper bound
+ * (`<`, `<=`), a comma and a space between. `advisoryVersionEntryFailure` also requires a pair's bounds to rise.
  */
-export const ADVISORY_VERSION_RANGE_SHAPE = new RegExp(`^(?:(?:<|<=|>|>=|=) ${RELEASE_VERSION}|(?:>|>=) ${RELEASE_VERSION}, (?:<|<=) ${RELEASE_VERSION})$`);
+export const ADVISORY_VERSION_RANGE_SHAPE = new RegExp(`^(?:(?:<|<=|>|>=|=) ${BOUND_VERSION}|(?:>|>=) ${BOUND_VERSION}, (?:<|<=) ${BOUND_VERSION})$`);
 /** Release versions one `patched_versions` names, at most. */
 export const MAX_ADVISORY_PATCHED_VERSIONS = 5;
 /** A `patched_versions`: one release version (GitHub's example: `1.0.1`) or a few, a comma and a space between. */
@@ -1880,11 +1908,34 @@ export const ADVISORY_PATCHED_VERSIONS_SHAPE = new RegExp(`^${RELEASE_VERSION}(?
 /** The keys one `versions` entry carries — exactly these three, each required (header). */
 export const ADVISORY_VERSION_KEYS = Object.freeze(['package', 'vulnerable_version_range', 'patched_versions']);
 
-/** Two release versions compared: negative, zero or positive. Pure; each must already be in `ADVISORY_VERSION_SHAPE`. */
-export function compareReleaseVersions(a, b) {
-  const [x, y] = [a.split('.').map(Number), b.split('.').map(Number)];
+const NUMERIC_IDENTIFIER = /^[0-9]+$/;
+/** Two pre-release identifiers by semver precedence: numbers numerically, below any word; words in ASCII order. */
+const compareIdentifiers = (a, b) => {
+  const [na, nb] = [NUMERIC_IDENTIFIER.test(a), NUMERIC_IDENTIFIER.test(b)];
+  if (na && nb) return Number(a) - Number(b);
+  if (na !== nb) return na ? -1 : 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+
+/**
+ * Two versions in `ADVISORY_BOUND_VERSION_SHAPE` compared by semver precedence: negative, zero or positive. The
+ * release part by number, part by part; on a tie a pre-release sorts BELOW its release (`18.0.0-rc.1` < `18.0.0`), and
+ * two pre-releases compare identifier by identifier, the longer list above when one is a prefix of the other. Pure.
+ */
+export function compareAdvisoryVersions(a, b) {
+  const [ra, ...pa] = a.split('-');
+  const [rb, ...pb] = b.split('-');
+  const [x, y] = [ra.split('.').map(Number), rb.split('.').map(Number)];
   for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
-  return 0;
+  const [ta, tb] = [pa.join('-'), pb.join('-')];
+  if (ta === tb) return 0;
+  if (ta === '' || tb === '') return ta === '' ? 1 : -1;
+  const [ia, ib] = [ta.split('.'), tb.split('.')];
+  for (let i = 0; i < Math.min(ia.length, ib.length); i++) {
+    const d = compareIdentifiers(ia[i], ib[i]);
+    if (d !== 0) return d;
+  }
+  return ia.length - ib.length;
 }
 
 const COMPARATOR = /^(<=|>=|<|>|=) (\S+)$/;
@@ -1899,9 +1950,9 @@ export function advisoryRangeComparators(range) {
   });
 }
 
-/** Does a release version lie inside a range — every one of its comparators holding? Pure. */
+/** Does a version lie inside a range — every one of its comparators holding, by semver precedence? Pure. */
 export function inAdvisoryRange(version, comparators) {
-  return comparators.every((c) => COMPARATOR_HOLDS[c.op](compareReleaseVersions(version, c.version)));
+  return comparators.every((c) => COMPARATOR_HOLDS[c.op](compareAdvisoryVersions(version, c.version)));
 }
 
 const describedQuietly = (v) =>
@@ -1911,9 +1962,10 @@ const KEY_NAME_SHAPE = /^[a-z_]{1,40}$/;
 /**
  * Why one `versions` entry is not one the relay sends, as a sentence whose subject is `where`, or null when it is
  * one (header): exactly `ADVISORY_VERSION_KEYS`; `package` an npm name (`NPM_PACKAGE_SHAPE`, at most
- * `MAX_NPM_PACKAGE_CHARS`); `vulnerable_version_range` in `ADVISORY_VERSION_RANGE_SHAPE`, a pair's lower bound below
- * its upper; `patched_versions` in `ADVISORY_PATCHED_VERSIONS_SHAPE`, each version once and none inside the entry's
- * own range. ⛔ The sentence never carries a value — a refusal reaches the public run log, and before the publish a
+ * `MAX_NPM_PACKAGE_CHARS`); `vulnerable_version_range` in `ADVISORY_VERSION_RANGE_SHAPE`, each bound a release version
+ * or a pre-release of one, a pair's lower bound below its upper by semver precedence (`compareAdvisoryVersions`);
+ * `patched_versions` in `ADVISORY_PATCHED_VERSIONS_SHAPE`, release versions alone, each once and none inside the
+ * entry's own range. ⛔ The sentence never carries a value — a refusal reaches the public run log, and before the publish a
  * package and its versions are the unpublished advisory's; a key is named only in a key's shape. Pure; never throws.
  */
 export function advisoryVersionEntryFailure(entry, where = 'the entry') {
@@ -1926,12 +1978,12 @@ export function advisoryVersionEntryFailure(entry, where = 'the entry') {
   if (typeof name !== 'string' || Buffer.byteLength(name, 'utf8') > MAX_NPM_PACKAGE_CHARS || !NPM_PACKAGE_SHAPE.test(name)) return `${where}.package must be an npm package name, got ${describedQuietly(name)} that is not one — not echoed`;
   const range = advisoryRangeComparators(entry.vulnerable_version_range);
   if (!range) {
-    return `${where}.vulnerable_version_range must be one comparator, or a lower bound then an upper bound — an operator, one space and a release version each, as in ">= 1.0.0, < 1.0.1" — got ${describedQuietly(entry.vulnerable_version_range)} that is not one — not echoed`;
+    return `${where}.vulnerable_version_range must be one comparator, or a lower bound then an upper bound — an operator, one space and a release version each, as in ">= 1.0.0, < 1.0.1", or a pre-release of one, as in ">= 17.0.0-rc.6, < 18.6.0", never a build tag — got ${describedQuietly(entry.vulnerable_version_range)} that is not one — not echoed`;
   }
-  if (range.length === 2 && compareReleaseVersions(range[0].version, range[1].version) >= 0) return `${where}.vulnerable_version_range has a lower bound that is not below its upper bound`;
+  if (range.length === 2 && compareAdvisoryVersions(range[0].version, range[1].version) >= 0) return `${where}.vulnerable_version_range has a lower bound that is not below its upper bound`;
   const patched = entry.patched_versions;
   if (typeof patched !== 'string' || !ADVISORY_PATCHED_VERSIONS_SHAPE.test(patched)) {
-    return `${where}.patched_versions must be one to ${MAX_ADVISORY_PATCHED_VERSIONS} release versions, a comma and a space between, as in "1.0.1" — got ${describedQuietly(patched)} that is not one — not echoed`;
+    return `${where}.patched_versions must be one to ${MAX_ADVISORY_PATCHED_VERSIONS} release versions, a comma and a space between, as in "1.0.1" — a pre-release is a range bound only, never a patched version — got ${describedQuietly(patched)} that is not one — not echoed`;
   }
   const versions = patched.split(', ');
   if (new Set(versions).size !== versions.length) return `${where}.patched_versions names a version twice`;
@@ -1985,6 +2037,19 @@ export function advisoryVersionsDiff(want = [], got = []) {
   const extra = [...pool.values()].reduce((a, b) => a + b, 0);
   return { same: missing === 0 && extra === 0, missing, extra };
 }
+
+/**
+ * Where a versions row's `drop` names a package its `versions` also sets (header): the positions in `drop`, ascending —
+ * `[]` when the two never meet. A position, ⛔ never the name: before the publish a package is the unpublished
+ * advisory's, and a refusal reaches the public run log. Pure; `versions` entries that are no object name nothing.
+ */
+export function advisoryDropOverlap(drop = [], versions = []) {
+  const set = new Set(versions.map((v) => (isObject(v) ? v.package : undefined)));
+  return drop.map((name, i) => (set.has(name) ? i : null)).filter((i) => i !== null);
+}
+
+/** Positions in a versions row's `drop`, as a sentence spells them: `drop[0], drop[2]`. Pure. */
+export const dropPositionsText = (positions) => positions.map((i) => `drop[${i}]`).join(', ');
 
 const entriesText = (n) => `${n} entr${n === 1 ? 'y' : 'ies'}`;
 const packagesText = (entries) => {
@@ -2106,19 +2171,25 @@ export const ADVISORY_FENCES = Object.freeze([
     fence: 'versions',
     wants: (c) =>
       setsVersions(c)
-        ? 'a list the action may replace whole — every package the advisory lists named by the action, every listed entry an npm package with a name and no vulnerable_functions, which this row does not write and the PATCH would drop'
+        ? 'a list the action may replace whole — every package the advisory lists named by the action, set by versions or removed by drop, every drop a package the advisory lists, every listed entry an npm package with a name and no vulnerable_functions, which this row does not write and the PATCH would drop'
         : "versions set first — at least one vulnerabilities entry, every one an npm package with a vulnerable_version_range and patched_versions in the versions row's spelling",
     fails: (c) => {
       if (!setsVersions(c) && !publishes(c)) return null;
       if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
       const listed = advisoryVersionsOf(c.answer.json);
       if (setsVersions(c)) {
-        const named = new Set(c.versions.map((v) => v?.package));
-        const dropped = new Set(listed.entries.map((v) => v.package).filter((name) => !named.has(name))).size;
+        // A listed package is named by the action when versions sets it or drop removes it by name (header); a drop that
+        // names no listed package is refused by its position alone, ⛔ never its name.
+        const drop = Array.isArray(c.drop) ? c.drop : [];
+        const named = new Set([...c.versions.map((v) => v?.package), ...drop]);
+        const listedNames = new Set(listed.entries.map((v) => v.package));
+        const dropped = [...listedNames].filter((name) => !named.has(name)).length;
+        const unlisted = drop.map((name, i) => (listedNames.has(name) ? null : i)).filter((i) => i !== null);
         const lacks = [
           ...(listed.foreign ? [`${entriesText(listed.foreign)} of another ecosystem or naming no package`] : []),
           ...(listed.functions ? [`${entriesText(listed.functions)} carrying vulnerable_functions`] : []),
           ...(dropped ? [`${dropped} listed package(s) the action does not name`] : []),
+          ...(unlisted.length ? [`${dropPositionsText(unlisted)} not a package it lists — a drop removes a listed package by name`] : []),
         ];
         return lacks.length ? `the advisory lists ${entriesText(listed.total)}: ${lacks.join('; ')}` : null;
       }
@@ -2232,10 +2303,11 @@ export function advisoryStateLandedText({ ghsaId, from, to, entries = null }) {
 
 /**
  * What LANDED means for `advisory_versions` (the header's section): the PATCH answered 2xx with the advisory the
- * action names, still `draft`, listing exactly the entries sent — order is the platform's. Answers
- * `{ ok, why, entries }`; `why` carries the id, the state and counts alone, ⛔ never a name or a version. Pure.
+ * action names, still `draft`, listing exactly the entries sent — order is the platform's — and no package the action
+ * dropped. Answers `{ ok, why, entries }`; `why` carries the id, the state, counts and `drop` positions alone, ⛔ never
+ * a name or a version. Pure.
  */
-export function advisoryVersionsReadBack({ ghsaId, sent = [], answer } = {}) {
+export function advisoryVersionsReadBack({ ghsaId, sent = [], drop = [], answer } = {}) {
   if (!twoXX(answer)) return { ok: false, why: `HTTP ${answer?.status ?? 'none'}` };
   if (!advisoryShaped(answer.json)) return { ok: false, why: `HTTP ${answer.status}, but the answer is not an advisory, so its versions cannot be read back` };
   if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `HTTP ${answer.status}, but the answer names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
@@ -2244,15 +2316,18 @@ export function advisoryVersionsReadBack({ ghsaId, sent = [], answer } = {}) {
   }
   const listed = advisoryVersionsOf(answer.json);
   const diff = advisoryVersionsDiff(sent, listed.entries);
-  if (listed.foreign || !diff.same) {
-    return { ok: false, why: `HTTP ${answer.status}, but the answer lists ${entriesText(listed.total)} — ${diff.missing} of the ${entriesText(sent.length)} sent missing or answered in another spelling, ${diff.extra + listed.foreign} other` };
+  const kept = drop.map((name, i) => (listed.entries.some((v) => v.package === name) ? i : null)).filter((i) => i !== null);
+  if (listed.foreign || !diff.same || kept.length) {
+    const still = kept.length ? `; ${dropPositionsText(kept)} still listed — a package the action dropped` : '';
+    return { ok: false, why: `HTTP ${answer.status}, but the answer lists ${entriesText(listed.total)} — ${diff.missing} of the ${entriesText(sent.length)} sent missing or answered in another spelling, ${diff.extra + listed.foreign} other${still}` };
   }
   return { ok: true, why: '', entries: listed.total };
 }
 
 /** The row a landed `advisory_versions` prints: the id, the state and counts — never a package name or a version. Pure. */
-export function advisoryVersionsLandedText({ ghsaId, state, versions = [] }) {
-  return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · versions set: ${entriesText(versions.length)} across ${packagesText(versions)}`;
+export function advisoryVersionsLandedText({ ghsaId, state, versions = [], drop = [] }) {
+  const dropped = drop.length ? ` · dropped ${drop.length} package${drop.length === 1 ? '' : 's'}` : '';
+  return `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · versions set: ${entriesText(versions.length)} across ${packagesText(versions)}${dropped}`;
 }
 
 /**
@@ -3377,6 +3452,8 @@ export const FIELDS = Object.freeze({
   collaborators: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS, shape: LOGIN_SHAPE, itemWhat: 'a GitHub login', quiet: true }),
   // The versions row's entries — a package and its two version strings each, no prose; quiet like every advisory key.
   versions: Object.freeze({ kind: 'versions', max: MAX_ADVISORY_VERSION_ENTRIES, quiet: true }),
+  // The packages the versions row removes from the advisory by name — npm names alone, quiet like every advisory key.
+  drop: Object.freeze({ kind: 'list', max: MAX_ADVISORY_PACKAGES, itemMax: MAX_NPM_PACKAGE_CHARS, shape: NPM_PACKAGE_SHAPE, itemWhat: 'an npm package name', quiet: true }),
   advisory_state: Object.freeze({ kind: 'enum', values: ADVISORY_SETTABLE_STATES, quiet: true, named: ADVISORY_REFUSED_STATES }),
   // The seat's one-time public key for ONE read (header: "The one row that READS an advisory") — its own kind.
   public_key: Object.freeze({ kind: 'x25519' }),
@@ -3562,6 +3639,10 @@ export function transferRemedy(source, target) {
  *   `distinct`    (optional) two keys the action must give different values —
  *                 the hierarchy rows' `issue` and `sub_issue`: an issue is
  *                 never its own sub-issue (header above);
+ *   `disjointPackages` (optional) a list of package names and a key of
+ *                 versions entries that never name one package — the versions
+ *                 row's `drop` and `versions`: a package is dropped or set,
+ *                 never both (`advisoryDropOverlap`, header above);
  *   `requests`    the request descriptors the executor issues, in order:
  *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, enqueueFront?, subIssue?, advisoryRead?, advisoryNote?, advisoryRewrite?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
@@ -3585,9 +3666,9 @@ export function transferRemedy(source, target) {
  *                 and whose answer it reads back (`advisoryPreflight` /
  *                 `confirmAdvisory`, execute.mjs) — it carries no
  *                 `body` either; an `advisoryVersions` descriptor carries the
- *                 advisory's id and the entries, whose fences the executor
- *                 reads before the PATCH and whose answer it reads back — its
- *                 `body` is the table's, the entries on the wire; an
+ *                 advisory's id, the entries and any `drop`, whose fences the
+ *                 executor reads before the PATCH and whose answer it reads
+ *                 back — its `body` is the table's, the entries on the wire; an
  *                 `advisoryState` descriptor carries the id and the state
  *                 asked for, the executor's `{ state }` its body; an
  *                 `advisoryRead` descriptor carries the
@@ -3900,17 +3981,20 @@ export const OPS = Object.freeze({
   // and the two version strings, never a vulnerable function, a summary or a description. The executor sends it only
   // after its own GET reads a draft whose whole list the action may replace (the `versions` fence), and it lands only
   // when the answer lists exactly the entries sent.
+  // `drop` names listed packages the list leaves out on purpose: it never reaches the body — the PATCH replaces the list
+  // with the entries alone — and is the fence's and the read-back's, each name listed before and gone after.
   advisory_versions: Object.freeze({
     permission: 'repository-advisories',
     required: Object.freeze(['ghsa_id', 'versions']),
-    optional: Object.freeze([]),
+    optional: Object.freeze(['drop']),
+    disjointPackages: Object.freeze(['drop', 'versions']),
     alone: true,
     requests: (a, repo) => [
       {
         verb: 'PATCH',
         path: `/repos/${repo}/security-advisories/${a.ghsa_id}`,
         body: { vulnerabilities: advisoryVersionsOnTheWire(a.versions) },
-        advisoryVersions: { ghsaId: a.ghsa_id, versions: a.versions.map((v) => ({ ...v })) },
+        advisoryVersions: { ghsaId: a.ghsa_id, versions: a.versions.map((v) => ({ ...v })), ...(a.drop ? { drop: [...a.drop] } : {}) },
       },
     ],
   }),
