@@ -12,6 +12,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { MetadataPlugin } from './plugin.js';
+// Pay the plugin's dynamic `@objectstack/metadata-fs` load during collection, never inside a case.
+import '@objectstack/metadata-fs';
 
 const STACK = 'com.probe.stack';
 const body = (id: string | undefined, namespace: string) =>

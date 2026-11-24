@@ -23,7 +23,10 @@ Wire / runtime contract:
                     are reserved for Phase 3/2 respectively).
  - `_provenance`  — `'package'` for loader-introduced items,
                     `'org'` for tenant-authored, `'env-forced'`
-                    reserved for emergency overrides.
+                    reserved for emergency overrides, `'platform'`
+                    for a record the platform's own code registers
+                    (a store-slot marker, set by the metadata service
+                    only).
  - `_packageId` / `_packageVersion` — denormalised from the
                     registry tag so consumers don't need a second
                     round-trip to inspect provenance.
