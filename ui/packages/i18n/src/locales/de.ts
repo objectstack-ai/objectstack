@@ -3469,7 +3469,7 @@ const de = {
     },
     language: {
       title: "Sprache",
-      description: "Die Sprache für Benachrichtigungen und Nachrichten, die an Sie gesendet werden. Die Oberflächensprache wird separat über das Globus-Menü gewählt.",
+      description: "Die Sprache der Oberfläche und der Benachrichtigungen und Nachrichten, die an Sie gesendet werden. Es ist dieselbe Einstellung wie im Globus-Menü – ändern Sie eine, ändert sich auch die andere.",
       label: "Bevorzugte Sprache",
       systemDefault: "Standard der Bereitstellung verwenden",
       save: "Speichern",

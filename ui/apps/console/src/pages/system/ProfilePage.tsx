@@ -567,16 +567,20 @@ interface LanguageCardProps {
  * `Alert` success/failure pair, the same disabled-while-saving submit, the
  * same `profile.saving` label.
  *
- * ## The UI language is a different thing, and is deliberately not touched
+ * ## One setting with the globe menu (objectui#10059)
  *
- * `@object-ui/i18n`'s provider keeps the interface language in `localStorage`
- * (`LOCALE_STORAGE_KEY`), seeded per device from the server's resolved locale
- * for the last signed-in owner (`/auth/me/localization`). `sys_user.locale` is a server-stored, per-user
- * column that the messaging channels read per recipient at delivery time.
- * Saving here therefore does NOT call `changeLanguage`, and switching the UI
- * language from the globe menu does NOT write this column. Wiring the two
- * together is a product decision nobody has made; this control states the
- * distinction in its own description instead of guessing.
+ * This column is also the interface language: for a signed-in user
+ * `sys_user.locale` is the only decider (`useUserLocale` in
+ * `@object-ui/app-shell`). The globe menu writes this same column through the
+ * same adapter (`useLanguageSelection`), and the shell's one reader
+ * (`useSignedInUserLocale`) applies the column on every `sys_user` mutation
+ * the data-invalidation bus reports, this card's own save included. So a save
+ * here switches the interface language at once without this card calling
+ * `changeLanguage`, and a pick in the globe menu is what this card reads. The
+ * messaging channels read the same column per recipient at delivery time.
+ * `@object-ui/i18n`'s per-device `localStorage` slot is only a cache of it.
+ * The card's description therefore names ONE setting, for the interface and
+ * for what is sent to the user, the same one as the globe menu.
  *
  * ## What is offered, and what happens when the write route is not there
  *
@@ -718,7 +722,7 @@ function LanguageCard({ userId }: LanguageCardProps) {
         <CardDescription>
           {t('profile.language.description', {
             defaultValue:
-              'The language used for notifications and messages sent to you. The interface language is chosen separately, from the globe menu.',
+              'The language of the interface and of the notifications and messages sent to you. It is the same setting as the globe menu, so changing one changes the other.',
           })}
         </CardDescription>
       </CardHeader>

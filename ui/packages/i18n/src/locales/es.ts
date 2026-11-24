@@ -3549,7 +3549,7 @@ const es = {
     },
     language: {
       title: "Idioma",
-      description: "El idioma que se usa para las notificaciones y los mensajes que se le envían. El idioma de la interfaz se elige aparte, en el menú del globo terráqueo.",
+      description: "El idioma de la interfaz y de las notificaciones y los mensajes que se le envían. Es el mismo ajuste que el del menú del globo terráqueo, así que cambiar uno cambia el otro.",
       label: "Idioma preferido",
       systemDefault: "Usar el valor predeterminado del despliegue",
       save: "Guardar",

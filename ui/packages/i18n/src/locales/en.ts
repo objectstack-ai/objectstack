@@ -4220,7 +4220,7 @@ const en = {
     },
     language: {
       title: 'Language',
-      description: 'The language used for notifications and messages sent to you. The interface language is chosen separately, from the globe menu.',
+      description: 'The language of the interface and of the notifications and messages sent to you. It is the same setting as the globe menu, so changing one changes the other.',
       label: 'Preferred language',
       systemDefault: 'Use the deployment default',
       save: 'Save',

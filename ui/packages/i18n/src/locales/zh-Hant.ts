@@ -3614,7 +3614,7 @@ const zhHant = {
     },
     language: {
       title: '語言',
-      description: '傳送給您的通知和訊息所使用的語言。介面語言另行設定,在地球圖示選單中切換。',
+      description: '介面以及傳送給您的通知和訊息所使用的語言。它與地球圖示選單是同一項設定，更改其中一處，另一處也會隨之更改。',
       label: '首選語言',
       systemDefault: '使用部署預設值',
       save: '儲存',
