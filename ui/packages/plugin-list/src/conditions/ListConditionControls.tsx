@@ -93,8 +93,9 @@ export function describeConditionValue(
   operator: string,
   value: unknown,
   t: Translate,
-  nameOf?: LookupValueName,
-  locale?: string,
+  nameOf: LookupValueName | undefined,
+  // Required, so no caller formats a date in the runtime's default locale by omission.
+  locale: string,
 ): string {
   const opLabel = quickOperatorLabel(operator, t);
   if (isValuelessOperator(operator)) return opLabel;
@@ -129,8 +130,8 @@ function chipText(
   operator: string,
   value: unknown,
   t: Translate,
-  nameOf?: LookupValueName,
-  locale?: string,
+  nameOf: LookupValueName | undefined,
+  locale: string,
 ) {
   return t('listConditions.chips.pattern', {
     field: field?.label ?? fieldName ?? '',
@@ -142,9 +143,9 @@ function viewChipText(
   chip: ViewConditionChip,
   fields: ReadonlyArray<ConditionField>,
   t: Translate,
-  nameOf?: LookupValueName,
-  relatedFieldOf?: RelatedFieldOf,
-  locale?: string,
+  nameOf: LookupValueName | undefined,
+  relatedFieldOf: RelatedFieldOf | undefined,
+  locale: string,
 ): string {
   if (chip.anyOf) {
     return chip.anyOf.map((member) => viewChipText(member, fields, t, nameOf, relatedFieldOf, locale)).join(t('listConditions.chips.or'));

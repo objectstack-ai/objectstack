@@ -9,22 +9,26 @@
 /**
  * How a date condition's value reads on a condition row (objectstack#37034).
  *
- * A row holds the value the query compares: a calendar day (`2026-10-01`) or
- * an instant (`2026-10-01T00:00:00.000Z`, the bound a dataset bucket's drill
- * writes). The row printed it as written, so a zh-CN chip read
- * 「≥ 2026-10-01T00:00:00.000Z」. It reads as a date now, in the viewer's
- * display locale, through the console's ONE date display path
- * (`formatDate` / `formatDateTime` in `@object-ui/core`'s `date-display`):
- * ⛔ no second formatter is written here.
+ * A row holds the value the query compares, written on the wire the way the
+ * field's type stores it: a `date` field's bound is a calendar day
+ * (`2026-10-01`), and a `datetime` field's bound is an ISO instant
+ * (`2026-10-01T00:00:00.000Z`; a dataset bucket's drill writes its month's
+ * bounds that way on a `created_at`). The row printed the value as written, so
+ * a zh-CN chip read 「创建时间：≥ 2026-10-01T00:00:00.000Z」. It reads as a
+ * date now, in the viewer's display locale, through the console's ONE date
+ * display path (`formatDate` / `formatDateTime` in `@object-ui/core`'s
+ * `date-display`): ⛔ no second formatter is written here.
  *
  * The field's type decides the face:
  *
  * - `date` names a calendar day, so the day is shown, with its year (a
- *   condition's bounds are read side by side). An instant at UTC midnight on
- *   a date field is how a day bound is written on the wire; it names that day
- *   in every zone, so its leading `YYYY-MM-DD` is what is shown — read as an
- *   instant it would name the previous day west of UTC.
- * - `datetime` is an instant: the date and the time in the display zone.
+ *   condition's bounds are read side by side). A `YYYY-MM-DD` value is that
+ *   day in every zone. A date field compared with an instant at UTC midnight
+ *   (an authored filter may write one) names the same day, so its leading
+ *   `YYYY-MM-DD` is what is shown: read as an instant it would name the
+ *   previous day west of UTC.
+ * - `datetime` is an instant: the date and the time in the display zone
+ *   (`setDisplayTimeZone`, else the viewer's own).
  * - `time` and anything else are shown as written.
  *
  * A value the display path cannot read (it answers `—`) is shown as written,
