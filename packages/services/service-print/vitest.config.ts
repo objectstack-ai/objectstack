@@ -20,6 +20,7 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      { find: /^@objectstack\/plugin-hono-server$/, replacement: path.resolve(__dirname, '../../plugins/plugin-hono-server/src/index.ts') },
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
       { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../../spec/src/index.ts') },
       { find: /^@objectstack\/spec\/api$/, replacement: path.resolve(__dirname, '../../spec/src/api/index.ts') },

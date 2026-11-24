@@ -25,7 +25,7 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (20
-// families) and `packages/runtime/src/route-ledger.ts` (26
+// families) and `packages/runtime/src/route-ledger.ts` (27
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
@@ -76,11 +76,11 @@
 // The ledgers supply the POPULATION; the classification stays a reviewed row
 // here.
 //
-// Of the 44 ledger keys, 20 are classified by rows below (re-derived when the
+// Of the 47 ledger keys, 23 are classified by rows below (re-derived when the
 // `/ui` and `/data` domains arrived classified under ADR-0138 D2's second
 // slice, after the `forms` family and the `/notifications`, `/keys` and
 // `/share-links` domains did under its first, the `/personal-views` and
-// `/attachments` domains did, #36506, the `/comments` domain did, #36469, the `/webhooks/redeliver` domain did, #22755, `/approvals/act` did, #22576, and `/i18n` left the baseline,
+// `/attachments` domains did, #36506, the `/print` domain did, #36840, the `/comments` domain did, #36469, the `/webhooks/redeliver` domain did, #22755, `/approvals/act` did, #22576, and `/i18n` left the baseline,
 // #22432); the other 24 are enumerated one by one,
 // dated, and pinned SHRINK-ONLY in `authz-ledger-population.baseline.ts`,
 // whose MAX note dates every step down from the 34 of 40 it held on the
@@ -454,6 +454,10 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
     enforcement: 'core/security/own-row-delete-routes.ts (the personal-view and attachment removal doors) and service-storage/attachment-removal-routes.ts (the rename door) — the caller resolved from the request\'s own credentials (ownRowDeleteCallerResolver: no signed-in user 401, a held sign-in 403), the row read AS THE CALLER (object grant, organization wall, the owner-only scope of sys_personal_view, the attachment read-visibility gate; unreadable = unknown 404), the owner column checked (403 PERMISSION_DENIED) or the update gate asked, then a system write attributed to the caller; reached through IPersonalViewDoorsService.handlePersonalViewDoor and IAttachmentDoorsService.handleAttachmentDoor by runtime/domains/own-door-bridge.ts (personal-views.ts, attachments.ts), which claims exactly the door shapes, forwards the transport\'s request UNREAD, reads the REQUEST kernel\'s slot per request and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates apply with NO exemption: core/security/auth-gate.ts ALLOW_ROUTES does not list the paths and runtime/http-dispatcher.ts enforceProjectMembership does not skip them. Each member runs the very registration its self-hosted mount runs (plugin-auth personal-view-door-member.ts, service-storage attachment-door-member.ts, over plugin-hono-server createDoorTableMember)',
     covers: ['dispatcher-domain:route-ledger.ts:/personal-views', 'dispatcher-domain:route-ledger.ts:/attachments'],
     note: 'The DISPATCHER domains only: on a self-hosted kernel the same paths are served from the plugins\' mounts on the kernel\'s http.server and never reach the dispatcher. Unit-, wire- and dogfood-proven: runtime domains/own-door-bridge.test.ts pins both domains on the real HttpDispatcher (the door shapes forwarded unread, every other method and path the ordinary miss, 501 for an absent slot or member, the slot read per request and only from the request kernel, the environment-scoped spelling forwarded at the wire path, a signed-in non-member and a gated session stopped before the member); personal-view-row-scope.dogfood.test.ts and member-attachment-baseline.dogfood.test.ts drive each door through a dispatcher alone over the real showcase and attachments stacks (`[hosted]`: the owner\'s removal and rename land, another member is refused as on the self-hosted door, anonymous is 401).' },
+  { id: 'print-door-session', summary: 'The print door (`POST /print/records`) on a kernel with no http.server — a signed-in member acting for themselves prints a record page they can read and archives the PDF on it; an anonymous caller is refused 401 and an impersonation session 403 by the door itself, exactly as the self-hosted mount refuses them', state: 'enforced',
+    enforcement: 'service-print/print-routes.ts registerPrintRoutes — the caller resolved from the request\'s own credentials (resolveCaller: no signed-in user 401 UNAUTHENTICATED, a held sign-in 403), an impersonation session refused 403 PERMISSION_DENIED (impersonatorOf reads session.impersonatedBy), then PrintService.printRecord runs AS THE CALLER (the record read, the files and attachment grants, the per-print session minted for that user); reached through IPrintDoorService.handlePrintDoor by runtime/domains/own-door-bridge.ts (print.ts), which claims exactly `POST /print/records`, forwards the transport\'s request UNREAD, reads the REQUEST kernel\'s `print` slot per request and adds no credential of its own (an absent slot or member is a typed 501, never a route miss). The two dispatcher preamble gates apply with NO exemption: core/security/auth-gate.ts ALLOW_ROUTES does not list the path and runtime/http-dispatcher.ts enforceProjectMembership does not skip it. The member runs the very registration the self-hosted mount runs (service-print print-door-member.ts, over plugin-hono-server createDoorTableMember)',
+    covers: ['dispatcher-domain:route-ledger.ts:/print'],
+    note: 'The DISPATCHER domain only: on a self-hosted kernel the same path is served from PrintServicePlugin\'s mount on the kernel\'s http.server and never reaches the dispatcher. Unit- and wire-proven: runtime domains/own-door-bridge.test.ts pins the domain on the real HttpDispatcher (the door shape forwarded unread, every other method and path the ordinary miss, 501 for an absent slot or member, the slot read per request and only from the request kernel, a signed-in non-member and a gated session stopped before the member); http-conformance hono-print-door.conformance.test.ts drives createHonoApp over a kernel with no http.server with real better-auth sessions (anonymous 401 and a signed-in member with no engine 503, each byte-identical to the self-hosted mount; no plugin 501). The impersonation refusal is pinned on the self-hosted mount (print-door-impersonation.dogfood.test.ts); the bridged face runs the same handler.' },
 
   // ── ADR-0138 D2 — THE CLOSED LIST OF DOORS (card E2) ─────────────────────
   //

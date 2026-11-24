@@ -161,6 +161,7 @@ const es = {
     completedNamed: 'Acción completada: {{action}}',
     failed: 'La acción falló',
     parallelFailed: 'Una o más acciones paralelas fallaron',
+    serviceUnavailable: 'Esta acción necesita un servicio que no está disponible en este entorno. Contacte con su administrador.',
     selectExactlyOneRow: 'Esta acción se ejecuta sobre un solo registro: seleccione exactamente una fila.',
     selectRowFirst: 'Esta acción se ejecuta sobre un solo registro: seleccione primero una fila.',
     undo: 'Deshacer',
