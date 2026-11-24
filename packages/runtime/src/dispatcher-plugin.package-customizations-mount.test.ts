@@ -21,6 +21,8 @@
  * does for the other `/packages` routes).
  */
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GetPackageCustomizationsResponseSchema } from '@objectstack/spec/api';
 

@@ -36,6 +36,8 @@
  * `@objectstack/metadata-protocol`'s and `@objectstack/objectql`'s `dist/`, so a
  * change there is read here after those packages are rebuilt.
  */
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { GetPackageCustomizationsResponseSchema } from '@objectstack/spec/api';
