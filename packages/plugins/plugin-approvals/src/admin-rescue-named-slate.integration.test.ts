@@ -648,6 +648,27 @@ describe('an empty admin_rescue slate opens on the organization\'s administrator
       expect(renderer.render(notice.keyedText, notice.payload, 'zh-CN').body).toBe(holdingZh('岗位「treasury」'));
     });
 
+    // [#36463] A slate of several slots is spelled inline too, one keyed
+    // type and value per slot, so the submitter reads every slot in their
+    // language: the sentence, the type words and the separator, each
+    // position by its pack label, else as stored.
+    it('the submitter\'s notice: a slate of several slots reads entirely in the recipient\'s language', async () => {
+      const row = await openLabelled('none_notice_two', [
+        { type: 'position', value: 'sales_manager' }, { type: 'position', value: 'treasury' },
+      ]);
+      const [notice] = told.filter((e) => e.source?.id === row.id);
+      expect(notice.keyedText.bodyKey).toBe('messages.approvalNoApproverHoldingSlots2');
+      expect(notice.payload.body).toBe(holding("position 'Sales Manager', position 'treasury'"));
+      const renderer = new NotificationTextRenderer({ getData: () => undefined, getI18n: () => i18n as any });
+      const zh = renderer.render(notice.keyedText, notice.payload, 'zh-CN').body;
+      expect(zh).toBe(holdingZh('岗位「销售经理」、岗位「treasury」'));
+      expect(zh).not.toMatch(/position|sales_manager/);
+      expect(renderer.render(notice.keyedText, notice.payload, 'ja-JP').body)
+        .toContain('役職「Sales Manager」、役職「treasury」を担うメンバー');
+      expect(renderer.render(notice.keyedText, notice.payload, 'en').body)
+        .toBe(holding("position 'Sales Manager', position 'treasury'"));
+    });
+
     it('CONTROL: a note written before the slot was stored renders exactly as before', async () => {
       const row = await open('none_legacy', UNSTAFFED, {}, LEADERLESS_ORG);
       // The stored shape of a note written before #36035: `who`, pre-composed.
