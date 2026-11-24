@@ -93,7 +93,7 @@ beforeEach(() => {
   toggleAnswer = ok({ success: true, data: { enabled: false } });
   fetchMock = vi.fn(async (url: string) => {
     const answer = String(url).includes('/actions/_activation/') ? toggleAnswer : ledgerAnswer;
-    return { ok: answer.status < 400, status: answer.status, json: async () => answer.body } as Response;
+    return { headers: new Headers(), ok: answer.status < 400, status: answer.status, json: async () => answer.body } as Response;
   });
   vi.stubGlobal('fetch', fetchMock);
   vi.mocked(toast.success).mockClear();

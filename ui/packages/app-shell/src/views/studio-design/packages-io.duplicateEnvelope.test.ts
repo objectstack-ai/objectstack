@@ -34,13 +34,13 @@ import { duplicatePackage } from './packages-io';
 
 /** The dispatcher's success envelope: the operation result under `data`. */
 function envelope(data: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, json: async () => ({ success: true, data }) } as unknown as Response;
+  return { headers: new Headers(), ok: status >= 200 && status < 300, status, json: async () => ({ success: true, data }) } as unknown as Response;
 }
 
 /** The dispatcher's error envelope — top-level, with no `data` to unwrap. */
 function errorEnvelope(status: number, message: string) {
   return {
-    ok: false,
+    headers: new Headers(), ok: false,
     status,
     json: async () => ({ success: false, error: { message, code: 'PERMISSION_DENIED', status } }),
   } as unknown as Response;
@@ -177,7 +177,7 @@ describe('duplicatePackage — the operation verdict lives under `data`', () => 
 
   it('falls back to the status when a non-2xx carries no readable body', async () => {
     stubFetch({
-      ok: false,
+      headers: new Headers(), ok: false,
       status: 502,
       json: async () => {
         throw new SyntaxError('Unexpected token < in JSON at position 0');

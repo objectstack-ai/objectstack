@@ -33,10 +33,10 @@ const DRAFT_ROWS = [
 
 const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
   const url = String(input);
-  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+  const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
   if (url.includes('/_drafts')) return ok({ drafts: DRAFT_ROWS });
   if (/\/meta\/[a-z_]+(\?|$)/.test(url)) return ok([]);
-  return { ok: false, status: 404, json: async () => ({}) };
+  return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
 });
 
 afterEach(() => {

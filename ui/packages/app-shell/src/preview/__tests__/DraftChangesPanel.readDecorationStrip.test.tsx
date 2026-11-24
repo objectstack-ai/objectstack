@@ -80,7 +80,7 @@ const DRAFT = {
 function mockRoutes() {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
     if (url.includes('/_drafts')) {
       return ok([{ type: 'object', name: 'crmext_visit', packageId: 'com.test.crmext' }]);
     }
@@ -91,7 +91,7 @@ function mockRoutes() {
       return ok({ type: 'object', name: 'crmext_visit', item: PUBLISHED });
     }
     if (/\/meta\/object(\?|$)/.test(url)) return ok([{ name: 'crmext_visit' }]);
-    return { ok: false, status: 404, json: async () => ({}) };
+    return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
   }) as unknown as typeof fetch;
 }
 
@@ -126,7 +126,7 @@ describe('DraftChangesPanel — read decorations never reach the review diff (ob
     // it was "Also changed: _diagnostics, _draft".
     global.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+      const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
       const AUTHORED = { name: 'crmext_visit', label: 'Visit', fields: { name: { type: 'text' } } };
       if (url.includes('/_drafts')) {
         return ok([{ type: 'object', name: 'crmext_visit', packageId: 'com.test.crmext' }]);
@@ -146,7 +146,7 @@ describe('DraftChangesPanel — read decorations never reach the review diff (ob
         });
       }
       if (/\/meta\/object(\?|$)/.test(url)) return ok([{ name: 'crmext_visit' }]);
-      return { ok: false, status: 404, json: async () => ({}) };
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }) as unknown as typeof fetch;
 
     render(

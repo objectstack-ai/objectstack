@@ -28,7 +28,8 @@ import type { ApprovalRequestLite } from '../hooks/useRecordApprovals';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  createAuthenticatedFetch: () => vi.fn(),
+  // The wire is the global `fetch` this file stubs; the authenticated fetch hands its requests to it.
+  createAuthenticatedFetch: () => (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
 }));
 
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
@@ -62,12 +63,12 @@ function stubActions(): void {
     vi.fn(async (url: string) =>
       /\/approvals\/requests\/req_1\/actions$/.test(String(url))
         ? ({
-            headers: new Headers(), ok: true,
+            ok: true,
             json: async () => ({
               data: [{ id: 'a1', request_id: 'req_1', action: 'approve', actor_id: 'u2', actor_name: 'Wang Fang', created_at: STORED }],
             }),
           } as unknown as Response)
-        : ({ headers: new Headers(), ok: false, status: 404, json: async () => ({}) } as unknown as Response),
+        : ({ ok: false, status: 404, json: async () => ({}) } as unknown as Response),
     ),
   );
 }

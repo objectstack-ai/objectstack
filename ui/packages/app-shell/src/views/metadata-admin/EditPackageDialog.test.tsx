@@ -32,7 +32,7 @@ beforeEach(() => {
       const body = init.body ? JSON.parse(init.body as string) : {};
       const updated: InstalledPackageRow = { ...PKG, manifest: { ...PKG.manifest, ...body } };
       return {
-        ok: true,
+        headers: new Headers(), ok: true,
         status: 200,
         text: async () => JSON.stringify({ success: true, data: updated }),
       } as Response;
@@ -72,7 +72,7 @@ describe('EditPackageDialog (spec-form wrapper)', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => ({
-        ok: false,
+        headers: new Headers(), ok: false,
         status: 400,
         text: async () =>
           JSON.stringify({ success: false, error: { message: 'version must be semantic (e.g. 1.0.0)' } }),

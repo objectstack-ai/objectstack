@@ -48,7 +48,7 @@ function stubFetch() {
     vi.fn(async (url: string, init: RequestInit = {}) => {
       calls.push({ url, init });
       return {
-        ok: true,
+        headers: new Headers(), ok: true,
         status: 200,
         text: async () => JSON.stringify({ success: true, data: { manifest: MANIFEST } }),
       } as Response;

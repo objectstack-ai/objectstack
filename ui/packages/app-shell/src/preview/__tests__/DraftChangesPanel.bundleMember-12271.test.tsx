@@ -58,8 +58,8 @@ function mockServer(fx: Fixture): string[] {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     urls.push(url);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-    const missing = { ok: false, status: 404, json: async () => ({}) };
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
+    const missing = { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     if (url.includes('/_drafts')) {
       return ok({
         drafts: fx.drafts.map((d) => ({

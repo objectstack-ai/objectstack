@@ -53,7 +53,7 @@ function stubFetch(status: number, body: unknown) {
     vi.fn(async (url: string, init: RequestInit = {}) => {
       calls.push({ url, init });
       return {
-        ok: status >= 200 && status < 300,
+        headers: new Headers(), ok: status >= 200 && status < 300,
         status,
         text: async () => JSON.stringify(body),
       } as Response;
