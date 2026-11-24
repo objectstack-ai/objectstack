@@ -14,6 +14,7 @@ import { ReportConfigPanel } from './ReportConfigPanel.js';
 import { readReportBuilderArrival, withoutReportBuilderArrival } from './reportBuilderArrival.js';
 import { Pencil, BarChart3, Loader2 } from 'lucide-react';
 import { PageHeader } from '../layout/PageHeader.js';
+import { useDesignModeActive, useHoldDesignModeOut } from '../layout/designMode.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
@@ -118,6 +119,10 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // Editing a report mutates the SHARED definition, so it is an admin-only
   // quick-edit affordance (mirrors ObjectView's view-config gate).
   const { isAdmin } = useWorkspaceAdminStatus();
+  // objectstack#36692 — the report's editors and the shell's design mode
+  // exclude each other: no Edit while the mode is on, and an open (or
+  // opening) editor holds the mode out (`useHoldDesignModeOut` below).
+  const designing = useDesignModeActive();
   // objectstack#36374 — which editor is open: the report builder (it
   // replaces the page), or the inspector panel beside the report.
   const [editor, setEditor] = useState<'builder' | 'panel' | null>(null);
@@ -334,6 +339,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   // buffer is the untranslated source, so a close with no landed save draws
   // the served report again, which is the display copy for this locale.
   const [openingEditor, setOpeningEditor] = useState(false);
+  useHoldDesignModeOut(editor !== null || openingEditor);
   // The authored buffer as the builder opened on it, and the served text of
   // the report's name and description paired with the published layer — the
   // builder's name and description boxes read it, and the page draws the
@@ -451,13 +457,13 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
   const navigate = useNavigate();
   const arrivalReadRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!isAdmin || loading || !initialReport || !reportName) return;
+    if (!isAdmin || designing || loading || !initialReport || !reportName) return;
     if (!readReportBuilderArrival(location.state, reportName)) return;
     if (arrivalReadRef.current === location.key) return;
     arrivalReadRef.current = location.key;
     navigate(location.pathname + location.search, { replace: true, state: withoutReportBuilderArrival(location.state) });
     void handleOpenBuilder();
-  }, [isAdmin, loading, initialReport, reportName, location, navigate, handleOpenBuilder]);
+  }, [isAdmin, designing, loading, initialReport, reportName, location, navigate, handleOpenBuilder]);
 
   // Sync reportData when metadata finishes loading or reportName changes
   useEffect(() => {
@@ -684,7 +690,7 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         title={heading}
         subtitle={description || undefined}
         icon={<BarChart3 className="h-4 w-4" />}
-        actions={isAdmin ? (
+        actions={isAdmin && !designing ? (
           <button
             type="button"
             onClick={() => { void handleOpenBuilder(); }}

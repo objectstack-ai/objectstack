@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#27518 — Studio's New dataset, beside the New report dialog's
- * dataset picker (`ReportCreateFields`) and the dashboard widget inspector's.
+ * objectstack#27518 — Studio's New dataset, beside the dashboard widget
+ * inspector's dataset picker. (The New report dialog's picker,
+ * `ReportCreateFields`, retired with the Interfaces pillar, objectstack#36502.)
  *
  *  - what the dialog writes, judged by the spec (`buildDatasetSkeleton`);
  *  - the picker entry, and the empty-state line's condition: no dataset reads
@@ -54,10 +55,13 @@ vi.mock('../metadata-admin/useMetadata', async (importOriginal) => {
 });
 
 import { buildDatasetSkeleton, datasetCandidateFields, StudioDatasetAuthoringContext } from './datasetCreate';
-import { NO_REPORT_BINDING, ReportCreateFields, type ReportBinding } from './interfaceCreate';
 import { DashboardWidgetInspector } from '../metadata-admin/inspectors/DashboardWidgetInspector';
 import type { ObjectFieldInfo } from '../metadata-admin/previews/useObjectFields';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches dynamic imports of `@objectstack/formula`, `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 const PLATFORM_DATASET = {
   name: 'sys_login_metrics',
@@ -128,21 +132,6 @@ describe('what New dataset writes (objectstack#27518)', () => {
 
 const authoring = { packageId: PKG, onDraftSaved: vi.fn() };
 
-function ReportHost() {
-  const [value, setValue] = React.useState<ReportBinding>(NO_REPORT_BINDING);
-  return (
-    <MemoryRouter initialEntries={[`/studio/${PKG}`]}>
-      <ReportCreateFields value={value} onChange={setValue} authoring={authoring} locale="en-US" />
-      <output data-testid="binding">{JSON.stringify(value)}</output>
-    </MemoryRouter>
-  );
-}
-
-async function listed(testId: string): Promise<HTMLElement[]> {
-  fireEvent.keyDown(screen.getByTestId(testId), { key: 'ArrowDown' });
-  return within(await screen.findByRole('listbox')).getAllByRole('option');
-}
-
 /** Open New dataset from `entry`, name it, group by Status, and save. */
 async function createWorkOrders(entry: string) {
   fireEvent.click(await screen.findByTestId(`${entry}-open`));
@@ -155,90 +144,6 @@ async function createWorkOrders(entry: string) {
   fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en-US') }));
   await waitFor(() => expect(mockClient.save).toHaveBeenCalledTimes(1));
 }
-
-describe('the report dialog\'s New dataset entry (objectstack#27518)', () => {
-  it('reads the draft-overlaid catalog and offers the entry under the picker', async () => {
-    render(<ReportHost />);
-    expect(await screen.findByTestId('create-report-dataset')).toBeInTheDocument();
-    expect(screen.getByTestId('create-report-new-dataset-open')).toHaveTextContent(
-      t('engine.studio.interfaces.newDataset.open', 'en-US'),
-    );
-    expect(mockClient.withPreviewDrafts).toHaveBeenCalledWith(true);
-  });
-
-  it('says no dataset reads this package\'s objects while only other datasets exist', async () => {
-    render(<ReportHost />);
-    expect(await screen.findByTestId('create-report-new-dataset-hint')).toHaveTextContent(
-      t('engine.studio.interfaces.newDataset.noPackageDatasets', 'en-US'),
-    );
-    // The picker still offers the datasets there are.
-    expect(screen.getByTestId('create-report-dataset')).toBeInTheDocument();
-  });
-
-  it('says nothing once a dataset reads one of the package\'s objects, and lists the package\'s first', async () => {
-    datasets = [
-      PLATFORM_DATASET,
-      { name: 'work_orders', label: 'Work orders', object: WORK_ORDER.name, _packageId: PKG, _draft: true, measures: [], dimensions: [] },
-    ];
-    render(<ReportHost />);
-    await screen.findByTestId('create-report-new-dataset-open');
-    await waitFor(() => expect(mockClient.list).toHaveBeenCalledWith('object'));
-    expect(screen.queryByTestId('create-report-new-dataset-hint')).toBeNull();
-    const options = (await listed('create-report-dataset')).map((o) => o.textContent);
-    expect(options).toEqual([
-      t('engine.studio.interfaces.create.datasetPlaceholder', 'en-US'),
-      'Work orders (work_orders)',
-      'Logins (sys_login_metrics)',
-    ]);
-  });
-
-  it('with no dataset at all, offers the entry and its line in place of the picker', async () => {
-    datasets = [];
-    render(<ReportHost />);
-    expect(await screen.findByTestId('create-report-new-dataset-hint')).toBeInTheDocument();
-    expect(screen.getByTestId('create-report-new-dataset-open')).toBeInTheDocument();
-    expect(screen.queryByTestId('create-report-dataset')).toBeNull();
-  });
-
-  it('saves the draft in this package, re-reads the catalog and binds the new dataset', async () => {
-    render(<ReportHost />);
-    await createWorkOrders('create-report-new-dataset');
-    expect(mockClient.save).toHaveBeenCalledWith(
-      'dataset',
-      'work_orders',
-      {
-        name: 'work_orders',
-        label: 'Work orders',
-        object: WORK_ORDER.name,
-        dimensions: [{ name: 'status', label: 'Status', field: 'status', type: 'string' }],
-        measures: [{ name: 'count', aggregate: 'count' }],
-      },
-      { mode: 'draft', packageId: PKG, ifNoneMatch: '*', surface: 'studio' },
-    );
-    expect(authoring.onDraftSaved).toHaveBeenCalledWith({ type: 'dataset', name: 'work_orders' });
-    await waitFor(() =>
-      expect(screen.getByTestId('binding')).toHaveTextContent('{"dataset":"work_orders","measure":""}'),
-    );
-    expect(await screen.findByTestId('create-report-dataset')).toHaveTextContent('Work orders (work_orders)');
-    // Its measure is offered at once: the re-read catalog carries the draft's body.
-    expect((await listed('create-report-measure')).map((o) => o.textContent)).toContain('count');
-    expect(screen.queryByTestId('create-report-new-dataset-hint')).toBeNull();
-  });
-
-  it('refuses a name a dataset already holds, and writes nothing', async () => {
-    mockClient.listDrafts.mockResolvedValueOnce([{ name: 'work_orders', packageId: 'other' }]);
-    render(<ReportHost />);
-    fireEvent.click(await screen.findByTestId('create-report-new-dataset-open'));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText(t('engine.studio.interfaces.newDataset.nameLabel', 'en-US')), {
-      target: { value: 'Work orders' },
-    });
-    await within(dialog).findByRole('checkbox', { name: /^Status\b/ });
-    fireEvent.click(within(dialog).getByRole('button', { name: t('engine.studio.createDraft', 'en-US') }));
-    expect(await within(dialog).findByText(/already exists/)).toBeInTheDocument();
-    expect(mockClient.save).not.toHaveBeenCalled();
-  });
-});
 
 describe('the widget inspector\'s New dataset entry (objectstack#27518)', () => {
   function renderWidget(onPatch: (patch: Record<string, unknown>) => void, inStudio: boolean) {

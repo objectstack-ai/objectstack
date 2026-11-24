@@ -16,12 +16,12 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { SidebarProvider } from '@object-ui/components';
 import { NavigationRenderer } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 
-const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en' }));
+const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en', sourceLocale: undefined as string | undefined }));
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
@@ -96,7 +96,9 @@ const storedNav = vi.hoisted(() => ({
 }));
 const client = vi.hoisted(() => ({
   list: async (type: string) => listed[type] ?? [],
-  layered: async () => {
+  layered: async (type?: string) => {
+    // objectstack#36504: no menu translation item is stored yet.
+    if (type === 'translation') return { code: null, overlay: null, overlayScope: null, effective: null };
     const gate = storedNav.gate;
     storedNav.gate = null;
     if (gate) await gate;
@@ -144,7 +146,6 @@ import DesignModeMenu from '../DesignModeMenu';
 import { closestCenter, type CollisionDetection } from '@dnd-kit/core';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
 import { __resetDefaultLocale } from '../designModeMenuSave';
-import { newReportSlotFor } from '../designModeReportSlot';
 
 const NAVIGATION = [
   { id: 'home', type: 'report', reportName: 'pipeline', label: 'Home' },
@@ -239,6 +240,7 @@ beforeEach(() => {
   toastError.mockReset();
   session.language = 'en';
   session.defaultLocale = 'en';
+  session.sourceLocale = undefined;
   storedNav.current = null;
   storedNav.failReads = 0;
   storedNav.missing = false;
@@ -255,7 +257,8 @@ beforeEach(() => {
     vi.fn(async (url: string) => {
       if (String(url).endsWith('/api/v1/i18n/locales')) {
         const locales = ['en', 'zh-CN'].map((code) => ({ code, label: code, isDefault: code === session.defaultLocale }));
-        return new Response(JSON.stringify({ success: true, data: { locales } }), { status: 200 });
+        const sourceLocale = session.sourceLocale ? { sourceLocale: session.sourceLocale } : {};
+        return new Response(JSON.stringify({ success: true, data: { locales, ...sourceLocale } }), { status: 200 });
       }
       throw new Error(`unexpected fetch ${url}`);
     }),
@@ -372,33 +375,65 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     expect(entry('leads')).toHaveTextContent('Prospects');
   });
 
-  // Ruling (4) on review 7081226692: a name is changed in the app's source language only.
-  it('under zh-CN, with English the default, the name is not changed: the field is closed and says why; the icon still is', async () => {
+  // objectstack#36504 relaxes ruling (4) on review 7081226692: a name is changed in any language,
+  // and lands where that language reads it.
+  it('under zh-CN over an English source, the name is changed: the rename says it is a zh-CN name, and the save writes the translation and keeps the stored label', async () => {
     session.language = 'zh-CN';
+    session.defaultLocale = 'zh-CN';
+    session.sourceLocale = 'en';
     start();
     await flush();
     await act_on('leads', 'Rename and icon');
     const dialog = await screen.findByTestId('design-menu-rename');
-    expect(within(dialog).getByLabelText('Name')).toBeDisabled();
-    expect(within(dialog).getByTestId('design-menu-rename-source-only')).toHaveTextContent(
-      "Menu names are changed in the app's source language",
-    );
+    const name = within(dialog).getByLabelText('Name');
+    expect(name).toBeEnabled();
+    expect(within(dialog).getByTestId('design-menu-rename-translation')).toHaveTextContent(/The new name is shown in .+\. The app's other languages keep their names\./);
+    fireEvent.change(name, { target: { value: '潜在客户' } });
     fireEvent.change(within(dialog).getByLabelText('Icon'), { target: { value: 'user-plus' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await flush();
+    expect(entry('leads')).toHaveTextContent('潜在客户');
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    await flush();
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save translation', 'publish translation', 'save app', 'publish app']);
+    expect(written[0][3]).toEqual({ name: 'crm_menu_zh_cn', locale: 'zh-CN', apps: { crm: { navigation: { leads: { label: '潜在客户' } } } } });
+    const leads = (written[2][3] as { navigation: Array<{ children?: Array<Record<string, unknown>> }> }).navigation[1].children![0];
+    expect(leads).toEqual({ id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads', icon: 'user-plus' });
+  });
+
+  it('in the source language, an entry shown under a label other than its stored one is renamed in that language\'s translation', async () => {
+    storedNav.current = NAVIGATION.map((e) => (e.id === 'home' ? { ...e, label: 'apps.crm.home' } : e));
+    start();
+    await flush();
+    await act_on('home', 'Rename and icon');
+    const dialog = await screen.findByTestId('design-menu-rename');
+    expect(within(dialog).getByLabelText('Name')).toBeEnabled();
+    expect(within(dialog).getByTestId('design-menu-rename-translation')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Start' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
     await flush();
     fireEvent.click(screen.getByTestId('design-mode-save'));
     await flush();
     await flush();
-    const leads = (written[0][3] as { navigation: Array<{ children?: Array<Record<string, unknown>> }> }).navigation[1].children![0];
-    expect(leads).toEqual({ id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads', icon: 'user-plus' });
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save translation', 'publish translation']);
+    expect(written[0][3]).toMatchObject({ name: 'crm_menu_en', locale: 'en', apps: { crm: { navigation: { home: { label: 'Start' } } } } });
   });
 
-  it('in the default language, an entry shown under a label other than its stored one is not renamed here', async () => {
-    storedNav.current = NAVIGATION.map((e) => (e.id === 'home' ? { ...e, label: 'apps.crm.home' } : e));
+  it('in the source language, over the stored label, the rename says nothing of a translation and writes the stored label', async () => {
     start();
     await flush();
-    await act_on('home', 'Rename and icon');
-    expect(within(await screen.findByTestId('design-menu-rename')).getByLabelText('Name')).toBeDisabled();
+    await act_on('leads', 'Rename and icon');
+    const dialog = await screen.findByTestId('design-menu-rename');
+    expect(within(dialog).queryByTestId('design-menu-rename-translation')).toBeNull();
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Prospects' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await flush();
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save app', 'publish app']);
   });
 
   it("another package's entry (served, not in the stored menu) says where it is changed, and is not moved or removed here", async () => {
@@ -819,135 +854,45 @@ async function openReports() {
   return picker;
 }
 
-/** A link elsewhere in the app, as the sidebar would follow one. */
-function GoElsewhere() {
-  const navigate = useNavigate();
-  return (
-    <button type="button" onClick={() => navigate('/apps/crm/object/crm_lead')}>
-      go elsewhere
-    </button>
-  );
-}
-
-function startOnBuilderPath() {
-  render(
-    <MemoryRouter initialEntries={['/apps/crm']}>
-      <Harness />
-      <Landing />
-      <GoElsewhere />
-    </MemoryRouter>,
-  );
-  fireEvent.click(screen.getByText('enter'));
-}
-
-const REPORT_BODY = {
-  label: 'Payment analysis',
-  type: 'summary',
-  dataset: 'invoice_metrics',
-  values: ['invoice_count'],
-  chart: { type: 'metric', xAxis: '', yAxis: 'invoice_count' },
-};
-
-describe('a new report from 「Add menu item」 (objectstack#36364, report half)', () => {
-  it('「Reports」 lists 「New report…」 first; it holds the place and opens the report builder, writing nothing', async () => {
-    startOnBuilderPath();
-    const picker = await openReports();
-    const rows = within(within(picker).getByTestId('design-menu-picker-rows')).getAllByRole('button').map((b) => b.textContent);
-    // The report the menu already opens (Home → pipeline) is not offered again.
-    expect(rows).toEqual(['New report…']);
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
-    expect(screen.getByTestId('landing')).toHaveTextContent('/apps/crm/reports/new null');
-    // The place stays held, saying what it waits for.
-    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', ['…']]]);
-    expect(screen.getByTestId('design-menu-placeholder')).toHaveTextContent('New report…');
-    expect(newReportSlotFor('/apps/crm/reports/new')).not.toBeNull();
-    expect(newReportSlotFor('/apps/hr/reports/new')).toBeNull();
-    expect(written).toEqual([]);
+/**
+ * objectstack#36692 — the design mode stops hosting the report builder (the
+ * maintainer's 「照 Twenty 分开」): 「Reports」 only links reports that exist;
+ * a new report is made from the reports index, with its own Save.
+ */
+describe('「Reports」 links existing reports only (objectstack#36692)', () => {
+  it('lists the reports not in the menu yet, and no 「New report…」 row', async () => {
+    listed.report = [
+      { name: 'pipeline', label: 'Pipeline' },
+      { name: 'revenue_by_month', label: 'Revenue by month' },
+    ];
+    try {
+      start();
+      const picker = await openReports();
+      const rows = within(within(picker).getByTestId('design-menu-picker-rows')).getAllByRole('button').map((b) => b.textContent);
+      // The report the menu already opens (Home → pipeline) is not offered again.
+      expect(rows).toEqual(['Revenue by month']);
+      expect(within(picker).queryByTestId('design-menu-picker-new-report')).toBeNull();
+      expect(within(picker).queryByText('New report…')).toBeNull();
+    } finally {
+      listed.report = [{ name: 'pipeline', label: 'Pipeline' }];
+    }
   });
 
-  it('the builder\'s Save: the report, then the menu with its entry in the held place and every other staged edit; the mode is left', async () => {
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up'); // another staged edit, saved with it
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    const slot = newReportSlotFor('/apps/crm/reports/new')!;
-    let saved: boolean | undefined;
-    await act(async () => {
-      saved = await slot.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
-    });
-    await flush();
-
-    expect(saved).toBe(true);
-    expect(written.map(([verb, type, name]) => `${verb} ${type} ${name}`)).toEqual([
-      'save report payment_analysis',
-      'publish report payment_analysis',
-      'save app crm',
-      'publish app crm',
-    ]);
-    expect(written[0][3]).toEqual({ ...REPORT_BODY, name: 'payment_analysis' });
-    expect(written[0][4]).toEqual({ mode: 'draft', ifNoneMatch: '*', packageId: 'com.acme.crm' });
-    const navigation = (written[2][3] as { navigation: Array<{ id: string; children?: unknown[] }> }).navigation;
-    expect(navigation[1].children!.map((c) => (c as { id: string }).id)).toEqual(['accounts', 'leads']);
-    expect(navigation[2].children).toEqual([
-      { id: 'nav_item_1', type: 'report', reportName: 'payment_analysis', label: 'Payment analysis' },
-    ]);
-    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-  });
-
-  it('a refused menu removes the new report; the mode, the held place and the other staged edits stay', async () => {
-    server.appSave = new Error('the app was refused');
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up');
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    let saved: boolean | undefined;
-    await act(async () => {
-      saved = await newReportSlotFor('/apps/crm/reports/new')!.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
-    });
-    await flush();
-
-    expect(saved).toBe(false);
-    expect(written.map(([verb, type, name, opt]) => `${verb} ${type} ${name} ${verb === 'reset' ? JSON.stringify(opt) : ''}`.trim())).toEqual([
-      'save report payment_analysis',
-      'publish report payment_analysis',
-      'save app crm',
-      'reset report payment_analysis {"packageId":"com.acme.crm"}',
-    ]);
-    expect(toastError).toHaveBeenCalledWith('Some changes were not saved: the app was refused');
-    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
-    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', ['…']]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).not.toBeNull();
-  });
-
-  it('the builder\'s Close drops the held place and writes nothing; the mode and its other edits stay', async () => {
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up');
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    act(() => newReportSlotFor('/apps/crm/reports/new')!.cancel());
-    await flush();
-    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-    expect(written).toEqual([]);
-    expect(screen.getByTestId('design-mode-save')).toBeEnabled();
-  });
-
-  it('leaving the builder another way drops the held place too', async () => {
-    startOnBuilderPath();
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    fireEvent.click(screen.getByText('go elsewhere'));
-    await flush();
-    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-    expect(written).toEqual([]);
+  it('picking one links it in the held place, staged with the mode; nothing is written, nothing navigates', async () => {
+    listed.report = [{ name: 'revenue_by_month', label: 'Revenue by month' }];
+    try {
+      startWithLanding();
+      const picker = await openReports();
+      fireEvent.click(within(picker).getByRole('button', { name: 'Revenue by month' }));
+      await flush();
+      expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+      expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', ['nav_item_1']]]);
+      expect(written).toEqual([]);
+      expect(screen.getByTestId('landing')).toHaveTextContent('/apps/crm null');
+      expect(screen.getByTestId('design-mode-save')).toBeEnabled();
+    } finally {
+      listed.report = [{ name: 'pipeline', label: 'Pipeline' }];
+    }
   });
 });
 

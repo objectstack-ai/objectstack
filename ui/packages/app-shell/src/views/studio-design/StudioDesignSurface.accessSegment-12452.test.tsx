@@ -1,32 +1,30 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12452 — Access is the fourth segment of the Studio pillar nav, and
- * the More overflow that held it alone is gone.
+ * objectui#12452 — Access is a segment of the Studio pillar nav, and the More
+ * overflow that held it alone is gone.
  *
- * Since objectui#5813 Access sat in a "More" popover beside the three primary
+ * Since objectui#5813 Access sat in a "More" popover beside the primary
  * pillars, and objectui#11794 pinned that trigger's name. The overflow held one
  * pillar, so it was a one-item menu. The epic's decision A (objectui#12446)
  * puts Access in the segmented control as a first-class pillar and retires
  * More; this file replaces the More trigger's pin.
  *
- * Three facts are pinned:
+ * Two facts are pinned:
  *
- * 1. The nav reads Data, Automations, Interfaces, Access, in that order, each a
- *    real router link to its pillar, with no trigger of any kind beside them.
- *    Access carries the shield glyph, compared with lucide's own `Shield`.
+ * 1. The nav reads Data, Automations, Access (objectstack#36502 retired the
+ *    Interfaces segment that stood third), each a real router link to its
+ *    pillar, with no trigger of any kind beside them. Access carries the
+ *    shield glyph, compared with lucide's own `Shield`.
  * 2. With Access open (under any package id) the Access segment is the current
  *    page and carries the active look the open primary pillar carries; with
- *    Interfaces open it carries neither, and Interfaces carries both.
- * 3. Leaving a pillar with an unsaved edit through Access asks exactly as
- *    leaving it through Data does (the surface's one leave guard,
- *    objectui#2600): cancel stays with the edit, confirm lands on Access. A
- *    clean departure through Access never asks.
+ *    Data open it carries neither, and Data carries both.
  *
- * The unsaved edit is the Interfaces pillar's nav edit, the one pillar other
- * than Access that reports one. The package list is held in flight, so the
- * nav autosave never sends it and the edit stays unsaved for the whole test
- * (`navEditClosesOnReadOnly-11167` reads the same window).
+ * A third fact, "leaving an unsaved pillar through Access asks as through
+ * Data does", was read on the Interfaces pillar's nav edit, the one pillar
+ * other than Access that reported an unsaved edit; it retired with that
+ * pillar. The surface's one leave guard stays pinned from Access itself in
+ * `pillarNavGuard`.
  *
  * The package-less scope's single pillar stays pinned where it is:
  * `packageLessFlows-11553` asserts no Access link there. Re-clicking the open
@@ -39,7 +37,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { Shield } from 'lucide-react';
 
@@ -128,6 +126,9 @@ vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => nul
 
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -151,7 +152,6 @@ const key = (type: string, name: string) => `${type}/${name}`;
 
 const DATA = t('engine.studio.pillar.data', 'en');
 const AUTOMATIONS = t('engine.studio.pillar.automations', 'en');
-const INTERFACES = t('engine.studio.pillar.interfaces', 'en');
 const ACCESS = t('engine.studio.pillar.access', 'en');
 /** The class tokens the open pillar's segment carries (objectui#12459). */
 const ACTIVE = ['bg-background', 'font-medium', 'text-foreground', 'shadow-sm'];
@@ -185,7 +185,6 @@ afterEach(() => {
 function LocationProbe() {
   return <output data-testid="location-path">{useLocation().pathname}</output>;
 }
-const pathname = () => screen.getByTestId('location-path').textContent;
 
 function renderAt(path: string) {
   render(
@@ -209,19 +208,17 @@ function shieldMarkup(): string {
   return markup;
 }
 
-describe('Studio pillar nav: Access is the fourth segment, and More is gone (objectui#12452)', () => {
-  it('reads Data, Automations, Interfaces, Access, each a link to its pillar, with no trigger beside them', async () => {
-    renderAt(`/studio/${PKG}/interfaces`);
-    // objectui#12725 — by test id: the Interfaces properties now sit in the right
-    // slot beside the top bar, and testing-library reads their aside's `header`
-    // as a second banner (a browser does not: it is inside an `aside`).
+describe('Studio pillar nav: Access is a segment of its own, and More is gone (objectui#12452)', () => {
+  it('reads Data, Automations, Access, each a link to its pillar, with no trigger beside them', async () => {
+    renderAt(`/studio/${PKG}/data`);
     await screen.findByTestId('studio-shell-header');
 
     const links = within(pillarNav()).getAllByRole('link');
-    // objectstack#28561 — the "All metadata" area follows the four pillars.
-    expect(links.map((a) => a.textContent)).toEqual([DATA, AUTOMATIONS, INTERFACES, ACCESS, t('engine.studio.pillar.metadata', 'en')]);
+    // objectstack#28561 — the "All metadata" area follows the pillars.
+    // objectstack#36502 — Interfaces is retired: no segment, no link.
+    expect(links.map((a) => a.textContent)).toEqual([DATA, AUTOMATIONS, ACCESS, t('engine.studio.pillar.metadata', 'en')]);
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['data', 'automations', 'interfaces', 'access', 'metadata'].map((p) => `/studio/${PKG}/${p}`),
+      ['data', 'automations', 'access', 'metadata'].map((p) => `/studio/${PKG}/${p}`),
     );
     // No More trigger, under its old test id or any other name.
     expect(within(pillarNav()).queryAllByRole('button')).toEqual([]);
@@ -242,83 +239,20 @@ describe('Studio pillar nav: Access is the fourth segment, and More is gone (obj
     expect(access).toHaveClass(...ACTIVE);
     expect(access.querySelector('svg')).toHaveClass('text-primary');
     // No other segment is the open one.
-    for (const name of [DATA, AUTOMATIONS, INTERFACES]) {
+    for (const name of [DATA, AUTOMATIONS]) {
       expect(segment(name)).not.toHaveAttribute('aria-current');
       expect(segment(name)).not.toHaveClass('shadow-sm');
     }
   });
 
-  it('control: with Interfaces open, Access carries neither, and Interfaces carries both', async () => {
-    renderAt(`/studio/${PKG}/interfaces`);
+  it('control: with Data open, Access carries neither, and Data carries both', async () => {
+    renderAt(`/studio/${PKG}/data`);
     await screen.findByTestId('studio-shell-header');
 
     expect(segment(ACCESS)).not.toHaveAttribute('aria-current');
     expect(segment(ACCESS)).not.toHaveClass('shadow-sm');
     expect(segment(ACCESS).querySelector('svg')).not.toHaveClass('text-primary');
-    expect(segment(INTERFACES)).toHaveAttribute('aria-current', 'page');
-    expect(segment(INTERFACES)).toHaveClass(...ACTIVE);
-  });
-});
-
-describe('Studio pillar nav: leaving an unsaved pillar through Access asks as through Data (objectui#12452)', () => {
-  /** Hold the package list in flight: the nav autosave waits on it, so an edit stays unsaved. */
-  function holdPackageList() {
-    fetchPackagesMock.mockReturnValue(new Promise<unknown[]>(() => {}));
-  }
-  const addedItemOnScreen = () => screen.queryAllByRole('button', { name: new RegExp(TASK.name) }).length > 0;
-  /** True while the surface's leave guard holds an unsaved edit (it cancels `beforeunload`). */
-  function leaveGuarded(): boolean {
-    const e = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(e);
-    return e.defaultPrevented;
-  }
-  /** Open nav editing and append an item bound to the fixture's object: the Interfaces pillar's unsaved edit. */
-  async function editTheNav(): Promise<void> {
-    await screen.findByRole('button', { name: /Landing menu/ }, { timeout: 8000 });
-    fireEvent.click(screen.getByTitle(/^Edit navigation/));
-    fireEvent.click(await screen.findByRole('button', { name: /Add nav item/ }, { timeout: 8000 }));
-    fireEvent.keyDown(screen.getByTestId('nav-link-object'), { key: 'ArrowDown' });
-    fireEvent.click(await screen.findByRole('option', { name: new RegExp(`\\(${TASK.name}\\)$`) }));
-    expect(addedItemOnScreen()).toBe(true);
-    await waitFor(() => expect(leaveGuarded()).toBe(true));
-  }
-
-  it('cancel through Access stays with the edit, as cancel through Data does; confirm through Access lands on Access', async () => {
-    holdPackageList();
-    renderAt(`/studio/${PKG}/interfaces`);
-    await editTheNav();
-
-    // The control door: Data asks, and cancel keeps the author and the edit.
-    confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(segment(DATA));
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(pathname()).toBe(`/studio/${PKG}/interfaces`);
-    expect(addedItemOnScreen()).toBe(true);
-
-    // THE PIN: Access asks the same question, and cancel does the same.
-    confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(segment(ACCESS));
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
-    expect(confirmSpy).toHaveBeenLastCalledWith(confirmSpy.mock.calls[0]![0]);
-    expect(pathname()).toBe(`/studio/${PKG}/interfaces`);
-    expect(addedItemOnScreen()).toBe(true);
-
-    confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(segment(ACCESS));
-    expect(confirmSpy).toHaveBeenCalledTimes(3);
-    await waitFor(() => expect(pathname()).toBe(`/studio/${PKG}/access`));
-    expect(segment(ACCESS)).toHaveAttribute('aria-current', 'page');
-    // The edit was discarded, never sent.
-    expect(server.saves).toEqual([]);
-  });
-
-  it('control: a clean departure through Access never asks', async () => {
-    renderAt(`/studio/${PKG}/interfaces`);
-    await screen.findByRole('button', { name: /Landing menu/ }, { timeout: 8000 });
-    expect(leaveGuarded()).toBe(false);
-
-    fireEvent.click(segment(ACCESS));
-    await waitFor(() => expect(pathname()).toBe(`/studio/${PKG}/access`));
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(segment(DATA)).toHaveAttribute('aria-current', 'page');
+    expect(segment(DATA)).toHaveClass(...ACTIVE);
   });
 });

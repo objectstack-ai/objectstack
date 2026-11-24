@@ -504,3 +504,32 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
         }
     });
 });
+
+// [#36463] A refusal the approvals service marks for the end user (the thrown
+// error's `userMessage`, `ApiErrorSchema.userMessage`) reaches the wire at the
+// top level of this door's flat body, beside the English `error` — the member
+// `@objectstack/client` lifts from this dialect. The decide refusal of a
+// submitter's own approval is its producer, in the decider's language.
+describe('a refusal the approvals service marks for the end user carries its userMessage (#36463)', () => {
+    const ENGLISH = "'u_sub' submitted this request and holds no slot on it, so they cannot approve it through the "
+        + 'administrator override. No one else can approve this request yet.';
+    const MARKED = '此请求由您提交，且您不在其审批人之列，因此不能以管理员身份代为批准它。';
+
+    it('the decide refusal answers 403 FORBIDDEN, its English as `error` and the marked text as `userMessage`', async () => {
+        const decide = vi.fn().mockRejectedValue(Object.assign(new Error(`FORBIDDEN: ${ENGLISH}`), { userMessage: MARKED }));
+        const answer = await drive(boot({ decide }), 'POST', `${REQ}/approve`);
+        expect(answer.status).toBe(403);
+        expect(answer.body).toEqual({ code: 'FORBIDDEN', error: ENGLISH, userMessage: MARKED });
+        expect(ApiErrorSchema.safeParse({
+            code: answer.body?.code, message: answer.body?.error, userMessage: answer.body?.userMessage,
+        }).success).toBe(true);
+    });
+
+    it('CONTROL: an unmarked refusal and a blank marking carry no userMessage member', async () => {
+        for (const thrown of [new Error(`FORBIDDEN: ${ENGLISH}`), Object.assign(new Error(`FORBIDDEN: ${ENGLISH}`), { userMessage: '  ' })]) {
+            const answer = await drive(boot({ decide: vi.fn().mockRejectedValue(thrown) }), 'POST', `${REQ}/approve`);
+            expect(answer.status).toBe(403);
+            expect(answer.body).toEqual({ code: 'FORBIDDEN', error: ENGLISH });
+        }
+    });
+});

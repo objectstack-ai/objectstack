@@ -114,25 +114,26 @@ const METADATA_FORM_BUNDLE: TranslationBundle = {
           advanced: { label: '高级', description: '无障碍与性能调优。' },
         },
         fields: {
-          name: { label: '名称', helpText: 'snake_case 唯一标识' },
-          label: { label: '显示名称', helpText: '展示给使用者的名称' },
+          name: { label: '名称', helpText: '仪表盘的唯一内部名称：使用小写字母、数字和下划线，以字母开头（例如 sales_overview）。' },
+          label: { label: '显示名称', helpText: '使用者看到的仪表盘标题。' },
           description: { label: '描述' },
-          columns: { label: '列数', helpText: '栅格列数（默认 12）' },
-          // The spec's own hint reaches for developer vocabulary to say this —
-          // `Grid gap (Tailwind units)` before 17.4.0, and "Space between
-          // widgets, in steps of 0.25rem (4 = 1rem)" since. Either way it names
-          // a unit only a developer can act on, so this row says what the author
-          // can decide rather than transliterating it (objectui#8785).
-          gap: { label: '间距', helpText: '组件之间的间距，数值越大越松' },
-          refreshIntervalSeconds: { label: '自动刷新', helpText: '自动刷新间隔（秒），0 表示不自动刷新' },
-          header: { label: '页眉', helpText: '页眉设置：标题、描述与操作按钮' },
+          columns: { label: '列数', helpText: '组件排布所用的列数，1 到 24。留空时仪表盘会按组件的宽度自动选择。' },
+          // The hints of these nine rows are the platform's zh-CN wording
+          // (`zh-CN.metadata-forms.generated.ts`), copied when the spec's own
+          // hints were rewritten in author language (objectstack#36816). Before
+          // that the English gap hint named a unit only a developer can act on
+          // (`Grid gap (Tailwind units)`, then "in steps of 0.25rem"), and this
+          // row was hand-worded instead of transliterated (objectui#8785).
+          gap: { label: '间距', helpText: '组件之间留出的空间。数值越大越松散；留空则使用标准间距。' },
+          refreshIntervalSeconds: { label: '自动刷新', helpText: '仪表盘重新加载数据的频率（秒）。留空或填 0 表示不自动刷新。' },
+          header: { label: '页眉', helpText: '仪表盘顶部显示的内容：标题、描述和操作按钮。' },
           // All three children of the `header` composite — see the ⛔ note above.
           'header.showTitle': { label: '显示标题', helpText: '在页眉中显示仪表盘名称' },
           'header.showDescription': { label: '显示描述', helpText: '在页眉中显示仪表盘描述' },
           'header.actions': { label: '操作按钮', helpText: '显示在页眉里的操作按钮' },
-          widgets: { label: '组件', helpText: '仪表盘组件，含位置与尺寸' },
-          dateRange: { label: '日期范围', helpText: '默认的日期范围选择器' },
-          globalFilters: { label: '全局筛选', helpText: '应用到全部组件的筛选条件' },
+          widgets: { label: '组件', helpText: '仪表盘上的图表、数字和表格，以及每一项所在的位置。' },
+          dateRange: { label: '日期范围', helpText: '打开仪表盘时默认的时间段，以及查看者能否自选日期。' },
+          globalFilters: { label: '全局筛选', helpText: '查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。' },
         },
       },
     },

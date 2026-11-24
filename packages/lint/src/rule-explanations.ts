@@ -4328,11 +4328,12 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'judged the same way, under this id, and refused when the page is saved. The grid is bound by its ' +
       '`dataSource.object`, else `properties.objectName`; its grouped header numbers come from its ' +
       '`aggregations` (`grid-aggregation-field-type-refused`), not from the column summaries.',
-    'A board\'s lane foot statistic, `kanban.summary`, is judged under this id too: a `sum` totals its ' +
-      'field over each lane, so the pair is the table\'s `sum` row over the field\'s declaration, and a ' +
-      'refused pair is reported at `kanban.summary`, as is a `sum` over a `boolean` or `toggle` field, which the ' +
-      'board does not add. `count` and `none` compare no value. The board totals ' +
-      'its loaded cards in the browser today, where a value that is no number draws no figure.',
+    'A board\'s lane foot statistic, `kanban.summary`, is judged under this id too: a `sum`, `avg`, `min` or ' +
+      '`max` is answered by one grouped aggregate over every record of each lane, so the pair is the table\'s ' +
+      'row for that function over the field\'s declaration, and a refused pair is reported at ' +
+      '`kanban.summary`, as is any of the four over a field of the boolean class (`boolean`, `toggle`), which ' +
+      'the board does not aggregate. `count` and `none` compare no value. A refused pair draws no figure at ' +
+      'the lane\'s foot.',
     AGGREGATE_PAIR_ROWS,
     'The yes / no counts of a boolean column, `count_true` and `count_false`, lower to `SUM(field)` ' +
       '(booleans aggregate as numbers, so the sum is the number of true cells) and `COUNT(field)`. The ' +

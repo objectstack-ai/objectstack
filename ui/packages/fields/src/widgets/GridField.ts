@@ -5,12 +5,12 @@ import React from 'react';
 import type { InlineGridColumn } from '@objectstack/spec/data';
 import { resolveFieldCurrency, currencyFractionDigits } from '../currency.js';
 import {
-  crossCurrencyRefusal,
-  planDeclaredLookupAutofill,
+  declaredPickWrites,
+  judgePickWrites,
   type AutofillCurrencyContext,
   type LookupAutofillPair,
   type LookupAutofillPlan,
-  type WithheldAutofill,
+  type PickWrite,
 } from './lookupAutofill.js';
 import { fieldHelpText } from '../fieldHelpText.js';
 // Type-only: erased at build, so it adds no edge to the bundle graph. The one
@@ -218,7 +218,10 @@ export function evalArith(expr: string, row: Row): number | null {
  * `currency` is the pick's cross-currency rule (`crossCurrencyRefusal`): a
  * value it refuses is left out of the patch, the same-named copy and the
  * declared pairs alike, and listed under `withheld` so the grid says why the
- * cell stayed empty. Without it every value copies as before.
+ * cell stayed as it was. Every value is judged against the line with all of
+ * this pick's writes applied (`judgePickWrites`), so a code the pick copies
+ * puts the amount beside it in that code. Without it every value copies as
+ * before.
  */
 export function planLookupAutofill(
   columns: GridColumn[],
@@ -227,8 +230,7 @@ export function planLookupAutofill(
   declared?: { pairs?: readonly LookupAutofillPair[]; row?: Row; previous?: Row | null },
   currency?: AutofillCurrencyContext,
 ): LookupAutofillPlan {
-  const patch: Row = { [col.name]: record?.value ?? record?.id ?? record?._id };
-  const withheld: WithheldAutofill[] = [];
+  const writes: PickWrite[] = [];
   const declaredTargets = new Set((declared?.pairs ?? []).map((p) => p.target));
   if (col.autofill !== false && record && typeof record === 'object') {
     for (const other of columns) {
@@ -236,15 +238,12 @@ export function planLookupAutofill(
       if (declaredTargets.has(other.name)) continue;
       const v = record[other.name];
       if (v === undefined || v === null || v === '') continue;
-      const refusal = currency
-        ? crossCurrencyRefusal(currency.sourceCurrency(other.name, v), currency.targetCurrency(other.name), currency.home)
-        : undefined;
-      if (refusal) withheld.push({ target: other.name, source: other.name, amount: Number(v), ...refusal });
-      else patch[other.name] = v;
+      writes.push({ target: other.name, source: other.name, value: v, held: declared?.row?.[other.name] });
     }
   }
-  const pairs = planDeclaredLookupAutofill(declared?.pairs, record, declared?.row, declared?.previous, currency);
-  return { patch: { ...patch, ...pairs.patch }, withheld: [...withheld, ...pairs.withheld] };
+  writes.push(...declaredPickWrites(declared?.pairs, record, declared?.row, declared?.previous));
+  const plan = judgePickWrites(writes, currency);
+  return { patch: { [col.name]: record?.value ?? record?.id ?? record?._id, ...plan.patch }, withheld: plan.withheld };
 }
 
 /** {@link planLookupAutofill}'s writes alone. */

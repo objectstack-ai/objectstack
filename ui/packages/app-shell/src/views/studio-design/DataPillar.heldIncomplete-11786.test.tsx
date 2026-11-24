@@ -119,7 +119,7 @@ async function addFieldAs(typeOption: RegExp): Promise<{ name: string; label: st
       <DataPillar packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await addFieldFromFormToolbar();
   await screen.findByText('Type', { selector: 'label' }, { timeout: 4000 });
   const name = (controlUnder('API name') as HTMLInputElement).value;
@@ -206,7 +206,7 @@ describe('Studio data page — complete bodies are sent as before (objectui#1178
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     await addFieldFromFormToolbar();
     await pressStudioSave();
     await waitFor(() => expect(puts.length).toBe(1), { timeout: 4000 });
@@ -230,7 +230,7 @@ describe('Studio data page — complete bodies are sent as before (objectui#1178
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter></StudioSaveHarness>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     await addFieldFromFormToolbar();
     await pressStudioSave();
     const strip = await screen.findByTestId('studio-refusal', undefined, { timeout: 4000 });

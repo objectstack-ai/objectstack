@@ -2357,7 +2357,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.firstObjectHint':
     '对象是应用的数据基座(如「订单」「客户」)。点击下方按钮创建一个;之后为它设计字段、表单与自动化,每次保存即生效。',
   'engine.studio.data.tab.records': '记录',
-  'engine.studio.data.tab.form': '表单',
+  // objectstack#36505 — the tab edits the object's field groups only.
+  'engine.studio.data.tab.form': '字段布局',
   'engine.studio.data.tab.rules': '验证',
   'engine.studio.data.tab.settings': '设置',
   'engine.studio.data.tab.hooks': '钩子',
@@ -2385,8 +2386,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.data.form.sourceLabel': '预览来源',
   'engine.studio.data.form.sourceDraft': '草稿',
   'engine.studio.data.form.sourcePublished': '已发布',
-  'engine.studio.data.form.layoutSource.fieldGroups': '字段分组',
-  'engine.studio.data.form.layoutSource.fieldGroupsTitle': '应用中的新建和编辑按这些分组排布此对象的字段。',
+  'engine.studio.data.form.usedOn': '这里的分组和顺序用在记录页、右侧预览、新建和编辑弹窗上。',
   'engine.studio.data.fieldProps': '字段属性',
   'engine.studio.data.groupProps': '分组属性',
   'engine.studio.data.fieldInspectorMissing': '本次会话没有注册字段检查器,因此无法在这里编辑该字段的属性。',
@@ -3086,6 +3086,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pillar.automations': '自动化',
   'engine.studio.pillar.interfaces': '界面',
   'engine.studio.pillar.access': '权限',
+  // objectstack#36502 — 旧「界面」链接落地时的提示。
+  'engine.studio.interfacesRetired.sentence': '界面的修改已经搬到应用里',
+  'engine.studio.interfacesRetired.backToApp': '回到应用',
+  'engine.studio.interfacesRetired.dismiss': '关闭',
   'engine.studio.pillar.metadata': '全部元数据',
   // Header · package-level publish + app bridge
   'engine.studio.changes': '变更',
@@ -3284,6 +3288,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.designer.newGroup': '新分组',
   'engine.studio.designer.fieldTitleReadOnly': '点选字段查看属性',
   'engine.studio.designer.toolbarHint': '拖动字段排布 · 点选字段编辑属性',
+  'engine.studio.designer.source.base': '原始包',
+  'engine.studio.designer.source.baseTitle': '随已安装的软件包而来，保持出厂原样',
+  'engine.studio.designer.source.environment': '本环境',
+  'engine.studio.designer.source.environmentTitle': '在本环境添加，存于其定制包',
   'engine.studio.designer.addGroup': '添加分组',
   'engine.studio.formDnd.instructions':
     '按空格键或回车键拿起字段。拖动时用方向键移动，再按空格键或回车键放到新位置，按 Esc 键取消。',
@@ -4353,6 +4361,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.itemTools.sourceReadOnly': '只读：此项无法在这里编辑。',
   'engine.studio.itemTools.layersFailed': '无法读取此项的分层：{message}',
   'engine.studio.itemTools.layersRetry': '重试',
+  // Studio 详情头部：每种全屏详情共用的头部（objectstack#36892）。
+  'engine.studio.detailHeader.close': '关闭并返回列表',
+  'engine.studio.detailHeader.previous': '上一个',
+  'engine.studio.detailHeader.next': '下一个',
+  'engine.studio.detailHeader.position': '第 {index} 项，共 {total} 项',
+  'engine.studio.detailHeader.notInList': '不在当前列表中',
+  'engine.studio.detailHeader.package': '来自包 {package}',
+  'engine.studio.detailHeader.more': '更多',
 };
 
 export default STUDIO_ZH;

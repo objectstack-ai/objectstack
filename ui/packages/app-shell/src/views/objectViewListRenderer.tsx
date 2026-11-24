@@ -203,7 +203,8 @@ export function useObjectViewListRenderer({
      * objectstack#35403 — the bulk Change Owner the grid's selection bar
      * offers, wired where the object offers the action (it makes the rows
      * selectable). It opens the page's Change Owner dialog over the selected
-     * rows.
+     * rows. Grid-only (objectstack#36395): a kanban, calendar, gallery or
+     * other non-grid view takes no selection and offers no bulk entry.
      */
     onBulkChangeOwner?: (records: any[]) => void;
     /**

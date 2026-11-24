@@ -56,6 +56,7 @@ import type { Equal, MetaTypesListing } from './protocol-meta-types-listing.js';
 import {
     HAND_CRAFTED_SCHEMAS,
     TYPE_TO_FORM,
+    TYPE_TO_LIST,
     canonicalMetaType,
     toJsonSchemaSafe,
 } from './protocol-meta-type-schema.js';
@@ -651,6 +652,8 @@ export class ProtocolDiscoveryAndBasesFacet {
             const schema = (zodSchema ? toJsonSchemaSafe(zodSchema, singular) : undefined)
                 ?? HAND_CRAFTED_SCHEMAS[singular];
             const form = TYPE_TO_FORM[singular];
+            // The Studio list layout, beside the form; omitted for a type with none.
+            const list = TYPE_TO_LIST[singular];
             // Phase 2: the authoritative minimal create seed (single source of
             // truth in @objectstack/spec). Studio/CLI derive create defaults
             // from this via /meta/types instead of re-inventing them.
@@ -677,6 +680,7 @@ export class ProtocolDiscoveryAndBasesFacet {
                         : 'registry' as const,
                     schema,
                     form,
+                    ...(list !== undefined ? { list } : {}),
                     ...(createSeed !== undefined ? { createSeed } : {}),
                     // Override the spread `base.actions` with the merged view
                     // (declarative + plugin-registered). Omit when empty to
@@ -754,6 +758,7 @@ export class ProtocolDiscoveryAndBasesFacet {
                 overrideSource: writableOverrides.has(singular) ? 'env' as const : 'registry' as const,
                 schema,
                 form,
+                ...(list !== undefined ? { list } : {}),
                 ...(createSeed !== undefined ? { createSeed } : {}),
                 // Plugin-registered actions on a type with no registry entry.
                 ...(typeActions.length ? { actions: typeActions } : {}),

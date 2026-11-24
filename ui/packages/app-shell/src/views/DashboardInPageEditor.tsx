@@ -22,6 +22,11 @@
  * published): that draft is its saver's, and is never published on their
  * behalf.
  *
+ * The edit state and the shell's design mode exclude each other
+ * (objectstack#36692): while the mode is on the Edit button is not offered,
+ * and while the edit state is open (or opening) it holds the mode out, so
+ * entering the mode refuses. The screen shows one Save/Cancel set at a time.
+ *
  * Out of scope here: undo, a business user's own copy, a new dashboard, chart
  * drawing and drill-down.
  */
@@ -42,6 +47,7 @@ import {
   type SaveAndPublishOutcome,
 } from './runtime-metadata-persistence.js';
 import { useStudioEntryGate } from '../hooks/useStudioDesignGate.js';
+import { useDesignModeActive, useHoldDesignModeOut } from '../layout/designMode.js';
 import { DashboardWidgetInspector } from './metadata-admin/inspectors/DashboardWidgetInspector.js';
 import { DashboardDefaultInspector } from './metadata-admin/inspectors/DashboardDefaultInspector.js';
 import { AddWidgetPicker } from './metadata-admin/previews/AddWidgetPicker.js';
@@ -192,10 +198,14 @@ export function filtersSectionLabel(locale: SupportedLocale): string | null {
  * (`useStudioEntryGate`: a workspace admin who may author metadata, on a
  * package Studio lists, writable or not; never a kernel package). A
  * read-only package's dashboard is edited through its customization package.
+ * Not while the shell's design mode is on (objectstack#36692): the two are
+ * separate entries, never open together.
  */
 export function useDashboardEditOffered(ownerPackageId: string | null | undefined): boolean {
   const path = ownerPackageId ? `/studio/${encodeURIComponent(ownerPackageId)}` : null;
-  return useStudioEntryGate(path) !== null;
+  const gated = useStudioEntryGate(path) !== null;
+  const designing = useDesignModeActive();
+  return gated && !designing;
 }
 
 /** The page header's Edit button. */
@@ -405,6 +415,8 @@ export function useDashboardInPageEdit({
   const [saving, setSaving] = React.useState(false);
   const [selection, setSelection] = React.useState<MetadataSelection | null>(null);
   const [revealFilters, setRevealFilters] = React.useState(false);
+  // Open, or opening: the design mode is held out (objectstack#36692).
+  useHoldDesignModeOut(session !== null || opening);
 
   // Another dashboard on the same route drops the edit state.
   React.useEffect(() => {

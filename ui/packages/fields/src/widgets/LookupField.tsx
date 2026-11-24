@@ -8,7 +8,12 @@ import { cn,
   AvatarImage,
   Popover,
   PopoverTrigger,
-  PopoverContent, EmptyValue } from '@object-ui/components';
+  PopoverContent,
+  Drawer,
+  DrawerTrigger,
+  DrawerContent,
+  DrawerTitle,
+  useIsMobile, EmptyValue } from '@object-ui/components';
 import { Search, X, Loader2, AlertCircle, Plus, TableProperties } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
@@ -38,11 +43,12 @@ import {
   planDeclaredLookupAutofill,
   readLookupAutofillTargets,
   withheldAutofillMessage,
+  withheldStillStands,
   type AutofillCurrencyContext,
   type LookupAutofillPair,
   type WithheldAutofill,
 } from './lookupAutofill.js';
-import { useFollowedParentRecord } from './followedParentRow.js';
+import { useFollowedParentRead } from './followedParentRow.js';
 import { getCellRendererResolver } from './_cell-renderer-bridge.js';
 // The one place a lookup column's display value is decided — shared with the
 // "browse all records" picker (RecordPickerDialog) so a single `lookupColumns`
@@ -371,6 +377,10 @@ function OptionPreviewLine({ children }: { children: React.ReactNode }) {
 export function LookupField({ value, onChange, field, readonly, error: fieldError, inCell, onCommit, ...props }: FieldWidgetComponentProps<any>) {
   // objectstack#35688 — in a list cell the candidate list is open from the start.
   const [isOpen, setIsOpen] = useState(!!inCell);
+  // Below the phone breakpoint the candidate panel opens in a bottom drawer
+  // instead of the anchored popover (objectstack#36832), at the width the
+  // search-first variant's own sheet switches at.
+  const isMobile = useIsMobile();
   const { t } = useFieldTranslation();
   const scanOffered = useFieldScanOffered();
   // Same two i18n channels RecordPickerDialog reads, so the inline dropdown
@@ -1223,16 +1233,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     () => (autofillTargets ? Object.values(autofillTargets).find((d) => recordCurrencyPath(d as never)) : undefined),
     [autofillTargets],
   );
-  const editedRecordForCurrency = useFollowedParentRecord(followingTarget as never, resolvedDependentValues, dataSource);
-  const followingPath = followingTarget ? recordCurrencyPath(followingTarget as never) : undefined;
-  const followedParentHeld = followingPath ? resolvedDependentValues?.[followingPath.via] : undefined;
-  // The parent read has not landed yet: the record names a parent by its id,
-  // and its code is not on the record the resolver reads.
-  const followedParentPending =
-    !!followingPath &&
-    (typeof followedParentHeld === 'string' || typeof followedParentHeld === 'number') &&
-    followedParentHeld !== '' &&
-    !(editedRecordForCurrency?.[followingPath.via] && typeof editedRecordForCurrency[followingPath.via] === 'object');
+  const { record: editedRecordForCurrency, state: followedParentState } = useFollowedParentRead(
+    followingTarget as never,
+    resolvedDependentValues,
+    dataSource,
+  );
+  // The opening fill waits only while the parent read is out. A read that
+  // failed or cannot run ends the wait: what does not depend on the parent's
+  // code fills, and an amount that does is withheld with a note
+  // (`targetCurrencyUnread`).
+  const followedParentPending = followedParentState === 'pending';
+  const followedParentUnread = followedParentState === 'unread';
   const autofillCurrency = !!autofillTargets;
   /** The currency context of a pick of `row` (`crossCurrencyRefusal`), or none without stamped targets. */
   const currencyFor = useCallback(
@@ -1242,10 +1253,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       return {
         home: homeCurrency,
         sourceCurrency: (source, v) => pickedAmountCurrencyOf(sourceFields?.[source] as never, v, row),
-        targetCurrency: (target) => amountCurrencyOf(autofillTargets[target] as never, editedRecordForCurrency),
+        targetCurrency: (target, writes) => {
+          const def = autofillTargets[target];
+          if (followedParentUnread && recordCurrencyPath(def as never)) {
+            return amountCurrencyOf(def as never) ? { kind: 'unread' } : undefined;
+          }
+          return amountCurrencyOf(def as never, editedRecordForCurrency, writes);
+        },
       };
     },
-    [autofillTargets, refObjectSchema, homeCurrency, editedRecordForCurrency],
+    [autofillTargets, refObjectSchema, homeCurrency, editedRecordForCurrency, followedParentUnread],
   );
   /** What the last fill left empty, for the record it picked; said under the field. */
   const [withheldFill, setWithheldFill] = useState<{ picked: string; items: readonly WithheldAutofill[] } | null>(null);
@@ -2002,7 +2019,61 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       <ScanFieldButton onScan={handleScanned} />
     ) : null;
 
-  // The candidate panel: the popover's body, or the list cell's editor itself.
+  // The candidate panel: the popover's body, the phone drawer's body, or the
+  // list cell's editor itself.
+  //
+  // In the popover and the drawer the search row is pinned at the top, the
+  // options scroll in the middle, and "show all results" and quick-create sit
+  // in a footer pinned under the list (objectstack#36825). Inside the room Radix reports the list
+  // is what gives way, so they stay whole and clickable whatever its length,
+  // on either side the popover opens to. The footer reads the same `canCreate`
+  // as the empty state's create button, and is not drawn when it would hold
+  // nothing. The list cell's editor keeps both at the end of its list, above
+  // its own pinned rows.
+  const panelFace: 'popover' | 'drawer' | 'cell' = inCell && !props.disabled ? 'cell' : isMobile ? 'drawer' : 'popover';
+  const offersShowAll = hasDataSource && totalCount > filteredOptions.length;
+  const showAllButton = offersShowAll ? (
+    <button
+      type="button"
+      className={cn('w-full shrink-0 whitespace-nowrap text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5', PHONE_TOUCH_HEIGHT)}
+      onClick={() => {
+        setIsOpen(false);
+        setIsPickerOpen(true);
+      }}
+      data-testid="show-all-results"
+    >
+      <TableProperties className="size-3.5" />
+      {t('lookup.showAllResults', { count: totalCount })}
+    </button>
+  ) : null;
+  const createButton = canCreate ? (
+    <button
+      type="button"
+      className={cn('w-full min-w-0 flex-1 text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground', PHONE_TOUCH_HEIGHT)}
+      disabled={creating}
+      onClick={() => handleCreateNew(searchQuery)}
+      data-testid="lookup-create-new"
+    >
+      {creating ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <Plus className="size-3.5 shrink-0" />}
+      <span className="truncate">{searchQuery ? t('lookup.createNamed', { name: searchQuery }) : t('lookup.createNew')}</span>
+    </button>
+  ) : null;
+  const listShowsOptions = !error && !(loading && filteredOptions.length === 0) && visibleOptions.length > 0;
+  // One row under the list: quick-create on the left (its typed name cut
+  // short when long), "show all" on the right.
+  const pinnedFooter = panelFace !== 'cell' && listShowsOptions && (showAllButton || createButton) ? (
+    <div
+      className={cn(
+        'flex shrink-0 items-center gap-1 border-t p-1 [&>button]:w-auto',
+        panelFace === 'drawer' && 'pb-[max(0.25rem,env(safe-area-inset-bottom))]',
+      )}
+      data-testid="lookup-panel-footer"
+    >
+      {createButton ?? <span className="flex-1" aria-hidden="true" />}
+      {showAllButton}
+    </div>
+  ) : null;
+  const fadeFrom = panelFace === 'drawer' ? 'from-background' : 'from-popover';
   const lookupPanelBody = (
     <>
           {/* Search input — not offered on a target whose search resolves to
@@ -2060,10 +2131,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
           {/* Options list */}
           {!error && !(loading && filteredOptions.length === 0) && (
-            <div className="relative flex min-h-0 flex-col">
+            <div className={cn('relative flex min-h-0 flex-col', panelFace === 'drawer' && 'flex-1')}>
             <div
               ref={attachList}
-              className="max-h-64 min-h-0 scroll-py-6 overflow-y-auto px-1 pb-1"
+              // The drawer's list takes the height left between the search row
+              // and the footer, and scrolls natively there; the popover's keeps
+              // its cap and shrinks into the room Radix reports.
+              className={cn(
+                'min-h-0 scroll-py-6 overflow-y-auto px-1 pb-1',
+                panelFace === 'drawer' ? 'flex-1 overscroll-contain' : 'max-h-64',
+              )}
               role="listbox"
               id={listboxId}
               onScroll={readListMore}
@@ -2146,57 +2223,36 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                     );
                   })}
                   {/* Show total count when fetched from DataSource */}
-                  {hasDataSource && totalCount > filteredOptions.length && (
+                  {offersShowAll && (
                     <p className="text-xs text-muted-foreground text-center py-2">
                       {t('lookup.showingResults', { shown: filteredOptions.length, total: totalCount })}
                     </p>
                   )}
-                  {/* "Show All Results" button — opens the full Record Picker (Level 2) */}
-                  {hasDataSource && totalCount > filteredOptions.length && (
-                    <button
-                      type="button"
-                      className={cn('w-full text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5', PHONE_TOUCH_HEIGHT)}
-                      onClick={() => {
-                        setIsOpen(false);
-                        setIsPickerOpen(true);
-                      }}
-                      data-testid="show-all-results"
-                    >
-                      <TableProperties className="size-3.5" />
-                      {t('lookup.showAllResults', { count: totalCount })}
-                    </button>
-                  )}
-                  {/* Quick-create entry (below results) */}
-                  {canCreate && (
-                    <button
-                      type="button"
-                      className={cn('w-full text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground', PHONE_TOUCH_HEIGHT)}
-                      disabled={creating}
-                      onClick={() => handleCreateNew(searchQuery)}
-                    >
-                      {creating ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-                      {searchQuery ? t('lookup.createNamed', { name: searchQuery }) : t('lookup.createNew')}
-                    </button>
-                  )}
+                  {/* The list cell's editor keeps "show all" (opens the full
+                      Record Picker, Level 2) and quick-create at the end of its
+                      list; the popover and the drawer pin them below it. */}
+                  {panelFace === 'cell' && showAllButton}
+                  {panelFace === 'cell' && createButton}
                 </>
               )}
             </div>
             {listMore.above && (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-popover to-transparent"
+                className={cn('pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b to-transparent', fadeFrom)}
                 data-testid="lookup-list-more-above"
               />
             )}
             {listMore.below && (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-md bg-gradient-to-t from-popover to-transparent"
+                className={cn('pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t to-transparent', !pinnedFooter && 'rounded-b-md', fadeFrom)}
                 data-testid="lookup-list-more-below"
               />
             )}
             </div>
           )}
+          {pinnedFooter}
     </>
   );
 
@@ -2307,16 +2363,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     );
   }
 
-  // objectstack#36249 — what the last fill left empty because the picked
+  // objectstack#36249 — what the last fill did not copy because the picked
   // amount is in another currency, while the field still holds that pick and
-  // the target is still empty.
+  // the target still holds what it held at the pick (empty, or the earlier
+  // value a re-pick left in place).
   const heldNow = normalizeId(value);
   const withheldShown =
     withheldFill && heldNow != null && String(heldNow) === withheldFill.picked
-      ? withheldFill.items.filter((w) => {
-          const held = resolvedDependentValues?.[w.target];
-          return held === undefined || held === null || held === '';
-        })
+      ? withheldFill.items.filter((w) => withheldStillStands(w, resolvedDependentValues?.[w.target]))
       : [];
   const withheldLabel = (target: string): string => {
     const label = (autofillTargets?.[target] as { label?: unknown } | undefined)?.label;
@@ -2416,7 +2470,44 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         </div>
       ) : (
       <div className="flex items-center gap-1.5">
+      {panelFace === 'drawer' ? (
+        // The phone face (objectstack#36832): a bottom drawer, its own modal
+        // layer, so the list scrolls by touch even when the field sits in a
+        // modal form. The search row stays at the top, the list takes the
+        // height between it and the pinned footer, and the drawer follows the
+        // on-screen keyboard (vaul's `repositionInputs`). The search box is not
+        // focused on open, so the keyboard does not cover the list until the
+        // user asks to type.
+        <Drawer
+          open={isOpen}
+          onOpenChange={(o) => {
+            if (!dependenciesMissing) setIsOpen(o);
+          }}
+          shouldScaleBackground={false}
+        >
+          <DrawerTrigger asChild>
+            {triggerButton}
+          </DrawerTrigger>
+          <DrawerContent
+            className="h-[85dvh] max-h-[85dvh] outline-none"
+            aria-describedby={undefined}
+            data-testid="lookup-drawer"
+          >
+            <DrawerTitle className="shrink-0 truncate px-4 pt-3 text-base font-semibold">
+              {lookupField?.label || t('common.select')}
+            </DrawerTitle>
+            <div className="flex min-h-0 flex-1 flex-col">
+              {lookupPanelBody}
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+      // `modal`: the popover is its own scroll-lock layer. Portalled out of
+      // a modal form's DOM, a non-modal popover's list sits outside that
+      // dialog's scroll lock, which cancels every wheel and touch move on
+      // it; as the topmost lock its list scrolls (objectstack#36825).
       <Popover
+        modal
         open={isOpen}
         onOpenChange={(o) => {
           if (!dependenciesMissing) setIsOpen(o);
@@ -2445,6 +2536,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           {lookupPanelBody}
         </PopoverContent>
       </Popover>
+      )}
 
       {lookupScan}
       {singleClear}

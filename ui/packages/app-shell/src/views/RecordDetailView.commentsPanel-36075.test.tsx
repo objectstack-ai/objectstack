@@ -502,3 +502,90 @@ describe("the phone's comment page (objectstack#36076)", () => {
     expect(button(container)).toBeNull();
   });
 });
+
+/**
+ * objectstack#36410 — a comment notice's link (`/{object}/{id}?comments=
+ * {thread}&comment={reply}`, written by plugin-audit) opens the record with
+ * its comments at that comment, with no further click:
+ *
+ * - Desktop: the panel opens at the thread, whatever this browser last chose
+ *   (and the choice is left as it was); the thread's replies are open, the
+ *   reply is marked and the list is scrolled to it. ✕ drops the link's
+ *   params, so the panel stays closed. CONTROL: an empty `?comments=` on the
+ *   desktop opens nothing.
+ * - Phone: the page opens at the thread, scrolled to the reply, marked; 「‹」
+ *   drops the reply with the thread.
+ *
+ * jsdom lays nothing out, so the list and the reply are given a box: the
+ * list 400 px tall at y=100, the reply 40 px tall at y=700. Centred, the list
+ * scrolls 700 - 100 - (400 - 40) / 2 = 420.
+ */
+function layOut(listSelector: string, commentId: string): () => void {
+  const box = (top: number, height: number) =>
+    ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.matches(listSelector)) return box(100, 400);
+    if (this.getAttribute('data-comment-id') === commentId) return box(700, 40);
+    return box(0, 0);
+  });
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.matches(listSelector) ? 400 : 0;
+  });
+  return () => {
+    rect.mockRestore();
+    height.mockRestore();
+  };
+}
+
+describe('a comment notice opens the comments at its comment (objectstack#36410)', () => {
+  const search = () => document.querySelector('[data-testid="location"]')!.getAttribute('data-search');
+  const target = () => document.querySelector('[data-comment-target="true"]') as HTMLElement | null;
+
+  it('desktop: the panel opens at the thread, its replies open, scrolled to the reply, the stored choice untouched', async () => {
+    const restore = layOut('[data-comments-panel] [data-comments-list]', 'c-reply');
+    try {
+      const { container } = await mount({ search: '?comments=c-ada&comment=c-reply' });
+      await waitFor(() => expect(panel(container)).not.toBeNull());
+      const p = within(panel(container)!);
+      expect(await p.findByText(REPLY_BODY)).toBeInTheDocument();
+      expect(target()).toHaveAttribute('data-comment-id', 'c-reply');
+      await waitFor(() => expect(panel(container)!.querySelector<HTMLElement>('[data-comments-list]')!.scrollTop).toBe(420));
+      expect(button(container)).toHaveAttribute('aria-pressed', 'true');
+      expect(window.localStorage.getItem(COMMENTS_PANEL_OPEN_KEY)).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('desktop: ✕ on a panel a link opened drops the link and the panel stays closed', async () => {
+    const { container } = await mount({ search: '?comments=c-ada&comment=c-reply' });
+    await waitFor(() => expect(panel(container)).not.toBeNull());
+    fireEvent.click(panel(container)!.querySelector('[data-comments-panel-close]')!);
+    await waitFor(() => expect(panel(container)).toBeNull());
+    expect(search()).toBe('');
+  });
+
+  it('desktop CONTROL: an empty ?comments= opens nothing', async () => {
+    const { container } = await mount({ search: '?comments=' });
+    await waitFor(() => expect(button(container)).not.toBeNull());
+    await act(async () => {});
+    expect(panel(container)).toBeNull();
+  });
+
+  it("phone: the page opens at the thread, scrolled to the reply, marked; 「‹」 drops the reply with the thread", async () => {
+    setWindowWidth(375);
+    const restore = layOut('[data-comments-thread]', 'c-reply');
+    try {
+      await mount({ search: '?comments=c-ada&comment=c-reply' });
+      const page = () => document.querySelector('[data-comments-page]') as HTMLElement | null;
+      await waitFor(() => expect(page()).toHaveAttribute('data-comments-page', 'thread'));
+      expect(target()).toHaveAttribute('data-comment-id', 'c-reply');
+      await waitFor(() => expect(page()!.querySelector<HTMLElement>('[data-comments-thread]')!.scrollTop).toBe(420));
+      fireEvent.click(page()!.querySelector('[data-comments-page-back]')!);
+      await waitFor(() => expect(page()).toHaveAttribute('data-comments-page', 'list'));
+      expect(search()).toBe('?comments=');
+    } finally {
+      restore();
+    }
+  });
+});

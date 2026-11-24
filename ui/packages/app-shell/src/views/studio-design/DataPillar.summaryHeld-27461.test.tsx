@@ -111,7 +111,7 @@ async function addRollup(): Promise<{ name: string; label: string }> {
       <DataPillar packageId="com.example.showcase" />
     </MemoryRouter></StudioSaveHarness>,
   );
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await addFieldFromFormToolbar(undefined, { label: 'Child Count', type: /^Rollup$/ });
   await screen.findByText('Type', { selector: 'label' }, { timeout: 4000 });
   const name = (controlUnder('API name') as HTMLInputElement).value;

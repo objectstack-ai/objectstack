@@ -106,6 +106,21 @@ describe('planObjectFormulas — computing formulas over the live record (object
     expect(plan.unservable.get('masked')).toMatch(/no expression/);
   });
 
+  it('a working-day function is unservable: its calendar is loaded for the read, never handed to the form (ADR-0157 D4)', () => {
+    const plan = planObjectFormulas({
+      start: { type: 'date' },
+      due: { type: 'formula', expression: 'addWorkingDays(record.start, 3)' },
+      days_left: { type: 'formula', expression: "workingDaysBetween(today(), record.start, 'cn_mainland')" },
+      overdue: { type: 'formula', expression: 'record.due < today()' },
+      plain: { type: 'formula', expression: 'addDays(record.start, 3)' },
+    })!;
+    expect(plan.unservable.get('due')).toMatch(/working-day function/);
+    expect(plan.unservable.get('days_left')).toMatch(/working-day function/);
+    // Reading one is unservable too; `addDays()` (CONTROL) computes.
+    expect(plan.unservable.get('overdue')).toMatch(/reads the formula 'due'/);
+    expect(plan.unservable.has('plain')).toBe(false);
+  });
+
   it('binds the acting user as the server does (id and positions): current_user, user and ctx compute; can() and os stay unservable', () => {
     const fields = {
       owner: { type: 'text' },
