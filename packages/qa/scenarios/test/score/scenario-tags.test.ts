@@ -426,7 +426,7 @@ const grade = (a: Bag, tag: string, card: ScenarioArtifactCard = CARD, namespace
 const pairs = (v: { checks: Array<{ check: string; pass: boolean }> }) => v.checks.map((c) => [c.check, c.pass]);
 
 describe('master-detail inline edit — placed by a field group of the master, or a declared form factor', () => {
-  const inline = (a: Bag) => grade(a, 'records-forms.master-detail-inline-edit').checks.at(-1);
+  const inline = (a: Bag) => grade(a, 'records-forms.master-detail-inline-edit').checks.find((c) => c.check === 'master-detail-inline-edit');
   const noGroup = (a: Bag) => { delete (a.objects[0] as Bag).fieldGroups; return a; };
 
   it('credits a child a field group of its master names, by child object or by `object.field`, with no `inlineEdit`', () => {
