@@ -2869,9 +2869,6 @@ const es = {
       targetQueue: 'Una cola',
       queue: 'Cola',
       queuePlaceholder: 'Elige una cola',
-      queuesLoading: 'Cargando colas…',
-      queuesFailed: 'No se pudieron leer las colas: {{message}}',
-      noQueues: 'No hay ninguna cola configurada.',
       notify: 'Notificar al nuevo propietario',
       alreadyOwner: 'Esta persona ya es propietaria de este registro.',
       submit: 'Cambiar propietario',
@@ -2886,7 +2883,6 @@ const es = {
       skipped_one: '{{count}} registro seleccionado no ofrece Cambiar propietario y se omite.',
       skipped_many: '{{count}} de registros seleccionados no ofrecen Cambiar propietario y se omiten.',
       skipped_other: '{{count}} registros seleccionados no ofrecen Cambiar propietario y se omiten.',
-      noClient: 'El propietario no se puede cambiar aquí.',
       cascadeHeading: 'Transferir también los registros relacionados',
       cascadeHelp: 'Los registros relacionados que apuntan a este y pertenecen al propietario anterior también pasan al nuevo propietario.',
       cascadeOption: '{{object}} ({{field}})',
@@ -2894,6 +2890,7 @@ const es = {
       cascadeReport: '{{object}} ({{field}}): {{moved}} transferidos, {{failed}} no se pudieron transferir.',
       cascadeRemaining: 'Se quedan con el propietario anterior, por encima del límite de 500 registros por cambio: {{count}}.',
       cascadeReadFailure: '{{object}} ({{field}}): no se pudieron leer los registros relacionados: {{message}}',
+      gridOnly: 'Para cambiar el propietario de varios registros a la vez, cambia a una vista de cuadrícula.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

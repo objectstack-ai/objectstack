@@ -8,9 +8,9 @@
   A field listed by two groups, or listed while its `group` names another, is refused.
 - Group keys must be `snake_case`.
 - Optional per-group: `icon`, `description`, and `collapse`
-  (`'none'` always open · `'expanded'` collapsible, starts open ·
-  `'collapsed'` collapsible, starts closed). Groups render identically on forms,
-  modals, and detail pages.
+  (`'none'` always open · `'expanded'` foldable, starts open ·
+  `'collapsed'` starts closed). Forms keep it; the default record page
+  lets readers fold any titled group.
 - Hide a whole group, header included, with `visibleWhen` (CEL over
   `record.*`; FALSE or a fault hides it) or `requiresFeature` (a deployment
   feature flag from `PUBLIC_AUTH_FEATURES` in `@objectstack/spec/kernel`; an

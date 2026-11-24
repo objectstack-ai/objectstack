@@ -62,6 +62,7 @@ import {
   RecordHeaderBarContext,
   type RecordHeaderBar,
   ObjectIconTile,
+  Skeleton,
 } from '@object-ui/components';
 import type { FieldContainerLike } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
@@ -558,7 +559,11 @@ export function RecordStackDrawer({
       : objectName;
   };
   const shortId = (recordId: string) => `#${recordId.length > 12 ? `${recordId.slice(0, 8)}…` : recordId}`;
-  const titleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title || shortId(level.recordId);
+  const knownTitleOf = (level: RecordDrawerLevel) => titles[levelKey(level)!] || level.title;
+  // An ancestor was the shown record before, so its page reported its name (or
+  // its short id, for a record with none); the short id is left only for an
+  // ancestor never drawn, which a deep link opens under the shown one.
+  const titleOf = (level: RecordDrawerLevel) => knownTitleOf(level) || shortId(level.recordId);
   const crumbClass =
     'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   // The record row's icon: the object's tile, as the full page draws it
@@ -570,14 +575,20 @@ export function RecordStackDrawer({
   // objectstack#35853 — the bar's record row: the icon, then the record's
   // name and tags as the record header draws them into the slot; until it
   // does (a record with no header, a read in flight), the bar's own name.
+  // objectstack#36235 — the page reports that name once it holds the record
+  // (the short id only for a record with nothing to be named by); while the
+  // read is in flight the row draws a placeholder, never the raw id.
+  const currentTitle = current ? knownTitleOf(current) : undefined;
   const recordRow = current ? (
     <>
       {rootIcon}
-      {!headerClaimed && (
+      {!headerClaimed && (currentTitle ? (
         <span className="min-w-0 truncate text-base font-medium text-foreground" data-record-drawer-title="">
-          {titleOf(current)}
+          {currentTitle}
         </span>
-      )}
+      ) : (
+        <Skeleton className="h-5 w-32 shrink-0" data-record-drawer-title-pending="" aria-hidden="true" />
+      ))}
       <span ref={setHeaderTitleSlot} className="flex min-w-0 items-center empty:hidden" data-record-bar-title="" />
     </>
   ) : undefined;
