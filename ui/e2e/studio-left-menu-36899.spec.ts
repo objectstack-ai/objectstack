@@ -157,8 +157,8 @@ const rect = (page: Page, selector: string) =>
     const r = el.getBoundingClientRect();
     return { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width) };
   });
-/** The docked panel (the sidebar primitive's fixed box). */
-const PANEL = '[data-side="left"][data-state] > div[data-sidebar="sidebar"]';
+/** The docked panel (the sidebar primitive's inner box, which fills its fixed container). */
+const PANEL = '[data-side="left"][data-state] [data-sidebar="sidebar"]';
 
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(240_000);
@@ -188,7 +188,9 @@ test.describe('Studio left menu (objectstack#36899)', () => {
     const panel = await rect(page, PANEL);
     const content = await rect(page, '#content');
     expect(panel.left).toBe(0);
-    expect(panel.width).toBe(256);
+    // 16rem, less the container's 1 px right border.
+    expect(panel.width).toBeGreaterThanOrEqual(255);
+    expect(panel.width).toBeLessThanOrEqual(256);
     expect(content.left).toBeGreaterThanOrEqual(panel.right - 1);
     for (const g of ['data', 'ui', 'automation', 'system', 'security', 'ai']) {
       await expect(page.getByTestId(`studio-menu-group-${g}`)).toBeVisible();
@@ -219,9 +221,10 @@ test.describe('Studio left menu (objectstack#36899)', () => {
     await page.getByTestId('studio-menu-toggle').click();
     const drawer = page.getByRole('dialog');
     await expect(drawer.getByTestId('studio-menu')).toBeVisible();
-    const box = await drawer.evaluate((el) => el.getBoundingClientRect().toJSON());
-    expect(box.left).toBeGreaterThanOrEqual(0);
-    expect(box.right).toBeLessThanOrEqual(390);
+    // Read once the slide-in has finished.
+    const box = () => drawer.evaluate((el) => el.getBoundingClientRect().toJSON() as { left: number; right: number });
+    await expect.poll(async () => (await box()).left).toBeGreaterThanOrEqual(0);
+    expect((await box()).right).toBeLessThanOrEqual(390);
     await testInfo.attach('narrow', { body: await page.screenshot(), contentType: 'image/png' });
     await drawer.getByTestId('studio-menu-entry-type:flow').click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
