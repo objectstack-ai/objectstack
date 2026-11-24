@@ -2929,6 +2929,11 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // nothing, so the executor counts it as refused, never as succeeded, and
     // lists it with this record's own sentence.
     if (res.refusal) return { refusal: { message: res.refusal.message } };
+    // A run paused at a screen started and waits for input: nothing says it
+    // will finish, so the executor counts it as waiting, never as succeeded
+    // (objectstack#36931). Its screen is the flow handler's to show; the
+    // console queues every paused record's screen, so each can be reached.
+    if (res.paused) return { paused: true };
   };
 
   // Whole-selection dispatcher for a def that opted into
