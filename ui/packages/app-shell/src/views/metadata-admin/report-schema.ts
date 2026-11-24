@@ -24,6 +24,7 @@
 import { z } from 'zod';
 import { ReportSchema, reportForm as specReportForm } from '@objectstack/spec/ui';
 import type { FormViewSpec } from './SchemaForm.js';
+import type { FormFieldSpec } from './form-spec.js';
 import type { SupportedLocale } from './i18n.js';
 import { localizeMetadataForm } from './metadata-form-i18n.js';
 
@@ -167,22 +168,22 @@ export function withDefaultPeriodLabels(
   label: (value: string, authored: string) => string,
 ): FormViewSpec | undefined {
   if (!form?.sections) return form;
+  const relabelChild = (child: string | FormFieldSpec): string | FormFieldSpec => {
+    if (typeof child === 'string' || child.field !== 'defaultRange' || !Array.isArray(child.options)) return child;
+    return {
+      ...child,
+      options: child.options.map((opt) => ({ ...opt, label: label(String(opt.value), String(opt.label ?? opt.value)) })),
+    };
+  };
   let changed = false;
   const sections = form.sections.map((section) => {
     if (!Array.isArray(section.fields)) return section;
     let sectionChanged = false;
-    const fields = section.fields.map((field: any) => {
-      if (field?.field !== 'dateRange' || !Array.isArray(field.fields)) return field;
-      let childChanged = false;
-      const children = field.fields.map((child: any) => {
-        if (child?.field !== 'defaultRange' || !Array.isArray(child.options)) return child;
-        childChanged = true;
-        return {
-          ...child,
-          options: child.options.map((opt: any) => ({ ...opt, label: label(String(opt.value), String(opt.label ?? opt.value)) })),
-        };
-      });
-      if (!childChanged) return field;
+    const fields = section.fields.map((field) => {
+      if (typeof field === 'string' || field.field !== 'dateRange' || !Array.isArray(field.fields)) return field;
+      const declared = field.fields;
+      const children = declared.map(relabelChild);
+      if (children.every((c, i) => c === declared[i])) return field;
       sectionChanged = true;
       return { ...field, fields: children };
     });
