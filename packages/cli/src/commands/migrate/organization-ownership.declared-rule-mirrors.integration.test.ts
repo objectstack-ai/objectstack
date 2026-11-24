@@ -56,6 +56,8 @@ import { DECLARED_SHARING_RULE_SEEDER_RUNS } from '../../utils/organization-owne
 // through dynamic `import()`s at MODULE LOAD, not inside a clocked case.
 import '@objectstack/objectql';
 import '@objectstack/metadata-protocol';
+import '@objectstack/platform-objects/system';
+import '@objectstack/driver-sql';
 import { relaxTenantColumnsOnFile } from '../../utils/pre-18-store.testkit.js';
 
 type Command = (typeof import('./organization-ownership.js'))['default'];
