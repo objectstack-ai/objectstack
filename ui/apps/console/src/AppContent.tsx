@@ -11,7 +11,7 @@
 
 import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, SetupFirstPageSlotProvider, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingFallback, LoadingScreen, SetupFirstPageSlotProvider, setupMetadataStudioPath, studioLandingPath, useAdapter } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
 import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest } from '@object-ui/permissions';
 import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
@@ -65,7 +65,7 @@ function ObjectRedirect() {
   // objectstack ADR-0146 D1 — straight to Studio's "All metadata" area, the
   // page Setup's `…/metadata/object` route opens there.
   const target = setupMetadataStudioPath(objectName ? `object/${objectName}` : 'object', location.search, location.hash);
-  return <Navigate to={target ?? '/studio'} replace />;
+  return <Navigate to={target ?? studioLandingPath()} replace />;
 }
 
 /**
@@ -175,7 +175,7 @@ function SystemObjectRedirect({ objectName }: { objectName: string }) {
 function SystemCatalogRedirect({ type }: { type: 'position' | 'permission' }) {
   // objectstack ADR-0146 D1 — the catalog is Studio's, in the "All metadata"
   // area's cross-package leg.
-  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? '/studio'} replace />;
+  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? studioLandingPath()} replace />;
 }
 
 /**

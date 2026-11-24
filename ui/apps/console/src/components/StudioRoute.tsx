@@ -45,10 +45,13 @@ import {
   LoadingFallback,
   LoadingScreen,
   STUDIO_ALL_PACKAGES_SEGMENT,
+  STUDIO_HOME_PILLAR,
   STUDIO_METADATA_AREA,
   STUDIO_ORG_SCOPE_PILLAR,
   STUDIO_ORG_SCOPE_SEGMENT,
+  STUDIO_ROOT_PATH,
   studioMetadataAreaPath,
+  studioPackagePath,
   useHomePath,
   useRecentItems,
 } from '@object-ui/app-shell';
@@ -282,7 +285,7 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
       id: `package:${packageId}`,
       type: 'package',
       name: packageId,
-      href: `/studio/${encodeURIComponent(packageId)}`,
+      href: studioPackagePath(packageId),
     });
     // Driven by the package alone. `addRecentItem` is a `useCallback` result,
     // whose identity is not a dependency (AGENTS.md #10), as in
@@ -331,7 +334,7 @@ function StudioPackageBuilder({ area }: { area?: typeof STUDIO_METADATA_AREA }) 
  * pillar builder as a package id.
  */
 export const studioRoutes = (
-  <Route path="/studio" element={<StudioRoute />}>
+  <Route path={STUDIO_ROOT_PATH} element={<StudioRoute />}>
     <Route index element={<StudioLanding />} />
     <Route
       path={STUDIO_ORG_SCOPE_SEGMENT}
@@ -345,7 +348,7 @@ export const studioRoutes = (
       path={`${STUDIO_ALL_PACKAGES_SEGMENT}/*`}
       element={<Navigate to={studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)} replace />}
     />
-    <Route path=":packageId" element={<Navigate to="data" replace />} />
+    <Route path=":packageId" element={<Navigate to={STUDIO_HOME_PILLAR} replace />} />
     <Route
       path={`:packageId/${STUDIO_METADATA_AREA}/*`}
       element={<StudioPackageBuilder area={STUDIO_METADATA_AREA} />}

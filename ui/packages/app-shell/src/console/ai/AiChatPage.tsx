@@ -171,6 +171,7 @@ import { AiUnavailable } from './AiUnavailable.js';
 import { recordWriteFormTarget } from '../../utils/recordFormAiDraft.js';
 import { useUpload } from '@object-ui/fields';
 import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } from './chatAttachments.js';
+import { studioHomePath } from '../../views/studio-design/studioAddress.js';
 
 /**
  * The app segment a record of `objectName` lives under: the object's owning
@@ -3145,7 +3146,7 @@ export function ChatPane({
         onDesignBuiltApp={(_appName, appSegment) => {
           const pkg = appSegment ?? boundPackageId;
           if (!pkg) return;
-          navigate(`/studio/${encodeURIComponent(pkg)}/data`);
+          navigate(studioHomePath(pkg));
         }}
         designBuiltAppLabel={t('console.ai.viewBuiltAppInStudio', { defaultValue: 'View in Studio' })}
         // Artifact deep links: every artifact the agent built gets a one-click
