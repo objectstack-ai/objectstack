@@ -3328,7 +3328,7 @@ export async function packagelessRowHeldBaseAddress(
  * draft the bare draft read, publish and discard act on, and the dependent's
  * draft is read, published and discarded at its own `?package=`.
  *
- * `address` itself otherwise: an ambiguous address (the doors ask
+ * `pending` (the draft address the stored rows give) itself otherwise: an ambiguous address (the doors ask
  * {@link packagelessRowHeldBaseAddress} for it themselves, #34681), an address
  * not bound to a package by the active rows, and every cell that judgment
  * declines.
@@ -3342,8 +3342,9 @@ export async function packagelessRowHeldBaseDraftAddress(
     type: string,
     name: string,
     member: string | undefined,
-    address: Awaited<ReturnType<ProtocolHost['packagelessDraftAddress']>>,
+    pending: ReturnType<ProtocolHost['packagelessDraftAddress']>,
 ): Promise<Awaited<ReturnType<ProtocolHost['packagelessDraftAddress']>>> {
+    const address = await pending;
     if (address.kind === 'ambiguous' || address.into === null) return address;
     const base = await packagelessRowHeldBaseAddress(host, type, name, member);
     if (base === undefined) return address;

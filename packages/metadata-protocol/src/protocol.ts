@@ -7954,7 +7954,7 @@ export class ObjectStackProtocolImplementation implements
      * under, and `drafts` the bindings of every draft row of the item, which
      * the doors' receipts name.
      */
-    private async packagelessDraftAddress(
+    private packagelessDraftAddress(
         type: string,
         name: string,
         /** [#22877] The bundle member the door addresses; omitted, the canonical one. */
@@ -7980,7 +7980,7 @@ export class ObjectStackProtocolImplementation implements
         // there: the row-held base's, where the member's active rows are
         // bound to one dependent only ({@link packagelessRowHeldBaseDraftAddress}).
         return packagelessRowHeldBaseDraftAddress(
-            protocolHost(this), type, name, member, await packagelessDraftAddress.call(host, type, name, member, body),
+            protocolHost(this), type, name, member, packagelessDraftAddress.call(host, type, name, member, body),
         );
     }
 
