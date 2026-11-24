@@ -34,6 +34,13 @@
  * itself whenever one of its rows is what keeps Create disabled, so a name
  * that derives no id never leaves the author at a disabled button with the
  * reason folded away.
+ *
+ * The Studio landing's 「新建应用」 door (objectstack#36748) is create mode
+ * with a `newApp` step: the dialog is titled and worded for an app (a
+ * no-code author reads 「应用」, never 「软件包」, on that door — the
+ * maintainer's ruling), a free app name is reserved before anything is
+ * written, and the package's app is created and made live right after the
+ * package. See `studio-design/newAppDoor.ts`.
  */
 
 import * as React from 'react';
@@ -64,6 +71,7 @@ import { getPackageSchema, getPackageForm } from './package-schema.js';
 import { PackageDependenciesEditor, type DependencyMap } from './PackageDependenciesEditor.js';
 import { romanizeHan, romanizerPending, useHanRomanizer } from './romanizeHan.js';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
+import type { NewAppStep } from '../studio-design/newAppDoor.js';
 
 const API = '/api/v1/packages';
 
@@ -277,6 +285,34 @@ export interface PackageSaveResult {
   mode: PackageFormMode;
   /** The server's package payload, when it returned one. */
   package?: { manifest: ManifestRecord } & Record<string, unknown>;
+  /**
+   * The new-app door only (objectstack#36748): the app created with the
+   * package, or `null` when the package was created and its app was refused.
+   */
+  app?: string | null;
+}
+
+/** The spec form's rows whose help line the new-app door words for an app. */
+const APP_DOOR_HELP_ROWS = ['name', 'description', 'namespace', 'version', 'type', 'defaultDatasource', 'dependencies'] as const;
+
+/**
+ * The new-app door's wording for the spec form's own rows (objectstack#36748):
+ * every help line names the app, Advanced's included.
+ */
+function withAppDoorWording(form: FormViewSpec, locale: string): FormViewSpec {
+  const help: Record<string, string> = {};
+  for (const row of APP_DOOR_HELP_ROWS) help[row] = t(`engine.studio.newApp.help.${row}`, locale);
+  return {
+    ...form,
+    sections: (form.sections ?? []).map((section) => ({
+      ...section,
+      fields: section.fields?.map((f) => {
+        const name = fieldName(f);
+        if (!(name in help)) return f;
+        return { ...(typeof f === 'string' ? { field: f } : f), helpText: help[name] };
+      }),
+    })),
+  };
 }
 
 /**
@@ -375,6 +411,7 @@ export function PackageFormDialog({
   onOpenChange,
   manifest,
   onSaved,
+  newApp,
 }: {
   mode: PackageFormMode;
   open: boolean;
@@ -382,6 +419,12 @@ export function PackageFormDialog({
   /** Existing manifest to seed edit/view. Ignored for create. */
   manifest?: ManifestRecord | null;
   onSaved?: (result: PackageSaveResult) => void;
+  /**
+   * Create mode only: the Studio landing's 「新建应用」 door
+   * (objectstack#36748). The dialog is worded for an app, and the package's
+   * app is created and made live right after the package.
+   */
+  newApp?: NewAppStep;
 }) {
   const locale = useMetadataLocale();
   const schema = React.useMemo(() => getPackageSchema(), []);
@@ -390,10 +433,15 @@ export function PackageFormDialog({
   // resident, so the form is rebuilt once it lands; keyed on the locale alone
   // it kept the `en` answer of its first render under a translated title.
   const catalogueResident = isStudioCatalogueLoaded(locale);
+  // objectstack#36748 — the new-app door: create mode with an app step.
+  const appDoor = mode === 'create' && newApp !== undefined;
   const form = React.useMemo(
-    () => getPackageForm(locale, { create: mode === 'create' }),
+    () => {
+      const spec = getPackageForm(locale, { create: mode === 'create' });
+      return appDoor ? withAppDoorWording(spec, locale) : spec;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the residency flag is the dependency: the form reads the catalogue through `t`
-    [locale, mode, catalogueResident],
+    [locale, mode, catalogueResident, appDoor],
   );
   // objectui#11792 — the `<org>` of a derived `com.<org>.<name>` id. Null
   // outside an AuthProvider and whenever the session has no active
@@ -519,7 +567,9 @@ export function PackageFormDialog({
 
   // The help line SchemaForm would have shown under the id: the localized row
   // when there is one, else the spec's own `.describe()` (see package-schema).
-  const idHelp = tOptional('engine.packages.form.help.id', locale) ?? ManifestSchema.shape.id.description;
+  const idHelp = appDoor
+    ? t('engine.studio.newApp.help.id', locale)
+    : (tOptional('engine.packages.form.help.id', locale) ?? ManifestSchema.shape.id.description);
 
   // Spec validation → inline issues (only where fields are editable).
   const issues: SchemaFormIssue[] = React.useMemo(() => {
@@ -604,22 +654,51 @@ export function PackageFormDialog({
           version: versionStr,
           type: draft.type ?? 'app',
         };
+        // objectstack#36748 — the new-app door reserves its app's name before
+        // anything is written: a taken one refuses the whole confirm, and the
+        // namespace it is made from sits behind Advanced.
+        let appName: string | null = null;
+        if (newApp) {
+          const reserved = await newApp.reserve(String(draft.namespace ?? '').trim());
+          if ('taken' in reserved) {
+            setError(tFormat('engine.studio.newApp.nameTaken', locale, reserved.taken));
+            setAdvancedOpen(true);
+            return;
+          }
+          appName = reserved.name;
+        }
         const created = await apiJson<{ manifest: ManifestRecord } & Record<string, unknown>>(API, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ manifest: manifestBody }),
         });
         const id = String((created?.manifest?.id as string) ?? manifestBody.id);
+        const createdName = String((created?.manifest?.name as string) ?? manifestBody.name);
         result = { id, mode, package: created };
-        // `ux-conventions.write-feedback`: the create answers with a toast
-        // naming the new package by its display name — the dialog closes
-        // and the caller may navigate away, so nothing else on screen says
-        // the write landed. A refusal stays in the dialog's banner below.
-        toast.success(
-          tFormat('engine.packages.create.created', locale, {
-            name: String((created?.manifest?.name as string) ?? manifestBody.name),
-          }),
-        );
+        if (newApp && appName) {
+          // The package is there now, so a refused app does not keep the
+          // author in the dialog: the toast says so and the top bar's Create
+          // app is the way to try again.
+          try {
+            await newApp.create(id, appName, createdName);
+            result.app = appName;
+            toast.success(tFormat('engine.studio.newApp.created', locale, { name: createdName }));
+          } catch (e) {
+            result.app = null;
+            toast.error(
+              tFormat('engine.studio.newApp.appFailed', locale, {
+                name: createdName,
+                reason: e instanceof Error && e.message ? e.message : String(e),
+              }),
+            );
+          }
+        } else {
+          // `ux-conventions.write-feedback`: the create answers with a toast
+          // naming the new package by its display name — the dialog closes
+          // and the caller may navigate away, so nothing else on screen says
+          // the write landed. A refusal stays in the dialog's banner below.
+          toast.success(tFormat('engine.packages.create.created', locale, { name: createdName }));
+        }
       } else {
         const id = String((manifest?.id as string) ?? draft.id ?? '');
         // The REST PATCH persists name / description / version / dependencies
@@ -673,7 +752,7 @@ export function PackageFormDialog({
       // Hence `readEnvelopeUserMessage` at the throw site and this read here.
       const marked: boolean = typeof e?.userMessage === 'string' && e.userMessage !== '';
       if (e?.status === 409 || /already exists/i.test(msg)) {
-        setError(marked ? msg : t('engine.packages.create.exists', locale));
+        setError(marked ? msg : t(appDoor ? 'engine.studio.newApp.exists' : 'engine.packages.create.exists', locale));
       } else if (e?.status === 403 || /manage_metadata/i.test(msg)) {
         // objectstack#8270 — for an UNMARKED body this arm still answers
         // exactly as it did, and that is the whole of what objectstack-ai/objectstack#8270 measured. The
@@ -692,7 +771,10 @@ export function PackageFormDialog({
         // transport reports one, the message when it does not.
         setError(marked ? msg : t('engine.packages.noCapability', locale));
       } else {
-        setError(msg || t(createMode ? 'engine.packages.create.failed' : 'engine.packages.edit.failed', locale));
+        setError(
+          msg ||
+            t(appDoor ? 'engine.studio.newApp.failed' : createMode ? 'engine.packages.create.failed' : 'engine.packages.edit.failed', locale),
+        );
       }
     } finally {
       setBusy(false);
@@ -729,7 +811,7 @@ export function PackageFormDialog({
 
   const title =
     mode === 'create'
-      ? t('engine.packages.create.title', locale)
+      ? t(appDoor ? 'engine.studio.newApp.title' : 'engine.packages.create.title', locale)
       : mode === 'edit'
         ? t('engine.packages.edit.title', locale)
         : t('engine.packages.view.title', locale);
@@ -741,7 +823,7 @@ export function PackageFormDialog({
           <DialogTitle>{title}</DialogTitle>
           {mode === 'create' ? (
             <DialogDescription>
-              {t('engine.packages.create.description', locale)}
+              {t(appDoor ? 'engine.studio.newApp.description' : 'engine.packages.create.description', locale)}
             </DialogDescription>
           ) : (
             <DialogDescription className="font-mono text-xs">
@@ -795,7 +877,7 @@ export function PackageFormDialog({
                       {t('engine.packages.form.advanced', locale)}
                     </span>
                     <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {t('engine.packages.create.advancedHint', locale)}
+                      {t(appDoor ? 'engine.studio.newApp.advancedHint' : 'engine.packages.create.advancedHint', locale)}
                     </span>
                   </span>
                   <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=closed]:-rotate-90" />
@@ -807,7 +889,7 @@ export function PackageFormDialog({
                     testId="package-form-id"
                   >
                     <Label htmlFor={idInputId} className="text-sm font-medium">
-                      {t('engine.packages.create.id', locale)}
+                      {t(appDoor ? 'engine.studio.newApp.id' : 'engine.packages.create.id', locale)}
                       <span className="ml-0.5 text-destructive" aria-hidden="true">
                         *
                       </span>
@@ -834,7 +916,7 @@ export function PackageFormDialog({
                   </DerivedField>
                   <DerivedField
                     derived={!touched.namespace}
-                    hint={t('engine.packages.nsRule.derived', locale)}
+                    hint={t(appDoor ? 'engine.studio.newApp.nsDerived' : 'engine.packages.nsRule.derived', locale)}
                     testId="package-form-namespace"
                   >
                     <div className={FLUSH_SECTION}>
@@ -896,7 +978,7 @@ export function PackageFormDialog({
               <Button onClick={submit} disabled={!canSubmit} data-testid="package-form-submit">
                 {busy
                   ? t(createMode ? 'engine.packages.create.creating' : 'engine.packages.edit.saving', locale)
-                  : t(createMode ? 'engine.packages.create.submit' : 'engine.packages.edit.save', locale)}
+                  : t(appDoor ? 'engine.studio.app.create' : createMode ? 'engine.packages.create.submit' : 'engine.packages.edit.save', locale)}
               </Button>
             </>
           )}

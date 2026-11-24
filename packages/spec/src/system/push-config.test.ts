@@ -31,7 +31,7 @@ const APNS = {
 
 const FCM = { projectId: 'example-project', credentialRef: 'OS_PUSH_FCM_SERVICE_ACCOUNT' } as const;
 
-const PEM = '-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg\n-----END PRIVATE KEY-----';
+const PEM = '-----BEGIN PRIVATE KEY-----\nFAKE-KEY-BODY-NOT-A-REAL-KEY\n-----END PRIVATE KEY-----';
 const SERVICE_ACCOUNT_JSON = '{"type":"service_account","project_id":"example-project","private_key":"x"}';
 
 describe('PushVendorSchema', () => {

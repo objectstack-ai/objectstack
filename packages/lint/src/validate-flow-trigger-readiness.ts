@@ -219,7 +219,15 @@ import {
 } from '@objectstack/spec/automation';
 import { resolvePackageClosure } from '@objectstack/metadata-core';
 import { walkFlowNodes } from './flow-walk.js';
-import { closureDependencyRemedy, packagesOf, recordsOf, suggestName } from './object-graph.js';
+import {
+  closureDependencyRemedy,
+  indexServedObjectGraph,
+  packagesOf,
+  recordsOf,
+  suggestName,
+  type ObjectGraph,
+} from './object-graph.js';
+import { indexSelectOptions, optionLabelComparisons, type SelectOptions } from './flow-select-options.js';
 import type { UserTextParams } from './finding-user-text.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
@@ -389,6 +397,52 @@ export const FLOW_API_TRIGGER_SECRET_MISSING = 'flow-api-trigger-secret-missing'
  * restates none of the declaration's grammar.
  */
 export const FLOW_API_TRIGGER_SIGNATURE_UNUSABLE = 'flow-api-trigger-signature-unusable';
+/**
+ * #35143 — a record-change start (`triggerType: 'record-…'`) that names no
+ * `config.objectName`. The binding hands the record-change trigger
+ * `object: undefined`, and a hook registered with no object target runs on
+ * EVERY object's write (ObjectQL `registerHook`: an absent target is the
+ * whole collection). So the flow does not sit idle: it starts on a write to
+ * any object, with that row as `record`. `error`: the start node alone
+ * settles it, and no installed package changes the answer.
+ */
+export const FLOW_TRIGGER_OBJECT_MISSING = 'flow-trigger-object-missing';
+/**
+ * #35143 — a record-change start condition that compares a select field of
+ * the trigger object with an option's LABEL (`record.stage == 'Closed Lost'`)
+ * where the field stores the option's VALUE (`closed_lost`). The row holds
+ * the value, so the comparison is always false (or always true for `!=`) and
+ * the condition never tells one record from another.
+ */
+export const FLOW_CONDITION_OPTION_LABEL = 'flow-condition-option-label';
+/**
+ * #35143 — a start node carrying BOTH a `record-*` `triggerType` and a
+ * `config.timeRelative` descriptor. The engine's binding resolver
+ * (`resolveFlowTriggerKind`) answers `record_change` first, so the sweep is
+ * never installed: the flow runs on record writes and never on the date.
+ */
+export const FLOW_TIME_RELATIVE_SHADOWED = 'flow-time-relative-shadowed';
+/**
+ * #35143 — `filter` or `maxRecords` written beside `config.timeRelative`
+ * instead of inside it. The sweep reads both from the descriptor only; the
+ * binding forwards `schedule` and `condition` from the start config and
+ * nothing else, so a sibling `filter` narrows nothing and a sibling cap caps
+ * nothing.
+ */
+export const FLOW_TIME_RELATIVE_KEY_MISPLACED = 'flow-time-relative-key-misplaced';
+/**
+ * #35143 — `config.timeRelative.dateField` names a field the swept object
+ * does not have, or one that is not a `date` / `datetime` field. The sweep
+ * builds its window as a range on that column, so it matches no record.
+ */
+export const FLOW_TIME_RELATIVE_DATE_FIELD_INVALID = 'flow-time-relative-date-field-invalid';
+/**
+ * #35143 — a schedule (or a time-relative sweep's cadence) written as a cron
+ * with no `timezone`. The trigger reads the cron in UTC
+ * (`schedule.timezone ?? 'UTC'`), so the hour fires at UTC, not at the hour
+ * of the zone the author had in mind. Advisory: a UTC hour may be the intent.
+ */
+export const FLOW_SCHEDULE_TIMEZONE_MISSING = 'flow-schedule-timezone-missing';
 
 type AnyRec = Record<string, unknown>;
 
@@ -624,6 +678,33 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 /** The start node of a flow definition, if any. */
+/** [#35143] The field types a time-relative sweep's window can fall on. */
+const DATE_FIELD_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
+
+/** A start condition's CEL source: the bare string, or an envelope's `source`. */
+function conditionSourceOf(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object' && typeof (raw as AnyRec).source === 'string') return (raw as AnyRec).source as string;
+  return '';
+}
+
+/**
+ * [#35143] The cron expression of a `config.schedule` that names no
+ * `timezone`, read in the shapes the schedule trigger's `normalizeSchedule`
+ * reads: a bare cron string, or `{ type: 'cron', expression }` (`cron` is the
+ * older spelling of `expression`). Any other shape is no cron here.
+ */
+function cronWithoutZone(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw.trim() || undefined;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const s = raw as AnyRec;
+  const isCron = s.type === 'cron' || (s.type === undefined && (typeof s.cron === 'string' || typeof s.expression === 'string'));
+  if (!isCron) return undefined;
+  const expression = (typeof s.expression === 'string' && s.expression) || (typeof s.cron === 'string' && s.cron) || '';
+  if (!expression.trim()) return undefined;
+  return typeof s.timezone === 'string' && s.timezone.trim() ? undefined : expression.trim();
+}
+
 function startNodeOf(flow: AnyRec): { node: AnyRec; index: number } | undefined {
   const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
   const index = nodes.findIndex((n) => n?.type === 'start');
@@ -708,6 +789,10 @@ export function validateFlowTriggerReadiness(
     };
   };
 
+  // [#35143] Built on first use: most stacks' flows never reach these reads.
+  let selectOptions: ReadonlyMap<string, ReadonlyMap<string, SelectOptions>> | undefined;
+  let servedGraph: ObjectGraph | undefined;
+
   flows.forEach((flow, flowIndex) => {
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
     const start = startNodeOf(flow);
@@ -755,6 +840,44 @@ export function validateFlowTriggerReadiness(
             },
           ),
         );
+      }
+      // 1-ii. #35143 — no object at all. Not "binds to nothing": the trigger
+      //     registers its hook with no object target, which ObjectQL reads as
+      //     every object, so the flow starts on a write to any of them.
+      if (objectName === undefined || objectName.trim() === '') {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_TRIGGER_OBJECT_MISSING,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.objectName`,
+          message:
+            objectName === undefined
+              ? `is a record-change flow ('${triggerType}') with no config.objectName, so its trigger watches every ` +
+                `object: it starts on a write to any object, with that row as \`record\``
+              : `is a record-change flow ('${triggerType}') whose config.objectName is blank; the engine refuses to ` +
+                `register a hook on an empty object name, so the trigger is never bound and the flow never starts`,
+          hint: `Set config.objectName to the object whose records should start this flow`,
+        });
+      } else {
+        // 1-iii. #35143 — the start condition compares a select field with an
+        //     option's label where the row holds the option's value.
+        selectOptions ??= indexSelectOptions(stack);
+        const options = selectOptions.get(objectName);
+        const src = conditionSourceOf(config.condition);
+        if (options && src) {
+          for (const hit of optionLabelComparisons(src, options)) {
+            findings.push({
+              severity: 'error',
+              rule: FLOW_CONDITION_OPTION_LABEL,
+              where: `flow "${flowName}" › start node`,
+              path: `flows[${flowIndex}].nodes[${start.index}].config.condition`,
+              message:
+                `compares '${objectName}.${hit.field}' with '${hit.label}', which is that option's label; the ` +
+                `field stores the value '${hit.value}', so the comparison never matches a record`,
+              hint: `Compare with the option's value: write '${hit.value}' in place of '${hit.label}'`,
+            });
+          }
+        }
       }
     }
 
@@ -888,6 +1011,98 @@ export function validateFlowTriggerReadiness(
           hint:
             `Remove config.objectName (the sweep never reads it), or set it to '${sweptObject}': conditions are then ` +
             `checked against the record each run holds`,
+        });
+      }
+
+      // 1b-iv. #35143 — a `record-*` token beside the descriptor. The resolver
+      //     answers `record_change` first, so the sweep is never installed.
+      if (isRecordTriggered) {
+        findings.push({
+          severity: 'error',
+          rule: FLOW_TIME_RELATIVE_SHADOWED,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.triggerType`,
+          message:
+            `declares both config.triggerType '${triggerType}' and config.timeRelative; the record-change ` +
+            `trigger takes precedence, so the sweep is never installed and the flow never runs on the date`,
+          hint:
+            `Remove config.triggerType to keep the date sweep, or remove config.timeRelative to keep the ` +
+            `record-change trigger`,
+        });
+      }
+
+      // 1b-v. #35143 — `filter` / `maxRecords` beside the descriptor. The sweep
+      //     reads both from inside it only.
+      for (const key of ['filter', 'maxRecords'] as const) {
+        if (config[key] === undefined || tr[key] !== undefined) continue;
+        findings.push({
+          severity: 'error',
+          rule: FLOW_TIME_RELATIVE_KEY_MISPLACED,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.${key}`,
+          message:
+            key === 'filter'
+              ? `sets config.filter beside config.timeRelative; the sweep reads its filter only from ` +
+                `config.timeRelative.filter, so this one is ignored and the flow runs for every record in the window`
+              : `sets config.maxRecords beside config.timeRelative; the sweep reads its cap only from ` +
+                `config.timeRelative.maxRecords, so this one is ignored and the default cap applies`,
+          hint: `Move it inside the descriptor: config.timeRelative.${key}`,
+        });
+      }
+
+      // 1b-vi. #35143 — the swept date field, against the swept object when
+      //     this stack declares it (an object it does not declare is 1b-i's).
+      const dateField = typeof tr.dateField === 'string' ? tr.dateField : undefined;
+      if (sweptObject && dateField) {
+        servedGraph ??= indexServedObjectGraph(stack);
+        const graphObject = servedGraph.get(sweptObject);
+        if (graphObject) {
+          const slice = graphObject.fields.get(dateField) ?? graphObject.injected.get(dateField);
+          const known = graphObject.names.has(dateField) || graphObject.injected.has(dateField);
+          const type = slice?.type;
+          if (!known || (type !== undefined && !DATE_FIELD_TYPES.has(type))) {
+            const dateFields = [...graphObject.fields, ...graphObject.injected]
+              .filter(([, f]) => f.type !== undefined && DATE_FIELD_TYPES.has(f.type))
+              .map(([n]) => n);
+            findings.push({
+              severity: 'error',
+              rule: FLOW_TIME_RELATIVE_DATE_FIELD_INVALID,
+              where: `flow "${flowName}" › start node`,
+              path: `flows[${flowIndex}].nodes[${start.index}].config.timeRelative.dateField`,
+              message: !known
+                ? `sweeps '${sweptObject}.${dateField}', and object '${sweptObject}' has no field '${dateField}', ` +
+                  `so the sweep's date window matches no record and the flow never runs` +
+                  suggestName(dateField, dateFields)
+                : `sweeps '${sweptObject}.${dateField}', a '${type}' field; the sweep's window is a date range, ` +
+                  `which a '${type}' field never falls in, so the flow never runs`,
+              hint:
+                dateFields.length > 0
+                  ? `Set config.timeRelative.dateField to a date or datetime field of '${sweptObject}' ` +
+                    `(${dateFields.join(', ')})`
+                  : `Add a date or datetime field to '${sweptObject}' and set config.timeRelative.dateField to it`,
+            });
+          }
+        }
+      }
+    }
+
+    // 1b-vii. #35143 — a cron cadence with no zone, on a flow the clock starts
+    //     (a schedule flow, or a sweep's cadence). The trigger reads it in UTC.
+    const clockKind = resolveFlowTriggerKind(flow);
+    if (start && (clockKind === 'schedule' || clockKind === 'time_relative')) {
+      const cron = cronWithoutZone(config.schedule);
+      if (cron !== undefined) {
+        findings.push({
+          severity: 'warning',
+          rule: FLOW_SCHEDULE_TIMEZONE_MISSING,
+          where: `flow "${flowName}" › start node`,
+          path: `flows[${flowIndex}].nodes[${start.index}].config.schedule`,
+          message:
+            `sets the cron '${cron}' with no timezone, so it fires at that hour in UTC, not in the zone ` +
+            `the hour was meant in`,
+          hint:
+            `Write the schedule as { type: 'cron', expression: '${cron}', timezone: 'Area/City' } with the zone ` +
+            `the hour is meant in, or set timezone: 'UTC' if UTC is the intent`,
         });
       }
     }
@@ -1454,4 +1669,62 @@ function signatureUnusableFinding(
       `Fix config.signature (its key named by config.secretRef only), or remove it to verify ` +
       `x-objectstack-signature`,
   };
+}
+
+/**
+ * #35143 — a `subflow` or `map` node whose `config.flowName` names no flow
+ * of this stack (nor of a package it carries in `packages[]`). The node asks
+ * the engine to run that flow by name, and the engine finds none, so the step
+ * fails every run (`subflow 'X' failed`).
+ *
+ * Its OWN exported rule, run on the CLI only, for the reason
+ * `flow-trigger-unknown-object` carries a hedge plus one more: the runtime
+ * publish gate judges a flow write over a snapshot whose `flows` holds only
+ * the written item, so a call to any other stored flow would read as unknown
+ * there. On the CLI the stack is one app; a flow another installed package
+ * ships is a legitimate target, so the finding is advisory, as that sibling's
+ * is without a stated closure.
+ */
+export const FLOW_SUBFLOW_UNKNOWN = 'flow-subflow-unknown';
+
+export function validateFlowSubflowTargets(stack: AnyRec): FlowTriggerReadinessFinding[] {
+  const findings: FlowTriggerReadinessFinding[] = [];
+  const flows = recordsOf(stack.flows);
+  if (flows.length === 0) return findings;
+  const known = new Set<string>();
+  for (const flow of flows) {
+    const name = nonEmptyString(flow.name);
+    if (name) known.add(name);
+  }
+  for (const entry of packagesOf(stack)) {
+    for (const flow of recordsOf(entry.flows)) {
+      const name = nonEmptyString(flow.name);
+      if (name) known.add(name);
+    }
+  }
+  flows.forEach((flow, flowIndex) => {
+    const flowName = nonEmptyString(flow.name) ?? `#${flowIndex}`;
+    for (const { node, path, regionTrail } of walkFlowNodes(flow, `flows[${flowIndex}]`)) {
+      if (node.type !== 'subflow' && node.type !== 'map') continue;
+      const config = node.config && typeof node.config === 'object' ? (node.config as AnyRec) : {};
+      const called = nonEmptyString(config.flowName)?.trim();
+      if (!called || known.has(called)) continue;
+      const nodeId = nonEmptyString(node.id) ?? String(node.type);
+      const nodeWhere = regionTrail ? `${regionTrail} › node "${nodeId}"` : `node "${nodeId}"`;
+      findings.push({
+        severity: 'warning',
+        rule: FLOW_SUBFLOW_UNKNOWN,
+        where: `flow "${flowName}" › ${nodeWhere}`,
+        path: `${path}.config.flowName`,
+        message:
+          `${String(node.type)} node '${nodeId}' calls flow '${called}', which this stack does not define; if ` +
+          `the name is wrong, the step fails on every run` +
+          suggestName(called, known),
+        hint:
+          `Set config.flowName to the exact name of a flow this app defines, or ignore this if another ` +
+          `installed package ships '${called}'`,
+      });
+    }
+  });
+  return findings;
 }

@@ -173,6 +173,7 @@ import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collecti
 import { META_ITEM_MEMBER_PARAM, META_ITEM_PUBLISHED_PARAMS, metaMemberSelector, projectMetaActionItem } from './meta-item-read-gate.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
+import { metaSaveRequestOptions } from './meta-save-request.js';
 import {
     META_ITEM_AUDIT_PARAMS,
     META_ITEM_DIFF_PARAMS,
@@ -682,6 +683,21 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                 if (refuseUnknownQueryParams(req, res, META_ITEM_PUBLISH_PARAMS)) return;
                 if (refuseRepeatedQueryParams(req, res, ['package', META_ITEM_MEMBER_PARAM])) return;
                 const packageId = metaItemPackageBinding(req.query?.package);
+                // [#36601] The ADR-0008 precondition on the PUBLISHED layer:
+                // `If-Match: <version>` publishes only over that active row,
+                // `If-None-Match: *` only where none is stored, neither is
+                // unpinned as before. Read by the save door's one mapping
+                // ({@link metaSaveRequestOptions}), so the two doors of a
+                // Studio Save read the headers alike and refuse the same
+                // malformed pair `400`; only its `parentVersion` is taken
+                // (`?mode=` and `?surface=` are not this door's, and the
+                // closed query set above has already refused them).
+                const precondition = metaSaveRequestOptions({ headers: req.headers });
+                if (!precondition.ok) {
+                    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: precondition.message } });
+                    return;
+                }
+                const parentVersion = precondition.request.parentVersion;
 
                 // [ADR-0131 D6] No organization, as on the `PUT` twin: a
                 // draft is saved environment-wide, so the promotion looks in
@@ -724,6 +740,8 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     ...(actor ? { actor } : {}),
                     ...(message ? { message } : {}),
                     ...(packageId ? { packageId } : {}),
+                    // [#36601] Present only when the caller pinned the active row.
+                    ...(parentVersion !== undefined ? { parentVersion } : {}),
                     // [#22877] Publishes ONE member's draft of a bundled type.
                     ...metaMemberSelector(req.query),
                     // [#32656] The languages the findings' `userMessage` is

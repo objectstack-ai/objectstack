@@ -1,0 +1,57 @@
+# CodeQL configuration for `.github/workflows/codeql.yml`.
+#
+# WHAT IT SCANS
+#
+# - Suite: `security-extended` — the security queries only. The code-quality
+#   queries (unused variables, trivial conditionals, …) are not run here: lint
+#   already owns them, and on the code-scanning tab they buried the security
+#   alerts.
+# - Paths: everything except test code. `paths-ignore` below lists test paths
+#   ONLY: test files, test directories, end-to-end suites and test fixtures.
+#   ⛔ Never add a non-test path here to make an alert go away — dismiss it
+#   instead (below), so the reason is recorded where the alert is.
+#   ⛔ `scripts/**` stays scanned: the fleet scripts read untrusted text (PR
+#   bodies, comments, CI logs), so a regex or injection alert there can be
+#   real. Only test files under `scripts/` fall under the patterns below.
+#   ⛔ `packages/spec/**` is product code: no pattern here may name a `spec`
+#   DIRECTORY — `**/*.spec.*` matches test file names only.
+#
+# DISMISSING AN ALERT
+#
+# An open alert is either fixed or dismissed with its reason — never left open
+# because it is believed wrong. Dismiss from the alert's own page, choosing
+# the closest of GitHub's three reasons, and write one line in the comment box
+# saying why:
+#
+# - `False positive` — the flagged flow cannot happen. The line names what
+#   stops it (the guard, the type, the constant input).
+# - `Used in tests` — the code runs only under a test harness. The line names
+#   the harness. A path that is ALL test code belongs in `paths-ignore` above
+#   instead, in the same PR as the dismissal.
+# - `Won't fix` — real but accepted. The line names the accepted risk and who
+#   accepted it (a ruling id or the card that decided it).
+#
+# A dismissal with an empty comment is not a dismissal: reopen it.
+#
+# A security alert in product code is triaged by the security seat under its
+# charter; its details never go into a public issue, PR or comment.
+
+name: ObjectStack CodeQL config
+
+queries:
+  - uses: security-extended
+
+paths-ignore:
+  # test files, wherever they live
+  - '**/*.test.*'
+  - '**/*.spec.*'
+  # test directories
+  - '**/__tests__/**'
+  - '**/test/**'
+  - '**/tests/**'
+  - '**/e2e/**'
+  # test fixtures, mocks and shared test helpers
+  - '**/fixtures/**'
+  - '**/__fixtures__/**'
+  - '**/__mocks__/**'
+  - 'ui/packages/test-support/**'

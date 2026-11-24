@@ -43,7 +43,7 @@ import { DetailSection } from '../DetailSection';
 let writeText: ReturnType<typeof vi.fn>;
 
 const NEW_MASKED_TYPE = 'objectui_8686_api_token';
-const RAW = 'sk_live_objectui_8686';
+const RAW = 'sk_live_FAKE_objectui_8686';
 const MASK = '••••••';
 const CONTROL_VALUE = 'Plain String Value';
 

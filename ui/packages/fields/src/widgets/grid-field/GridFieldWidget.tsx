@@ -1280,7 +1280,10 @@ function GridFieldBody({
                           value={row[c.name]}
                           onChange={() => {}}
                           readonly
-                          field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any}
+                          // `multiple` from the column, as the editable cell passes it:
+                          // without it a multi-record cell's id list reads as one id
+                          // and draws "undefined" (objectstack#36618).
+                          field={{ reference: c.reference, displayField: c.displayField, idField: c.idField, multiple: c.multiple } as any}
                           dataSource={cellSource}
                         />
                       ) : (
@@ -1389,7 +1392,8 @@ function GridFieldBody({
       if (c.type === 'lookup' && val != null && val !== '') {
         return (
           <LookupField value={val} onChange={() => {}} readonly
-            field={{ reference: c.reference, displayField: c.displayField, idField: c.idField } as any}
+            // `multiple` from the column, as in the read-only table (objectstack#36618).
+            field={{ reference: c.reference, displayField: c.displayField, idField: c.idField, multiple: c.multiple } as any}
             dataSource={cellSource} />
         );
       }

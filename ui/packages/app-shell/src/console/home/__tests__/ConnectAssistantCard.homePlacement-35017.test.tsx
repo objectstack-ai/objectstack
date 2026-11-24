@@ -158,7 +158,25 @@ describe('with apps: greeting, My apps, My work, then the card (objectstack#3501
   });
 });
 
+
+/**
+ * objectstack#36732 — from 768 px up a viewer with no product app is drawn the
+ * no-apps empty state (`HomePage.desktopNoApps-36732.test.tsx`); the empty
+ * state these cases read is a phone's, so they render at phone width.
+ */
+function atPhoneWidth() {
+  const real = window.innerWidth;
+  Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
+  return () => Object.defineProperty(window, 'innerWidth', { value: real, configurable: true, writable: true });
+}
+
 describe('with no app yet: after the welcome (objectstack#35017)', () => {
+  let restoreWidth = () => {};
+  beforeEach(() => {
+    restoreWidth = atPhoneWidth();
+  });
+  afterEach(() => restoreWidth());
+
   it('draws the card after the empty state, not above it', () => {
     state.apps = [];
     render(<HomePage />);

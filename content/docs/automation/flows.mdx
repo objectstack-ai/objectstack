@@ -3029,7 +3029,7 @@ export const renewalReminder: Flow = {
         // run acts as its own record's organization) and not read under
         // `single`. See "The acting organization" below.
         organization: '<sys_organization.id>',
-        // schedule: { type: 'cron', expression: '0 8 * * *' } // optional; defaults to daily 08:00 UTC
+        // schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' } // optional; defaults to daily 08:00 UTC
       },
     },
     { id: 'notify_owner', type: 'notify', label: 'Notify Owner' },
@@ -3094,7 +3094,7 @@ it runs as**, on the start node's `config`, beside the cadence it scopes:
 
 ```typescript
 config: {
-  schedule: { type: 'cron', expression: '0 8 * * *' },
+  schedule: { type: 'cron', expression: '0 8 * * *', timezone: 'UTC' },
   organization: 'org_msokm9oaz0cal87q', // a sys_organization.id
 }
 ```

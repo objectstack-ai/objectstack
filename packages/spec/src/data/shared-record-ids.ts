@@ -6,8 +6,8 @@
  * user `recipient`"*: at every access level (the read form), or at the levels
  * it names (the write form, ADR-0155 ③ ruled A).
  *
- * It sits where today's list of granted ids sits, as the comparand of `$in` on
- * the object's `id`:
+ * It sits where the share arm's list of granted ids sat before the producer's
+ * switch (ADR-0155 plan step 6), as the comparand of `$in` on the object's `id`:
  *
  * ```ts
  * { id: { $in: SharedRecordIds.read('account', 'u1') } }
@@ -19,9 +19,9 @@
  * that is neither NULL nor empty and, on the write form, an `access_level` in
  * the levels it carries. Read with system authority, with no organization
  * predicate (ADR-0155 ① ruled A), with no cap and no ordering. The list the
- * share arm binds today holds at most 5,000 members of G; the leaf is G at every
- * count. A SQL driver compiles it in the list's own position, as
- * {@link SharedRecordIds.innerRead} describes:
+ * share arm bound before the switch is retired; the share arm now carries this
+ * leaf, which is G at every count. A SQL driver compiles it in the list's own
+ * position, as {@link SharedRecordIds.innerRead} describes:
  *
  * ```sql
  * id IN (SELECT record_id FROM sys_record_share
@@ -69,10 +69,10 @@
  * non-enumerable.
  *
  * **The recipient is the producer's.** It is captured from the context the
- * scope is built for, where today's `recipient_id` comes from. ⛔ No seam and no
- * driver re-derives it from the reading context: the engine's seam (ADR-0155
- * D4) compares it with the reading context's user and delegator and never
- * replaces it.
+ * scope is built for, where the retired list's `recipient_id` came from. ⛔ No
+ * seam and no driver re-derives it from the reading context: the engine's seam
+ * (ADR-0155 D4) compares it with the reading context's user and delegator and
+ * never replaces it.
  *
  * ## It arrives composed
  *
@@ -99,9 +99,8 @@
  * No operator joins `FieldOperatorsSchema` or `VALID_AST_OPERATORS`
  * (`./filter.zod.ts`), and there is no CEL function and no lint vocabulary. One
  * producer writes it: plugin-sharing's read-scope builder, and its write-scope
- * builder. No caller of the comparand-shape door admits it until the engine's
- * card (ADR-0155 plan step 2), and nothing writes it until that producer's
- * switch (plan step 6).
+ * builder. The engine's callers of the comparand-shape door admit it (ADR-0155
+ * plan step 2), and that producer writes it from its switch on (plan step 6).
  *
  * Like `./readable-ids.ts`, the module is tolerant of bare, un-parsed input:
  * {@link isSharedRecordIds} accepts `unknown` and answers `false` for every
