@@ -42,6 +42,11 @@
  * draft, else the published action. A row whose stored copy is not served
  * (`unserved`) stays listed and is not edited: ⛔ never buffered from the
  * served copy.
+ *
+ * objectstack#36726 — that same layered answer's `overlayVersion` pins each
+ * row's publish: a row another editor published since is refused and asked
+ * about (reload, overwrite, keep editing), never replaced in silence. A new
+ * row's publish asserts no published row of its name.
  */
 
 import * as React from 'react';
@@ -49,7 +54,12 @@ import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { authoredBuffer, extractDraftBody, formatMetadataError, type AuthoredLayers } from '@object-ui/data-objectstack';
 import { useMetadataClient } from '../metadata-admin/useMetadata.js';
 import { t as tStudio, tFormat, useMetadataLocale } from '../metadata-admin/i18n.js';
-import { readDraftForSave, useDraftSaveGuard, type DraftPin } from '../metadata-admin/DraftConflictDialog.js';
+import {
+  publishedPinOf,
+  readDraftForSave,
+  useDraftSaveGuard,
+  type DraftPin,
+} from '../metadata-admin/DraftConflictDialog.js';
 import { publishSavedItem, useStudioSaveEntry, type StudioSaveResult } from './studioSaveBar.js';
 import { emitMetadataRefresh } from '../../assistant/assistantBus.js';
 import type { RailCustomizations } from './StudioRailCustomizations.js';
@@ -164,7 +174,15 @@ export function usePairObjectActions(
   const [blocking, setBlocking] = React.useState<Readonly<Record<string, number>>>({});
   const [nonce, setNonce] = React.useState(0);
   const reload = React.useCallback(() => setNonce((n) => n + 1), []);
-  const { save: saveGuarded, recordRead, forget, dialog } = useDraftSaveGuard(client, reload);
+  const {
+    save: saveGuarded,
+    recordRead,
+    forget,
+    // objectstack#36726 — the published action each row was loaded at, for the Save's publish.
+    recordPublished,
+    publish: publishGuarded,
+    dialog,
+  } = useDraftSaveGuard(client, reload);
   React.useEffect(() => {
     forget();
   }, [publishNonce, forget]);
@@ -275,7 +293,11 @@ export function usePairObjectActions(
           return { for: objectName, pair: readAt, list: [...merged, ...added] };
         });
         for (const [name, pin] of pins) {
-          if (!open.edited.has(name)) recordRead('action', name, readAt, pin);
+          if (open.edited.has(name)) continue;
+          recordRead('action', name, readAt, pin);
+          // objectstack#36726 — the row's publish, to the published action the same layers served.
+          const at = listed.indexOf(name);
+          recordPublished('action', name, readAt, at < 0 ? null : publishedPinOf(layers[at]));
         }
         setError(null);
       } catch (e) {
@@ -285,7 +307,7 @@ export function usePairObjectActions(
     return () => {
       cancelled = true;
     };
-  }, [client, active, pairId, objectName, publishNonce, nonce, recordRead]);
+  }, [client, active, pairId, objectName, publishNonce, nonce, recordRead, recordPublished]);
 
   const all = active && rows !== null && rows.for === objectName && (rows.pair === pairId || rows.pair === null) ? rows.list : NO_ROWS;
   const list = React.useMemo(() => (removed.size === 0 ? all : all.filter((r) => !removed.has(r.name))), [all, removed]);
@@ -361,6 +383,8 @@ export function usePairObjectActions(
     setSaving(true);
     setError(null);
     const refusals: string[] = [];
+    // The author chose to reload over a conflict: nothing of that row was saved.
+    let reloaded = false;
     try {
       let pair: string;
       try {
@@ -398,13 +422,30 @@ export function usePairObjectActions(
           } else if (
             (await saveGuarded('action', name, row.body, { mode: 'draft', packageId: pair, surface: 'studio' })) === 'reloaded'
           ) {
+            reloaded = true;
             setEdited(new Set());
             continue;
           }
-          const outcome = await publishSavedItem(client, { type: 'action', name, packageId: pair }, row.draft);
+          // objectstack#36726 — a new row's publish asserts no published action of its name.
+          if (isNew) recordPublished('action', name, pair, { ifNoneMatch: '*' });
+          const outcome = await publishSavedItem(client, { type: 'action', name, packageId: pair }, row.draft, publishGuarded);
+          // The published action moved and the author chose to reload: the pair's read installs it.
+          if (!outcome.ok && 'reloaded' in outcome) {
+            reloaded = true;
+            setEdited(new Set());
+            if (isNew) {
+              setCreated((prev) => {
+                const next = new Set(prev);
+                next.delete(name);
+                return next;
+              });
+            }
+            continue;
+          }
           if (!outcome.ok) {
             if (outcome.draftDiscarded) recordRead('action', name, pair, { ifNoneMatch: '*' });
             else setRows((prev) => (prev === null ? prev : { ...prev, list: prev.list.map((r) => (r.name === name ? { ...r, draft: true } : r)) }));
+            // Kept editing reads as the draft conflict's own "not saved" line, as for a draft that moved.
             refusals.push(`${String(row.body.label ?? name)}: ${formatMetadataError(outcome.error)}`);
             continue;
           }
@@ -444,8 +485,8 @@ export function usePairObjectActions(
       setError(reason);
       return { kind: 'refused', reason };
     }
-    return { kind: 'saved' };
-  }, [client, created, edited, removed, pairForWrite, saveGuarded, recordRead, reload]);
+    return reloaded ? { kind: 'declined' } : { kind: 'saved' };
+  }, [client, created, edited, removed, pairForWrite, saveGuarded, publishGuarded, recordRead, recordPublished, reload]);
 
   const cancel = React.useCallback(() => {
     setError(null);

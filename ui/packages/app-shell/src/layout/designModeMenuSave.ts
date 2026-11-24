@@ -273,7 +273,7 @@ export async function prepareAppMenuSave(
   let translated: ReadonlyMap<string, string | null> = new Map();
   if (input.labels) {
     const language = labelLanguageOf(input.labels.language, doors.readLocales ? await doors.readLocales() : null);
-    const split = splitLabelEdits(served, navigation, storedEntriesById(served, shownStored), language);
+    const split = splitLabelEdits(served, navigation, storedEntriesById(served, shownStored), language, input.labels.language);
     navigation = split.navigation;
     translated = split.labels;
     if (translated.size > 0) translation = { name: menuTranslationName(appName, language.locale), locale: language.locale, labels: {} };
