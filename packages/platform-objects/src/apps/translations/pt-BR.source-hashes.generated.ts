@@ -171,6 +171,7 @@ export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_sso_provider.fields.id.label": "00b0385c9c152888",
   "objects.sys_sso_provider.fields.sign_out_of_idp.help": "ab8ff5fce3001c81",
   "objects.sys_sso_provider.fields.sign_out_of_idp.label": "212587b8191bb91b",
+  "objects.sys_task.fields.status.label": "64a420165247654b",
   "objects.sys_unit._validations.unit_code_immutable.message": "c8ce340a53339ba2",
   "objects.sys_unit._validations.unit_code_organization_namespace.message": "a1feea8fefab1228",
   "objects.sys_unit._validations.unit_dimension_immutable.message": "b12c97027d369d60",

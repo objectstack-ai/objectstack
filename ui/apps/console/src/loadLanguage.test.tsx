@@ -34,6 +34,7 @@ import { FlowRunner, type ScreenFlowState } from '@object-ui/app-shell';
 import { TokenStorage } from '@object-ui/auth';
 import { loadLanguage } from './loadLanguage';
 import { publishAuthState } from './i18nSession';
+import { __resetLocalesRead } from './localesRead';
 
 /**
  * Serve `body` as the endpoint's JSON answer. A real `Response`: the loader
@@ -63,6 +64,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // One /i18n/locales read per page load (cloud#4964): each case is its own page load.
+  __resetLocalesRead();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   TokenStorage.clear();

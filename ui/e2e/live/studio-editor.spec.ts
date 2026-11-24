@@ -86,16 +86,18 @@ test('Add block opens a block-type picker with configurable block kinds, and the
     await expect(dialog.getByRole('button', { name: /Section/i })).toBeVisible();
     await expect(dialog.getByRole('button', { name: /Record details/i })).toBeVisible();
 
-    // The save round trip, not only the canvas: picking a kind autosaves a
-    // draft, and the draft read back through /meta holds the new block at the
-    // end of the first region.
-    const saved = page.waitForResponse(
-      (r) => r.request().method() === 'PUT' && r.url().includes(`/api/v1/meta/page/${name}?mode=draft`),
-    );
+    // The save round trip, not only the canvas: picking a kind is an unsaved
+    // edit, and Save makes it live at once (objectstack#36902): the item's
+    // draft, then that one item's publish. The page read back through /meta
+    // holds the new block at the end of the first region.
     await dialog.getByRole('button', { name: /Card/i }).first().click();
-    const save = await saved;
-    expect(save.ok(), await save.text()).toBeTruthy();
-    const stored = await request.get(`${API}/api/v1/meta/page/${name}?state=draft`);
+    const published = page.waitForResponse(
+      (r) => r.request().method() === 'POST' && r.url().includes(`/api/v1/meta/page/${name}/publish`),
+    );
+    await page.getByTestId('resource-save').click();
+    const publish = await published;
+    expect(publish.ok(), await publish.text()).toBeTruthy();
+    const stored = await request.get(`${API}/api/v1/meta/page/${name}`);
     expect(stored.ok(), await stored.text()).toBeTruthy();
     const blocks = (await stored.json()).item.regions[0].components as { type?: string }[];
     expect(blocks).toHaveLength(firstRegionBlocks + 1);

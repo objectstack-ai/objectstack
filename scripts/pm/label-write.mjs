@@ -254,7 +254,9 @@
  *             over every path the tier tool read, pre-lift — a path lifted as a pure regeneration included; off the
  *             tier route the narrowed leg's pair: the body and each changeset text, `narrowingDeclared` when a
  *             narrowing is declared on either line — so a code-only size-limb pull is on the declaration face at
- *             `TIER_DEFAULT` and a narrowing one on the narrowing face), one PASS line, no open grade.
+ *             `TIER_DEFAULT` and a narrowing one on the narrowing face), one PASS line, no open grade. A PASS on an
+ *             older head carried by a `Regen-provenance:` line is the guard's `regenCarry` to judge: the pair hands
+ *             it this checkout's git (`handoffGitReader`, none for another repository) and the pull's `base.sha`.
  *             A `## 维护者速读` comment must be on the thread or be the request itself — H48's brief half.
  *   plan      the approvers not requested, assigned or holding a submitted review (H43's union); the author among
  *             them is ASSIGNED, never requested (a request naming the author is a 422). A covered approver and a
@@ -463,7 +465,7 @@ import {
   readSignatureLine,
   h48GovernedVerdictWithoutBrief,
 } from './check-half-states.mjs';
-import { GOVERNED_TIER_H, GOVERNED_TIER_S, LOW_RISK_CHANGESET_PATH, sizeLimbFires } from './check-governed-merges.mjs';
+import { GOVERNED_TIER_H, GOVERNED_TIER_S, LOW_RISK_CHANGESET_PATH, sizeLimbFires, slugFromRemote } from './check-governed-merges.mjs';
 // The `--land` dogfood gate's readers (header: `--land` on a breaking or narrowing pull), each CALLED from its owner:
 // the one `Clause-②:` reader, the card a pull delivers, the relay's identity and the record leg's author trust.
 import { quoteLine, readClause2Line } from './clause2-line.mjs';
@@ -1531,7 +1533,7 @@ export async function runLabelWrite(options, deps = {}) {
   // ── `--comment-file`: the comment (and `--land`) folded into this ONE stroke, RELAY-ONLY (header) ──
   if (options.commentFile || options.handoff) {
     const readText = deps.readText ?? ((p) => readFileSync(p, 'utf8'));
-    const handoffDeps = { tierReading: deps.tierReading, recognisers: deps.recognisers, approvers: deps.approvers };
+    const handoffDeps = { tierReading: deps.tierReading, recognisers: deps.recognisers, approvers: deps.approvers, gitReader: deps.gitReader };
     return foldStroke({ options, repo, issue, base, labels, assignees, kind: targetKind.kind, card: read.json, route, send, clock, readText, record, stamp, result, doCall, httpCalls, handoffDeps });
   }
 
@@ -2146,6 +2148,33 @@ export function handoffRowLines({ pull, matched, approvers, reviewed, handoff, r
 }
 
 /**
+ * git in this checkout, in the shape the queue guard hands its readers (`runGit(args, input)`): the argv, an optional
+ * STDIN (`check-attr --stdin` reads its paths there — dropped, git answers nothing and every moved path reads as a
+ * regeneration), stdout back, and a THROW on any failure, so a tree this checkout does not hold is a gap, never a diff.
+ */
+export function checkoutGit(args, input) {
+  const r = spawnSync('git', args, { cwd: fileURLToPath(REPO_ROOT), encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(`git ${args[0]} exited ${r.status}: ${String(r.stderr ?? '').trim().split('\n')[0]}`);
+  return r.stdout;
+}
+
+/**
+ * The PASS reader's git for `repo` (header: records): this checkout's, when its `origin` IS that repository — or null,
+ * as `check-governed-merges.mjs --pr` hands none outside its own checkout, and the guard's reader then reads a carried
+ * record as a gap. ⛔ Never another repository's trees read as this one's. `run` is the self-test's seam.
+ */
+export function handoffGitReader(repo, run = checkoutGit) {
+  let origin;
+  try {
+    origin = slugFromRemote(String(run(['remote', 'get-url', 'origin'])));
+  } catch {
+    return null;
+  }
+  return origin !== null && origin.toLowerCase() === String(repo ?? '').toLowerCase() ? run : null;
+}
+
+/**
  * Every read and refusal of `--handoff` before the comment is judged (header). Returns `{ ok: true, … }` with the
  * plan and the readings the read-back reuses, or `{ ok: false, exit, why }` — exit 2 a judged refusal, 3 a read the
  * platform or the tier tool did not answer. ⛔ Writes nothing.
@@ -2222,7 +2251,12 @@ async function handoffGate(c) {
   // the narrowed leg's pair: the body and every changeset text, and `narrowingDeclared` when it declares one.
   const card = recognisers.deliveredCard(pull.json);
   const declared = changesets === null ? {} : { declaredOn: [body, ...changesets.files.map((f) => f.text)], narrowingDeclared: tier.narrowing === true };
-  const pair = { pr: issue, card: card.card, headSha, paths, repo: tier.json?.repo, ...declared };
+  // A PASS carried from an older head by `Regen-provenance:` is re-tested by the guard's `regenCarry`, which needs a git
+  // reader and the base ref: the pull's own `base.sha` (as `--pr` and the guard's `pull_request` leg hand it), never a
+  // remote-tracking ref this checkout may hold stale. Without either it reads the carry as a gap, never as clean.
+  const runGit = (deps.gitReader ?? handoffGitReader)(repo);
+  const baseSha = String(pull.json.base?.sha ?? '');
+  const pair = { pr: issue, card: card.card, headSha, paths, repo: tier.json?.repo, runGit, baseRef: FULL_SHA.test(baseSha) ? baseSha : null, ...declared };
   const fetchComments = async (n) => {
     if (n === issue) return rows;
     const thread = await readThreadRows(doCall, repo, n);
@@ -2812,6 +2846,8 @@ export function fakeBoard(initial = {}) {
     body: initial.body ?? null,
     head: { ...(initial.head ?? { sha: 'f'.repeat(40), ref: 'claude/issue-8-fixture' }) },
     baseRef: initial.baseRef ?? 'main',
+    // The base branch's sha as `GET /pulls/{n}` answers it — what `--handoff` hands the PASS reader as its base ref.
+    baseSha: initial.baseSha ?? null,
     cards: { ...(initial.cards ?? {}) },
     commits: { ...(initial.commits ?? {}) },
     onBase: new Set(initial.onBase ?? []),
@@ -2921,7 +2957,7 @@ export function fakeBoard(initial = {}) {
         title: board.title,
         body: board.body,
         head: board.head,
-        base: { ref: board.baseRef },
+        base: { ref: board.baseRef, ...(board.baseSha === null ? {} : { sha: board.baseSha }) },
         user: { login: board.author },
         requested_reviewers: board.requested.map((login) => ({ login })),
         labels: board.labels.map((name) => ({ name })),
@@ -3086,7 +3122,7 @@ async function driveOffline(argv, boardInit = {}, extra = {}) {
     if (p in files) return files[p];
     throw new Error(`ENOENT: no such file, open '${p}'`);
   };
-  const res = await runLabelWrite(parsed.options, { call: fake.call, log: (l) => out.push(l), route: extra.route ?? DIRECT_ROUTE, send, readText, now: extra.now, tierReading: extra.tierReading, recognisers: extra.recognisers, approvers: extra.approvers });
+  const res = await runLabelWrite(parsed.options, { call: fake.call, log: (l) => out.push(l), route: extra.route ?? DIRECT_ROUTE, send, readText, now: extra.now, tierReading: extra.tierReading, recognisers: extra.recognisers, approvers: extra.approvers, gitReader: extra.gitReader ?? (() => null) });
   return { parsed, exit: res.exit, res, fake, out, sent, text: out.join('\n') };
 }
 
@@ -3186,7 +3222,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // Raised 65 → 70 with the battery repositories: the pure predicate, the zero-read gate, cloud `(narrowing)` and `!` landing, objectstack still refusing.
   [LAND_DOGFOOD_BATTERY]: 70,
   [HAND_SET_BATTERY]: 42,
-  [HANDOFF_BATTERY]: 59,
+  // Raised 59 → 68 with the carried PASS: the git reader and base ref handed to the guard's `regenCarry`, both directions.
+  [HANDOFF_BATTERY]: 68,
 });
 const SELF_TEST_BATTERY_FLOOR = 19;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -4118,7 +4155,7 @@ export async function selfTest() {
       ...over,
     });
     const argv = ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--comment-file', REQ_FILE, '--handoff'];
-    const hand = (b, extra = {}) => driveOffline(extra.argv ?? argv, b, { route, relay: extra.relay ?? 'success', files: { [REQ_FILE]: extra.request ?? REQUEST }, now: NOW, tierReading: extra.tier ?? TIER_H, recognisers, approvers: PAIR, ...(extra.send ? { send: extra.send } : {}) });
+    const hand = (b, extra = {}) => driveOffline(extra.argv ?? argv, b, { route, relay: extra.relay ?? 'success', files: { [REQ_FILE]: extra.request ?? REQUEST }, now: NOW, tierReading: extra.tier ?? TIER_H, recognisers, approvers: PAIR, ...(extra.send ? { send: extra.send } : {}), ...(extra.gitReader ? { gitReader: extra.gitReader } : {}) });
     const writesOf = (run) => run.fake.calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.path}`);
     const handoffOf = (b) => h43HandoffReading(b.comments, b.head.sha, { available: true, admits: (r) => r?.user?.login === RELAY_COMMENT_AUTHOR });
     const rowsOn = (b, slice = H_SLICE, handoff = handoffOf(b)) => {
@@ -4297,6 +4334,49 @@ export async function selfTest() {
     t('⭐ S3: a size-limb pull whose only register hit was LIFTED as a pure regeneration is on the `rules` face, pre-lift, as the guard reads it: TIER_DEFAULT refused', [...zero(regenLow), regenLow.text.includes('the `rules` face owes `Served-tier: CONTRACT_REVIEW_TIER`')], [EXIT_USAGE, 0, 0, true], regenLow.text.slice(-600));
     const regenAt = await hand(board(), { tier: liftedRead });
     t('…control: the same pull with a CONTRACT_REVIEW_TIER PASS is handed off, exit 0', [regenAt.exit, regenAt.sent.length], [EXIT_OK, 1]);
+
+    // R1 — a PASS on an OLDER head, carried to this one by a `Regen-provenance:` line (contract-review.md 「head 后移例外」):
+    // the guard's own `regenCarry` re-runs the pure-regeneration test, so the gate hands it a git reader and the base ref.
+    const BASE_SHA = 'ba5e0000'.repeat(5);
+    const PROVENANCE = `${SIG}\nRegen-provenance: 502 · \`${OLD_HEAD}\` → \`${HEAD}\` · \`pnpm gen:all\` → (empty)\n`;
+    const carryBoard = (over = {}) => board({ baseSha: BASE_SHA, comments: [row(501, '2026-11-08T14:00:00Z', RECORD()), row(502, '2026-11-08T12:10:00Z', PASS(OLD_HEAD)), row(503, '2026-11-08T13:30:00Z', PROVENANCE)], ...over });
+    const REGEN_PATH = 'packages/spec/api-surface/data.txt';
+    // A fake git over committed trees, the guard's argv: `moved` is OLD..HEAD, `own` the pull's own delta at HEAD.
+    // `check-attr` answers from the paths it is handed on STDIN, so a reader that drops stdin cannot pass.
+    const carryGit = (moved, own = '') => {
+      const seen = [];
+      const git = (args, input) => {
+        seen.push(args.join(' '));
+        if (args[0] === 'merge-base') return `mb-${args[2]}\n`;
+        if (args[0] === 'check-attr') return String(input).split('\0').flatMap((p) => [p, 'merge', p === REGEN_PATH ? 'os-regen' : 'unspecified']).join('\0') + '\0';
+        if (args[0] === 'rev-parse') return `${OLD_HEAD}\n`;
+        if (args.slice(0, 4).join(' ') !== 'diff -z --name-only --no-renames') return '';
+        return args[4] === OLD_HEAD && args[5] === HEAD ? moved : args[5] === HEAD ? own : '';
+      };
+      return Object.assign(git, { seen });
+    };
+    // A merge of main: the regenerated artefact plus a hand-written path main brought, which the pull's own delta does not name.
+    const cleanGit = carryGit(`${REGEN_PATH}\0AGENTS.md\0`);
+    const carried = await hand(carryBoard(), { gitReader: () => cleanGit });
+    t('⭐ R1: a PASS on an older head CARRIED to this head by a `Regen-provenance:` line, the trees clean: the records step passes on that PASS and the hand-off is written, exit 0', [carried.exit, carried.sent.length, carried.text.includes('hand-off records ✓'), carried.text.includes('PASS comment 502 on the PR')], [EXIT_OK, 1, true, true], carried.text.slice(-700));
+    t('…and the base ref the guard\'s reader was handed is the pull\'s own `base.sha`, never a remote-tracking ref this checkout may hold stale', [cleanGit.seen.filter((a) => a.startsWith('merge-base ')).every((a) => a.startsWith(`merge-base ${BASE_SHA} `)), cleanGit.seen.some((a) => a.startsWith('merge-base '))], [true, true]);
+    const handGit = carryGit(`${REGEN_PATH}\0scripts/pm/x.mjs\0`, 'scripts/pm/x.mjs\0');
+    const handMoved = await hand(carryBoard(), { gitReader: () => handGit });
+    t('⛔ R1: the same chain over a tree where the pull moved a HAND-WRITTEN path carries nothing — no same-head PASS, refused, exit 2, zero sends', [...zero(handMoved), handMoved.text.includes(`names the head \`${HEAD.slice(0, 12)}\``)], [EXIT_USAGE, 0, 0, true], handMoved.text.slice(-600));
+    const blind = await hand(carryBoard(), { gitReader: () => () => { throw new Error(`fatal: bad object ${OLD_HEAD}`); } });
+    t('⛔ R1: a git reader that cannot reach the trees is UNREAD — PREREQUISITE, exit 3, zero sends, with the guard\'s own fetch hint; never handed off', [...zero(blind), blind.text.includes('PREREQUISITE NOT MET'), blind.text.includes('git fetch origin pull/7/head')], [EXIT_PREREQUISITE, 0, 0, true, true], blind.text.slice(-600));
+    const noReader = await hand(carryBoard());
+    t('…control: a run holding NO reader (a pull outside this checkout\'s repository) reads the guard\'s gap, exit 3 — the line alone certifies nothing', [...zero(noReader), noReader.text.includes('holds no git reader')], [EXIT_PREREQUISITE, 0, 0, true]);
+    const noBase = await hand(carryBoard({ baseSha: null }), { gitReader: () => carryGit(`${REGEN_PATH}\0AGENTS.md\0`) });
+    t('…control: a pull read that carries no base sha names no base ref — UNREAD, exit 3, never clean', [...zero(noBase), noBase.text.includes('base ref')], [EXIT_PREREQUISITE, 0, 0, true]);
+    const carriedDry = await hand(carryBoard(), { argv: ['--repo', 'objectstack-ai/objectstack', '--issue', '7', '--handoff', '--dry-run'], send: neverSend, gitReader: () => carryGit(`${REGEN_PATH}\0AGENTS.md\0`) });
+    t('…and the per-round dry run reads the carried PASS through the same reader: records ✓, `now` rows ✗, exit 7, nothing sent', [carriedDry.exit, carriedDry.text.includes('hand-off records ✓'), writesOf(carriedDry).length], [EXIT_HANDOFF_OWED, true, 0], carriedDry.text.slice(-600));
+    const originRun = (url) => (args) => (args.join(' ') === 'remote get-url origin' ? `${url}\n` : '');
+    const own = originRun('https://github.com/objectstack-ai/objectstack.git');
+    t('the reader: this checkout\'s git when its `origin` is the pull\'s repository (any remote spelling, any case); none for another repository or an unreadable remote', [handoffGitReader('objectstack-ai/objectstack', own) === own, handoffGitReader('ObjectStack-AI/objectstack', originRun('git@github.com:objectstack-ai/objectstack')) !== null, handoffGitReader('objectstack-ai/cloud', own), handoffGitReader('objectstack-ai/objectstack', () => { throw new Error('no remote'); })], [true, true, null, null]);
+    const attrsText = readFileSync(new URL('.gitattributes', REPO_ROOT), 'utf8');
+    const literal = attrsText.split('\n').map((l) => l.trim().split(/\s+/)).find((w) => w.length === 2 && w[1] === 'merge=os-regen' && !/[*?[]/.test(w[0]))?.[0] ?? null;
+    t('⭐ the real reader hands git its STDIN: `check-attr --stdin` answers `os-regen` for a literal `.gitattributes` row (a reader that drops stdin answers nothing, and an empty answer reads every path as regenerated)', [literal !== null, literal === null ? null : String(checkoutGit(['check-attr', '-z', 'merge', '--stdin'], literal)).split('\0')[2]], [true, 'os-regen']);
 
     // S2 — "whole" includes the brief on the thread.
     const coveredNoBrief = { labels: ['domain:skills', GOVERNED_PR_AWAITING_MERGE_LABEL], assignees: ['os-zhuang'], requested: ['os-second'], comments: noBrief };

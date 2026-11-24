@@ -105,7 +105,7 @@ const REREAD_IP_RANGES = pinned('', 'OS_AUTH_ALLOWED_IP_RANGES', [
 const fetchMock = vi.fn();
 
 function ok(body: unknown): Response {
-  return { ok: true, status: 200, statusText: 'OK', json: async () => body } as unknown as Response;
+  return { ok: true, status: 200, statusText: 'OK', headers: new Headers(), json: async () => body } as unknown as Response;
 }
 
 /** GET answers the page; a PUT answers `putValues` and the next GET reads `rereadValues`. */
@@ -256,6 +256,7 @@ describe('clear the value saved beneath an env pin (objectstack#30665)', () => {
           ok: false,
           status: 409,
           statusText: 'Conflict',
+          headers: new Headers(),
           json: async () => ({
             success: false,
             error: {
