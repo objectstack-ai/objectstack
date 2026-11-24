@@ -168,7 +168,11 @@ describe('the form canvas settles the platform’s pinned fields first (objectst
     // objectstack#35900: the section lists Owner where it was dropped (after Condition), and the
     // column stays exactly the platform's, so the write may still strip it and
     // the read put it back: the list keeps its place either way.
-    expect(commits).toHaveLength(0);
+    // objectstack#36505: the one fields write is the conversion of
+    // Condition's older `group` into the list; Owner's column is untouched.
+    expect(commits).toHaveLength(1);
+    expect(commits[0].owner_id).toEqual(OWNER_FIELD_DEF);
+    expect(commits[0].condition.group).toBeUndefined();
     expect(groupCommits.at(-1)).toEqual([{ key: 'details', label: 'Details', fields: ['condition', 'owner_id'] }]);
     cleanup();
     renderDesigner({ ...served(reload({ condition: { ...condition, group: 'details' }, notes })), fieldGroups: groupCommits.at(-1) });

@@ -405,7 +405,7 @@
       "title": "A read-only package actually locks Studio editing surfaces",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -428,7 +428,7 @@
         {
           "clause": "the read-only badge renders AND the controls are actually disabled — checkboxes/Save inert, edit affordances absent",
           "oracle": "dom",
-          "verify": "after screenshot confirms render, assert disabled state on the controls (a badge alone is not a lock). The object designer's Form tab is the designed exception: on a read-only base it stays editable and saves the form view as a declared override in the base's .custom pair, not into the base (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx formViewReadOnly; ADR-0146 D2), so editable Form-tab controls are not a FAIL; they are inert only when the pair is walled or no form view is chosen",
+          "verify": "after screenshot confirms render, assert disabled state on the controls (a badge alone is not a lock). The object designer's Field layout tab (字段布局, formerly Form) is the designed exception: on a read-only base it stays editable and saves the object's field groups as the whole fieldGroups arrangement of the object extension in the base's .custom pair, not into the base (ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx layoutWritable; ADR-0146 D10), so editable Field-layout controls are not a FAIL; they are inert only when the pair is walled",
           "evidence": "screenshot + disabled-state DOM read"
         },
         {
@@ -500,6 +500,12 @@
           "date": "2026-11-14",
           "change": "acceptance[0].verify re-pointed (card #33332; QA run #33094 comment 6852480973): the run found the Form tab editable on a read-only base. That is by design: StudioDesignSurface.tsx makes the Form tab read-only only when no form view is chosen or the pair is walled, because its save lands as a declared override in the base's .custom pair (ADR-0146 D2), never in the base. The verify now names that exception so it is not scored as the lock failing. The clause is unchanged. Read from source at base fca5f89c",
           "ref": "#33332"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-24",
+          "change": "acceptance[0].verify re-pointed (card #36505): the Form tab is renamed Field layout (字段布局) and edits the object's field groups only; no form view is read or written there. On a read-only base its edits go into the .custom pair's object extension as the whole fieldGroups arrangement (ADR-0146 D10), and it is read-only only where the pair is walled.",
+          "ref": "#36505"
         }
       ]
     },

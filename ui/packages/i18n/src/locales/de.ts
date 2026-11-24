@@ -40,6 +40,8 @@ const de = {
     allResults: 'Alle Ergebnisse',
     createNew: 'Neu erstellen',
     createNamed: '„{{name}}“ erstellen',
+    createdOutsideFilters: 'Der Datensatz wurde erstellt, entspricht aber nicht den Filtern dieses Felds und kann hier daher nicht ausgewählt werden.',
+    createdUnchecked: 'Der Datensatz wurde erstellt, konnte aber nicht gegen die Filter dieses Felds geprüft werden und wurde daher nicht ausgewählt. Suchen Sie ihn hier, statt ihn erneut anzulegen.',
     showingResults: '{{shown}} von {{total}} Ergebnissen',
     showAllResults: 'Alle Ergebnisse anzeigen ({{count}})',
     selectedBadge: 'Ausgewählt',

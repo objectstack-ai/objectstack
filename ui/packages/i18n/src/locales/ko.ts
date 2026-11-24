@@ -40,6 +40,8 @@ const ko = {
     allResults: '모든 결과',
     createNew: '새로 만들기',
     createNamed: '“{{name}}” 새로 만들기',
+    createdOutsideFilters: '레코드가 생성되었지만 이 필드의 필터 조건에 맞지 않아 여기에서 선택할 수 없습니다.',
+    createdUnchecked: '레코드가 생성되었지만 이 필드의 필터 조건에 맞는지 확인하지 못해 선택하지 않았습니다. 다시 만들지 말고 여기에서 검색하세요.',
     showingResults: '{{total}}개 중 {{shown}}개 표시',
     showAllResults: '모든 결과 보기 ({{count}})',
     selectedBadge: '선택됨',

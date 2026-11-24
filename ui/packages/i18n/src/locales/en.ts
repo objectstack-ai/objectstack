@@ -49,6 +49,9 @@ const en = {
     noRecords: 'No records found',
     createNew: 'Create new',
     createNamed: 'Create new "{{name}}"',
+    // objectstack#36865 — a quick-created record the field's lookupFilters exclude is not selected; this says why.
+    createdOutsideFilters: "The record was created, but it does not match this field's filters, so it cannot be chosen here.",
+    createdUnchecked: "The record was created, but it could not be checked against this field's filters, so it was not chosen. Search for it here rather than creating it again.",
     showingResults: 'Showing {{shown}} of {{total}} results',
     showAllResults: 'Show all results ({{count}})',
     selectedBadge: 'Selected',

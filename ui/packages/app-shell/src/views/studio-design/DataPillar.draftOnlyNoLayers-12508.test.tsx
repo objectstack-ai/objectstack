@@ -95,6 +95,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
@@ -139,7 +141,7 @@ describe('DataPillar — a draft-only object logs no failed read (objectui#12508
     expect(reads('st_ticket', ''), 'the draft read never ran: the harness is dead').toEqual([200]);
     expect(reads('st_ticket', '/layers')).toEqual([200]);
     expect(server.requests.filter((r) => r.status >= 400)).toEqual([]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     expect(await screen.findByText('Subject')).toBeInTheDocument();
   });
 
@@ -156,7 +158,7 @@ describe('DataPillar — a draft-only object logs no failed read (objectui#12508
     await openPillar();
 
     expect(reads('st_case', '/layers')).toEqual([200]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     expect(await screen.findByText('Title')).toBeInTheDocument();
   });
 

@@ -40,6 +40,8 @@ const es = {
     allResults: 'Todos los resultados',
     createNew: 'Crear nuevo',
     createNamed: 'Crear «{{name}}»',
+    createdOutsideFilters: 'El registro se creó, pero no cumple los filtros de este campo, así que no se puede elegir aquí.',
+    createdUnchecked: 'El registro se creó, pero no se pudo comprobar si cumple los filtros de este campo, así que no se ha elegido. Búsquelo aquí en lugar de crearlo de nuevo.',
     showingResults: 'Mostrando {{shown}} de {{total}} resultados',
     showAllResults: 'Ver todos los resultados ({{count}})',
     selectedBadge: 'Seleccionado',

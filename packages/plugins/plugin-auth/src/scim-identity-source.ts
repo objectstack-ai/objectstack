@@ -21,7 +21,11 @@
  * link, and the reason a SCIM user who later sets a password keeps the
  * `env_native` value `stampIdentitySource`'s credential branch flips them to —
  * a later SCIM sync or a later boot re-runs this rule and leaves that user
- * alone.
+ * alone. A SCIM write that leaves the user inactive, and the re-activation
+ * that lifts the directory's ban, remove the local password first
+ * (`scim-deactivation-password-removal.ts`), so the mark after it finds no
+ * password and the user reads `idp_provisioned` again: the same rule, applied
+ * to what is left.
  *
  * ## The two callers
  *

@@ -45,7 +45,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, act, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 
@@ -58,7 +58,7 @@ vi.mock('@object-ui/permissions', async (importOriginal) => {
 });
 
 import type { BulkActionDef } from '@object-ui/types';
-import { registerAllFields, resolveActionParam, type ResolveActionParamsContext } from '@object-ui/fields';
+import { LookupField, registerAllFields, resolveActionParam, type ResolveActionParamsContext } from '@object-ui/fields';
 import { ActionProvider, MetadataCtx, type MetadataContextValue } from '@object-ui/react';
 import { ObjectGrid } from '../ObjectGrid';
 import { resolveBulkActions, resolvePromotedBulkParams, unresolvedFieldOf } from '../resolveBulkActions';
@@ -448,5 +448,83 @@ describe('ObjectGrid bulk dialog — a field-backed param on the selection bar (
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+/**
+ * objectstack#36865 — the selection toolbar's picker honours the borrowed
+ * field's `allowCreate`, as the record header's does. `toBulkParam` carried
+ * the field's other picker settings and dropped this one, so a field
+ * declaring `allowCreate: false` still drew "+ New" in the bulk dialog. The
+ * rows run the real fold (`resolvePromotedBulkParams` → `bulkParamToField` →
+ * `LookupField`) on both faces of the picker.
+ */
+describe('the bulk picker honours the borrowed field\'s allowCreate (objectstack#36865)', () => {
+  const realInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  const realMatchMedia = window.matchMedia;
+  const setViewportWidth = (width: number) => {
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: width });
+    window.matchMedia = ((query: string) => ({
+      matches: window.innerWidth < 768,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as any;
+  };
+  afterEach(() => {
+    cleanup();
+    if (realInnerWidth) Object.defineProperty(window, 'innerWidth', realInnerWidth);
+    window.matchMedia = realMatchMedia;
+  });
+
+  const bulkWidgetField = (allowCreate: boolean) => {
+    const member = {
+      name: 'crm_campaign_member',
+      fields: { crm_campaign: { ...FILTERED_CAMPAIGN_MEMBER.fields.crm_campaign, allowCreate } },
+    };
+    const [param] = resolvePromotedBulkParams(promote(ADD_TO_CAMPAIGN), ctx([member])).params ?? [];
+    return bulkParamToField(param, false);
+  };
+
+  const offersCreate = async (allowCreate: boolean, face: 'popover' | 'drawer'): Promise<boolean> => {
+    setViewportWidth(face === 'drawer' ? 390 : 1280);
+    const field = bulkWidgetField(allowCreate);
+    const ds = {
+      find: vi.fn(async () => ({ data: [{ id: 'c1', name: 'Spring launch', status: 'planning' }], total: 1 })),
+      findOne: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    };
+    render(<LookupField field={field as any} value={undefined} onChange={vi.fn()} readonly={false} dataSource={ds as any} />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId(`lookup-trigger-${field.name}`));
+    });
+    const panel = await screen.findByTestId(face === 'drawer' ? 'lookup-drawer' : 'lookup-popover');
+    await waitFor(() => expect(within(panel).getAllByRole('option')).toHaveLength(1));
+    return within(panel).queryByTestId('lookup-create-new') !== null;
+  };
+
+  it('the bulk widget field carries the field\'s allowCreate', () => {
+    expect(bulkWidgetField(false).allowCreate).toBe(false);
+    expect(bulkWidgetField(true).allowCreate).toBe(true);
+  });
+
+  it('allowCreate: false — no create entry in the desktop popover', async () => {
+    expect(await offersCreate(false, 'popover')).toBe(false);
+  });
+
+  it('allowCreate: false — no create entry in the phone drawer', async () => {
+    expect(await offersCreate(false, 'drawer')).toBe(false);
+  });
+
+  it('CONTROL — allowCreate: true shows the create entry on both faces', async () => {
+    expect(await offersCreate(true, 'popover')).toBe(true);
+    cleanup();
+    expect(await offersCreate(true, 'drawer')).toBe(true);
   });
 });

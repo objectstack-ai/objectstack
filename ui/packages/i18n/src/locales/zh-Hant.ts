@@ -52,6 +52,8 @@ const zhHant = {
     noRecords: '未找到記錄',
     createNew: '新建',
     createNamed: '新建“{{name}}”',
+    createdOutsideFilters: '記錄已建立，但不符合此欄位的篩選條件，因此不能在這裡選擇。',
+    createdUnchecked: '記錄已建立，但未能核對它是否符合此欄位的篩選條件，因此沒有選中。請在這裡搜尋它，不要重複建立。',
     showingResults: '顯示 {{total}} 條結果中的 {{shown}} 條',
     showAllResults: '檢視全部結果（{{count}}）',
     selectedBadge: '已選',

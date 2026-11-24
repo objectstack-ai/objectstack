@@ -40,6 +40,8 @@ const ar = {
     allResults: 'كل النتائج',
     createNew: 'إنشاء جديد',
     createNamed: 'إنشاء «{{name}}»',
+    createdOutsideFilters: 'تم إنشاء السجل، لكنه لا يطابق عوامل تصفية هذا الحقل، لذا لا يمكن اختياره هنا.',
+    createdUnchecked: 'تم إنشاء السجل، لكن تعذّر التحقق من مطابقته لعوامل تصفية هذا الحقل، لذا لم يتم اختياره. ابحث عنه هنا بدلًا من إنشائه مرة أخرى.',
     showingResults: 'عرض {{shown}} من {{total}} نتيجة',
     showAllResults: 'عرض كل النتائج ({{count}})',
     selectedBadge: 'محدد',
