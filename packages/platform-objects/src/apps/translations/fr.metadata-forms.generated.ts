@@ -114,7 +114,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Réduire",
-        helpText: "Indique si la section peut être réduite, sur le formulaire de saisie et la page de détail de l’enregistrement. Non défini : non."
+        helpText: "Indique si la section peut être réduite. Le formulaire de saisie applique le réglage tel quel. Sur la page d’enregistrement par défaut, le lecteur peut réduire chaque groupe titré ; le réglage n’y fixe que l’état initial : Collapsed commence réduit, les autres ouverts. Non défini : non."
       },
       "fieldGroups.visibleWhen": {
         label: "Visible si",

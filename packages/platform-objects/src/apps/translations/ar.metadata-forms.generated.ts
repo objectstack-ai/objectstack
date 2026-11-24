@@ -114,7 +114,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "الطي",
-        helpText: "ما إذا كان يمكن طي القسم، في نموذج الإدخال وصفحة تفاصيل السجل. عند عدم التعيين: لا."
+        helpText: "ما إذا كان يمكن طي القسم. يتبع نموذج الإدخال الإعداد كما هو. في صفحة السجل الافتراضية يمكن للقارئ طي كل مجموعة لها عنوان، لذا يحدد الإعداد هناك الحالة الأولى فقط: Collapsed تبدأ مطوية والبقية مفتوحة. عند عدم التعيين: لا."
       },
       "fieldGroups.visibleWhen": {
         label: "مرئي عندما",

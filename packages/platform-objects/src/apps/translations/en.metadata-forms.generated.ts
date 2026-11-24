@@ -114,7 +114,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Collapse",
-        helpText: "Whether the section can be collapsed, on the entry form and the record detail page. Unset: none."
+        helpText: "Whether the section can be collapsed. The entry form follows it as set. The default record page lets the reader fold every titled group, so there it only sets the first state: Collapsed starts closed, the others start open. Unset: none."
       },
       "fieldGroups.visibleWhen": {
         label: "Visible When",

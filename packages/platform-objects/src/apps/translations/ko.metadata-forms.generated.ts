@@ -114,7 +114,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "접기",
-        helpText: "입력 양식과 레코드 상세 페이지에서 섹션을 접을 수 있는지 여부입니다. 설정하지 않으면 없음입니다."
+        helpText: "섹션을 접을 수 있는지 여부입니다. 입력 양식은 설정을 그대로 따릅니다. 기본 레코드 페이지에서는 읽는 사람이 제목이 있는 모든 그룹을 접을 수 있으므로, 거기서는 초기 상태만 정합니다. Collapsed는 접힌 상태로, 나머지는 펼친 상태로 시작합니다. 설정하지 않으면 없음입니다."
       },
       "fieldGroups.visibleWhen": {
         label: "표시 조건",
