@@ -181,9 +181,9 @@ import { zodIssuesToFields } from '@objectstack/spec/api';
 // union failure produces the entries of the branch that explains it, addressed
 // with the union's own path (#5014). That bare "Invalid input" entry itself
 // (`invalid_shape`) is dropped whenever an entry below explains it, and kept
-// only when nothing does, where it is the whole answer. Read entries by `field` and `code`, never by position, and read
-// `fields.length` as the number of field errors, never as the number of Zod
-// issues.
+// only when nothing does, where it is the whole answer. Read entries by `field`
+// and `code`, never by position, and read `fields.length` as the number of
+// field errors, never as the number of Zod issues.
 function createValidationError(zodError: z.ZodError, input?: unknown): AppError {
   const fields = zodIssuesToFields(zodError.issues, input);
 

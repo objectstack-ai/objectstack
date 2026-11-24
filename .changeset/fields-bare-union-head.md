@@ -4,8 +4,11 @@
 
 fix(spec)!: a refused data-API request no longer lists zod's bare "Invalid input" union entry in `fields[]` ahead of the entries that explain it
 
-Clause-②: no (narrowing) — narrowed: `zodIssuesToFields` (`@objectstack/spec/api`, re-exported by `@objectstack/rest`) no longer emits a union's own `{ code: 'invalid_shape', message: 'Invalid input' }` entry when an entry below it explains the failure, at every depth. Every `400 VALIDATION_FAILED` / `VALIDATION_ERROR` whose `fields[]` comes from it moves: the query door, personal-view config saves, and the other declared-schema ingress doors. `fields[0]` of such a refusal is now the first located cause.
+Clause-②: no (narrowing)
 Metadata-protocol: none
+Skills-docs: none (no skills/ page names the union's `invalid_shape` / `Invalid input` entry or reads `fields[]` by position)
+
+What narrows: `zodIssuesToFields` (`@objectstack/spec/api`, re-exported by `@objectstack/rest`) no longer emits a union's own `{ code: 'invalid_shape', message: 'Invalid input' }` entry when an entry below it explains the failure, at every depth. Every `400 VALIDATION_FAILED` / `VALIDATION_ERROR` whose `fields[]` comes from it moves: the query door, personal-view config saves, and the other declared-schema ingress doors. `fields[0]` of such a refusal is now the first located cause.
 
 <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: what moves is which entries a refusal's fields list carries, computed afresh on every refused request. The accept set is unchanged. The one reading instruction is in the body: read entries by field and code, never by index. -->
 
