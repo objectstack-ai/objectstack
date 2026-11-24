@@ -235,13 +235,13 @@ function renderChecklist(
   );
 }
 
-/** The sidebar's pill, as an app's sidebar draws it, under the one provider. */
 /** The browser's Back, as a button the test presses. */
 function BackButton() {
   const navigate = useNavigate();
   return <button type="button" data-testid="test-history-back" onClick={() => navigate(-1)} />;
 }
 
+/** The sidebar's pill, as an app's sidebar draws it, under the one provider. */
 function renderPill(systemPermissions: string[] | undefined, language = 'en') {
   return render(
     <MemoryRouter initialEntries={['/apps/sales']}>
