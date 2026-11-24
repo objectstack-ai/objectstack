@@ -23,7 +23,7 @@
  */
 
 import { approvalMessageKey, interpolate, type ApprovalTextParam } from './approval-notification-text.js';
-import { enMessages, type ApprovalMessageId } from './translations/messages.js';
+import { enMessages, noApproverHoldingSlotsId, type ApprovalMessageId } from './translations/messages.js';
 import { slatePositions, type ApprovalSentenceRender, type PositionLabelOf } from './admin-rescue-note.js';
 import { isPlatformAdminAddress, slateNamesAPerson } from './approver-address.js';
 import { positionLabelKey } from './reader-locale-labels.js';
@@ -129,6 +129,23 @@ export function namesNoOneBut(slate: readonly string[], submitter: string): bool
 }
 
 /**
+ * One slot of the submitter's notice as the messaging service fills it per
+ * recipient: `type` the approver type's word as a key, and a position's
+ * `value` its reader-language label as a key (`positions.<name>.label`)
+ * falling back to `declaredLabel`, else the name.
+ */
+function slotParams(slot: Slot, declaredLabel: PositionLabelOf | undefined): {
+  type: ApprovalTextParam; value: ApprovalTextParam;
+} {
+  const word = APPROVER_TYPE_WORDS[slot.type];
+  const value = slotValue(slot, declaredLabel);
+  return {
+    type: word ? { key: approvalMessageKey(word), fallback: enMessages[word] } : slot.type,
+    value: slot.type === 'position' ? { key: positionLabelKey(slot.value), fallback: value } : value,
+  };
+}
+
+/**
  * The submitter's notice body for the note: its catalog sentence and the
  * params the messaging service fills per recipient, at delivery
  * (`EmitInput.keyedText`).
@@ -139,25 +156,30 @@ export function namesNoOneBut(slate: readonly string[], submitter: string): bool
  * the approver type's word as a key, and a position's `value` is its
  * reader-language label as a key (`positions.<name>.label`, the key the
  * timeline reads) falling back to `declaredLabel`, else the name — the order
- * the timeline note names it in. A slate of several slots names them in
- * English inside the reader's sentence, each position by `declaredLabel`; a
- * note that stored `who` keeps it as written.
+ * the timeline note names it in. [#36463] A slate of 2 to
+ * `NO_APPROVER_NOTICE_MAX_SLOTS` slots is spelled inline the same way, in
+ * `approvalNoApproverHoldingSlots<n>`, slot `i` under `type<i>` / `value<i>`
+ * in the slate's order. A slate of more slots names them in English inside
+ * the reader's sentence, each position by `declaredLabel`; a note that stored
+ * `who` keeps it as written.
  */
 export function noApproverNotice(note: Pick<NoApproverNote, 'slots' | 'who'>, declaredLabel?: PositionLabelOf): {
   id: ApprovalMessageId; params: Record<string, ApprovalTextParam>;
 } {
   const slots = note.slots ? slotsOf(note.slots) : [];
   if (slots.length === 1) {
-    const [slot] = slots;
-    const word = APPROVER_TYPE_WORDS[slot.type];
-    const value = slotValue(slot, declaredLabel);
-    return {
-      id: 'approvalNoApproverHoldingSlot',
-      params: {
-        type: word ? { key: approvalMessageKey(word), fallback: enMessages[word] } : slot.type,
-        value: slot.type === 'position' ? { key: positionLabelKey(slot.value), fallback: value } : value,
-      },
-    };
+    const { type, value } = slotParams(slots[0], declaredLabel);
+    return { id: 'approvalNoApproverHoldingSlot', params: { type, value } };
+  }
+  const listed = noApproverHoldingSlotsId(slots.length);
+  if (listed) {
+    const params: Record<string, ApprovalTextParam> = {};
+    slots.forEach((slot, i) => {
+      const { type, value } = slotParams(slot, declaredLabel);
+      params[`type${i + 1}`] = type;
+      params[`value${i + 1}`] = value;
+    });
+    return { id: listed, params };
   }
   const who = note.slots ? noApproverWho(note.slots, declaredLabel) : note.who;
   return who
@@ -191,6 +213,66 @@ export function noApproverNoteText(
   return render
     ? render(approvalMessageKey('approvalNoApproverHolding'), { who })
     : interpolate(enMessages.approvalNoApproverHolding, { who });
+}
+
+/** The decision door's two refusals of a submitter's own approval. */
+export type SubmitterApprovalRefusal = 'excludeSubmitter' | 'override';
+
+/**
+ * [#36463] The end user's half of the decision door's refusal of a
+ * submitter's own approval: the text the thrown error carries as its
+ * `userMessage` (`ApiErrorSchema.userMessage`, composed where it is produced,
+ * in the request's language), beside a `message` that keeps its English for
+ * the developer and the log.
+ *
+ * `refusal` names which refusal it is: `excludeSubmitter` (the step keeps its
+ * submitter from approving) or `override` (the administrator override never
+ * approves a request its actor submitted, maintainer ruling 2026-11-17,
+ * option B). `noOneElseOn` is the slate when no one but the submitter is on
+ * it: the remedy is then the no-approver sentence the timeline note names, a
+ * position named by `positionLabel`; absent, the remedy names the approver
+ * who decides it. With `render`, every sentence is the reader's language; a
+ * pack that lacks one of them answers the whole text in English, never a
+ * sentence of each.
+ */
+export function submitterRefusalUserMessage(
+  refusal: SubmitterApprovalRefusal,
+  noOneElseOn: readonly string[] | undefined,
+  render?: ApprovalSentenceRender,
+  positionLabel?: PositionLabelOf,
+): string {
+  const compose = (
+    sentence: (id: ApprovalMessageId, params: Readonly<Record<string, string>>) => string | undefined,
+    noApprover: () => string | undefined,
+  ): string | undefined => {
+    let remedy: string | undefined;
+    if (noOneElseOn) {
+      const named = noApprover();
+      remedy = named === undefined || refusal === 'excludeSubmitter'
+        ? named
+        : sentence('approvalDecideRefusedOverrideWithdraw', { remedy: named });
+    } else {
+      remedy = sentence(
+        refusal === 'excludeSubmitter' ? 'approvalDecideRefusedAnotherApprover' : 'approvalDecideRefusedOverrideAnotherApprover',
+        {},
+      );
+    }
+    if (remedy === undefined) return undefined;
+    return sentence(
+      refusal === 'excludeSubmitter' ? 'approvalDecideRefusedSubmitterExcluded' : 'approvalDecideRefusedOverrideOwnRequest',
+      { remedy },
+    );
+  };
+  const inReader = render
+    ? compose(
+      (id, params) => render(approvalMessageKey(id), params),
+      () => noApproverNoteText({ slots: noOneElseOn ?? [] }, render, positionLabel),
+    )
+    : undefined;
+  return inReader ?? compose(
+    (id, params) => interpolate(enMessages[id], params),
+    () => noApproverNoteText({ who: noApproverWho(noOneElseOn ?? [], positionLabel) }),
+  )!;
 }
 
 /**

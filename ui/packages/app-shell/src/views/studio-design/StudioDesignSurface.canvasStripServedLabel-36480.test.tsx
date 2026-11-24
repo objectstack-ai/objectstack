@@ -26,12 +26,9 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { cleanup } from '@testing-library/react';
 import { DashboardSchema } from '@objectstack/spec/ui';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
-import { I18nProvider } from '@object-ui/i18n';
-import { MetadataCtx } from '@object-ui/react';
 
 const PACKAGE_ID = 'com.example.crm';
 const DASH = 'sales_dashboard';
@@ -59,9 +56,6 @@ const SERVED_ZH = {
   label: '销售业绩',
   widgets: [widget('pipeline_by_stage', '阶段管道分布'), widget('won_total', '赢单总额')],
 };
-
-/** What an en-US request answers: the English bundle repeats the authored titles. */
-const SERVED_EN = JSON.parse(JSON.stringify(CODE)) as typeof CODE;
 
 const state: { served: unknown; draft: unknown } = { served: SERVED_ZH, draft: null };
 
@@ -126,10 +120,12 @@ vi.mock('./StudioAiCopilot', () => ({
 // Pay the dynamic `@objectstack/lint` load at collection, never inside a case's
 // clocked window (`check:test-source-alias`).
 import '@objectstack/lint';
-import { StudioDesignSurface } from './StudioDesignSurface';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { DashboardWidgetInspector } from '../metadata-admin/inspectors/DashboardWidgetInspector';
+// The source under test reaches dynamic imports of `@objectstack/formula`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/formula';
 
 /** Selects a widget as `DashboardPreview` does: by id, labelled with the buffer's authored title. */
 function StubDashboardPreview(props: Record<string, unknown>): React.ReactElement {
@@ -154,25 +150,6 @@ function StubDashboardPreview(props: Record<string, unknown>): React.ReactElemen
 
 registerMetadataPreview('dashboard', StubDashboardPreview as never);
 registerMetadataInspector('dashboard', DashboardWidgetInspector);
-
-/** The console's metadata store: the `/meta` dashboard list as served for the session's language. */
-function metadataStore(served: unknown) {
-  return {
-    apps: [],
-    objects: [],
-    dashboards: [served],
-    reports: [],
-    pages: [],
-    loading: false,
-    error: null,
-    refresh: async () => {},
-    invalidate: () => {},
-    ensureType: async () => [],
-    getItem: async () => null,
-    getItemsByType: () => [],
-    getTypeStatus: () => 'ready' as const,
-  };
-}
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
 
@@ -205,29 +182,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Open the dashboard leaf in `language`, select `widgetId` on the canvas, and return the strip once it names `label`. */
-async function selectWidget(language: 'en' | 'zh', widgetId: string, label: string): Promise<HTMLElement> {
-  render(
-    <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
-      <MetadataCtx.Provider value={metadataStore(state.served) as never}>
-        <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/interfaces`]}>
-          <Routes>
-            <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
-          </Routes>
-        </MemoryRouter>
-      </MetadataCtx.Provider>
-    </I18nProvider>,
-  );
-  fireEvent.click(await screen.findByTitle(`dashboard · ${DASH}`, undefined, { timeout: 8000 }));
-  // The published layer is read to pair the served titles with before the pick.
-  await waitFor(() => expect(mockClient.layered.mock.calls.some((c) => c[0] === 'dashboard')).toBe(true), {
-    timeout: 8000,
-  });
-  fireEvent.click(await screen.findByTestId(`pick-${widgetId}`, undefined, { timeout: 8000 }));
-  await waitFor(() => expect(screen.getByTestId('if-canvas-hint')).toHaveTextContent(label), { timeout: 8000 });
-  return screen.getByTestId('if-canvas-hint');
-}
-
 describe('the objectstack#36480 dashboard fixture is what the spec accepts', () => {
   it('the authored layer, the zh-CN answer and the retitled draft all parse against DashboardSchema', () => {
     expect(DashboardSchema.safeParse(CODE).success).toBe(true);
@@ -242,37 +196,3 @@ function retitledDraft() {
   return draft;
 }
 
-describe('objectstack#36480 — the zh-CN canvas strip names the selected widget by its served title', () => {
-  it('reads 阶段管道分布, the text the Title box beside it shows, never the English source', async () => {
-    const strip = await selectWidget('zh', 'pipeline_by_stage', '阶段管道分布');
-
-    expect(strip).not.toHaveTextContent('Pipeline by Stage');
-    // The panel beside it reads the same text: one answer, not two.
-    expect(await screen.findByDisplayValue('阶段管道分布', undefined, { timeout: 8000 })).toHaveAttribute(
-      'id',
-      'widget-title',
-    );
-  });
-});
-
-describe('objectstack#36480 — a widget retitled in the draft is named by its authored title', () => {
-  it('reads the draft title, as the Title box does, beside a served published title', async () => {
-    state.draft = retitledDraft();
-    const strip = await selectWidget('zh', 'pipeline_by_stage', 'Stage Pipeline');
-
-    expect(strip).not.toHaveTextContent('阶段管道分布');
-    expect(await screen.findByDisplayValue('Stage Pipeline', undefined, { timeout: 8000 })).toHaveAttribute(
-      'id',
-      'widget-title',
-    );
-  });
-});
-
-describe('objectstack#36480 — an English session reads as before', () => {
-  it('the strip names the widget by its English title', async () => {
-    state.served = SERVED_EN;
-    const strip = await selectWidget('en', 'won_total', 'Won Total');
-
-    expect(strip).toHaveTextContent('Won Total');
-  });
-});

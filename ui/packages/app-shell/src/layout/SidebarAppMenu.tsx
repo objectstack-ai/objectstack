@@ -74,6 +74,11 @@ export const APP_MENU_SEARCH_FROM = 8;
  * (objectstack#36363: its changes are saved as this environment's
  * customization), except where the customization door is walled off for this
  * caller. Not drawn where no shell holds the mode, nor while the mode is on.
+ *
+ * objectstack#36692 — while a dashboard's or a report's own editor is open
+ * it stays drawn, and choosing it refuses, saying to save or cancel those
+ * changes first: the mode's `enter` refuses while an editor holds it out
+ * (`useHoldDesignModeOut`), so the screen never shows two Save/Cancel sets.
  */
 function useEnterDesignMode(apps: Parameters<typeof matchAppBySegment>[0], activeAppName: string): (() => void) | null {
   const entry = useStudioEntryGate(appStudioDesignPath(matchAppBySegment(apps, activeAppName), true));

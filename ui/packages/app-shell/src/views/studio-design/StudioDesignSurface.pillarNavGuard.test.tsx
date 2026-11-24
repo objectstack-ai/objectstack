@@ -130,7 +130,7 @@ function makeClient(server: Server) {
   return {
     // Serves the Access rail (list('permission')), the embedded matrix
     // (list('object') + object get), the header's app probe (list('app')),
-    // and — after a pillar switch — the Interfaces pillar's app resolution.
+    // and — after a pillar switch — the Automations rail's list.
     // objectstack#26840 — the Access matrix reads its objects through the draft-overlaid door.
     withPreviewDrafts() { return this; },
     list: async (type: string) => {
@@ -241,23 +241,28 @@ const matrixEditSurvived = () => {
   expect(within(row).getByRole('checkbox', { name: 'a_account Read' })).not.toBeChecked();
 };
 
+/** The switch landed: the Automations segment is the current page (objectstack#36502 retired Interfaces, the switch these cases used to make). */
+async function landedOnAutomations() {
+  await waitFor(() => expect(screen.getByRole('link', { name: 'Automations' })).toHaveAttribute('aria-current', 'page'));
+}
+
 describe('Studio header — unsaved pillar edits guard (#2600)', () => {
   it('asks before a pillar switch when dirty; cancel keeps the pillar and its edits', async () => {
     await renderSurfaceOnAccess();
     dirtyTheMatrix();
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(screen.getByRole('link', { name: 'Interfaces' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Automations' }));
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(inSetHeader().getByTitle('set_a')).toBeInTheDocument();
     matrixEditSurvived();
 
-    // Confirming the same switch discards and lands on the Interfaces pillar.
+    // Confirming the same switch discards and lands on the Automations pillar.
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(screen.getByRole('link', { name: 'Interfaces' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Automations' }));
     expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await screen.findByText('This package has no app yet');
+    await landedOnAutomations();
     expect(screen.queryByText('set_a')).not.toBeInTheDocument();
 
     // The discarded pillar reset the guard on unmount — walking back to
@@ -280,7 +285,7 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     fireEvent.click(within(listbox).getByRole('option', { name: owdPrivate }));
 
     confirmSpy.mockReturnValueOnce(false);
-    fireEvent.click(screen.getByRole('link', { name: 'Interfaces' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Automations' }));
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     // Still on the overview, edit intact.
     expect(screen.getByTestId('owd-internal-a_account').textContent).toBe(owdPrivate);
@@ -288,9 +293,9 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
     // Confirming discards and leaves; the unmounting pillar resets the guard,
     // so walking back to Access must NOT prompt again.
     confirmSpy.mockReturnValueOnce(true);
-    fireEvent.click(screen.getByRole('link', { name: 'Interfaces' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Automations' }));
     expect(confirmSpy).toHaveBeenCalledTimes(2);
-    await screen.findByText('This package has no app yet');
+    await landedOnAutomations();
 
     await clickAccessInNav();
     expect(confirmSpy).toHaveBeenCalledTimes(2);
@@ -300,10 +305,10 @@ describe('Studio header — unsaved pillar edits guard (#2600)', () => {
   it('switches pillars without prompting when clean', async () => {
     await renderSurfaceOnAccess();
 
-    fireEvent.click(screen.getByRole('link', { name: 'Interfaces' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Automations' }));
 
     expect(confirmSpy).not.toHaveBeenCalled();
-    await screen.findByText('This package has no app yet');
+    await landedOnAutomations();
   });
 
   it('never prompts when re-clicking the open pillar (nothing unmounts)', async () => {

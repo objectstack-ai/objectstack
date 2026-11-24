@@ -46,7 +46,7 @@ import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor, type AnalyticsSqlDialect } from '../text-match-sql.js';
 import { whereContainsMembershipSql } from '../contains-membership-sql.js';
-import { refuseWhereJsonColumnComparison } from '../json-column-comparison-refusal.js';
+import { refuseWhereJsonColumnComparison, whereComparisonColumnClass } from '../json-column-comparison-refusal.js';
 import { JSON_COLUMN_INCOMPATIBLE_OPERATORS } from '@objectstack/core';
 // [#25778] The per-row operand of a dataset duration measure, per dialect.
 import { durationMeasureIn, durationMeasureKey, durationOperandSql, hasDurationSql } from '../duration-measure-sql.js';
@@ -1130,6 +1130,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       if (!comparison && op !== '$contains' && op !== '$notContains' && op !== '$empty') return false;
       const dialect = sqlDialectFor(ctx, target.object);
       if (comparison ? dialect !== 'unknown' : hasJsonMembershipSql(dialect)) return false;
+      // [#36190] The comparison refusal's population, which the storing
+      // driver's single-value media class joins.
+      if (comparison) return whereComparisonColumnClass(ctx, target) !== undefined;
       const shape = declaredValueShapeResolver(ctx, target.object)?.(target.field);
       if (op === '$empty') return shape !== undefined && expandEmptyOperator(shape).arm === 'multi_value';
       return isJsonStoredShape(shape);

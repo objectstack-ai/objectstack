@@ -58,6 +58,7 @@ import {
   resolveResourceConfig,
 } from './registry.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
+import { servedListColumns, withExtraColumns, type ListColumns } from './servedListColumns.js';
 import { buildPackageScopeOptions } from './package-scope.js';
 import { ENVIRONMENT_SCOPE_QUERY, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
@@ -714,8 +715,15 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     [scopedItems],
   );
 
+  // objectstack#36860 — the served list layout first, then the console's own
+  // columns, then the default (`servedListColumns.tsx` states the precedence).
   const columns = withBundleMemberColumn(
-    config.listColumns ?? defaultColumns(config.primaryKey ?? 'name'),
+    withExtraColumns(
+      servedListColumns(entry?.list, entry?.schema, config.listCells)
+        ?? config.listColumns
+        ?? defaultColumns(config.primaryKey ?? 'name'),
+      config.listExtraColumns,
+    ),
     config.bundleMemberField,
   );
   const typeLabel = translateMetadataType(type, locale, entry?.label ?? type);
@@ -742,9 +750,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // area never wait on them.
   const packagesPending = !envScope && !host && projectPackages === null;
 
-  // Localise default column labels — registered columns keep their
-  // hand-authored labels (consumers may want bespoke wording).
-  const localizeColumnLabel = (col: { key: string; label: string }) => {
+  // Localise a console column's header through `engine.list.col.<key>`. A
+  // served header is already in the reader's locale and is shown as served.
+  const localizeColumnLabel = (col: { key: string; label: string; labelLocalized?: boolean }) => {
+    if (col.labelLocalized) return col.label;
     const tryKey = `engine.list.col.${col.key}`;
     const translated = t(tryKey, locale);
     return translated === tryKey ? col.label : translated;
@@ -1389,7 +1398,6 @@ export function openRowFromClick(e: React.MouseEvent<HTMLElement>, open: () => v
 const ROW_OWN_CONTROLS =
   'a,button,input,select,textarea,label,summary,[role="button"],[role="switch"],[role="checkbox"],[role="menuitem"],[role="link"],[contenteditable="true"]';
 
-type ListColumns = NonNullable<import('./registry.js').MetadataResourceConfig['listColumns']>;
 
 /**
  * objectstack#26649 — the member column of a type whose identity is a pair,

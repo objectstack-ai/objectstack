@@ -75,7 +75,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // (objectui#5134).
 import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
 import type { ColumnSummary, GroupingConfig } from '@objectstack/spec/ui';
-import { canonicalAstOperator, isAggregateCompatibleWithFieldType, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
+import { BOOLEAN_VALUE_TYPES, canonicalAstOperator, isAggregateCompatibleWithFieldType, isVirtualSearchField, platformProvisionsStorage, resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { usePermissions } from '@object-ui/permissions';
 import { RecordDetailPanel } from '@object-ui/plugin-detail';
@@ -1759,10 +1759,11 @@ function kanbanLaneFieldOf(schema: ListViewSchema, objectDef: unknown): string |
  * objectstack#36370 — may a board's lane statistic total a field of `type`?
  * The aggregate × field-type table's `sum` row, the verdict `@objectstack/lint`
  * gives `kanban.summary` (a percent does not add, a formula stores no value),
- * less the true / false class: a board totals numbers, not yes / no counts.
+ * less the spec's boolean class (`BOOLEAN_VALUE_TYPES`, objectstack#36520): a
+ * board totals numbers, not yes / no counts.
  */
 function laneStatisticSums(type: unknown): boolean {
-  return typeof type === 'string' && type !== 'boolean' && type !== 'toggle'
+  return typeof type === 'string' && !BOOLEAN_VALUE_TYPES.has(type)
     && isAggregateCompatibleWithFieldType('sum', type);
 }
 

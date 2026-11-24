@@ -1626,30 +1626,30 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Name",
-        helpText: "Eindeutige Kennung in snake_case"
+        helpText: "Eindeutiger interner Name dieses Dashboards: Kleinbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben (zum Beispiel sales_overview)."
       },
       label: {
         label: "Bezeichnung",
-        helpText: "Anzeigename"
+        helpText: "Der Titel, den Benutzer für dieses Dashboard sehen."
       },
       description: {
         label: "Beschreibung"
       },
       columns: {
         label: "Spalten",
-        helpText: "Rasterspalten (Standard 12)"
+        helpText: "Auf wie vielen Spalten die Widgets angeordnet werden, von 1 bis 24. Leer lassen, damit das Dashboard eine Breite wählt, die zu seinen Widgets passt."
       },
       gap: {
         label: "Abstand",
-        helpText: "Abstand zwischen Widgets in Schritten von 0,25rem (4 = 1rem)"
+        helpText: "Wie viel Platz zwischen den Widgets bleibt. Größere Zahlen rücken sie weiter auseinander; leer lassen für den Standardabstand."
       },
       refreshIntervalSeconds: {
         label: "Aktualisierungsintervall (Sekunden)",
-        helpText: "Automatische Aktualisierung (Sekunden)"
+        helpText: "Wie oft das Dashboard seine Daten neu lädt, in Sekunden. Leer lassen oder 0 eingeben, um das automatische Neuladen auszuschalten."
       },
       header: {
         label: "Kopfzeile",
-        helpText: "Konfiguration der Dashboard-Kopfzeile (Titel, Untertitel, Aktionen)"
+        helpText: "Was oben im Dashboard angezeigt wird: Titel, Beschreibung und Aktionsschaltflächen."
       },
       "header.showTitle": {
         label: "Titel anzeigen",
@@ -1677,7 +1677,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Dashboard-Widgets mit Position und Größe"
+        helpText: "Die Diagramme, Kennzahlen und Tabellen dieses Dashboards und wo jedes davon steht."
       },
       "widgets.id": {
         label: "Widget-ID"
@@ -1732,11 +1732,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Datumsbereich",
-        helpText: "Standardauswahl des Datumsbereichs"
+        helpText: "Der Zeitraum, mit dem das Dashboard öffnet, und ob Betrachter selbst einen Zeitraum wählen dürfen."
       },
       globalFilters: {
         label: "Globale Filter",
-        helpText: "Auf alle Widgets angewendete Filter"
+        helpText: "Filter, mit denen Betrachter alle Widgets auf einmal eingrenzen können oder nur die von Ihnen gewählten."
       },
       "globalFilters.name": {
         label: "Filtername"

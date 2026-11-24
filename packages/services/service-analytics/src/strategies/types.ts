@@ -17,6 +17,7 @@ export type {
 
 import type { FilterCondition, FixedReadLeaf, ValueShapeFieldDef } from '@objectstack/spec/data';
 import type { IObjectQLEngine, StrategyContext } from '@objectstack/spec/contracts';
+import type { JsonColumnFieldClass } from '@objectstack/core';
 import type { DATASET_DURATION_AGGREGATES, DatasetDurationUnit } from '@objectstack/spec/ui';
 
 /**
@@ -183,6 +184,25 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * declaration-free SQL for it (`empty-operator-sql.ts` says why).
    */
   declaredValueShape?(objectName: string, field: string): ValueShapeFieldDef | undefined;
+  /**
+   * [#36190] Which class of JSON column `field` on `objectName` is ON THIS
+   * DEPLOYMENT, as the driver that stores it answers
+   * (`SqlDriver.jsonColumnFieldClass`): `'single-value-media'` for a
+   * single-value `file` / `image` / `avatar` / `video` / `audio` field the
+   * ADR-0104 window still stores as JSON, `'multi-value-or-json'` for every
+   * other JSON column, `undefined` when it is not a JSON column there or the
+   * host cannot answer (no data engine, a driver without the member).
+   *
+   * The one JSON-column class {@link declaredValueShape} cannot name: the
+   * declaration says `image`, and whether that column holds a JSON string or
+   * a bare id is the deployment's storage state. The scalar-comparison
+   * refusal (`json-column-comparison-refusal.ts`) reads it beside the
+   * declared shape. Declared HERE rather than on the spec's
+   * {@link StrategyContext} for the reason `declaredFieldType` is: nothing
+   * about it is an authorable surface, and a strategy that does not know the
+   * hook keeps the behaviour it had.
+   */
+  jsonColumnFieldClass?(objectName: string, field: string): JsonColumnFieldClass | undefined;
   /**
    * [#15684] The SQL dialect of the datasource backing `objectName` —
    * `'sqlite'` / `'postgres'` / `'mysql'`, or `undefined` when the host cannot

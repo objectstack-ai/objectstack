@@ -433,10 +433,23 @@ function refusalEnvelopeMessage(
     locale: string | undefined,
 ): string {
     return flowFailureMessage(
-        { userMessage: declaredUserMessage((json as { error?: unknown } | null | undefined)?.error) },
+        { userMessage: refusalBodyUserMessage(json) },
         actionErrorDetail(json, fallback),
         locale,
     );
+}
+
+/**
+ * A refusal body's producer-marked `userMessage`, from the two members
+ * `@objectstack/client` lifts it from: the ADR-0112 envelope's
+ * `error.userMessage`, else the top level of a flat `{ code, error }` body —
+ * the dialect the approvals door answers, where a decide refusal carries the
+ * decider's own language (objectstack#36463). One predicate for both:
+ * `declaredUserMessage`, so a blank or non-string value is no marking.
+ */
+function refusalBodyUserMessage(json: unknown): string | null {
+    const body = json as { error?: unknown; userMessage?: unknown } | null | undefined;
+    return declaredUserMessage(body?.error) ?? declaredUserMessage({ userMessage: body?.userMessage });
 }
 
 /**

@@ -98,10 +98,11 @@ export const TYPE_STATE_WORD_KEY: Readonly<Record<TypeStateWord, string>> = Obje
 /**
  * objectstack#30062 — whether Studio offers Customize on a read-only base's
  * item of `type`, read from the doors that offer it, never from the type's
- * overlay flag: the Interfaces pillar's header ({@link isStudioCustomizeType}),
+ * overlay flag: the app's navigation customize ({@link isStudioCustomizeType}),
  * the All metadata area's form editor ({@link AREA_FORM_EDITOR_TYPES}) and
- * its customize editor on a read-only package ({@link AREA_CUSTOMIZE_EDITOR_TYPES},
- * a dataset, objectstack#30064), and the Automations pillar's flow header
+ * its customize editor on a read-only package ({@link AREA_CUSTOMIZE_EDITOR_TYPES}:
+ * a dataset, objectstack#30064; a view, dashboard, report or page since
+ * objectstack#36502 retired the Interfaces pillar), and the Automations pillar's flow header
  * (objectstack#28570). A door added to one of those lists moves its type's
  * tile with it.
  *

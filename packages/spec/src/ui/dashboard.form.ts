@@ -11,8 +11,8 @@ export const dashboardForm = defineForm({
       description: 'Dashboard identity and description.',
       columns: 2,
       fields: [
-        { field: 'name', type: 'text', required: true, colSpan: 1, helpText: 'snake_case unique identifier' },
-        { field: 'label', type: 'text', required: true, colSpan: 1, helpText: 'Display name' },
+        { field: 'name', type: 'text', required: true, colSpan: 1, helpText: 'A unique internal name for this dashboard: lowercase letters, numbers and underscores, starting with a letter (for example sales_overview).' },
+        { field: 'label', type: 'text', required: true, colSpan: 1, helpText: 'The title people see for this dashboard.' },
         { field: 'description', type: 'textarea', colSpan: 2 },
       ],
     },
@@ -21,14 +21,14 @@ export const dashboardForm = defineForm({
       description: 'Grid sizing and refresh cadence.',
       columns: 3,
       fields: [
-        { field: 'columns', type: 'number', colSpan: 1, helpText: 'Grid columns (default 12)' },
-        { field: 'gap', type: 'number', colSpan: 1, helpText: 'Space between widgets, in steps of 0.25rem (4 = 1rem)' },
-        { field: 'refreshIntervalSeconds', type: 'number', colSpan: 1, helpText: 'Auto-refresh (seconds)' },
+        { field: 'columns', type: 'number', colSpan: 1, helpText: 'How many columns the widgets are laid out on, from 1 to 24. Leave it empty and the dashboard picks a width that fits its widgets.' },
+        { field: 'gap', type: 'number', colSpan: 1, helpText: 'How much space to leave between widgets. Larger numbers spread them further apart; leave it empty for the standard spacing.' },
+        { field: 'refreshIntervalSeconds', type: 'number', colSpan: 1, helpText: 'How often the dashboard reloads its data, in seconds. Leave it empty or enter 0 to turn automatic reloading off.' },
         {
           field: 'header',
           type: 'composite',
           colSpan: 3,
-          helpText: 'Dashboard header config (title, subtitle, actions)',
+          helpText: 'What shows at the top of the dashboard: its title, its description and action buttons.',
           // The children are ENUMERATED (#16458) so `os i18n extract` emits a
           // `metadataForms.dashboard.fields['header.<child>']` key for each one
           // and the platform catalogs can name them. All three — the console
@@ -67,7 +67,7 @@ export const dashboardForm = defineForm({
           field: 'widgets',
           type: 'repeater',
           required: true,
-          helpText: 'Dashboard widgets with position and sizing',
+          helpText: 'The charts, numbers and tables on this dashboard, and where each one sits.',
           // Row-property names (#17508): every authorable row property, `label`
           // equal to the item schema's `.meta({ title })`, so `os i18n extract`
           // emits a catalog key per column and the panel keeps its schema-derived
@@ -100,11 +100,11 @@ export const dashboardForm = defineForm({
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'dateRange', type: 'composite', helpText: 'Default date range selector' },
+        { field: 'dateRange', type: 'composite', helpText: 'The period the dashboard opens with, and whether viewers may pick their own dates.' },
         {
           field: 'globalFilters',
           type: 'repeater',
-          helpText: 'Filters applied to all widgets',
+          helpText: 'Filters viewers can use to narrow every widget at once, or only the widgets you choose.',
           // Row-property names (#17508): every authorable row property, `label`
           // equal to the item schema's `.meta({ title })`, so `os i18n extract`
           // emits a catalog key per column and the panel keeps its schema-derived

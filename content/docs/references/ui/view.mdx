@@ -59,8 +59,8 @@ nothing. The one item-name grammar itself lives in
 ## TypeScript Usage
 
 ```typescript
-import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, KanbanLaneSummarySchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TimesheetConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
-import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, KanbanLaneSummary, ListChartConfig, ListColumn, ListMapConfig, ListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TimesheetConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
+import { AddRecordConfigSchema, AppearanceConfigSchema, CalendarConfigSchema, ColumnPrefixSchema, ColumnSummarySchema, ColumnSummaryConfigSchema, EmptyStateSchema, FormButtonConfigSchema, FormFieldSchema, FormSectionSchema, FormSelectOptionSchema, FormViewSchema, GalleryConfigSchema, GanttConfigSchema, GanttQuickFilterSchema, GroupingConfigSchema, GroupingFieldSchema, HttpMethodSubsetSchema, HttpRequestSchema, KanbanConfigSchema, KanbanLaneSummarySchema, ListChartConfigSchema, ListColumnSchema, ListMapConfigSchema, ListViewSchema, MetadataListCellTypeSchema, MetadataListColumnSchema, MetadataListViewSchema, NavigationConfigSchema, NavigationModeSchema, ObjectListViewSchema, ObjectUserFiltersSchema, PaginationConfigSchema, RowColorConfigSchema, RowHeightSchema, SelectionConfigSchema, TimelineConfigSchema, TimesheetConfigSchema, TreeConfigSchema, UserActionsConfigSchema, UserFilterFieldSchema, UserFiltersSchema, ViewSchema, ViewDataSchema, ViewFilterElementSchema, ViewFilterOrGroupSchema, ViewFilterRuleSchema, ViewItemSchema, ViewItemNameSchema, ViewItemWireSchema, ViewKindSchema, ViewScopeSchema, ViewSharingSchema, ViewTabSchema, VisualizationTypeSchema } from '@objectstack/spec/ui';
+import type { AddRecordConfig, AppearanceConfig, CalendarConfig, ColumnPrefix, ColumnSummary, ColumnSummaryConfig, EmptyState, FormButtonConfig, FormField, FormSection, FormSelectOption, FormView, GalleryConfig, GanttConfig, GanttQuickFilter, GroupingConfig, HttpMethodSubset, HttpRequest, KanbanConfig, KanbanLaneSummary, ListChartConfig, ListColumn, ListMapConfig, ListView, MetadataListCellType, MetadataListColumn, MetadataListView, NavigationConfig, NavigationMode, PaginationConfig, RowColorConfig, RowHeight, SelectionConfig, TimelineConfig, TimesheetConfig, TreeConfig, UserActionsConfig, UserFilterField, UserFilters, View, ViewData, ViewFilterElement, ViewFilterOrGroup, ViewFilterRule, ViewItem, ViewItemName, ViewItemWire, ViewKind, ViewScope, ViewSharing, ViewTab, VisualizationType } from '@objectstack/spec/ui';
 
 // Validate data
 const result = AddRecordConfigSchema.parse(data);
@@ -689,7 +689,7 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
-| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string }` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over the cards the lane has loaded, not every record of the lane (the foot says so when the lane holds more); `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string } \| { type: 'avg'; field: string } \| … +2 more` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over all of the lane records, `avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query (a field the reader may not read shows no figure); `{ type: 'none' }` shows nothing. Known gap: on a board given its records by its host instead of querying them (in a list view, lanes over a lookup field or a view with grouping), `sum` totals the records handed in, one page, unmarked, and the other three show nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
 | **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
 | **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
@@ -700,14 +700,35 @@ HTTP methods a view data source may request — the subset of `HttpMethod` witho
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `'sum'` | ✅ |  |
-| **field** | `string` | ✅ | The number field the lane totals over its loaded cards (e.g. amount) |
+| **field** | `string` | ✅ | The number field the lane totals over all of its records (e.g. amount) |
+
+### Nested Shape: `KanbanConfig.summary[type='avg']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'avg'` | ✅ |  |
+| **field** | `string` | ✅ | The number field the lane averages over all of its records (e.g. amount) |
+
+### Nested Shape: `KanbanConfig.summary[type='min']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'min'` | ✅ |  |
+| **field** | `string` | ✅ | The field whose smallest value over all of the lane's records the lane shows (e.g. amount) |
+
+### Nested Shape: `KanbanConfig.summary[type='max']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'max'` | ✅ |  |
+| **field** | `string` | ✅ | The field whose largest value over all of the lane's records the lane shows (e.g. amount) |
 
 
 ---
 
 ## KanbanLaneSummary
 
-Lane foot statistic: none, the count of the lane's records, or the sum of a number field over the lane's loaded cards
+Lane foot statistic: none, the count of the lane's records, or the sum, average, minimum or maximum of a field over all of the lane's records
 
 ### Union Options
 
@@ -746,7 +767,46 @@ This schema accepts one of the following structures:
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `'sum'` | ✅ |  |
-| **field** | `string` | ✅ | The number field the lane totals over its loaded cards (e.g. amount) |
+| **field** | `string` | ✅ | The number field the lane totals over all of its records (e.g. amount) |
+
+---
+
+#### Option 4
+
+**Type:** `avg`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'avg'` | ✅ |  |
+| **field** | `string` | ✅ | The number field the lane averages over all of its records (e.g. amount) |
+
+---
+
+#### Option 5
+
+**Type:** `min`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'min'` | ✅ |  |
+| **field** | `string` | ✅ | The field whose smallest value over all of the lane's records the lane shows (e.g. amount) |
+
+---
+
+#### Option 6
+
+**Type:** `max`
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'max'` | ✅ |  |
+| **field** | `string` | ✅ | The field whose largest value over all of the lane's records the lane shows (e.g. amount) |
 
 ---
 
@@ -846,11 +906,11 @@ Map view configuration
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -983,7 +1043,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
-| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string }` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over the cards the lane has loaded, not every record of the lane (the foot says so when the lane holds more); `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string } \| { type: 'avg'; field: string } \| … +2 more` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over all of the lane records, `avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query (a field the reader may not read shows no figure); `{ type: 'none' }` shows nothing. Known gap: on a board given its records by its host instead of querying them (in a list view, lanes over a lookup field or a view with grouping), `sum` totals the records handed in, one page, unmarked, and the other three show nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
 | **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
 | **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
@@ -1202,6 +1262,83 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 
 ---
 
+## MetadataListCellType
+
+How a metadata list cell draws its value
+
+### Allowed Values
+
+* `text`
+* `badge`
+* `boolean`
+* `count`
+* `list`
+* `summary`
+
+
+---
+
+## MetadataListColumn
+
+One column of a metadata type list
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Key of the metadata type's schema: a top-level key, or a dotted path into it |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **type** | `Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'>` | optional | Cell renderer; `text` when absent |
+
+
+---
+
+## MetadataListView
+
+List layout of a metadata type: its schema binding and its columns
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **data** | `{ provider: 'object'; object: string } \| { provider: 'value'; items: any[] } \| { provider: 'schema'; schemaId: string; schema?: Record<string, any> }` | optional | Data source configuration (defaults to "object" provider) |
+| **columns** | `{ field: string; label?: string \| Record<string, string>; type?: Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'> }[]` | ✅ | Columns of the list, in display order |
+
+### Nested Shape: `MetadataListView.data[provider='object']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'object'` | ✅ |  |
+| **object** | `string` | ✅ | Target object name |
+
+### Nested Shape: `MetadataListView.data[provider='value']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'value'` | ✅ |  |
+| **items** | `any[]` | ✅ | Static data array |
+
+### Nested Shape: `MetadataListView.data[provider='schema']`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **provider** | `'schema'` | ✅ |  |
+| **schemaId** | `string` | ✅ | Schema identifier — typically the metadata type name |
+| **schema** | `Record<string, any>` | optional | Inline JSON Schema (Draft 2020-12). Optional when schemaId is resolvable. |
+
+### Nested Shape: `MetadataListView.columns[number]`
+
+One column of a metadata type list
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Key of the metadata type's schema: a top-level key, or a dotted path into it |
+| **label** | `string \| Record<string, string>` | optional | Display label override |
+| **type** | `Enum<'text' \| 'badge' \| 'boolean' \| 'count' \| 'list' \| 'summary'>` | optional | Cell renderer; `text` when absent |
+
+
+---
+
 ## NavigationConfig
 
 ### Properties
@@ -1246,11 +1383,11 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1374,7 +1511,7 @@ An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its rules ma
 | **groupByField** | `string` | ✅ | Field to group columns by (usually status/select). NO leading or trailing whitespace: the board reads this name off every card verbatim, so a padded spelling collapses the whole board into one `Uncategorized` lane. |
 | **lanes** | `string[]` | optional | The lanes the board draws, in this order: stored option values of the groupByField field (the option `value`, not its label). Omit to draw one lane per option in the options' own order. A record whose value is not listed is not hidden: it lands in the `Uncategorized` lane, as a record whose value matches no lane does. To keep records off the board, filter the view. List each value once. |
 | **summarizeField** | `string` | optional | Field to sum at top of column (e.g. amount) |
-| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string }` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over the cards the lane has loaded, not every record of the lane (the foot says so when the lane holds more); `{ type: 'none' }` shows nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
+| **summary** | `{ type: 'none' } \| { type: 'count' } \| { type: 'sum'; field: string } \| { type: 'avg'; field: string } \| … +2 more` | optional | The statistic each lane shows at its foot. `{ type: 'count' }` counts the lane records; `{ type: 'sum', field: 'amount' }` totals a number field over all of the lane records, `avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query (a field the reader may not read shows no figure); `{ type: 'none' }` shows nothing. Known gap: on a board given its records by its host instead of querying them (in a list view, lanes over a lookup field or a view with grouping), `sum` totals the records handed in, one page, unmarked, and the other three show nothing. Takes precedence over summarizeField. Omit to keep summarizeField's sum, or no statistic without it. |
 | **showFieldLabels** | `boolean` | optional | Whether each card names its fields beside their values. Omit for true (names shown); false shows the values alone. |
 | **hideEmptyFields** | `boolean` | optional | Whether a card leaves out a field that holds no value. Omit for true (left out); false keeps the field with an empty value. |
 | **titleField** | `string` | optional | Field displayed as the card title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
@@ -1853,11 +1990,11 @@ Tab configuration for multi-tab view interface
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -1933,11 +2070,11 @@ Tab configuration for multi-tab view interface
 | **searchableFields** | `string[]` | optional | Fields enabled for search |
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2231,11 +2368,11 @@ This schema accepts one of the following structures:
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
@@ -2420,11 +2557,11 @@ This schema accepts one of the following structures:
 | **filterableFields** | `never` | optional | [REMOVED] `view.list.filterableFields` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — the key was declared as a shorthand for `userFilters.fields` (the quick-filter bar), but the one renderer that read it used it as a whitelist of the fields the Filter panel offers instead, so one key carried two meanings and drew no quick filter. Delete the key; no per-view Filter-panel whitelist replaces it. For a curated end-user filter bar, declare `userFilters: { element: 'dropdown', fields: [{ field: '<field_name>' }] }`. The Filter panel offers every field the user may read: field read security decides, and a field the object definition marks `hidden: true` is not offered. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **userFilters** | `{ element?: Enum<'dropdown' \| 'tabs' \| 'toggle'>; fields?: object[]; tabs?: object[]; showAllRecords?: boolean; … }` | optional | End-user quick-filter bar: dropdown/toggle fields or tab presets. Omit to let the renderer derive filters from select/boolean fields |
 | **resizable** | `boolean` | optional | Enable column resizing |
-| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover |
+| **compactToolbar** | `boolean` | optional | Collapse Group/Color/Density/Hide-fields into a single View settings popover. On by default: omitted or `true`, the renderer draws this compact toolbar; `false` draws the wide toolbar, one button per control. The compact toolbar draws no Refresh button, so `userActions.refresh` governs only the wide toolbar; pull-to-refresh is unaffected by either key. |
 | **selection** | `{ type?: Enum<'none' \| 'single' \| 'multiple'> }` | optional | Row selection configuration |
 | **navigation** | `{ mode?: Enum<'drawer' \| 'page' \| 'new_window' \| 'none'>; preventNavigation?: boolean; openNewTab?: boolean; size?: Enum<'auto' \| 'sm' \| 'md' \| 'lg' \| 'xl' \| 'full'>; … }` | optional | Configuration for item click navigation: the drawer size, and `preventNavigation` for a list whose rows open nothing (`mode` is deprecated — the record name opens the page, the hover icon the side panel) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
-| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| object \| object; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
+| **kanban** | `{ groupByField: string; lanes?: string[]; summarizeField?: string; summary?: object \| … +5 more; … }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string; … }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |

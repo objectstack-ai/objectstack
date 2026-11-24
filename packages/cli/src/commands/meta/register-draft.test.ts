@@ -344,7 +344,7 @@ describe('[#34777] the `--mode` flag `os meta register` declares', () => {
     expect(head).toContain('view/v');
     expect(head).toContain('not published');
     expect(head).toContain('hmac-sha256:ab');
-    expect(review).toContain(`/studio/${PKG}/interfaces?changes=review`);
+    expect(review).toContain(`/studio/${PKG}/data?changes=review`);
   });
 
   it('[ruling D4] `--mode draft` naming no package is refused, and the refusal names `--package <id>`', () => {
@@ -386,7 +386,7 @@ describe('[#34777] `os meta register --mode draft` against the real save door', 
 
     expect(run.exitCode).toBe(0);
     expect(run.out).toContain('Draft saved: view/draft_view');
-    expect(run.out).toContain(`/studio/${PKG}/interfaces?changes=review`);
+    expect(run.out).toContain(`/studio/${PKG}/data?changes=review`);
     expect(run.out).not.toContain('Metadata registered');
     // The save, then the strict draft read of the same package, and nothing else.
     expect(requests(wire)).toEqual([

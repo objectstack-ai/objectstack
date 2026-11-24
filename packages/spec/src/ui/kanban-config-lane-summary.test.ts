@@ -6,10 +6,11 @@
  *
  * Legs: the three keys are members of the bare block and of a list view's
  * `kanban` block; absence writes nothing (no spec default, so a stored view is
- * unchanged); `summary` takes only what the board computes, `none`, `count`
- * and the `sum` of a named field, and refuses `avg` / `min` / `max` (which wait
- * for a server lane read) and a `sum` without its field. Whether the field is a
- * number is judged against the object by `@objectstack/lint`
+ * unchanged); `summary` takes `none`, `count`, and the `sum`, `avg`, `min`
+ * and `max` of a named field (objectstack#36520: the server lane read answers
+ * all four over every record of the lane), and refuses an aggregate without its
+ * field and any other calculation. Whether the field's type takes the aggregate
+ * is judged against the object by `@objectstack/lint`
  * (`validate-list-view-field-refs`), which pins it.
  */
 
@@ -31,20 +32,29 @@ describe('KanbanConfigSchema: the lane statistic and the two card toggles', () =
     for (const key of ['summary', 'showFieldLabels', 'hideEmptyFields']) expect(parsed).not.toHaveProperty(key);
   });
 
-  it('takes none, count and a field\'s sum', () => {
-    for (const summary of [{ type: 'none' }, { type: 'count' }, { type: 'sum', field: 'amount' }]) {
+  it('takes none, count and a field\'s sum, average, minimum and maximum', () => {
+    for (const summary of [
+      { type: 'none' },
+      { type: 'count' },
+      { type: 'sum', field: 'amount' },
+      { type: 'avg', field: 'amount' },
+      { type: 'min', field: 'amount' },
+      { type: 'max', field: 'amount' },
+    ]) {
       expect(KanbanLaneSummarySchema.safeParse(summary).success, JSON.stringify(summary)).toBe(true);
     }
   });
 
-  it('refuses what the board does not compute, a sum without its field, and a stray key', () => {
+  it('refuses what the board does not compute, an aggregate without its field, and a stray key', () => {
     for (const summary of [
-      { type: 'avg', field: 'amount' },
-      { type: 'min', field: 'amount' },
-      { type: 'max', field: 'amount' },
       { type: 'count_unique', field: 'amount' },
+      { type: 'median', field: 'amount' },
       { type: 'sum' },
       { type: 'sum', field: '' },
+      { type: 'avg' },
+      { type: 'min', field: '' },
+      { type: 'max' },
+      { type: 'avg', field: 'amount', extra: true },
       { type: 'count', field: 'amount' },
       'sum',
     ]) {

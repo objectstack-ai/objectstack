@@ -518,8 +518,18 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // which would be a new defect rather than a restored behaviour. What the
   // contract governs is what a READER sees, and that is what this leaves
   // unchanged.
+  //
+  // objectstack#36593 — the hide holds only WHILE THE READER HIDES EMPTY
+  // FIELDS. Once they show them (the field list's one 「显示 N 个空字段」 row,
+  // or the per-object choice a section's own toggle writes), the section draws
+  // like any kept all-empty one, and in the field list its rows are counted by
+  // that row before it is pressed. Authored `true` and the renderer default
+  // read the same here: nothing tells them apart, and the default page's
+  // declared groups carry the default. A print page has no toggle, so paper
+  // keeps the hide.
   const allFieldsEmpty = section.fields.length > 0 && filledCount === 0;
-  const hideAllEmptySection = section.hideEmpty === true && allFieldsEmpty && !isEditing;
+  const readerShowsEmpty = !isPrintPage && (foldsIntoList ? fieldList?.showEmpty === true : showEmptyOverride);
+  const hideAllEmptySection = section.hideEmpty === true && allFieldsEmpty && !isEditing && !readerShowsEmpty;
 
   // objectui#13386 (ruling C, batch #7 item 4, maintainer 2026-10-23) — what a
   // KEPT all-empty section draws for a reader: its heading plus ONE fold row,
@@ -542,19 +552,18 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   const foldAllEmptySection =
     !foldsIntoList && allFieldsEmpty && !hideAllEmptySection && !isEditing && !isPrintPage;
 
-  // The authored all-empty hide is not the reader's to undo: it applies
-  // whatever the reader's "show empty fields" choice is, now that the choice is
-  // one per object and reaches sections that never drew the toggle
-  // (objectstack#25883).
+  // The all-empty hide yields to the reader's "show empty fields" choice
+  // (objectstack#36593, above); that choice is one per object and reaches
+  // sections that never drew the toggle (objectstack#25883).
   const hideEmptyEffective =
     hideAllEmptySection ||
     (foldsIntoList
       ? fieldList?.showEmpty !== true && !isEditing
       : !showEmptyOverride && (shouldAutoHideEmpty || foldAllEmptySection));
   // In a field list the group's empty rows are the list's to count, hidden
-  // or shown: an all-empty group then draws nothing until they are shown.
-  // An authored all-empty hide is not the reader's to undo, so not counted.
-  useReportEmptyFields(foldsIntoList && !isEditing && !hideAllEmptySection ? emptyCount : 0);
+  // or shown: an all-empty group then draws nothing until they are shown,
+  // `hideEmpty` on or off (objectstack#36593).
+  useReportEmptyFields(foldsIntoList && !isEditing ? emptyCount : 0);
 
   // Filter out empty fields when the auto-hide heuristic kicked in, when an
   // all-empty section is folded, or when one is hiding itself (its early

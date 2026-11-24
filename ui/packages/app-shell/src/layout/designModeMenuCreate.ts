@@ -15,9 +15,8 @@
  *
  * 1. every check of the menu save is made first, and nothing is written
  *    before they pass;
- * 2. the item is created and published in that package (a dashboard empty,
- *    `saveDashboardInPlace`; a report as the builder made it,
- *    `saveAndPublishInPackage`), so everyone the menu shows it to finds it,
+ * 2. the item is created, empty, and published in that package
+ *    (`saveDashboardInPlace`), so everyone the menu shows it to finds it,
  *    never a missing one;
  * 3. the menu is written and published (`writeAppMenu`), the new entry and
  *    every other staged menu edit with it;
@@ -25,12 +24,9 @@
  *    (the item's delete in its package), and the refusal is said. Should that
  *    removal be refused too, the refusal says the item was left.
  *
- * A dashboard is created from its name alone. A report is not: the spec
- * refuses a report without `dataset` and `values`, so 「New report…」 opens
- * the report builder instead (the seat's option A), and the report is
- * created here, by the same steps, with the body the builder made, once the
- * builder saves (`designModeReportSlot`). Cancelling the builder writes
- * nothing.
+ * Only a dashboard is created here, from its name alone. A report is never
+ * made from the design mode (objectstack#36692): it is made from the reports
+ * index, with its own Save, and the menu then links it.
  *
  * @module
  */
@@ -38,12 +34,12 @@
 import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from '../views/metadata-admin/createDerive.js';
 import { loadHanRomanizer, romanizeHan, romanizerPending } from '../views/metadata-admin/romanizeHan.js';
-import { saveAndPublishInPackage, saveDashboardInPlace } from '../views/runtime-metadata-persistence.js';
-import type { Menu } from './designModeMenuModel.js';
+import { saveDashboardInPlace } from '../views/runtime-metadata-persistence.js';
 import {
   prepareAppMenuSave,
   writeAppMenu,
   type AppMenuSaveDoors,
+  type AppMenuSaveInput,
   type AppMenuSaveTexts,
 } from './designModeMenuSave.js';
 
@@ -51,20 +47,16 @@ import {
 export const NEW_MENU_ITEM_KINDS = ['dashboard'] as const;
 export type NewMenuItemKind = (typeof NEW_MENU_ITEM_KINDS)[number];
 
-/** Every kind a menu entry can be created with: a report comes from the report builder. */
-export type CreatedMenuItemKind = NewMenuItemKind | 'report';
-
 export function isNewMenuItemKind(kind: string): kind is NewMenuItemKind {
   return (NEW_MENU_ITEM_KINDS as readonly string[]).includes(kind);
 }
 
-/**
- * The thing to create: its kind, its machine name and the name the reader
- * gave it; a report also carries the body the report builder made.
- */
-export type NewMenuItem =
-  | { readonly kind: NewMenuItemKind; readonly name: string; readonly label: string }
-  | { readonly kind: 'report'; readonly name: string; readonly label: string; readonly body: Record<string, unknown> };
+/** The thing to create: its kind, its machine name and the name the reader gave it. */
+export interface NewMenuItem {
+  readonly kind: NewMenuItemKind;
+  readonly name: string;
+  readonly label: string;
+}
 
 /** The sentences a refused create is said with, in the viewer's language. */
 export interface NewMenuItemTexts extends AppMenuSaveTexts {
@@ -121,14 +113,9 @@ export async function freeItemName(
   throw new Error(`No free ${kind} name was found for "${label}".`);
 }
 
-/** The body a new `kind` is created with: an empty dashboard, or the report the builder made. */
+/** The body a new `kind` is created with: an empty dashboard. */
 export function newItemBody(item: NewMenuItem): Record<string, unknown> {
-  switch (item.kind) {
-    case 'dashboard':
-      return { name: item.name, label: item.label, widgets: [] };
-    case 'report':
-      return { ...item.body, name: item.name };
-  }
+  return { name: item.name, label: item.label, widgets: [] };
 }
 
 /**
@@ -137,23 +124,18 @@ export function newItemBody(item: NewMenuItem): Record<string, unknown> {
  * same package; when the menu is refused, the item is removed again.
  */
 export async function saveAppMenuWithNewItem(
-  input: { appName: string; packageId: string; served: Menu; navigation: Menu; item: NewMenuItem },
+  input: AppMenuSaveInput & { item: NewMenuItem },
   texts: NewMenuItemTexts,
   doors: AppMenuSaveDoors,
 ): Promise<void> {
   const { item } = input;
   const prepared = await prepareAppMenuSave(input, texts, doors);
-  const outcome =
-    item.kind === 'dashboard'
-      ? await saveDashboardInPlace(
-          item.name,
-          newItemBody(item),
-          { kind: 'package', packageId: prepared.target },
-          { metadataClient: doors.client },
-        )
-      : await saveAndPublishInPackage(item.kind, item.name, newItemBody(item), prepared.target, {
-          metadataClient: doors.client,
-        });
+  const outcome = await saveDashboardInPlace(
+    item.name,
+    newItemBody(item),
+    { kind: 'package', packageId: prepared.target },
+    { metadataClient: doors.client },
+  );
   if (outcome === 'pending-draft') throw new Error(texts.itemPendingDraft);
   try {
     await writeAppMenu(prepared, texts, doors);
