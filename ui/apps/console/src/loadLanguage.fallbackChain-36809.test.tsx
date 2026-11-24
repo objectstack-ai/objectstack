@@ -23,6 +23,7 @@ import {
 import { TokenStorage } from '@object-ui/auth';
 import { loadLanguage } from './loadLanguage';
 import { publishAuthState } from './i18nSession';
+import { __resetLocalesRead } from './localesRead';
 
 const FLOW = 'deal_review';
 const ZH = { flows: { [FLOW]: { nodes: { score_deal: { label: '评分' } } } } };
@@ -63,6 +64,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // One /i18n/locales read per page load (cloud#4964): each case is its own page load.
+  __resetLocalesRead();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   TokenStorage.clear();

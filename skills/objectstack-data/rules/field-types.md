@@ -40,15 +40,15 @@ const fields = {
 | `phone` | Phone numbers | `format` |
 | `password` | ⚠️ Masked-on-read input. On a generic object the value is stored **PLAINTEXT at rest**. Prefer `secret` for credentials; a generic `password` field triggers a build warning | `minLength`, `maxLength` |
 | `secret` | Reversible **encrypted-at-rest** credential (DB password, API key, token) — encrypted on write via `ICryptoProvider`, masked on read, fail-closed (ADR-0100) | — |
-| `markdown` | Markdown-formatted content | `maxLength` |
-| `html` | Raw HTML content | `maxLength` |
-| `richtext` | WYSIWYG rich text editor | `maxLength` |
+| `markdown` | Markdown content | `maxLength` |
+| `html` | Raw HTML | `maxLength` |
+| `richtext` | WYSIWYG editor | `maxLength` |
 
 ## Numbers
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
+| `number` | Numeric value | `min`, `max`, `precision`, `scale` |
 | `currency` | Monetary amounts | `currencyConfig` (→ Currency) |
 | `percent` | Percentage; stored as a fraction (0-1) unless the field declares `max` above 1 (`max: 100`), then whole points; seeds, defaults, API values use that scale | `min`, `max`, `precision`, `percentDisplay` — the read-only face: unset or `'bar'` draws a progress bar, `'plain'` the number alone, for a rate or a probability |
 
@@ -56,15 +56,15 @@ const fields = {
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `date` | Date only (no time component) | `defaultValue` |
-| `datetime` | Full date + time | `defaultValue` |
-| `time` | Time only (no date component) | `defaultValue`, `format` |
+| `date` | Date only | `defaultValue` |
+| `datetime` | Date + time | `defaultValue` |
+| `time` | Time only | `defaultValue`, `format` |
 
 ## Logic
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `boolean` | Standard checkbox | `defaultValue` |
+| `boolean` | Checkbox | `defaultValue` |
 | `toggle` | Toggle switch (distinct UI from checkbox) | `defaultValue` |
 
 ## Selection
@@ -94,22 +94,25 @@ options: [
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
 | `user` | Person picker — a lookup specialized to `sys_user` (reviewer, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default; declared, as on `lookup`: relationships.md → Delete Behaviors) |
 
-**`lookupAutofill: [{ target, source, overwrite? }]`** (single-value `lookup` /
-`master_detail`): a pick copies the picked record's `source` into this object's
-`target` (`[{ target: 'unit_price', source: 'list_price' }]` on a product lookup),
-in the form and the line-item grid. `target`: a field of this object an author
-writes (not the lookup, `readonly` or computed), named once. `source`: a declared,
-non-`internal` field of `reference` the target can hold. A pick fills an empty
-target or an earlier pick's fill; `overwrite: true` always replaces. Client-side
-only; in a grid a declared target leaves the same-named `autofill` copy.
+**`lookupAutofill: [{ target, source, overwrite? }]`** (single-value only): a
+pick copies the picked record's `source` into this object's `target`
+(`unit_price` from a product's `list_price`), in the form and the line-item
+grid. `target`: a field of this object an author writes (not the lookup,
+`readonly` or computed), named once. `source`: a declared, non-`internal` field
+of `reference` the target can hold. A pick fills an empty target or an earlier
+pick's fill; `overwrite: true` always replaces. Client-side only; in a grid a
+declared target leaves the same-named `autofill` copy. Either copy moves a
+`currency` amount only between fields in the same currency (`fixed` or
+per-record); else the target is left as it was and the form says why. Nothing
+is converted.
 
 ## Media
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
 | `image` | Image files (PNG, JPG, GIF, WebP) | `multiple` |
-| `file` | Generic file attachments | `multiple` |
-| `avatar` | User/profile picture | — |
+| `file` | File attachments | `multiple` |
+| `avatar` | Profile picture | — |
 | `video` | Video files | — |
 | `audio` | Audio files | — |
 
@@ -135,17 +138,17 @@ Stored as JSON on the parent row, no separate table/FK:
 
 | Type | When to Use | Config |
 |:-----|:------------|:-------|
-| `location` | Geographic coordinates (lat/lng) | — |
+| `location` | Coordinates (lat/lng) | — |
 | `address` | Structured address (street, city, country) | — |
 | `code` | Syntax-highlighted code editor | `language` |
 | `json` | JSON data (untyped escape hatch) | — (validate with a `json_schema` validation rule on the object) |
 | `color` | Color picker | — |
 | `rating` | Star/heart rating | `max` (default 5) |
-| `slider` | Numeric slider | `min`, `max`, `step` |
-| `signature` | Digital signature pad | — |
+| `slider` | Slider | `min`, `max`, `step` |
+| `signature` | Signature pad | — |
 | `qrcode` | QR code / barcode | — |
 | `progress` | Progress bar | `min`, `max` |
-| `tags` | Free-form tag input | — |
+| `tags` | Free-form tags | — |
 | `vector` | AI/ML embeddings (semantic search, RAG) | `dimensions` (flat sibling, e.g. `1536`) |
 
 ## Common Field Configurations
