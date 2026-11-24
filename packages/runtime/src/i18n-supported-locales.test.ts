@@ -213,3 +213,30 @@ describe('GET /i18n/locales reports the app\'s declared supportedLocales (#7679)
         ]);
     });
 });
+
+/**
+ * [#36504] `GET /i18n/locales` names the language the app's own text is
+ * written in, so a client that edits labels (the console's design mode) can
+ * tell an edit of the source text from a translation. The declared
+ * `i18n.sourceLocale` wins; an app declaring none is authored in its default
+ * locale, the collapse every metadata-document translator makes.
+ */
+describe('GET /i18n/locales names the source locale (#36504)', () => {
+    async function body(i18nConfig: Record<string, unknown> | undefined) {
+        const { dispatcher } = await bootStack(i18nConfig);
+        const result = await dispatcher.handleI18n('/locales', 'GET', {}, SIGNED_IN);
+        const parsed = GetLocalesResponseSchema.safeParse(result.response?.body?.data);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+        return parsed.data!;
+    }
+
+    it('an app authored in English that defaults its users to zh-CN: the source is en, the default zh-CN', async () => {
+        const read = await body({ defaultLocale: 'zh-CN', sourceLocale: 'en', supportedLocales: ['zh-CN', 'en'] });
+        expect(read.sourceLocale).toBe('en');
+        expect(read.locales.find((l) => l.isDefault)?.code).toBe('zh-CN');
+    });
+
+    it('an app declaring no sourceLocale is authored in its default locale', async () => {
+        expect((await body({ defaultLocale: 'zh-CN', supportedLocales: ['zh-CN', 'en'] })).sourceLocale).toBe('zh-CN');
+    });
+});
