@@ -9,8 +9,9 @@
  * `FormPage.tsx` is the SECOND form renderer in this repo. objectui#2212
  * recorded exactly this symptom — a FormView field carrying a CEL visibility
  * predicate renders unconditionally — and PR #2214 fixed it on the OTHER
- * chain: `ModalForm` -> `resolveFormViewLayout` -> `@object-ui/plugin-form`
- * `sectionFields.ts` -> `@object-ui/components` `renderers/form/form.tsx`.
+ * chain: `ModalForm` -> `@object-ui/plugin-form` `sectionFields.ts` ->
+ * `@object-ui/components` `renderers/form/form.tsx` (the record dialog fed it
+ * a form view's sections until #36425 stopped that dialog loading one).
  * This file's renderer is on that chain at no point, so #2212's fix never
  * reached it and #2212's regression pin — which lives with the chain it fixed
  * — could not see it. One contract, two implementations, each only ever

@@ -43,7 +43,7 @@ import { authoredBuffer, formatMetadataError, type AuthoredLayers } from '@objec
 import { unwrapDraftBody } from './runtime-metadata-persistence.js';
 import { draftPinOf, useDraftSaveGuard, type DraftPin, type DraftVersionGuard } from './metadata-admin/DraftConflictDialog.js';
 import { isSameOptionsValue } from './objectViewOptions.js';
-import type { ObjectFieldInfo } from './metadata-admin/previews/useObjectFields.js';
+import { declaredFieldOptions, type ObjectFieldInfo } from './metadata-admin/previews/useObjectFields.js';
 import {
     runtimeViewToInspectorDraft,
     inspectorDraftToRuntimeView,
@@ -155,6 +155,7 @@ export function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): O
     if (!fields || typeof fields !== 'object') return [];
     return Object.entries(fields).map(([name, def]) => {
         const f = (def ?? {}) as Record<string, any>;
+        const options = declaredFieldOptions(f);
         return {
             name,
             label: typeof f.label === 'string' && f.label ? f.label : name,
@@ -163,6 +164,9 @@ export function mapObjectFields(objectDef: ViewConfigPanelProps['objectDef']): O
             // The filter builder offers a list-valued column membership and
             // the empty checks only (`operatorsForField`).
             ...(f.multiple === true ? { multiple: true } : {}),
+            // The filter builder draws a picklist column's value as a picker
+            // over its declared choices and stores the option's `value`.
+            ...(options ? { options } : {}),
         };
     });
 }

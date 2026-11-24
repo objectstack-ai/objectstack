@@ -26,50 +26,54 @@ export const reportForm = defineForm({
       fields: [
         { field: 'name', type: 'text', colSpan: 1, required: true, helpText: 'snake_case unique identifier' },
         { field: 'label', type: 'text', colSpan: 1, required: true },
-        { field: 'description', type: 'textarea', colSpan: 2 },
-        { field: 'type', colSpan: 2, helpText: 'Report type: tabular/summary/matrix/joined' },
+        // #36447 — without its own hint this row read the shared `I18nLabel`
+        // description ("Display label — … inline locale map …").
+        { field: 'description', type: 'textarea', colSpan: 2, helpText: 'One sentence on what this report shows, displayed under its name.' },
+        { field: 'type', colSpan: 2, helpText: 'Report type: tabular, summary, matrix or joined.' },
       ],
     },
     {
       label: 'Dataset binding',
-      description: 'The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions.',
+      description: 'Where the report’s numbers come from, how they are grouped and sorted, and which records open when you click a row.',
       // A `joined` report carries its data on `blocks` instead.
       visibleWhen: "data.type != 'joined'",
       fields: [
-        { field: 'dataset', widget: 'ref:dataset', helpText: 'Dataset to bind (measures/dimensions come from its semantic layer)' },
-        { field: 'values', widget: 'string-tags', helpText: 'Measure names (from the dataset) to display' },
-        { field: 'rows', widget: 'string-tags', helpText: 'Dimension names (from the dataset) to group rows by' },
+        { field: 'dataset', widget: 'ref:dataset', helpText: 'The report reads its numbers from here; everyone sees only the records they have access to.' },
+        { field: 'values', widget: 'string-tags', helpText: 'The metrics to total or count (from the data source).' },
+        { field: 'rows', widget: 'string-tags', helpText: 'The fields to group by (from the data source).' },
         // CEL visibility — only Matrix reports pivot across a second dimension.
-        { field: 'columns', widget: 'string-tags', visibleWhen: "data.type == 'matrix'", helpText: 'Dimension names across (matrix only)' },
+        { field: 'columns', widget: 'string-tags', visibleWhen: "data.type == 'matrix'", helpText: 'Groups spread across the columns (matrix reports only).' },
         // #3916 — ordering is authorable here or it is not authorable at all:
         // `DatasetSelection.order` has always existed on the wire, but a report
         // author had no channel to reach it. Optional — a selected time
         // dimension is chronological by default without declaring anything.
         {
           field: 'order',
+          // #36447 — "Order" alone reads as a sales order to a business reader.
+          label: 'Sort Order',
           type: 'repeater',
-          helpText: 'Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default.',
+          helpText: 'What to sort by, most important first (a grouping or a metric). Time groupings sort in date order by default.',
           // Row-property names (#17508): every authorable row property, `label`
           // equal to the item schema's `.meta({ title })`, so `os i18n extract`
           // emits a catalog key per column and the panel keeps its schema-derived
           // widgets (no `type` here).
           fields: [
-            { field: 'by', label: 'Order By' },
+            { field: 'by', label: 'Sort By' },
             { field: 'direction', label: 'Direction' },
           ],
         },
-        { field: 'drilldown', helpText: 'Click an aggregated row/cell to open the underlying records' },
+        { field: 'drilldown', helpText: 'Click a summarized row or cell to open the records behind it.' },
       ],
     },
     {
       label: 'Joined blocks',
-      description: 'Additional dataset-bound blocks stacked into a single report (joined reports only).',
+      description: 'Other blocks stacked into the same report, each with its own data source (joined reports only).',
       visibleWhen: "data.type == 'joined'",
       fields: [
         {
           field: 'blocks',
           type: 'repeater',
-          helpText: 'Dataset-bound sub-reports (joined report only)',
+          helpText: 'Sub-reports, each with its own data source (joined reports only).',
           // Row-property names (#17508): every authorable row property, `label`
           // equal to the item schema's `.meta({ title })`, so `os i18n extract`
           // emits a catalog key per column and the panel keeps its schema-derived
@@ -86,26 +90,26 @@ export const reportForm = defineForm({
             // (#21702), so this column declares the `ref:dataset` picker the
             // top-level binding declares, marked required: a block is bound
             // in the form before save.
-            { field: 'dataset', label: 'Dataset', widget: 'ref:dataset', required: true },
-            { field: 'rows', label: 'Rows' },
-            { field: 'columns', label: 'Columns' },
-            { field: 'values', label: 'Values' },
+            { field: 'dataset', label: 'Data Source', widget: 'ref:dataset', required: true },
+            { field: 'rows', label: 'Group By' },
+            { field: 'columns', label: 'Group Columns By' },
+            { field: 'values', label: 'Metrics' },
             { field: 'runtimeFilter', label: 'Runtime Filter' },
-            { field: 'order', label: 'Order' },
+            { field: 'order', label: 'Sort Order' },
           ],
         },
       ],
     },
     {
       label: 'Filter & chart',
-      description: 'Render-time scope filter and chart presentation.',
+      description: 'Filter conditions and how the chart is shown.',
       collapsible: true,
       collapsed: true,
       fields: [
-        { field: 'runtimeFilter', widget: 'json', helpText: 'Render-time scope filter, ANDed at query time' },
+        { field: 'runtimeFilter', widget: 'json', helpText: 'A filter applied whenever the report is shown, on top of the data source’s own conditions.' },
         // #20161 — a `joined` report draws its blocks as tables and refuses a
         // container `chart`, so the control is offered only where it draws.
-        { field: 'chart', type: 'composite', visibleWhen: "data.type != 'joined'", helpText: 'Chart config (type, legend, colors)' },
+        { field: 'chart', type: 'composite', visibleWhen: "data.type != 'joined'", helpText: 'Chart type and settings.' },
       ],
     },
     {
@@ -119,8 +123,31 @@ export const reportForm = defineForm({
       collapsed: true,
       visibleWhen: "data.type != 'joined'",
       fields: [
-        { field: 'dateRange', type: 'composite', helpText: 'Default period and custom-range switch. The dimension must be a date dimension of the dataset; leave it empty when the dataset has exactly one.' },
-        { field: 'exportOptions', type: 'composite', helpText: 'Download formats (csv, xlsx) and file name. Who may download is the export permission on the dataset object.' },
+        // #36447 — both composites declare their children, so each row carries
+        // its own business wording instead of the schema description, and
+        // `os i18n extract` emits a catalog key per child.
+        // `report-form-composite-children.test.ts` holds each list equal to the
+        // schema's live keys: a key added to the schema later must be added here.
+        {
+          field: 'dateRange',
+          type: 'composite',
+          helpText: 'The period the report opens with, and whether people may choose their own range.',
+          fields: [
+            { field: 'dimension', label: 'Date Field', helpText: 'The date grouping of the data source the period applies to. Leave it empty when the data source has only one.' },
+            { field: 'defaultRange', label: 'Default Period', helpText: 'The period the report opens with.' },
+            { field: 'allowCustomRange', label: 'Allow Custom Range', helpText: 'Let people pick their own start and end dates.' },
+          ],
+        },
+        {
+          field: 'exportOptions',
+          type: 'composite',
+          helpText: 'Download formats (csv, xlsx) and file name. Who may download is set by the export permission on the data source’s object.',
+          fields: [
+            { field: 'formats', label: 'Formats', helpText: 'The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off.' },
+            { field: 'includeHeaders', label: 'Include Headers', helpText: 'Put the column names in the first row of the downloaded file.' },
+            { field: 'fileNamePrefix', label: 'File Name', helpText: 'The start of the downloaded file’s name, used instead of the report name.' },
+          ],
+        },
       ],
     },
     // An "Advanced" section offering `aria` + `performance` used to sit here.

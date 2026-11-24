@@ -4,8 +4,9 @@
  * [#35402] The Change Owner routes: one record, or a list of records, handed
  * to another owner — a person or an ownership queue — as the caller.
  *
- *   POST {basePath}/data/:object/:id/change-owner   body: { ownerId | queue, notify? }
- *   POST {basePath}/data/:object/change-owner       body: { ids, ownerId | queue, notify? }
+ *   POST {basePath}/data/:object/:id/change-owner      body: { ownerId | queue, notify?, cascade? }
+ *   POST {basePath}/data/:object/change-owner          body: { ids, ownerId | queue, notify?, cascade? }
+ *   GET  {basePath}/data/:object/change-owner/cascades  the declared cascades the dialog may offer
  *
  * The rules (which objects offer the action, whose writes, the target, the
  * row cap) live in `@objectstack/core`'s `change-record-owner.ts`; this module
@@ -24,6 +25,20 @@
  *   listed with its id, code and sentence, worded as the `/data` write door
  *   words the same throw.
  *
+ * ## Cascade (#35315 phase 2, ruling 7000907189 point 4)
+ *
+ * `cascade` is an optional leg of the same two requests, not a route of its
+ * own: a list of `{ object, field }`, each a relationship whose child's
+ * reference field declares `transferBehavior: 'cascade'`. The rules —
+ * declared and eligible only, previous owner's rows only, the caller's own
+ * writes, every refused row reported, the row cap — are core's
+ * (`change-record-owner.ts`); both answers then carry `cascade`, one outcome
+ * per named relationship. The `GET …/change-owner/cascades` read lists the
+ * candidates (`transferCascadeRelations`): the relationships declared to the
+ * object whose child offers Change Owner itself. The caller's own transfer
+ * verdict on each child is the explain engine's, which the dialog asks; the
+ * write path judges every cascaded row again.
+ *
  * Both refuse the whole call before any write when the object does not offer
  * Change Owner (`403 CHANGE_OWNER_DISABLED`), when the target names no user or
  * a banned one, and when the body is not the closed shape below. Both declare
@@ -41,9 +56,14 @@
 
 import { sendError, sendOk } from '@objectstack/types';
 import {
+    changeOwnerOffReason,
+    changeOwnerOffRefusal,
     changeRecordOwner,
     changeRecordsOwner,
+    objectNotFoundError,
+    transferCascadeRelations,
     UserWorkTransferRefusal,
+    type ChangeOwnerCascadeRelation,
     type ChangeOwnerEngine,
     type ChangeOwnerMessaging,
     type ChangeOwnerTarget,
@@ -70,10 +90,13 @@ export interface ChangeOwnerRouteHost {
 export const CHANGE_OWNER_QUERY_PARAMS: readonly string[] = [];
 
 /** The keys the single route's body may carry. */
-const SINGLE_BODY_KEYS = new Set(['ownerId', 'queue', 'notify']);
+const SINGLE_BODY_KEYS = new Set(['ownerId', 'queue', 'notify', 'cascade']);
 
 /** The keys the bulk route's body may carry. */
-const BULK_BODY_KEYS = new Set(['ids', 'ownerId', 'queue', 'notify']);
+const BULK_BODY_KEYS = new Set(['ids', 'ownerId', 'queue', 'notify', 'cascade']);
+
+/** The keys one `cascade` entry may carry. */
+const CASCADE_ENTRY_KEYS = new Set(['object', 'field']);
 
 /** A refused request body: the sentence, and the member it names. */
 interface BodyRefusal { message: string; field?: string }
@@ -84,8 +107,8 @@ interface BodyRefusal { message: string; field?: string }
  * non-empty string, and `notify`, when given, a boolean that only a person
  * target can take — a queue has nobody to tell.
  */
-function readTarget(body: Record<string, unknown>): { target: ChangeOwnerTarget; notify: boolean } | BodyRefusal {
-    const { ownerId, queue, notify } = body;
+function readTarget(body: Record<string, unknown>): { target: ChangeOwnerTarget; notify: boolean; cascade?: ChangeOwnerCascadeRelation[] } | BodyRefusal {
+    const { ownerId, queue, notify, cascade } = body;
     if (ownerId !== undefined && queue !== undefined) {
         return { message: 'Name either ownerId (a person) or queue (an ownership queue), not both' };
     }
@@ -105,7 +128,23 @@ function readTarget(body: Record<string, unknown>): { target: ChangeOwnerTarget;
         return { message: 'notify tells the new owner, and a queue target has none; leave notify out when moving records to a queue', field: 'notify' };
     }
     const target: ChangeOwnerTarget = typeof ownerId === 'string' ? { ownerId } : { queue: queue as string };
-    return { target, notify: notify === true };
+    if (cascade === undefined) return { target, notify: notify === true };
+    const cascadeRefusal = {
+        message: 'cascade, when given, must be a list of { object, field }: the related object, and its reference field to this object',
+        field: 'cascade',
+    };
+    if (!Array.isArray(cascade)) return cascadeRefusal;
+    const relations: ChangeOwnerCascadeRelation[] = [];
+    for (const entry of cascade) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return cascadeRefusal;
+        const e = entry as Record<string, unknown>;
+        if (Object.keys(e).some((k) => !CASCADE_ENTRY_KEYS.has(k))) return cascadeRefusal;
+        if (typeof e.object !== 'string' || e.object.length === 0 || typeof e.field !== 'string' || e.field.length === 0) {
+            return cascadeRefusal;
+        }
+        relations.push({ object: e.object, field: e.field });
+    }
+    return { target, notify: notify === true, cascade: relations };
 }
 
 /** The body as an object whose every key is in `allowed`, or the refusal. */
@@ -207,6 +246,33 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
         sendError(res, nested.status, nested.code, nested.message, nested.extra);
     };
 
+    // [#35315 phase 2] The cascade candidates: a three-segment literal, read
+    // before any `{data}/:object/:id/...` matcher could take `change-owner` as
+    // an id. Same gates as the writes (the dialog is about to write), no body.
+    this.routeManager.register({
+        method: 'GET',
+        path: `${dataPath}/:object/change-owner/cascades`,
+        handler: async (req: any, res: any) => {
+            const object = String(req.params?.object ?? '');
+            try {
+                const environmentId = isScoped ? req.params?.environmentId : undefined;
+                const context = await this.resolveExecCtx(environmentId, req);
+                if (this.enforceAuth(req, res, context)) return;
+                if (await gate(req, res, environmentId, context)) return;
+                const engine = await resolveEngine(environmentId, req);
+                if (!engine) return sendError(res, 501, 'NOT_IMPLEMENTED', 'No data engine is configured on this deployment');
+                const def = engine.getSchema(object);
+                if (!def || typeof def !== 'object') throw objectNotFoundError(object);
+                const reason = changeOwnerOffReason(object, def);
+                if (reason) throw changeOwnerOffRefusal(object, reason);
+                return sendOk(res, { object, cascades: transferCascadeRelations(engine, object) });
+            } catch (err) {
+                return sendRefusal(res, err, object);
+            }
+        },
+        metadata: { summary: 'List the related objects a Change Owner of this object may cascade to', tags: ['data', 'change-owner'] },
+    });
+
     // The bulk route first: `{data}/:object/change-owner` is a two-segment
     // literal beside the greedy `{data}/:object/:id` matchers, and the router
     // is first-match-wins (this registrar runs before the CRUD routes).
@@ -220,7 +286,7 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (await gate(req, res, environmentId, context)) return;
-                const shape = '{ ids, ownerId | queue, notify? }';
+                const shape = '{ ids, ownerId | queue, notify?, cascade? }';
                 const body = closedBody(req.body, BULK_BODY_KEYS, shape);
                 if (isRefusal(body)) return sendBodyRefusal(res, body);
                 const ids = body.ids;
@@ -235,6 +301,7 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
                     notify: read.notify,
                     messaging: read.notify ? await resolveMessaging(environmentId, req) : undefined,
                     describeFailure: rowFailureAnswer,
+                    ...(read.cascade ? { cascade: read.cascade } : {}),
                 });
                 return sendOk(res, report);
             } catch (err) {
@@ -254,7 +321,7 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
                 const context = await this.resolveExecCtx(environmentId, req);
                 if (this.enforceAuth(req, res, context)) return;
                 if (await gate(req, res, environmentId, context)) return;
-                const body = closedBody(req.body, SINGLE_BODY_KEYS, '{ ownerId | queue, notify? }');
+                const body = closedBody(req.body, SINGLE_BODY_KEYS, '{ ownerId | queue, notify?, cascade? }');
                 if (isRefusal(body)) return sendBodyRefusal(res, body);
                 const read = readTarget(body);
                 if (isRefusal(read)) return sendBodyRefusal(res, read);
@@ -263,6 +330,7 @@ export function registerChangeOwnerEndpoints(this: ChangeOwnerRouteHost, basePat
                 const result = await changeRecordOwner(engine, object, String(req.params.id), read.target, context, {
                     notify: read.notify,
                     messaging: read.notify ? await resolveMessaging(environmentId, req) : undefined,
+                    ...(read.cascade ? { cascade: read.cascade, describeFailure: rowFailureAnswer } : {}),
                 });
                 return sendOk(res, result);
             } catch (err) {

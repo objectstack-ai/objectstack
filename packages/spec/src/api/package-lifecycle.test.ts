@@ -27,6 +27,7 @@ import {
 import { PackagePublishResultSchema as SystemPackagePublishResultSchema } from '../system/metadata-persistence.zod';
 import { CONNECTOR_CREDENTIAL_MAP_PATHS, redactConnectorItem } from '../integration/connector-credential-redaction';
 import { InstalledPackageSourceSchema } from '../kernel/package-registry.zod';
+import { CUSTOM_ARRANGEMENT_KEYS } from '../data/field-customization';
 
 describe('the ruled re-export of PackagePublishResultSchema into the `/api` namespace', () => {
   it('is the SAME declaration as the `/system` original — a re-export, never a second copy', () => {
@@ -509,9 +510,10 @@ describe('GetPackageCustomizationsResponseSchema.contributions: the entry shape 
     packageId: 'com.acme.crm',
     overrides: [],
     extensions: [],
+    arrangements: [],
     switchedOff: [],
     contributions,
-    counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: contributions.length },
+    counts: { overrides: 0, extensions: 0, arrangements: 0, switchedOff: 0, contributions: contributions.length },
   });
 
   /** The single issue a refused answer carries, by code and path. */
@@ -577,6 +579,73 @@ describe('GetPackageCustomizationsResponseSchema.contributions: the entry shape 
     const issues = refusalOf([{ ...FIELD, kind: 'action' }]);
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ code: 'invalid_union', path: ['contributions', 0, 'kind'] });
+  });
+});
+
+describe('GetPackageCustomizationsResponseSchema.arrangements: one entry per object and arrangement key (ADR-0146 D10)', () => {
+  const TABS = { object: 'crm_lead', key: 'relatedLists' };
+  const GROUPS = { object: 'crm_lead', key: 'fieldGroups' };
+
+  /** A whole answer around `arrangements`, its count derived the way the producer derives it. */
+  const answer = (arrangements: unknown[]) => ({
+    packageId: 'com.acme.crm',
+    overrides: [],
+    extensions: [],
+    arrangements,
+    switchedOff: [],
+    contributions: [],
+    counts: { overrides: 0, extensions: 0, arrangements: arrangements.length, switchedOff: 0, contributions: 0 },
+  });
+
+  /** The issues a refused answer carries, by code and path. */
+  const refusalOf = (served: unknown) => {
+    const result = GetPackageCustomizationsResponseSchema.safeParse(served);
+    expect(result.success).toBe(false);
+    return result.success ? [] : result.error.issues.map((issue) => ({
+      code: issue.code,
+      path: issue.path,
+      keys: (issue as { keys?: string[] }).keys,
+    }));
+  };
+
+  it('an entry for each key of the frozen arrangement list parses and is PRESERVED', () => {
+    const served = answer([GROUPS, TABS, { object: 'crm_lead', key: 'actionLayout' }]);
+    const result = GetPackageCustomizationsResponseSchema.safeParse(served);
+    expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
+    if (result.success) expect(result.data).toEqual(served);
+  });
+
+  it('the key vocabulary is exactly `CUSTOM_ARRANGEMENT_KEYS`, never a second list', () => {
+    const key = GetPackageCustomizationsResponseSchema.shape.arrangements.element.shape.key;
+    expect(key.options).toEqual([...CUSTOM_ARRANGEMENT_KEYS]);
+  });
+
+  it('a key outside the arrangement list is refused: a member such as `fields` is an `extensions` entry', () => {
+    expect(refusalOf(answer([{ object: 'crm_lead', key: 'fields' }])))
+      .toEqual([expect.objectContaining({ code: 'invalid_value', path: ['arrangements', 0, 'key'] })]);
+  });
+
+  it('an entry carrying the arrangement\'s content is refused: the entry names it and nothing more', () => {
+    expect(refusalOf(answer([{ ...TABS, relatedLists: ['crm_task'] }])))
+      .toEqual([{ code: 'unrecognized_keys', path: ['arrangements', 0], keys: ['relatedLists'] }]);
+  });
+
+  it('an entry requires its object and its key', () => {
+    for (const dropped of ['object', 'key'] as const) {
+      const partial: Record<string, unknown> = { ...TABS };
+      delete partial[dropped];
+      expect(refusalOf(answer([partial])), dropped)
+        .toEqual([expect.objectContaining({ path: ['arrangements', 0, dropped] })]);
+    }
+  });
+
+  it('the list and its count are both required members of the answer', () => {
+    const { arrangements: _list, ...noList } = answer([TABS]);
+    expect(refusalOf(noList)).toEqual([expect.objectContaining({ code: 'invalid_type', path: ['arrangements'] })]);
+    const served = answer([TABS]);
+    const { arrangements: _count, ...counts } = served.counts;
+    expect(refusalOf({ ...served, counts }))
+      .toEqual([expect.objectContaining({ code: 'invalid_type', path: ['counts', 'arrangements'] })]);
   });
 });
 

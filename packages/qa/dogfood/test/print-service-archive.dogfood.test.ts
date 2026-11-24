@@ -267,7 +267,8 @@ describe('print service on a real showcase boot', () => {
         expect.objectContaining({ url: `http://127.0.0.1:1/_console/apps/showcase/showcase_invoice/record/${ownInvoice}` }),
       );
       expect(revoke).toHaveBeenCalledTimes(1);
-      expect(out).toMatchObject({ size: PDF.byteLength, filename: `${PAGE}-${ownInvoice}.pdf` });
+      // No filename in the request: the PDF is named from the invoice's display name (ADR-0079), its number.
+      expect(out).toMatchObject({ size: PDF.byteLength, filename: 'INV-PRINT-OWN.pdf' });
 
       const file = await ql.findOne('sys_file', { where: { id: out.fileId } }, { context: SYS });
       expect(file).toMatchObject({ status: 'committed', mime_type: 'application/pdf', size: PDF.byteLength, scope: 'attachments' });
@@ -276,6 +277,25 @@ describe('print service on a real showcase boot', () => {
       // Attached AS THE CALLER: both rows name the requester.
       expect(file!.owner_id).toBe(ctx.userId);
       expect(attachment!.uploaded_by).toBe(ctx.userId);
+    });
+
+    it('a second print of the same invoice carries the same name and is a second attachment: neither replaces the other', async () => {
+      const ctx = await stack.contextFor(adminToken);
+      const first = await service.printRecordToFile(request(ownInvoice), ctx);
+      const second = await service.printRecordToFile(request(ownInvoice), ctx);
+      expect(second.filename).toBe(first.filename);
+      expect(second.fileId).not.toBe(first.fileId);
+      expect(second.attachmentId).not.toBe(first.attachmentId);
+      const named = await ql.find(
+        'sys_attachment',
+        { where: { parent_object: 'showcase_invoice', parent_id: ownInvoice, file_name: first.filename } },
+        { context: SYS },
+      );
+      const ids = named.map((row) => String(row.id));
+      expect(ids).toEqual(expect.arrayContaining([first.attachmentId, second.attachmentId]));
+      for (const fileId of [first.fileId, second.fileId]) {
+        expect(await ql.findOne('sys_file', { where: { id: fileId } }, { context: SYS })).toMatchObject({ status: 'committed' });
+      }
     });
 
     it('a member who may attach files archives their own invoice: the attachment is their write, and sys_file stays unreadable to them', async () => {

@@ -114,7 +114,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "Recolher",
-        helpText: "Se a seção pode ser recolhida, no formulário de entrada e na página de detalhes do registro. Não definido: nenhuma."
+        helpText: "Se a seção pode ser recolhida. O formulário de entrada segue a configuração. Na página de registro padrão, o leitor pode recolher qualquer grupo com título, então ali ela define só o estado inicial: Collapsed começa recolhida e as demais, abertas. Não definido: nenhuma."
       },
       "fieldGroups.visibleWhen": {
         label: "Visível quando",
@@ -239,6 +239,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.deleteBehavior": {
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
+      },
+      "fields.transferBehavior": {
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
       },
       "fields.multiple": {
         label: "Múltiplo",
@@ -768,6 +772,10 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       deleteBehavior: {
         label: "Comportamento na exclusão",
         helpText: "O que acontece quando o registro referenciado é excluído"
+      },
+      transferBehavior: {
+        label: "Comportamento na troca de proprietário",
+        helpText: "Indica se “Alterar proprietário” no registro referenciado também pode mover os registros que apontam para ele por este campo"
       },
       relatedListFilter: {
         label: "Filtro da lista relacionada",
@@ -2190,7 +2198,8 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rótulo"
       },
       description: {
-        label: "Descrição"
+        label: "Descrição",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Tipo",
@@ -2272,9 +2281,33 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Intervalo de datas",
         helpText: "Período padrão e opção de intervalo personalizado. A dimensão deve ser uma dimensão de data do conjunto de dados; deixe-a em branco quando o conjunto de dados tiver exatamente uma."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Opções de exportação",
         helpText: "Formatos de download (csv, xlsx) e nome do arquivo. Quem pode baixar é definido pela permissão de exportação no objeto do conjunto de dados."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
