@@ -365,6 +365,14 @@ export const FlowRegistrationSchema = lazySchema(() => z.discriminatedUnion('sta
  * its item read serves as `disabledActions` ({@link GetMetaItemResponseSchema}
  * says why it is beside the item, why absence means no ledger answered, and
  * why `[]` is stated), keyed by the object's `name`.
+ *
+ * [#36894] `changedAt` is the same position for each listed item's change
+ * time: when the stored row whose content the list serves for the item last
+ * changed, keyed by the item's `name`. Only an item served from a stored row
+ * has one; a code-shipped or file-loaded item has no recorded change time and
+ * no entry, never a stand-in (not the read time, not the boot time). It is the
+ * instant the by-name read serves as `Last-Modified`
+ * ({@link GetMetaItemCachedResponseSchema}`.lastModified`) for the same row.
  */
 export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -384,6 +392,20 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
     + 'answered by a process whose data engine has an activation ledger attached; absent otherwise, and '
     + 'absence means no ledger answered, never that nothing is switched off. Beside the items, never '
     + 'inside one: each item\'s `actions` is served as declared.',
+  ),
+  changedAt: z.record(z.string(), z.string().datetime()).optional().describe(
+    'When each listed item last changed, keyed by the item\'s `name`: the `updated_at` of the stored '
+    + 'row whose content the list serves for that item, an ISO-8601 instant in UTC written with `Z`. '
+    + 'One entry per listed item served from a stored row; an item the list serves from code (a '
+    + 'code-shipped or file-loaded definition) has no recorded change time and no entry, never a '
+    + 'stand-in such as the read time. Where an item has several stored layers in scope (its '
+    + 'package\'s own row, the package-less row, the package\'s declared override, environment-wide or '
+    + 'scoped to one package), the time is the effective layer\'s: the row whose content is the listed '
+    + 'item. On a `?preview=draft` list an item whose pending draft is served (`_draft: true`) has the '
+    + 'draft row\'s time, since the draft is its content. Where several listed items share a name (a '
+    + 'name two or more packages ship, the members of a bundle), the latest of their times. Only the '
+    + 'names of items in this answer are keyed. Absent when no listed item is served from a stored '
+    + 'row. Beside the items, never inside one: an item\'s body is served as stored.',
   ),
 }));
 
