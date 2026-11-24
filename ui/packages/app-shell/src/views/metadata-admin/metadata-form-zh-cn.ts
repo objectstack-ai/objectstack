@@ -19,7 +19,9 @@
  * for; it is hand-worded here and marked so at its row. The second is the
  * `report` form's wording leaves (objectstack#36373, marked ⟨36373⟩): the
  * report panel speaks business wording — 数据来源 / 分组 / 指标 — and this
- * overlay is the only source of its residual rows' words.
+ * overlay is the only source of its residual rows' words. The `dateRange` and
+ * `exportOptions` children (objectstack#36447, marked ⟨36447⟩) are the first
+ * kind: shown by the report panel, not yet translated by the platform.
  *
  * ## Two depths, by who renders the form
  *
@@ -348,6 +350,14 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       // ⟨36373⟩ dateRange · exportOptions
       dateRange: { label: '日期范围', helpText: '默认时间段与自定义范围开关。按数据来源里的一个日期分组筛选；只有一个日期分组时可留空' },
       exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定' },
+      // ⟨36447⟩ the children `report.form.ts` declares for both composites. The
+      // platform bundle has no zh for them yet, and the report panel shows them.
+      'dateRange.dimension': { label: '日期字段', helpText: '时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空' },
+      'dateRange.defaultRange': { label: '默认时间段', helpText: '打开报表时显示的时间段' },
+      'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许使用者自己选择开始和结束日期' },
+      'exportOptions.formats': { label: '格式', helpText: '可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载' },
+      'exportOptions.includeHeaders': { label: '包含表头', helpText: '在下载文件的第一行写入列名' },
+      'exportOptions.fileNamePrefix': { label: '文件名', helpText: '下载文件名的开头，用来代替报表名称' },
     },
   },
 
