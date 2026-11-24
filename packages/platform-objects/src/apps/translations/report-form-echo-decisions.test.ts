@@ -96,6 +96,13 @@
 // `dataset_binding` description, the `drilldown` hint and the `runtimeFilter`
 // hint — and each row says its verdicts were taken against the old English.)
 //
+// (#36838 gave the top-level `dataset` / `values` / `rows` / `columns` rows the
+// blocks grid's titles — Data Source / Metrics / Group By / Group Columns By —
+// where they read the humanized keys. Each label leaf already existed, so the
+// population, the field leaves and the inward negatives did not move, and none
+// of the six decided rows moved. The "Dataset" twin below now points at the
+// English the heading was rendered from on the dataset type's own label.)
+//
 // ## ⚠️⚠️ The phantom-translation trap — and why this family is the SHARP case
 //
 // `reportForm` declares NO label on `drilldown` and NO label on `runtimeFilter`
@@ -788,7 +795,13 @@ describe('#19403 round 9 — one schema key, one rendering', () => {
     // Round 5's discipline, from the other side: a row that names a twin has to
     // be able to point at it.
     const en = enMetadataForms as Record<string, any>;
-    expect(en.report?.fields?.dataset?.label).toBe('Dataset');
+    // #36838 renamed the report row's English to "Data Source", the blocks
+    // grid's term; its translated values (asserted below) did not move. The
+    // English word "Dataset" this heading was rendered from still has an
+    // authored home with the SAME three renderings: the metadata type's own
+    // label, asserted below as well.
+    expect(en.report?.fields?.dataset?.label).toBe('Data Source');
+    expect(en.dataset?.label).toBe('Dataset');
     expect(en.dataset?.sections?.measures?.label).toBe('Measures');
     expect(en.dataset?.sections?.dimensions?.label).toBe('Dimensions');
     expect(String(en.dataset?.fields?.filter?.helpText)).toContain('ANDed into every query');
@@ -817,6 +830,7 @@ describe('#19403 round 9 — one schema key, one rendering', () => {
     for (const [locale, forms] of TRANSLATED_LOCALES) {
       const want = expected[locale];
       expect(String(forms.report?.fields?.dataset?.label), `${locale} the Dataset twin moved`).toBe(want.dataset);
+      expect(String(forms.dataset?.label), `${locale} the dataset type label no longer reads the Dataset twin`).toBe(want.dataset);
       expect(String(forms.dataset?.sections?.measures?.label), `${locale} the Measures twin moved`).toBe(want.measures);
       expect(String(forms.dataset?.sections?.dimensions?.label), `${locale} the Dimensions twin moved`).toBe(
         want.dimensions,

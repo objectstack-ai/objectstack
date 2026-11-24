@@ -315,7 +315,9 @@ describe('@mention notifications reach only mentioned users who can read the com
         [[CAROL.id], undefined],
         [[CAROL.id], ['email']],
       ]);
-      expect(all[1]).toMatchObject({ payload: { body: `note ${seq}`, mentionUrl: `/${TASK}/${openTask}` } });
+      // [#36410] The record with the comment panel at the comment's thread — the inbox notice's own link.
+      expect(all[1]).toMatchObject({ payload: { body: `note ${seq}`, mentionUrl: expect.stringMatching(new RegExp(`^/${TASK}/${openTask}\\?comments=[^&]+$`)) } });
+      expect((all[1] as any).payload.mentionUrl).toBe((all[0] as any).payload.url);
     });
 
     it('resolves a fellow member mentioned by email to their user id', async () => {

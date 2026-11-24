@@ -11,9 +11,10 @@
  *  - the editor itself: `tags` (a `select` declared `multiple: true`) is the
  *    list subject; `stage` (a plain `select`) is the scalar CONTROL; `'vip' in
  *    record.tags` is the shape that does match;
- *  - both mount sites hand the object's field definitions through: the view
- *    variant inspector (metadata admin) and the Studio list-view panel's
- *    "more" section.
+ *  - the mount site hands the object's field definitions through: the view
+ *    variant inspector (metadata admin). The Studio list-view panel's "more"
+ *    section was the second, until objectstack#36502 retired it with the
+ *    Interfaces pillar.
  *
  * Direction: without `fieldDefs` reaching the editor no field is judged a list,
  * `record.tags == 'vip'` lints clean and the refusing cases are red; the
@@ -59,9 +60,7 @@ vi.mock('./useMetadata', async (importOriginal) => {
 
 import { ConditionalFormattingEditor, type ConditionalFormattingRuleDraft } from './ConditionalFormattingEditor';
 import { ViewVariantInspector } from './inspectors/ViewVariantInspector';
-import { ListViewMoreSection } from '../studio-design/ListViewMoreSection';
 import { mapObjectFields } from '../ViewConfigPanel';
-import { loaded } from './loadState';
 
 afterEach(cleanup);
 
@@ -135,7 +134,7 @@ describe('ConditionalFormattingEditor — list-equality while typing (#36459)', 
   });
 });
 
-describe('both mount sites hand the editor the object’s field definitions (#36459)', () => {
+describe('the mount site hands the editor the object’s field definitions (#36459)', () => {
   it('the view variant inspector refuses == on a list field in a formatting rule', async () => {
     function Harness() {
       const [draft, setDraft] = React.useState<Record<string, unknown>>({
@@ -169,33 +168,5 @@ describe('both mount sites hand the editor the object’s field definitions (#36
     const editor = await screen.findByTestId('cf-editor');
     typeCondition("record.tags == 'vip'", editor);
     expect(await within(editor).findByText(LIST_FINDING, {}, { timeout: 5000 })).toBeInTheDocument();
-  });
-
-  it('the Studio list-view panel refuses == on a list field, and holds the autosave', async () => {
-    const report = vi.fn();
-    function Harness() {
-      const [body, setBody] = React.useState<Record<string, unknown>>({
-        type: 'grid',
-        columns: ['name'],
-        conditionalFormatting: [{ condition: '', style: {} }],
-      });
-      return (
-        <ListViewMoreSection
-          body={body}
-          writeBody={setBody}
-          objectName="ticket"
-          fieldNames={Object.keys(TICKET_FIELDS)}
-          fieldCatalog={loaded(FIELD_DEFS.map((f) => ({ ...f, multiple: f.multiple === true || undefined })))}
-          readOnly={false}
-          locale={'en-US'}
-          onBlockingIssuesChange={report}
-        />
-      );
-    }
-    render(<Harness />);
-    const editor = screen.getByTestId('cf-editor');
-    typeCondition("record.tags == 'vip'", editor);
-    await waitFor(() => expect(report.mock.calls.at(-1)?.[0]).toBe(1), { timeout: 5000 });
-    expect(within(editor).getByText(LIST_FINDING)).toBeInTheDocument();
   });
 });

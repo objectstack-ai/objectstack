@@ -27,6 +27,7 @@ import {
   type LookupAutofillByField,
   type WithheldAutofill,
   withheldAutofillMessage,
+  withheldStillStands,
 } from '../lookupAutofill.js';
 import { FileCell } from '../FileField.js';
 import { toDateInputValue, toDateTimeInputValue, fromDateTimeInputValue, isImpossibleStoredDay } from '../nativeDateValue.js';
@@ -476,7 +477,8 @@ function coerce(type: string | undefined, raw: string): any {
  *   column whose child field definition the host handed over (`columnFields`)
  *   is in that definition's currency, read on the line as the record form
  *   reads it (`amountCurrencyOf`): a `fixed` code, the code a sibling field on
- *   the line holds, or the home currency. A `currency` column the host named
+ *   the line holds (with this pick's own write to that code applied), or the
+ *   home currency. A `currency` column the host named
  *   nothing for is in the home currency. A column of any other type holds no
  *   amount of money. A declared target that is not a drawn column is judged
  *   by its child field the same way, and holds no amount when the host names
@@ -495,7 +497,7 @@ function gridAutofillCurrency(
     home,
     sourceCurrency: (source, value) =>
       pickedAmountCurrencyOf(sourceFields?.[source] as never, value, picked),
-    targetCurrency: (target): AmountCurrency | undefined => {
+    targetCurrency: (target, writes): AmountCurrency | undefined => {
       // A declared target need not be a drawn column: one that is not is
       // judged by its child field all the same, as the record form judges it.
       const c = columns.find((x) => x.name === target);
@@ -505,7 +507,7 @@ function gridAutofillCurrency(
         return code ? { kind: 'code', code } : { kind: 'unset' };
       }
       const def = columnFields?.[target];
-      if (def && typeof def === 'object') return amountCurrencyOf(def as never, line) ?? (c ? { kind: 'home' } : undefined);
+      if (def && typeof def === 'object') return amountCurrencyOf(def as never, line, writes) ?? (c ? { kind: 'home' } : undefined);
       return c ? { kind: 'home' } : undefined;
     },
   };
@@ -514,7 +516,9 @@ function gridAutofillCurrency(
 /**
  * What the last pick on one line did not copy (objectstack#36249): the lookup
  * column picked, the value it committed, and each withheld value. The note
- * stands while the line still holds that pick and the withheld cell is empty.
+ * stands while the line still holds that pick and the withheld cell still
+ * holds what it held at the pick (`withheldStillStands`): empty, or the
+ * earlier value a re-pick left in place.
  */
 interface WithheldPick {
   lookup: string;
@@ -960,7 +964,8 @@ function GridFieldBody({
   const pickedLookupRecords = useRef(new Map<string, Row>());
   // The values the last pick on each line did not copy, because the picked
   // amount is in another currency than the cell (objectstack#36249): said
-  // under the line while that pick still stands and the cell is still empty.
+  // under the line while that pick still stands and the cell still holds
+  // what it held at the pick.
   const [withheldFills, setWithheldFills] = React.useState<ReadonlyMap<number, WithheldPick>>(() => new Map());
   const applyLookupSelection = useCallback(
     (rowIdx: number, col: GridColumn, record: any, picked?: { sourceFields?: Readonly<Record<string, unknown>> | null }) => {
@@ -1726,11 +1731,11 @@ function GridFieldBody({
                 const isGhost = hasGhost && rowIdx === rows.length;
                 const reorderable = allowReorder && !isGhost && !isList;
                 // objectstack#36249 — the values this line's pick did not copy,
-                // while the pick stands and the cell is still empty.
+                // while the pick stands and the cell still holds what it held.
                 const withheldPick = withheldFills.get(rowIdx);
                 const withheldShown =
                   withheldPick && !isList && String(row[withheldPick.lookup] ?? '') === String(withheldPick.picked ?? '')
-                    ? withheldPick.items.filter((w) => row[w.target] == null || row[w.target] === '')
+                    ? withheldPick.items.filter((w) => withheldStillStands(w, row[w.target]))
                     : [];
                 return (
                   <React.Fragment key={rowIdx}>

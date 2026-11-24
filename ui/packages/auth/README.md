@@ -215,10 +215,18 @@ user runs, so a key added later is covered without being listed. What the
 sweep leaves: the session token (`auth-session-token`, which the auth client
 manages itself), the session-user pointer
 (`auth-session-user-id`), the theme (`vite-ui-theme`) and the sign-in page
-language (`objectui-locale`, `objectui-locale-seed`). A session read the
-server does not answer (a network failure, or an error status other than 401)
-is not a sign-out and clears nothing. Server-side user preferences are not
-changed.
+language (`objectui-locale`, `objectui-locale-seed`). It also leaves the list
+layout this browser keeps for its reader, so the same person signing back in
+finds their lists as they left them: column widths, row height and tab order
+(`list-layout:…`, written by `@object-ui/app-shell`) and the grid's own column
+widths and order (`grid-columns-…`, written by `@object-ui/plugin-grid`). These
+are kept by prefix, and only while an entry holds that layout and nothing else
+(view ids, field names, widths, a row height); an entry holding anything more
+is removed like any other key. A different person signing in on that browser
+still clears all of it: their lists open at each view's defaults. A session
+read the server does not answer (a network failure, or an error status other
+than 401) is not a sign-out and clears nothing. Server-side user preferences
+are not changed.
 
 ### getSessionOwnerChangeCount / subscribeSessionOwnerChange
 

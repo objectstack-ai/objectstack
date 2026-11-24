@@ -1284,13 +1284,13 @@ function verdictOf(judgement: OpenAuthoringDraftJudgement): {
 
 /**
  * Where a person reviews the draft, as Console routes: the package's Changes
- * drawer (`?changes=review` on its Interfaces pillar, `studioChangesLink.ts`)
+ * drawer (`?changes=review` on its Studio home, the Data pillar, `studioChangesLink.ts`)
  * and the item's draft review on Studio's metadata area (`?review=1`).
  */
 function reviewRoutes(packageId: string, type: string, name: string): { changes: string; item: string; note: string } {
     const pkg = encodeURIComponent(packageId);
     return {
-        changes: `/studio/${pkg}/interfaces?changes=review`,
+        changes: `/studio/${pkg}/data?changes=review`,
         item: `/studio/${pkg}/metadata/${encodeURIComponent(type)}/${encodeURIComponent(name)}?review=1`,
         note: 'Console routes. A person reviews and publishes the draft there; this server cannot publish.',
     };

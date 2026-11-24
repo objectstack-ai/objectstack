@@ -96,10 +96,15 @@ export function RecordCommentsAside({
   placement,
   onClose,
   onEngage,
+  focusThreadId,
+  focusCommentId,
 }: {
   placement: CommentsPanelPlacement;
   onClose: () => void;
   onEngage?: () => void;
+  /** objectstack#36410 — the thread (and comment) a link opened the panel at. */
+  focusThreadId?: string | null;
+  focusCommentId?: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // Closed from inside (✕, Esc), the focus goes back to the record: to the
@@ -123,7 +128,7 @@ export function RecordCommentsAside({
       onPointerEnter={onEngage}
       onFocusCapture={onEngage}
     >
-      <CommentsPanel onClose={close} />
+      <CommentsPanel onClose={close} focusThreadId={focusThreadId} focusCommentId={focusCommentId} />
     </div>
   );
 }

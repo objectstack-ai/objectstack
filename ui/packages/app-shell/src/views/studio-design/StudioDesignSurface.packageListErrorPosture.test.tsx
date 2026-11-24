@@ -112,7 +112,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderSurface(tab = 'interfaces') {
+function renderSurface(tab = 'data') {
   return render(
     <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/${tab}`]}>
       <Routes>
@@ -130,7 +130,7 @@ describe('Studio top bar — package-list fetch failure is reported, not swallow
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     // The rest of the header survived the failure.
-    expect(screen.getByRole('link', { name: 'Interfaces' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Automations' })).toBeInTheDocument();
     // …and its way out still works (objectstack#36501): no app is known, so
     // it goes to the console's landing.
     fireEvent.click(screen.getByTestId('studio-back-to-app'));

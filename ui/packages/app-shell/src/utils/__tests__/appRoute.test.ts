@@ -281,20 +281,21 @@ describe('appStudioDesignPath', () => {
 });
 
 /**
- * App → Studio interface deep-link (dashboard design page).
+ * App → Studio interface deep-link: the item's page in the All-metadata area
+ * (objectstack#36502 retired the Interfaces pillar it opened before).
  */
 describe('appStudioSurfacePath', () => {
   const crm = { name: 'crm', _packageId: 'com.acme.crm' };
 
-  it('deep-links to the interface surface in the Interfaces pillar', () => {
+  it('deep-links to the interface\'s item page in the All-metadata area (objectstack#36502)', () => {
     expect(appStudioSurfacePath(crm, true, { type: 'dashboard', name: 'executive_dashboard' })).toBe(
-      '/studio/com.acme.crm/interfaces?surface=dashboard:executive_dashboard',
+      '/studio/com.acme.crm/metadata/dashboard/executive_dashboard',
     );
   });
   it('URL-encodes the package id and the surface name', () => {
     expect(
       appStudioSurfacePath({ _packageId: 'com.acme/crm' }, true, { type: 'dashboard', name: 'sales dash' }),
-    ).toBe('/studio/com.acme%2Fcrm/interfaces?surface=dashboard:sales%20dash');
+    ).toBe('/studio/com.acme%2Fcrm/metadata/dashboard/sales%20dash');
   });
   it('returns null for non-admins', () => {
     expect(appStudioSurfacePath(crm, false, { type: 'dashboard', name: 'd' })).toBeNull();
@@ -341,28 +342,28 @@ describe('appStudioObjectPath', () => {
 
 /**
  * App → Studio route bridge — maps a running-app route to its Studio target:
- * an interface surface (dashboard / page / report) deep-links into the
- * Interfaces pillar; an object record page deep-links that object in the Data
+ * an interface surface (dashboard / page / report) deep-links to its
+ * All-metadata item page (objectstack#36502); an object record page deep-links that object in the Data
  * pillar; everything else opens the package's Data tab.
  */
 describe('appStudioRoutePath', () => {
   const crm = { name: 'crm', _packageId: 'com.acme.crm' };
 
-  it('deep-links a dashboard route to its Interfaces surface', () => {
+  it('deep-links a dashboard route to its All-metadata item page', () => {
     expect(appStudioRoutePath(crm, true, { type: 'dashboard', name: 'executive_dashboard' })).toBe(
-      '/studio/com.acme.crm/interfaces?surface=dashboard:executive_dashboard',
+      '/studio/com.acme.crm/metadata/dashboard/executive_dashboard',
     );
   });
 
-  it('deep-links a page route to its Interfaces surface (the fix — was the Data tab)', () => {
+  it('deep-links a page route to its All-metadata item page (the fix — was the Data tab)', () => {
     expect(appStudioRoutePath(crm, true, { type: 'page', name: 'showcase_crm_workbench' })).toBe(
-      '/studio/com.acme.crm/interfaces?surface=page:showcase_crm_workbench',
+      '/studio/com.acme.crm/metadata/page/showcase_crm_workbench',
     );
   });
 
-  it('deep-links a report route to its Interfaces surface', () => {
+  it('deep-links a report route to its All-metadata item page', () => {
     expect(appStudioRoutePath(crm, true, { type: 'report', name: 'pipeline_report' })).toBe(
-      '/studio/com.acme.crm/interfaces?surface=report:pipeline_report',
+      '/studio/com.acme.crm/metadata/report/pipeline_report',
     );
   });
 

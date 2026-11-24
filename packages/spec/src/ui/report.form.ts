@@ -38,11 +38,16 @@ export const reportForm = defineForm({
       // A `joined` report carries its data on `blocks` instead.
       visibleWhen: "data.type != 'joined'",
       fields: [
-        { field: 'dataset', widget: 'ref:dataset', helpText: 'The report reads its numbers from here; everyone sees only the records they have access to.' },
-        { field: 'values', widget: 'string-tags', helpText: 'The metrics to total or count (from the data source).' },
-        { field: 'rows', widget: 'string-tags', helpText: 'The fields to group by (from the data source).' },
+        // #36838 — the four row titles are the blocks grid's terms below (and
+        // `JoinedReportBlockSchema`'s `.meta({ title })`), so one form never
+        // names the same key in two vocabularies. Without a `label` these rows
+        // read the prettified keys Dataset / Values / Rows / Columns.
+        { field: 'dataset', label: 'Data Source', widget: 'ref:dataset', helpText: 'The report reads its numbers from here; everyone sees only the records they have access to.' },
+        // A measure may be any dataset measure (sum, count, average, ratio, derived).
+        { field: 'values', label: 'Metrics', widget: 'string-tags', helpText: 'The metrics to show, such as totals, counts, averages or ratios (from the data source).' },
+        { field: 'rows', label: 'Group By', widget: 'string-tags', helpText: 'The fields to group by (from the data source).' },
         // CEL visibility — only Matrix reports pivot across a second dimension.
-        { field: 'columns', widget: 'string-tags', visibleWhen: "data.type == 'matrix'", helpText: 'Groups spread across the columns (matrix reports only).' },
+        { field: 'columns', label: 'Group Columns By', widget: 'string-tags', visibleWhen: "data.type == 'matrix'", helpText: 'Groups spread across the columns (matrix reports only).' },
         // #3916 — ordering is authorable here or it is not authorable at all:
         // `DatasetSelection.order` has always existed on the wire, but a report
         // author had no channel to reach it. Optional — a selected time
@@ -145,7 +150,10 @@ export const reportForm = defineForm({
           fields: [
             { field: 'formats', label: 'Formats', helpText: 'The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off.' },
             { field: 'includeHeaders', label: 'Include Headers', helpText: 'Put the column names in the first row of the downloaded file.' },
-            { field: 'fileNamePrefix', label: 'File Name', helpText: 'The start of the downloaded file’s name, used instead of the report name.' },
+            // The prefix replaces the report's label, which falls back to its
+            // name (`buildExportFileName` in @object-ui/core, called by the
+            // report export control); the date and time follow it.
+            { field: 'fileNamePrefix', label: 'File Name', helpText: 'The start of the downloaded file’s name. Left empty, the file is named after the report’s label, or its name when it has no label.' },
           ],
         },
       ],

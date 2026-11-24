@@ -5,8 +5,9 @@
  * Studio handle on the same route opens (objectui#12540).
  *
  * On a console page route the app bar's pencil, the app switcher's Studio row
- * and the sidebar's Design (objectui#12520) all open the page's surface in
- * Studio's Interfaces pillar, `/studio/PACKAGE/interfaces?surface=page:NAME`,
+ * and the sidebar's Design (objectui#12520) all open the page in Studio, at
+ * its All-metadata item page `/studio/PACKAGE/metadata/page/NAME` since
+ * objectstack#36502 retired the Interfaces pillar,
  * through `appStudioRoutePath`. The page's own button opened the
  * metadata-admin page instead, so the one handle labelled "Edit in studio" was
  * the one that did not open Studio. It now goes through the same derivation:
@@ -140,12 +141,12 @@ afterEach(() => {
 });
 
 describe('Edit in studio opens the page in Studio, as the app bar pencil does (objectui#12540)', () => {
-  it('lands on the page surface in Studio\'s Interfaces pillar — the pencil\'s derivation, for the same app and page', async () => {
+  it('lands on the page\'s All-metadata item page in Studio (objectstack#36502) — the pencil\'s derivation, for the same app and page', async () => {
     await mountUnder(OWNED);
     fireEvent.click(screen.getByTestId('page-edit-in-studio-button'));
     expect(navigateSpy).toHaveBeenCalledTimes(1);
     const target = navigateSpy.mock.calls[0][0];
-    expect(target).toBe('/studio/com.objectstack.cloud/interfaces?surface=page:welcome');
+    expect(target).toBe('/studio/com.objectstack.cloud/metadata/page/welcome');
     // The app bar's inputs on this route: the app, the author gate, the route type and name.
     expect(target).toBe(appStudioRoutePath(OWNED, true, { type: 'page', name: 'welcome' }));
   });

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { Plugin, PluginContext } from '@objectstack/core';
+import type { JsonColumnFieldClass, Plugin, PluginContext } from '@objectstack/core';
 import { isFederatedObject, registryObjectPackageDisabled } from '@objectstack/core';
 import type { Cube, FilterCondition } from '@objectstack/spec/data';
 import { AggregationFunction, referenceCarrierOf } from '@objectstack/spec/data';
@@ -128,6 +128,16 @@ type DialectNamingDriver = { readonly dialectName?: unknown };
  */
 type DateBucketingDriver = {
   dateBucketSql?(objectName: string, field: string, granularity: string, timezone?: string): unknown;
+};
+
+/**
+ * [#36190] The slice of a SQL driver that names the CLASS of a JSON column on
+ * its deployment, `SqlDriver.jsonColumnFieldClass`. Read structurally, as
+ * {@link DialectNamingDriver} is and for the same reason: which columns are
+ * JSON on this deployment is a property of the SQL driver family's storage.
+ */
+type JsonColumnClassifyingDriver = {
+  jsonColumnFieldClass?(table: string, field: string): unknown;
 };
 
 /**
@@ -1496,6 +1506,27 @@ export class AnalyticsServicePlugin implements Plugin {
     };
 
     /**
+     * [#36190] Which class of JSON column `field` on `objectName` is on this
+     * deployment, asked of the DRIVER that stores the object through the same
+     * `getDriverForObject` seam `sqlDialect` uses: the driver alone knows
+     * whether its single-value media columns are still JSON (the ADR-0104
+     * window). Only the two classes the refusal words are passed on;
+     * `undefined` on every tier that cannot answer (no data engine, a driver
+     * without the member, a throw), which leaves the column unjudged.
+     */
+    const jsonColumnFieldClass = (objectName: string, field: string): JsonColumnFieldClass | undefined => {
+      try {
+        const svc = ctx.getService<DataEngineLike>('data');
+        const driver = svc?.getDriverForObject?.(objectName) as JsonColumnClassifyingDriver | undefined;
+        if (typeof driver?.jsonColumnFieldClass !== 'function') return undefined;
+        const answered = driver.jsonColumnFieldClass(objectName, field);
+        return answered === 'single-value-media' || answered === 'multi-value-or-json' ? answered : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    /**
      * [#21080] The data engine's answer to "is a middleware registered for
      * this object?" (`IObjectQLEngine.hasObjectMiddleware`), resolved per call
      * like every bridge above, so plugin order does not matter.
@@ -1692,6 +1723,9 @@ export class AnalyticsServicePlugin implements Plugin {
       // [#21441] The executing driver's own bucket expression — see
       // `dateBucketSql` above.
       dateBucketSql,
+      // [#36190] The storing driver's JSON-column class — see
+      // `jsonColumnFieldClass` above.
+      jsonColumnFieldClass,
       // [#19995, ruling C] The executing engine's own `where` admission — see
       // `judgeFilter` beside the `executeAggregate` auto-bridge above.
       judgeFilter,

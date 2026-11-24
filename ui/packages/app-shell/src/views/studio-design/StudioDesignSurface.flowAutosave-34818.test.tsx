@@ -117,7 +117,7 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
 import { toast } from 'sonner';
-import { AutomationsPillar, InterfacesPillar } from './StudioDesignSurface';
+import { AutomationsPillar } from './StudioDesignSurface';
 import { StudioRightSlotContext } from './studioRightSlotState';
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
@@ -128,7 +128,7 @@ import { FlowInspector } from '../metadata-admin/inspectors/FlowInspector';
 import { PagePreview } from '../metadata-admin/previews/PagePreview';
 import { PageBlockInspector } from '../metadata-admin/inspectors/PageBlockInspector';
 import { PageDefaultInspector } from '../metadata-admin/inspectors/PageDefaultInspector';
-import { t, tFormat } from '../metadata-admin/i18n';
+import { t } from '../metadata-admin/i18n';
 
 const dataSource = createEmptyDataSource();
 
@@ -164,11 +164,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function editText(el: HTMLElement, value: string): void {
-  fireEvent.change(el, { target: { value } });
-  fireEvent.blur(el);
-}
-
 async function renderOpenFlow(): Promise<void> {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
@@ -183,21 +178,6 @@ async function selectStart(): Promise<HTMLElement> {
   fireEvent.click(document.querySelector('[data-node-id="start"] [role="button"]') as HTMLElement);
   return within(screen.getByTestId('auto-config-aside')).findByLabelText('Label', undefined, { timeout: 8000 });
 }
-
-describe('an Interfaces page (a leaf) autosave toasts by its label (#34818 item 8)', () => {
-  it('the control: an Interfaces page (a leaf) autosave still toasts by its label', async () => {
-    render(
-      <MemoryRouter initialEntries={[`/studio/${PKG}/interfaces`]}>
-        <InterfacesPillar packageId={PKG} />
-      </MemoryRouter>,
-    );
-    await screen.findByRole('button', { name: 'Select hello' }, { timeout: 8000 });
-    const label = await within(screen.getByRole('complementary')).findByLabelText(/^Label/, undefined, { timeout: 8000 });
-    editText(label, 'Welcome');
-    await waitFor(() => expect(toast.success).toHaveBeenCalled(), { timeout: 8000 });
-    expect(vi.mocked(toast.success).mock.calls[0][0]).toBe(tFormat('engine.studio.draftSaved', 'en', { item: 'Home menu' }));
-  });
-});
 
 describe('the Debug section takes the Configuration aside’s place (#34818 item 6)', () => {
   it('hides the aside in Debug and brings it back, selection kept, on leaving', async () => {
