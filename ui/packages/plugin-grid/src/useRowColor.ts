@@ -118,6 +118,19 @@ function colorToClass(color: string): string | undefined {
 }
 
 /**
+ * The row class of a palette colour NAME (objectstack#36897, `ObjectGrid`'s
+ * host `rowTint`): `undefined` for none and for a name outside the palette.
+ * Unlike an authored `rowColor` value, a raw `bg-*` class is not admitted.
+ */
+export function rowTintClass(name: string | null | undefined): string | undefined {
+  if (typeof name !== 'string') return undefined;
+  const lower = name.toLowerCase().trim();
+  return Object.prototype.hasOwnProperty.call(COLOR_TO_CLASS, lower)
+    ? `${ROW_TINT_SURFACE} ${COLOR_TO_CLASS[lower]}`
+    : undefined;
+}
+
+/**
  * Hook that returns a row-className resolver based on RowColorConfig.
  *
  * @param config  - RowColorConfig from the grid schema (optional)

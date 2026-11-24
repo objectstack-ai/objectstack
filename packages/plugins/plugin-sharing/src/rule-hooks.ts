@@ -167,7 +167,7 @@ export const ruleRegrantQueue = new RuleRegrantQueue();
 export function bindRuleHooks(
   engine: MinimalEngine,
   service: SharingRuleService,
-  rules: SharingRuleRow[],
+  rules: ReadonlyArray<Pick<SharingRuleRow, 'object_name' | 'active'>>,
   logger?: MinimalLogger,
 ): void {
   const objects = new Set<string>();
@@ -310,7 +310,33 @@ export function bindRuleHooks(
       }
     }, opts);
   }
-  logger?.info?.('[sharing-rule] hooks bound', { objects: Array.from(objects), ruleCount: rules.length });
+  logger?.info?.('[sharing-rule] hooks bound', { objects: Array.from(objects) });
+}
+
+/**
+ * Unbind the rule-hook package and bind it again on
+ * {@link SharingRuleService.listRuleHookObjects} — how the plugin binds the
+ * per-record rule hooks, at boot and on every `sys_sharing_rule` rebind
+ * (`SharingServicePlugin`'s private `bindRuleHooks`), so the two can never
+ * derive different object sets.
+ *
+ * The object set is read from the rules' DECLARATIONS and rows, never from the
+ * organizations a declared rule is served in right now: the binding is per
+ * object and organization-agnostic, and the organization is resolved when a
+ * record is evaluated. An organization created after the bind is therefore
+ * served by the hooks already bound, with no rebind and no restart.
+ *
+ * The read runs before the unbind, so a failed read leaves the previous
+ * bindings in place.
+ */
+export async function rebindRuleHooks(
+  engine: MinimalEngine,
+  service: SharingRuleService,
+  logger?: MinimalLogger,
+): Promise<void> {
+  const objects = await service.listRuleHookObjects();
+  unbindAllRuleHooks(engine);
+  bindRuleHooks(engine, service, objects.map((object_name) => ({ object_name, active: true })), logger);
 }
 
 export function unbindAllRuleHooks(engine: MinimalEngine): number {

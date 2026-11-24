@@ -253,11 +253,21 @@ export interface MetaItemsListOptions {
 
 /**
  * [#30205] `security.assignedWork.count`'s answer: per object and user field,
- * how many records hold the user, as the caller can read them.
+ * how many records hold the user, as the caller can read them. A row with
+ * `transferable: false` is counted but never handed over, and `reason` says
+ * why: `multi_valued` (a multi-valued user field) or `transfer_off` (the owner
+ * field of an object whose Change Owner switch, `userActions.transfer`, is off).
  */
 export interface UserAssignedWorkSummary {
   userId: string;
-  objects: Array<{ object: string; field: string; count: number; transferable: boolean }>;
+  objects: Array<{
+    object: string;
+    field: string;
+    count: number;
+    transferable: boolean;
+    /** Why the row is not handed over; present exactly when `transferable` is false. */
+    reason?: 'multi_valued' | 'transfer_off';
+  }>;
   total: number;
   truncated: boolean;
   unreadable: string[];
@@ -7042,9 +7052,11 @@ export class ObjectStackClient {
       assignedWork: {
           /**
            * Per object and user field (the owner field and every app user
-           * field), how many records hold `userId`. Objects the caller cannot
-           * read are named in `unreadable`; `truncated` says more fields exist
-           * than were counted.
+           * field), how many records hold `userId`, each with whether
+           * `transfer` moves them and, when it does not, why (`reason`): a
+           * multi-valued field, or the owner field of an object whose Change
+           * Owner switch is off. Objects the caller cannot read are named in
+           * `unreadable`; `truncated` says more fields exist than were counted.
            */
           count: async (userId: string): Promise<UserAssignedWorkSummary> => {
               const res = await this.fetch(

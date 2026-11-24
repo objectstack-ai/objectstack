@@ -6,6 +6,7 @@ import type { MetadataValidationResult } from '@objectstack/spec/kernel';
 import { printError, printInfo, printSuccess, printWarning, emitJson, errorCodeFields } from '../../utils/format.js';
 import { createApiClient, requireAuth } from '../../utils/api-client.js';
 import { formatOutput } from '../../utils/output-formatter.js';
+import { studioChangesReviewLink } from '@objectstack/types';
 
 /**
  * [#23350] The refusal an EMPTY `--package` earns, before anything reaches the
@@ -210,7 +211,7 @@ export function draftSaveLines(args: {
   if (args.packageId) {
     lines.push(
       `Review and publish it in Studio's Changes for package ${args.packageId} `
-        + `(/studio/${encodeURIComponent(args.packageId)}/data?changes=review).`,
+        + `(${studioChangesReviewLink(args.packageId)}).`,
     );
   }
   return lines;
