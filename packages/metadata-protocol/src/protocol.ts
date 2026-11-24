@@ -107,8 +107,6 @@ import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import {
     resolveLockState,
     type MetadataLock,
-    type MetadataLockSource,
-    type MetadataProvenance,
 } from '@objectstack/spec/kernel';
 // [#28409, ADR-0146 D3 / D8 item 2] The pair's id, the one spelling N-08 owns,
 // and the one predicate that says a stored row is the served override of a
@@ -4350,6 +4348,10 @@ export class ObjectStackProtocolImplementation implements
      * `@objectstack/rest`, and its runtime twin) asks for it; every other
      * reader of this method reads no draft. A failed draft read throws, as
      * the overlay read does, for the same [#5707] reason.
+     *
+     * [#36601] `opts.withVersion` adds `overlayVersion`: the active row's
+     * keyed version token at this address (`null` for none), which a per-item
+     * publish there takes as `If-Match`. Without it the key is not served.
      */
     async getMetaItemLayered(request: {
         type: string;
@@ -4357,44 +4359,8 @@ export class ObjectStackProtocolImplementation implements
         packageId?: string;
         /** [#26699] The bundle member whose layers to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string;
-    }, opts: { withDraft?: boolean } = {}): Promise<{
-        type: string;
-        name: string;
-        code: unknown | null;
-        overlay: unknown | null;
-        overlayScope: 'env' | null;
-        effective: unknown | null;
-        /** [#29814] The pending draft row as stored, only when `opts.withDraft` asked; `null` for none. */
-        draft?: unknown | null;
-        /**
-         * Load-time validation result for the effective payload — same
-         * shape attached to getMetaItems/getMetaItem by
-         * decorateMetadataItem. Undefined for types without a registered
-         * Zod schema (function/service/router). Lets the Studio edit
-         * page surface invalid-metadata banners + inline field errors
-         * without a second round-trip.
-         */
-        _diagnostics?: MetadataDiagnostics;
-        // ── ADR-0010 protection envelope ──
-        lock: MetadataLock;
-        lockReason?: string;
-        // `MetadataLockSource` (artifact | package | env-forced) — the only
-        // producer feeding this field on this path is the item-lock
-        // resolution's `lockSource` ([#21738] {@link resolveItemLock}: the
-        // binding layer's declared `_lockSource`), typed
-        // `MetadataLockSource | undefined`. The `'overlay'` arm this annotation
-        // used to carry was dead: the door's `'artifact' | 'overlay'` is the
-        // resolution's `layer`, which `getEffectiveLock` reports in its refusal
-        // text and which never feeds this response (commit 11b779e0f).
-        lockSource?: MetadataLockSource;
-        lockDocsUrl?: string;
-        provenance?: MetadataProvenance;
-        packageId?: string;
-        packageVersion?: string;
-        editable: boolean;
-        deletable: boolean;
-        resettable: boolean;
-    }> {
+    }, opts: { withDraft?: boolean; withVersion?: boolean } = {}): ReturnType<typeof getMetaItemLayered> {
+        // [#36601] The answer's shape is the facet's own (`overlayVersion` joined it), declared once there.
         // [#25467 E1] The body moved to `protocol-meta-layered-reads.ts`; it reaches this class through `protocol-host.ts`.
         return getMetaItemLayered(protocolHost(this), request, opts);
     }
@@ -9807,6 +9773,8 @@ export class ObjectStackProtocolImplementation implements
         member?: string;
         /** [#32656] The write request's `userTextLocales`, for the findings' `userMessage`. */
         userTextLocales?: readonly (string | undefined)[];
+        /** [#36601] The caller's pin on the active row this promotion replaces (`PublishMetaItemRequestSchema.parentVersion`). */
+        parentVersion?: string | null;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
         /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */

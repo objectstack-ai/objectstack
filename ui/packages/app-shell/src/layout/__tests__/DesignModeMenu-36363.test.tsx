@@ -626,7 +626,7 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
 
     fireEvent.click(screen.getByText('switch to hr'));
-    expect(confirmSpy).toHaveBeenCalledWith('Leave design mode? Your unsaved changes will be lost.');
+    expect(confirmSpy).toHaveBeenCalledWith('Leave Design layout? Your unsaved changes will be lost.');
     expect(switchedTo).toEqual([]);
     expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
     expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);

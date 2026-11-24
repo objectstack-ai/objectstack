@@ -2183,10 +2183,11 @@ export function registerStorageFamily(
       }
 
       // The stored-bytes rule (`served-bytes-policy.ts`): inline only for the
-      // allow-list, `nosniff` and the sandbox CSP on every answer. The token's
-      // filename, when it carries one, names the browser's saved copy.
+      // allow-list and only for bytes that begin with their type's signature,
+      // `nosniff` and the sandbox CSP on every answer. The token's filename,
+      // when it carries one, names the browser's saved copy.
       for (const [name, value] of Object.entries(
-        servedBytesHeaders({ contentType: payload.ct, filename: payload.n, disposition: payload.d }),
+        servedBytesHeaders({ contentType: payload.ct, filename: payload.n, disposition: payload.d, bytes: data }),
       )) {
         res.header(name, value);
       }

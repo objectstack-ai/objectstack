@@ -29,6 +29,7 @@ import { Button, Input, cn } from '@object-ui/components';
 import { Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { CelPredicateField } from './CelPredicateField.js';
 import type { CelLintIssue } from './celAuthoring.js';
+import type { CelFieldDef } from './clientValidation.js';
 
 /**
  * Scope roots bound at RUNTIME for a row predicate, advertised to autocomplete.
@@ -181,6 +182,16 @@ export interface ConditionalFormattingEditorProps {
   objectName?: string;
   /** Field names of {@link objectName} for autocomplete. */
   fieldNames?: string[];
+  /**
+   * The object's field definitions — each field's `type` and `multiple` —
+   * handed to every rule's {@link CelPredicateField}, which reads the
+   * list-valued ones through `isMultiValueField`. A condition such as
+   * `record.tags == 'vip'` on a list field compares a list with a scalar, so
+   * it never matches any row; with these it is refused while the author types
+   * (`list-equality`, with the `in` rewrite). Omitted: no field is judged a
+   * list, the lint is what it was before this prop.
+   */
+  fieldDefs?: ReadonlyArray<CelFieldDef>;
   disabled?: boolean;
   /** i18n resolver (`(key) => string`). */
   t: (key: string) => string;
@@ -239,6 +250,7 @@ export function ConditionalFormattingEditor({
   onChange,
   objectName,
   fieldNames,
+  fieldDefs,
   disabled,
   t,
   onBlockingIssuesChange,
@@ -377,6 +389,7 @@ export function ConditionalFormattingEditor({
             placeholder="record.status == 'overdue'"
             objectName={objectName}
             fieldNames={fieldNames}
+            fieldDefs={fieldDefs}
             // Row predicates bind the row as `record.*` and nothing else at
             // runtime — `83fe6e741` (Phase 2 of the objectui#5330 canon)
             // retired the bare shorthand and `data.*`. So this lints in the

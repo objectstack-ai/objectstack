@@ -59,6 +59,7 @@ const ROWS: Record<string, Row[]> = {
   xm_task: [
     { id: 't1', name: 'Kickoff', project: 'p1' },
     { id: 't2', name: 'Kickoff', project: 'p2' },
+    { id: 't3', name: 'Design review', project: 'p1' },
   ],
 };
 
@@ -66,10 +67,14 @@ const ROWS: Record<string, Row[]> = {
 const metaMap = buildFieldMetaMap({
   fields: {
     name: TEXT,
-    contract: { type: 'lookup', reference: 'xm_contract' },
+    contract: { type: 'lookup', reference: 'xm_contract', label: 'Contract' },
     milestone: { type: 'lookup', reference: 'xm_milestone' },
-    project: { type: 'lookup', reference: 'xm_project' },
+    project: { type: 'lookup', reference: 'xm_project', label: 'Project' },
     task: { type: 'lookup', reference: 'xm_task', dependsOn: [{ field: 'project', param: 'project' }] },
+    // A multi-value lookup scoped the same way, for the multi-value refusal.
+    tasks: {
+      type: 'lookup', reference: 'xm_task', multiple: true, dependsOn: [{ field: 'project', param: 'project' }],
+    },
     // A second column pointing at the master, used only by the two-column case.
     other_contract: { type: 'lookup', reference: 'xm_contract' },
   },
@@ -223,5 +228,85 @@ describe('[#33523] the match-key pass scopes a key column by the row\'s master t
     });
     expect(summary.results.map(verdict)).toEqual([OK, { ok: false, code: 'reference_not_found', field: 'milestone' }]);
     expect(createData.mock.calls.map(([a]) => a.data.milestone)).toEqual(['m3']);
+  });
+});
+
+describe('[#36159] a scoped miss whose value exists outside the row\'s scope names the scoping column', () => {
+  const refusal = (r: { ok: boolean; code?: string; field?: string; error?: string }) =>
+    ({ ok: r.ok, code: r.code, field: r.field, error: r.error });
+
+  it('a dependsOn-scoped cell naming another parent\'s record: reference_not_found naming Project and its cell', async () => {
+    const { p, createData } = protocol();
+    // "Design review" exists, under Apollo only.
+    const summary = await run(p, [{ name: 'INV-1', project: 'Gemini', task: 'Design review' }]);
+    expect(summary.results.map(refusal)).toEqual([{
+      ok: false, code: 'reference_not_found', field: 'task',
+      error: 'task: no record matches "Design review" (Project = "Gemini")',
+    }]);
+    expect(createData).not.toHaveBeenCalled();
+  });
+
+  it('a master-scoped cell naming another master\'s detail, by name or by id: the same sentence naming Contract', async () => {
+    const { p } = protocol();
+    const summary = await run(p, [
+      { name: 'INV-1', contract: 'Contract B', milestone: 'Final 70%' },
+      { name: 'INV-2', contract: 'Contract B', milestone: 'm1' },
+    ]);
+    expect(summary.results.map(refusal)).toEqual([
+      {
+        ok: false, code: 'reference_not_found', field: 'milestone',
+        error: 'milestone: no record matches "Final 70%" (Contract = "Contract B")',
+      },
+      {
+        ok: false, code: 'reference_not_found', field: 'milestone',
+        error: 'milestone: no record matches "m1" (Contract = "Contract B")',
+      },
+    ]);
+  });
+
+  it('a value that matches no record at all keeps the plain no-record-matches sentence', async () => {
+    const { p } = protocol();
+    const summary = await run(p, [
+      { name: 'INV-1', project: 'Gemini', task: 'Retrospective' },
+      { name: 'INV-2', contract: 'Contract B', milestone: 'Holdback 5%' },
+    ]);
+    expect(summary.results.map(refusal)).toEqual([
+      { ok: false, code: 'reference_not_found', field: 'task', error: 'task: no record matches "Retrospective"' },
+      { ok: false, code: 'reference_not_found', field: 'milestone', error: 'milestone: no record matches "Holdback 5%"' },
+    ]);
+  });
+
+  it('a multi-value cell: the token outside the scope is refused with the same sentence', async () => {
+    const { p } = protocol();
+    const summary = await run(p, [
+      { name: 'INV-1', project: 'Gemini', tasks: 'Kickoff; Design review' },
+      { name: 'INV-2', project: 'Gemini', tasks: 'Kickoff; Retrospective' },
+    ]);
+    expect(summary.results.map(refusal)).toEqual([
+      {
+        ok: false, code: 'reference_not_found', field: 'tasks',
+        error: 'tasks: no record matches "Design review" (Project = "Gemini")',
+      },
+      { ok: false, code: 'reference_not_found', field: 'tasks', error: 'tasks: no record matches "Retrospective"' },
+    ]);
+  });
+
+  it('the unscoped probe is the importing caller\'s own read, and a record that caller cannot read stays unnamed', async () => {
+    const { p, findData } = protocol();
+    // The caller's reads see no Apollo task: the fake hides xm_task rows of p1
+    // from this caller, as row-level security would.
+    findData.mockImplementation(async (args: FindArgs) =>
+      (ROWS[args.object] ?? [])
+        .filter((r) => !(args.object === 'xm_task' && r.project === 'p1'))
+        .filter((r) => matches(r, args.query!.where as Record<string, unknown>)));
+    const summary = await run(p, [{ name: 'INV-1', project: 'Gemini', task: 'Design review' }]);
+    expect(summary.results.map(refusal)).toEqual([
+      { ok: false, code: 'reference_not_found', field: 'task', error: 'task: no record matches "Design review"' },
+    ]);
+    const taskReads = findData.mock.calls.map(([a]) => a).filter((a) => a.object === 'xm_task');
+    // Both the scoped lookup and the unscoped probe ran, and every read ran as the caller.
+    expect(taskReads.some((a) => (a.query!.where as Row).project === 'p2')).toBe(true);
+    expect(taskReads.some((a) => !('project' in (a.query!.where as Row)))).toBe(true);
+    for (const a of findData.mock.calls.map(([call]) => call)) expect(a.context).toBe(CALLER);
   });
 });
