@@ -2959,9 +2959,6 @@ const zhHant = {
       targetQueue: '佇列',
       queue: '佇列',
       queuePlaceholder: '選擇佇列',
-      queuesLoading: '正在讀取佇列…',
-      queuesFailed: '無法讀取佇列：{{message}}',
-      noQueues: '尚未設定任何佇列。',
       notify: '通知新的負責人',
       alreadyOwner: '此人已是該記錄的負責人。',
       submit: '更改負責人',
@@ -2975,7 +2972,7 @@ const zhHant = {
       skipped: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       skipped_one: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
       skipped_other: '所選記錄中有 {{count}} 條不提供更改負責人，已排除。',
-      noClient: '此處無法更改負責人。',
+      gridOnly: '如需一次更改多條記錄的負責人，請切換到表格檢視。',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

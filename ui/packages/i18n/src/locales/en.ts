@@ -3473,9 +3473,6 @@ const en = {
       targetQueue: 'A queue',
       queue: 'Queue',
       queuePlaceholder: 'Pick a queue',
-      queuesLoading: 'Loading queues…',
-      queuesFailed: 'The queues could not be read: {{message}}',
-      noQueues: 'No queue is set up.',
       notify: 'Notify the new owner',
       alreadyOwner: 'This person already owns this record.',
       submit: 'Change Owner',
@@ -3489,7 +3486,7 @@ const en = {
       skipped: '{{count}} selected records do not offer Change Owner and are left out.',
       skipped_one: '{{count}} selected record does not offer Change Owner and is left out.',
       skipped_other: '{{count}} selected records do not offer Change Owner and are left out.',
-      noClient: 'The owner cannot be changed here.',
+      gridOnly: 'To change the owner of several records at once, switch to a grid view.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

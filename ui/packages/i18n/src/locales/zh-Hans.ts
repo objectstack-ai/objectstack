@@ -2959,9 +2959,6 @@ const zh = {
       targetQueue: '队列',
       queue: '队列',
       queuePlaceholder: '选择队列',
-      queuesLoading: '正在读取队列…',
-      queuesFailed: '无法读取队列：{{message}}',
-      noQueues: '尚未设置任何队列。',
       notify: '通知新的负责人',
       alreadyOwner: '此人已是该记录的负责人。',
       submit: '更改负责人',
@@ -2975,7 +2972,7 @@ const zh = {
       skipped: '所选记录中有 {{count}} 条不提供更改负责人，已排除。',
       skipped_one: '所选记录中有 {{count}} 条不提供更改负责人，已排除。',
       skipped_other: '所选记录中有 {{count}} 条不提供更改负责人，已排除。',
-      noClient: '此处无法更改负责人。',
+      gridOnly: '如需一次更改多条记录的负责人，请切换到表格视图。',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

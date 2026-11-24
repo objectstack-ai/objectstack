@@ -2864,9 +2864,6 @@ const pt = {
       targetQueue: 'Uma fila',
       queue: 'Fila',
       queuePlaceholder: 'Escolha uma fila',
-      queuesLoading: 'Carregando filas…',
-      queuesFailed: 'Não foi possível ler as filas: {{message}}',
-      noQueues: 'Nenhuma fila está configurada.',
       notify: 'Notificar o novo proprietário',
       alreadyOwner: 'Esta pessoa já é a proprietária deste registro.',
       submit: 'Alterar proprietário',
@@ -2881,7 +2878,7 @@ const pt = {
       skipped_one: '{{count}} registro selecionado não oferece Alterar proprietário e foi deixado de fora.',
       skipped_many: '{{count}} de registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
       skipped_other: '{{count}} registros selecionados não oferecem Alterar proprietário e foram deixados de fora.',
-      noClient: 'O proprietário não pode ser alterado aqui.',
+      gridOnly: 'Para alterar o proprietário de vários registros de uma vez, mude para uma visualização em grade.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

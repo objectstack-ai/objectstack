@@ -2794,9 +2794,6 @@ const ko = {
       targetQueue: '대기열',
       queue: '대기열',
       queuePlaceholder: '대기열 선택',
-      queuesLoading: '대기열을 불러오는 중…',
-      queuesFailed: '대기열을 읽을 수 없습니다: {{message}}',
-      noQueues: '설정된 대기열이 없습니다.',
       notify: '새 소유자에게 알림',
       alreadyOwner: '이 사용자는 이미 이 레코드의 소유자입니다.',
       submit: '소유자 변경',
@@ -2810,7 +2807,7 @@ const ko = {
       skipped: '선택한 레코드 중 {{count}}개는 소유자 변경을 제공하지 않아 제외됩니다.',
       skipped_one: '선택한 레코드 중 {{count}}개는 소유자 변경을 제공하지 않아 제외됩니다.',
       skipped_other: '선택한 레코드 중 {{count}}개는 소유자 변경을 제공하지 않아 제외됩니다.',
-      noClient: '여기서는 소유자를 변경할 수 없습니다.',
+      gridOnly: '여러 레코드의 소유자를 한 번에 변경하려면 그리드 보기로 전환하세요.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
