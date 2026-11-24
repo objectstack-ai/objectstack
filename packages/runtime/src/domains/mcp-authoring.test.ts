@@ -177,6 +177,8 @@ interface Served {
   grantReads: string[];
   protocolCalls: unknown[];
   warnings: unknown[][];
+  /** [#36856] The scope id each `automation` resolution was asked with. */
+  automationAsks: unknown[];
 }
 
 /**
@@ -191,6 +193,8 @@ async function serve(
     protocol?: OpenAuthoringProtocol;
     /** The `tenancy` service the walled refusal reads its posture from. */
     tenancy?: { posture: string };
+    /** [#36856] The automation service the door resolves for a flow's switch. */
+    automation?: unknown;
   } = {},
 ): Promise<Served> {
   const { ql, reads } = userQl(opts.systemPermissions ?? ADMIN);
@@ -208,8 +212,15 @@ async function serve(
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     },
   };
+  const automationAsks: unknown[] = [];
   const deps = {
-    resolveService: async (_ctx: unknown, name: string) => (name === 'mcp' ? mcp : name === 'protocol' ? protocol : name === 'security' ? security : undefined),
+    resolveService: async (_ctx: unknown, name: string, scopeId?: unknown) => {
+      if (name === 'automation') {
+        automationAsks.push(scopeId);
+        return opts.automation;
+      }
+      return name === 'mcp' ? mcp : name === 'protocol' ? protocol : name === 'security' ? security : undefined;
+    },
     resolveServiceOrLoud: async (_ctx: unknown, name: string) => (name === 'tenancy' ? opts.tenancy : undefined),
     getObjectQL: async () => {
       if (opts.qlThrows) throw new Error('engine lookup failed');
@@ -234,6 +245,7 @@ async function serve(
     grantReads: reads,
     protocolCalls: calls,
     warnings,
+    automationAsks,
   };
 }
 
@@ -282,6 +294,21 @@ describe('the open draft door is served only where the token consents AND the us
     expect(refused.isError).toBe(true);
     expect(refused.body.error).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(served.protocolCalls).toEqual([]);
+  });
+
+  // [#36856] The shipping assembly of the switch port, through the real domain:
+  // the door resolves the automation service for the request's environment.
+  it('the door resolves the automation service for this environment, and a flow read carries its switch', async () => {
+    const ec = await oauthEnvelope(['metadata:write'], ADMIN);
+    const automation = { getFlowRuntimeStates: () => [{ name: 'opportunity_approval', enabled: false, bound: true }] };
+    const served = await serve(ec, {
+      store: { flow: [{ name: 'opportunity_approval', label: 'Opportunity approval', status: 'active', nodes: [] }] },
+      automation,
+    });
+    const read = await call(served.authoring!, 'get_metadata_item', { type: 'flow', name: 'opportunity_approval' });
+    expect(read.isError).toBe(false);
+    expect(read.body.runtimeState).toEqual({ enabled: false });
+    expect(served.automationAsks).toEqual(['env_1']);
   });
 
   it('a metadata:write token whose user holds manage_metadata lists the five tools, and a read is served', async () => {

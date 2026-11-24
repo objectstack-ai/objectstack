@@ -279,7 +279,7 @@ const READ_TOOLS: readonly AIToolDefinition[] = Object.freeze([
             'Read one metadata item\'s full definition. Without `state`, a pending draft is read in place of '
             + 'the published version and the answer says `draft: true`. `state: "draft"` reads the pending '
             + 'draft only and is refused when there is none; `state: "active"` reads the published version. '
-            + 'A flow\'s answer also carries `runtimeState.enabled`: `false` means an admin switched it off and it '
+            + 'A flow\'s answer also carries `runtimeState.enabled`: `false` means the flow is switched off and '
             + 'does not run, whatever its `status` reads.',
         parameters: {
             type: 'object',
