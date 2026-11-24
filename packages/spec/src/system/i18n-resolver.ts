@@ -403,9 +403,17 @@ export interface TranslateDocumentOptions extends ResolveOptions {
    * layer shipped that rule name, and its `fields` also carry each field a
    * code extender ADDS under a name the owner does not declare, as that
    * extender ships it — the catalog rows for such a field can only translate
-   * what its extender ships. Its scalars and every field the owner declares
+   * what its extender ships, and, where the owner declares `relatedLists`,
+   * those `relatedLists` carry each entry a code extender's list placement
+   * (`place`) splices in, as the fold splices it, so a placed tab's `label`
+   * reads the catalog. Its scalars and every field the owner declares
    * stay the owner's: an extension's `fieldPatches` are never folded in, so a
-   * patched owner field still reads as diverged.
+   * patched owner field still reads as diverged. Whether a placement applies
+   * is judged on the OWNER here and on the served object's base layer (a
+   * tenant overlay's own `relatedLists`, else the owner's) by the fold: where
+   * only a tenant overlay declares `relatedLists`, the served placed tab has
+   * no packaged counterpart, so it reads as authored and the deployment
+   * catalog does not translate its `label`.
    *
    * Supplied by the serving layer, which is the only one that knows it; when
    * it is absent the translators behave exactly as they did before #8284 (the

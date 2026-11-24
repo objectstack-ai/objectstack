@@ -124,7 +124,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/ui.md', 1041],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 1320],
   ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 3990],
-  ['.claude/skills/pm-dispatch/references/lanes/security.md', 4194],
+  ['.claude/skills/pm-dispatch/references/lanes/security.md', 4241], // raised 4194 → 4241 (+47) by ruling record 7121202500 (N4 → B: 「以上都同意」): the low-severity advisory batch is not counted against the default fold's ≤5 cap and is bounded by the release-line and PR-size line alone
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 6958],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 2637], // lowered 2530 → 2526 by the fold/sweep/size rule PR's own edit; raised 2526 → 2637 (+111) by ruling record 7107018094 (the topic board in the repo: 「看板代码要放进仓库，立卡派发」, 「接，按普通顺序派」): the 3-hourly board rebuild line
   ['.claude/skills/pm-dispatch/references/lanes/l2-review.md', 1460],

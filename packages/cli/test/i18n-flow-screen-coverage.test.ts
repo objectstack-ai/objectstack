@@ -565,9 +565,10 @@ describe('a screen inside an ADR-0031 region (#17511)', () => {
         },
       ],
     };
-    // Not even the flow's own label: the payload object is not a screen node,
-    // so the flow has none and the runner can never open on it.
-    expect(flowKeys({ flows: [callout] })).toEqual([]);
+    // Only the flow's own label, which every named flow owes (the docs flow
+    // embed titles any flow by it): the payload object is not a screen node,
+    // so no screen key comes out of it.
+    expect(flowKeys({ flows: [callout] })).toEqual(['flows.callout.label']);
     // The lit control for that empty answer: the same flow with one real
     // screen node is walked, and the payload object still is not.
     const confirmed = { ...callout, nodes: [...callout.nodes, { id: 'confirm', type: 'screen', config: { title: 'Confirm' } }] };
@@ -614,17 +615,16 @@ describe('a screen inside an ADR-0031 region (#17511)', () => {
   });
 });
 
-// ── The flow's own label is demanded only for a flow the runner can open ────
+// ── The flow's own label is demanded for every named flow ───────────────────
 //
-// The console's `FlowRunner` reads `flows.<flow>.label`: it names the flow in
-// its header and its completion toast, and it opens only on a run paused at a
-// screen node. So the walker emits the label entry for a flow with a screen
-// node somewhere in the node universe the screens walk reads, at any depth.
-// Both sides are pinned: a flow with no screen node owes no label, and a flow
-// whose only screen sits inside a region still owes it. The approvals door is
-// the key's other reader, so a flow with an `approval` node owes it too
-// (#24916, pinned in `i18n-flow-approval-coverage.test.ts`); the scheduled
-// flow below has neither.
+// `flows.<flow>.label` has three readers: the console's `FlowRunner` (header
+// and completion toast, on a run paused at a screen), the approvals door
+// (#24916) and the docs viewer's `type: flow` embed, which titles its card by
+// it for whichever flow a page names, whatever its nodes. The third draws a
+// scheduled flow with no screen and no approval too, so the walker asks every
+// named flow for its label; a flow with no `name` has no key to ask for. The
+// scheduled flow below has neither a screen nor an approval and owes the label
+// all the same.
 
 /** A scheduled flow whose nodes include a region, and no screen at any depth. */
 const nightlyDigest = {
@@ -711,9 +711,16 @@ describe('a screen\'s body text is a key where the screen authors one (#22507)',
   });
 });
 
-describe('the flow label is demanded only for a flow the runner can open', () => {
-  it('emits no `flows.<flow>.label` entry for a flow with no screen node', () => {
-    expect(flowKeys({ flows: [nightlyDigest] })).toEqual([]);
+describe('the flow label is demanded for every named flow', () => {
+  it('emits the `flows.<flow>.label` entry for a flow with no screen node, seeded with its label', () => {
+    expect(flowKeys({ flows: [nightlyDigest] })).toEqual(['flows.nightly_digest.label']);
+    const entry = collectExpectedEntries({ flows: [nightlyDigest] }).find((e) => e.path.join('.') === 'flows.nightly_digest.label');
+    expect(entry).toMatchObject({ sourceValue: 'Nightly Digest' });
+  });
+
+  it('asks nothing of a flow with no name, which no bundle entry can address', () => {
+    expect(flowKeys({ flows: [{ ...nightlyDigest, name: undefined }] })).toEqual([]);
+    expect(flowKeys({ flows: [{ ...nightlyDigest, name: '' }] })).toEqual([]);
   });
 
   it('still emits it for a flow whose only screen node is region-nested', () => {
@@ -723,16 +730,20 @@ describe('the flow label is demanded only for a flow the runner can open', () =>
     ]);
   });
 
-  it('asks the coverage gate for the screen flow\'s label and not the other\'s, in one tree', () => {
-    const report = computeI18nCoverage({
-      i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
-      flows: [nightlyDigest, guardedCapture],
-      translations: [{ 'zh-CN': {} }],
-    });
-    const labels = userIssues(report)
-      .map((i) => i.key)
-      .filter((k) => k.endsWith('.label') && k.split('.').length === 3)
-      .sort();
-    expect(labels).toEqual(['flows.guarded_capture.label']);
+  it('asks the coverage gate for both flows\' labels in one tree, and goes quiet once translated', () => {
+    const flowLabelIssues = (zh: Record<string, unknown>) =>
+      userIssues(
+        computeI18nCoverage({
+          i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+          flows: [nightlyDigest, guardedCapture],
+          translations: [{ 'zh-CN': zh }],
+        }),
+      )
+        .filter((i) => i.source === 'flow')
+        .map((i) => i.key)
+        .filter((k) => k.endsWith('.label') && k.split('.').length === 3)
+        .sort();
+    expect(flowLabelIssues({})).toEqual(['flows.guarded_capture.label', 'flows.nightly_digest.label']);
+    expect(flowLabelIssues({ flows: { nightly_digest: { label: '每日摘要' } } })).toEqual(['flows.guarded_capture.label']);
   });
 });

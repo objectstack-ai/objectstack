@@ -2443,30 +2443,31 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
     // by the schema, so this is authored text in practice; `pushOptional`
     // keeps a label-less flow from seeding an empty string anyway.
     //
-    // Demanded for a flow with a `screen` node or an `approval` node, at any
-    // depth of the same node universe the walks below read. The predicate
-    // mirrors the two readers of the key, and nothing wider:
+    // Demanded for EVERY named flow. The key has three readers, and the
+    // third draws any flow, whatever its nodes:
     //
     // - the console's `FlowRunner` names the flow by it, in its header and its
-    //   completion toast, and the runner opens only on a run paused at a screen;
+    //   completion toast (a run paused at a screen);
     // - [#24916] the approvals door names a request's flow by it in the
     //   reader's locale (`plugin-approvals` `reader-locale-labels.ts`, the
-    //   inbox, the record's approval panel and the request page), and a request
-    //   exists only where an `approval` node opened one.
+    //   inbox, the record's approval panel and the request page);
+    // - the docs viewer's `type: flow` embed titles its card by it
+    //   (`metadata-viewer.tsx` `FlowView`, `useFlowLabelTranslations`), for
+    //   whichever flow a page names, record-triggered, scheduled and API flows
+    //   included. That is the reader the `nodes` demand below already asks
+    //   every flow's drawn steps for, and a card whose steps are asked for
+    //   and whose title is not draws an English heading over translated
+    //   steps.
     //
-    // A flow with neither (record-triggered, scheduled or an API flow that
-    // only does work) has no surface that shows its translated label: the
-    // console's launch hosts toast the action's copy or the flow's own
-    // `successMessage` / `errorMessage`, never its label. Demanding one would
-    // ask an author for a string that is stored and never read, so `Flow.label`
-    // being required by the schema is not the test. When a reader of such a
-    // flow's label lands, this predicate widens in the same change as that
-    // reader.
-    const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
+    // Until that embed read the key, a flow with neither a screen nor an
+    // approval had no surface showing its translated label, and this
+    // predicate was narrower; it widens with that reader, as the walk's rule
+    // says: a string nobody reads is not demanded, and this one is read. A
+    // flow with no `name` has no key and is skipped above, the one flow no
+    // reader can draw by a bundle entry.
     const approvalNodes = nodes.filter((node) => node && typeof node === 'object' && node.type === APPROVAL_NODE_TYPE);
-    if (hasScreen || approvalNodes.length > 0) {
-      pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
-    }
+    const hasScreen = nodes.some((node) => node && typeof node === 'object' && node.type === SCREEN_NODE_TYPE);
+    pushOptional(out, ['flows', flowName, 'label'], flow.label, 'flow', scope);
 
     // `flows.<flow>.successMessage` / `.errorMessage` (#22507) — the terminal
     // toasts, seeded from the flow's own text and emitted ONLY where the flow

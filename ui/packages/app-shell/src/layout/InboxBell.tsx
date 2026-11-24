@@ -1,10 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * InboxBell — the bell and its side panel (notifications, approvals,
- * activity), wired onto the shared user feeds. Drawn by the phone top bar and,
- * from 768 px up, beside the app sidebar's search (objectstack#36112), where
- * the desktop draws no top bar.
+ * InboxBell — the bell, wired onto the shared user feeds. Drawn by the phone
+ * top bar, where it opens the side panel (notifications, approvals, activity),
+ * and, from 768 px up, beside the app sidebar's search (objectstack#36112),
+ * where it opens the full-page inbox instead (objectstack#36741).
  *
  * The rows, badge addends and mark-read paths come from `useInboxBell`, the
  * one wiring of `sharedUserFeeds` onto an `InboxPopover`, so every bell and the
@@ -65,6 +65,7 @@ export function InboxBell({ activities }: InboxBellProps) {
         onMarkManyRead={markManyRead}
         pendingApprovals={pendingApprovals}
         onApprovalDecided={refreshPendingApprovals}
+        opensPageOnDesktop
       />
     </span>
   );

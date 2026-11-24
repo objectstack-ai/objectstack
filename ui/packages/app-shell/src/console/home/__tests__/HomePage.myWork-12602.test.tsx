@@ -281,8 +281,8 @@ describe('two columns until an inbox row can say what kind it is (objectui#12602
     await user.click(screen.getByTestId('home-my-work-open-inbox'));
     await user.click(screen.getByTestId('home-my-work-notifications-view-all'));
     expect(navigateMock.mock.calls.map((c) => c[0])).toEqual([
-      '/apps/crm/sys_inbox_message?view=mine',
-      '/apps/crm/sys_inbox_message?view=mine',
+      '/apps/crm/inbox',
+      '/apps/crm/inbox',
     ]);
   });
 });

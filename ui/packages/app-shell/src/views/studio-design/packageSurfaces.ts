@@ -63,8 +63,12 @@ export interface PackageSurface {
    * default form (`isDefault`) or its `OBJECT.create` form, unless its body
    * turns on public sharing (`sharing.enabled === true`, a public form, which
    * keeps loading at its own link). A form under any other name is a named
-   * form an action of type `form` opens: not internal. The same test as the
-   * `form-view-internal-not-loaded` lint rule.
+   * form an action of type `form` opens: not internal. The
+   * `form-view-internal-not-loaded` lint rule applies this test and, since
+   * objectstack-ai/objectstack#36545, also leaves out a default or create form
+   * that a `form`-type action opens by its served name (seat ruling 5 on
+   * #36425). This row reads no actions, so it does not yet make that
+   * exemption: which read it should take is open on #36545.
    */
   internalForm?: boolean;
 }

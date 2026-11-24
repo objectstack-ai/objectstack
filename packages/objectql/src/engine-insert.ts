@@ -47,6 +47,7 @@ import { SummaryRecomputeError } from './summary-errors.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { DuplicateRecordError } from './duplicate-record-error.js';
 import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refusal-error.js';
+import { refuseHookSyncProvenanceWrite, refuseSyncProvenanceWrite, snapshotSyncKeys } from './sync-provenance-write.js';
 import { ASSIGNMENT_RULE_TYPE, AssignmentRuleEvaluator, OWNERSHIP_QUEUE_SOURCE_SLOT } from './assignment-rules.js';
 import type { AssignmentQueueService } from './assignment-rules.js';
 import { redactBoundStatement } from '@objectstack/types';
@@ -342,6 +343,12 @@ export class InsertFacet {
       ownUnit ? () => this.inAfterAbortUnit(body) : body;
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
+    // [ADR-0153 D4] A `_sync_` provenance column is written by the sync-in pull
+    // alone, whatever the caller's context: judged on the caller's payload,
+    // before anything runs. The pull's mark is consumed here, so the hooks and
+    // flows this write triggers write as any other system caller.
+    const syncJudgedContext = refuseSyncProvenanceWrite(object, data, options?.context, 'insert');
+    if (syncJudgedContext !== options?.context) options = { ...options, context: syncJudgedContext } as typeof options;
     // [#8844] The organization set is about to change. Dropped BEFORE the write
     // rather than after it, so a concurrent read cannot repopulate the memo from
     // a snapshot this insert is in the middle of invalidating.
@@ -640,6 +647,8 @@ export class InsertFacet {
       // land on the SAME row object, so a hook mutating `ctx.input.data.x` in
       // place is mutating the engine's row exactly as it always has.
       const rowHookWrites: Array<HookWriteRecording | undefined> = [];
+      // [ADR-0153 D4] Each row's `_sync_` keys before the hooks, judged after the seal below.
+      const rowSyncBefore = (isBatch ? (defaultedData as any[]) : [defaultedData]).map((row) => snapshotSyncKeys(row));
       const rowHookContexts: HookContext[] = (isBatch ? (defaultedData as any[]) : [defaultedData]).map(
         (row, rowIndex) => {
           const recording =
@@ -698,6 +707,12 @@ export class InsertFacet {
         const sealed = rowHookWrites[i]?.seal(rowHookContexts[i]!.input.data);
         if (sealed) rowHookContexts[i]!.input.data = sealed.data as any;
         rowHookWrittenKeys[i] = sealed?.hookWrittenKeys;
+      }
+      // [ADR-0153 D4] A `_sync_` key a hook assigned, changed or removed is refused,
+      // the pull's own write included (sync-provenance-write.ts, "The hooks' own writes").
+      for (let i = 0; i < rowHookContexts.length; i++) {
+        if (undeclaredPerRow[i] !== undefined) continue;
+        refuseHookSyncProvenanceWrite(object, rowSyncBefore[i]!, rowHookContexts[i]!.input.data, 'insert');
       }
 
       // ── [#22306] HAND BACK what was withheld from beforeInsert ─────────────

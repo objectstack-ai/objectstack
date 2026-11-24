@@ -20,6 +20,13 @@
  * organization's default sets (objectstack ruling 7073270426). The field they
  * do not change keeps following the organization.
  *
+ * Once digest or quiet hours is the person's own answer (the door says
+ * `own`), a "Follow organization setting" action beside it empties that field
+ * on their own `(*, *)` row (`followOrganizationWrite`), the same empty the
+ * Setup grid writes; the page then reads the door again and draws the value in
+ * force with its source. Where the field is not their own answer there is
+ * nothing to clear, and the action is not drawn.
+ *
  * Channels are columns as the door lists them, so a channel the deployment
  * adds later (Slack, …) appears without a change here; a channel the
  * deployment cannot send on yet says so in its header. Where the door lists
@@ -64,6 +71,7 @@ import { PageHeader } from '../../layout/PageHeader.js';
 import {
   cellWrite,
   digestChoices,
+  followOrganizationWrite,
   quietHoursSaveable,
   quietHoursStored,
   generalWrite,
@@ -193,6 +201,9 @@ export function NotificationSettingsPage() {
   // Every disabled control names the one visible reason as its description.
   const readOnlyDescribedBy = writeGranted ? undefined : readOnlyReasonId;
   const quietValue = quietDraft === undefined ? prefs.general.quietHours.value : quietDraft;
+  const followDigest = followOrganizationWrite(prefs.general, 'digest');
+  const followQuietHours = followOrganizationWrite(prefs.general, 'quiet_hours');
+  const followLabel = (setting: string) => t('notificationSettings.followOrganizationFor', { setting });
 
   const topicLabel = (topic: PreferenceTopic) =>
     topic.topic === PREFERENCE_WILDCARD ? t('notificationSettings.allTopics') : topic.topic;
@@ -241,9 +252,24 @@ export function NotificationSettingsPage() {
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-source">
-                {t(SOURCE_KEY[prefs.general.digest.source])}
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-muted-foreground" data-testid="notification-settings-digest-source">
+                  {t(SOURCE_KEY[prefs.general.digest.source])}
+                </p>
+                {followDigest && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="notification-settings-digest-follow"
+                    aria-label={followLabel(t('notificationSettings.digest'))}
+                    disabled={!canWrite}
+                    aria-describedby={readOnlyDescribedBy}
+                    onClick={() => void apply(followDigest)}
+                  >
+                    {t('notificationSettings.followOrganization')}
+                  </Button>
+                )}
+              </div>
             </div>
             <div className="space-y-1" data-testid="notification-settings-quiet-hours">
               <Label>{t('notificationSettings.quietHours')}</Label>
@@ -273,6 +299,19 @@ export function NotificationSettingsPage() {
                 <span className="text-xs text-muted-foreground" data-testid="notification-settings-quiet-hours-source">
                   {t(SOURCE_KEY[prefs.general.quietHours.source])}
                 </span>
+                {followQuietHours && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="notification-settings-quiet-hours-follow"
+                    aria-label={followLabel(t('notificationSettings.quietHours'))}
+                    disabled={!canWrite}
+                    aria-describedby={readOnlyDescribedBy}
+                    onClick={() => void apply(followQuietHours)}
+                  >
+                    {t('notificationSettings.followOrganization')}
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>
