@@ -62,3 +62,68 @@ describe('AdvancedChartImpl — axis tick label resolution', () => {
     expect(container.textContent).toMatch(/active/);
   });
 });
+
+/**
+ * objectstack#36988 — the VALUE axis: two ticks never share a label.
+ *
+ * The card's data: one bucket at 1/3, the rest 0. recharts lays five ticks over
+ * that domain at a 0.085 step (0, 0.085, 0.17, 0.255, 0.34), and the compact
+ * fallback, capped at one fraction digit, printed them `0, 0.1, 0.2, 0.3, 0.3`
+ * — two ticks with one label, which no reader can tell apart. The fallback now
+ * prints as many digits as the axis' tick step needs, so distinct tick values
+ * read as distinct labels; with a declared percent `format` (what the report
+ * hands a `'0.0%'` measure's chart) the same ticks read as percents.
+ */
+describe('AdvancedChartImpl — value-axis ticks on a small domain (objectstack#36988)', () => {
+  const RATE = [
+    { priority: 'High', rate: 1 / 3 },
+    { priority: 'Medium', rate: 0 },
+    { priority: 'Low', rate: 0 },
+  ];
+  const PRIORITIES = new Set(RATE.map((r) => r.priority));
+
+  /** The value tick labels the left axis draws, in order. */
+  const valueTicks = (c: HTMLElement) =>
+    [...c.querySelectorAll('text.recharts-cartesian-axis-tick-value')]
+      .filter((t) => t.getAttribute('orientation') === 'left')
+      .map((t) => (t.textContent ?? '').trim())
+      .filter((t) => !PRIORITIES.has(t));
+
+  function draw(extra: Record<string, unknown> = {}) {
+    const { container } = render(
+      <AdvancedChartImpl
+        chartType="column"
+        data={RATE}
+        xAxisKey="priority"
+        series={[{ dataKey: 'rate', label: 'Rate' }]}
+        isAnimationActive={false}
+        {...extra}
+      />,
+    );
+    return valueTicks(container);
+  }
+
+  it('with no axis format, every tick reads a label of its own', () => {
+    const ticks = draw();
+    // At least three drawn, so an empty or collapsed axis cannot pass.
+    expect(ticks.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(ticks).size).toBe(ticks.length);
+    expect(ticks).toEqual(['0', '0.085', '0.17', '0.255', '0.34']);
+  });
+
+  it('with a declared percent format, the ticks read as percents', () => {
+    const ticks = draw({ yAxes: [{ format: '0.0%' }] });
+    expect(ticks.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(ticks).size).toBe(ticks.length);
+    expect(ticks.every((t) => t.endsWith('%'))).toBe(true);
+    expect(ticks).toEqual(['0.0%', '8.5%', '17.0%', '25.5%', '34.0%']);
+  });
+
+  it('a declared format too coarse for the step still keeps the ticks apart', () => {
+    // `'0%'` declares whole percents; the 8.5-point step needs one more digit.
+    const ticks = draw({ yAxes: [{ format: '0%' }] });
+    expect(ticks.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(ticks).size).toBe(ticks.length);
+    expect(ticks.every((t) => t.endsWith('%'))).toBe(true);
+  });
+});
