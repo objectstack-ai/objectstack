@@ -247,7 +247,24 @@ export async function handleI18nRequest(
         // the source text from a translation. Absent when neither is known.
         const declaredSource = typeof i18nService.getSourceLocale === 'function' ? i18nService.getSourceLocale() : undefined;
         const sourceLocale = declaredSource || defaultLocale || undefined;
-        return { handled: true, response: deps.success({ locales, ...(sourceLocale ? { sourceLocale } : {}) }) };
+        // [objectstack#36809] The deployment's DECLARED fallback chain — the
+        // `getFallbackLocale()` the server's own metadata translations hand
+        // the spec resolvers as `fallbackChain` (`metaTranslateOptions`,
+        // `@objectstack/rest`), read by the same feature-detected accessor
+        // under the same condition (a non-empty string), so a client that
+        // resolves translated metadata itself walks the locales the server
+        // walks. Absent when the service declares none: the server threads a
+        // declaration, it never invents one.
+        const declaredFallback = typeof i18nService.getFallbackLocale === 'function' ? i18nService.getFallbackLocale() : undefined;
+        const fallbackChain = typeof declaredFallback === 'string' && declaredFallback.length > 0 ? [declaredFallback] : undefined;
+        return {
+            handled: true,
+            response: deps.success({
+                locales,
+                ...(sourceLocale ? { sourceLocale } : {}),
+                ...(fallbackChain ? { fallbackChain } : {}),
+            }),
+        };
     }
 
     // GET /i18n/translations/:locale  OR  /i18n/translations?locale=xx
