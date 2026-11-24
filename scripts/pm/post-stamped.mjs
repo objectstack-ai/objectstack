@@ -464,6 +464,9 @@
  * rows off three keys in one seat's shift, the measurement behind this rule; a whole shift of claims naming the
  * ceiling tier with nothing behind it, the measurement behind the fourth). `claimKeyedLineRefusals` carries the four
  * decisions that keep it a mirror and not a fifth dialect.
+ * One row is WRITE-time only: a comment that OPENS with `Claim:` carries the `Container & model:` line with its size and
+ * an `effort:` 定档 gives that size (`claimTierWriteRefusal`, `dispatch-gates.mjs`). Absence is a refusal there and nowhere
+ * else: the other readers also judge claims already written, whose authors cannot add the line.
  *
  * ## The first line is the seat's signature, or the body is refused (#27113)
  *
@@ -977,7 +980,7 @@ import { readClause2Line } from './clause2-line.mjs';
 // The fourth owner: the `model:` value of a claim's `Container & model:` line
 // is judged against the tier ladder `dispatch-gates.mjs` derives — the
 // ceiling's spellings live there, beside the constant, and are never restated.
-import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLOOR, ceilingTierSpellings, containerModelRefusal } from './dispatch-gates.mjs';
+import { CONTRACT_REVIEW_TIER, CONTRACT_REVIEW_TIER_NAME, TIER_DEFAULT, TIER_FLOOR, EFFORT_ABOVE_TABLE, EFFORT_BY_SIZE, ceilingTierSpellings, claimTierWriteRefusal, containerModelRefusal } from './dispatch-gates.mjs';
 // The record's `Local-runs:` line is read by the file that owns the record's
 // every other line — judged when present, an absent line not re-judged.
 // The mailbox doorbell is read by the same file: a knock's `To:` seat and its key come from `readMailboxLine`.
@@ -2000,7 +2003,8 @@ export const CLAIM_KEY_SPELLINGS = Object.freeze({
   Seat: '`Seat: domain:LANE#N` at the START of a line, lane and number both — e.g. `Seat: domain:skills#2`',
   'Thread-read': '`Thread-read: ID` at the START of a line — ONE comment id, or `none`, and nothing after it',
   'Clause-②': '`Clause-②: yes` or `Clause-②: no` at the START of a line — reasoning after the value is fine, a quotation around it is not',
-  'Container & model': '`Container & model: …, model: TIER (…)` at the START of a line — the ceiling tier (`CONTRACT_REVIEW_TIER`) carries, on the SAME line, the `MANDATORY` line `dispatch-gates --tier` printed for the card\'s paths (`--tier --repo owner/name PATH…` for a sister repo) or `reason: …` naming the per-card ruling; the default and floor tiers cite nothing',
+  // The line's 定档 half prints its pairs FROM the table's one copy (`EFFORT_BY_SIZE`), never typed here.
+  'Container & model': `\`Container & model: …, model: TIER (…)\` at the START of a line — the ceiling tier (\`CONTRACT_REVIEW_TIER\`) carries, on the SAME line, the \`MANDATORY\` line \`dispatch-gates --tier\` printed for the card's paths (\`--tier --repo owner/name PATH…\` for a sister repo) or \`reason: …\` naming the per-card ruling; the default and floor tiers cite nothing. A claim being written carries the line, opening with its size and ending in its effort (\`Container & model: SIZE, mode:…, model: TIER (…), effort: VALUE\`) — ${Object.entries(EFFORT_BY_SIZE).map(([size, effort]) => `${size} \`${effort}\``).join(', ')}; any other pairing carries \`reason: …\` inside the effort slot, and \`${EFFORT_ABOVE_TABLE.value}\` is for a \`File surface:\` naming \`${EFFORT_ABOVE_TABLE.surface}**\` alone`,
 });
 
 /** PRESENCE only, `CLAIM_SEAT_DECLARATION_ANYWHERE`'s calibration one key along: case-SENSITIVE and demanding the whole
@@ -2052,6 +2056,11 @@ export function claimKeyedLineRefusals(body) {
   // ceiling tier with neither a MANDATORY hit nor a `reason:` on its line.
   const model = containerModelRefusal(text);
   if (model !== null) rows.push({ key: model.key, line: offendingSpan(model.line, 160), why: model.why });
+  // 定档, on a claim BEING MADE only — the comment OPENS with `Claim:`. Here, unlike every row above, absence is a row:
+  // the readers above also judge claims quoted further down and tolerate what older claims never carried; this act's
+  // author can still write the line. One row per key, so the ceiling row above is not doubled.
+  const sizing = model === null && openingClaimLine(text) !== null ? claimTierWriteRefusal(text) : null;
+  if (sizing !== null) rows.push({ key: sizing.key, line: offendingSpan(sizing.line, 160), why: sizing.why });
   return rows;
 }
 
@@ -2061,7 +2070,7 @@ export function keyedLineRefusalText(rows) {
     `post-stamped: REFUSED — ${rows.length} keyed line(s) in this \`Claim:\` cannot be read by the checker that owns them. Nothing was written.\n` +
     rows.map((r, i) => `  ${i + 1}. [${r.key}] ${r.why}\n      line:  ${r.line}\n      write: ${CLAIM_KEY_SPELLINGS[r.key]}`).join('\n') +
     '\n\n  `claimSeatNumber` and `h50ThreadReadMismatch` (`check-half-states.mjs`), `readClause2Line` (`clause2-line.mjs`) and\n' +
-    '  `containerModelRefusal` (`dispatch-gates.mjs`) are imported HERE, so this IS the row they would file — hours earlier,\n' +
+    '  `containerModelRefusal` and `claimTierWriteRefusal` (`dispatch-gates.mjs`) are imported HERE, so this IS the row they would file — hours earlier,\n' +
     '  and on your own claim rather than on someone else\'s post. ⛔ No flag turns it off: a line those readers cannot read\n' +
     '  is a half-state, not a formatting preference.'
   );
@@ -4288,7 +4297,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the size refusal: a 422 the platform answered is not a route that never existed': 53,
   'the two positions: a declaration renders as bare digits, and the patrol reads digits': 24,
   'the shared rule: this tool and H56 cannot come to disagree': 6,
-  'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 30,
+  'the keyed lines: a claim\'s exact-value fields, judged by the readers that own them': 35,
   'the record line: a `## Contract review` record\'s `Head-sha:` and `Local-runs:` lines, judged when present — an absent line is not re-judged': 18,
   'the vacant body: a VACANT seat post\'s ledger holds pointers, never obligations': 27,
   'the decision facets: a decision analysis carries its marker, and a delta, a record or a quotation is not one': 22,
@@ -5459,9 +5468,11 @@ export function selfTest() {
 
   battery('the keyed lines: a claim\'s exact-value fields, judged by the readers that own them');
   {
-    const CLAIM = (...lines) => ['Claim: PM loop round 1', 'Session: `session_x`', ...lines].join('\n');
+    // Every claim BEING WRITTEN carries 定档 (`claimTierWriteRefusal`), so the helper appends a sized line unless the case brings its own.
+    const SIZED = `Container & model: \`S\`, \`mode:subagent\`, \`model: ${TIER_DEFAULT}\`, \`effort: medium\``;
+    const CLAIM = (...lines) => ['Claim: PM loop round 1', 'Session: `session_x`', ...lines, ...(lines.some((l) => l.includes('Container & model')) ? [] : [SIZED])].join('\n');
     const keys = (body) => claimKeyedLineRefusals(body).map((r) => r.key).join();
-    const MISLAID_SEAT = 'Claim: PM loop round 1 — dispatched. Seat: domain:skills#2 — R1.';
+    const MISLAID_SEAT = `Claim: PM loop round 1 — dispatched. Seat: domain:skills#2 — R1.\n${SIZED}`;
     let ownerSource = ''; try { ownerSource = readFileSync(new URL('./check-half-states.mjs', import.meta.url), 'utf8'); } catch { ownerSource = ''; }
     t('⭐ a well-formed claim passes — every key reads', keys(CLAIM('Seat: `domain:skills#2`', 'Thread-read: 5747819898', 'Clause-②: no')) === '');
     t('⭐ the measured `Seat:` shape — declared inside the opening sentence — is REFUSED, on the OWNER\'s verdict and ⛔ no rule spelled here', keys(MISLAID_SEAT) === 'Seat' && claimSeatNumber(MISLAID_SEAT) === null);
@@ -5470,15 +5481,15 @@ export function selfTest() {
     t('⭐ the measured `Thread-read:` shape — a list of ids — is refused, named as a value H50\'s EQUALITY can never match', keys(CLAIM('Thread-read: 5747819898, 5752364802, 5747819899')) === 'Thread-read' && keyedLineRefusalText(claimKeyedLineRefusals(CLAIM('Thread-read: 1, 2'))).includes('EQUALITY'));
     t('`none` reads, and so does a backticked id the field reader unwraps', keys(CLAIM('Thread-read: none')) === '' && keys(CLAIM('Thread-read: `5747819898`')) === '');
     t('an id with the reason glued on, an EMPTY value and the UNFILLED placeholder are all refused', ['Thread-read: 5747819898 — the lane grading', 'Thread-read:', 'Thread-read: id of the newest comment, or none'].every((line) => keys(CLAIM(line)) === 'Thread-read'));
-    t('a `Thread-read:` declared off the line start is refused, though the field reader calls it absent', keys(`Claim: x. Thread-read: 5747819898 was the tail.`) === 'Thread-read' && threadReadField('Claim: x. Thread-read: 5747819898 was the tail.').present === false);
-    t('⛔ prose naming the key with no id behind it is not a declaration', keys('Claim: x. The Thread-read: line goes last.') === '');
+    t('a `Thread-read:` declared off the line start is refused, though the field reader calls it absent', keys(`Claim: x. Thread-read: 5747819898 was the tail.\n${SIZED}`) === 'Thread-read' && threadReadField('Claim: x. Thread-read: 5747819898 was the tail.').present === false);
+    t('⛔ prose naming the key with no id behind it is not a declaration', keys(`Claim: x. The Thread-read: line goes last.\n${SIZED}`) === '');
     t('⭐ `Clause-②: yes — reasoning` is ACCEPTED — its reader\'s own control shape, ⛔ not tightened here', keys(CLAIM('Clause-②: yes — the ruling states it outright')) === '');
     t('⭐ …while the quoted-and-continued spelling that reader calls `describing` IS refused', keys(CLAIM('`Clause-②: yes` — the ruling states it outright')) === 'Clause-②');
     t('a value the clause reader cannot grade is refused', keys(CLAIM('Clause-②: YES')) === 'Clause-②' && keys(CLAIM('Clause-②: yes|no')) === 'Clause-②');
     t('⛔ ABSENCE is nobody\'s row here: no `Seat:` line is seat 1 by the owner\'s own default, and no clause line is no declaration to grade', keys(CLAIM('Thread-read: none')) === '' && keys(CLAIM('Seat: `domain:skills#2`')) === '');
     t('⛔ NOT a claim: a report carrying the same mislaid declaration is untouched', keys('os-dev-report\n\nThe claim declared Seat: domain:skills#2 mid-sentence.') === '');
     t('⭐ SCOPED by the fleet\'s marker, ⛔ not by the first line: a `Claim:` further down is judged', keys('Round report\n\nClaim: x. Seat: domain:skills#2 taken.') === 'Seat');
-    t('⭐ QUOTE-BLIND: backticks round a mid-sentence declaration buy no exemption, while a line-initial one inside a FENCE still reads as the declaration the owner reads there — masking either way would store the row', keys('Claim: x, `Seat: domain:skills#2`, R1.') === 'Seat' && keys(CLAIM('```', 'Seat: domain:skills#2', '```')) === '');
+    t('⭐ QUOTE-BLIND: backticks round a mid-sentence declaration buy no exemption, while a line-initial one inside a FENCE still reads as the declaration the owner reads there — masking either way would store the row', keys(`Claim: x, \`Seat: domain:skills#2\`, R1.\n${SIZED}`) === 'Seat' && keys(CLAIM('```', 'Seat: domain:skills#2', '```')) === '');
     t('FIRST MATCH: a readable declaration followed by a malformed duplicate passes, exactly as the owner reads it', keys(CLAIM('Seat: `domain:skills#2`', 'Thread-read: 5747819898', 'Seat: domain:skills')) === '');
     t('↔ owner coupling: the id pattern and the `none` are `check-half-states.mjs`\'s own spellings, read off its source', ownerSource.includes('/^[1-9]\\d*$/') && ownerSource.includes("'none'") && THREAD_READ_VALUE.source.includes('[1-9]\\d*') && THREAD_READ_VALUE.test('none'));
     t('structural: the CLI runs this on `--comment` only, ⛔ never on a card body, and every reader is imported, ⛔ none restated', /const keyed = options\.mode === 'comment' \? claimKeyedLineRefusals\(rendered\.body\) : \[\];/u.test(stampSource) && new RegExp('function\\s+(claimSeatNumber|threadReadField|readClause2Line|containerModelRefusal)\\b').test(stampSource) === false);
@@ -5488,7 +5499,7 @@ export function selfTest() {
     // ceiling tier into every claim of a shift, and nothing compared the line
     // to anything. The owner is the tier ladder's own file; what is pinned
     // here is that its refusal lands in THIS act, on the claim, before the write.
-    const CEILING = (rest) => CLAIM('Seat: `domain:ui#2`', 'Thread-read: none', 'Clause-②: no', `Container & model: \`M\`, \`mode:subagent\`, ${rest}`);
+    const CEILING = (rest) => CLAIM('Seat: `domain:ui#2`', 'Thread-read: none', 'Clause-②: no', `Container & model: \`M\`, \`mode:subagent\`, ${rest}, \`effort: high\``);
     const CEILING_WORD = ceilingTierSpellings().find((w) => w !== CONTRACT_REVIEW_TIER_NAME && w !== CONTRACT_REVIEW_TIER) ?? null;
     t('⭐ a ceiling claim quoting the MANDATORY line the tool printed passes — every key reads', keys(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (\`dispatch-gates --tier\` at \`abc1234\`: MANDATORY — SKILL.md, clause ①)`)) === '');
     t('⭐ a ceiling claim carrying a per-card `reason:` passes too', keys(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (reason: the maintainer ruled it on the card)`)) === '');
@@ -5496,10 +5507,20 @@ export function selfTest() {
     t('⛔ …and by the ladder word the incident actually wrote, while the ceiling is a tier of its own', CEILING_WORD === null || keys(CEILING(`model: ${CEILING_WORD} (the ceiling)`)) === 'Container & model');
     t('the default tier with nothing behind it passes — only a ceiling owes a citation', keys(CEILING(`\`model: ${TIER_DEFAULT}\` (\`--tier\`: no path-derived mandate)`)) === '' && keys(CEILING(`model: ${TIER_FLOOR}`)) === '');
     t('the refusal prints the spelling that reads, and names the ceiling by the constant\'s NAME — no model identifier in it', (() => { const text = keyedLineRefusalText(claimKeyedLineRefusals(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\``))); return text.includes(CLAIM_KEY_SPELLINGS['Container & model']) && text.includes(CONTRACT_REVIEW_TIER_NAME) && !text.includes(CONTRACT_REVIEW_TIER); })());
-    t('⛔ ABSENCE is nobody\'s row here either: a claim with no `Container & model:` line is untouched — older claims never carried it', keys(CLAIM('Seat: `domain:skills#2`', 'Thread-read: none', 'Clause-②: no')) === '');
+    // FLIPPED, on purpose: this case used to pin that a claim with no `Container & model:` line is untouched. That is still the
+    // READ-time rule — `readContainerModelLine` answers `present: false` and files nothing on a claim already on the board, or
+    // on one quoted further down a report — but at WRITE time the author is here to add the line, so absence is the refusal.
+    const BARE = ['Claim: PM loop round 1', 'Session: `session_x`', 'Seat: `domain:skills#2`', 'Thread-read: none', 'Clause-②: no'].join('\n');
+    t('⛔ WRITE TIME: a claim being made with no `Container & model:` line is REFUSED — while the same lines quoted under a report, and the read-time reader, are untouched', keys(BARE) === 'Container & model' && keys(`Round report\n\n${BARE}`) === '' && containerModelRefusal(BARE) === null);
+    const SIZING = (size, effort, surface = 'scripts/pm/**') => CLAIM(`File surface: \`${surface}\``, `Container & model: \`${size}\`, \`mode:subagent\`, \`model: ${TIER_DEFAULT}\`${effort}`);
+    t('⭐ 定档 reads: S at `medium`, M at `high`, and a reasoned exception inside the effort slot', [SIZING('S', ', `effort: medium`'), SIZING('XS', ', effort: medium'), SIZING('M', ', `effort: high (M card)`'), SIZING('XL', ', `effort: high`'), SIZING('S', ', `effort: high, reason: not mechanical — the judgement is in the design`')].every((b) => keys(b) === ''));
+    t('⛔ THE MEASURED SHAPES: an S card at `high` with no reason, an M card at `medium`, and a line with no `effort:` value at all are each REFUSED', [SIZING('S', ', `effort: high`'), SIZING('M', ', `effort: medium`'), SIZING('M', ''), SIZING('M', ', `effort:`'), SIZING('M', ', `effort: max, reason: hard`')].every((b) => keys(b) === 'Container & model'));
+    t('⛔ a `reason:` in the MODEL slot does not buy the effort its exception, and a line opening with no size is refused', keys(CLAIM(`Container & model: \`S\`, \`mode:subagent\`, \`model: ${TIER_DEFAULT} (reason: quota)\`, \`effort: high\``)) === 'Container & model' && keys(SIZING('mode:cloud', ', `effort: high`')) === 'Container & model');
+    t('`xhigh` is the ADR-revision row\'s alone: refused off that surface whatever the reason, refused on it bare, read on it with its standing order cited', keys(SIZING('M', ', `effort: xhigh, reason: adversarial re-read`')) === 'Container & model' && keys(SIZING('M', ', `effort: xhigh`', 'docs/adr/**')) === 'Container & model' && keys(SIZING('M', ', `effort: xhigh, reason: the standing order`', 'docs/adr/**')) === '');
+    t('the refusal names 定档\'s file and the spelling that reads, and a ceiling row is not doubled by a sizing row', (() => { const text = keyedLineRefusalText(claimKeyedLineRefusals(SIZING('S', ', `effort: high`'))); return text.includes('execution-duties.md') && text.includes('size S reads `effort: medium`') && text.includes(CLAIM_KEY_SPELLINGS['Container & model']) && claimKeyedLineRefusals(CLAIM(`Container & model: \`M\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``)).length === 1; })());
     t('⛔ NOT a claim: a seat post or a report carrying the same ceiling line is untouched — the reader runs on `Claim:` comments only', keys(`os-dev-report\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``) === '' && keys(`Seat post.\n\nContainer & model: \`M\`, \`mode:subagent\`, \`model: ${CONTRACT_REVIEW_TIER_NAME}\``) === '');
     t('FIRST MATCH holds for the fourth key too: a readable ceiling line followed by a bare duplicate passes, as the owner reads it', keys(CEILING(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (MANDATORY)`) + `\nContainer & model: model: ${CONTRACT_REVIEW_TIER_NAME}`) === '');
-    t('structural: the fourth reader is IMPORTED from the ladder\'s own file, ⛔ never restated here', /import \{[^}]*\bcontainerModelRefusal\b[^}]*\} from '\.\/dispatch-gates\.mjs';/u.test(stampSource) && new RegExp('function\\s+(containerModelRefusal|readContainerModelLine|ceilingTierSpellings)\\b').test(stampSource) === false);
+    t('structural: the fourth reader is IMPORTED from the ladder\'s own file, ⛔ never restated here', /import \{[^}]*\bcontainerModelRefusal\b[^}]*\} from '\.\/dispatch-gates\.mjs';/u.test(stampSource) && new RegExp('function\\s+(containerModelRefusal|readContainerModelLine|ceilingTierSpellings|claimTierWriteRefusal|readClaimEffort)\\b').test(stampSource) === false);
   }
 
   // ── the record line ──────────────────────────────────────────────────────
@@ -5819,7 +5840,7 @@ export function selfTest() {
   battery('the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy');
   {
     const SIG = 'domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg';
-    const ok = judgeBody(`${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSeat: \`domain:skills#2\``, { mode: 'comment' }, NOW_MS);
+    const ok = judgeBody(`${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSeat: \`domain:skills#2\`\nContainer & model: \`S\`, \`mode:subagent\`, \`model: ${TIER_DEFAULT}\`, \`effort: medium\``, { mode: 'comment' }, NOW_MS);
     t('⭐ a signed, stamped claim passes and comes back RENDERED — the clock this act read is in it', ok.ok && ok.rendered.substituted === 1 && ok.rendered.body.includes(ok.rendered.stamp) && !ok.rendered.body.includes(STAMP_TOKEN));
     const unsigned = judgeBody('Claim: PM loop round 1 · {{NOW}}', { mode: 'comment' }, NOW_MS, 'label-write');
     t('⭐ an unsigned comment is refused, and the refusal names the SENDER it was handed', !unsigned.ok && unsigned.text.startsWith('label-write: REFUSED') && unsigned.text.includes('opens with no signature line'));
@@ -5842,7 +5863,7 @@ export function selfTest() {
   battery('the claim stroke: a comment opening `Claim:` is refused on every route but `direct`, pointing at the `label-write` fold; the same body through that fold passes');
   {
     const SIG = 'domain:skills#2 · os-justin · session_01QSeKYmhU5KEj1nukYhp1Tg';
-    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`session_x\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\n`;
+    const CLAIM = `${SIG}\nClaim: PM loop round 1 · {{NOW}}\nSession: \`session_x\`\nBranch: \`claude/issue-7-fold\`\nSeat: \`domain:skills#2\`\nContainer & model: \`S\`, \`mode:subagent\`, \`model: ${TIER_DEFAULT}\`, \`effort: medium\`\n`;
     const RELAY = { transport: 'dispatch', error: null };
     const DIRECT = { transport: 'direct', error: null };
     const UNDECIDED = { transport: null, error: 'no session' };
