@@ -47,6 +47,7 @@ import {
   studioPillarItemAddress,
   type StudioPillarKey,
 } from './studioAddress.js';
+import { isStudioOrgScope, studioOrgScopePath } from './studioScope.js';
 
 // objectstack#36895 — the area's segments are Studio address vocabulary, owned
 // by `studioAddress.ts`; re-exported under their names here.
@@ -176,13 +177,17 @@ const ALL_PACKAGES_VALUE = 'all';
  *    it a save in the area would leave the package;
  *  - the cross-package leg with no `?package=` stays as it is: a URL that
  *    names no package lists across packages, and no page repairs one in
- *    (#29566).
+ *    (#29566);
+ *  - the package-less scope (`~org`, as the segment or as `?package=`) names
+ *    no package, so it is never written into `?package=`: it has no area, and
+ *    lands on its flows, the one leg Studio's menu offers it (#36899).
  *
  * `rest` is the path below the area's root as the URL spells it (encoded),
  * `''` at the root; `search` is the URL's query, with or without its `?`.
  */
 export function areaLocationRedirect(segment: string, rest: string, search: string): string | null {
   const params = new URLSearchParams(search);
+  if (isStudioOrgScope(segment) || isStudioOrgScope(params.get('package'))) return studioOrgScopePath();
   const allLeg = isStudioAllPackagesScope(segment);
   const at = (leg: string) => studioMetadataAreaAddress(leg, rest, { query: params });
 

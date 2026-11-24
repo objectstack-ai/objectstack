@@ -358,9 +358,27 @@ describe('shadcn local patches — application to fresh upstream (objectstack#55
     }
   });
 
-  it('sidebar declares no patch outside those three families', () => {
+  /**
+   * The eighth family: the provider's own cookie name (objectstack#36899), so
+   * Studio's left menu keeps its collapse state apart from the app sidebar's.
+   * The four halves are listed because any one alone leaves the read and the
+   * write naming different cookies, or a name nothing declares.
+   */
+  it('sidebar declares the cookie-name patches', () => {
+    const ids = LOCAL_PATCHES.sidebar
+      .filter((p: { issue: string }) => p.issue === 'objectstack#36899')
+      .map((p: { id: string }) => p.id);
+    expect(ids).toEqual([
+      'sidebar-cookie-name-prop',
+      'sidebar-cookie-name-destructure',
+      'sidebar-cookie-name-write',
+      'sidebar-cookie-name-write-deps',
+    ]);
+  });
+
+  it('sidebar declares no patch outside those four families', () => {
     const issues = [...new Set(LOCAL_PATCHES.sidebar.map((p: { issue: string }) => p.issue))].sort();
-    expect(issues).toEqual(['objectui#10859', 'objectui#11464', 'objectui#4234']);
+    expect(issues).toEqual(['objectstack#36899', 'objectui#10859', 'objectui#11464', 'objectui#4234']);
   });
 
   /**

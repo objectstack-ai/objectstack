@@ -2848,6 +2848,7 @@ const fr = {
       summary: 'Enregistrements que vous pouvez lire : {{total}}. En propriété : {{owned}}, assignés : {{assigned}}.',
       row: '{{object}} · {{field}}',
       notTransferable: 'Ce champ contient plusieurs personnes et ne peut pas être transféré ici.',
+      ownerKept: 'Non transféré : cet objet conserve le propriétaire de chaque enregistrement (« Changer de propriétaire » y est désactivé).',
       truncated: 'Tous les champs utilisateur n’ont pas été comptés ; cette personne peut en détenir davantage.',
       unreadable: 'Non comptés, car vous ne pouvez pas les lire : {{objects}}',
       handoverTo: 'Transférer à',

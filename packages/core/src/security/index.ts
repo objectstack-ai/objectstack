@@ -693,6 +693,7 @@ export {
   type UserAssignedWorkField,
   type UserWorkEngine,
   type UserAssignedWorkCount,
+  type UserAssignedWorkHoldReason,
   type UserAssignedWorkSummary,
   type UserWorkFailureDescriber,
   type UserWorkTransferFailure,
