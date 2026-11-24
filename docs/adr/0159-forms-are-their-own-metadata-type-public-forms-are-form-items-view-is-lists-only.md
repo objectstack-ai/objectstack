@@ -12,7 +12,7 @@
   1. A new metadata type **`form`**, addressed by name, bound to one object (it carries `object` itself), body = today's form view schema. Its content is named forms that have a consumer: **public forms** (the main content, `sharing` included) and forms an action of `type: 'form'` opens.
   2. **Public forms are not a separate feature**: they are `form` items. Their list, detail and edit come from the `form` type, not from a separate Studio page.
   3. `view` becomes **lists only**. The record create and edit form stays on the object's `fieldGroups` and does not become a `form` item.
-- **Supersedes, among rulings**: items 1 and 2 of ruling record [`7118881549`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7118881549) (the 2026-11-24T01:08Z option 「Studio 单独一页，存储不变」) and the "Definition (unchanged shape)" paragraph of ruling record [`7100386248`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7100386248). The rest of 7100386248 stands and is carried here: Studio designs and Setup operates (its items 2 to 10), and a switched-off form answers `404 FORM_NOT_FOUND` like a form that does not exist (its F3 = A).
+- **Rulings it replaces**: items 1 and 2 of ruling record [`7118881549`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7118881549) (the 2026-11-24T01:08Z option 「Studio 单独一页，存储不变」) and the "Definition (unchanged shape)" paragraph of ruling record [`7100386248`](https://github.com/objectstack-ai/objectstack/issues/36444#issuecomment-7100386248). The rest of 7100386248 stands and is carried here: Studio designs and Setup operates (its items 2 to 10), and a switched-off form answers `404 FORM_NOT_FOUND` like a form that does not exist (its F3 = A).
 - **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (one Zod source per type), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce or remove), [ADR-0050](./0050-form-layout-vs-presentation.md) (a form declares layout, the caller chooses where it opens), [ADR-0084](./0084-application-builder-information-architecture.md) (the Interface pillar already lists `form` beside `view`; no change there), [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (conversions, the migration chain, stored rows), [ADR-0088](./0088-metadata-kind-admission-and-retirement.md) (the kind admission test), [ADR-0138](./0138-guest-model-anonymous-principal-doors-grants-and-organization.md) D2 (the public form doors' admission condition and grant, unchanged), [ADR-0146](./0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md) (declared overrides in the paired `.custom`), [ADR-0150](./0150-behavioural-metadata-addressed-by-package-objects-keep-the-literal-prefix.md) D1 (object-derived names keep the literal prefix).
 - **Inputs**: the card's read-only analysis, taken at `main` `14f4d8f8`. Every reading below was taken again for this record on `objectstack-ai/objectstack` `main` at `62692b7f8b`; where a position moved, [Readings](#readings-re-taken-at-62692b7f8b) says so.
 
@@ -367,23 +367,23 @@ Recommendation: **A**.
 
 ## Readings, re-taken at `62692b7f8b`
 
-The card cites positions read at `14f4d8f8`. Each was read again; this record cites symbols, never line numbers.
+The card cites positions read at `14f4d8f8`. Each was read again. The numbers below are a dated reading for the card, not anchors; the decision text above cites symbols.
 
 | The card's citation | On `62692b7f8b` |
 |:--|:--|
 | `view.zod.ts` `FormViewSchema` near 5329 | moved: declared at line 5411 |
 | `view.zod.ts` container `ViewSchema` near 5889 | moved: 5971 |
 | `view.zod.ts` item and overlay arms, 6368 to 6900 | moved: `ViewKindSchema` 6168, the arm shape 6324, `ViewItemSchema` 6450, `ViewItemWireSchema` 6650 |
-| `view.zod.ts:2186-2194`, `addRecord.formView` retired | moved: the tombstone text at 2191, the key at 2224 |
-| `recordFormNavigation.ts:141-150` | holds |
-| `action.zod.ts:693,719` | holds |
-| `form-routes.ts:236-260`, the slug resolution | holds at 236; it now runs to 271 |
-| `anonymous-form-intake.ts:103-121`, the candidates | moved slightly: 101 to 121 |
-| `protocol.ts:2169`, the intake posture note | moved: 2171 |
-| `protocol-save.ts:175-195`, the container collision judgement | moved: the function starts at 205; its docblock covers the cited lines |
-| `customization-package.ts:319`, `view: listed` | holds |
-| `MetadataProvider.tsx:654-655` | holds (655) |
-| `app.zod.ts:502`, `viewName` | holds |
+| `view.zod.ts` lines 2186 to 2194, `addRecord.formView` retired | moved: the tombstone text at 2191, the key at 2224 |
+| `recordFormNavigation.ts` lines 141 to 150 | holds |
+| `action.zod.ts` lines 693 and 719 | holds |
+| `form-routes.ts` lines 236 to 260, the slug resolution | holds at 236; it now runs to 271 |
+| `anonymous-form-intake.ts` lines 103 to 121, the candidates | moved slightly: 101 to 121 |
+| `protocol.ts` line 2169, the intake posture note | moved: 2171 |
+| `protocol-save.ts` lines 175 to 195, the container collision judgement | moved: the function starts at 205; its docblock covers the cited lines |
+| `customization-package.ts` line 319, `view: listed` | holds |
+| `MetadataProvider.tsx` lines 654 and 655 | holds (655) |
+| `app.zod.ts` line 502, `viewName` | holds |
 | `packages/metadata-core/src/anonymous-form-intake.ts` as the home of the candidates rule | moved before the card: the rule lives in `packages/spec/src/ui/anonymous-form-intake.ts`; `metadata-core` re-exports it |
 | "about 10 call sites in `publicForms.ts`" | counted: six type arguments in that module and one list read in the page |
 | "the Form-tab switch in `StudioDesignSurface.tsx`" | not on `main`: it exists only in PR #36784 |
