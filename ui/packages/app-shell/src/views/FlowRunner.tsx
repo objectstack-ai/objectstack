@@ -159,8 +159,9 @@
  *
  * WHERE the bundle comes from is the channel the console already has:
  * `activeFlowsBundle` (`@object-ui/i18n`) reads the `flows` group back out
- * of the i18next resource tree the provider loaded, for the active language.
- * There is no second loader.
+ * of the i18next resource tree the provider loaded, for the active language,
+ * with the fallback locales' groups when the server declares a fallback chain
+ * (`flowsResolveOptions`, objectstack#36809). There is no second loader.
  *
  * Deliberately NOT localized here: the runner chrome (Cancel / Submit /
  * Submitting… / the terminal toast's default sentence) — the console's own
@@ -337,6 +338,27 @@
  * the engine's sentence. The engine's refusal itself is unchanged. A loop that
  * pauses on the same screen node again is indistinguishable from a retry by
  * `nodeId`, and keeps today's answer.
+ *
+ * ## Following a record link ends the dialog (objectstack#36849)
+ *
+ * A `record_link` field leads to another record's page, and the host holds
+ * only the run's LAUNCH state — the step the run first paused on; every later
+ * step lives in this component. A record page redraws its loading skeleton on
+ * every object or record change, so a dialog left open across the link's
+ * navigation unmounted with it and came back from that launch state: step one,
+ * its inputs and a live Next, which posted step one's values to a run already
+ * past it.
+ *
+ * So following a link in this window (`ScreenView`'s `onRecordLinkFollow`; a
+ * new-tab click leaves the dialog alone) ends the dialog through the same door
+ * as its close button, before the route changes: the host is told to close at
+ * once (`onClose`), so whatever it draws on the record page holds no run. On a
+ * result screen the run is then completed exactly as Done completes it (the
+ * resume-RESULT and result-screen sections above): the empty resume, its
+ * toast, `notifyDataChanged`, `onComplete`. Its answer arrives after the
+ * dialog is gone, so a failure is told by its toast alone. On any other screen
+ * the link closes as Cancel does and resumes nothing; while a resume is in
+ * flight, or after one has failed, it only closes, as the close button does.
  */
 import { Suspense, useEffect, useState } from 'react';
 import {
@@ -358,8 +380,10 @@ import { UploadingScopeProvider, useUploadingScope } from '@object-ui/fields';
 import type { ActionCopyTemplate } from '@object-ui/core';
 import {
   FLOW_SCREEN_FIELD_COPY_KEYS,
+  resolveBundleLocale,
   resolveFlowScreenFieldOptions,
   translateFlow,
+  type ResolveOptions,
   type TranslationBundle,
 } from '@objectstack/spec/system';
 import type { AutomationResult } from '@objectstack/spec/contracts';
@@ -379,7 +403,7 @@ import {
 } from './ScreenView.js';
 import { flowSuccessCopy, interpretFlowResponse } from '../utils/flowResponse.js';
 import { announceFlowDroppedFields } from '../utils/flowLaunch.js';
-import { activeFlowsBundle, type FlowsTranslation } from '@object-ui/i18n';
+import { activeFlowsBundle, flowsLocaleChain, flowsResolveOptions, type FlowsTranslation } from '@object-ui/i18n';
 
 export type { ScreenSpec, ScreenFieldSpec } from './ScreenView.js';
 
@@ -420,7 +444,7 @@ function overlayFieldOptions(
   flowName: string,
   nodeId: string,
   bundle: TranslationBundle,
-  language: string,
+  resolveOptions: ResolveOptions,
 ): ScreenFieldSpec {
   // Handed the two members it reads: the served `ScreenFieldSpec` is an
   // interface, so it does not meet the resolver's open `FlowScreenFieldLike`.
@@ -429,7 +453,7 @@ function overlayFieldOptions(
     flowName,
     nodeId,
     { name: field.name, options: field.options },
-    { locale: language },
+    resolveOptions,
   );
   if (options === field.options) return field;
   // The resolver copies each served option and replaces only its `label` with
@@ -444,17 +468,32 @@ function overlayFieldOptions(
  * served — the engine already translated them (objectstack#22507 ruling A, see
  * the header) — and everything else is the payload, untouched. With no bundle
  * the input comes back as-is.
+ *
+ * Each copy key walks the locales the resolvers walk (`flowsLocaleChain`: the
+ * active language, then the server's declared fallback chain, objectstack#36809),
+ * so a key the active language lacks reads the fallback locale's copy before
+ * the authored one, on its own.
  */
 function localizeScreen(
   screen: ScreenSpec,
   flowName: string,
   bundle: TranslationBundle | undefined,
-  language: string,
+  resolveOptions: ResolveOptions,
 ): ScreenSpec {
   if (!bundle || !Array.isArray(screen.fields)) return screen;
-  const fieldCopy = bundle[language]?.flows?.[flowName]?.screens?.[screen.nodeId]?.fields;
+  // Overlaid last locale first, so the earlier one in the walk wins each key.
+  const fieldCopies = flowsLocaleChain(resolveOptions)
+    .map((code) => resolveBundleLocale(bundle, code))
+    .map((locale) => (locale === undefined ? undefined : bundle[locale]?.flows?.[flowName]?.screens?.[screen.nodeId]?.fields))
+    .reverse();
   const fields = screen.fields.map((field) =>
-    overlayFieldOptions(overlayFieldCopy(field, fieldCopy?.[field.name]), flowName, screen.nodeId, bundle, language),
+    overlayFieldOptions(
+      fieldCopies.reduce((next, copy) => overlayFieldCopy(next, copy?.[field.name]), field),
+      flowName,
+      screen.nodeId,
+      bundle,
+      resolveOptions,
+    ),
   );
   return { ...screen, fields };
 }
@@ -470,9 +509,9 @@ function displayFlowLabel(
   flowName: string,
   flowLabel: string | undefined,
   bundle: TranslationBundle | undefined,
-  language: string,
+  resolveOptions: ResolveOptions,
 ): string {
-  return translateFlow({ name: flowName, label: flowLabel }, bundle, { locale: language }).label || flowName;
+  return translateFlow({ name: flowName, label: flowLabel }, bundle, resolveOptions).label || flowName;
 }
 
 /**
@@ -575,7 +614,11 @@ export interface FlowRunnerProps {
   authFetch: (url: string, init?: RequestInit) => Promise<Response>;
   /** API base (e.g. `import.meta.env.VITE_SERVER_URL || ''`). */
   baseUrl: string;
-  /** User dismissed the runner without completing. */
+  /**
+   * The dialog closes. Usually the user dismissed it without completing; a
+   * result screen's record link closes it first and completes the run after,
+   * so `onComplete` can follow (objectstack#36849 — see the header).
+   */
   onClose: () => void;
   /** The flow ran to completion — host should refresh. */
   onComplete: () => void;
@@ -634,10 +677,13 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   // to keep stable (AGENTS.md §5 #10). `screen` stays the payload the run is
   // driven by; `shown` differs from it in copy only, so every DISPLAY read —
   // including the labels the required refusal below names — goes through it.
+  // With the server's declared fallback chain (objectstack#36809): a string
+  // the active language lacks reads the fallback locale's, as on the server.
   const bundle = activeFlowsBundle(i18n, language, flowName);
-  const shown = localizeScreen(screen, flowName, bundle, language);
+  const resolveOptions = flowsResolveOptions(i18n, language);
+  const shown = localizeScreen(screen, flowName, bundle, resolveOptions);
   // The flow's name as the user reads it (objectui#11092), from the same bundle.
-  const shownFlowLabel = displayFlowLabel(flowName, flowLabel, bundle, language);
+  const shownFlowLabel = displayFlowLabel(flowName, flowLabel, bundle, resolveOptions);
 
   const setVal = (name: string, v: unknown) => {
     setValues((p) => ({ ...p, [name]: v }));
@@ -775,7 +821,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
       toast.success(
         flowSuccessCopy(state.actionSuccessMessage, outcome.successMessage)?.text
           || t('flowRunner.completed', {
-            flow: displayFlowLabel(flowName, outcome.flowLabel, bundle, language),
+            flow: displayFlowLabel(flowName, outcome.flowLabel, bundle, resolveOptions),
             defaultValue: 'Flow "{{flow}}" completed',
           }),
       );
@@ -907,6 +953,14 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
   // resume has failed, when closing is a plain close again and Done the retry.
   const resultScreen = !terminal && !anotherScreen && isDisplayOnlyScreen(screen);
   const dismiss = resultScreen && !resumeError ? () => { void submit(); } : onClose;
+  // A record link followed in this window ends the dialog before the route
+  // changes (objectstack#36849 — see the header): the host closes now, and a
+  // result screen's run completes behind it, as its close button completes it.
+  const followRecordLink = () => {
+    const complete = resultScreen && !resumeError && !submitting;
+    onClose();
+    if (complete) void submit();
+  };
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o && !submitting) dismiss(); }}>
@@ -980,6 +1034,7 @@ export function FlowRunner({ state, authFetch, baseUrl, onClose, onComplete, dat
                   values={values}
                   onValueChange={setVal}
                   errors={fieldErrors}
+                  onRecordLinkFollow={followRecordLink}
                   dataSource={dataSource}
                   objects={objects}
                   // Two columns from `sm` up; `space-y-0` replaces the body's own

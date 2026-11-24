@@ -40,6 +40,8 @@ const de = {
     allResults: 'Alle Ergebnisse',
     createNew: 'Neu erstellen',
     createNamed: '„{{name}}“ erstellen',
+    createdOutsideFilters: 'Der Datensatz wurde erstellt, entspricht aber nicht den Filtern dieses Felds und kann hier daher nicht ausgewählt werden.',
+    createdUnchecked: 'Der Datensatz wurde erstellt, konnte aber nicht gegen die Filter dieses Felds geprüft werden und wurde daher nicht ausgewählt. Suchen Sie ihn hier, statt ihn erneut anzulegen.',
     showingResults: '{{shown}} von {{total}} Ergebnissen',
     showAllResults: 'Alle Ergebnisse anzeigen ({{count}})',
     selectedBadge: 'Ausgewählt',
@@ -65,6 +67,8 @@ const de = {
     autofillCurrencyDiffers: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}} in {{from}}, {{field}} ist hier aber in {{to}}. Geben Sie ihn in {{to}} ein.',
     autofillSourceNoCurrency: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag {{amount}} nennt keine Währung, {{field}} ist hier aber in {{to}}. Geben Sie ihn in {{to}} ein.',
     autofillNoCurrency: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, hier ist aber noch keine Währung gewählt. Wählen Sie die Währung und geben Sie dann {{field}} ein.',
+    autofillCurrencyUnread: '{{field}} wurde nicht ausgefüllt: Der gewählte Betrag ist {{amount}}, die Währung hier konnte aber nicht gelesen werden. Prüfen Sie die Währung und geben Sie dann {{field}} ein.',
+    autofillKept: '{{field}} behält seinen bisherigen Wert.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -155,6 +159,7 @@ const de = {
     completedNamed: 'Aktion abgeschlossen: {{action}}',
     failed: 'Aktion fehlgeschlagen',
     parallelFailed: 'Eine oder mehrere parallele Aktionen sind fehlgeschlagen',
+    serviceUnavailable: 'Diese Aktion benötigt einen Dienst, der in dieser Umgebung nicht verfügbar ist. Wenden Sie sich an Ihren Administrator.',
     selectExactlyOneRow: 'Diese Aktion gilt für einen einzelnen Datensatz – wählen Sie genau eine Zeile aus.',
     selectRowFirst: 'Diese Aktion gilt für einen einzelnen Datensatz – wählen Sie zuerst eine Zeile aus.',
     undo: 'Rückgängig',

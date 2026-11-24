@@ -335,6 +335,41 @@ function permissionDeniedLine(locale: string | undefined): string {
     );
 }
 
+/** The one subtree of a resident catalogue {@link serviceUnavailableLine} reads. */
+type ServiceLinePack = { actions?: { serviceUnavailable?: unknown } } | undefined;
+
+/**
+ * [objectstack#36840] The one code a `type: 'api'` action's answer carries
+ * when the service behind its target is not composed in this environment: the
+ * dispatcher's `501 NOT_IMPLEMENTED`, answered by an own-door bridge whose
+ * service slot is empty or lacks the door's member. Its message names a
+ * package to install, which tells the person who clicked nothing they can act
+ * on. Deliberately NOT read this way: a `503 SERVICE_UNAVAILABLE`, which is
+ * the platform's general "not right now" (a store that could not be read, an
+ * engine probe that failed) and whose sentence is the producer's own; and a
+ * route miss (`ROUTE_NOT_FOUND`, `ENDPOINT_NOT_FOUND`), which is as likely a
+ * misspelled action `target` whose path the author needs to see.
+ */
+const SERVICE_ABSENT_CODE = 'NOT_IMPLEMENTED';
+
+/**
+ * The runner's "this environment does not offer the service" line
+ * (`actions.serviceUnavailable`) in `locale`, read from the resident built-in
+ * catalogue exactly as {@link permissionDeniedLine} reads its line, and by the
+ * same one-chain rule `scripts/check-i18n-dead-keys.mjs` derives the `en` read
+ * from.
+ */
+function serviceUnavailableLine(locale: string | undefined): string {
+    const usable = (line: unknown): string | undefined =>
+        typeof line === 'string' && line.trim() ? line : undefined;
+    const tag = locale ? resolveBuiltInLanguage(locale) : null;
+    return (
+        (tag ? usable((getLoadedBuiltInLocales()[tag] as ServiceLinePack)?.actions?.serviceUnavailable) : undefined)
+        ?? usable((getLoadedBuiltInLocales().en as ServiceLinePack)?.actions?.serviceUnavailable)
+        ?? 'This action needs a service that is not available in this environment. Contact your administrator.'
+    );
+}
+
 /**
  * A failed run's message, by the record-save rule (objectstack#24914 ruling
  * B′): the flow's authored `errorMessage`, as the engine served it (rendered
@@ -457,6 +492,9 @@ function refusalBodyUserMessage(json: unknown): string | null {
  * — see the header). A `400 FLOW_FAILED` is a flow the endpoint ran, and reads
  * the run's refusal by the failed arm's rule; `locale` is the host's active
  * language.
+ * An answer that says the target's service is absent ({@link SERVICE_ABSENT_CODE})
+ * and carries no `userMessage` reads the localized
+ * {@link serviceUnavailableLine} (objectstack#36840).
  * Every other answer reads {@link refusalEnvelopeMessage}: its `userMessage`
  * when it carries one, else its message (objectstack#36390).
  */
@@ -466,8 +504,15 @@ export function apiActionFailureMessage(
     fallback: string,
     locale: string | undefined,
 ): string {
-    if (res.status === 400 && errorCodeIs((json as { error?: unknown } | null | undefined)?.error, 'FLOW_FAILED')) {
+    const envelope = (json as { error?: unknown } | null | undefined)?.error;
+    if (res.status === 400 && errorCodeIs(envelope, 'FLOW_FAILED')) {
         return flowFailedEnvelopeMessage(json, fallback, locale);
+    }
+    // [objectstack#36840] The service behind the target is absent: the
+    // person who clicked reads the localized line, never the operator prose.
+    // A producer-marked `userMessage` still wins, as on every other refusal.
+    if (!declaredUserMessage(envelope) && errorCodeIs(envelope, SERVICE_ABSENT_CODE)) {
+        return serviceUnavailableLine(locale);
     }
     return refusalEnvelopeMessage(json, fallback, locale);
 }

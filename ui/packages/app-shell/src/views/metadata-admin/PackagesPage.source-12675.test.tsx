@@ -174,11 +174,13 @@ describe('Packages — marketplace capability present (objectui#12675)', () => {
     renderPackages('?source=marketplace');
 
     expect(await drawnSources()).toEqual({ 'com.example.todo': 'marketplace' });
-    // objectstack#34722 — that view is Setup's Installed Apps door, and its
-    // one click into the unfiltered developer list is gone (ruling 甲 on
-    // objectstack#25098); `PackagesPage.installedAppsUpdates-34722.test.tsx`
-    // pins the door.
+    // objectstack#34722 / objectstack#36834 — that address (Setup's retired
+    // Installed Apps entry) opens the administration face, whose Source
+    // filter replaces the chip and whose "All" stays on that face; it never
+    // clears into the developer list. `PackagesPage.installedAppsUpdates-34722.test.tsx`
+    // pins the face.
     expect(screen.queryByTestId('pkg-source-filter')).toBeNull();
+    expect(screen.getByTestId('pkg-source-picker')).toBeInTheDocument();
   });
 
   it('another `?source=` shows only its rows, and Show all clears it', async () => {

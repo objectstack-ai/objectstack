@@ -1,7 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { MetadataListViewSchema, ViewSchema } from '../ui/view.zod';
+import { FormViewSchema, MetadataListViewSchema, ViewSchema } from '../ui/view.zod';
+import { ActionSchema } from '../ui/action.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { DiscoverySchema } from './discovery.zod';
 import {
@@ -211,6 +212,7 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
   types: z.array(z.string()).describe('Available metadata type names (e.g., "object", "plugin", "view")'),
   entries: z.array(z.object({
     type: z.string().describe('Singular type identifier'),
+    schemaId: z.string().describe('Same value as `type`: the id the type\'s `schema`, `form` and `list` are bound to'),
     label: z.string().describe('Human-readable label'),
     description: z.string().optional().describe('Brief description'),
     filePatterns: z.array(z.string()).describe('Glob patterns used to discover artifacts of this type'),
@@ -223,7 +225,10 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     domain: z.enum(['data', 'ui', 'automation', 'system', 'security', 'ai']).describe('Protocol domain'),
     overrideSource: z.enum(['registry', 'env']).describe('Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable'),
     createSeed: z.unknown().optional().describe('Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively.'),
+    schema: z.record(z.string(), z.unknown()).optional().describe('JSON Schema of the type, derived from its spec schema, for the generic metadata editor. Absent for a type with neither a spec schema nor a hand-crafted one.'),
+    form: FormViewSchema.optional().describe('Form layout of the type\'s Studio editor, labels in the request locale. Absent for a type with no declared form, which Studio edits from `schema` alone.'),
     list: MetadataListViewSchema.optional().describe('Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description.'),
+    actions: z.array(ActionSchema).optional().describe('Type-level actions on a definition of this type (e.g. a datasource "Test connection"): the registry\'s declarative actions merged with plugin-registered ones. Absent when there are none.'),
   })).optional().describe('Enriched per-type registry entries (Phase 3a)'),
 }));
 
@@ -4818,6 +4823,22 @@ export const GetLocalesRequestSchema = lazySchema(() => z.object({}));
  * menu rename made in any other language as that language's translation.
  * Named after its config key, as `defaultLocale`'s `isDefault` mark is the
  * config's `defaultLocale`.
+ *
+ * `fallbackChain` names the locales the server consults after the requested
+ * one and before the authored text, the deployment's DECLARED chain: the i18n
+ * service's `getFallbackLocale()` (the stack's `i18n.fallbackLocale`, else its
+ * `defaultLocale`, as the boot collapses them), which the server's own
+ * metadata translations already hand the spec resolvers as
+ * `ResolveOptions.fallbackChain`. It is absent when the i18n service reports
+ * no fallback (the file-backed service always reports one, collapsed from
+ * `fallbackLocale || defaultLocale || 'en'`), and a client then resolves the
+ * requested locale alone, as the server does. A client that resolves
+ * translated metadata itself (the console's flow labels) reads it beside
+ * `sourceLocale` (the resolvers' `defaultLocale`), after negotiating its
+ * request tag against `locales[].code` as the server negotiates a request's
+ * tag (`resolveLocaleAmong`), so its answer and the server's walk the same
+ * locales: a `zh-Hans` request on a deployment holding `zh-CN` is the
+ * `zh-CN` request, and walks no chain when `zh-CN` is the source locale.
  */
 export const GetLocalesResponseSchema = lazySchema(() => z.object({
   locales: z.array(z.object({
@@ -4830,6 +4851,12 @@ export const GetLocalesResponseSchema = lazySchema(() => z.object({
   sourceLocale: z.string().optional().describe(
     'The language the app\'s own text (a plain-string `label`) is written in: the declared `i18n.sourceLocale`, '
     + 'else the default locale. Absent when the server knows neither. Text typed in any other locale is a translation',
+  ),
+  fallbackChain: z.array(z.string()).optional().describe(
+    'The locales the server consults, in order, after the requested one and before the authored text: the deployment\'s '
+    + 'declared fallback (`i18n.fallbackLocale`, else `defaultLocale`). Absent when the i18n service reports none; the '
+    + 'requested locale alone is then consulted. A request tag is negotiated against `locales[].code` first, and the chain '
+    + 'is not walked for a request that negotiates to `sourceLocale`',
   ),
 }));
 
@@ -4912,6 +4939,8 @@ export type GetDiscoveryRequest = z.input<typeof GetDiscoveryRequestSchema>;
 export type GetDiscoveryResponse = z.input<typeof GetDiscoveryResponseSchema>;
 export type GetMetaTypesRequest = z.input<typeof GetMetaTypesRequestSchema>;
 export type GetMetaTypesResponse = z.input<typeof GetMetaTypesResponseSchema>;
+/** Post-parse shape of {@link GetMetaTypesResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetMetaTypesResponseParsed = z.infer<typeof GetMetaTypesResponseSchema>;
 export type GetMetaItemsRequest = z.input<typeof GetMetaItemsRequestSchema>;
 export type FlowRegistrationRefusal = z.input<typeof FlowRegistrationRefusalSchema>;
 export type FlowRegistration = z.input<typeof FlowRegistrationSchema>;

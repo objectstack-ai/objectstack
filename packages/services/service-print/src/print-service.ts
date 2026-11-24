@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { recordNotFoundError } from '@objectstack/core';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import { resolveDisplayField, type DisplayNameObjectMeta } from '@objectstack/spec/data';
-import type { EngineSchemaRegistryView, IDataEngine, IFileAttachmentService } from '@objectstack/spec/contracts';
+import type { EngineSchemaRegistryView, IDataEngine, IFileAttachmentService, IPrintDoorService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import type { ICallerFileAttachmentService } from '@objectstack/service-storage';
@@ -145,6 +145,14 @@ export interface PrintServiceDeps {
   getMinter(): PrincipalSessionMinter | undefined;
   /** Where a failed revoke is reported. */
   logger?: { error(message: string): void };
+  /**
+   * [#36840] The print door for a kernel with no `http.server` (a hosted
+   * tenant kernel): the member {@link PrintService.handlePrintDoor} is, built
+   * by the plugin over the same registration its `http.server` mount runs.
+   * Absent: the service has no such member, and the dispatcher's `/print`
+   * domain answers `501`.
+   */
+  printDoor?: (request: Request) => Promise<Response>;
 }
 
 /** The whole render's time budget. */
@@ -276,10 +284,20 @@ function defaultPrintFilename(
 /** What the engine's last probe answered. */
 type ProbeResult = { ok: true; version: string } | { ok: false; reason: string };
 
-export class PrintService implements IPrintService {
+export class PrintService implements IPrintService, IPrintDoorService {
   private lastProbe: ProbeResult | undefined;
 
-  constructor(private readonly deps: PrintServiceDeps) {}
+  /**
+   * [#36840] `IPrintDoorService.handlePrintDoor`: the print door for a kernel
+   * with no `http.server`, reached through the runtime dispatcher's `/print`
+   * domain. Present exactly when the composition supplied
+   * {@link PrintServiceDeps.printDoor}.
+   */
+  readonly handlePrintDoor?: (request: Request) => Promise<Response>;
+
+  constructor(private readonly deps: PrintServiceDeps) {
+    if (deps.printDoor) this.handlePrintDoor = deps.printDoor;
+  }
 
   /**
    * Probe the engine: open the browser, read its version, close it. Records

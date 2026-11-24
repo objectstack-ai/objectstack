@@ -154,7 +154,7 @@ describe('Data pillar field rail — a late object inspector fills the open rail
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     const card = (await screen.findByText('Title')).closest('.cursor-grab') as HTMLElement;
     expect(card).toBeTruthy();
     fireEvent.click(card);

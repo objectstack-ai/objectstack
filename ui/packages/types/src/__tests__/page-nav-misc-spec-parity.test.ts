@@ -435,7 +435,7 @@ type LocalOnlyParamKey = Exclude<keyof ActionParam, SpecAuthorableParamKey>;
 
 describe('ActionParam declares ONLY authorable keys (objectui#3174)', () => {
   it('does not declare the resolved-side picker group', () => {
-    // These nine live on `@object-ui/core`'s RESOLVED `ActionParamDef`, which
+    // These ten live on `@object-ui/core`'s RESOLVED `ActionParamDef`, which
     // `resolveActionParams()` EMITS. Declaring them on the authoring type made
     // `{ type: 'lookup', referenceTo: 'account' }` compile, lose its picker
     // target in the resolver, and render as a record-id text box — while the
@@ -466,11 +466,14 @@ describe('ActionParam declares ONLY authorable keys (objectui#3174)', () => {
     const withLookupPageSize: ActionParam = { name: 'p', lookupPageSize: 20 };
     // @ts-expect-error inherited from the referenced field, not authored
     const withDependsOn: ActionParam = { name: 'p', dependsOn: [] };
+    // @ts-expect-error inherited from the referenced field, not authored (objectstack#36865)
+    const withAllowCreate: ActionParam = { name: 'p', allowCreate: false };
 
     expect([
       withDisplayField, withIdField, withDescriptionField, withTitleFormat,
       withLookupColumns, withLookupFilters, withLookupPageSize, withDependsOn,
-    ]).toHaveLength(8);
+      withAllowCreate,
+    ]).toHaveLength(9);
   });
 
   it('keeps `reference` as the one authorable picker spelling', () => {

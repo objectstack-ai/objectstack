@@ -1,5 +1,5 @@
 import type { Field as SpecField } from '@objectstack/spec/data';
-import { resolveFieldCurrency, type FieldCurrencyConfig } from '@object-ui/i18n';
+import { recordCurrencyField, recordCurrencyPath, resolveFieldCurrency, type FieldCurrencyConfig } from '@object-ui/i18n';
 import { formatCurrency } from './number-format.js';
 import { withFollowedParentObject } from '../currency.js';
 
@@ -48,6 +48,9 @@ function sameValue(a: unknown, b: unknown): boolean {
  * an amount the pick would write into an amount in another currency is not
  * written; it is returned under `withheld`, so the host can say why the
  * target stayed as it was. Without `currency` every value copies as before.
+ * Each amount is judged against the record with this pick's own writes
+ * applied (`currency.targetCurrency`'s `writes`), so a pick that fills a code
+ * field and an amount in that code together copies both.
  */
 export function planDeclaredLookupAutofill(
   pairs: readonly LookupAutofillPair[] | undefined,
@@ -56,16 +59,61 @@ export function planDeclaredLookupAutofill(
   previous?: Values | null,
   currency?: AutofillCurrencyContext,
 ): LookupAutofillPlan {
-  const plan: LookupAutofillPlan = { patch: {}, withheld: [] };
-  if (!pairs?.length || !picked || typeof picked !== 'object') return plan;
+  return judgePickWrites(declaredPickWrites(pairs, picked, current, previous), currency);
+}
+
+/**
+ * The values the declared pairs would write on one pick, under the overwrite
+ * rule ({@link planDeclaredLookupAutofill}), before the cross-currency rule
+ * judges them.
+ */
+export function declaredPickWrites(
+  pairs: readonly LookupAutofillPair[] | undefined,
+  picked: Values | null | undefined,
+  current: Values | null | undefined,
+  previous?: Values | null,
+): PickWrite[] {
+  const out: PickWrite[] = [];
+  if (!pairs?.length || !picked || typeof picked !== 'object') return out;
   for (const { target, source, overwrite } of pairs) {
     if (!(source in picked) || picked[source] === undefined) continue;
     const held = current?.[target];
     const filledByEarlierPick = !!previous && source in previous && sameValue(held, previous[source]);
     if (!(overwrite === true || isEmptyValue(held) || filledByEarlierPick)) continue;
-    const refused = judgeCopy(currency, target, source, picked[source]);
+    out.push({ target, source, value: picked[source], held });
+  }
+  return out;
+}
+
+/**
+ * One value a pick would write: `value` from `source` into `target`, which
+ * held `held` at the pick.
+ */
+export interface PickWrite {
+  readonly target: string;
+  readonly source: string;
+  readonly value: unknown;
+  readonly held?: unknown;
+}
+
+/**
+ * The cross-currency judgement of every value one pick would write. Each is
+ * judged against the record with all of this pick's writes applied (the
+ * `writes` `currency.targetCurrency` is handed), so the code a pick writes
+ * beside an amount is the code that amount is judged in. Without `currency`
+ * every value is written.
+ */
+export function judgePickWrites(
+  candidates: readonly PickWrite[],
+  currency: AutofillCurrencyContext | undefined,
+): LookupAutofillPlan {
+  const plan: LookupAutofillPlan = { patch: {}, withheld: [] };
+  const writes: Values = {};
+  for (const c of candidates) writes[c.target] = c.value;
+  for (const c of candidates) {
+    const refused = judgeCopy(currency, c, writes);
     if (refused) plan.withheld.push(refused);
-    else plan.patch[target] = picked[source];
+    else plan.patch[c.target] = c.value;
   }
   return plan;
 }
@@ -111,13 +159,17 @@ export function lookupAutofillByField(fields: Record<string, unknown> | undefine
  * - `unset`: a `record`-mode amount whose record holds no code yet;
  * - `unknown`: a picked value whose field definition this host does not hold
  *   (the referenced object's schema did not load), so its currency cannot be
- *   named. It is copied only into an amount in the home currency.
+ *   named. It is copied only into an amount in the home currency;
+ * - `unread`: an amount that follows the code of a parent the record names,
+ *   whose code this host could not read (the read failed, or cannot run), so
+ *   nothing can be judged against it.
  */
 export type AmountCurrency =
   | { readonly kind: 'home' }
   | { readonly kind: 'code'; readonly code: string }
   | { readonly kind: 'unset' }
-  | { readonly kind: 'unknown' };
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'unread' };
 
 const HOME: AmountCurrency = Object.freeze({ kind: 'home' });
 const UNSET: AmountCurrency = Object.freeze({ kind: 'unset' });
@@ -147,11 +199,30 @@ function isMoneyDef(def: MoneyDef | null | undefined): def is MoneyDef {
 export function amountCurrencyOf(
   def: MoneyDef | null | undefined,
   record?: Readonly<Record<string, unknown>> | null,
+  writes?: Readonly<Record<string, unknown>> | null,
 ): AmountCurrency | undefined {
   if (!isMoneyDef(def)) return undefined;
-  const code = resolveFieldCurrency(def, undefined, record ?? null);
+  const code = resolveFieldCurrency(def, undefined, withCodeWrite(def, record, writes));
   if (code) return { kind: 'code', code };
   return def.currencyConfig?.currencyMode === 'record' ? UNSET : HOME;
+}
+
+/**
+ * `record` with the write `writes` makes to `def`'s own code field applied: a
+ * pick that fills the code beside the amount puts the amount in that code. A
+ * parent's code is not the record's to write, so a parent path reads `record`
+ * as it stands.
+ */
+function withCodeWrite(
+  def: MoneyDef,
+  record: Readonly<Record<string, unknown>> | null | undefined,
+  writes: Readonly<Record<string, unknown>> | null | undefined,
+): Readonly<Record<string, unknown>> | null {
+  const codeField = recordCurrencyField(def);
+  if (!writes || !codeField || recordCurrencyPath(def) || !Object.prototype.hasOwnProperty.call(writes, codeField)) {
+    return record ?? null;
+  }
+  return { ...(record ?? {}), [codeField]: writes[codeField] };
 }
 
 /**
@@ -183,15 +254,21 @@ function codeOf(c: AmountCurrency, home: string | undefined): string | undefined
  * - `noTargetCurrency`: the amount being filled follows a record that holds
  *   no currency yet;
  * - `noSourceCurrency`: the picked amount's currency cannot be named, while
- *   the amount being filled is in `to`.
+ *   the amount being filled is in `to`;
+ * - `targetCurrencyUnread`: the amount being filled follows a parent whose
+ *   code could not be read.
+ *
+ * `held` is the value the target held at the pick when it held one (a re-pick
+ * over a filled target): the target keeps it, and the note says so.
  */
 export interface WithheldAutofill {
   readonly target: string;
   readonly source: string;
   readonly amount: number;
-  readonly reason: 'differs' | 'noTargetCurrency' | 'noSourceCurrency';
+  readonly reason: 'differs' | 'noTargetCurrency' | 'noSourceCurrency' | 'targetCurrencyUnread';
   readonly from?: string;
   readonly to?: string;
+  readonly held?: unknown;
 }
 
 /**
@@ -214,6 +291,7 @@ export function crossCurrencyRefusal(
   const from = codeOf(source, home);
   const to = codeOf(target, home);
   if (from && to && from === to) return undefined;
+  if (target.kind === 'unread') return { reason: 'targetCurrencyUnread', ...(from ? { from } : {}) };
   if (target.kind === 'unset') return { reason: 'noTargetCurrency', ...(from ? { from } : {}) };
   if (!from) return { reason: 'noSourceCurrency', ...(to ? { to } : {}) };
   if (!to) return { reason: 'noTargetCurrency', from };
@@ -226,11 +304,13 @@ export function crossCurrencyRefusal(
  * on the picked record) and of each field of the record being edited
  * (`targetCurrency`, by target name), plus the organization's home currency.
  * A host that knows neither side passes no context, and every value copies as
- * before.
+ * before. `targetCurrency` is handed this pick's own writes, by target name: a
+ * target whose code field the pick writes is in that code
+ * (`amountCurrencyOf`'s `writes`).
  */
 export interface AutofillCurrencyContext {
   sourceCurrency: (source: string, value: unknown) => AmountCurrency | undefined;
-  targetCurrency: (target: string) => AmountCurrency | undefined;
+  targetCurrency: (target: string, writes?: Readonly<Values>) => AmountCurrency | undefined;
   home: string | undefined;
 }
 
@@ -240,18 +320,27 @@ export interface LookupAutofillPlan {
   withheld: WithheldAutofill[];
 }
 
-/** `value` copied from `source` into `target`, or the reason it is not. */
+/** `write` judged against the record with this pick's `writes` applied, or the reason it is not copied. */
 function judgeCopy(
   ctx: AutofillCurrencyContext | undefined,
-  target: string,
-  source: string,
-  value: unknown,
+  { target, source, value, held }: PickWrite,
+  writes: Readonly<Values>,
 ): WithheldAutofill | undefined {
   if (!ctx) return undefined;
-  const refusal = crossCurrencyRefusal(ctx.sourceCurrency(source, value), ctx.targetCurrency(target), ctx.home);
+  const refusal = crossCurrencyRefusal(ctx.sourceCurrency(source, value), ctx.targetCurrency(target, writes), ctx.home);
   if (!refusal) return undefined;
   const amount = typeof value === 'number' ? value : Number(value);
-  return { target, source, amount, ...refusal };
+  return { target, source, amount, ...refusal, ...(isEmptyValue(held) ? {} : { held }) };
+}
+
+/**
+ * Whether the note about `item` still stands over `current`, the value its
+ * target holds now: the target still holds what it held at the pick (empty,
+ * or the earlier value a re-pick left in place). Once somebody writes the
+ * target, the note has said what it had to say.
+ */
+export function withheldStillStands(item: WithheldAutofill, current: unknown): boolean {
+  return item.held === undefined ? isEmptyValue(current) : sameValue(current, item.held);
 }
 
 /** The translation call a widget holds (`useFieldTranslation().t`). */
@@ -260,7 +349,8 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
 /**
  * The sentence that says why a pick left `item.target` empty, naming both
  * currencies and the picked amount in its own currency, so a person can
- * price it by hand. `label` is the target's label.
+ * price it by hand. `label` is the target's label. A target that kept the
+ * value it held at the pick (`held`) is said to keep it.
  */
 export function withheldAutofillMessage(
   item: WithheldAutofill,
@@ -269,13 +359,15 @@ export function withheldAutofillMessage(
   locale: string | undefined,
 ): string {
   const amount = Number.isFinite(item.amount) ? formatCurrency(item.amount, item.from, locale) : String(item.amount);
-  if (item.reason === 'differs') {
-    return t('lookup.autofillCurrencyDiffers', { field: label, amount, from: item.from, to: item.to });
-  }
-  if (item.reason === 'noSourceCurrency') {
-    return t('lookup.autofillSourceNoCurrency', { field: label, amount, to: item.to });
-  }
-  return t('lookup.autofillNoCurrency', { field: label, amount });
+  const why =
+    item.reason === 'differs'
+      ? t('lookup.autofillCurrencyDiffers', { field: label, amount, from: item.from, to: item.to })
+      : item.reason === 'noSourceCurrency'
+        ? t('lookup.autofillSourceNoCurrency', { field: label, amount, to: item.to })
+        : item.reason === 'targetCurrencyUnread'
+          ? t('lookup.autofillCurrencyUnread', { field: label, amount })
+          : t('lookup.autofillNoCurrency', { field: label, amount });
+  return item.held === undefined ? why : `${why} ${t('lookup.autofillKept', { field: label })}`;
 }
 
 /**

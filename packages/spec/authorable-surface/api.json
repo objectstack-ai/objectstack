@@ -858,6 +858,7 @@
     "api/GetInstalledPackageResponse:error",
     "api/GetInstalledPackageResponse:meta",
     "api/GetInstalledPackageResponse:success",
+    "api/GetLocalesResponse:fallbackChain",
     "api/GetLocalesResponse:locales",
     "api/GetLocalesResponse:sourceLocale",
     "api/GetMetaDiagnosticsResponse:entries",

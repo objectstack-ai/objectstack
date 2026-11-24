@@ -49,6 +49,9 @@ const en = {
     noRecords: 'No records found',
     createNew: 'Create new',
     createNamed: 'Create new "{{name}}"',
+    // objectstack#36865 — a quick-created record the field's lookupFilters exclude is not selected; this says why.
+    createdOutsideFilters: "The record was created, but it does not match this field's filters, so it cannot be chosen here.",
+    createdUnchecked: "The record was created, but it could not be checked against this field's filters, so it was not chosen. Search for it here rather than creating it again.",
     showingResults: 'Showing {{shown}} of {{total}} results',
     showAllResults: 'Show all results ({{count}})',
     selectedBadge: 'Selected',
@@ -73,6 +76,8 @@ const en = {
     autofillCurrencyDiffers: '{{field}} was not filled: the picked amount is {{amount}} in {{from}}, but {{field}} here is in {{to}}. Enter it in {{to}}.',
     autofillSourceNoCurrency: '{{field}} was not filled: the picked amount {{amount}} names no currency, but {{field}} here is in {{to}}. Enter it in {{to}}.',
     autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
+    autofillCurrencyUnread: '{{field}} was not filled: the picked amount is {{amount}}, but the currency here could not be read. Check the currency, then enter {{field}}.',
+    autofillKept: '{{field}} still holds its earlier value.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -195,6 +200,10 @@ const en = {
     // handler for an undoable success toast.
     failed: 'Action failed',
     parallelFailed: 'One or more parallel actions failed',
+    // A `type: 'api'` action whose backing service this deployment does not
+    // run or cannot reach (503 SERVICE_UNAVAILABLE, 501 NOT_IMPLEMENTED, a route
+    // miss), shown instead of the server's operator prose (objectstack#36840).
+    serviceUnavailable: 'This action needs a service that is not available in this environment. Contact your administrator.',
     // The two row-count refusals of a single-record action launched from a
     // list toolbar (`resolveServerActionRecordId` in `@object-ui/core`); the
     // runner asks for them before any confirmation or param dialog opens

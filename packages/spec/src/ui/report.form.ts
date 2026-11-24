@@ -14,6 +14,36 @@
  */
 
 import { defineForm } from './view.zod';
+import { DATE_RANGE_DEFAULT_RANGES, type DateRangeDefaultRange } from './dashboard.zod';
+
+/**
+ * The name each Default Period choice reads by — one per member of the shared
+ * preset table, so a preset added there fails to compile here until it is named.
+ * The words are the ones the report page's period chip shows for the same
+ * presets (the console's `dashboard.filters.range.*` and
+ * `dashboard.filters.custom` rows), so the period an author picks reads the
+ * same as the period a viewer sees. `custom` names no window: it opens the
+ * picker with no preset applied.
+ */
+const DEFAULT_PERIOD_LABELS: Record<DateRangeDefaultRange, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  this_week: 'This week',
+  last_week: 'Last week',
+  this_month: 'This month',
+  last_month: 'Last month',
+  next_month: 'Next month',
+  this_quarter: 'This quarter',
+  last_quarter: 'Last quarter',
+  next_quarter: 'Next quarter',
+  this_year: 'This year',
+  last_year: 'Last year',
+  last_7_days: 'Last 7 days',
+  last_30_days: 'Last 30 days',
+  last_90_days: 'Last 90 days',
+  next_30_days: 'Next 30 days',
+  custom: 'Custom…',
+};
 
 export const reportForm = defineForm({
   schemaId: 'report',
@@ -139,7 +169,15 @@ export const reportForm = defineForm({
           helpText: 'The period the report opens with, and whether people may choose their own range.',
           fields: [
             { field: 'dimension', label: 'Date Field', helpText: 'The date grouping of the data source the period applies to. Leave it empty when the data source has only one.' },
-            { field: 'defaultRange', label: 'Default Period', helpText: 'The period the report opens with.' },
+            // Each choice is named (`DEFAULT_PERIOD_LABELS`): with no options a
+            // select names its choices by their stored values.
+            {
+              field: 'defaultRange',
+              type: 'select',
+              label: 'Default Period',
+              helpText: 'The period the report opens with.',
+              options: DATE_RANGE_DEFAULT_RANGES.map((value) => ({ label: DEFAULT_PERIOD_LABELS[value], value })),
+            },
             { field: 'allowCustomRange', label: 'Allow Custom Range', helpText: 'Let people pick their own start and end dates.' },
           ],
         },

@@ -40,6 +40,8 @@ const pt = {
     allResults: 'Todos os resultados',
     createNew: 'Criar novo',
     createNamed: 'Criar “{{name}}”',
+    createdOutsideFilters: 'O registro foi criado, mas não atende aos filtros deste campo, por isso não pode ser escolhido aqui.',
+    createdUnchecked: 'O registro foi criado, mas não foi possível verificar se ele atende aos filtros deste campo, por isso não foi escolhido. Procure-o aqui em vez de criá-lo novamente.',
     showingResults: 'Mostrando {{shown}} de {{total}} resultados',
     showAllResults: 'Ver todos os resultados ({{count}})',
     selectedBadge: 'Selecionado',
@@ -66,6 +68,8 @@ const pt = {
     autofillCurrencyDiffers: '{{field}} não foi preenchido: o valor escolhido é {{amount}} em {{from}}, mas aqui {{field}} está em {{to}}. Informe-o em {{to}}.',
     autofillSourceNoCurrency: '{{field}} não foi preenchido: o valor escolhido {{amount}} não indica moeda, mas aqui {{field}} está em {{to}}. Informe-o em {{to}}.',
     autofillNoCurrency: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas ainda não há moeda escolhida aqui. Escolha a moeda e depois informe {{field}}.',
+    autofillCurrencyUnread: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas não foi possível ler a moeda aqui. Verifique a moeda e depois informe {{field}}.',
+    autofillKept: '{{field}} mantém o valor anterior.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -157,6 +161,7 @@ const pt = {
     completedNamed: 'Ação concluída: {{action}}',
     failed: 'A ação falhou',
     parallelFailed: 'Uma ou mais ações paralelas falharam',
+    serviceUnavailable: 'Esta ação precisa de um serviço que não está disponível neste ambiente. Entre em contato com o administrador.',
     selectExactlyOneRow: 'Esta ação é executada em um único registro — selecione exatamente uma linha.',
     selectRowFirst: 'Esta ação é executada em um único registro — selecione uma linha primeiro.',
     undo: 'Desfazer',

@@ -52,6 +52,8 @@ const zh = {
     noRecords: '未找到记录',
     createNew: '新建',
     createNamed: '新建“{{name}}”',
+    createdOutsideFilters: '记录已创建，但不符合此字段的筛选条件，因此不能在这里选择。',
+    createdUnchecked: '记录已创建，但未能核对它是否符合此字段的筛选条件，因此没有选中。请在这里搜索它，不要重复创建。',
     showingResults: '显示 {{total}} 条结果中的 {{shown}} 条',
     showAllResults: '查看全部结果（{{count}}）',
     selectedBadge: '已选',
@@ -74,6 +76,8 @@ const zh = {
     autofillCurrencyDiffers: '未填入{{field}}：所选金额为 {{amount}}（{{from}}），而此处的{{field}}以 {{to}} 计。请按 {{to}} 手动填写。',
     autofillSourceNoCurrency: '未填入{{field}}：所选金额 {{amount}} 未注明币种，而此处的{{field}}以 {{to}} 计。请按 {{to}} 手动填写。',
     autofillNoCurrency: '未填入{{field}}：所选金额为 {{amount}}，但此处尚未选择币种。请先选择币种，再填写{{field}}。',
+    autofillCurrencyUnread: '未填入{{field}}：所选金额为 {{amount}}，但无法读取此处的币种。请先确认币种，再填写{{field}}。',
+    autofillKept: '{{field}}仍保留原来的值。',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).
@@ -164,6 +168,7 @@ const zh = {
     completedNamed: '“{{action}}”已完成',
     failed: '操作失败',
     parallelFailed: '一个或多个并行操作失败',
+    serviceUnavailable: '此操作所需的服务在当前环境未启用，请联系管理员。',
     selectExactlyOneRow: '此操作针对单条记录，请只选择一行。',
     selectRowFirst: '此操作针对单条记录，请先选择一行。',
     undo: '撤销',

@@ -251,16 +251,20 @@ describe('a keyboard drag in the form designer reaches a drop target (objectui#1
 });
 
 describe('a move writes the group\'s own fields list, not the object\'s field order (objectstack#35900)', () => {
-  it('reordering inside a group changes only that group\'s fields: the fields array is untouched', async () => {
+  it('reordering inside a group changes only that group\'s fields: the fields array keeps its order', async () => {
     renderDesigner();
     await keyboardMove('Phone', ['ArrowDown']);
     expect(said()).toBe('Phone moved to Contact, position 2 of 2.');
-    // Same array, same order, same definitions: the list default columns and
-    // the form order read are where they were.
-    expect(latest.fields).toBe(DRAFT.fields);
+    // Same order, same definitions: the list default columns and the form
+    // order read are where they were. objectstack#36505: the first save also
+    // converts the older per-field `group` into the lists, so `phone` and
+    // `email` lose it and nothing else changes.
+    const fields = latest.fields as Field[];
+    expect(fields.map((f) => f.name)).toEqual(DRAFT.fields.map((f) => f.name));
+    expect(fields).toEqual(DRAFT.fields.map(({ group: _group, ...def }) => def));
     expect(latest.fieldGroups).toEqual([
       { key: 'contact', label: 'Contact', fields: ['email', 'phone'] },
-      { key: 'new_group', label: 'New group' },
+      { key: 'new_group', label: 'New group', fields: [] },
     ]);
   });
 

@@ -148,7 +148,7 @@ async function openTask(): Promise<void> {
 
 /** The card's repro: add a Picklist "Priority" with no option yet; the autosave holds it. */
 async function holdAPicklist(): Promise<void> {
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await addFieldFromFormToolbar(undefined, { label: 'Priority', type: /^Picklist$/ });
   await screen.findByTestId('studio-held', undefined, { timeout: 8000 });
 }
