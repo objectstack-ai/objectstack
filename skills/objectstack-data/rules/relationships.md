@@ -333,7 +333,8 @@ InvoiceLine = {
   clock: a scheduled flow too).
 - **Catalog auto-fill** — a `lookup` line field + sibling columns whose names
   match fields on the referenced record (e.g. `unit_price`, `description`) →
-  picking a record fills those cells.
+  picking a record fills those cells (a `currency` amount only in the same
+  currency: field-types.md → `lookupAutofill`).
 - **Sort field** — a numeric `position` / `sort_order` / `sequence` field is
   auto-detected, hidden from the grid, and stamped on drag-reorder.
 

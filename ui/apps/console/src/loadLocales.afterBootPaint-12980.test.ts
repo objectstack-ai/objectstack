@@ -13,6 +13,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { TokenStorage } from '@object-ui/auth';
 import { loadLocales, __resetBootPainted } from './loadLocales';
 import { publishAuthState } from './i18nSession';
+import { __resetLocalesRead } from './localesRead';
 
 let splash: HTMLElement | null = null;
 const someFrames = () => new Promise<void>((r) => setTimeout(r, 80));
@@ -31,6 +32,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // One /i18n/locales read per page load (cloud#4964): each case is its own page load.
+  __resetLocalesRead();
   splash?.remove();
   splash = null;
   vi.unstubAllGlobals();
