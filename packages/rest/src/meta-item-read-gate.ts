@@ -4468,6 +4468,28 @@ function withItems(raw: unknown, items: any[]): unknown {
 }
 
 /**
+ * [#36894] The list envelope with its `changedAt` (when the stored row each
+ * listed item serves last changed, keyed by name) keyed by the names of the
+ * items it still lists, and without it when none is left. The store keys the
+ * items it read; the per-caller gate and the query filters leave items out,
+ * and an entry for one of those would tell the caller a name, and when it
+ * changed, that this answer does not list. Anything else is answered as it is.
+ */
+function withChangedAtOfListedNames(raw: unknown): unknown {
+    const list = listItemsOf(raw);
+    if (!list || Array.isArray(raw)) return raw;
+    const changedAt = (raw as { changedAt?: unknown }).changedAt;
+    if (changedAt === undefined) return raw;
+    const { changedAt: _held, ...rest } = raw as Record<string, unknown>;
+    if (!changedAt || typeof changedAt !== 'object' || Array.isArray(changedAt)) return rest;
+    const listed = new Set(list.map((it: any) => (it && typeof it === 'object' ? it.name : undefined))
+        .filter((name: unknown): name is string => typeof name === 'string'));
+    const kept = Object.entries(changedAt as Record<string, unknown>).filter(([name]) => listed.has(name));
+    if (kept.length === Object.keys(changedAt).length) return raw;
+    return kept.length === 0 ? rest : { ...rest, changedAt: Object.fromEntries(kept) };
+}
+
+/**
  * [#25333, ADR-0131 D3/D4] The `position` list's `?include=grants` step: each
  * listed position gains, as served decorations beside `_packageId` and the
  * rest,
@@ -4577,6 +4599,10 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     is left out.
  *  8. `position` — `?include=grants`: each position as the resolver enforces
  *     it for a holder ({@link describeMetaPositionList}).
+ *  8a. [#36894] The store's `changedAt` (`GetMetaItemsResponseSchema`) keeps
+ *     only the names an item still listed carries
+ *     ({@link withChangedAtOfListedNames}): the gate and the filters above
+ *     leave items out, and a name this caller is not listed is not keyed.
  *  9. The translation step ({@link translateMetaList}, reached through
  *     {@link MetaListAnswerSources.translateList}).
  *
@@ -4724,6 +4750,9 @@ export function createMetaListAnswer(
                 if (described !== list) visible = withItems(visible, described);
             }
         }
+
+        // 8a. [#36894] `changedAt` keys only the names this answer lists.
+        visible = withChangedAtOfListedNames(visible);
 
         // 9. The translation step ({@link translateMetaList}, through the transport's entry).
         const data = await sources.translateList(metaType, visible);
