@@ -443,6 +443,27 @@ export interface McpDataBridge {
    * not found). OPTIONAL — see {@link searchPackageDocs}.
    */
   readPackageDoc?(input: ReadPackageDocInput): Promise<ReadPackageDocOutput>;
+  /**
+   * [ADR-0149 D2] `search_knowledge`: the passages of the app's knowledge
+   * sources that answer `input.query`, from the sources whose `aiExposed` is
+   * not `false`. Runs AS the principal through the knowledge service's one
+   * executor (`@objectstack/service-knowledge`, `createKnowledgeTools`), which
+   * re-checks every object-source hit against the caller's row-level
+   * security; the tool layer adds and removes nothing.
+   *
+   * OPTIONAL: a host with no `knowledge` service, or one whose service carries
+   * no `knowledgeTools`, omits both knowledge members ({@link searchKnowledge},
+   * {@link knowledgeToolDefinitions}) and the tool does not register.
+   */
+  searchKnowledge?(input: Record<string, unknown>): Promise<unknown>;
+  /**
+   * [ADR-0149 D2] The knowledge tool's `AIToolDefinition`, as the knowledge
+   * service defines it: `registerKnowledgeTools` registers `search_knowledge`
+   * under that definition's description and argument schema, so
+   * `packages/mcp` holds no second copy of either. OPTIONAL — see
+   * {@link searchKnowledge}.
+   */
+  knowledgeToolDefinitions?(): ReadonlyArray<Pick<AIToolDefinition, 'name' | 'description' | 'parameters'>>;
 }
 
 /** [#35442] Where a manual page lives: its name, app, title, manual and the console address to cite. */
@@ -3156,6 +3177,9 @@ export function wireBridgeTools(
   // [#35442] `search_package_docs` / `read_package_doc`, only where the bridge
   // carries both doc members and the grant admits `data:read`.
   registered.push(...registerPackageDocTools(server, bridge, options));
+  // [ADR-0149 D2] `search_knowledge`, only where the bridge carries both
+  // knowledge members and the grant admits `data:read`.
+  registered.push(...registerKnowledgeTools(server, bridge, options));
   return registered;
 }
 
@@ -3441,6 +3465,86 @@ export function registerPackageDocTools(
   );
 
   return [SEARCH_PACKAGE_DOCS_TOOL_NAME, READ_PACKAGE_DOC_TOOL_NAME];
+}
+
+/** [ADR-0149 D2] The knowledge search tool's name, the one the cloud `service-ai` registry already holds. */
+export const SEARCH_KNOWLEDGE_TOOL_NAME = 'search_knowledge';
+
+/**
+ * [ADR-0149 D2] The `search_knowledge` definition this bridge and grant
+ * register, or `undefined` when the tool does not register: a bridge missing
+ * a knowledge member, a grant without `data:read` (the read family's gate,
+ * `aggregate_records`'s: an undefined grant keeps it), and a bridge that
+ * defines no `search_knowledge` are all `undefined`. The one gate:
+ * {@link registerKnowledgeTools} registers from it.
+ */
+export function knowledgeToolDefinition(
+  bridge: Partial<McpDataBridge> | undefined,
+  options: RegisterObjectToolsOptions = {},
+): Pick<AIToolDefinition, 'name' | 'description' | 'parameters'> | undefined {
+  if (!bridge) return undefined;
+  if (typeof bridge.searchKnowledge !== 'function' || typeof bridge.knowledgeToolDefinitions !== 'function') return undefined;
+  const scopes = options.grantedScopes;
+  if (scopes && !scopes.includes(MCP_OAUTH_SCOPE_DATA_READ)) return undefined;
+  const definition = bridge.knowledgeToolDefinitions().find((d) => d.name === SEARCH_KNOWLEDGE_TOOL_NAME);
+  return definition?.description ? definition : undefined;
+}
+
+/**
+ * [ADR-0149 D2] Register `search_knowledge` over the bridge's knowledge
+ * members: the app's knowledge sources, searched by meaning.
+ *
+ * - **Read family.** Registers under `data:read` exactly as
+ *   `aggregate_records` and the dataset pair do; outside that grant the SDK
+ *   answers a call as an unknown tool.
+ * - **Optional.** A bridge without both knowledge members (no `knowledge`
+ *   service on the host) registers nothing, and nothing else on the surface
+ *   changes.
+ * - **One definition.** The description and the argument schema are the
+ *   knowledge service's definition ({@link McpDataBridge.knowledgeToolDefinitions}),
+ *   its JSON Schema taken through zod's `fromJSONSchema` the way a bridged
+ *   registry tool's is, so a client is listed the shape the definition
+ *   declares and an undeclared argument is refused before dispatch.
+ * - **No second gate, none bypassed.** Every call goes to the bridge member,
+ *   which runs the knowledge service's executor AS the principal: only the
+ *   sources whose `aiExposed` is not `false` are searched, every object-source
+ *   hit is re-checked against the caller's row-level security, and a refusal
+ *   comes back in its ADR-0112 envelope ({@link errorResultWithCode}).
+ */
+export function registerKnowledgeTools(
+  server: McpServer,
+  bridge: Partial<McpDataBridge>,
+  options: RegisterObjectToolsOptions = {},
+): string[] {
+  const definition = knowledgeToolDefinition(bridge, options);
+  if (!definition) return [];
+  let inputSchema: unknown;
+  try {
+    inputSchema = z.fromJSONSchema(definition.parameters as never);
+  } catch {
+    inputSchema = undefined;
+  }
+  // The definition is the knowledge service's own and declares an object; one
+  // that does not convert to an object schema is not registered rather than
+  // registered taking no arguments, which would drop every `query`.
+  if (!(inputSchema instanceof z.ZodObject)) return [];
+  const search = bridge.searchKnowledge!.bind(bridge);
+  server.registerTool(
+    SEARCH_KNOWLEDGE_TOOL_NAME,
+    {
+      description: definition.description,
+      inputSchema: inputSchema as z.ZodObject,
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async (args: Record<string, unknown>) => {
+      try {
+        return textResult(await search(args));
+      } catch (err) {
+        return errorResultWithCode(err);
+      }
+    },
+  );
+  return [SEARCH_KNOWLEDGE_TOOL_NAME];
 }
 
 /**

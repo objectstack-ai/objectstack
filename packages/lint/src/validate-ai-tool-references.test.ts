@@ -9,6 +9,7 @@ import {
   MCP_DOOR_TOOL_NAMES,
   MCP_FILE_TOOL_NAMES,
   PLATFORM_PROVIDED_TOOL_NAMES,
+  PLATFORM_TOOLS_BY_PACKAGE,
   PLATFORM_TOOL_FAMILY_PREFIXES,
 } from '@objectstack/spec/system';
 import { explainRule } from './rule-explanations.js';
@@ -363,6 +364,37 @@ describe('validate-ai-tool-references', () => {
    * `draft_record`): a skill naming `create_record` / `update_record` resolves;
    * a near name nobody registers does not, and neither does the retired name.
    */
+  /**
+   * The `ask` product's data tools the MCP door does not register. A skill
+   * offered over MCP with `instructions` that binds one is withheld from
+   * every MCP `prompts/list` (`skillBindingServed`, `@objectstack/mcp`), so
+   * the rule names the tool, though the name resolves.
+   */
+  it('names an ask tool no MCP connection serves, on a skill MCP would project, as the reason it is withheld', () => {
+    const askOnly = (PLATFORM_TOOLS_BY_PACKAGE['service-ai'] ?? []).filter((n) => !MCP_DOOR_TOOL_NAMES.includes(n));
+    expect(askOnly.sort()).toEqual(['aggregate_data', 'query_data', 'visualize_data']);
+    const playbook = { name: 'policy_inquiry', instructions: 'Answer from the policy clauses.' };
+    const findings = validateAiToolReferences({
+      skills: [{ ...playbook, tools: ['query_records', 'aggregate_data', 'search_knowledge'] }],
+    });
+    expect(findings.map((f) => f.path)).toEqual(['skills[0].tools[1]']);
+    expect(findings[0].message).toContain('"aggregate_data" is served by the in-product agents but by no MCP connection');
+    expect(findings[0].hint).toContain('`mcpPrompt: false`');
+
+    // The controls: MCP projects none of these skills, so none loses a prompt.
+    for (const skill of [
+      { ...playbook, mcpPrompt: false, tools: ['aggregate_data'] },
+      { name: 'no_playbook', tools: ['aggregate_data'] },
+      { ...playbook, instructions: '   ', tools: ['aggregate_data'] },
+      { ...playbook, active: false, tools: ['aggregate_data'] },
+    ]) {
+      expect(validateAiToolReferences({ skills: [skill] }), JSON.stringify(skill)).toEqual([]);
+    }
+    // The door serves `search_knowledge` and the build product's tools may be
+    // a host's authoring family, so neither costs a projected skill its prompt.
+    expect(validateAiToolReferences({ skills: [{ ...playbook, tools: ['search_knowledge', 'verify_build'] }] })).toEqual([]);
+  });
+
   it('resolves the service-ai-studio record-write pair', () => {
     expect(
       validateAiToolReferences({ skills: [{ name: 's', tools: ['create_record', 'update_record'] }] }),
@@ -495,6 +527,7 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
       '`url`, `modal` or `form` action is UI-only',
       'advisory-first ratchet',
       'never at the runtime publish gate',
+      'withheld from every `prompts/list`',
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }
@@ -525,6 +558,7 @@ describe('[#22161] one-line verdicts — ai-skill-tool-unresolved', () => {
     expect(converted.some((f) => f.message.startsWith('Tool family '))).toBe(true);
     expect(converted.some((f) => f.message.includes('does not become an AI tool'))).toBe(true);
     expect(converted.some((f) => f.message.includes('resolves to no stack, platform or materialised action tool'))).toBe(true);
+    expect(converted.some((f) => f.message.includes('is served by the in-product agents but by no MCP connection'))).toBe(true);
     for (const f of converted) {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
@@ -542,6 +576,7 @@ describe('[#22161] one-line fixes — ai-skill-tool-unresolved', () => {
     expect(converted.some((f) => f.hint.startsWith('Drop `mcpPrompt: false`'))).toBe(true);
     expect(converted.some((f) => f.hint.startsWith('Opt "'))).toBe(true);
     expect(converted.some((f) => f.hint.startsWith('Back "'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Set `mcpPrompt: false`'))).toBe(true);
     for (const f of converted) {
       expect(f.hint, f.rule).not.toContain('\n');
       expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
@@ -554,5 +589,8 @@ describe('[#22161] one-line fixes — ai-skill-tool-unresolved', () => {
     expect(text).toContain('the ADR-0109 default path');
     expect(text).toContain('at least 40 characters');
     expect(text).toContain('a runtime plugin outside the platform registry provides the name');
+    // The ask tools the explanation names are exactly the ones the door lacks.
+    const askOnly = (PLATFORM_TOOLS_BY_PACKAGE['service-ai'] ?? []).filter((n) => !MCP_DOOR_TOOL_NAMES.includes(n));
+    expect(text).toContain(`(${askOnly.sort().map((n) => `\`${n}\``).join(', ')})`);
   });
 });
