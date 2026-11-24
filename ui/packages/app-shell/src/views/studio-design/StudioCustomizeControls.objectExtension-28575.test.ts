@@ -193,3 +193,18 @@ describe('the extension\'s whole field arrangement, folded and written (objectst
     expect(withoutReplacedPlacements(untouched)).toBe(untouched);
   });
 });
+
+describe('a field the extension places into a group stays there when its declaration is laid over (objectstack#36505)', () => {
+  it('keeps the served group of a placed field, and only of a placed one', () => {
+    const servedPlaced = {
+      name: OBJECT,
+      fieldGroups: [{ key: 'more', label: 'More' }],
+      fields: { name: { type: 'text', label: 'Account Name' }, region__c: { type: 'text', label: 'Region', group: 'more' } },
+    };
+    const region = { type: 'text', label: 'Region' };
+    const placed = foldObjectExtension(servedPlaced, { extend: OBJECT, fields: { region__c: region }, place: [{ field: 'region__c', group: 'more' }] });
+    expect((placed.fields as Record<string, Record<string, unknown>>).region__c.group).toBe('more');
+    const unplaced = foldObjectExtension(servedPlaced, { extend: OBJECT, fields: { region__c: region } });
+    expect((unplaced.fields as Record<string, Record<string, unknown>>).region__c.group).toBeUndefined();
+  });
+});

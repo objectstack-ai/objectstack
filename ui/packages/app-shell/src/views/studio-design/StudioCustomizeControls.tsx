@@ -547,11 +547,22 @@ export function foldObjectExtension(
     const patch = patches[entry.name];
     entries.push(isPlainRecord(patch) ? { name: entry.name, def: applyFieldPatch(entry.def, patch) } : entry);
   }
+  // objectstack#36505 — a field the extension places into a group (`place`
+  // `{ field, group }`) is served in that group: laying the extension's own
+  // declaration (which carries no `group`) over the served field keeps it.
+  const placedIn = new Set<string>();
+  if (Array.isArray(ext.place)) {
+    for (const entry of ext.place) {
+      if (isPlainRecord(entry) && typeof entry.field === 'string' && typeof entry.group === 'string') placedIn.add(entry.field);
+    }
+  }
   for (const [name, def] of Object.entries(own)) {
     if (!isPlainRecord(def)) continue;
     const at = entries.findIndex((e) => e.name === name);
-    if (at >= 0) entries[at] = { name, def };
-    else entries.push({ name, def });
+    const servedGroup = at >= 0 ? entries[at].def.group : undefined;
+    const laid = placedIn.has(name) && def.group === undefined && typeof servedGroup === 'string' ? { ...def, group: servedGroup } : def;
+    if (at >= 0) entries[at] = { name, def: laid };
+    else entries.push({ name, def: laid });
   }
   if (!Array.isArray(ext.fieldGroups)) return { ...object, fields: writeFields({ shape: view.shape, entries }) };
   return applyExtensionFieldGroups({ ...object, fields: writeFields({ shape: view.shape, entries }) }, ext.fieldGroups, own);
