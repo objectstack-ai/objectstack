@@ -316,7 +316,8 @@ export const ImportRequestSchema = lazySchema(() => z.object({
       'as on the import, naming each such field (match on single-value fields: a code, a name, an email); ' +
       'a caller that hands rows to ' +
       'the import runner without this door (a mapping\'s connector pull) gets every row failed with ' +
-      '`VALIDATION_ERROR` and the same refusal instead.',
+      '`VALIDATION_ERROR` instead, its `error` the `import_multi_value_match_key` catalog sentence in ' +
+      'the request language, naming the fields by label.',
     ),
   runAutomations: z.boolean().default(true)
     .describe(
