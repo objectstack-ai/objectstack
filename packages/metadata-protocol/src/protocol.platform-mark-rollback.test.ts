@@ -14,6 +14,8 @@ import {
     assertEngineUpdateDispatch,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// Pay the source's dynamic `@objectstack/lint` load during collection, never inside a case.
+import '@objectstack/lint';
 
 type Row = Record<string, unknown>;
 
