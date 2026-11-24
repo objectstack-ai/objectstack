@@ -140,7 +140,7 @@ vi.mock('../../utils/getIcon', () => ({ getIcon: () => () => null }));
 
 import { DesignModeProvider, useDesignMode, useDesignModeController } from '../designMode';
 import { DesignModeBar } from '../DesignModeBar';
-import DesignModeMenu, { menuCollision } from '../DesignModeMenu';
+import DesignModeMenu from '../DesignModeMenu';
 import { closestCenter, type CollisionDetection } from '@dnd-kit/core';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
 import { __resetDefaultLocale } from '../designModeMenuSave';
@@ -1343,21 +1343,21 @@ describe('the design-mode menu save and drag, hardened (objectstack#36538)', () 
         droppableContainers: [{ id: 'home', key: 'home', data: { current: {} }, disabled: false, node: { current: null }, rect: { current: rect } }],
         pointerCoordinates: pointer,
       }) as unknown as Parameters<CollisionDetection>[0];
-    const area = () => new DOMRect(0, 0, 200, 400);
 
-    it('a pointer outside the menu is over nothing; inside it, and from the keyboard, the nearest entry', () => {
-      const rule = menuCollision(area);
+    it("the editor's rule: a pointer outside the menu is over nothing; inside it, and from the keyboard, the nearest entry", async () => {
+      start();
+      await flush();
+      vi.spyOn(screen.getByTestId('design-menu-area'), 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 200, 400));
+      const rule = collisionRule.current!;
       expect(rule(args({ x: 900, y: 900 }))).toEqual([]);
-      expect(rule(args({ x: 50, y: 10 })).map((c) => c.id)).toEqual(['home']);
-      expect(rule(args(null)).map((c) => c.id)).toEqual(['home']);
+      expect((rule(args({ x: 50, y: 10 })) as Array<{ id: string }>).map((c) => c.id)).toEqual(['home']);
+      expect((rule(args(null)) as Array<{ id: string }>).map((c) => c.id)).toEqual(['home']);
       expect(closestCenter(args({ x: 900, y: 900 })).map((c) => c.id)).toEqual(['home']); // CONTROL: the old rule moved it
     });
 
-    it("is the editor's rule, and a drop it answers nothing for moves nothing", async () => {
+    it('a drop the rule answers nothing for moves nothing', async () => {
       start();
       await flush();
-      // jsdom lays the menu out at no size, so any pointer off its origin is outside it.
-      expect(collisionRule.current!(args({ x: 900, y: 900 }))).toEqual([]);
       act(() => dragEnd.current!({ active: { id: 'home' }, over: null }));
       expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
     });

@@ -210,25 +210,15 @@ const parentOfEndZone = (id: string): string | null | undefined => {
  * entry up, so Enter on an entry still opens its page, as on any link; Space
  * or Enter drops it, Escape puts it back.
  */
-export const MENU_KEYBOARD_CODES: KeyboardCodes = {
+const MENU_KEYBOARD_CODES: KeyboardCodes = {
   start: [KeyboardCode.Space],
   cancel: [KeyboardCode.Esc],
   end: [KeyboardCode.Space, KeyboardCode.Enter],
 };
 
-/**
- * The editor's collision rule (objectstack#36538, review N14): a pointer
- * released outside the box `area()` answers (the menu's own) is over nothing,
- * so the drop moves nothing; inside it, and for a keyboard move (which has
- * no pointer), the nearest entry's centre, as before.
- */
-export function menuCollision(area: () => DOMRect | null | undefined): CollisionDetection {
-  return (args) => {
-    const at = args.pointerCoordinates;
-    const box = at ? area() : null;
-    if (at && box && (at.x < box.left || at.x > box.right || at.y < box.top || at.y > box.bottom)) return [];
-    return closestCenter(args);
-  };
+/** Whether the point `at` lies outside the box `box`. */
+function outside(at: { x: number; y: number }, box: DOMRect): boolean {
+  return at.x < box.left || at.x > box.right || at.y < box.top || at.y > box.bottom;
 }
 
 export interface DesignModeMenuProps {
@@ -346,8 +336,17 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates, keyboardCodes: MENU_KEYBOARD_CODES }),
   );
+  // The collision rule (objectstack#36538, review N14): a pointer released
+  // outside the menu's own box is over nothing, so the drop moves nothing;
+  // inside it, and for a keyboard move (which has no pointer), the nearest
+  // entry's centre, as before.
   const menuArea = React.useRef<HTMLDivElement>(null);
-  const collision = React.useMemo(() => menuCollision(() => menuArea.current?.getBoundingClientRect()), []);
+  const collision = React.useCallback<CollisionDetection>((args) => {
+    const at = args.pointerCoordinates;
+    const box = at ? menuArea.current?.getBoundingClientRect() : null;
+    if (at && box && outside(at, box)) return [];
+    return closestCenter(args);
+  }, []);
   const keyboardHint = t('designMode.menu.keyboardHint', {
     defaultValue: 'Drag an item to move it, or focus it and press Space, then the arrow keys. Enter opens it.',
   });
@@ -677,7 +676,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
           onDragCancel={endDrag}
         >
           <SortableContext items={leafIds} strategy={verticalListSortingStrategy}>
-            <div ref={menuArea}>
+            <div ref={menuArea} data-testid="design-menu-area">
               <SidebarMenu>{renderEntries(menu, null, 0)}</SidebarMenu>
             </div>
           </SortableContext>
