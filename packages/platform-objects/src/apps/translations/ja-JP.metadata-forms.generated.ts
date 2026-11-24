@@ -2307,7 +2307,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "exportOptions.fileNamePrefix": {
         label: "ファイル名",
-        helpText: "ダウンロードするファイル名の先頭部分。レポート名の代わりに使われます。"
+        helpText: "ダウンロードするファイル名の先頭部分。空欄の場合はレポートの表示名が使われ、表示名がない場合は名前が使われます。"
       }
     }
   },

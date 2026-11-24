@@ -2307,7 +2307,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "exportOptions.fileNamePrefix": {
         label: "Nombre de archivo",
-        helpText: "El inicio del nombre del archivo descargado, en lugar del nombre del informe."
+        helpText: "El inicio del nombre del archivo descargado. Si se deja vacío, el archivo toma la etiqueta del informe, o su nombre si no tiene etiqueta."
       }
     }
   },
