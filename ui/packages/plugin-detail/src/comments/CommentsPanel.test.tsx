@@ -216,3 +216,76 @@ describe('CommentsButton', () => {
     expect(button.querySelector('[data-comments-count]')).toBeNull();
   });
 });
+
+/**
+ * objectstack#36410 — the thread (and comment) a link opened the panel at:
+ * its replies open in place, the comment is marked, and the list is scrolled
+ * to it (not to its foot). jsdom lays nothing out, so the list is given a box
+ * 400 px tall at y=100 and the comment one 40 px tall at y=700: centred, the
+ * list scrolls 700 - 100 - (400 - 40) / 2 = 420.
+ */
+function layOut(commentId: string): () => void {
+  const box = (top: number, height: number) =>
+    ({ top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.hasAttribute('data-comments-list')) return box(100, 400);
+    if (this.getAttribute('data-comment-id') === commentId) return box(700, 40);
+    return box(0, 0);
+  });
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.hasAttribute('data-comments-list') ? 400 : 0;
+  });
+  return () => {
+    rect.mockRestore();
+    height.mockRestore();
+  };
+}
+
+describe('CommentsPanel — opened at a comment (objectstack#36410)', () => {
+  const list = () => document.querySelector('[data-comments-list]') as HTMLElement;
+  const targets = () => Array.from(document.querySelectorAll('[data-comment-target="true"]')).map((el) => el.getAttribute('data-comment-id'));
+
+  function renderAt(focusThreadId: string | null, focusCommentId: string | null = null) {
+    render(
+      <DiscussionContextProvider items={ITEMS as any[]} onAddComment={vi.fn()} onAddReply={vi.fn()}>
+        <CommentsPanel onClose={vi.fn()} focusThreadId={focusThreadId} focusCommentId={focusCommentId} />
+      </DiscussionContextProvider>,
+    );
+  }
+
+  it('a reply: its thread opens in place, the reply is marked and the list scrolls to it', () => {
+    const restore = layOut('r1');
+    try {
+      renderAt('c1', 'r1');
+      expect(screen.getByText('a reply')).toBeInTheDocument();
+      expect(targets()).toEqual(['r1']);
+      expect(list().scrollTop).toBe(420);
+    } finally {
+      restore();
+    }
+  });
+
+  it('a top-level comment: marked and scrolled to, its replies left closed', () => {
+    const restore = layOut('c2');
+    try {
+      renderAt('c2');
+      expect(targets()).toEqual(['c2']);
+      expect(list().scrollTop).toBe(420);
+      expect(screen.queryByText('a reply')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('once there, the reader may collapse the thread again', () => {
+    renderAt('c1', 'r1');
+    fireEvent.click(document.querySelector('[data-comment-replies-collapse]')!);
+    expect(screen.queryByText('a reply')).toBeNull();
+  });
+
+  it('CONTROL: with no link nothing is marked and no thread opens', () => {
+    renderAt(null);
+    expect(targets()).toEqual([]);
+    expect(screen.queryByText('a reply')).toBeNull();
+  });
+});
