@@ -337,7 +337,14 @@ Where each of the epic's fifteen decisions is written:
 > addresses the item's stored row in a package when its rows are bound to exactly one, and the package-unbound row
 > otherwise.
 >
-> D1 and the amendment above are left as written; read "Studio owns all metadata" with this note.
+> Built by [#36397](https://github.com/objectstack-ai/objectstack/pull/36397) (the mode),
+> [#36437](https://github.com/objectstack-ai/objectstack/pull/36437) (the menu),
+> [#36629](https://github.com/objectstack-ai/objectstack/pull/36629) (the action arrangement),
+> [#36405](https://github.com/objectstack-ai/objectstack/pull/36405) (the dashboard),
+> [#36644](https://github.com/objectstack-ai/objectstack/pull/36644) (the report builder),
+> [#36411](https://github.com/objectstack-ai/objectstack/pull/36411) (the kanban's view settings) and
+> [#36848](https://github.com/objectstack-ai/objectstack/pull/36848) (the two editors apart from the mode). D1 and the
+> amendment above are left as written; read "Studio owns all metadata" with this note.
 
 ### D2 — One mechanism: a customization of an installed package is an item of its paired `.custom` package, and overriding an existing item is a declaration in that item's body {#d2}
 
