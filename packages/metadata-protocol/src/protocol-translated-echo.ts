@@ -47,7 +47,14 @@
  *    carries the echo itself, so compared with itself nothing differs, and
  *    compared with the platform's `queue` its label is `队列` for `Queue`. That
  *    is what lets the next save of such a row — and the stored-row migration,
- *    which re-saves through this door — repair it.
+ *    which re-saves through this door — repair it;
+ *  - last, for what a CODE extender brings and the stored row does not
+ *    declare at all, the packaged base: a field the packaged owner does not
+ *    declare, and a `relatedLists` entry whose `list` the owner does not name
+ *    (an extender's `place`). The read serves both from the fold over a stored
+ *    row of any age, and translates them against the packaged base; a row
+ *    saved before the extending package was installed carries no copy, so
+ *    without this source the translation would be stored as the text.
  *
  * The locales tried are every one the read could have answered in: the
  * bundle's, and the built-in system-field table's
@@ -60,8 +67,13 @@
  * the source in some locale gets the source back — which the reader in that
  * locale is served anyway, since the catalog translates it. Nothing else is
  * touched: a label that is not a translation of its source is the author's
- * edit and is kept, and a field the source does not declare has nothing to
- * be compared with.
+ * edit and is kept, and a field no source declares (neither the stored row nor,
+ * for what a code extender brings, the packaged base) has nothing to be
+ * compared with. The packaged base is never a source for a field or entry the
+ * stored row declares, nor for one the packaged owner declares: a stored slot
+ * is the stored row's to explain (a diverged one is served as written), and an
+ * owner's field or entry the stored row dropped is not served by the fold, so
+ * a body carrying it again carries the author's text.
  *
  * The slots are the ones the read translates: the object's scalars, each
  * field's text slots and option labels, and the `label` of each object-form
@@ -72,7 +84,7 @@
  * from the packaged text) is no translation's source.
  *
  * Pure: no store, no service. The caller hands in the source row, the
- * bundle and the packaged base.
+ * bundle, the packaged base and the packaged owner.
  */
 
 import type { RuntimeAuthoringIssue } from '@objectstack/spec/api';
@@ -175,6 +187,17 @@ function relatedListEntry(entries: unknown, list: string): Rec | undefined {
     return Array.isArray(entries) ? (entries.find((e) => isRec(e) && e.list === list) as Rec | undefined) : undefined;
 }
 
+/** Every `list` the entries name, as a bare string or an object entry's `list`. */
+function relatedListNames(entries: unknown): Set<string> {
+    const out = new Set<string>();
+    if (!Array.isArray(entries)) return out;
+    for (const e of entries) {
+        if (typeof e === 'string') out.add(e);
+        else if (isRec(e) && typeof e.list === 'string') out.add(e.list);
+    }
+    return out;
+}
+
 /** That entry's `label`; {@link NOT_DECLARED} when no entry names `list` with a string label. */
 function relatedListLabel(entries: unknown, list: string): unknown {
     const label = relatedListEntry(entries, list)?.label;
@@ -194,8 +217,8 @@ export function translatedEchoLocales(bundle: TranslationBundle | undefined): st
  * only the names the incoming body declares.
  */
 interface TranslatedSource {
-    /** Which source: the stored row, one patch entry's base, or the platform's columns. */
-    kind: 'stored' | 'patch' | 'injected';
+    /** Which source: the stored row, one patch entry's base, the platform's columns, or what a code extender brings. */
+    kind: 'stored' | 'patch' | 'injected' | 'extender';
     doc: Rec;
     fields: Map<string, Rec>;
     reads: Array<{ doc: Rec; fields: Map<string, Rec> }>;
@@ -236,12 +259,14 @@ function translatedSource(
  * Put every translated slot of `item` back to its source text. Returns the
  * SAME reference when nothing was restored. See the module header.
  *
- * Two sources, asked in order, the first that explains the value wins: the
- * stored row's own declaration, then — for an injected column — the
- * platform's definition. The second is what heals a row a zh-CN session
- * already stored: its `queue` declaration IS the translation, so compared
- * with itself nothing differs, while compared with the platform's `queue` the
- * label is `队列` for `Queue`.
+ * The sources, asked in order, the first that explains the value wins: the
+ * stored row's own declaration, each patch entry's base, then — for an
+ * injected column — the platform's definition, and last — given
+ * `packagedOwner` — what a code extender brings that the stored row does not
+ * declare. The injected one is what heals a row a zh-CN session already
+ * stored: its `queue` declaration IS the translation, so compared with itself
+ * nothing differs, while compared with the platform's `queue` the label is
+ * `队列` for `Queue`.
  */
 export function restoreTranslatedEchoes<T>(
     item: T,
@@ -279,6 +304,19 @@ export function restoreTranslatedEchoes<T>(
          * package's translation.
          */
         patchBundles?: PatchBundles;
+        /**
+         * The packaged OWNER's own declaration (the registry's
+         * `getPackagedObjectOwner`), the base before any code extender widened
+         * it. With it and `packagedBase`, what the base carries beyond the
+         * owner is the last source, for an incoming field or `relatedLists`
+         * entry the stored row does not declare at all: a field a code
+         * extender adds (a name the owner does not declare) and an entry a
+         * code extender's `place` splices in (a `list` the owner does not
+         * name). Those the read serves from the fold over a stored row that
+         * predates the extending package, translated against the base, and
+         * nothing else explains them. Absent, there is no such source.
+         */
+        packagedOwner?: unknown;
     },
 ): { item: T; restored: RestoredTranslatedSlot[] } {
     const restored: RestoredTranslatedSlot[] = [];
@@ -322,7 +360,27 @@ export function restoreTranslatedEchoes<T>(
         }
         return doc;
     });
-    const sources = ([['stored', storedDoc], ...patchDocs.map((doc) => ['patch', doc] as const), ['injected', injectedDoc]] as const)
+    // What a code extender brings, cut to what the stored row does not
+    // declare: the packaged base's fields the owner does not declare, and its
+    // `relatedLists` entries whose `list` the owner does not name. A slot the
+    // stored row declares is the stored row's to explain, so this source can
+    // never out-explain a tenant's own text; with no stored row the source IS
+    // the packaged base, and this cut is empty.
+    const extenderDoc: Rec = { name: item.name, fields: {} };
+    if (isRec(args.packagedOwner) && isRec(args.packagedBase) && args.packagedBase !== args.packagedOwner) {
+        const ownerFields = fieldMap(args.packagedOwner);
+        for (const name of incoming.keys()) {
+            const def = packagedFields.get(name);
+            if (def && !ownerFields.has(name) && !storedFields.has(name)) (extenderDoc.fields as Rec)[name] = { ...def };
+        }
+        const ownerLists = relatedListNames(args.packagedOwner.relatedLists);
+        const storedLists = relatedListNames(isRec(args.source) ? args.source.relatedLists : undefined);
+        const placed = Array.isArray(args.packagedBase.relatedLists)
+            ? args.packagedBase.relatedLists.filter((e) => isRec(e) && typeof e.list === 'string' && !ownerLists.has(e.list) && !storedLists.has(e.list))
+            : [];
+        if (placed.length > 0) extenderDoc.relatedLists = placed;
+    }
+    const sources = ([['stored', storedDoc], ...patchDocs.map((doc) => ['patch', doc] as const), ['injected', injectedDoc], ['extender', extenderDoc]] as const)
         .filter(([, doc]) => Object.keys(doc.fields as Rec).length > 0 || Object.keys(doc).length > 2)
         .map(([kind, doc]) => translatedSource(kind, doc, locales, args.bundle, args.packagedBase, patchBundles));
     if (sources.length === 0) return { item, restored };

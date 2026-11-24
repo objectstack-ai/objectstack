@@ -1131,6 +1131,14 @@ export class ProtocolDiscoveryAndBasesFacet {
      * could have answered in. Each restored slot is answered on the save's
      * `advisories` ({@link translatedEchoNotices}).
      *
+     * The packaged owner (the registry's `getPackagedObjectOwner`) is handed
+     * in beside the base, so what the base carries beyond it (a field a code
+     * extender adds, a `relatedLists` entry a code extender's `place`
+     * splices in) is the last source for a field or entry the stored row does
+     * not declare: the fold serves those over a stored row saved before the
+     * extending package was installed, translated against the base, and that
+     * row carries nothing to compare them with.
+     *
      * Every save is asked, the stored-row migration included
      * (`source: 'migrate-stored'`): it re-saves a row through this door, which
      * is how a row a zh-CN session already stored is repaired. Any other
@@ -1139,7 +1147,7 @@ export class ProtocolDiscoveryAndBasesFacet {
      * the packaged base is a registry lookup, so a degraded MetadataService
      * fails nothing here.
      */
-    static async restoreTranslatedObjectEchoes(host: Pick<ProtocolHost, 'getPackageTranslationBundle' | 'getPackagedFieldPatchBases' | 'getPackagedObjectBase' | 'registeredTranslationBundle'>, request: SaveMetaItemRequest,
+    static async restoreTranslatedObjectEchoes(host: Pick<ProtocolHost, 'engine' | 'getPackageTranslationBundle' | 'getPackagedFieldPatchBases' | 'getPackagedObjectBase' | 'registeredTranslationBundle'>, request: SaveMetaItemRequest,
             repo: SysMetadataRepository,
             ref: Parameters<SysMetadataRepository['get']>[0],
             mode: 'draft' | 'publish',): Promise<{ item: SaveMetaItemRequest['item']; restored: RestoredTranslatedSlot[] }> {
@@ -1174,11 +1182,20 @@ export class ProtocolDiscoveryAndBasesFacet {
             const own = await host.getPackageTranslationBundle(entry.packageId);
             if (own !== undefined) patchBundles.push({ patchedBase: entry.base, bundle: own });
         }
+        // The owner alone, so the restore can tell what a code extender
+        // brings from what the owner declares (see the docblock): the same
+        // registry read `getPackagedObjectBase` falls back to. No `try`, for
+        // the reason the stored-row read has none.
+        const registry = (host.engine as any)?.registry;
+        const packagedOwner: unknown = packagedBase && typeof registry?.getPackagedObjectOwner === 'function'
+            ? registry.getPackagedObjectOwner(request.name)?.definition
+            : undefined;
         return restoreTranslatedEchoes(request.item, {
             source,
             bundle: host.registeredTranslationBundle(),
             packagedBase: packagedBase ?? undefined,
             ...(patchBundles.length > 0 ? { patchBundles } : {}),
+            ...(packagedOwner !== undefined && packagedOwner !== null ? { packagedOwner } : {}),
         });
     }
 
