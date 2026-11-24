@@ -3026,9 +3026,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // failed every run, on every door; `const input = ctx.input || {}` is the
   // shape an AI author writes, a redeclared parameter. Gating: no reading of
   // the metadata behaves as written, because the body never starts. A
-  // regular-expression PATTERN the host refuses is the one `warning` arm (the
-  // two engines' pattern dialects measurably differ; a literal that never
-  // closes or carries a bad flag set is refused; see the module). Across the runtime publish gate for `action` writes and for
+  // regular-expression pattern the host refuses for a measured dialect gap (a
+  // duplicate named group, a modifier group, a Unicode property name only
+  // QuickJS knows: Node 22's V8 refuses them, QuickJS runs them) is the one
+  // `warning` arm; every other
+  // pattern failure, a literal that never closes and a bad flag set are
+  // refused (see the module). Across the runtime publish gate for `action` writes and for
   // `object` writes, whose inline `actions[]` the same walk reads; the
   // differential charges a write only with the bodies it adds. The rule loads
   // no dependency: compiling goes through the host's `node:vm`.
@@ -3049,8 +3052,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `judgeBodyCompile`; two ids (`hook-body-does-not-compile`,
   // `job-body-does-not-compile`). Across the runtime publish gate for `hook`
   // writes only: a hook is runtime-creatable, a job is not
-  // (`allowRuntimeCreate: false`), so no door publishes a job body, and no
-  // object write carries a hook (`hooks` is not an ObjectSchema key). The rule
+  // (`allowRuntimeCreate: false`), so the metadata publish door never takes a
+  // job body, and no object write carries a hook (`hooks` is not an
+  // ObjectSchema key). That is the metadata door only: the boot and
+  // `os package install` bring hook and job bodies in from an artifact and run
+  // no author-time rule, so such a body reaches the runtime unjudged and the
+  // runner's coded compile failure is its answer there. The rule
   // loads no dependency: compiling goes through the host's `node:vm`.
   {
     name: 'validateHookAndJobBodyCompiles',

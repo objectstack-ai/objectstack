@@ -24,12 +24,12 @@
  * copy says what the author can do; it names no package mechanism.
  *
  * objectstack#35196 — this page is the served Studio's door to package
- * management (ruling 甲 of objectstack#25098 puts the unfiltered package list
- * in Studio only, and the `@objectstack/studio` app whose Overview → Packages
- * entry names it is not default-loaded): every card carries Manage, which
- * opens the same detail sheet as the top-bar switcher's "Package info &
- * settings" (Disable / Enable, export, and the writable actions), and the
- * title row links to the unfiltered Packages page.
+ * management (the `@objectstack/studio` app whose Overview → Packages entry
+ * names the full list is not default-loaded; Setup → Packages opens the same
+ * list on its administration face only, objectstack#36834): every card
+ * carries Manage, which opens the same detail sheet as the top-bar
+ * switcher's "Package info & settings" (Disable / Enable, export, and the
+ * writable actions), and the title row links to the unfiltered Packages page.
  */
 
 import * as React from 'react';
@@ -79,10 +79,13 @@ import { newAppStep } from './newAppDoor.js';
 const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
 
 /**
- * objectstack#35196 — the unfiltered Packages page (`developer:packages` with no
- * `source`), the full list with every package's lifecycle actions. Ruling 甲
- * (objectstack#25098) gives it no Setup menu entry; this landing's link is its
- * menu door in the served Studio. The route is hosted under the Setup app's
+ * objectstack#35196 — the Packages page's development surface
+ * (`developer:packages` with no `face` and no `source`), the full list with
+ * every package's lifecycle and authoring actions; this landing's link is its
+ * menu door in the served Studio. Setup → Packages opens the same page with
+ * `?face=admin`, its administration face — enable / disable, delete and create
+ * only (objectstack#36834, amending ruling 甲 of objectstack#25098, which had
+ * given the list no Setup entry). The route is hosted under the Setup app's
  * address, the one console app every boot loads.
  */
 export const STUDIO_ALL_PACKAGES_PATH = packagesHref('/apps/setup');

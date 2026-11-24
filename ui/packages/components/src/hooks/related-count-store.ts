@@ -107,6 +107,13 @@ interface InflightRead {
    * is the only order a badge's or a rail card's own read asks for.
    */
   order?: string;
+  /**
+   * objectstack#36922 — set when a change overtook this read while it was out
+   * (`invalidate`, `invalidateAll`, a newer `seed`, the rail's `releaseRows`):
+   * it answers for data that has changed and installs no count, so a `fetch`
+   * that joined it asks again rather than answering with it.
+   */
+  overtaken?: boolean;
 }
 
 const counts = new Map<string, number>();
@@ -161,6 +168,14 @@ function key(
 function emit(): void {
   version += 1;
   for (const l of listeners) l();
+}
+
+/** Drop the read in flight for `k`, marking it overtaken (see `InflightRead.overtaken`). */
+function overtake(k: string): void {
+  const entry = inflight.get(k);
+  if (!entry) return;
+  entry.overtaken = true;
+  inflight.delete(k);
 }
 
 function getCount(
@@ -321,6 +336,16 @@ function startRead(
 /**
  * Probe a count via the supplied finder. Deduplicates concurrent requests
  * for the same key and caches the resulting number until invalidated.
+ *
+ * Contract (objectstack#36922): resolves with the count the store HOLDS for
+ * the key once it settles, or `0` when the read failed (nothing cached). A
+ * read a change overtook while it was out installs nothing, so a fetch that
+ * joined it does not answer with it: it takes the count a newer read installed,
+ * joins the read now in flight, or reads again. A caller may therefore read
+ * "resolved and nothing cached" as a failed read, which `useRelatedCounts`
+ * does; answering with the overtaken read's number instead marked a count
+ * failed after any write that reached the bus twice a beat apart (a row
+ * action), and that count was never asked again for the record open.
  */
 async function fetchCount(
   probe: ProbeFn,
@@ -331,20 +356,25 @@ async function fetchCount(
   fields?: FieldContainerLike,
 ): Promise<number> {
   const k = key(objectName, relField, parentId, filter);
-  const cached = counts.get(k);
-  if (cached !== undefined) return cached;
-  let pending = inflight.get(k);
-  if (!pending) {
-    // A rail card claims rows only on the unfiltered key, so a badge with a
-    // declared filter never reaches a claim and asks for one row.
-    const claimed = filter === undefined ? claims.get(k) : undefined;
-    pending = startRead(probe, objectName, relField, parentId, filter, fields, claimed ?? 1, false);
-    inflight.set(k, pending);
-  }
-  try {
-    return (await pending.read).total;
-  } catch {
-    return 0;
+  // Each lap follows one change that overtook the read before it, so the loop
+  // ends once the writes do.
+  for (;;) {
+    const cached = counts.get(k);
+    if (cached !== undefined) return cached;
+    let pending = inflight.get(k);
+    if (!pending) {
+      // A rail card claims rows only on the unfiltered key, so a badge with a
+      // declared filter never reaches a claim and asks for one row.
+      const claimed = filter === undefined ? claims.get(k) : undefined;
+      pending = startRead(probe, objectName, relField, parentId, filter, fields, claimed ?? 1, false);
+      inflight.set(k, pending);
+    }
+    try {
+      const { total } = await pending.read;
+      if (!pending.overtaken) return total;
+    } catch {
+      if (!pending.overtaken) return 0;
+    }
   }
 }
 
@@ -440,6 +470,7 @@ function seed(
   })();
   // Consumers that join it see the refusal; nobody may be waiting yet.
   entry.read.catch(() => undefined);
+  overtake(k);
   inflight.set(k, entry);
 }
 
@@ -505,7 +536,7 @@ function releaseRows(objectName: string, relField: string, parentId: string): vo
   const k = key(objectName, relField, parentId);
   claims.delete(k);
   heldRows.delete(k);
-  if (inflight.get(k)?.fromRows) inflight.delete(k);
+  if (inflight.get(k)?.fromRows) overtake(k);
 }
 
 /**
@@ -524,7 +555,7 @@ function invalidate(objectName: string, parentId?: string): void {
   // the change, answer for data that has changed: neither may be handed to a
   // reader that asks after it.
   for (const k of [...heldRows.keys()]) if (matches(k)) heldRows.delete(k);
-  for (const k of [...inflight.keys()]) if (matches(k)) inflight.delete(k);
+  for (const k of [...inflight.keys()]) if (matches(k)) overtake(k);
   for (const k of counts.keys()) {
     if (!matches(k)) continue;
     counts.delete(k);
@@ -535,7 +566,7 @@ function invalidate(objectName: string, parentId?: string): void {
 
 function invalidateAll(): void {
   heldRows.clear();
-  inflight.clear();
+  for (const k of [...inflight.keys()]) overtake(k);
   if (counts.size === 0) return;
   counts.clear();
   emit();

@@ -68,6 +68,8 @@ import {
   DEFAULT_BASE_REF,
   DEFAULT_BASE_REMOTE,
   DURABILITY_SEAM_GATE,
+  EFFORT_ABOVE_TABLE,
+  EFFORT_BY_SIZE,
   ESCAPABLE_LITERAL_LEDGER,
   GENERATED_MODULE_SOURCES,
   GIT_MAX_BUFFER_BYTES,
@@ -93,6 +95,7 @@ import {
   SELF_TEST_VERDICT,
   SUSPECT_TIER_GLOBS,
   TIER_CEILING,
+  TIER_SIZING_RULEBOOK,
   USAGE_LINE,
   absentDeclaredPaths,
   absentPathVerdict,
@@ -114,6 +117,7 @@ import {
   changedPathsFromGit,
   checkFamilyCoverageGaps,
   ciOnlyMeasurement,
+  claimTierWriteRefusal,
   classifyEntry,
   collapseHint,
   commandsFor,
@@ -231,6 +235,7 @@ import {
   populationReasonContinuation,
   populationReasonCutRefusal,
   reachesMetadataFormModule,
+  readClaimEffort,
   readContainerModelLine,
   readPopulationDeclaration,
   readPopulationMarker,
@@ -11013,6 +11018,24 @@ export function selfTest({ tier = 'full' } = {}) {
   t('⛔ a ceiling `model:` slot citing nothing, with a `reason:` only in the `effort:` slot after it, is REFUSED', (() => { const body = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\`, \`effort: xhigh, reason: the timing reading, 41 min\``); const r = readContainerModelLine(body); return r.ceiling && r.reasonCited === false && containerModelRefusal(body)?.key === 'Container & model'; })());
   t('⛔ the same with `MANDATORY` only in the `effort:` slot — the mandate is not cited, and the claim is refused', (() => { const body = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\`, \`effort: xhigh (MANDATORY per the standing order)\``); const r = readContainerModelLine(body); return r.ceiling && r.mandateCited === false && containerModelRefusal(body)?.key === 'Container & model'; })());
   t('⭐ the positive twin: a citation INSIDE the `model:` slot, commas and parentheses included, still reads with an `effort:` slot after it', (() => { const mandate = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME}\` (\`--tier\` at \`abc1234\`: MANDATORY, SKILL.md), \`effort: high\``); const reason = CM(`\`model: ${CONTRACT_REVIEW_TIER_NAME} (reason: ruled on the card, 2026-11-20)\`, \`effort: xhigh, reason: timing\``); return readContainerModelLine(mandate).mandateCited && containerModelRefusal(mandate) === null && readContainerModelLine(reason).reasonCited && containerModelRefusal(reason) === null; })());
+
+  // ── 定档 at claim WRITE time: the effort table is the rulebook's, and absence is a refusal ──
+  //
+  // FRESHNESS first: `EFFORT_BY_SIZE` is a copy of one row of 定档, so the row is re-read from
+  // the rulebook here and compared — an edit to either side alone reds this case, never forks.
+  const sizingText = readFileSync(nodePath.join(ROOT, TIER_SIZING_RULEBOOK), 'utf8');
+  const sizingSection = sizingText.slice(Math.max(0, sizingText.indexOf('### 定档')));
+  const sizingRow = /^- S [^`\n]*`([a-z]+)`;M、L、XL `([a-z]+)`/m.exec(sizingSection);
+  t('⭐ FRESHNESS: 定档\'s own row still reads S ⇒ medium and M、L、XL ⇒ high, and `EFFORT_BY_SIZE` equals it — XS riding on S', sizingRow !== null && EFFORT_BY_SIZE.S === sizingRow[1] && EFFORT_BY_SIZE.XS === sizingRow[1] && ['M', 'L', 'XL'].every((k) => EFFORT_BY_SIZE[k] === sizingRow[2]) && Object.keys(EFFORT_BY_SIZE).length === 5, JSON.stringify({ row: sizingRow?.slice(1) ?? null, table: EFFORT_BY_SIZE }));
+  t('⭐ FRESHNESS: 定档 still caps effort at the table\'s top and gives the one value above it to the ADR-revision row, never to a claim\'s adversarial re-read', sizingSection.includes(`- effort 最高 \`${EFFORT_BY_SIZE.XL}\``) && sizingSection.includes(`- ADR 修订(改 \`${EFFORT_ABOVE_TABLE.surface}**\` 的卡)effort 照常设令 \`${EFFORT_ABOVE_TABLE.value}\``) && sizingSection.includes('⛔ 不写进认领'));
+  const SZ = (value, surface = 'scripts/pm/**') => `Claim: PM loop round 1\nFile surface: \`${surface}\`\nContainer & model: ${value}`;
+  t('readClaimEffort: the size is the FIRST token, the effort the first after its key, decoration stripped and case folded', (() => { const r = readClaimEffort(SZ('`S 级机械卡`, `mode:subagent`, `model: opus`, `effort: Medium`')); return r.present && r.size === 'S' && r.effort === 'medium' && r.reasonCited === false && readClaimEffort(SZ('XL, mode:cloud, model: opus, effort: high')).size === 'XL' && readClaimEffort(SZ('`Small`, effort: high')).size === null && readClaimEffort('Claim: x').present === false; })());
+  t('readClaimEffort: a `reason:` counts inside the effort slot only — the model slot\'s, before or after it, is its own', readClaimEffort(SZ('`S`, `model: opus (reason: quota)`, `effort: high`')).reasonCited === false && readClaimEffort(SZ('`S`, `effort: high`, `model: opus (reason: quota)`')).reasonCited === false && readClaimEffort(SZ('`S`, `model: opus`, `effort: high, reason: design judgement`')).reasonCited === true);
+  t('⭐ claimTierWriteRefusal: every size at its table value passes, and so does a reasoned exception', Object.entries(EFFORT_BY_SIZE).every(([size, effort]) => claimTierWriteRefusal(SZ(`\`${size}\`, \`model: opus\`, \`effort: ${effort}\``)) === null) && claimTierWriteRefusal(SZ('`S`, `model: opus`, `effort: high, reason: not mechanical`')) === null);
+  t('⛔ THE MEASURED SHAPES: S at `high` with no reason, no `effort:` value, and no line at all are each refused, naming 定档\'s file', [SZ('`S`, `mode:subagent`, `model: opus`, `effort: high`'), SZ('`M`, `mode:subagent`, `model: opus`'), 'Claim: PM loop round 1\nSeat: domain:skills#1'].every((b) => { const r = claimTierWriteRefusal(b); return r?.key === 'Container & model' && r.why.includes(TIER_SIZING_RULEBOOK); }) && claimTierWriteRefusal(SZ('`S`, `model: opus`, `effort: high`')).why.includes('size S reads `effort: medium`'));
+  t('⛔ a line opening with no size, and a value 定档 gives no card, are refused — both problems named in ONE row', (() => { const r = claimTierWriteRefusal(SZ('`mode:cloud`, `model: opus`, `effort: max, reason: hard`')); return r !== null && r.why.includes('no size token') && r.why.includes('`effort: max` is no value') && claimTierWriteRefusal(SZ('`M`, `effort: low, reason: lookup`')) !== null; })());
+  t('`xhigh` in a claim: refused off the ADR surface whatever the reason, refused on it without one, read on it with the standing order cited', claimTierWriteRefusal(SZ('`M`, `effort: xhigh, reason: adversarial re-read`'))?.why.includes('never into a claim') === true && claimTierWriteRefusal(SZ('`M`, `effort: xhigh`', 'docs/adr/0087-x.md')) !== null && claimTierWriteRefusal(SZ('`M`, `effort: xhigh, reason: the standing order`', 'docs/adr/0087-x.md')) === null);
+  t('⛔ control: the READ-time reader is untouched — a claim with no line, or no effort, still earns no `containerModelRefusal`', containerModelRefusal('Claim: x') === null && containerModelRefusal(SZ('`S`, `model: opus`')) === null);
 
   // Hoisted out of the slow sections that used to declare them: a later section reads each one.
   const CLI = fileURLToPath(ENGINE_URL);
