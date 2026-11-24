@@ -367,40 +367,28 @@ function renderAt(path: string) {
   );
 }
 
-const dataRail = () => screen.getByTestId('studio-rail-data');
-const markOf = (row: HTMLElement | null) => row?.querySelector('[data-testid="customization-mark"]')?.getAttribute('data-kind') ?? null;
 
-describe('the Data rail lists the pair’s objects with the base’s (objectstack#28572)', () => {
-  it('marks the pair’s object "added"; the base’s objects carry no mark; opening it names the pair', async () => {
-    renderAt(`/studio/${BASE}/data`);
-    await waitFor(() => expect(within(dataRail()).getByText('Survey')).toBeInTheDocument(), { timeout: 8000 });
-    const survey = within(dataRail()).getByText('Survey').closest('button');
-    await waitFor(() => expect(markOf(survey)).toBe('added'), { timeout: 8000 });
-    // The extension the pair adds to `crm_account` is no override and no
-    // added item: the object is the base's, unmarked.
-    expect(markOf(within(dataRail()).getByText('Account').closest('button'))).toBeNull();
-    expect(markOf(within(dataRail()).getByText('Deal').closest('button'))).toBeNull();
-
-    fireEvent.click(survey!);
-    await waitFor(
-      () => expect(within(screen.getByTestId('data-object-header')).getByTestId('studio-pair-item-chip')).toBeInTheDocument(),
-      { timeout: 8000 },
-    );
-  });
-});
-
+// objectstack#36904 — the object designer has no rail: the base's object list
+// marks the pair's rows (`ResourceListPage`), and a pair's object opens at the
+// pair's own address.
 describe('the pair’s URLs (objectstack#28572)', () => {
   // The package switcher's case (the pair has no row, named under its base)
   // left with the switcher, objectstack#36501; the Studio landing's cards
   // fold the pair the same way (`foldCustomizationPairs`).
-  it('a pillar URL of the pair lands on the base’s surface, its query kept', async () => {
+  // objectstack#36904 — the pair's old object address opens the object's
+  // designer on the pair's own address (`dataPillarRedirect`), read at the
+  // pair, its owner (objectstack#28584).
+  it('the pair’s old object address opens the object at the pair', async () => {
     renderAt(`/studio/${encodeURIComponent(PAIR)}/data?surface=object:hotcrm_custom_survey`);
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toMatch(new RegExp(`^/studio/${BASE}/data\\?`)));
-    // The item the pair adds opens once the pair is known, at the pair.
-    await waitFor(
-      () => expect(within(screen.getByTestId('data-object-header')).getByTestId('studio-pair-item-chip')).toBeInTheDocument(),
-      { timeout: 8000 },
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toMatch(
+        new RegExp(`^/studio/${encodeURIComponent(PAIR)}/metadata/object/hotcrm_custom_survey`),
+      ),
     );
+    await screen.findByTestId('data-object-header', undefined, { timeout: 8000 });
+    const layers = () => srv.reads.filter((r) => r.startsWith('/api/v1/meta/object/hotcrm_custom_survey/layers'));
+    await waitFor(() => expect(layers()).not.toEqual([]), { timeout: 8000 });
+    for (const read of layers()) expect(new URL(read, 'http://localhost').searchParams.get('package')).toBe(PAIR);
   });
 
   it('the pair’s "All metadata" URL stays on the pair: it is not sent to the base, so nothing loops', async () => {
@@ -410,47 +398,6 @@ describe('the pair’s URLs (objectstack#28572)', () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(screen.getByTestId('location')).toHaveTextContent(`/studio/${encodeURIComponent(PAIR)}/metadata`);
   });
-});
-
-describe('a third package’s lists are never asked (objectstack#28722, objectstack#29786)', () => {
-  it('the rails ask no list of another package, and with no contribution served no row names one', async () => {
-    renderAt(`/studio/${BASE}/data`);
-    await waitFor(() => expect(markOf(within(dataRail()).getByText('Survey').closest('button'))).toBe('added'), { timeout: 8000 });
-    expect(srv.reads.filter((r) => r.includes(encodeURIComponent(ADDON)) || r.includes(`package=${ADDON}`))).toEqual([]);
-    expect(within(dataRail()).queryByText(/acme/i)).toBeNull();
-  });
-});
-
-describe('CONTROL: a base with no pair is unchanged (objectstack#28572)', () => {
-  it('reads no pair list, and draws no mark and no filter', async () => {
-    srv.pairListed = false;
-    renderAt(`/studio/${BASE}/data`);
-    await waitFor(() => expect(within(dataRail()).getByText('Account')).toBeInTheDocument(), { timeout: 8000 });
-    await new Promise((r) => setTimeout(r, 300));
-    expect(srv.reads.filter((r) => r.includes(`package=${encodeURIComponent(PAIR)}`))).toEqual([]);
-    expect(within(dataRail()).queryByTestId('customization-mark')).toBeNull();
-    expect(within(dataRail()).queryByTestId('studio-rail-customizations-only')).toBeNull();
-    expect(within(dataRail()).queryByText('Survey')).toBeNull();
-  });
-});
-
-describe('an item the pair adds reads its layers at the pair (objectstack#28584)', () => {
-  // A layered read naming no package is refused (409) for a name two packages
-  // hold, and a read naming the base finds nothing the base does not hold: the
-  // pair's own item is read at the pair, its owner.
-  const layersOf = (type: string, name: string) =>
-    srv.reads.filter((r) => r.startsWith(`/api/v1/meta/${type}/${name}/layers`));
-
-  it('the Data pillar reads the pair’s object at the pair', async () => {
-    renderAt(`/studio/${BASE}/data`);
-    await waitFor(() => expect(within(dataRail()).getByText('Survey')).toBeInTheDocument(), { timeout: 8000 });
-    fireEvent.click(within(dataRail()).getByText('Survey').closest('button')!);
-    await waitFor(() => expect(layersOf('object', 'hotcrm_custom_survey')).not.toEqual([]), { timeout: 8000 });
-    for (const read of layersOf('object', 'hotcrm_custom_survey')) {
-      expect(new URL(read, 'http://localhost').searchParams.get('package')).toBe(PAIR);
-    }
-  });
-
 });
 
 /**
@@ -465,9 +412,7 @@ describe('items another package contributes are drawn greyed, with the package (
 
   it('Data: the contributed field is marked in the Form layout, once, and its properties are read-only while the base’s are not', async () => {
     srv.contributed = true;
-    renderAt(`/studio/${BASE}/data`);
-    await waitFor(() => expect(within(dataRail()).getByText('Account')).toBeInTheDocument(), { timeout: 8000 });
-    fireEvent.click(within(dataRail()).getByText('Account').closest('button')!);
+    renderAt(`/studio/${BASE}/metadata/object/crm_account`);
     fireEvent.click(await screen.findByText(t('engine.studio.data.tab.form', 'en'), undefined, { timeout: 8000 }));
 
     const card = await waitFor(

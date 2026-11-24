@@ -12,7 +12,8 @@
  * sentence 「界面的修改已经搬到应用里」 with a link back to the app.
  *
  * Pinned:
- *  - the bare URL and a `?surface=` deep link land on `/studio/<package>/data`,
+ *  - the bare URL and a `?surface=` deep link land on `/studio/<package>/data`
+ *    (objectstack#36904: which lands on the area's object list),
  *    the deep link dropped; `?changes=review` travels;
  *  - the notice reads the card's sentence in zh-CN and its English in en,
  *    and its link goes to the package's app, as 「‹ Back to app」 does;
@@ -181,8 +182,11 @@ function LocationProbe() {
   return <output data-testid="location-path">{`${location.pathname}${location.search}`}</output>;
 }
 const where = () => screen.getByTestId('location-path').textContent;
-/** The path alone: the Data pillar opens its first object with a `?surface=` of its own. */
+/** The path alone: the area writes its `?package=` after the landing. */
 const pathname = () => (where() ?? '').split('?')[0];
+/** objectstack#36904 — the Studio home: the package's object list, `/data` redirected. */
+const HOME_PATH = `/studio/${PKG}/metadata/object`;
+const HOME = `${HOME_PATH}?package=${PKG}`;
 
 function renderAt(path: string) {
   render(
@@ -192,9 +196,11 @@ function renderAt(path: string) {
         <Route path="/apps/*" element={<output data-testid="the-app" />} />
         {/* objectstack#36899 — a menu type entry opens that type's area list; this stand-in links back to Data. */}
         <Route
-          path="/studio/:packageId/metadata/*"
+          path="/studio/:packageId/metadata/flow"
           element={<Link to={`/studio/${PKG}/data`} data-testid="back-to-data">Data</Link>}
         />
+        {/* objectstack#36904 — the Studio home (`/data`) is the area's object list. */}
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
       </Routes>
       <LocationProbe />
     </MemoryRouter>,
@@ -207,7 +213,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
   it('the bare URL: Data pillar, the notice, and a link back to the app', async () => {
     renderAt(`/studio/${PKG}/interfaces`);
     await screen.findByTestId('studio-shell-header');
-    expect(where()).toBe(`/studio/${PKG}/data`);
+    await waitFor(() => expect(where()).toBe(HOME));
 
     const strip = await screen.findByTestId('studio-interfaces-retired');
     expect(strip).toHaveAttribute('role', 'status');
@@ -225,7 +231,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
   it('a `?surface=` deep link lands on the same home, its retired parameter dropped', async () => {
     renderAt(`/studio/${PKG}/interfaces?surface=${encodeURIComponent('page:home')}`);
     await screen.findByTestId('studio-shell-header');
-    expect(where()).toBe(`/studio/${PKG}/data`);
+    await waitFor(() => expect(where()).toBe(HOME));
     expect(await screen.findByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });
 
@@ -236,7 +242,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
     // on an old link, with the real drawer mounted, is `copilotDoors-12894`'s.
     renderAt(`/studio/${PKG}/interfaces?surface=${encodeURIComponent('page:home')}&changes=review`);
     await screen.findByTestId('studio-shell-header');
-    expect(pathname()).toBe(`/studio/${PKG}/data`);
+    expect(pathname()).toBe(HOME_PATH);
     expect(where()).not.toContain('surface=page');
     expect(await screen.findByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });
@@ -246,13 +252,13 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
     const strip = await screen.findByTestId('studio-interfaces-retired');
     fireEvent.click(within(strip).getByRole('button', { name: t('engine.studio.interfacesRetired.dismiss', 'en') }));
     await waitFor(() => expect(notice()).toBeNull());
-    expect(pathname()).toBe(`/studio/${PKG}/data`);
+    expect(pathname()).toBe(HOME_PATH);
   });
 
-  it('the notice outlasts the Data pillar opening its first object (a `?surface=` written with no state)', async () => {
+  it('the notice outlasts the area writing its `?package=` (a navigation with no state)', async () => {
     renderAt(`/studio/${PKG}/interfaces`);
     await screen.findByTestId('studio-interfaces-retired');
-    await waitFor(() => expect(where()).toContain('surface='));
+    await waitFor(() => expect(where()).toContain('package='));
     expect(screen.getByTestId('studio-interfaces-retired')).toBeInTheDocument();
   });
 
@@ -263,7 +269,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
     await waitFor(() => expect(pathname()).toBe(`/studio/${PKG}/metadata/flow`));
     expect(notice()).toBeNull();
     fireEvent.click(screen.getByTestId('back-to-data'));
-    await waitFor(() => expect(pathname()).toBe(`/studio/${PKG}/data`));
+    await waitFor(() => expect(pathname()).toBe(HOME_PATH));
     await screen.findByTestId('studio-shell-header');
     expect(notice()).toBeNull();
   });
@@ -279,7 +285,7 @@ describe('an old Interfaces URL lands on the Studio home (objectstack#36502)', (
   it('CONTROL: an ordinary arrival on the Data pillar shows no notice', async () => {
     renderAt(`/studio/${PKG}/data`);
     await screen.findByTestId('studio-shell-header');
-    expect(where()).toBe(`/studio/${PKG}/data`);
+    await waitFor(() => expect(where()).toBe(HOME));
     expect(notice()).toBeNull();
   });
 });

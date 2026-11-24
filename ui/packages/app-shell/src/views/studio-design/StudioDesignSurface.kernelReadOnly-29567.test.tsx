@@ -195,7 +195,8 @@ afterEach(() => {
 
 function renderAt(packageId: string) {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${packageId}/data`]}>
+    // objectstack#36904 — an object designer's header, on its own address.
+    <MemoryRouter initialEntries={[`/studio/${packageId}/metadata/object/sys_probe`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />

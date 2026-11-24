@@ -130,7 +130,7 @@ const PUBLISH = new RegExp(`^${t('engine.studio.publish', 'en')}$`);
 
 async function mountAndEdit(): Promise<HTMLElement> {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/data`]}>
+    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/metadata/object/a_task`]}>
       <Routes>
         <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />

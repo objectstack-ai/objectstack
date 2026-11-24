@@ -213,8 +213,9 @@ describe('Data pillar — a new metadata client while the open object loads (obj
     remintClient();
     rerender(dataTree());
     // The new client has to have reached the pillar for the count below to
-    // mean anything: its rail list read is the proof that it did.
-    await waitFor(() => expect(client.list).toHaveBeenCalledWith('object', expect.anything()));
+    // mean anything: the header's list read (its ‹ ›, objectstack#36904) is
+    // the proof that it did.
+    await waitFor(() => expect(client.list).toHaveBeenCalledWith('object', undefined));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });

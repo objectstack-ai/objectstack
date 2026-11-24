@@ -303,24 +303,26 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
   const locale = useMetadataLocale();
   // objectstack#36502 — a landing from an old Interfaces URL says once where
   // interface editing went. The landing's history state is read once and
-  // latched here, keyed on the pillar it landed on: the Data pillar writes
-  // its own `?surface=` (the first object) and the Changes drawer drops
-  // `?changes=` right after the landing, and those navigations carry no state.
-  // It goes when dismissed or when the author leaves for another pillar;
-  // another old URL is a new history state, so it shows again.
-  const landingState: unknown = useLocation().state;
+  // latched here, keyed on the page it landed on: the Changes drawer drops
+  // `?changes=` right after the landing, and the area writes its `?package=`,
+  // and those navigations carry no state. objectstack#36904 — keyed on the
+  // path, not the pillar: the home is the area's object list now, and the
+  // area's other pages share its segment. It goes when dismissed or when the
+  // author leaves for another page; another old URL is a new history state,
+  // so it shows again.
+  const { state: landingState, pathname: landingPath }: { state: unknown; pathname: string } = useLocation();
   const [retiredOn, setRetiredOn] = React.useState<string | null>(() =>
-    isRetiredInterfacesLanding(landingState) ? tab : null,
+    isRetiredInterfacesLanding(landingState) ? landingPath : null,
   );
   React.useEffect(() => {
-    if (isRetiredInterfacesLanding(landingState)) setRetiredOn(tab);
+    if (isRetiredInterfacesLanding(landingState)) setRetiredOn(landingPath);
     // Keyed on the state object alone: a new landing is a new object.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [landingState]);
   React.useEffect(() => {
-    if (retiredOn !== null && retiredOn !== tab) setRetiredOn(null);
-  }, [retiredOn, tab]);
-  const retiredLanding = retiredOn !== null && retiredOn === tab;
+    if (retiredOn !== null && retiredOn !== landingPath) setRetiredOn(null);
+  }, [retiredOn, landingPath]);
+  const retiredLanding = retiredOn !== null && retiredOn === landingPath;
 
   // Courtesy gate (the framework's ADR-0124 D1 — server enforces, client is
   // courtesy): a read-only code/installed package refuses authoring
