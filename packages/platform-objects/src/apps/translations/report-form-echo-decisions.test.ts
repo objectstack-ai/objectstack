@@ -717,9 +717,12 @@ describe('#19403 round 9 — machine tokens, and a guard that can say NO', () =>
   });
 
   it('⭐ the token predicate can say NO — and a bare `includes` could not', () => {
-    // The English source spells it `ANDed`, so the bare token is NOT in it — a
+    // The English source spelled it `ANDed`, so the bare token is NOT in it — a
     // substring guard would report the source as carrying the token it does not.
-    const en = DECISIONS.find((d) => d.path === 'runtimeFilter' && d.prop === 'helpText')!.en;
+    // #36447 reworded that source into business terms (it no longer carries
+    // `AND` at all), so the predicate is held on the sentence it was decided
+    // against, kept here as a literal.
+    const en = 'Render-time scope filter, ANDed at query time';
     expect(en.includes('AND')).toBe(true);
     expect(carriesToken(en, 'AND')).toBe(false);
     expect(carriesToken('以 AND 方式并入', 'AND')).toBe(true);

@@ -1313,7 +1313,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 763 since #36366: `advanced` offers the `actionLayout` composite and
       // its `list` / `record` rows — three row labels, authored in all three
       // locales.
-      expect(translated.length, `${locale} positive control`).toBe(763);
+      // 769 since #36447: the report form declares the `dateRange` and
+      // `exportOptions` children — six row labels, authored in all three
+      // locales.
+      expect(translated.length, `${locale} positive control`).toBe(769);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the
