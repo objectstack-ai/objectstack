@@ -160,8 +160,9 @@ export interface StudioPaletteSurface {
   renderGroups: (props: StudioPaletteGroupsProps) => ReactNode;
   /**
    * Opens a Studio address the palette picked, after it closes: the page asks
-   * about its unsaved work, and re-enters itself when the address is the page
-   * already open on another query.
+   * the shell's unsaved-edits seam (every editor that registered edits, not
+   * only the page's own), and re-enters itself when the address is the page
+   * already open on another query (`openStudioPaletteAddress`).
    */
   open: (to: string) => void;
 }
