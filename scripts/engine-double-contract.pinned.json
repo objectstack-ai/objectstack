@@ -1427,6 +1427,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-response-schema-36887.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-response-schema-36887.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.meta-types-response-schema-36887.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.meta-types-unauthorable-columns.test.ts",
       "verb": "delete",
       "pinned": 1
