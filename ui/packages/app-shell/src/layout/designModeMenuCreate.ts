@@ -39,11 +39,11 @@ import { emitMetadataRefresh } from '../assistant/assistantBus.js';
 import { slugify } from '../views/metadata-admin/createDerive.js';
 import { loadHanRomanizer, romanizeHan, romanizerPending } from '../views/metadata-admin/romanizeHan.js';
 import { saveAndPublishInPackage, saveDashboardInPlace } from '../views/runtime-metadata-persistence.js';
-import type { Menu } from './designModeMenuModel.js';
 import {
   prepareAppMenuSave,
   writeAppMenu,
   type AppMenuSaveDoors,
+  type AppMenuSaveInput,
   type AppMenuSaveTexts,
 } from './designModeMenuSave.js';
 
@@ -137,7 +137,7 @@ export function newItemBody(item: NewMenuItem): Record<string, unknown> {
  * same package; when the menu is refused, the item is removed again.
  */
 export async function saveAppMenuWithNewItem(
-  input: { appName: string; packageId: string; served: Menu; navigation: Menu; item: NewMenuItem },
+  input: AppMenuSaveInput & { item: NewMenuItem },
   texts: NewMenuItemTexts,
   doors: AppMenuSaveDoors,
 ): Promise<void> {
