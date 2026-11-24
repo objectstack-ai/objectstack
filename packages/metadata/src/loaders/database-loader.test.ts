@@ -4375,7 +4375,7 @@ describe('[#37013] the platform\'s record beside a package\'s item, from the sto
     const node = managerOver();
     await node.register('skill', NAME, platformSkill('platform v1'), { notify: false, origin: 'platform', skipSourceLoader: true });
     expect(((await node.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
-    expect(((await node.get('skill', NAME)) as any)?.instructions, 'CONTROL: a read naming no package keeps its rule').toBe('platform v1');
+    expect(instructionsOf(await node.list('skill')), 'the registry\'s platform slot does not shadow the loader\'s package item').toEqual(['package rules', 'platform v1']);
   });
 
   it('registerInMemory stores the body without the platform\'s stamp', async () => {
@@ -4466,12 +4466,46 @@ describe('[#37013] the platform\'s record beside a package\'s item, from the sto
     // …and a cold node, whose registry holds nothing, leaves the row too.
     await managerOver().unregister('view', VIEW, { notify: false, origin: 'platform' });
     expect(await viewRows()).toBe(1);
+    // …and an item held in memory alone, which no loader could restore.
+    manager.registerInMemory('view', 'probe_seeded', { name: 'probe_seeded', label: 'seeded' });
+    await manager.unregister('view', 'probe_seeded', { notify: false, origin: 'platform' });
+    expect(((await manager.get('view', 'probe_seeded')) as any)?.label).toBe('seeded');
+    // …and the in-memory loader's copy (the artifact door's) of another writer's item.
+    const door = new MemoryLoader();
+    await door.save('view', 'probe_door', { name: 'probe_door', label: 'door' });
+    await door.delete('view', 'probe_door', { platformOnly: true });
+    expect(((await door.load('view', 'probe_door')).data as any)?.label).toBe('door');
+    await door.save('view', 'probe_door', { name: 'probe_door', label: 'door', _provenance: 'platform' });
+    await door.delete('view', 'probe_door', { platformOnly: true });
+    expect((await door.load('view', 'probe_door')).data ?? null, 'CONTROL: the platform\'s copy is taken').toBeNull();
 
     // CONTROL: the platform's own record is withdrawn.
     await manager.register('view', VIEW, { name: VIEW, label: 'the platform\'s' }, { notify: false, origin: 'platform' });
     await manager.unregister('view', VIEW, { notify: false, origin: 'platform' });
     expect(await manager.get('view', VIEW)).toBeUndefined();
     expect(await viewRows()).toBe(0);
+  });
+});
+
+describe('[#37013] an action: the platform\'s stored record beside a package\'s binding is the platform\'s, as an unstored one is (#32560)', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  let driver: IDataDriver;
+  const managerOver = () => new MetadataManager({ formats: ['json'], loaders: [new DatabaseLoader({ driver })] });
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('a read naming no package beside two packages is refused naming the platform, not the environment (BASE: the stored record was named the environment\'s)', async () => {
+    const manager = managerOver();
+    await manager.register('action', 'approve', { name: 'approve', label: 'platform', objectName: 'account' }, { notify: false, origin: 'platform' });
+    await manager.register('action', 'approve', { name: 'approve', label: 'alpha', objectName: 'account', _packageId: ALPHA, _provenance: 'package' }, { notify: false });
+    await manager.register('action', 'approve', { name: 'approve', label: 'beta', objectName: 'account', _packageId: BETA, _provenance: 'package' }, { notify: false });
+    const refused = await manager.get('action', 'approve').then(() => undefined, (e: { refusal?: { candidates?: unknown } }) => e);
+    expect(refused?.refusal?.candidates).toEqual([{ kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }, { kind: 'platform' }]);
+    expect(((await manager.get('action', 'approve', ALPHA)) as any)?.label).toBe('alpha');
+    expect(((await manager.getPlatformItem('action', 'approve')) as any)?.label).toBe('platform');
   });
 });
 
