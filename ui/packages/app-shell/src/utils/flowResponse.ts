@@ -223,7 +223,7 @@ import { actionCopySource, actionErrorDetail, refusalFieldErrors } from '@object
 import type { ActionResult } from '@object-ui/core';
 import { getLoadedBuiltInLocales, resolveBuiltInLanguage } from '@object-ui/i18n';
 import { declaredUserMessage, delegationScopeMessage, isPermissionError } from '@object-ui/react';
-import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
+import { errorCodeIs } from '@object-ui/types';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 
 /**
@@ -339,17 +339,18 @@ function permissionDeniedLine(locale: string | undefined): string {
 type ServiceLinePack = { actions?: { serviceUnavailable?: unknown } } | undefined;
 
 /**
- * [objectstack#36840] The codes a `type: 'api'` action's answer carries when
- * the service behind its target is not there to serve it: the target's own
- * `503 SERVICE_UNAVAILABLE` (a print door whose engine this deployment did not
- * configure), the dispatcher's `501 NOT_IMPLEMENTED` for a kernel that
- * composes no such service, and a route miss from a host that does not route
- * the target at all (the dispatcher's `ROUTE_NOT_FOUND`, the transport's
- * `ENDPOINT_NOT_FOUND`). Each one's message is operator prose — an
- * environment variable, a package name, `Route Not Found: /print/records` —
- * that tells the person who clicked nothing they can act on.
+ * [objectstack#36840] The one code a `type: 'api'` action's answer carries
+ * when the service behind its target is not composed in this environment: the
+ * dispatcher's `501 NOT_IMPLEMENTED`, answered by an own-door bridge whose
+ * service slot is empty or lacks the door's member. Its message names a
+ * package to install, which tells the person who clicked nothing they can act
+ * on. Deliberately NOT read this way: a `503 SERVICE_UNAVAILABLE`, which is
+ * the platform's general "not right now" (a store that could not be read, an
+ * engine probe that failed) and whose sentence is the producer's own; and a
+ * route miss (`ROUTE_NOT_FOUND`, `ENDPOINT_NOT_FOUND`), which is as likely a
+ * misspelled action `target` whose path the author needs to see.
  */
-const SERVICE_ABSENT_CODES = ['SERVICE_UNAVAILABLE', 'NOT_IMPLEMENTED', 'ROUTE_NOT_FOUND', 'ENDPOINT_NOT_FOUND'] as const;
+const SERVICE_ABSENT_CODE = 'NOT_IMPLEMENTED';
 
 /**
  * The runner's "this environment does not offer the service" line
@@ -478,7 +479,7 @@ function refusalEnvelopeMessage(
  * — see the header). A `400 FLOW_FAILED` is a flow the endpoint ran, and reads
  * the run's refusal by the failed arm's rule; `locale` is the host's active
  * language.
- * An answer that says the target's service is absent ({@link SERVICE_ABSENT_CODES})
+ * An answer that says the target's service is absent ({@link SERVICE_ABSENT_CODE})
  * and carries no `userMessage` reads the localized
  * {@link serviceUnavailableLine} (objectstack#36840).
  * Every other answer reads {@link refusalEnvelopeMessage}: its `userMessage`
@@ -497,7 +498,7 @@ export function apiActionFailureMessage(
     // [objectstack#36840] The service behind the target is absent: the
     // person who clicked reads the localized line, never the operator prose.
     // A producer-marked `userMessage` still wins, as on every other refusal.
-    if (!declaredUserMessage(envelope) && errorCodeIsAnyOf(envelope, SERVICE_ABSENT_CODES)) {
+    if (!declaredUserMessage(envelope) && errorCodeIs(envelope, SERVICE_ABSENT_CODE)) {
         return serviceUnavailableLine(locale);
     }
     return refusalEnvelopeMessage(json, fallback, locale);

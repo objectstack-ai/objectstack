@@ -792,17 +792,11 @@ describe('apiActionFailureMessage — a flow-backed api action reads the run ref
     });
 });
 
-describe('apiActionFailureMessage — an api action whose service is absent reads a localized line, not the route text (objectstack#36840)', () => {
+describe('apiActionFailureMessage — an api action whose service is not composed reads a localized line, not the operator text (objectstack#36840)', () => {
     registerBuiltInLocales();
 
-    // The card's toast, verbatim from a hosted HotCRM's 「打印报价」.
-    const ROUTE_MISS = {
-        success: false,
-        error: {
-            code: 'ROUTE_NOT_FOUND', message: 'Route Not Found: /print/records', httpStatus: 404, route: '/print/records',
-            hint: 'No route is registered for this path.',
-        },
-    };
+    // What the card's 「打印报价」 answers once the `/print` bridge is in: the
+    // dispatcher's 501 for a kernel with no print service.
     const NOT_COMPOSED = {
         success: false,
         error: {
@@ -810,21 +804,45 @@ describe('apiActionFailureMessage — an api action whose service is absent read
             message: 'The print door is not available: no print service is registered on this kernel. @objectstack/service-print (PrintServicePlugin) registers it.',
         },
     };
-    const NO_ENGINE = {
+    // A transient outage: the print door's own 503 (engine probe failed, a
+    // store unreadable). It can clear on a retry, so "not enabled" would be wrong.
+    const OUTAGE = {
         success: false,
-        error: { code: 'SERVICE_UNAVAILABLE', httpStatus: 503, message: 'No print engine is configured. Set OS_PRINT_CHROMIUM_PATH …' },
+        error: { code: 'SERVICE_UNAVAILABLE', httpStatus: 503, message: 'Printing is not available right now. Try again later.' },
     };
-    const TRANSPORT_MISS = { success: false, error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' } };
+    // A misspelled action `target`: the dispatcher's and the transport's misses.
+    const ROUTE_MISS = {
+        success: false,
+        error: {
+            code: 'ROUTE_NOT_FOUND', message: 'Route Not Found: /prnt/records', httpStatus: 404, route: '/prnt/records',
+            hint: 'No route is registered for this path.',
+        },
+    };
+    const TRANSPORT_MISS = { success: false, error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found: /prnt/records' } };
 
-    it('each absent-service answer reads the line in the host\'s language, never the server prose', () => {
-        for (const [status, json] of [[404, ROUTE_MISS], [501, NOT_COMPOSED], [503, NO_ENGINE], [404, TRANSPORT_MISS]] as const) {
-            const zh = apiActionFailureMessage({ status }, json, `HTTP ${status}`, 'zh-CN');
-            expect(zh, `${status}`).toBe(builtInLocales['zh-Hans'].actions.serviceUnavailable);
-            expect(zh).not.toContain('/print/records');
-            expect(apiActionFailureMessage({ status }, json, `HTTP ${status}`, 'en'), `${status}`)
-                .toBe(builtInLocales.en.actions.serviceUnavailable);
-        }
+    it('a 501 NOT_IMPLEMENTED reads the line in the host\'s language, never the package name', () => {
+        const zh = apiActionFailureMessage({ status: 501 }, NOT_COMPOSED, 'HTTP 501', 'zh-CN');
+        expect(zh).toBe(builtInLocales['zh-Hans'].actions.serviceUnavailable);
+        expect(zh).not.toContain('@objectstack/service-print');
+        expect(apiActionFailureMessage({ status: 501 }, NOT_COMPOSED, 'HTTP 501', 'en')).toBe(builtInLocales.en.actions.serviceUnavailable);
         expect(builtInLocales['zh-Hans'].actions.serviceUnavailable).toBe('此操作所需的服务在当前环境未启用，请联系管理员。');
+    });
+
+    it('a 503 SERVICE_UNAVAILABLE keeps the producer\'s own sentence, never the "not enabled" line', () => {
+        for (const locale of ['zh-CN', 'en']) {
+            const shown = apiActionFailureMessage({ status: 503 }, OUTAGE, 'HTTP 503', locale);
+            expect(shown, locale).toBe(OUTAGE.error.message);
+            expect(shown, locale).not.toBe(builtInLocales['zh-Hans'].actions.serviceUnavailable);
+            expect(shown, locale).not.toBe(builtInLocales.en.actions.serviceUnavailable);
+        }
+    });
+
+    it('a route miss (a misspelled target) keeps the path its author needs to see', () => {
+        for (const [status, json] of [[404, ROUTE_MISS], [404, TRANSPORT_MISS]] as const) {
+            const shown = apiActionFailureMessage({ status }, json, `HTTP ${status}`, 'zh-CN');
+            expect(shown, json.error.code).toBe(json.error.message);
+            expect(shown, json.error.code).toContain('/prnt/records');
+        }
     });
 
     it('a locale the registry does not carry falls back to the English line', () => {
@@ -832,8 +850,8 @@ describe('apiActionFailureMessage — an api action whose service is absent read
     });
 
     it('a producer-marked userMessage still wins over the line', () => {
-        const marked = { success: false, error: { ...NO_ENGINE.error, userMessage: 'Printing is switched off for this workspace.' } };
-        expect(apiActionFailureMessage({ status: 503 }, marked, 'HTTP 503', 'en')).toBe('Printing is switched off for this workspace.');
+        const marked = { success: false, error: { ...NOT_COMPOSED.error, userMessage: 'Printing is switched off for this workspace.' } };
+        expect(apiActionFailureMessage({ status: 501 }, marked, 'HTTP 501', 'en')).toBe('Printing is switched off for this workspace.');
     });
 
     it('a refusal that is not about an absent service keeps its own sentence (control)', () => {

@@ -285,7 +285,7 @@
  *     comment spelling and the form's call and this read goes dark while a
  *     failed flow still shows it. A SECOND key is read the same two ways:
  *     `actions.serviceUnavailable`, the line a `type: 'api'` action shows when
- *     the service behind its target is absent (objectstack#36840). It too is
+ *     the service behind its target is not composed (objectstack#36840). It too is
  *     two segments, seen by the full-key probe only through this file's own
  *     comment spelling, and it has NO literal `t()` call keeping it live
  *     elsewhere: drop the comment spelling and it reads as dead while every
