@@ -4530,3 +4530,135 @@ describe('[#37013] a bundled type: the row a package\'s first item would take ov
     expect(((await managerOver().getPlatformItem('email_template', 'welcome')) as any)?.subject).toBe('platform en');
   });
 });
+
+// ---------- [#37013] contract review r2: one place for the mark, the rollback writes, the host's package, every serve site ----------
+
+describe('[#37013] the mark has one place on an item, and every write and serve site reads it there', () => {
+  const PKG = 'com.acme.crm';
+  const HOST = 'com.host.app';
+  let driver: IDataDriver;
+  const db = () => new DatabaseLoader({ driver });
+  const managerOver = (...loaders: MetadataLoader[]) => new MetadataManager({ formats: ['json'], loaders: loaders.length > 0 ? loaders : [db()] });
+  const rowsOf = async (type: string, name: string) => ((await driver.find('sys_metadata', { where: { type, name } })) as Array<Record<string, unknown>>)
+    .map((row) => ({ package_id: (row.package_id as string | null | undefined) ?? null, body: JSON.parse(row.metadata as string) as Record<string, any> }));
+  const seedRow = (type: string, name: string, body: Record<string, unknown>, packageId: string | null = null) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${name}_${packageId ?? 'env'}`, type, name, state: 'active', version: 1, checksum: `${type}_${name}_${packageId ?? 'env'}`,
+      package_id: packageId, metadata: JSON.stringify(body),
+    });
+  /** A loader of the `memory:` protocol with neither keyed read: the `loadMany` and `list` + `load` arms. */
+  const plainLoader = (items: Record<string, Record<string, unknown>>): MetadataLoader => ({
+    contract: { name: 'plain', protocol: 'memory:', capabilities: { read: true, write: false, watch: false, list: true } },
+    async load(_type: string, name: string) { return items[name] ? { data: items[name], source: 'plain', format: 'json', loadTime: 0 } : { data: null }; },
+    async loadMany<T>() { return Object.values(items) as T[]; },
+    async list() { return Object.keys(items); },
+    async exists(_type: string, name: string) { return name in items; },
+    async stat() { return null; },
+  } as unknown as MetadataLoader);
+  const provenancesOf = (items: unknown[]) => (items as Array<{ data?: { _provenance?: unknown }; _provenance?: unknown }>).map((item) => (item.data ?? item)._provenance ?? null);
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('a connector whose authored `metadata` record carries the value, stored as the protocol door stores it: never the platform\'s record (BASE: read off the nested record as the platform\'s)', async () => {
+    await seedRow('connector', 'erp', { name: 'erp', label: 'ERP', type: 'api', metadata: { _provenance: 'platform' } });
+    const manager = managerOver();
+    expect(await manager.getPlatformItem('connector', 'erp')).toBeUndefined();
+    // A package's first item takes the environment's item over, as it takes any environment item.
+    await manager.register('connector', 'erp', { name: 'erp', label: 'ERP pkg', type: 'api', _packageId: PKG, _provenance: 'package' }, { notify: false });
+    expect((await rowsOf('connector', 'erp')).map((row) => row.package_id)).toEqual([PKG]);
+  });
+
+  it('the platform\'s withdrawal leaves an environment connector whose authored `metadata` record carries the value', async () => {
+    await seedRow('connector', 'erp', { name: 'erp', label: 'ERP', type: 'api', metadata: { _provenance: 'platform' } });
+    await managerOver().unregister('connector', 'erp', { notify: false, origin: 'platform' });
+    expect((await rowsOf('connector', 'erp')).map((row) => row.body.label)).toEqual(['ERP']);
+  });
+
+  it('register keeps an authored nested `_provenance` as the author wrote it: only the item\'s own key is the mark', async () => {
+    const manager = managerOver();
+    await manager.register('connector', 'erp', { name: 'erp', label: 'ERP', type: 'api', metadata: { _provenance: 'platform' } }, { notify: false });
+    expect((await rowsOf('connector', 'erp'))[0]!.body.metadata).toEqual({ _provenance: 'platform' });
+    expect(await manager.getPlatformItem('connector', 'erp')).toBeUndefined();
+  });
+
+  it('rollback to a version the platform registered writes it back without the mark (BASE: the row was stamped again)', async () => {
+    const manager = managerOver();
+    await manager.register('skill', 'helper', { name: 'helper', label: 'platform v1', instructions: 'p' }, { notify: false, origin: 'platform' });
+    await manager.register('skill', 'helper', { name: 'helper', label: 'env edit', instructions: 'e' }, { notify: false });
+    await manager.rollback('skill', 'helper', 1);
+    expect((await rowsOf('skill', 'helper')).map((row) => [row.body.label, row.body._provenance ?? null])).toEqual([['platform v1', null]]);
+    expect(await managerOver().getPlatformItem('skill', 'helper')).toBeUndefined();
+  });
+
+  it('a host that declares a package id: after a restart, the platform\'s withdrawal of a view takes the registry\'s copy too (BASE: get and list kept answering it)', async () => {
+    const first = managerOver();
+    await first.register('view', 'probe_view', { name: 'probe_view', label: 'platform' }, { notify: false, origin: 'platform' });
+    const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
+    const manager = (plugin as any).manager as MetadataManager;
+    (manager as any).loaders.clear();
+    manager.registerLoader(db());
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    expect(((await manager.getPlatformItem('view', 'probe_view')) as any)?.label).toBe('platform');
+    await manager.unregister('view', 'probe_view', { notify: false, origin: 'platform' });
+    expect(await manager.get('view', 'probe_view')).toBeUndefined();
+    expect(((await manager.list('view')) as any[]).filter((item) => item?.name === 'probe_view')).toEqual([]);
+    expect(await rowsOf('view', 'probe_view')).toEqual([]);
+  });
+
+  it('getPlatformItem of a type outside the by-package set answers the platform\'s row only, never another stored item', async () => {
+    await seedRow('view', 'env_view', { name: 'env_view', label: 'env' });
+    await seedRow('view', 'plat_view', { name: 'plat_view', label: 'platform', _provenance: 'platform' });
+    const manager = managerOver();
+    expect(await manager.getPlatformItem('view', 'env_view')).toBeUndefined();
+    expect(((await manager.getPlatformItem('view', 'plat_view')) as any)?.label).toBe('platform');
+  });
+
+  describe('a body a non-`datasource:` loader stores with the value is served without it, at every serve site', () => {
+    const forgedSkill = { name: 'helper', label: 'forged', instructions: 'x', _provenance: 'platform' };
+    const forgedView = { name: 'probe_view', label: 'forged', _provenance: 'platform' };
+
+    it('list over the door\'s own loader (`loadManySlots`)', async () => {
+      const door = new MemoryLoader();
+      await door.save('skill', 'helper', forgedSkill);
+      const node = new MetadataManager({ formats: ['json'], loaders: [] });
+      node.registerLoader(door);
+      expect(provenancesOf(await node.list('skill'))).toEqual([null]);
+    });
+
+    it('list over a loader with no keyed read (`loadMany`)', async () => {
+      const node = new MetadataManager({ formats: ['json'], loaders: [] });
+      node.registerLoader(plainLoader({ probe_view: forgedView }));
+      expect(provenancesOf(await node.list('view'))).toEqual([null]);
+    });
+
+    it('get, load and getPlatformItem of a type outside the by-package set (`loadDiagnosed`)', async () => {
+      const door = new MemoryLoader();
+      await door.save('view', 'probe_view', forgedView);
+      const node = new MetadataManager({ formats: ['json'], loaders: [] });
+      node.registerLoader(door);
+      expect(((await node.get('view', 'probe_view')) as any)?._provenance).toBeUndefined();
+      expect(((await node.load('view', 'probe_view')) as any)?._provenance).toBeUndefined();
+      expect(await node.getPlatformItem('view', 'probe_view')).toBeUndefined();
+    });
+
+    it.each([
+      ['a loader with a keyed read', () => { const door = new MemoryLoader(); return door.save('skill', 'helper', forgedSkill).then(() => door as MetadataLoader); }],
+      ['a loader with neither keyed read', async () => plainLoader({ helper: forgedSkill })],
+    ] as const)('loadManyKeyed of a by-package type, over %s', async (_label, make) => {
+      const node = new MetadataManager({ formats: ['json'], loaders: [] });
+      node.registerLoader(await make());
+      expect(provenancesOf(await node.loadManyKeyed('skill'))).toEqual([null]);
+    });
+
+    it.each([
+      ['a loader with a keyed read', () => { const door = new MemoryLoader(); return door.save('view', 'probe_view', forgedView).then(() => door as MetadataLoader); }],
+      ['a loader with neither keyed read', async () => plainLoader({ probe_view: forgedView })],
+    ] as const)('loadManyKeyed of a type outside the by-package set, over %s', async (_label, make) => {
+      const node = new MetadataManager({ formats: ['json'], loaders: [] });
+      node.registerLoader(await make());
+      expect(provenancesOf(await node.loadManyKeyed('view'))).toEqual([null]);
+    });
+  });
+});

@@ -891,8 +891,25 @@ describe('MetadataManager — the platform\'s withdrawal on a cluster peer (#370
         expect(((await b.mgr.get('skill', NAME, PKG)) as any)?.instructions).toBe('package rules');
     });
 
-    it('a removal whose platform scope is not `true` is dropped — B deletes nothing, not by name', async () => {
+    it('a type outside the by-package set: B keeps another writer\'s item held in memory alone', async () => {
+        const bus = new TestPubSub();
+        const node = async (nodeId: string) => {
+            const mgr = new MetadataManager({ formats: ['json'], loaders: [] });
+            mgr.registerInMemory('view', 'probe_view', { name: 'probe_view', label: 'seeded' });
+            mgr.attachClusterPubSub(bus, nodeId);
+            return mgr;
+        };
+        const a = await node('node-A');
+        const b = await node('node-B');
+        await a.unregister('view', 'probe_view', { origin: 'platform' });
+        await flush();
+        expect(((await b.get('view', 'probe_view')) as any)?.label).toBe('seeded');
+    });
+
+    it('a removal whose platform scope is not `true` is dropped — B deletes nothing, not by name, and not as a platform withdrawal', async () => {
         const { bus, b } = await bootPlatformCluster();
+        // B's door also holds a copy of the platform's record: a removal read as `platformOnly: true` would take it.
+        await b.door.save('skill', NAME, { name: NAME, label: 'platform', instructions: 'platform v1', _provenance: 'platform' });
         await bus.publish('metadata.changed', {
             originNode: 'node-X',
             type: 'skill',
@@ -900,6 +917,6 @@ describe('MetadataManager — the platform\'s withdrawal on a cluster peer (#370
             removal: { platformOnly: 'yes' },
         });
         await flush();
-        expect((await b.door.loadSlots('skill', NAME)).map((slot) => slot.packageId)).toEqual([PKG]);
+        expect((await b.door.loadSlots('skill', NAME)).map((slot) => slot.packageId ?? null).sort()).toEqual([PKG, null].sort());
     });
 });

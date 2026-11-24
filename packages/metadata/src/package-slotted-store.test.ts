@@ -15,6 +15,7 @@ import { PackageScopedNameRefusedError } from '@objectstack/core';
 import {
   inheritStoreWriteOrder,
   isPlatformOrigin,
+  carriesPlatformStamp,
   lastWrittenKeyOf,
   latestMemberOf,
   newSlotView,
@@ -265,7 +266,11 @@ describe('[#37013] the platform\'s record of a name keeps the bare slot beside a
     const stamped = platform('p');
     expect(withoutPlatformOrigin(stamped)).toEqual({ name: ASK, label: 'p' });
     expect(stamped._provenance).toBe('platform');
-    const wrapped = { packageId: undefined, metadata: { name: ASK, _provenance: 'platform' } };
-    expect(withoutPlatformOrigin(wrapped)).toEqual({ packageId: undefined, metadata: { name: ASK } });
+    // The mark has one place, the item's own `_provenance`: a nested key is the body's data, never the mark.
+    const nested = { name: ASK, metadata: { _provenance: 'platform' } };
+    expect(withoutPlatformOrigin(nested)).toBe(nested);
+    expect(isPlatformOrigin(nested)).toBe(false);
+    expect(carriesPlatformStamp(nested)).toBe(false);
+    expect(carriesPlatformStamp(stamped)).toBe(true);
   });
 });

@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { MetadataPlugin } from './plugin.js';
+import { MetadataManager } from './metadata-manager.js';
 // Pay the plugin's dynamic `@objectstack/metadata-fs` load during collection, never inside a case.
 import '@objectstack/metadata-fs';
 
@@ -58,6 +59,32 @@ describe('[#37013] the artifact door refuses an item carrying the platform\'s pr
         expect(error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400, httpStatus: 400 });
         expect(error.issues).toEqual([{ path: '_provenance', code: 'custom', message: expect.stringContaining('remove `_provenance`') }]);
         expect(stored).toEqual([]);
+    });
+
+    it('a view container carrying it is refused at `_provenance`, nothing stored', async () => {
+        const container = { object: 'probe_thing', list: { type: 'grid', columns: [{ field: 'name' }] }, _provenance: 'platform' };
+        const { error, stored } = await registerResidual(withResidual(STACK, { views: [container] }));
+        expect(error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(error.issues).toEqual([{ path: '_provenance', code: 'custom', message: expect.any(String) }]);
+        expect(stored).toEqual([]);
+    });
+
+    it('a connector whose authored `metadata` record carries the value is stored as authored and is not the platform\'s record: the door and the store read the mark at one place', async () => {
+        const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+        const connector = { name: 'erp', label: 'ERP', type: 'api', metadata: { _provenance: 'platform' } };
+        let error: unknown;
+        try {
+            await MetadataPlugin.registerUnclaimedTopLevel(
+                { register: (type, name, item) => manager.register(type, name, item, { notify: false }), warn: () => undefined },
+                withResidual(undefined, { connectors: [connector] }),
+                { door: 'artifact', label: 'probe' },
+            );
+        } catch (e) {
+            error = e;
+        }
+        expect(error).toBeUndefined();
+        expect(((await manager.get('connector', 'erp')) as any)?.metadata).toEqual({ _provenance: 'platform' });
+        expect(await manager.getPlatformItem('connector', 'erp')).toBeUndefined();
     });
 
     it('CONTROL: an item with no provenance, or the package\'s, is stored', async () => {
