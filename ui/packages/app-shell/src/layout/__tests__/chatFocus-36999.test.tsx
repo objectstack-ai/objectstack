@@ -90,6 +90,7 @@ import {
   type ChatFocus,
 } from '../chatFocus';
 import type { ChatSurfaceContext } from '../chatSurfaceContext';
+import type { ChatDockTarget } from '../chatDockTarget';
 
 window.matchMedia = ((query: string) => ({
   matches: false,
@@ -138,12 +139,25 @@ const record = (id: string): ChatSurfaceContext => ({
 });
 
 /** The dock's page in view, moved the way a navigation moves it. */
-const page: { go: (surface: ChatSurfaceContext | undefined) => void } = { go: () => {} };
+const page: {
+  go: (surface: ChatSurfaceContext | undefined) => void;
+  /** Opens a conversation in the drawer, the way a history row does. */
+  open: (target: ChatDockTarget | undefined) => void;
+} = { go: () => {}, open: () => {} };
 function Dock({ initial }: { initial?: ChatSurfaceContext }) {
   const [surface, setSurface] = React.useState<ChatSurfaceContext | undefined>(initial);
+  const [target, setTarget] = React.useState<ChatDockTarget | undefined>(undefined);
   page.go = (next) => act(() => setSurface(next));
+  page.open = (next) => act(() => setTarget(next));
   return (
-    <ChatDockConversation userId="u1" apiBase="/api/v1/ai" surfaceContext={surface} surfaceArtifactLabel="Account" />
+    <ChatDockConversation
+      userId="u1"
+      apiBase="/api/v1/ai"
+      surfaceContext={surface}
+      surfaceArtifactLabel="Account"
+      target={target}
+      onTargetChange={setTarget}
+    />
   );
 }
 
@@ -257,7 +271,7 @@ describe('the console dock — conversation focus (objectstack#36999)', () => {
     fireEvent.click(screen.getByTestId('chat-focus-pin'));
 
     page.go(record('rec_2'));
-    expect(screen.getByTestId('chat-focus-switch')).toHaveTextContent('Ask about "rec_2" instead?');
+    expect(screen.getByTestId('chat-focus-switch')).toHaveTextContent('Ask about "account · rec_2" instead?');
     fireEvent.click(screen.getByTestId('chat-focus-switch-decline'));
     expect(screen.queryByTestId('chat-focus-switch')).toBeNull();
 
@@ -287,6 +301,32 @@ describe('the console dock — conversation focus (objectstack#36999)', () => {
     expect(screen.queryByTestId('chat-focus-chip')).toBeNull();
     expect(screen.getByTestId('chat-focus-pin')).toBeInTheDocument();
     expect(await send('second')).not.toHaveProperty('focus');
+  });
+
+  it('a focus pinned on an unsent conversation does not follow the user into an existing one', async () => {
+    // conv-old was pinned to rec_9 earlier in this tab; conv-bare to nothing.
+    window.sessionStorage.setItem(
+      'ai-chat-focus:conv-old',
+      JSON.stringify({ focus: { object: 'account', id: 'rec_9' }, declined: false }),
+    );
+    mountDock();
+    await composerReady();
+    fireEvent.click(screen.getByTestId('chat-focus-pin'));
+    expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1');
+
+    // Opened from the history without a send: conv-old shows ITS focus, and sends it.
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_9'));
+    await composerReady();
+    expect((await send('and now?')).focus).toEqual([{ object: 'account', id: 'rec_9' }]);
+    expect(readStoredChatFocus('conv-old').focus).toEqual({ object: 'account', id: 'rec_9' });
+
+    // A conversation with no focus of its own shows none and sends no key.
+    page.open({ agent: 'ask', conversationId: 'conv-bare' });
+    await waitFor(() => expect(screen.queryByTestId('chat-focus-chip')).toBeNull());
+    await composerReady();
+    expect(await send('anything?')).not.toHaveProperty('focus');
+    expect(state.minted).toBe(0);
   });
 
   it('a page that shows no one record offers no pin', async () => {

@@ -312,6 +312,13 @@ export function ChatDockConversation({
   // and never re-keys it: a focus does not change which conversation the
   // drawer shows (ADR-0057 as amended for objectui#10926).
   const conversationFocus = useConversationFocus(paneConversationId);
+  // A first send creates the conversation: the id it mints takes the focus
+  // pinned before it (and no other arriving id does).
+  const { markSending: markFocusSending } = conversationFocus;
+  const ensureConversationForSend = React.useCallback(() => {
+    markFocusSending();
+    return ensureConversation();
+  }, [markFocusSending, ensureConversation]);
 
   // ── The drawer's own controls over its thread ───────────────────────────
   // The launcher, the app switcher and the handoff in the pane open targets
@@ -434,7 +441,7 @@ export function ChatDockConversation({
             initialMessages={paneInitialMessages}
             pendingFirstMessageRef={pendingFirstMessageRef}
             pendingFirstMessageSeq={pendingFirstMessageSeq}
-            ensureConversation={ensureConversation}
+            ensureConversation={ensureConversationForSend}
             conversationCreateError={createError}
             selectedModelId={selectedModelId}
             onSelectedModelChange={setSelectedModelId}

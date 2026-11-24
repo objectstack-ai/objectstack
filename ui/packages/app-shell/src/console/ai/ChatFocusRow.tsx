@@ -121,7 +121,7 @@ export function ChatFocusRow({ focus, surface, surfaceLabel, surfaceTitle }: Cha
             <span className="min-w-0 truncate text-muted-foreground">
               {t('console.ai.focus.switchPrompt', {
                 defaultValue: 'Ask about "{{target}}" instead?',
-                target: pageTitle || pageRecord.id,
+                target: pageTitle || `${pageRecord.object} · ${pageRecord.id}`,
               })}
             </span>
             <button

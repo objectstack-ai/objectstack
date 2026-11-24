@@ -135,28 +135,55 @@ export function resetChatFocusForTests(): void {
 
 /** What a chat host hands its pane. */
 export interface ConversationFocus extends ChatFocusEntry {
-  /** Pin (or clear) the focus — the same write {@link setChatFocus} makes. */
+  /** Pin (or clear) the focus of the conversation on screen. */
   setFocus: (focus: ChatFocus | null) => void;
   /** Decline the offer to switch; remembered for the conversation. */
   decline: () => void;
+  /**
+   * The host is creating the conversation for a first send (it calls this
+   * beside `ensureConversation`): the id that arrives next is the one that
+   * send goes to, so a focus pinned before it is carried onto it.
+   */
+  markSending: () => void;
+}
+
+interface FocusState {
+  key: string | undefined;
+  entry: ChatFocusEntry;
+  /**
+   * The id that arrives next takes this conversation's focus: set by a first
+   * send (`markSending`) and by a `setChatFocus` hand-off that landed before
+   * the host had an id ("pin, then open the drawer"). Any other arrival of an
+   * id — a resumed thread resolving, a history row, the scope blanking the id
+   * between apps — reads that conversation's own stored focus instead.
+   */
+  carry: boolean;
 }
 
 /**
  * The focus of the conversation `conversationId` names, held by the chat
- * host. `undefined` is a conversation not created yet: a focus pinned there is
- * carried onto the id its first send mints, in the same render, so the first
- * turn — sent by the pane that remounts on that id — already carries it.
- * Moving to another conversation restores that one's chip from storage.
+ * host. `undefined` is a conversation the host has no id for yet. A focus
+ * pinned there reaches an id only on a CARRY (see {@link FocusState.carry}):
+ * the first send minting it, or the setter's hand-off — and then in the same
+ * render, so the first turn, sent by the pane that remounts on that id,
+ * already carries it. Every other move to a conversation restores that one's
+ * chip from storage.
  */
 export function useConversationFocus(conversationId: string | undefined): ConversationFocus {
-  const [state, setState] = React.useState<{ key: string | undefined; entry: ChatFocusEntry }>(() => ({
+  const [state, setState] = React.useState<FocusState>(() => ({
     key: conversationId,
     entry: readStoredChatFocus(conversationId),
+    carry: false,
   }));
   let current = state;
   if (state.key !== conversationId) {
-    const minted = state.key === undefined && conversationId !== undefined && state.entry.focus !== null;
-    current = { key: conversationId, entry: minted ? state.entry : readStoredChatFocus(conversationId) };
+    const carried =
+      state.key === undefined && conversationId !== undefined && state.carry && state.entry.focus !== null;
+    current = {
+      key: conversationId,
+      entry: carried ? state.entry : readStoredChatFocus(conversationId),
+      carry: false,
+    };
     // Derived state set during render: React re-renders before committing, so
     // no child of this commit sees the previous conversation's focus.
     setState(current);
@@ -169,17 +196,25 @@ export function useConversationFocus(conversationId: string | undefined): Conver
 
   const setFocus = React.useCallback((focus: ChatFocus | null) => {
     setState((s) =>
-      sameChatFocus(s.entry.focus, focus) ? s : { key: s.key, entry: { focus, declined: false } },
+      sameChatFocus(s.entry.focus, focus) ? s : { ...s, entry: { focus, declined: false } },
     );
   }, []);
   const decline = React.useCallback(() => {
-    setState((s) => (s.entry.declined ? s : { key: s.key, entry: { ...s.entry, declined: true } }));
+    setState((s) => (s.entry.declined ? s : { ...s, entry: { ...s.entry, declined: true } }));
+  }, []);
+  const markSending = React.useCallback(() => {
+    setState((s) => (s.key !== undefined || s.carry ? s : { ...s, carry: true }));
+  }, []);
+  // The setter's hand-off: applied here, and carried onto the id the host
+  // resolves next when it has none yet.
+  const handOff = React.useCallback((focus: ChatFocus | null) => {
+    setState((s) => ({ key: s.key, entry: { focus, declined: false }, carry: s.key === undefined }));
   }, []);
 
-  React.useEffect(() => registerChatFocusHost(setFocus), [setFocus]);
+  React.useEffect(() => registerChatFocusHost(handOff), [handOff]);
 
   return React.useMemo(
-    () => ({ focus: entry.focus, declined: entry.declined, setFocus, decline }),
-    [entry, setFocus, decline],
+    () => ({ focus: entry.focus, declined: entry.declined, setFocus, decline, markSending }),
+    [entry, setFocus, decline, markSending],
   );
 }

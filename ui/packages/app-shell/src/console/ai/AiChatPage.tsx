@@ -1251,6 +1251,13 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
   // reason: the keyed pane remounts when the first send mints the id, and that
   // first turn must still carry the record the user pinned.
   const conversationFocus = useConversationFocus(paneConversationId);
+  // A first send creates the conversation: the id it mints takes the focus
+  // pinned before it (and no other arriving id does).
+  const { markSending: markFocusSending } = conversationFocus;
+  const ensureConversationForSend = useCallback(() => {
+    markFocusSending();
+    return ensureConversation();
+  }, [markFocusSending, ensureConversation]);
   // Bumped whenever the pending ref is set OUT OF BAND (the handoff seed below).
   // ChatPane's deferred-send replay lists this in its deps, so it re-runs and
   // fires the seed even when the conversation id was ALREADY minted. Without it a
@@ -1693,7 +1700,7 @@ export function AiChatPage({ apiBase: apiBaseProp, defaultAgent: defaultAgentPro
             initialMessages={paneInitialMessages}
             pendingFirstMessageRef={pendingFirstMessageRef}
             pendingFirstMessageSeq={pendingFirstMessageSeq}
-            ensureConversation={ensureConversation}
+            ensureConversation={ensureConversationForSend}
             conversationCreateError={conversationCreateError}
             selectedModelId={selectedModelId}
             onSelectedModelChange={setSelectedModelId}
