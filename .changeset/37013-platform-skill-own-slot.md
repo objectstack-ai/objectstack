@@ -1,12 +1,13 @@
 ---
-'@objectstack/spec': patch
-'@objectstack/metadata': patch
+'@objectstack/spec': minor
+'@objectstack/metadata': minor
 ---
 
 fix(metadata): a skill the platform registers keeps its own slot beside an app's skill of the same name
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
+Skills-docs: none — no skills/ page names `_provenance` or its values; the new value is set by the metadata service only, never written by an author
 
 `MetadataProvenanceSchema` (`@objectstack/spec/kernel`) gains `'platform'`: the `_provenance` of a record the platform's own code registers at boot. Only the metadata service sets it.
 
