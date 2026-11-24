@@ -491,7 +491,7 @@
  * A comment whose first keyed line (after the signature) is `Claim:` is `EXIT_REFUSED` with zero writes, and the
  * refusal prints the `label-write.mjs --comment-file …` strokes that fold the same comment — judged by `judgeBody`,
  * unchanged — one arm per card state, as `claimStrokeRefusalText` says why: `--add pm:dispatched --remove pm:queue
- * --assign LOGIN` for a card not yet dispatched, `--add pm:dispatched` alone for an amendment of one that is. Measured: claims
+ * --assign LOGIN` for a card not yet dispatched (`pm:queue` or no pm state), `--add pm:dispatched` alone for an amendment of one that is. Measured: claims
  * posted here as lone comments left their cards `pm:queue` and unassigned until triage knocked. Judged after the route
  * is resolved, on one arm: on a route resolved `direct` the fold does not exist (it is relay-only) and the claim stays
  * this tool's write, said on stderr. `claimStrokeRefusal` carries why it is not in `judgeBody`. `--comment` only.
@@ -2122,8 +2122,10 @@ export function claimStrokeRefusal(body, { mode, route } = {}) {
  * body cannot say which it is: an amendment is a newer `Claim:` of the same shape, and the patrol reads the newest one
  * (`latestClaimComment`). Pure, so neither arm is chosen from a read that may fail. The amendment arm keeps the
  * card's state and assignee: on a card already `pm:dispatched` its `--add` is label-write's idempotent no-op and the
- * stroke is the comment alone; on any other state it makes two state labels, refused (ONE-OF) with nothing written.
- * The dispatch arm on such a card would add LOGIN as a second assignee unless LOGIN already holds it.
+ * stroke is the comment alone; on a card carrying another pm state it makes two state labels, refused (ONE-OF) with
+ * nothing written. A card with NO pm state is not refused — the amendment arm would dispatch it with no assignee — so
+ * it takes the first arm. The dispatch arm on a dispatched card would add LOGIN as a second assignee unless LOGIN
+ * already holds it.
  */
 export function claimStrokeRefusalText(refusal, { number = 'N', file = null } = {}) {
   const transport = refusal.transport ? `the route resolved \`${refusal.transport}\`` : 'the route could not be decided, so the fold cannot be ruled out';
@@ -2134,12 +2136,13 @@ export function claimStrokeRefusalText(refusal, { number = 'N', file = null } = 
     `  line:  ${offendingSpan(refusal.line, 160)}\n` +
     '  Sent alone, the claim lands and the card stays `pm:queue` with no assignee — readable as free — until someone\n' +
     '  notices. Fold it into the label write, comment first, in one relay stroke — the arm that fits the card now:\n' +
-    '  a card not yet dispatched (`pm:queue`), the claim that dispatches it:\n' +
+    '  a card not yet dispatched (`pm:queue` or no pm state), the claim that dispatches it:\n' +
     `    ${stroke} --remove pm:queue --assign LOGIN\n` +
     '  a card already `pm:dispatched` (a claim AMENDMENT), its state and assignee left as they are:\n' +
     `    ${stroke}\n` +
-    '  There the label is already on, so the stroke is the comment alone; on any other state it is refused (two state\n' +
-    '  labels), nothing written. The first arm on a dispatched card adds LOGIN as a second assignee unless LOGIN holds it.\n' +
+    '  There the label is already on, so the stroke is the comment alone; on a card carrying another pm state it is\n' +
+    '  refused (two state labels), nothing written — but on a card with NO pm state it dispatches with no assignee, so\n' +
+    '  that card takes the first arm. The first arm on a dispatched card adds LOGIN as a second assignee unless LOGIN holds it.\n' +
     '  The comment is judged there by this file\'s own `judgeBody`, so nothing about the body changes.\n' +
     `  (${transport}; \`--comment-file\` is relay-only, and only on a route resolved \`direct\` does this tool post a claim.)`
   );
@@ -4322,7 +4325,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
   'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 10,
   'the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched': 16,
-  'the claim stroke: a comment opening `Claim:` is refused on every route but `direct`, pointing at the `label-write` fold; the same body through that fold passes': 20,
+  'the claim stroke: a comment opening `Claim:` is refused on every route but `direct`, pointing at the `label-write` fold; the same body through that fold passes': 21,
 });
 const SELF_TEST_BATTERY_FLOOR = 30;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -5924,6 +5927,8 @@ export function selfTest() {
       t('⛔ control: the SAME arm on a card still `pm:queue` is refused there — two state labels, exit 2, no stroke packed', early.exit === 2 && early.ops === null && early.lines.some((l) => l.includes('ONE-OF')));
       t('⛔ control: the dispatch arm on that dispatched card, LOGIN another account, packs `assign` — the second assignee the amendment arm exists to avoid', lw(dispatchArm, DISPATCHED, ['huangyiirene']).ops === 'comment > assign');
       t('…and the dispatch arm stays right where it fits: a `pm:queue` card gets the comment, the state swap and the assignee', lw(dispatchArm, QUEUED, []).ops === 'comment > labels_add > labels_remove > assign');
+      const STATELESS = ['domain:skills'];
+      t('⛔ control: a card with NO pm state is not refused by the amendment arm — it packs `labels_add` and no `assign`, a dispatch with no holder — and the dispatch arm there packs `assign`, so that card takes the first arm', lw(amendArm, STATELESS, []).ops === 'comment > labels_add' && lw(dispatchArm, STATELESS, []).ops === 'comment > labels_add > assign' && text.includes('not yet dispatched (`pm:queue` or no pm state)') && !text.includes('any other state'));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
