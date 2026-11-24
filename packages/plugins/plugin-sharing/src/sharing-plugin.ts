@@ -454,6 +454,23 @@ export class SharingServicePlugin implements Plugin {
   private ruleRebindChain: Promise<void> = Promise.resolve();
 
   /**
+   * The plugin's ONE binding site for the per-record sharing-rule hooks, at
+   * boot and on every `sys_sharing_rule` rebind ({@link bindRuleRebindTriggers})
+   * — so the two can never derive different object sets. It unbinds the
+   * rule-hook package and binds it again on `listRuleHookObjects()`
+   * (`rebindRuleHooks`, rule-hooks.ts): per OBJECT, from the declarations and
+   * rows, never from the organizations a declared rule is served in at this
+   * moment. An organization created after boot (the organization-created
+   * middleware, `addDeclaredRuleScope`) is therefore served by the hooks
+   * already bound; the organization is resolved when a record is evaluated.
+   */
+  private async bindRuleHooks(engine: any, ctx: PluginContext): Promise<void> {
+    const ruleService = this.ruleService;
+    if (!ruleService) return;
+    await rebindRuleHooks(engine, ruleService, ctx.logger as any);
+  }
+
+  /**
    * [#2592] Rebind rule hooks whenever `sys_sharing_rule` DATA changes.
    *
    * `bindRuleHooks` above runs once at `kernel:ready` and registers
@@ -465,8 +482,8 @@ export class SharingServicePlugin implements Plugin {
    * rebind pattern (#2576) never fires here — the trigger must be a
    * data-change hook on the rule table itself.
    *
-   * The rebind mirrors boot exactly: both call `rebindRuleHooks`, which
-   * unbinds the whole rule-hook package and re-binds it from a fresh
+   * The rebind mirrors boot exactly: both go through {@link bindRuleHooks},
+   * which unbinds the whole rule-hook package and re-binds it from a fresh
    * `listRuleHookObjects()`. Runs AFTER the write inside the
    * same lifecycle pipeline (awaited, so the rule is enforceable the moment
    * the authoring call returns), but never fails the write — a rebind
@@ -501,11 +518,7 @@ export class SharingServicePlugin implements Plugin {
    */
   private bindRuleRebindTriggers(engine: any, ctx: PluginContext): void {
     const scheduleRebind = (): Promise<void> => {
-      const run = this.ruleRebindChain.then(async () => {
-        const ruleService = this.ruleService;
-        if (!ruleService) return;
-        await rebindRuleHooks(engine, ruleService, ctx.logger as any);
-      });
+      const run = this.ruleRebindChain.then(() => this.bindRuleHooks(engine, ctx));
       // The chain must never hold a rejection (it would poison later
       // rebinds); callers observe failures through `run`.
       this.ruleRebindChain = run.catch(() => undefined);
@@ -992,12 +1005,9 @@ export class SharingServicePlugin implements Plugin {
           }
 
           if (typeof engine.registerHook === 'function' && typeof engine.unregisterHooksByPackage === 'function') {
-            // Bound per OBJECT, from the declarations and rows — never from the
-            // organizations a declared rule is served in at this moment — so an
-            // organization created after boot (the middleware above) is served
-            // by these hooks with no rebind; the organization is resolved when a
-            // record is evaluated (`listRuleHookObjects`).
-            await rebindRuleHooks(engine, this.ruleService, ctx.logger as any);
+            // Bound per OBJECT, never per organization: an organization the
+            // middleware above serves later needs no rebind (`bindRuleHooks`).
+            await this.bindRuleHooks(engine, ctx);
             this.bindRuleRebindTriggers(engine, ctx);
 
             // [#7729] A rule whose recipient resolves through the BUSINESS-UNIT
