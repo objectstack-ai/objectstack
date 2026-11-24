@@ -160,7 +160,7 @@ describe('a report switched to Joined is held until its first block is added (ob
   it('Report type = Joined, then a Label edit: nothing is sent, no red strip, the line names Blocks', async () => {
     const report = vi.fn();
     mountPillar(report);
-    const inspector = await ready('Order');
+    const inspector = await ready('Sort Order');
     await pick(inspector, L('engine.inspector.report.type'), L('engine.inspector.report.type.joined'));
     editLabel(inspector, 'Sales v2');
     await outlastDebounce();
@@ -174,7 +174,7 @@ describe('a report switched to Joined is held until its first block is added (ob
 
   it('"Show me" focuses the Blocks list in the report properties', async () => {
     mountPillar();
-    const inspector = await ready('Order');
+    const inspector = await ready('Sort Order');
     await pick(inspector, L('engine.inspector.report.type'), L('engine.inspector.report.type.joined'));
     await within(inspector).findByText('Blocks', { selector: 'label' });
     const row = listRow(inspector, 'Blocks');
@@ -189,7 +189,7 @@ describe('a report switched to Joined is held until its first block is added (ob
   it('Blocks → Add item hands the hold to the new block, still unsent', async () => {
     const report = vi.fn();
     mountPillar(report);
-    const inspector = await ready('Order');
+    const inspector = await ready('Sort Order');
     await pick(inspector, L('engine.inspector.report.type'), L('engine.inspector.report.type.joined'));
     await within(inspector).findByText('Blocks', { selector: 'label' });
     fireEvent.click(within(listRow(inspector, 'Blocks')).getByRole('button', { name: L('engine.form.addItem') }));
@@ -205,7 +205,7 @@ describe('a report switched to Joined is held until its first block is added (ob
   // CONTROL: a type switch the door accepts saves at once.
   it('Report type = Tabular saves at once, with no line', async () => {
     mountPillar();
-    const inspector = await ready('Order');
+    const inspector = await ready('Sort Order');
     await pick(inspector, L('engine.inspector.report.type'), L('engine.inspector.report.type.tabular'));
     await waitFor(() => expect(reportSaves()).toHaveLength(1), { timeout: 4000 });
     expect(reportSaves()[0].type).toBe('tabular');
