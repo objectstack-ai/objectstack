@@ -178,15 +178,67 @@ function AreaItemOpen({
   return <MetadataResourceEditPage />;
 }
 
-/** `<root>/:type/new`: a read-only package takes no new item, so its create URL lands on the list. */
-function AreaCreate(): React.ReactElement {
+/**
+ * `<root>/:type/new`. A read-only package takes no new item of its own:
+ * objectstack#36897 — on a read-only base the create is its `.custom` pair's
+ * (ADR-0146 D3), asked of the ensure door and opened there; where the door
+ * refuses this caller (`customization.walled`), or there is no base to pair,
+ * the create URL lands on the list, as before.
+ */
+function AreaCreate({ customization }: { customization: StudioBaseCustomization | null }): React.ReactElement {
   const { type = '' } = useParams<{ type: string }>();
   const { search } = useLocation();
   const host = useMetadataAreaHost();
   if (host?.readOnly) {
+    if (customization && !customization.walled) {
+      return <AreaPairedCreate type={type} search={search} customization={customization} />;
+    }
     return <Navigate to={`${host.basePath}/${encodeURIComponent(type)}${search}`} replace />;
   }
   return <MetadataResourceEditPage createMode />;
+}
+
+/** The create of a read-only base's pair: the ensure door names the pair (creating it on first use), then its create opens. */
+function AreaPairedCreate({
+  type,
+  search,
+  customization,
+}: {
+  type: string;
+  search: string;
+  customization: StudioBaseCustomization;
+}): React.ReactElement {
+  const locale = useMetadataLocale();
+  const [answer, setAnswer] = React.useState<{ to: string } | { error: string } | null>(null);
+  // Asked once per create: the surface may hand a new `customization` on any render.
+  const ensureRef = React.useRef(customization.ensurePackage);
+  ensureRef.current = customization.ensurePackage;
+  React.useEffect(() => {
+    let cancelled = false;
+    ensureRef.current().then(
+      (pair) => {
+        if (cancelled) return;
+        const query = new URLSearchParams(search);
+        query.set('package', pair.packageId);
+        setAnswer({ to: `${studioMetadataAreaPath(pair.packageId)}/${encodeURIComponent(type)}/new?${query.toString()}` });
+      },
+      (e: unknown) => {
+        if (!cancelled) setAnswer({ error: e instanceof Error ? e.message : String(e) });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [type, search]);
+  if (answer && 'to' in answer) return <Navigate to={answer.to} replace />;
+  if (answer) {
+    return (
+      <div role="alert" className="p-6 text-sm text-destructive" data-testid="studio-area-pair-create-refused">
+        {answer.error}
+      </div>
+    );
+  }
+  return <AreaLoading locale={locale} />;
 }
 
 export interface StudioMetadataAreaProps {
@@ -249,7 +301,7 @@ export function StudioMetadataArea({
             <Route path="_diagnostics" element={<MetadataDiagnosticsPage />} />
             <Route path="datasource/*" element={<Navigate to={SETUP_DATASOURCES_PATH} replace />} />
             <Route path=":type" element={<MetadataResourceListPage />} />
-            <Route path=":type/new" element={<AreaCreate />} />
+            <Route path=":type/new" element={<AreaCreate customization={customization} />} />
             <Route path=":type/:name" element={<AreaItem editor={editor} />} />
             <Route path=":type/:name/history" element={<MetadataResourceHistoryPage />} />
           </Routes>

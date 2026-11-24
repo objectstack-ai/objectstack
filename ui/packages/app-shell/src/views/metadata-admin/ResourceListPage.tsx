@@ -115,6 +115,8 @@ import {
   type MetadataListState,
 } from './metadataListState.js';
 import { useListScrollRestore } from './useListScrollRestore.js';
+import { LIST_CREATE_DIALOG_TYPES, MetadataListCreateDialog } from './MetadataListCreateDialog.js';
+import { useCustomizeDoorWalled } from '../studio-design/StudioCustomizeControls.js';
 import { ObjectGrid } from '@object-ui/plugin-grid';
 import {
   LIST_PAGE_PARAM,
@@ -466,7 +468,19 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // writable base exists, create into it (defaulting away from the Local/null
   // scope); when none exists yet, prompt to create a base first.
   const [showCreateBase, setShowCreateBase] = React.useState(false);
+  // objectstack#36897 — in the Studio area an object or a flow is created in
+  // the list's own dialog (`MetadataListCreateDialog`), and on a read-only
+  // base every create lands in the base's `.custom` pair (ADR-0146 D3) — none
+  // where the ensure door refuses this caller, as on the pillars.
+  const customizeWalled = useCustomizeDoorWalled();
+  const createInPair = !!host?.readOnly && pairId !== null && !customizeWalled;
+  const createInDialog = !!host?.packageId && LIST_CREATE_DIALOG_TYPES.includes(type);
+  const [createOpen, setCreateOpen] = React.useState(false);
   const handleCreate = React.useCallback(() => {
+    if (createInDialog) {
+      setCreateOpen(true);
+      return;
+    }
     // An environment-authored item belongs to no package (ADR-0131 D3).
     if (envScope) {
       navigate(`./new?${ENVIRONMENT_SCOPE_QUERY}`);
@@ -495,7 +509,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       return;
     }
     navigate(`./new${pkgSuffix}`);
-  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg]);
+  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg, createInDialog]);
 
   // objectui#7611 — the activation state the switch column shows. Re-read on
   // the list's own refresh, never on an unrelated render. The anchors arrive
@@ -791,7 +805,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const typeWritable = !!(entry?.allowEnvironmentOverlay || entry?.allowRuntimeCreate);
   // A declaration-only catalog is never authored here: its items are created
   // on the authored object's page.
-  const canCreate = typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && !host?.readOnly;
+  const canCreate =
+    typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && (!host?.readOnly || createInPair);
   // The wall is the gate to NAME only where the type would otherwise admit a
   // write: a type with no runtime write channel is read-only for the operator
   // too, and its page says nothing about the wall.
@@ -1145,6 +1160,21 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
 
   const body = (
       <div className="p-6 space-y-4" ref={scrollAnchorRef}>
+        {createInDialog && host?.packageId && (
+          <MetadataListCreateDialog
+            type={type}
+            open={createOpen}
+            onOpenChange={setCreateOpen}
+            packageId={host.packageId}
+            inPair={createInPair}
+            locale={locale}
+            onCreated={({ name, packageId }) => {
+              setCreateOpen(false);
+              refresh();
+              navigate(`./${encodeURIComponent(name)}?package=${encodeURIComponent(packageId)}`);
+            }}
+          />
+        )}
         <CreatePackageDialog
           open={showCreateBase}
           onOpenChange={setShowCreateBase}
