@@ -22,10 +22,10 @@ import { Separator } from "./separator"
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "./sheet"
+import { SidebarDrawerTitle } from "../lib/sidebar-drawer-label"
 import { Skeleton } from "./skeleton"
 import {
   Tooltip,
@@ -219,6 +219,7 @@ const Sidebar = React.forwardRef<
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
+            aria-describedby={undefined}
             className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden data-[state=open]:duration-300 data-[state=open]:ease-out"
             style={
               {
@@ -228,8 +229,7 @@ const Sidebar = React.forwardRef<
             side={side}
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>Sidebar</SheetTitle>
-              <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+              <SheetTitle><SidebarDrawerTitle /></SheetTitle>
             </SheetHeader>
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>
