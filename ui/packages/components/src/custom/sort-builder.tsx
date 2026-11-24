@@ -35,7 +35,7 @@ const useSafeSortTranslation = createSafeTranslation(
 )
 
 /** The direction words a sort level uses, by field type: time, size or the alphabet. */
-export type SortWording = 'time' | 'size' | 'alphabet'
+type SortWording = 'time' | 'size' | 'alphabet'
 
 /** Ordered by time: the filter's date family. */
 const TIME_SORT_TYPES: ReadonlySet<string> = new Set<string>(FILTER_DATE_LIKE_TYPES)
@@ -43,19 +43,18 @@ const TIME_SORT_TYPES: ReadonlySet<string> = new Set<string>(FILTER_DATE_LIKE_TY
 const SIZE_SORT_TYPES: ReadonlySet<string> = new Set<string>([...FILTER_NUMBER_LIKE_TYPES, 'boolean'])
 
 /**
- * Which words name a sort direction on a field of `type`. The one source for
- * every surface that words a direction — the sort builder's levels and the
- * list's sort chip — so a number never reads "A → Z" in one and "Low → High"
- * in the other. An unknown or absent type reads as the alphabet.
+ * Which words name a sort direction on a field of `type`, over the
+ * `listConditions.sort.*` rows every locale carries. An unknown or absent type
+ * reads as the alphabet.
  */
-export function sortWording(type: string | undefined): SortWording {
+function sortWording(type: string | undefined): SortWording {
   if (type && TIME_SORT_TYPES.has(type)) return 'time'
   if (type && SIZE_SORT_TYPES.has(type)) return 'size'
   return 'alphabet'
 }
 
 /** The words for one sort direction on a field of `type`: time, size or the alphabet. */
-export function sortDirectionLabel(
+function sortDirectionLabel(
   type: string | undefined,
   order: 'asc' | 'desc',
   t: (key: string) => string,

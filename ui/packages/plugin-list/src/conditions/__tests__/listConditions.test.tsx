@@ -35,7 +35,7 @@ import type { FilterBuilderRow } from '@object-ui/components';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { operatorsForField, sortDirectionLabel } from '@object-ui/components';
+import { operatorsForField } from '@object-ui/components';
 import { builtInLocales, en as enPack, zh as zhPack } from '@object-ui/i18n/locales';
 import { I18nProvider } from '@object-ui/i18n';
 import { parseFilterAST } from '@objectstack/spec/data';
@@ -595,13 +595,6 @@ describe('SortPanel — the same field list with the direction on top', () => {
   it('CONTROL: without renderAdvanced the sort panel has no footer entry', () => {
     render(<SortPanel fields={FIELDS} shownFields={SHOWN} value={[]} onChange={() => {}} />);
     expect(screen.queryByTestId('sort-panel-open-advanced')).toBeNull();
-  });
-
-  it('words the direction by type: time for dates, size for numbers, the alphabet for text', () => {
-    const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
-    expect(sortDirectionLabel('date', 'asc', t as never)).toBe('Oldest → Newest');
-    expect(sortDirectionLabel('currency', 'desc', t as never)).toBe('High → Low');
-    expect(sortDirectionLabel('text', 'asc', t as never)).toBe('A → Z');
   });
 });
 
