@@ -297,10 +297,13 @@ describe('Approvals Inbox — the reading state survives a request page and Back
     expect(await screen.findByText('0 of 2')).toBeInTheDocument();
     expect(trigger('Expense Approval')).toBeInTheDocument();
     expect(trigger('expense')).toBeInTheDocument();
-    await new Promise((r) => setTimeout(r, 0));
+    // A drop would be a router write, which commits in a transition, a few
+    // ticks after the page lands: give it time to land before reading.
+    await new Promise((r) => setTimeout(r, 300));
     expect(Object.fromEntries(new URL(where(), 'http://x').searchParams)).toEqual({
       scope: 'all', process: 'Expense Approval', object: 'expense',
     });
+    expect(trigger('Expense Approval')).toBeInTheDocument();
   });
 
   it('changing tab clears the filters, search and sort from the address and keeps every other param', async () => {
