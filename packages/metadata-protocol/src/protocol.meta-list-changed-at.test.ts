@@ -29,7 +29,8 @@ import { GetMetaItemsResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
-const TYPE = 'dashboard';
+const DEFAULT_TYPE = 'dashboard';
+const TYPE = DEFAULT_TYPE;
 const PKG_A = 'com.example.a';
 const PKG_B = 'com.example.b';
 const NAME = 'sales_board';
@@ -57,13 +58,13 @@ const whereValueMatches = (actual: unknown, want: unknown): boolean =>
 function row(
     packageId: string | null,
     stamps: { updated_at?: unknown; created_at?: unknown },
-    opts: { state?: 'active' | 'draft'; name?: string; label?: string } = {},
+    opts: { state?: 'active' | 'draft'; name?: string; label?: string; type?: string } = {},
 ): StoredRow {
     const name = opts.name ?? NAME;
     const state = opts.state ?? 'active';
     return {
         id: `r_${name}_${packageId ?? 'none'}_${state}`,
-        type: TYPE,
+        type: opts.type ?? TYPE,
         name,
         package_id: packageId,
         state,
@@ -75,7 +76,12 @@ function row(
 /** What a package's loader registered: a code-shipped item, no stored row. */
 const artifact = (packageId: string, name = NAME) => ({ name, label: `${name} shipped by ${packageId}`, _packageId: packageId, _provenance: 'package' });
 
-function harness(rows: StoredRow[], artifacts: Array<Record<string, unknown>> = []) {
+function harness(
+    rows: StoredRow[],
+    artifacts: Array<Record<string, unknown>> = [],
+    opts: { type?: string; applyNavContributions?: (app: any) => any } = {},
+) {
+    const TYPE = opts.type ?? DEFAULT_TYPE;
     const ofPackage = (packageId?: string) => artifacts.filter((i) => !packageId || i._packageId === packageId);
     const registry = {
         ...NO_PACKAGE_SCOPED_READS,
@@ -93,7 +99,7 @@ function harness(rows: StoredRow[], artifacts: Array<Record<string, unknown>> = 
         registerObject: () => undefined,
         getPackage: () => undefined,
         isPackageDisabled: () => false,
-        applyNavContributions: (app: unknown) => app,
+        applyNavContributions: opts.applyNavContributions ?? ((app: unknown) => app),
     };
     const matching = (where: Record<string, unknown>) => {
         for (const k of Object.keys(where)) {
@@ -280,5 +286,32 @@ describe('5 — only the served effective list answers it, and no returned item 
             expect('changedAt' in answer).toBe(false);
             expect(symbolsOf(answer.items)).toEqual([]);
         }
+    });
+});
+
+// ── 6. The app nav fold ──────────────────────────────────────────────────────
+
+describe('6 — an `app` keeps its entry through the nav contribution fold, which clones the app', () => {
+    /** The registry's fold as it stands: a contributed app is answered as a `structuredClone` carrying the contribution. */
+    const fold = (app: any) => (app?.name === NAME
+        ? structuredClone({ ...app, navigation: [...(app.navigation ?? []), { id: 'contributed', type: 'url', url: '/x' }] })
+        : app);
+    const rows = () => [
+        row(PKG_A, { updated_at: T_MID }, { type: 'app' }),
+        row(PKG_A, { updated_at: T_OLD }, { type: 'app', name: 'plain_app' }),
+    ];
+
+    it('a stored app the fold contributes to, beside one it does not: both keyed, the contribution served, plain items', async () => {
+        const listed: any = await harness(rows(), [], { type: 'app', applyNavContributions: fold }).getMetaItems({ type: 'app' });
+        const contributed = (listed.items as any[]).find((it) => it.name === NAME);
+        expect(contributed.navigation.map((n: any) => n.id)).toEqual(['contributed']);
+        expect(listed.changedAt).toEqual({ [NAME]: T_MID, plain_app: T_OLD });
+        expect((listed.items as any[]).flatMap((it) => Object.getOwnPropertySymbols(it))).toEqual([]);
+    });
+
+    it('control: a code-shipped app the fold contributes to stays unkeyed', async () => {
+        const listed: any = await harness([], [artifact(PKG_A)], { type: 'app', applyNavContributions: fold }).getMetaItems({ type: 'app' });
+        expect((listed.items as any[]).find((it) => it.name === NAME)?.navigation.map((n: any) => n.id)).toEqual(['contributed']);
+        expect('changedAt' in listed).toBe(false);
     });
 });

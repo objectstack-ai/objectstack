@@ -17,5 +17,4 @@ Skills-docs: none — a read-only field of the list response that no author writ
 - On `?preview=draft`, an item whose pending draft is served (`_draft: true`) has the draft row's time.
 - Several listed items of one name (a name two or more packages ship, the members of a bundle) answer the latest of their times.
 - The `/meta` list chain (REST and the runtime dispatcher) keys only the names of which it still lists every item: where the per-caller gate withholds an item, or a query filter leaves one out, that name has no entry, so the time of an item the caller is not shown is never served, under its own name or a name another listed item shares.
-- An `app` with navigation contributions keeps its entry (the contribution fold clones the app).
 - The items themselves are unchanged. The execution face and the per-package layer answer no `changedAt`, and the MCP `list_metadata_items` summary is unchanged.
