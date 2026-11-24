@@ -66,6 +66,8 @@ const pt = {
     autofillCurrencyDiffers: '{{field}} não foi preenchido: o valor escolhido é {{amount}} em {{from}}, mas aqui {{field}} está em {{to}}. Informe-o em {{to}}.',
     autofillSourceNoCurrency: '{{field}} não foi preenchido: o valor escolhido {{amount}} não indica moeda, mas aqui {{field}} está em {{to}}. Informe-o em {{to}}.',
     autofillNoCurrency: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas ainda não há moeda escolhida aqui. Escolha a moeda e depois informe {{field}}.',
+    autofillCurrencyUnread: '{{field}} não foi preenchido: o valor escolhido é {{amount}}, mas não foi possível ler a moeda aqui. Verifique a moeda e depois informe {{field}}.',
+    autofillKept: '{{field}} mantém o valor anterior.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

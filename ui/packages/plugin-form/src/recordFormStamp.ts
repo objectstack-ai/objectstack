@@ -32,6 +32,13 @@
  *   (objectstack#36249), and a target's currency is its definition's. A
  *   target the form draws carries the name the form shows for it, so the
  *   note about a target it did not fill names it the same way.
+ * - The hosts this reaches are every record-form layout: `ObjectForm`'s
+ *   simple and sectioned arms, `TabbedForm`, `WizardForm`, `ModalForm` and
+ *   `DrawerForm`, and the forms drawn through `ObjectForm` (`MasterDetailForm`'s
+ *   header and line form, `EmbeddableForm`). A line-item grid judges its own
+ *   picks (`GridField`). A standalone `form` node drawn outside these hosts
+ *   holds no object field map, is not stamped, and its lookup copies as it
+ *   always did.
  */
 import { RECORD_BEING_EDITED_KEY, withLookupAutofillTargets, withRecordBeingEdited } from '@object-ui/fields';
 

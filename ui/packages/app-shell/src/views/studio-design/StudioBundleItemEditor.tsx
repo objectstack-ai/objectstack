@@ -42,6 +42,15 @@
  * what uses it, from the references read (`client.references`), before
  * anything is published; and a refusal the header's Publish kept for it is
  * shown here, at the item, as on its Pending changes entry.
+ *
+ * ## A view, dashboard, report or page (objectstack#36502)
+ *
+ * Their Customize door was the Interfaces pillar's. With that pillar retired,
+ * the area opens a read-only base's item of these types here as it opens a
+ * dataset: the type's registered designer (`ViewDefaultInspector`,
+ * `DashboardDefaultInspector`, `ReportDefaultInspector`,
+ * `PageDefaultInspector`) beside its preview, customized as above, with the
+ * override mark and its Restore.
  */
 
 import * as React from 'react';
@@ -219,7 +228,7 @@ function StudioBundleUsedBy({
 export interface StudioBundleItemEditorProps {
   /** The package the area is open on. */
   packageId: string;
-  /** `email_template` or `translation` (`AREA_FORM_EDITOR_TYPES`), or a read-only package's `dataset`. */
+  /** `email_template` or `translation` (`AREA_FORM_EDITOR_TYPES`), or a read-only package's `dataset`, `view`, `dashboard`, `report` or `page` (`AREA_CUSTOMIZE_EDITOR_TYPES`). */
   type: string;
   name: string;
   /** The bundle member the URL names (`?member=`); absent for the canonical one and for a translation. */

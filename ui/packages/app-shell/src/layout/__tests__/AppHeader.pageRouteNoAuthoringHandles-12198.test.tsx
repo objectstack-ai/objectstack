@@ -339,7 +339,7 @@ describe('a page offers no Studio entry to a caller without `manage_metadata` (o
 
   it('CONTROL — a workspace admin holding `manage_metadata` sees all three, all three to one target', async () => {
     const seen = await studioEntriesOnPageRoute(AUTHOR);
-    expect(seen['app-design-in-studio-button']).toBe('/studio/com.objectstack.cloud/interfaces?surface=page:welcome');
+    expect(seen['app-design-in-studio-button']).toBe('/studio/com.objectstack.cloud/metadata/page/welcome');
     // The page's pencil opened the metadata-admin page until objectui#12540.
     expect(seen['page-edit-in-studio-button']).toBe(seen['app-design-in-studio-button']);
     expect(seen['app-switcher-edit-in-studio']).toBe(seen['app-design-in-studio-button']);

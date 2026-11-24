@@ -1626,30 +1626,30 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     fields: {
       name: {
         label: "名称",
-        helpText: "snake_case 唯一标识符"
+        helpText: "仪表盘的唯一内部名称：使用小写字母、数字和下划线，以字母开头（例如 sales_overview）。"
       },
       label: {
         label: "显示名称",
-        helpText: "显示名"
+        helpText: "使用者看到的仪表盘标题。"
       },
       description: {
         label: "描述"
       },
       columns: {
         label: "列",
-        helpText: "栅格列数（默认 12）"
+        helpText: "组件排布所用的列数，1 到 24。留空时仪表盘会按组件的宽度自动选择。"
       },
       gap: {
         label: "间距",
-        helpText: "组件之间的间距，每级 0.25rem（4 = 1rem）"
+        helpText: "组件之间留出的空间。数值越大越松散；留空则使用标准间距。"
       },
       refreshIntervalSeconds: {
         label: "刷新间隔",
-        helpText: "自动刷新间隔（秒）"
+        helpText: "仪表盘重新加载数据的频率（秒）。留空或填 0 表示不自动刷新。"
       },
       header: {
         label: "页眉",
-        helpText: "仪表盘页眉配置（title、subtitle、actions）"
+        helpText: "仪表盘顶部显示的内容：标题、描述和操作按钮。"
       },
       "header.showTitle": {
         label: "显示标题",
@@ -1677,7 +1677,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "组件",
-        helpText: "包含位置和尺寸的仪表盘组件"
+        helpText: "仪表盘上的图表、数字和表格，以及每一项所在的位置。"
       },
       "widgets.id": {
         label: "组件 ID"
@@ -1732,11 +1732,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       dateRange: {
         label: "日期范围",
-        helpText: "默认日期范围选择器"
+        helpText: "打开仪表盘时默认的时间段，以及查看者能否自选日期。"
       },
       globalFilters: {
         label: "全局筛选",
-        helpText: "应用到所有组件的筛选条件"
+        helpText: "查看者可用来一次筛选全部组件，或只筛选你指定组件的筛选条件。"
       },
       "globalFilters.name": {
         label: "名称"

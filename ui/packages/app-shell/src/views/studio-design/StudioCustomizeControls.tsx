@@ -8,12 +8,12 @@
  *
  * What this module holds, and what it reads:
  *
- *  - which types Studio customizes ({@link STUDIO_CUSTOMIZE_TYPES}): the
- *    Interfaces pillar's four and the app its rail navigates, each an
+ *  - which types Studio customizes ({@link STUDIO_CUSTOMIZE_TYPES}): a view,
+ *    dashboard, report and page, and an app, each an
  *    `overridable` type of the spec's closed classification
  *    (`isOverridableMetadataType`);
  *  - the body the pair's draft is written with ({@link overrideDraftBody}):
- *    the document the pillar holds, without its `_` keys, declaring
+ *    the document the editor holds, without its `_` keys, declaring
  *    `overrides: { package, basedOn }`;
  *  - the declaration the server serves for an item ({@link useServedOverride}):
  *    the pair's draft as the draft door serves it, else the layered read's
@@ -25,7 +25,7 @@
  *    offers Restore, with its confirmation (objectstack#29692).
  *
  * The pair's id for a write is the ensure door's answer
- * (`packages-io.ts#ensureCustomizationPackage`); the pillar asks it.
+ * (`packages-io.ts#ensureCustomizationPackage`); the editor asks it.
  */
 
 import * as React from 'react';
@@ -65,17 +65,18 @@ import { useStudioFoldedMenuClose } from './StudioItemHeader.js';
 import { readFields, writeFields, type FieldEntry } from '../metadata-admin/previews/object-fields-io.js';
 
 /**
- * The types Studio's Customize door covers: the Interfaces pillar's view,
- * dashboard, report and page (an `object` leaf's list view is a `view`;
- * objectstack#30063: a page, block or source, is edited in its designer as
- * a dashboard is), and the app whose navigation that pillar's rail edits
- * (objectstack#30059: the whole app is copied into the pair on the first
- * saved navigation edit). Each is an
- * `overridable` type of the spec's classification. Translations and email
- * templates are too: no pillar designs them, and the All metadata area's form
- * editor customizes them (`StudioBundleItemEditor`, objectstack#28569). So is
- * a read-only package's dataset, in that editor with its own designer
- * (objectstack#30064, `metadataArea.ts#AREA_CUSTOMIZE_EDITOR_TYPES`).
+ * The types Studio's Customize door covers: a view, dashboard, report and page
+ * (objectstack#30063: a page, block or source, is edited in its designer as a
+ * dashboard is), and an app (objectstack#30059: the whole app is copied into
+ * the pair on the first saved navigation edit). Each is an `overridable` type
+ * of the spec's classification. Their door was the Interfaces pillar's header;
+ * since objectstack#36502 retired that pillar, a read-only base's view,
+ * dashboard, report or page is customized in the All metadata area's editor
+ * (`StudioBundleItemEditor`, `metadataArea.ts#AREA_CUSTOMIZE_EDITOR_TYPES`),
+ * and an app's navigation in the running app's design mode
+ * (`layout/designModeMenuSave.ts`). Translations and email templates are
+ * customized in that editor too (objectstack#28569), and so is a read-only
+ * package's dataset, with its own designer (objectstack#30064).
  */
 export const STUDIO_CUSTOMIZE_TYPES: readonly string[] = ['view', 'dashboard', 'report', 'page', 'app'];
 

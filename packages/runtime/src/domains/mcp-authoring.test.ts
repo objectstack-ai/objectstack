@@ -749,7 +749,7 @@ describe('save_metadata_draft saves a draft and answers with its publish verdict
       saved: { type: 'flow', name: 'lead_intake', package: 'com.acme.crm', state: 'draft', version: 'v8' },
       verdict: { publishable: false, refusals: [UNROUTABLE_ISSUE], advisories: [] },
       review: {
-        changes: '/studio/com.acme.crm/interfaces?changes=review',
+        changes: '/studio/com.acme.crm/data?changes=review',
         item: '/studio/com.acme.crm/metadata/flow/lead_intake?review=1',
         note: expect.any(String),
       },
@@ -1026,7 +1026,7 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect(finding.path).toBe('flows[0].nodes[0].config.triggerType');
     expect(typeof finding.hint === 'string' && finding.hint.length > 0).toBe(true);
     expect(saved.body.verdict.publishable).toBe(false);
-    expect(saved.body.review.changes).toBe(`/studio/${STUDIO_BASE}/interfaces?changes=review`);
+    expect(saved.body.review.changes).toBe(`/studio/${STUDIO_BASE}/data?changes=review`);
 
     // The Studio Changes source: the package's pending drafts.
     const listed = await call(authoring, 'list_drafts', { package: STUDIO_BASE });
