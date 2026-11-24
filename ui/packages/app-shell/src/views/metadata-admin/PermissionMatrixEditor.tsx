@@ -139,7 +139,7 @@ import { holdingOfRead, holdingPackage, type PermissionSetHolding } from './perm
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { errorCodeIs } from '@object-ui/types';
-import { formatMetadataError, type MetadataError } from '@object-ui/data-objectstack';
+import { formatMetadataError, readDraftChanges, type DraftChange, type MetadataError } from '@object-ui/data-objectstack';
 import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
 import { isStudioHiddenSystemField } from '../studio-design/studioHiddenSystemField.js';
 import { permissionSetCloneNoticeText, type PermissionSetCloned } from './permission-set-clone.js';
@@ -591,6 +591,12 @@ export interface PermissionStudioFrame {
   toolOpen?: boolean;
   /** The open tool's panel, drawn in the body while {@link toolOpen}. */
   toolPanel?: React.ReactNode;
+  /**
+   * Told, on every load, who wrote the set's pending draft: its per-key
+   * provenance (`draftChanges`), `null` with no draft or none recorded. The
+   * host draws the AI-draft notice from it (epic decision 1).
+   */
+  onDraftChangesRead?: (changes: DraftChange[] | null) => void;
 }
 
 export interface PermissionMatrixEditPageProps {
@@ -873,6 +879,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const cloneSourcePackage = holdingPackage(assignmentsHolding ?? undefined);
   const onCloneSourceReadRef = React.useRef(studio?.onCloneSourceRead);
   onCloneSourceReadRef.current = studio?.onCloneSourceRead;
+  const onDraftChangesReadRef = React.useRef(studio?.frame?.onDraftChangesRead);
+  onDraftChangesReadRef.current = studio?.frame?.onDraftChangesRead;
   React.useEffect(() => {
     onCloneSourceReadRef.current?.(name, cloneSourcePackage);
   }, [name, cloneSourcePackage]);
@@ -1156,6 +1164,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         }
         const pendingDraft = pendingRead?.answer ?? null;
         hadDraftRef.current = !!pendingDraft;
+        onDraftChangesReadRef.current?.(pendingDraft ? readDraftChanges(pendingDraft) : null);
         verdictReadSeq.current += 1;
         setServedVerdict(
           editedItemDiagnostics({

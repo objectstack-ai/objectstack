@@ -24,15 +24,20 @@
  *    so ×, ‹ ›, the left menu, a reload and a tab close all ask first
  *    (epic decision 12). The browser's Back is not guarded.
  *
- * The AI-draft notice that objects and flows draw (objectstack#36660) is not
- * drawn here yet: that card decides it for every remaining editor.
+ *  - An AI-written pending draft (copilot or MCP) is the version on screen and
+ *    gets the designers' notice (`StudioAiDraftNotice`): Save makes it live
+ *    with the page's own edits, and 「放弃 AI 的改动」 drops that one set's
+ *    draft at its package, asking first only when the matrix holds unsaved
+ *    edits — the rule the generic item page follows (epic decision 1,
+ *    objectstack#36660). A person's own leftover draft keeps Discard draft
+ *    (decision 14).
  */
 
 import * as React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Copy, Shield, ShieldQuestion, Undo2 } from 'lucide-react';
 import { DropdownMenuItem } from '@object-ui/components';
-import { formatMetadataError } from '@object-ui/data-objectstack';
+import { formatMetadataError, type DraftChange } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
 import {
   PermissionMatrixEditPage,
@@ -52,6 +57,8 @@ import { confirmUnsavedLeave } from '../../chrome/unsavedEdits.js';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
 import { suggestedSetLabel } from '../../components/suggestedSetLabel.js';
 import { StudioReadOnlyLink } from './StudioPillarKit.js';
+import { StudioAiDraftNotice } from './StudioAiDraftNotice.js';
+import { isAgentDraftSurface } from './StudioDraftMark.js';
 import type { StudioItemStatus } from './StudioItemHeader.js';
 import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { customizationPairBaseOf } from './StudioRailCustomizations.js';
@@ -169,35 +176,65 @@ export function StudioPermissionSetPage({
   const titleRef = React.useRef(name);
 
   const hasDraft = !readOnly && !!read?.drafts.has(name);
+  // Who wrote the pending draft, as the matrix's load read it.
+  const [draftChanges, setDraftChanges] = React.useState<DraftChange[] | null>(null);
+  const aiDraft = (draftChanges ?? []).some((change) => isAgentDraftSurface(change.by));
+  const [matrixDirty, setMatrixDirty] = React.useState(false);
   const [discarding, setDiscarding] = React.useState(false);
-  const discardDraft = React.useCallback(async () => {
-    const item = titleRef.current || name;
-    const neverPublished = !read?.published.has(name);
-    // One confirm: an unsaved edit on the matrix is an unpublished change of
-    // this same set, and the discard removes it with the rest.
-    const key = neverPublished ? 'engine.studio.access.discardConfirmUnpublished' : 'engine.studio.access.discardConfirm';
-    if (!window.confirm(tFormat(key, locale, { item }))) return;
-    setDiscarding(true);
-    try {
-      await client.reset('permission', name, { state: 'draft', packageId });
-      toast.success(tFormat('engine.edit.draftDiscarded', locale, { item }));
-      onDraftSaved?.();
-      // A set that was never published has nothing left: back to its list.
-      if (neverPublished) {
-        navigate(detailListHref(location.pathname, searchParams));
-        return;
+  /** Drop this set's draft at its package (`DELETE ?state=draft`), once `ask` agreed. */
+  const dropDraft = React.useCallback(
+    async (ask: (item: string, neverPublished: boolean) => boolean, failed: (e: unknown) => void) => {
+      const item = titleRef.current || name;
+      const neverPublished = !read?.published.has(name);
+      if (!ask(item, neverPublished)) return;
+      setDiscarding(true);
+      try {
+        await client.reset('permission', name, { state: 'draft', packageId });
+        toast.success(tFormat('engine.edit.draftDiscarded', locale, { item }));
+        setDraftChanges(null);
+        onDraftSaved?.();
+        // A set that was never published has nothing left: back to its list.
+        if (neverPublished) {
+          navigate(detailListHref(location.pathname, searchParams));
+          return;
+        }
+        setRereadNonce((n) => n + 1);
+        setReadNonce((n) => n + 1);
+      } catch (e) {
+        failed(e);
+      } finally {
+        setDiscarding(false);
       }
-      setRereadNonce((n) => n + 1);
-      setReadNonce((n) => n + 1);
-    } catch (e) {
-      toast.error(t('engine.studio.access.discardFailed', locale), {
-        description: formatMetadataError(e),
-        classNames: { description: 'whitespace-pre-line' },
-      });
-    } finally {
-      setDiscarding(false);
-    }
-  }, [read, name, locale, client, packageId, onDraftSaved, navigate, location.pathname, searchParams]);
+    },
+    [read, name, locale, client, packageId, onDraftSaved, navigate, location.pathname, searchParams],
+  );
+  // A person's own draft: one confirm, since an unsaved edit on the matrix is
+  // an unpublished change of this same set and goes with the rest.
+  const discardDraft = () =>
+    dropDraft(
+      (item, neverPublished) =>
+        window.confirm(
+          tFormat(
+            neverPublished ? 'engine.studio.access.discardConfirmUnpublished' : 'engine.studio.access.discardConfirm',
+            locale,
+            { item },
+          ),
+        ),
+      (e) =>
+        toast.error(t('engine.studio.access.discardFailed', locale), {
+          description: formatMetadataError(e),
+          classNames: { description: 'whitespace-pre-line' },
+        }),
+    );
+  // The AI's draft: asked first only when the matrix holds unsaved edits.
+  const discardAiDraft = () =>
+    dropDraft(
+      () => !matrixDirty || window.confirm(t('engine.studio.aiDraft.discardConfirmUnsaved', locale)),
+      (e) =>
+        toast.error(tFormat('engine.studio.aiDraft.discardFailed', locale, { reason: formatMetadataError(e) }), {
+          classNames: { description: 'whitespace-pre-line' },
+        }),
+    );
 
   // "New similar" on a read-only base's set (objectstack#28573): the copy
   // opens where the clone door says it landed, with the strip riding the
@@ -286,7 +323,7 @@ export function StudioPermissionSetPage({
                 locale={locale}
               />
             )}
-            {hasDraft && (
+            {hasDraft && !aiDraft && (
               <button
                 type="button"
                 data-testid="access-discard-draft"
@@ -364,6 +401,14 @@ export function StudioPermissionSetPage({
         strings={accessSuggestionStrings(locale, (s) => suggestedSetLabel(s, read?.sets ?? []))}
       />
       {shownStrip && <NewSimilarStripNotice strip={shownStrip} locale={locale} onDismiss={() => setStrip(null)} />}
+      {aiDraft && (
+        <StudioAiDraftNotice
+          locale={locale}
+          onDiscard={readOnly ? undefined : () => void discardAiDraft()}
+          busy={discarding}
+          className="mx-3 mt-2"
+        />
+      )}
       <div className="min-h-0 flex-1">
         <PermissionMatrixEditPage
           type="permission"
@@ -375,7 +420,12 @@ export function StudioPermissionSetPage({
             onDraftSaved?.();
             setReadNonce((n) => n + 1);
           }}
-          onSaved={() => setReadNonce((n) => n + 1)}
+          onSaved={() => {
+            // Published: no draft of the set is left, the AI's included.
+            setDraftChanges(null);
+            setReadNonce((n) => n + 1);
+          }}
+          onDirtyChange={setMatrixDirty}
           embedded
           // objectstack#29809 — a set a base's pair holds is one the pair adds
           // (a permission set takes no override, ADR-0005): it reads Custom,
@@ -391,7 +441,7 @@ export function StudioPermissionSetPage({
               itemTab.select('details');
             },
             onCloneSourceRead,
-            frame: { renderHeader, toolOpen, toolPanel },
+            frame: { renderHeader, toolOpen, toolPanel, onDraftChangesRead: setDraftChanges },
           }}
         />
       </div>

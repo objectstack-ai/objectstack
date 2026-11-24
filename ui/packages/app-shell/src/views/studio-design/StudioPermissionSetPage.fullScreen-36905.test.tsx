@@ -73,7 +73,17 @@ window.matchMedia = ((query: string) => ({
 
 const en = (key: string) => t(key, 'en');
 
-function makeClient(drafts: string[] = []) {
+/** The set's pending draft as the strict draft read serves it, with who wrote it. */
+function draftOf(by: 'copilot' | 'mcp' | 'studio') {
+  return {
+    type: 'permission',
+    name: SET,
+    item: { ...BODY, label: 'Sales rep (AI)' },
+    draftChanges: [{ path: ['label'], by, actor: 'u1', at: '2026-11-24T10:00:00.000Z' }],
+  };
+}
+
+function makeClient(drafts: string[] = [], draft: ReturnType<typeof draftOf> | null = null) {
   return {
     save: vi.fn(async (_t: string, _n: string, body: Record<string, unknown>) => body),
     reset: vi.fn(async () => ({})),
@@ -86,7 +96,7 @@ function makeClient(drafts: string[] = []) {
     }),
     listDrafts: vi.fn(async () => drafts.map((name) => ({ name }))),
     layered: vi.fn(async () => ({ effective: BODY, code: null, overlay: null, overlayScope: null })),
-    getDraft: vi.fn(async () => null),
+    getDraft: vi.fn(async () => draft),
     get: vi.fn(async () => ({ fields: [] })),
   };
 }
@@ -210,6 +220,32 @@ describe('the draft discard (objectstack#36905)', () => {
     await title();
     await waitFor(() => expect(clientImpl.listDrafts).toHaveBeenCalled());
     expect(screen.queryByTestId('access-discard-draft')).toBeNull();
+  });
+});
+
+describe('an AI draft gets the designers\' notice and discard (objectstack#36905 item 6, epic decision 1)', () => {
+  for (const by of ['copilot', 'mcp'] as const) {
+    it(`${by}: the notice, its discard drops the set's draft at its package without asking on a clean page`, async () => {
+      clientImpl = makeClient([SET], draftOf(by));
+      mount(CUSTOM_PKG);
+      expect(await screen.findByTestId('studio-ai-draft-notice', undefined, { timeout: 8000 })).toHaveTextContent(
+        en('engine.studio.aiDraft.notice'),
+      );
+      // The AI's draft is discarded from its notice, not from the plain button.
+      expect(screen.queryByTestId('access-discard-draft')).toBeNull();
+      fireEvent.click(screen.getByTestId('studio-ai-draft-discard'));
+      await waitFor(() =>
+        expect(clientImpl.reset).toHaveBeenCalledWith('permission', SET, { state: 'draft', packageId: CUSTOM_PKG }),
+      );
+      expect(window.confirm).not.toHaveBeenCalled();
+    });
+  }
+
+  it('CONTROL: a person\'s own draft draws no notice, and keeps Discard draft', async () => {
+    clientImpl = makeClient([SET], draftOf('studio'));
+    mount(CUSTOM_PKG);
+    await screen.findByTestId('access-discard-draft', undefined, { timeout: 8000 });
+    expect(screen.queryByTestId('studio-ai-draft-notice')).toBeNull();
   });
 });
 
