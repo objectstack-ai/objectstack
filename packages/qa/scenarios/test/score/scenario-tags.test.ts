@@ -47,6 +47,10 @@ function richArtifact(edit?: (stack: Bag) => void): Bag {
   const fixture = DEFAULT_METADATA_EVAL_CORPUS.find((c) => c.id === 'project_with_tasks')!.fixture;
   const stack = structuredClone(fixture) as Bag;
   stack.objects[0].fields.sponsor = { type: 'user', label: 'Sponsor' };
+  // The tasks are edited inline the supported way: a field group of the
+  // project names them, and the FK declares no `inlineEdit` at all.
+  stack.objects[0].fieldGroups = [{ key: 'tasks', label: 'Tasks', relatedList: 'task' }];
+  delete stack.objects[1].fields.project.inlineEdit;
   stack.objects[1].fields.blocked_by = { type: 'lookup', label: 'Blocked By', reference: 'task' };
   stack.objects[1].fields.estimate_days = { type: 'formula', label: 'Estimate (days)', expression: 'record.estimate_hours / 8', returnType: 'number' };
   stack.objects[1].validations = [
@@ -151,7 +155,11 @@ const TAG_DEGRADATIONS: Record<string, Record<string, (a: Bag) => void>> = {
     'dangling lookup target': (a) => { field(a, 'task', 'blocked_by').reference = 'no_such_object'; },
   },
   'records-forms.master-detail-inline-edit': {
-    'master-detail not edited inline': (a) => { delete field(a, 'task', 'project').inlineEdit; },
+    'master-detail not edited inline': (a) => { delete (a.objects[0] as Bag).fieldGroups; },
+    'master-detail carrying only the retired `inlineEdit: true`': (a) => {
+      delete (a.objects[0] as Bag).fieldGroups;
+      field(a, 'task', 'project').inlineEdit = true;
+    },
     'dangling master-detail target': (a) => { field(a, 'task', 'project').reference = 'no_such_object'; },
   },
   'records-forms.roll-up-summary': {
@@ -416,6 +424,41 @@ describe('agent actions — a declared action the build does not expose fails', 
 const grade = (a: Bag, tag: string, card: ScenarioArtifactCard = CARD, namespace?: string) =>
   gradeCapabilityTags(readArtifactFacts(a), { ...card, capabilities: [tag] }, namespace === undefined ? {} : { namespace })[0]!;
 const pairs = (v: { checks: Array<{ check: string; pass: boolean }> }) => v.checks.map((c) => [c.check, c.pass]);
+
+describe('master-detail inline edit — placed by a field group of the master, or a declared form factor', () => {
+  const inline = (a: Bag) => grade(a, 'records-forms.master-detail-inline-edit').checks.at(-1);
+  const noGroup = (a: Bag) => { delete (a.objects[0] as Bag).fieldGroups; return a; };
+
+  it('credits a child a field group of its master names, by child object or by `object.field`, with no `inlineEdit`', () => {
+    expect(field(richArtifact(), 'task', 'project').inlineEdit).toBeUndefined();
+    expect(inline(richArtifact())).toEqual({ check: 'master-detail-inline-edit', pass: true, detail: '1 edited inline' });
+    const dotted = richArtifact((stack) => { stack.objects[0].fieldGroups[0].relatedList = 'task.project'; });
+    expect(inline(dotted)?.pass).toBe(true);
+  });
+
+  it('does not credit a group on the CHILD, or a group naming the child on an FK a group may not place', () => {
+    const onChild = noGroup(richArtifact());
+    (onChild.objects[1] as Bag).fieldGroups = [{ key: 'tasks', label: 'Tasks', relatedList: 'task' }];
+    expect(inline(onChild)?.pass).toBe(false);
+    const tab = richArtifact();
+    field(tab, 'task', 'project').relatedList = true;
+    expect(inline(tab)?.pass).toBe(false);
+  });
+
+  it('does not credit the retired `inlineEdit: true` alone', () => {
+    const a = noGroup(richArtifact());
+    field(a, 'task', 'project').inlineEdit = true;
+    expect(inline(a)).toEqual({ check: 'master-detail-inline-edit', pass: false, detail: '0 edited inline' });
+  });
+
+  it("still credits a declared form factor, `'grid'` or `'form'`, with no placing group", () => {
+    for (const mode of ['grid', 'form']) {
+      const a = noGroup(richArtifact());
+      field(a, 'task', 'project').inlineEdit = mode;
+      expect(inline(a)?.pass).toBe(true);
+    }
+  });
+});
 
 describe('formula field — a computed field whose expression compiles', () => {
   const formula = (a: Bag) => grade(a, 'records-forms.formula-field');
