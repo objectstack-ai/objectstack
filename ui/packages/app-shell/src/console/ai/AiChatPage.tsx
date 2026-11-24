@@ -3139,16 +3139,18 @@ export function ChatPane({
         // The secondary door (在 Studio 中查看): Studio is the built app's
         // iteration home (direct edit + the same copilot conversation in the
         // dock, which the build's binding resumes). The package id is the
-        // canvas segment (one package = one app).
+        // canvas segment (one package = one app). objectstack#36502 — it opens
+        // the package's Studio home; the app's interfaces are designed in the
+        // running app, which the primary door opens.
         onDesignBuiltApp={(_appName, appSegment) => {
           const pkg = appSegment ?? boundPackageId;
           if (!pkg) return;
-          navigate(`/studio/${encodeURIComponent(pkg)}/interfaces`);
+          navigate(`/studio/${encodeURIComponent(pkg)}/data`);
         }}
         designBuiltAppLabel={t('console.ai.viewBuiltAppInStudio', { defaultValue: 'View in Studio' })}
         // Artifact deep links: every artifact the agent built gets a one-click
         // path to where it can be edited BY HAND (object → Data, flow →
-        // Automations, dashboard/page/view/app → Interfaces). Returns null for
+        // Automations, dashboard/page/view/app → its All metadata item page). Returns null for
         // types with no direct-edit home (seed/dataset) → rendered as text.
         getArtifactAction={(artifact, appSegment) => {
           const path = artifactStudioPath(appSegment ?? boundPackageId, artifact);

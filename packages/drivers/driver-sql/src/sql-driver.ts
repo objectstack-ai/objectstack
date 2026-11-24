@@ -7148,8 +7148,10 @@ export class SqlDriver implements IDataDriver {
    *
    * `driver-turso`'s remote transport asks the same question through this
    * method, so both faces of one `TursoDriver` word one refusal.
+   *
+   * [#36190] PUBLIC: the analytics host compiles its own SQL over these tables and cannot read this deployment fact.
    */
-  protected jsonColumnFieldClass(table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
+  public jsonColumnFieldClass(table: string | null | undefined, localField: string): JsonColumnFieldClass | undefined {
     // [#29520 codemod] The body moved to `sql-driver-filter-helpers.ts` (see `FilterHelpersHost`).
     return FilterHelpersFacet.jsonColumnFieldClass.call(filterHelpersHost.of(this), table, localField);
   }

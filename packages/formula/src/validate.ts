@@ -2222,6 +2222,8 @@ export const CEL_STDLIB_FUNCTIONS: string[] = [
   'isBlank', 'isEmpty', 'coalesce', 'len',
   // Options (registered stdlib) — `label(record.<field>)`, a select value's label
   'label',
+  // Working days (registered stdlib, ADR-0157 D4) — counted with the organization's working calendar
+  'addWorkingDays', 'workingDaysBetween', 'addWorkingHours',
   // cel-js built-ins (verified to resolve)
   'size', 'has', 'int', 'string', 'bool', 'double', 'timestamp', 'duration',
 ];

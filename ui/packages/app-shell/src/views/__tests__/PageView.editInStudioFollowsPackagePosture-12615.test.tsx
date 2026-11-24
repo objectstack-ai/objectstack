@@ -105,7 +105,7 @@ const PACKAGES = {
   },
 };
 
-const BASE_TARGET = '/studio/com.example.my_base/interfaces?surface=page:welcome';
+const BASE_TARGET = '/studio/com.example.my_base/metadata/page/welcome';
 
 function serve(answer: () => Promise<{ ok: boolean; status: number; body: unknown }>) {
   vi.stubGlobal(

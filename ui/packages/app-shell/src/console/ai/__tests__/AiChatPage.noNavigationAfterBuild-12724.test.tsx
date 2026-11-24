@@ -19,7 +19,8 @@
  *     it), so pin 1 is not vacuous.
  *  3. The two doors are SPA navigations the user chooses: 打开应用 to
  *     `/apps/APP` (the app's first navigation item), 在 Studio 中查看 to
- *     `/studio/PKG/interfaces` with no landing state.
+ *     `/studio/PKG/data` with no landing state (the Interfaces pillar it
+ *     opened before retired with objectstack#36502).
  *
  * Same faked-chat harness the retired files used: the hook instance owns the
  * thread; hydration (the REAL AiChatPage path) derives the envelopes.
@@ -330,13 +331,13 @@ describe('AiChatPage — no automatic navigation after a build (objectui#12724)'
     expect(assignSpy).not.toHaveBeenCalled();
   });
 
-  it('在 Studio 中查看 is an SPA navigation to the Interfaces pillar with no landing state', async () => {
+  it('在 Studio 中查看 is an SPA navigation to the Studio home (the Data pillar) with no landing state', async () => {
     serverTurns = UNBUILT_TURNS;
     renderPage();
     await waitFor(() => expect(screen.getByTestId('pane')).toBeInTheDocument(), { timeout: 4000 });
     fireEvent.click(screen.getByTestId('studio-door'));
     expect(await screen.findByTestId('studio-page', {}, { timeout: 4000 })).toBeInTheDocument();
-    expect(screen.getByTestId('where')).toHaveAttribute('data-path', '/studio/app.k9/interfaces');
+    expect(screen.getByTestId('where')).toHaveAttribute('data-path', '/studio/app.k9/data');
     expect(screen.getByTestId('where')).toHaveAttribute('data-state', 'null');
     expect(assignSpy).not.toHaveBeenCalled();
   });

@@ -5,9 +5,11 @@
  * happens in the metadata studio (canvas + inspector), not here — runtime is
  * pure rendering. For parity with the view/report/dashboard runtime editors,
  * metadata authors get a lightweight "Edit in studio" affordance that
- * deep-links to the page's design surface in Studio's Interfaces pillar
- * (`/studio/PACKAGE/interfaces?surface=page:NAME`) rather than embedding the
- * heavyweight page canvas in the runtime. It is the path the app bar's pencil,
+ * deep-links to the page's item in Studio's "All metadata" area
+ * (`/studio/PACKAGE/metadata/page/NAME`) rather than embedding the
+ * heavyweight page canvas in the runtime: a custom page has no visual editor
+ * since the Interfaces pillar retired (objectstack#36502), and is edited there
+ * as metadata. It is the path the app bar's pencil,
  * the app switcher's Studio row and the sidebar's Design open for the same
  * page, built by the same `appStudioRoutePath` (objectui#12540).
  *

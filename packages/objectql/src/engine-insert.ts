@@ -35,6 +35,7 @@
  * this module.
  */
 
+import { formulaWorkCalendarsFor } from './formula-work-calendars.js';
 import type { DataEngineInsertOptions, EngineCountOptions, EngineQueryOptions, HookContext, QueryAST } from '@objectstack/spec/data';
 import type { WriteObservabilityOptions } from '@objectstack/spec/contracts';
 import type { PendingSecretRow } from './engine-secret-internal-fields.js';
@@ -576,6 +577,7 @@ export class InsertFacet {
         onFault: this.formulaFaultSink(object),
         relatedFor: (plan, records) => this.resolveFormulaRelated(this._registry.getObject(object), plan, records, opCtx.context),
         optionLabelsFor: (plan) => declaredOptionLabels(this._registry.getObject(object), plan),
+        workCalendarsFor: (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, opCtx.context),
       };
       if (storedExpressionPlan.length > 0) {
         const defaultedRows = (isBatch ? defaultedData : [defaultedData]) as Array<Record<string, unknown>>;
@@ -1667,6 +1669,7 @@ export class InsertFacet {
           (plan, records) => this.resolveFormulaRelated(schemaForValidation, plan, records, opCtx.context),
           // [#26608] The 201 body is what the save toast names the record from.
           (plan) => this.formulaOptionLabels(schemaForValidation, plan, opCtx.context),
+          (plan, records) => formulaWorkCalendarsFor(this.facade, plan, records, opCtx.context),
         );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];

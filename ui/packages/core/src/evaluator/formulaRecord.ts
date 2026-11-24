@@ -53,6 +53,8 @@
  * The unservable set is the server's (objectql `unservableReason`) plus the
  * two things the server binds and the form cannot hold: `os` (for `os.org`)
  * and `current_user.can()` (a permission map, which a write may resolve).
+ * A working-day function (ADR-0157 D4) is in the server's set too: its
+ * calendar is loaded for the read, never handed to the form.
  * Every other formula the form computes as the server does. A field whose
  * `visibleWhen` reads an unservable one is shown and keeps its `required`
  * flag; for those two the form can be stricter than the server, which stays
@@ -61,6 +63,7 @@
 import {
   ExpressionEngine,
   analyzeRelationshipTraversals,
+  callsWorkingDayFunction,
   collectCelRootIdentifiers,
   findTraversalConflicts,
   formulaReadOrder,
@@ -267,6 +270,13 @@ export function planObjectFormulas(
     }
     if (LABEL_CALL.test(source)) {
       unservable.set(name, 'calls label(), which the form does not answer');
+      continue;
+    }
+    // ADR-0157 D4: a working-day function counts with the organization's
+    // working calendar, which the server loads for the read and the form does
+    // not hold (objectql `unservableReason` says the same of the write path).
+    if (callsWorkingDayFunction(source)) {
+      unservable.set(name, 'calls a working-day function, which counts with a working calendar the form does not hold');
       continue;
     }
     if (callsReceiverMethod(parseCelToAst(source), 'can')) {

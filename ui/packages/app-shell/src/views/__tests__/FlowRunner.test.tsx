@@ -67,7 +67,10 @@ describe('FlowRunner resume outcomes', () => {
     const authFetch = vi.fn(async () => jsonResponse({ success: false, error: 'gateway timeout' }, 502));
     const { onClose, onComplete } = setup(authFetch);
     await fillAndSubmit();
-    await waitFor(() => expect(authFetch).toHaveBeenCalledTimes(1));
+    // One resume; the failure then re-reads the run's screen (objectstack#36831),
+    // which a gateway's answer here does not settle, so the retry stays.
+    await waitFor(() => expect(authFetch).toHaveBeenCalledTimes(2));
+    expect(authFetch.mock.calls.filter((call) => ((call as unknown[])[1] as RequestInit | undefined)?.method === 'POST')).toHaveLength(1);
     expect(onClose).not.toHaveBeenCalled();
     expect(onComplete).not.toHaveBeenCalled();
     // The form is still interactive for a retry.
