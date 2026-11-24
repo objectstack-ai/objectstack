@@ -3546,7 +3546,7 @@ const pt = {
     },
     language: {
       title: "Idioma",
-      description: "O idioma usado nas notificações e mensagens enviadas para você. O idioma da interface é escolhido separadamente, no menu do globo.",
+      description: "O idioma da interface e das notificações e mensagens enviadas para você. É a mesma configuração do menu do globo, então alterar um altera o outro.",
       label: "Idioma preferido",
       systemDefault: "Usar o padrão da implantação",
       save: "Salvar",

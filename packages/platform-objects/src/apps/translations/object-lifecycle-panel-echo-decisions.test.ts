@@ -1319,7 +1319,10 @@ describe('#19403 round 10 — the verdicts, on the live bundles', () => {
       // 771 since #36447: the report form declares the `dateRange` and
       // `exportOptions` children — six row labels, authored in all three
       // locales.
-      expect(translated.length, `${locale} positive control`).toBe(771);
+      // 823 since #36860: the Studio list column headers no form field
+      // labels get their own `fields.<path>.label` row (`METADATA_LIST_REGISTRY`)
+      // — fifty-two row labels, authored in all three locales.
+      expect(translated.length, `${locale} positive control`).toBe(823);
     }
     // ⭐ DARK — the blindness, executable. On a synthetic two-locale catalog the
     // all-three predicate returns 0 while the per-locale one returns 1, so the

@@ -30,7 +30,7 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { ConsolePageHeader, approvalQueueState, objectHostAppSegment, useMetadata } from '@object-ui/app-shell';
 import {
   Button,
@@ -80,7 +80,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@object-ui/auth';
 import { declaredUserMessage } from '@object-ui/react';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
-import { APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
+import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 import {
   CheckCircle2,
   XCircle,
@@ -109,8 +109,9 @@ import {
   useUnresolvableRecordReferenceLabel,
 } from './unresolvableRecordReference';
 import { useInboxFigureFieldByObject } from './hiddenFields';
+import { applyInboxUrlState, parseInboxUrlState, type InboxSort, type InboxUrlState } from './approvalsInboxUrlState';
 
-type TabKey = 'pending' | 'submitted' | 'all';
+type TabKey = InboxUrlState['tab'];
 
 /** Server page size for the paginated tabs (submitted / all). */
 const PAGE_SIZE = 50;
@@ -983,7 +984,20 @@ function ApprovalsQueue() {
    */
   const unresolvableReferenceLabel = useUnresolvableRecordReferenceLabel();
 
-  const [tab, setTab] = useState<TabKey>('pending');
+  // objectstack#36966 — the tab, the filters, the search and the sort live in
+  // the address (`approvalsInboxUrlState.ts`), so Back from a request's page,
+  // a reload and a copied link reopen the inbox as the reader left it. Every
+  // write replaces the history entry: Back leaves the inbox, it never pages
+  // through filter flips.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search = searchParams.toString();
+  const urlState = useMemo(() => parseInboxUrlState(new URLSearchParams(search)), [search]);
+  const { tab, status: statusFilter, process: processFilter, object: objectFilter, sort: sortKey } = urlState;
+  const writeUrlState = useCallback(
+    (patch: Partial<InboxUrlState>) =>
+      setSearchParams((prev) => applyInboxUrlState(prev, patch), { replace: true }),
+    [setSearchParams],
+  );
   const [rows, setRows] = useState<ApprovalRequestRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -1053,18 +1067,28 @@ function ApprovalsQueue() {
   );
   const figureFields = useInboxFigureFieldByObject(figureObjects);
 
-  // Search + filters. On the paginated tabs (submitted/all) the free-text
-  // query is debounced and pushed to the server; the pending tab keeps
-  // instant client-side matching over its (bounded) personal queue.
-  const [query, setQuery] = useState('');
-  const [serverQuery, setServerQuery] = useState('');
-  const [processFilter, setProcessFilter] = useState<string>('all');
-  const [objectFilter, setObjectFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  // Client-side ordering of the visible rows (#2762 P1-3). Default keeps the
-  // server's newest-first; the others let a reviewer triage by wait time or by
-  // the decision-relevant amount.
-  const [sortKey, setSortKey] = useState<'recent' | 'oldest' | 'amount'>('recent');
+  // Search + filters. The box keeps its own draft, so a keystroke never waits
+  // on the router; the draft reaches the address debounced (`q`). On the
+  // paginated tabs (submitted/all) the address's query is the one the server
+  // is asked; the pending tab keeps instant client-side matching over its
+  // (bounded) personal queue, from the draft. The draft follows the address
+  // only on a navigation this page did not write (a link here, Back /
+  // Forward), never on a REPLACE, which is this page's own write.
+  const [query, setQuery] = useState(urlState.q);
+  const navigationType = useNavigationType();
+  const [draftLocationKey, setDraftLocationKey] = useState(location.key);
+  if (draftLocationKey !== location.key) {
+    setDraftLocationKey(location.key);
+    if (navigationType !== 'REPLACE') setQuery(urlState.q);
+  }
+  const serverQuery = tab === 'pending' ? '' : urlState.q;
+  // Client-side ordering of the visible rows (#2762 P1-3), `sortKey` above.
+  // Default keeps the server's newest-first; the others let a reviewer triage
+  // by wait time or by the decision-relevant amount.
+  const setStatusFilter = useCallback((v: string) => writeUrlState({ status: v }), [writeUrlState]);
+  const setProcessFilter = useCallback((v: string) => writeUrlState({ process: v }), [writeUrlState]);
+  const setObjectFilter = useCallback((v: string) => writeUrlState({ object: v }), [writeUrlState]);
+  const setSortKey = useCallback((v: InboxSort) => writeUrlState({ sort: v }), [writeUrlState]);
 
   // Bulk selection (only meaningful on "pending" tab where the user can act)
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
@@ -1092,10 +1116,10 @@ function ApprovalsQueue() {
   const [focusIndex, setFocusIndex] = useState<number>(-1);
 
   useEffect(() => {
-    if (tab === 'pending') return;
-    const t = window.setTimeout(() => setServerQuery(query), 350);
+    if (query === urlState.q) return;
+    const t = window.setTimeout(() => writeUrlState({ q: query }), 350);
     return () => window.clearTimeout(t);
-  }, [query, tab]);
+  }, [query, urlState.q, writeUrlState]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1201,24 +1225,66 @@ function ApprovalsQueue() {
       .catch(() => { /* best-effort */ });
   }, [identities]);
 
-  /** Unique process labels present in current rows (for filter dropdown). */
-  const processOptions = useMemo(() => {
+  /** Unique process labels present in current rows. */
+  const rowProcesses = useMemo(() => {
     const set = new Set<string>();
     for (const r of rows) set.add(processLabel(r));
     return Array.from(set).sort();
   }, [rows]);
 
   /**
-   * Unique objects present in current rows (for filter dropdown): filtered by
-   * machine name, shown by the label the row serves, which the approvals door
-   * picks in the reader's language (objectstack#26883).
+   * Unique objects present in current rows: filtered by machine name, shown by
+   * the label the row serves, which the approvals door picks in the reader's
+   * language (objectstack#26883).
    */
-  const objectOptions = useMemo(() => {
+  const rowObjects = useMemo(() => {
     const byName = new Map<string, string>();
     for (const r of rows) if (r.object_name && !byName.has(r.object_name)) byName.set(r.object_name, objectDisplay(r));
     return Array.from(byName, ([value, label]) => ({ value, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
+
+  /**
+   * The filter dropdowns: the rows' own values, and the filter in force when no
+   * loaded row carries it (objectstack#36966). On the paginated tabs the rows
+   * are the pages loaded so far, so a filter the address names can sit past
+   * them; the dropdown still shows it, and the reader can see and clear it.
+   * An object no loaded row labels is shown by its machine name.
+   */
+  const processOptions = useMemo(
+    () => (processFilter !== 'all' && !rowProcesses.includes(processFilter)
+      ? [...rowProcesses, processFilter].sort()
+      : rowProcesses),
+    [rowProcesses, processFilter],
+  );
+  const objectOptions = useMemo(
+    () => (objectFilter !== 'all' && !rowObjects.some((o) => o.value === objectFilter)
+      ? [...rowObjects, { value: objectFilter, label: objectFilter }].sort((a, b) => a.label.localeCompare(b.label))
+      : rowObjects),
+    [rowObjects, objectFilter],
+  );
+
+  /**
+   * objectstack#36966 — a process or object the address names (Back, a
+   * reload, a copied link) is data, not a fixed vocabulary, so it is checked
+   * against the rows: once, at the first load that answers rows. Only when
+   * those rows are the WHOLE answer — the pending tab, which is unpaginated,
+   * or a paginated tab whose first load holds every row (`total`) — does a
+   * value none of them carries read as "all" and leave the address. A value
+   * past the first page of a paginated tab is kept (see the dropdowns above).
+   * A filter picked from the dropdowns is never second-guessed.
+   */
+  const seedFiltersChecked = useRef(false);
+  useEffect(() => {
+    if (seedFiltersChecked.current || loading || error || rows.length === 0) return;
+    seedFiltersChecked.current = true;
+    const wholeAnswer = tab === 'pending' || total === null || rows.length >= total;
+    if (!wholeAnswer) return;
+    const patch: Partial<InboxUrlState> = {};
+    if (processFilter !== 'all' && !rowProcesses.includes(processFilter)) patch.process = 'all';
+    if (objectFilter !== 'all' && !rowObjects.some((o) => o.value === objectFilter)) patch.object = 'all';
+    if (patch.process || patch.object) writeUrlState(patch);
+  }, [loading, error, rows.length, tab, total, processFilter, rowProcesses, objectFilter, rowObjects, writeUrlState]);
 
   // objectstack#29070: the list follows the search box at a deferred
   // priority, so a keystroke repaints the box first and the rows after,
@@ -1287,9 +1353,20 @@ function ApprovalsQueue() {
    * draws 「第 N 条，共 M 条」 with ↓ ↑ and `j` / `k` over it, and a decision
    * that takes the request out of the queue opens the next one. The other
    * tabs list requests the reader is not deciding, so they hand no queue.
+   *
+   * objectstack#36966 — a search typed and not yet written to the address
+   * (the write is debounced) is written first, into the inbox's own entry, so
+   * Back returns to it too.
    */
   const openRequest = useCallback(
-    (r: ApprovalRequestRow) =>
+    (r: ApprovalRequestRow) => {
+      let inboxSearch = location.search;
+      if (query !== urlState.q) {
+        const next = applyInboxUrlState(searchParams, { q: query });
+        setSearchParams(next, { replace: true });
+        const flushed = next.toString();
+        inboxSearch = flushed ? `?${flushed}` : '';
+      }
       navigate(
         appName
           ? `/apps/${appName}/${APPROVAL_REQUEST_OBJECT}/record/${encodeURIComponent(r.id)}`
@@ -1302,13 +1379,17 @@ function ApprovalsQueue() {
         tab === 'pending'
           ? {
               state: approvalQueueState(
-                { pathname: `${location.pathname}${location.search}`, label: inboxTitle },
+                { pathname: `${location.pathname}${inboxSearch}`, label: inboxTitle },
                 filteredRows.map((row) => row.id),
               ),
             }
           : undefined,
-      ),
-    [navigate, appName, metadataApps, tab, location.pathname, location.search, inboxTitle, filteredRows],
+      );
+    },
+    [
+      navigate, appName, metadataApps, tab, location.pathname, location.search, inboxTitle, filteredRows,
+      query, urlState.q, searchParams, setSearchParams,
+    ],
   );
 
   // Reset selection when underlying filtered list changes (avoid acting on hidden rows).
@@ -1762,12 +1843,8 @@ function ApprovalsQueue() {
   const hasFilters = !!query || processFilter !== 'all' || objectFilter !== 'all' || statusFilter !== 'all';
 
   const onTabChange = (v: string) => {
-    setTab(v as TabKey);
-    setStatusFilter('all');
-    setProcessFilter('all');
-    setObjectFilter('all');
+    writeUrlState({ tab: v as TabKey, status: 'all', process: 'all', object: 'all', q: '', sort: 'recent' });
     setQuery('');
-    setSortKey('recent');
     setFocusIndex(-1);
   };
 
@@ -1843,11 +1920,12 @@ function ApprovalsQueue() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{tr('allStatuses', 'All statuses')}</SelectItem>
-                    <SelectItem value="pending">{statusLabel('pending')}</SelectItem>
-                    <SelectItem value="approved">{statusLabel('approved')}</SelectItem>
-                    <SelectItem value="rejected">{statusLabel('rejected')}</SelectItem>
-                    <SelectItem value="recalled">{statusLabel('recalled')}</SelectItem>
-                    <SelectItem value="returned">{statusLabel('returned')}</SelectItem>
+                    {/* One option per status the CONTRACT declares, so a state the
+                        platform adds is offered the day it ships (a hand-typed list
+                        missed `cancelled` while its rows already showed here). */}
+                    {APPROVAL_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>{statusLabel(s)}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               )}
@@ -1879,7 +1957,7 @@ function ApprovalsQueue() {
               )}
               {/* Triage ordering (#2762 P1-3): newest by default, or by wait
                   time / decision amount. */}
-              <Select value={sortKey} onValueChange={(v) => setSortKey(v as typeof sortKey)}>
+              <Select value={sortKey} onValueChange={(v) => setSortKey(v as InboxSort)}>
                 <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[120px] text-sm')}>
                   <ArrowUpDown className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                   <SelectValue placeholder={tr('sortBy', 'Sort')} />
