@@ -14,7 +14,8 @@
  * 1. The menu's Access group holds the permission-set entry, a real router
  *    link, with no "More" trigger anywhere; the group carries the shield glyph,
  *    the Data group's is not it.
- * 2. With the Access pillar open (under any package id) that entry is the
+ * 2. With the Access pillar's address open (under any package id) — which
+ *    lands on the list of sets since objectstack#36905 — that entry is the
  *    current page and carries the active state; with Data open it carries
  *    neither, and the object entry carries both.
  *
@@ -115,6 +116,14 @@ vi.mock('sonner', () => ({
 
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
+// objectstack#36905 — the area's pages, where the Access pillar's address lands.
+vi.mock('../metadata-admin/index.js', () => ({
+  MetadataDirectoryPage: () => <div data-testid="area-page" />,
+  MetadataDiagnosticsPage: () => <div data-testid="area-page" />,
+  MetadataResourceListPage: () => <div data-testid="area-page" />,
+  MetadataResourceEditPage: () => <div data-testid="area-page" />,
+  MetadataResourceHistoryPage: () => <div data-testid="area-page" />,
+}));
 vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
@@ -184,6 +193,7 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
       </Routes>
       <LocationProbe />
     </MemoryRouter>,
@@ -222,7 +232,8 @@ describe('Studio menu: Access is a group of its own, and More is gone (objectui#
   it.each(['app.objectstack.hotcrm', PKG])('with Access open in %s, the permission-set entry is the current page', async (pkg) => {
     fetchPackagesMock.mockResolvedValue([{ id: pkg, name: 'Pkg', writable: true, namespace: 'pkg' }]);
     renderAt(`/studio/${pkg}/access`);
-    await screen.findByTestId('studio-shell-header');
+    await screen.findByTestId('area-page');
+    expect(screen.getByTestId('location-path')).toHaveTextContent(`/studio/${pkg}/metadata/permission`);
 
     const access = entry(PERMISSION_ENTRY);
     expect(access).toHaveAttribute('aria-current', 'page');

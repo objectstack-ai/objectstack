@@ -190,7 +190,7 @@ describe('opened directly, 「‹ Back to app」 lands on the package app\'s fir
 
   it('with several published apps, the first, addressed by its name', async () => {
     srv.apps = [SERVICE_APP, SALES_APP];
-    renderAt(`/studio/${OWN}/access`);
+    renderAt(`/studio/${OWN}/owd`);
     await waitFor(() => expect(within(header()).getByTestId('studio-back-app-name')).toHaveTextContent('Service desk'), {
       timeout: 8000,
     });

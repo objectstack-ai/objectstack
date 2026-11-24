@@ -14,6 +14,7 @@ import {
   AREA_DESIGNER_PAGE_TYPES,
   AREA_PILLAR_FOR_TYPE,
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaDesignerItemOf,
   areaItemOpensDesignerPage,
   areaItemOpensFormEditor,
   areaItemPillarPath,
@@ -135,6 +136,23 @@ describe('areaItemOpensDesignerPage — a permission set opens its matrix full-s
     for (const type of ['object', 'flow', 'position', 'view']) {
       expect(areaItemOpensDesignerPage({ packageId: PKG, type }), type).toBe(false);
     }
+  });
+
+  it('areaDesignerItemOf reads the item off a designer page\'s address, for the copilot', () => {
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/sales%20rep`, PKG)).toEqual({
+      type: 'permission',
+      name: 'sales rep',
+    });
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/sales_rep/history`, PKG)).toEqual({
+      type: 'permission',
+      name: 'sales_rep',
+    });
+    // Not a designer page: another type, a list, the cross-package leg, another package's path.
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/hook/h1`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission`, PKG)).toBeNull();
+    expect(areaDesignerItemOf('/studio/~all/metadata/permission/admin', '~all')).toBeNull();
+    expect(areaDesignerItemOf(`/studio/other/metadata/permission/a`, PKG)).toBeNull();
+    expect(areaDesignerItemOf(`/studio/${PKG}/metadata/permission/%E0%A4%A`, PKG)).toBeNull();
   });
 });
 

@@ -1531,6 +1531,7 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 publishNonce={publishNonce}
                 onDraftSaved={onDraftSaved}
                 publishRefusalFor={publishRefusalFor}
+                onSurfaceLabelChange={setSurfaceLabel}
               />
             ) : tab === STUDIO_OWD_SECTION ? (
               // objectstack#36905 (decision 11) — the organization-wide default

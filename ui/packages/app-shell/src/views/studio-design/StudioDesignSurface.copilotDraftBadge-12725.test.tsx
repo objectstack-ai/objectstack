@@ -250,7 +250,7 @@ function LocationProbe(): React.ReactElement {
 
 function renderStudio() {
   return render(
-    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/access`]}>
+    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/owd`]}>
       <LocationProbe />
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />

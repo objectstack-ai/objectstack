@@ -8,8 +8,12 @@
  * it read "0 objects granted · 0 field overrides" and listed nothing, though
  * the server holds 8 objects and 3 field overrides.
  *
- * The REAL `StudioDesignSurface`, `AccessPillar` and `PermissionMatrixEditPage`
- * over the REAL metadata client and a fetch stub serving the package list (the
+ * objectstack#36905 — each set opens at its own metadata address, the copy at
+ * its pair's (`/studio/<pair>/metadata/permission/<copy>`, as the base's list
+ * links it), in the full-screen page (`StudioPermissionSetPage`).
+ *
+ * The REAL `StudioDesignSurface` (its area), `StudioPermissionSetPage` and
+ * `PermissionMatrixEditPage` over the REAL metadata client and a fetch stub serving the package list (the
  * base read-only, its pair writable), the base's customization read, the
  * base's objects and sets, and the copy, published in the pair.
  *
@@ -21,7 +25,7 @@
  *    keeping every grant it holds; no write names the base;
  *  - CONTROL: the base's own (read-only) set lists the base's objects and
  *    reads no pair list for them;
- *  - objectstack#29809: the header's provenance chip follows the rail's mark,
+ *  - objectstack#29809: the header's provenance chip follows the list's mark,
  *    Custom for a set the pair holds (copied or created there), Package for
  *    the base's own set.
  */
@@ -203,17 +207,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** A set at its metadata address: the copy and a set created there at the pair's, the base's own at the base's. */
 function renderAccess(set: string) {
+  const pkg = set === BASE_SET.name ? BASE : PAIR;
   return render(
-    <MemoryRouter initialEntries={[`/studio/${BASE}/access?surface=${encodeURIComponent(`permission:${set}`)}`]}>
+    <MemoryRouter initialEntries={[`/studio/${pkg}/metadata/permission/${set}?package=${pkg}`]}>
       <Routes>
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/metadata/*" element={<StudioDesignSurface area="metadata" />} />
       </Routes>
     </MemoryRouter>,
   );
 }
 
-const header = () => screen.getByTestId('access-item-header');
+const header = () => screen.getByTestId('permission-detail-header');
 const matrix = () => screen.getByTestId('perm-studio-matrix');
 const countsText = (objects: number, fields: number) =>
   `${tFormat('engine.studio.access.grantedOther', 'en', { count: objects })} · ${tFormat(
@@ -284,46 +290,33 @@ describe('CONTROL: the base’s own set (objectstack#29674)', () => {
 });
 
 /**
- * objectstack#29809 (ADR-0146 D3) — the header's provenance chip and the rail
- * row's customization mark tell one story: a set the pair holds reads Custom
- * beside the rail's Added, and the base's own set still reads Package with no
- * mark. Same harness: the real surface, pillar and page.
+ * objectstack#29809 (ADR-0146 D3) — the header's provenance chip and the
+ * list's customization mark tell one story: a set the pair holds reads Custom
+ * beside the list's Added, and the base's own set still reads Package. Same
+ * harness: the real surface, area and page.
  */
-describe('the header’s provenance chip follows the rail’s mark (objectstack#29809)', () => {
-  /** A set created in the pair: its draft, never published, listed from the pair’s drafts. */
+describe('the header’s provenance chip follows the list’s mark (objectstack#29809)', () => {
+  /** A set created in the pair: its draft, never published. */
   const CREATED = 'pair_auditor';
-  const accessRail = () => screen.getByTestId('studio-rail-access');
-  /** The rail row holding `text`, and the kind of mark it carries (`null`: none). */
-  const railMarkOf = (text: string) =>
-    within(accessRail())
-      .getByText(text)
-      .closest('button')
-      ?.querySelector('[data-testid="customization-mark"]')
-      ?.getAttribute('data-kind') ?? null;
   const chip = () => within(header()).getByTestId('perm-provenance-badge');
 
-  it('a New similar copy in the pair: Custom in the header, Added in the rail', async () => {
+  it('a New similar copy in the pair: Custom in the header', async () => {
     renderAccess(COPY);
     await copyOpen();
-    await waitFor(() => expect(railMarkOf('My contributor')).toBe('added'), { timeout: 8000 });
     expect(chip()).toHaveTextContent(t('perm.badge.custom', 'en'));
     expect(chip()).not.toHaveTextContent(t('engine.studio.access.origin.app', 'en'));
   });
 
-  it('a set created in the pair: Custom in the header, Added in the rail', async () => {
+  it('a set created in the pair: Custom in the header', async () => {
     srv.pairDrafts.set(`permission/${CREATED}`, { name: CREATED, label: 'Pair auditor', objects: {}, fields: {} });
     renderAccess(CREATED);
-    await waitFor(() => expect(within(header()).getAllByTitle(CREATED).length).toBeGreaterThan(0), { timeout: 8000 });
-    await waitFor(() => expect(railMarkOf(CREATED)).toBe('added'), { timeout: 8000 });
-    expect(chip()).toHaveTextContent(t('perm.badge.custom', 'en'));
+    await waitFor(() => expect(within(header()).getAllByText(CREATED).length).toBeGreaterThan(0), { timeout: 8000 });
+    await waitFor(() => expect(chip()).toHaveTextContent(t('perm.badge.custom', 'en')), { timeout: 8000 });
   });
 
-  it('CONTROL: the base’s own set reads Package, and its rail row carries no mark', async () => {
+  it('CONTROL: the base’s own set reads Package', async () => {
     renderAccess(BASE_SET.name);
     await waitFor(() => expect(within(header()).getByText(/(^|· )Contributor$/)).toBeInTheDocument(), { timeout: 8000 });
-    // The read has answered: the copy's row is marked, the base set's is not.
-    await waitFor(() => expect(railMarkOf('My contributor')).toBe('added'), { timeout: 8000 });
-    expect(railMarkOf('Contributor')).toBeNull();
-    expect(chip()).toHaveTextContent(t('engine.studio.access.origin.app', 'en'));
+    await waitFor(() => expect(chip()).toHaveTextContent(t('engine.studio.access.origin.app', 'en')), { timeout: 8000 });
   });
 });

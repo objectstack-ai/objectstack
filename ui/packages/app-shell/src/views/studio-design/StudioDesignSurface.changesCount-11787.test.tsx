@@ -143,7 +143,7 @@ async function createAppThroughTheDialog() {
 describe('the Changes count after a draft save (objectui#11787)', () => {
   it('says a draft is pending from the render the save lands in, and the read it asks for is its own', async () => {
     render(
-      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/access`]}>
+      <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/owd`]}>
         <Routes>
           <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
         </Routes>

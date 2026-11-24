@@ -116,7 +116,7 @@ afterEach(() => {
 
 function renderSurface() {
   render(
-    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/access`]}>
+    <MemoryRouter initialEntries={[`/studio/${PACKAGE_ID}/owd`]}>
       <Routes>
         <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
       </Routes>

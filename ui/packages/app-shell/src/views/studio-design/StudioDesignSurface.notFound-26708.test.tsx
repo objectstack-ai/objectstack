@@ -148,7 +148,7 @@ const menu = () => screen.getByTestId('studio-menu');
 const menuLinks = () => within(menu()).getAllByRole('link');
 
 describe('Studio: a package id no package has renders "package not found" (objectstack#26708)', () => {
-  it.each(['data', 'automations', 'interfaces', 'access'])('%s: not found, no menu, no package actions', async (pillar) => {
+  it.each(['data', 'automations', 'interfaces', 'owd'])('%s: not found, no menu, no package actions', async (pillar) => {
     const fetchMock = servePackages();
     renderAt(`/studio/${PHANTOM}/${pillar}`);
 

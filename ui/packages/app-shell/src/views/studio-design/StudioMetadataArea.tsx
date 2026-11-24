@@ -59,6 +59,7 @@ import { BUNDLE_MEMBER_PARAM, getMetadataResource } from '../metadata-admin/regi
 import { ITEM_TOOL_TAB_PARAM } from '../item-tools/ItemToolTabs.js';
 import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 import type { StudioRefusal } from './metadataError.js';
+import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
 
 /*
  * The pages load with the area, through the specifier `AppContent` loads them
@@ -134,6 +135,8 @@ interface AreaEditorProps {
   publishNonce: number;
   onDraftSaved?: (saved?: { type: string; name: string }) => void;
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
+  /** objectstack#36905 — a designer page's open item label, for the copilot's chip. */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }
 
 /**
@@ -181,6 +184,7 @@ function AreaItemOpen({
         readOnly={host.readOnly}
         publishNonce={editor.publishNonce}
         onDraftSaved={editor.onDraftSaved ? () => editor.onDraftSaved?.({ type, name }) : undefined}
+        onSurfaceLabelChange={editor.onSurfaceLabelChange}
       />
     );
   }
@@ -314,6 +318,11 @@ export interface StudioMetadataAreaProps {
    * at the item it refused.
    */
   publishRefusalFor?: (type: string, name: string) => StudioRefusal | null;
+  /**
+   * objectstack#36905 — told the open designer page's item label (the
+   * permission set's), for the copilot's chip, as a pillar tells it.
+   */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }
 
 export function StudioMetadataArea({
@@ -322,6 +331,7 @@ export function StudioMetadataArea({
   publishNonce = 0,
   onDraftSaved,
   publishRefusalFor,
+  onSurfaceLabelChange,
 }: StudioMetadataAreaProps): React.ReactElement {
   const { pathname, search } = useLocation();
   const locale = useMetadataLocale();
@@ -340,7 +350,7 @@ export function StudioMetadataArea({
     () => ({ packageId, readOnly, basePath, ...(pairCreate ? { pairCreate } : {}) }),
     [packageId, readOnly, basePath, pairCreate],
   );
-  const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved, publishRefusalFor };
+  const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved, publishRefusalFor, onSurfaceLabelChange };
 
   // The query names the leg (`areaLocationRedirect`). Settled before any page
   // mounts, so no page reads a scope the URL is about to change.

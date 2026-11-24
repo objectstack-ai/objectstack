@@ -53,7 +53,9 @@ import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.
 import { suggestedSetLabel } from '../../components/suggestedSetLabel.js';
 import { StudioReadOnlyLink } from './StudioPillarKit.js';
 import type { StudioItemStatus } from './StudioItemHeader.js';
+import type { StudioSurfaceLabel } from './StudioAiCopilot.js';
 import { customizationPairBaseOf } from './StudioRailCustomizations.js';
+import { fetchListedPackageManifests } from './packages-io.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { accessSuggestionStrings } from './accessSuggestionStrings.js';
 import {
@@ -78,6 +80,8 @@ export interface StudioPermissionSetPageProps {
   publishNonce?: number;
   /** Told when a save left a draft, so the top bar's pending count follows it. */
   onDraftSaved?: () => void;
+  /** objectstack#35018 — the set's label for the copilot's chip: 「正在看：权限 · 组织成员」. */
+  onSurfaceLabelChange?: (surface: StudioSurfaceLabel | null) => void;
 }
 
 /** What the page reads of the package's sets: their labels, which are published, which hold a draft. */
@@ -93,6 +97,7 @@ export function StudioPermissionSetPage({
   readOnly = false,
   publishNonce = 0,
   onDraftSaved,
+  onSurfaceLabelChange,
 }: StudioPermissionSetPageProps): React.ReactElement {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
@@ -137,6 +142,25 @@ export function StudioPermissionSetPage({
       cancelled = true;
     };
   }, [client, packageId, publishNonce, metadataRefreshNonce, readNonce]);
+
+  // objectstack#35018 — the copilot's chip reads the pillar's word and the
+  // set's label, never the type word or the machine name. Keyed on primitives,
+  // the callback read through a ref; cleared on unmount.
+  const reportLabelRef = React.useRef(onSurfaceLabelChange);
+  React.useEffect(() => {
+    reportLabelRef.current = onSurfaceLabelChange;
+  });
+  const setLabel = read?.sets.find((p) => p.name === name)?.label;
+  const chipLabel = setLabel ? `${t('engine.studio.copilot.subject.access', locale)} · ${setLabel}` : null;
+  React.useEffect(() => {
+    reportLabelRef.current?.(chipLabel ? { type: 'permission', name, label: chipLabel } : null);
+  }, [name, chipLabel]);
+  React.useEffect(
+    () => () => {
+      reportLabelRef.current?.(null);
+    },
+    [],
+  );
 
   // Bumped by a discard and a rollback: the matrix re-reads as it does after a
   // publish, since in each what it holds is gone.
@@ -207,14 +231,31 @@ export function StudioPermissionSetPage({
 
   // The status place: what a save does here, or, read-only, the link that
   // says why nothing is saved. A set of a base's pair lists the base's objects
-  // too (objectstack#29674), so its note names the base.
+  // too (objectstack#29674), so its note names the base, by its label once the
+  // package list (one shared read, `packages-io.ts`) has said it.
   const pairBase = customizationPairBaseOf(packageId);
+  const [pairBaseLabel, setPairBaseLabel] = React.useState<{ id: string; label: string } | null>(null);
+  React.useEffect(() => {
+    if (pairBase === null) return undefined;
+    let cancelled = false;
+    fetchListedPackageManifests().then(
+      (manifests) => {
+        const label = manifests.get(pairBase)?.name;
+        if (!cancelled && label) setPairBaseLabel({ id: pairBase, label });
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [pairBase]);
+  const baseShown = pairBase !== null && pairBaseLabel?.id === pairBase ? pairBaseLabel.label : pairBase;
   const status: StudioItemStatus | undefined = readOnly
     ? undefined
     : pairBase !== null
       ? {
-          label: tFormat('engine.studio.access.bannerPair', locale, { package: pairBase }),
-          title: tFormat('engine.studio.access.bannerTitlePair', locale, { package: pairBase }),
+          label: tFormat('engine.studio.access.bannerPair', locale, { package: baseShown }),
+          title: tFormat('engine.studio.access.bannerTitlePair', locale, { package: baseShown }),
         }
       : { label: t('engine.studio.access.banner', locale), title: t('engine.studio.access.bannerTitle', locale) };
 
@@ -336,6 +377,10 @@ export function StudioPermissionSetPage({
           }}
           onSaved={() => setReadNonce((n) => n + 1)}
           embedded
+          // objectstack#29809 — a set a base's pair holds is one the pair adds
+          // (a permission set takes no override, ADR-0005): it reads Custom,
+          // as the list's mark says Added.
+          customizationMark={pairBase !== null ? 'added' : null}
           onOpenOwd={(objectName) =>
             confirmUnsavedLeave(() => navigate(studioOwdOverviewPath(packageId, { object: objectName || null })))
           }

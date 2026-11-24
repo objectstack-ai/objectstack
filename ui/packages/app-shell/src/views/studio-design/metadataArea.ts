@@ -132,6 +132,28 @@ export function areaItemOpensDesignerPage(input: { packageId: string | null; typ
 }
 
 /**
+ * The item an area URL opens in its full-screen designer page, read off the
+ * address (`/studio/<package>/metadata/<type>/<name>[/…]`), or `null` for any
+ * other URL. Studio's copilot reads it as it reads a pillar's `?surface=`
+ * (cloud#1610: the URL is the one source of what is being discussed), so a
+ * designer that left its pillar keeps the context the pillar gave it.
+ */
+export function areaDesignerItemOf(pathname: string, segment: string | null | undefined): { type: string; name: string } | null {
+  if (!segment || isStudioAllPackagesScope(segment) || isStudioOrgScope(segment)) return null;
+  const root = `${studioMetadataAreaRoot(segment)}/`;
+  if (!pathname.startsWith(root)) return null;
+  const [rawType, rawName] = pathname.slice(root.length).split('/');
+  if (!rawType || !rawName) return null;
+  try {
+    const type = decodeURIComponent(rawType);
+    const name = decodeURIComponent(rawName);
+    return areaItemOpensDesignerPage({ packageId: segment, type }) ? { type, name } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * objectstack#28569 (ADR-0146 Consequences) — the types whose item opens the
  * area's simplified form editor (`StudioBundleItemEditor`): the fields Setup's
  * form offers beside the type's preview, and Customize on a read-only base.
