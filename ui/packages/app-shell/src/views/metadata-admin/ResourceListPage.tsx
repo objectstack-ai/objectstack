@@ -100,6 +100,9 @@ import { resolveAffordance, type SchemaLike } from '@object-ui/core';
 import { useAdapter, useMetadata } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { SharingRuleCloneDialog, type SharingRuleCloneDialogProps } from './SharingRuleCloneDialog.js';
+import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
+import { permissionSetCloneNoticeText } from './permission-set-clone.js';
+import { newSimilarOutcome } from '../studio-design/permissionNewSimilar.js';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
 import {
   applyListState,
@@ -355,6 +358,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     }).allowed;
   const CloneDialog = authoredObject && canClone ? DECLARATION_CLONE_DIALOGS[type] : undefined;
   const [cloning, setCloning] = React.useState<Record<string, unknown> | null>(null);
+  // objectstack#36905 — "New similar" on a read-only base's permission sets in
+  // Studio's area, where the Access pillar's rail offered it before: the clone
+  // door picks the package, and the copy opens at its own address.
+  const [newSimilarFrom, setNewSimilarFrom] = React.useState<{ name: string; sourcePackage?: string } | null>(null);
 
   // Studio is scoped to a single *project* package at a time. Load the
   // installed packages and keep only project-scoped ones — anything not
@@ -927,6 +934,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // then the row's controls — the Active switch, Clone, or both in one cell —
   // pinned at its right edge (objectui#13091). One column, because the grid
   // holds one column at that edge.
+  // On the base's own rows only: a row its pair adds is writable where it opens.
+  const newSimilarRows = type === 'permission' && !!host?.packageId && host.readOnly === true && canAuthor && !walled;
   const gridColumns: MetadataGridColumn[] = [
     ...shownColumns.map((c, ci) => ({
       key: c.key,
@@ -936,7 +945,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     // objectstack#36898 — the item's change time and its pending-draft mark.
     { key: CHANGED_COLUMN, label: t('engine.list.col.changedAt', locale) },
     { key: SOURCE_COLUMN, label: t('engine.list.col.source', locale) },
-    ...(activation || CloneDialog
+    ...(activation || CloneDialog || newSimilarRows
       ? [
           {
             key: CONTROLS_COLUMN,
@@ -1140,12 +1149,26 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       </span>
     );
   };
-  if (activation || CloneDialog) {
+  if (activation || CloneDialog || newSimilarRows) {
     cellDraws[pageField(CONTROLS_COLUMN)] = (_value, rec) => {
       const info = rowInfoOf(rec);
       if (!info) return null;
+      const newSimilar = newSimilarRows && (!info.rowPkg || info.rowPkg === host?.packageId);
       return (
         <span className="inline-flex items-center gap-2">
+          {newSimilar && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 max-w-[120px] px-2 text-xs"
+              onClick={() => setNewSimilarFrom({ name: info.name, sourcePackage: holdingPackage(info.holding) })}
+              title={t('perm.clone.hint', locale)}
+              data-testid={`list-new-similar-${info.name}`}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1" />
+              <span className="truncate">{t('perm.clone.action', locale)}</span>
+            </Button>
+          )}
           {activation && (
             <CatalogActiveCell
               itemName={info.name}
@@ -1334,6 +1357,36 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
             <span>{t('engine.catalog.declaredOnly.switchReadOnly', locale)}</span>
           </div>
+        )}
+        {newSimilarFrom && (
+          <PermissionSetCloneDialog
+            source={newSimilarFrom.name}
+            sourcePackage={newSimilarFrom.sourcePackage}
+            locale={locale}
+            onClose={() => setNewSimilarFrom(null)}
+            onCloned={(copy) => {
+              setNewSimilarFrom(null);
+              const outcome = newSimilarOutcome(copy);
+              if ('open' in outcome) {
+                navigate(outcome.open.to, { state: outcome.open.state });
+                return;
+              }
+              // Nothing to open: said where the person is, in the strip's words.
+              toast.warning(
+                outcome.strip.kind === 'noPackage'
+                  ? tFormat('engine.studio.access.newSimilar.noPackage', locale, { name: outcome.strip.name })
+                  : t('perm.clone.noName', locale),
+                outcome.strip.notice
+                  ? {
+                      description: permissionSetCloneNoticeText(
+                        { notice: outcome.strip.notice, noticeCode: outcome.strip.noticeCode, package: null },
+                        locale,
+                      ),
+                    }
+                  : undefined,
+              );
+            }}
+          />
         )}
         {cloning && CloneDialog && (
           <CloneDialog

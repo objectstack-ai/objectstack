@@ -57,12 +57,12 @@ import { customizationPairBaseOf } from './StudioRailCustomizations.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { accessSuggestionStrings } from './accessSuggestionStrings.js';
 import {
-  NEW_SIMILAR_ARRIVAL_STATE,
   NewSimilarStripNotice,
+  newSimilarOutcome,
   readNewSimilarArrival,
   type NewSimilarStrip,
 } from './permissionNewSimilar.js';
-import { studioMetadataItemAddress, studioOwdOverviewPath } from './studioAddress.js';
+import { studioOwdOverviewPath } from './studioAddress.js';
 
 const ACTION_BUTTON =
   'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50';
@@ -190,27 +190,9 @@ export function StudioPermissionSetPage({
   const onNewSimilarSaved = React.useCallback(
     (copy: PermissionSetCloned) => {
       setNewSimilarOpen(false);
-      if (!copy.name) {
-        setStrip({ kind: 'noName', notice: copy.notice, noticeCode: copy.noticeCode });
-        return;
-      }
-      if (typeof copy.package !== 'string') {
-        setStrip({ kind: 'noPackage', name: copy.name, notice: copy.notice, noticeCode: copy.noticeCode });
-        return;
-      }
-      const landed: NewSimilarStrip = {
-        kind: 'landed',
-        name: copy.name,
-        package: copy.package,
-        notice: copy.notice,
-        noticeCode: copy.noticeCode,
-      };
-      navigate(
-        studioMetadataItemAddress(copy.package, 'permission', copy.name, {
-          query: `package=${encodeURIComponent(copy.package)}`,
-        }),
-        { state: { [NEW_SIMILAR_ARRIVAL_STATE]: landed } },
-      );
+      const outcome = newSimilarOutcome(copy);
+      if ('strip' in outcome) setStrip(outcome.strip);
+      else navigate(outcome.open.to, { state: outcome.open.state });
     },
     [navigate],
   );

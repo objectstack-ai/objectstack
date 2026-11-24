@@ -10,8 +10,9 @@
 
 import * as React from 'react';
 import { Copy } from 'lucide-react';
-import { permissionSetCloneNoticeText } from '../metadata-admin/permission-set-clone.js';
+import { permissionSetCloneNoticeText, type PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
 import { t, tFormat } from '../metadata-admin/i18n.js';
+import { studioMetadataItemAddress } from './studioAddress.js';
 
 /**
  * What the strip says: the copy the clone door saved (shown on that copy, in
@@ -46,6 +47,36 @@ export function readNewSimilarArrival(state: unknown, packageId: string): NewSim
     package: packageId,
     notice: typeof arrival.notice === 'string' ? arrival.notice : '',
     ...(typeof arrival.noticeCode === 'string' ? { noticeCode: arrival.noticeCode } : {}),
+  };
+}
+
+/**
+ * What a clone door's answer does: open the copy where it says the copy
+ * landed — its metadata address, with the strip riding the navigation — or,
+ * for an answer that names no copy or no package, say so where the person is.
+ * The landing is never derived from the source.
+ */
+export function newSimilarOutcome(
+  copy: PermissionSetCloned,
+): { open: { to: string; state: Record<string, NewSimilarStrip> } } | { strip: NewSimilarStrip } {
+  if (!copy.name) return { strip: { kind: 'noName', notice: copy.notice, noticeCode: copy.noticeCode } };
+  if (typeof copy.package !== 'string') {
+    return { strip: { kind: 'noPackage', name: copy.name, notice: copy.notice, noticeCode: copy.noticeCode } };
+  }
+  const landed: NewSimilarStrip = {
+    kind: 'landed',
+    name: copy.name,
+    package: copy.package,
+    notice: copy.notice,
+    noticeCode: copy.noticeCode,
+  };
+  return {
+    open: {
+      to: studioMetadataItemAddress(copy.package, 'permission', copy.name, {
+        query: `package=${encodeURIComponent(copy.package)}`,
+      }),
+      state: { [NEW_SIMILAR_ARRIVAL_STATE]: landed },
+    },
   };
 }
 
