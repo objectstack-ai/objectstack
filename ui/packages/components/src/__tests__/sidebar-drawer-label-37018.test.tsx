@@ -101,6 +101,12 @@ describe('Sidebar phone drawer — accessible name (objectstack#37018)', () => {
     expect(await screen.findByRole('dialog', { name: 'App navigation' })).toBeTruthy();
   });
 
+  // Measured for objectstack#37018: the `@radix-ui/react-dialog` this package
+  // resolves logs nothing about a missing Description or Title, and leaves
+  // `aria-describedby` off when no Description is mounted, so this holds with
+  // or without `aria-describedby={undefined}` today (the ablation stayed
+  // green). It is kept as the guard for a Radix change that brings the
+  // missing-description warning back, which the explicit prop exists to quiet.
   it('opens without Radix warning about a missing Description', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
