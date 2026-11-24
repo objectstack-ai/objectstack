@@ -346,6 +346,12 @@ jobs:
       # Gates the `test` job ONLY, ORed with `core` — see the `crosspkg`
       # filter below and the `test` job's `if:` (#9829, #10015).
       crosspkg: ${{ github.event_name != 'merge_group' && steps.changes.outputs.crosspkg || 'true' }}
+      # [#37095] Read by `temporal-conformance` on merge_group ONLY: the queue
+      # build runs that job when the merged diff touches the paths in the
+      # `temporal_live` filter below (ruling record 7146156389, which revises
+      # #22998 for this one job). Every other event ignores it. Fail-open like
+      # the ui outputs: a queue build whose step failed reads '' → 'true'.
+      temporal_live: ${{ steps.changes.outputs.temporal_live || 'true' }}
       # The objectui tree under `ui/` (objectstack#25677). Three outputs, read
       # together by the five `* UI` jobs at the bottom of this file (Type Check
       # UI, Test UI, Lint UI, Build & E2E UI and Live E2E UI):
@@ -770,6 +776,18 @@ jobs:
               - 'packages/lint/**'
               - 'packages/sdui-parser/**'
               - 'packages/types/**'
+            # [#37095] What makes the merge queue run `temporal-conformance`
+            # (ruling record 7146156389): the pgvector store, the driver whose
+            # whole suite that job runs against the live servers, the
+            # live-server files its two filtered steps select, and this file.
+            temporal_live:
+              - 'packages/plugins/knowledge-pgvector/**'
+              - 'packages/drivers/driver-sql/**'
+              - 'packages/metadata-protocol/src/**/*.live-mysql.test.ts'
+              - 'packages/metadata-protocol/src/**/*.live-postgres.test.ts'
+              - 'packages/metadata-protocol/src/**/live-mysql-database.testkit.ts'
+              - 'packages/runtime/src/**/cascade-delete-multivalue-lookup-real-driver*'
+              - '.github/workflows/ci.yml'
 
   # ── WHICH TEST CORE SHARDS START (#26084) ─────────────────────────────
   # The `test` matrix used to be the literal 1..8, so every Test Core run
@@ -2427,8 +2445,10 @@ jobs:
     name: Temporal Conformance (live PG + MySQL)
     needs: filter
     # See THE FILTER CONTRACT on the filter job's outputs (#4928). Full battery
-    # only: see THE TWO SPEEDS above `jobs:` (#22998).
-    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+    # (see THE TWO SPEEDS above `jobs:`, #22998), plus the merge queue when the
+    # entry's diff hits the `temporal_live` paths ([#37095], ruling record
+    # 7146156389). Never on pull_request.
+    if: ${{ !cancelled() && needs.filter.outputs.core != 'false' && github.event_name != 'pull_request' && (github.event_name != 'merge_group' || needs.filter.outputs.temporal_live != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
