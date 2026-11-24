@@ -466,7 +466,7 @@ describe("a list asks the explain engine's transfer verdict for the object, once
     asked = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { body?: string }) => {
       asked.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
-      return { ok, status: ok ? 200 : 403, json: async () => ({ allowed }) };
+      return { headers: new Headers(), ok, status: ok ? 200 : 403, json: async () => ({ allowed }) };
     }));
   }
   beforeEach(() => __clearObjectTransferVerdicts());
@@ -565,7 +565,7 @@ describe('the Change Owner dialog offers the declared cascades as ticks (objects
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { object: string; operation: string };
       explained.push(`${body.object}:${body.operation}`);
-      return { ok: true, status: 200, json: async () => ({ allowed: allow.includes(body.object) }) };
+      return { headers: new Headers(), ok: true, status: 200, json: async () => ({ allowed: allow.includes(body.object) }) };
     }));
   }
 

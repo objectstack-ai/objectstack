@@ -46,7 +46,7 @@ beforeEach(() => {
       const body = init.body ? JSON.parse(init.body as string) : {};
       posts.push(body.manifest ?? body);
       return {
-        ok: true,
+        headers: new Headers(), ok: true,
         status: 201,
         text: async () => JSON.stringify({ success: true, data: { manifest: body.manifest } }),
       } as Response;

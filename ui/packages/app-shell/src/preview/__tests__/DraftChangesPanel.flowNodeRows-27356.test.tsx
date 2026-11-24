@@ -113,7 +113,7 @@ describe("computeChangeDetail names a flow's nodes (objectstack#27356)", () => {
 /* ─────────────── the panel ─────────────── */
 
 function stubServer() {
-  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+  const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -123,7 +123,7 @@ function stubServer() {
       }
       if (/\/meta\/flow(\?|$)/.test(url)) return ok([{ name: 'case_follow_up' }]);
       if (/\/meta\/flow\/case_follow_up\b/.test(url)) return ok(url.includes('state=draft') ? { item: DRAFT } : PUBLISHED);
-      return { ok: false, status: 404, json: async () => ({}) };
+      return { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     }) as unknown as typeof fetch,
   );
 }

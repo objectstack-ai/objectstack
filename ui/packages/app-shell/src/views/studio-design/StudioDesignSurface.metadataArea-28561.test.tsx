@@ -110,7 +110,7 @@ import { StudioDesignSurface } from './StudioDesignSurface';
 // load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
 
-const answer = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
 
 /** The package list as the server serves it: one writable app package and one kernel package. */
 function servePackages() {

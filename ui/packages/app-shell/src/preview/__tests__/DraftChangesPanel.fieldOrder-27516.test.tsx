@@ -130,7 +130,7 @@ type Body = Record<string, unknown>;
 function mockServer(published: Body, draft: Body): void {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
     if (url.includes('/_drafts')) return ok([{ type: 'object', name: 'asset', packageId: 'com.x' }]);
     const [type, name] = url.split('?')[0].replace('/api/v1/meta/', '').split('/');
     if (!name) return ok([{ name: 'asset' }]);
