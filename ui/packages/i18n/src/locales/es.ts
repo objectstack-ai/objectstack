@@ -67,6 +67,7 @@ const es = {
     autofillSourceNoCurrency: 'No se rellenó {{field}}: el importe elegido {{amount}} no indica moneda, pero aquí {{field}} está en {{to}}. Introdúzcalo en {{to}}.',
     autofillNoCurrency: 'No se rellenó {{field}}: el importe elegido es {{amount}}, pero aquí aún no se ha elegido moneda. Elija la moneda y luego introduzca {{field}}.',
     createdOutsideFilters: 'El registro se creó, pero no cumple los filtros de este campo, así que no se puede elegir aquí.',
+    createdUnchecked: 'El registro se creó, pero no se pudo comprobar si cumple los filtros de este campo, así que no se ha elegido. Búsquelo aquí en lugar de crearlo de nuevo.',
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

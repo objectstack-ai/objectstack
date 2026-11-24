@@ -33,7 +33,7 @@
  * - the re-read carries the field's filter AND the new id;
  * - CONTROL, a field with no filter selects without a re-read.
  */
-import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -50,6 +50,7 @@ afterEach(() => {
 
 const TARGET = 'crm_expense_request';
 const OUTSIDE = "The record was created, but it does not match this field's filters, so it cannot be chosen here.";
+const UNCHECKED = "The record was created, but it could not be checked against this field's filters, so it was not chosen. Search for it here rather than creating it again.";
 
 const filteredField = {
   name: 'crm_expense_request',
@@ -87,10 +88,21 @@ function admits(row: Record<string, unknown>, filter: unknown): boolean {
 }
 
 /** Open the picker, type a name nothing matches, and quick-create `created`. */
-async function quickCreate(opts: { field?: any; created: Record<string, unknown>; modal: boolean }) {
-  const table: Array<Record<string, unknown>> = [];
+async function quickCreate(opts: {
+  field?: any;
+  created: Record<string, unknown>;
+  modal: boolean;
+  /** Rows already in the table before the create. */
+  existing?: Array<Record<string, unknown>>;
+  /** The re-read of the new id fails (a transport error). */
+  reReadFails?: boolean;
+}) {
+  const table: Array<Record<string, unknown>> = [...(opts.existing ?? [])];
   const ds = {
     find: vi.fn(async (_object: string, params: any) => {
+      if (opts.reReadFails && JSON.stringify(params?.$filter ?? {}).includes(String(opts.created.id))) {
+        throw new Error('network down');
+      }
       const data = table.filter((r) => admits(r, params?.$filter));
       return { data, total: data.length };
     }),
@@ -178,5 +190,58 @@ describe('LookupField selects a quick-created record only when the field\'s filt
     });
     await waitFor(() => expect(onChange).toHaveBeenCalledWith('req_draft'));
     expect(ds.find.mock.calls.some(([, p]: any[]) => JSON.stringify(p?.$filter ?? {}).includes('req_draft'))).toBe(false);
+  });
+});
+
+describe('after a quick-created record is turned away, the picker still lists and picks (objectstack#36865 review S1, N1)', () => {
+  const existing = [{ id: 'req_old', name: 'Shanghai trip', status: 'approved' }];
+
+  it('the notice sits above the list: the existing candidates stay listed, and one can be picked at once', async () => {
+    const { onChange, onModal } = await quickCreate({
+      modal: true,
+      existing,
+      created: { id: 'req_draft', name: 'Trip', status: 'draft' },
+    });
+    await waitFor(() => expect(onModal).toHaveBeenCalled());
+    const notice = await screen.findByText(OUTSIDE);
+    const panel = screen.getByTestId('lookup-popover');
+    expect(panel).toContainElement(notice);
+    const option = await waitFor(() => within(panel).getByRole('option', { name: /Shanghai trip/ }));
+    await act(async () => {
+      fireEvent.click(option);
+    });
+    expect(onChange).toHaveBeenCalledWith('req_old');
+    expect(onChange).not.toHaveBeenCalledWith('req_draft');
+  });
+
+  it('closing the picker clears the notice; reopened, it lists the candidates with no notice', async () => {
+    const { onModal } = await quickCreate({
+      modal: true,
+      existing,
+      created: { id: 'req_draft', name: 'Trip', status: 'draft' },
+    });
+    await waitFor(() => expect(onModal).toHaveBeenCalled());
+    await screen.findByText(OUTSIDE);
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    });
+    await waitFor(() => expect(screen.queryByTestId('lookup-popover')).toBeNull());
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Select/i }));
+    });
+    const panel = await screen.findByTestId('lookup-popover');
+    await waitFor(() => expect(within(panel).getByRole('option', { name: /Shanghai trip/ })).toBeInTheDocument());
+    expect(screen.queryByText(OUTSIDE)).toBeNull();
+  });
+
+  it('the re-read fails: not selected, and the line says the record exists and could not be checked', async () => {
+    const { onChange, onModal } = await quickCreate({
+      modal: true,
+      reReadFails: true,
+      created: { id: 'req_new', name: 'Trip', status: 'approved' },
+    });
+    await waitFor(() => expect(onModal).toHaveBeenCalled());
+    expect(await screen.findByText(UNCHECKED)).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

@@ -75,6 +75,7 @@ const en = {
     autofillNoCurrency: '{{field}} was not filled: the picked amount is {{amount}}, but no currency is chosen here yet. Choose the currency, then enter {{field}}.',
     // objectstack#36865 — a quick-created record the field's lookupFilters exclude is not selected; this says why.
     createdOutsideFilters: "The record was created, but it does not match this field's filters, so it cannot be chosen here.",
+    createdUnchecked: "The record was created, but it could not be checked against this field's filters, so it was not chosen. Search for it here rather than creating it again.",
   },
   common: {
     // objectui#13461 — a disclosure toggle's name (the tree-view node toggle).

@@ -897,7 +897,17 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   const searchQuery = popoverQuery.search;
   const loading = popoverQuery.loading;
   const totalCount = popoverQuery.total;
-  const error = popoverQuery.error ?? createError;
+  // The fetch error alone gates the list. A create error — a failed inline
+  // create, or a quick-created record this picker will not take
+  // (objectstack#36865) — is a notice drawn above the list instead: the
+  // candidates stay listed and selectable, so the user can pick an existing
+  // record right after reading why the new one was not chosen.
+  const error = popoverQuery.error;
+  // The notice belongs to the panel it was raised in: closing the picker
+  // clears it, so a later open starts clean.
+  useEffect(() => {
+    if (!isOpen) setCreateError(null);
+  }, [isOpen]);
   // Built from the row with its relations collapsed to ids — see
   // `candidateExpand` for why the option never sees the expanded form.
   const fetchedOptions = useMemo(
@@ -1635,10 +1645,10 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
   // SERVER decides, exactly as it does for every listed candidate. Absent
   // from the answer: not selected, and the picker reopens saying why. A
   // picker with no filter, or no data source to ask, selects as before.
-  // A failed re-read is reported, never read as a pass.
+  // A failed re-read is reported as unchecked, never read as a pass.
   const admitCreated = useCallback(
     async (created: Record<string, unknown>): Promise<boolean> => {
-      if (!popoverFilter || !dataSource || !referenceTo) return true;
+      if (!popoverFilter || !hasDataSource || !dataSource || !referenceTo) return true;
       const rid = recordValue(created, idField);
       if (rid === undefined || rid === null) return true;
       let admitted = false;
@@ -1650,13 +1660,15 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         const rows = (res as any)?.data ?? res ?? [];
         admitted = Array.isArray(rows) && rows.length > 0;
         if (!admitted) setCreateError(t('lookup.createdOutsideFilters'));
-      } catch (err) {
-        setCreateError(err instanceof Error ? err.message : String(err));
+      } catch {
+        // Fail closed, and say the record EXISTS: a bare transport error read
+        // as "the create failed" invites a second, duplicate create.
+        setCreateError(t('lookup.createdUnchecked'));
       }
       if (!admitted) setIsOpen(true);
       return admitted;
     },
-    [popoverFilter, dataSource, referenceTo, idField, t],
+    [popoverFilter, hasDataSource, dataSource, referenceTo, idField, t],
   );
   const handleCreateNew = useCallback(
     async (q: string) => {
@@ -2126,6 +2138,14 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   />
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Create notice — above the list, never in place of it. */}
+          {createError && (
+            <div className="flex shrink-0 items-start gap-2 px-3 pb-2 text-sm text-destructive" role="alert" data-testid="lookup-create-error">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <p>{createError}</p>
             </div>
           )}
 
