@@ -6,8 +6,10 @@
 
 fix(plugin-approvals): the decide refusal of a submitter's own approval, and a submitter notice that names several slots, read in the reader's language
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
+
+**Widened door response.** The approvals decide door (`packages/rest/src/approvals-routes.ts`) gains one optional member, `userMessage`, at the top level of its flat `{ code, error }` refusal body. Two rows answer it today: the two `403 FORBIDDEN` decide refusals of a submitter's own approval, the `excludeSubmitter` refusal and the administrator-override self-approve refusal. It is absent whenever no producer marked one, so every other refusal body is unchanged.
 
 - **The decide refusal.** When the decision door refuses a submitter's own approval (the step sets `excludeSubmitter`, or the administrator override would approve the actor's own request), the thrown error now carries a `userMessage`: the same refusal, with its remedy, in the decider's language (`approvalDecideRefused*` in every approvals message pack). A position is named by the decider's pack label, then its declared label, then its name. The error's `message` is unchanged: it stays English for the developer and the log. With no reader language, `userMessage` is English and names no user id.
 - **The REST door.** The approvals routes answer a refusal the service marked with `userMessage` at the top level of their flat `{ code, error }` body, beside `error`, on every mapped row. A refusal with no marking answers exactly as before.
