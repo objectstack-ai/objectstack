@@ -187,7 +187,10 @@ describe('objectstack#36737 — the record tabs in the design mode', () => {
     fireEvent.click(screen.getByText('design'));
     const editor = await screen.findByTestId('record-tabs-editor');
     expect(editor.querySelector('[data-record-tabs-tab="crm_contact.account"]')).not.toBeNull();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Hide Contacts' })).toBeEnabled());
+    // What a save writes through has loaded: the tab's controls are on.
+    await waitFor(() =>
+      expect(editor.querySelector('[data-record-tabs-tab="crm_contact.account"] [data-record-tabs-hide]')).toBeEnabled(),
+    );
     expect(screen.getAllByTestId('design-mode-bar')).toHaveLength(1);
     expect(screen.queryByTestId('record-tabs-config-bar')).toBeNull();
     const items = await moreMenuItems();
