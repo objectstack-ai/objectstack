@@ -266,14 +266,15 @@ describe('KnowledgeService — event sync', () => {
 
 describe('KnowledgeService — reindex', () => {
   it('object source: walks IDataEngine with isSystem context and pushes docs', async () => {
+    // The first page holds both rows; the read after it (id > 'r2') is empty.
     const find = vi.fn(async (
       _obj: string,
-      _query: { where?: unknown; limit?: number },
+      query: { where?: unknown; limit?: number },
       _options: { context: { isSystem?: boolean } },
-    ) => [
+    ) => (query.where === undefined ? [
       { id: 'r1', title: 'T1', notes: 'N1', status: 'open' },
       { id: 'r2', title: 'T2', notes: 'N2', status: 'done' },
-    ]);
+    ] : []));
     const adapter = makeAdapter('memory');
     const svc = new KnowledgeService({ dataEngine: { find } as unknown as IDataEngine });
     svc.registerAdapter('memory', adapter);
@@ -422,13 +423,14 @@ describe('recordToDocument withholds credential-class and internal fields', () =
 
   it('the reindex walk reads the schema off the bound engine', async () => {
     const getSchema = vi.fn((name: string) => (name === 'probe_doc' ? schema : undefined));
-    const find = vi.fn(async () => [record()]);
+    // One row on the first page; the read after it (id > that row) is empty.
+    const find = vi.fn(async (_obj: string, query: { where?: unknown }) => (query.where === undefined ? [record()] : []));
     const svc = new KnowledgeService({ dataEngine: { find, getSchema } as unknown as IDataEngine });
     const adapter = makeAdapter('memory');
     svc.registerAdapter('memory', adapter);
     svc.registerSource(source(['*']));
     const res = await svc.reindexSource('s1');
-    expect(res.indexed).toBe(1);
+    expect(res).toMatchObject({ ok: true, indexed: 1 });
     const [docs] = adapter.upsertSpy.mock.calls[0] as unknown as [KnowledgeDocument[]];
     expect(JSON.stringify(docs)).not.toContain(CREDENTIAL);
     expect(JSON.stringify(docs)).not.toContain(INTERNAL);
