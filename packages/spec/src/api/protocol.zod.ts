@@ -404,8 +404,11 @@ export const GetMetaItemsResponseSchema = lazySchema(() => z.object({
     + 'item. On a `?preview=draft` list an item whose pending draft is served (`_draft: true`) has the '
     + 'draft row\'s time, since the draft is its content. Where several listed items share a name (a '
     + 'name two or more packages ship, the members of a bundle), the latest of their times. Only the '
-    + 'names of items in this answer are keyed. Absent when no listed item is served from a stored '
-    + 'row. Beside the items, never inside one: an item\'s body is served as stored.',
+    + 'names of items in this answer are keyed, and a door that leaves out some item of a name (the '
+    + 'per-caller read gate, a query filter) answers no entry for that name, since the entry may be '
+    + 'the time of the item it left out. A view a stored view container expands is not served from a '
+    + 'row of its own name and has no entry. Absent when no listed item is served from a stored row. '
+    + 'Beside the items, never inside one: an item\'s body is served as stored.',
   ),
 }));
 

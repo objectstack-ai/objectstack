@@ -4467,25 +4467,42 @@ function withItems(raw: unknown, items: any[]): unknown {
     return Array.isArray(raw) ? items : { ...(raw as any), items };
 }
 
+/** How many items of each `name` a list holds. */
+function itemCountsByName(list: readonly unknown[] | null): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const it of list ?? []) {
+        const name = it && typeof it === 'object' ? (it as { name?: unknown }).name : undefined;
+        if (typeof name === 'string') counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts;
+}
+
 /**
- * [#36894] The list envelope with its `changedAt` (when the stored row each
- * listed item serves last changed, keyed by name) keyed by the names of the
- * items it still lists, and without it when none is left. The store keys the
- * items it read; the per-caller gate and the query filters leave items out,
- * and an entry for one of those would tell the caller a name, and when it
- * changed, that this answer does not list. Anything else is answered as it is.
+ * [#36894] The list envelope `visible` with its `changedAt` (when the stored
+ * row each listed item serves last changed, keyed by name) keyed only by the
+ * names of which it still lists every item the store's answer `stored` listed,
+ * and without it when none is left. Anything else is answered as it is.
+ *
+ * The per-caller gate and the query filters leave items out. An entry for a
+ * name no item of which is listed tells the caller a name, and when it
+ * changed, that the answer does not list. And the store's entry for a name
+ * two or more items share is the latest of all of them, so once one of them
+ * is left out it may be that item's time, served under a name whose listed
+ * items have none or an older one: that entry is dropped too, never
+ * recomputed (the per-item times never leave the store).
  */
-function withChangedAtOfListedNames(raw: unknown): unknown {
-    const list = listItemsOf(raw);
-    if (!list || Array.isArray(raw)) return raw;
-    const changedAt = (raw as { changedAt?: unknown }).changedAt;
-    if (changedAt === undefined) return raw;
-    const { changedAt: _held, ...rest } = raw as Record<string, unknown>;
+function withChangedAtOfListedNames(stored: unknown, visible: unknown): unknown {
+    const list = listItemsOf(visible);
+    if (!list || Array.isArray(visible)) return visible;
+    const changedAt = (visible as { changedAt?: unknown }).changedAt;
+    if (changedAt === undefined) return visible;
+    const { changedAt: _held, ...rest } = visible as Record<string, unknown>;
     if (!changedAt || typeof changedAt !== 'object' || Array.isArray(changedAt)) return rest;
-    const listed = new Set(list.map((it: any) => (it && typeof it === 'object' ? it.name : undefined))
-        .filter((name: unknown): name is string => typeof name === 'string'));
-    const kept = Object.entries(changedAt as Record<string, unknown>).filter(([name]) => listed.has(name));
-    if (kept.length === Object.keys(changedAt).length) return raw;
+    const before = itemCountsByName(listItemsOf(stored));
+    const after = itemCountsByName(list);
+    const kept = Object.entries(changedAt as Record<string, unknown>)
+        .filter(([name]) => (after.get(name) ?? 0) > 0 && (after.get(name) ?? 0) >= (before.get(name) ?? 0));
+    if (kept.length === Object.keys(changedAt).length) return visible;
     return kept.length === 0 ? rest : { ...rest, changedAt: Object.fromEntries(kept) };
 }
 
@@ -4600,9 +4617,10 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *  8. `position` — `?include=grants`: each position as the resolver enforces
  *     it for a holder ({@link describeMetaPositionList}).
  *  8a. [#36894] The store's `changedAt` (`GetMetaItemsResponseSchema`) keeps
- *     only the names an item still listed carries
+ *     only the names of which every item the store listed is still listed
  *     ({@link withChangedAtOfListedNames}): the gate and the filters above
- *     leave items out, and a name this caller is not listed is not keyed.
+ *     leave items out, and the store's entry for a name is the latest of all
+ *     its items, so it may be the time of one left out.
  *  9. The translation step ({@link translateMetaList}, reached through
  *     {@link MetaListAnswerSources.translateList}).
  *
@@ -4751,8 +4769,8 @@ export function createMetaListAnswer(
             }
         }
 
-        // 8a. [#36894] `changedAt` keys only the names this answer lists.
-        visible = withChangedAtOfListedNames(visible);
+        // 8a. [#36894] `changedAt` keys only the names no step above left an item of out.
+        visible = withChangedAtOfListedNames(raw, visible);
 
         // 9. The translation step ({@link translateMetaList}, through the transport's entry).
         const data = await sources.translateList(metaType, visible);

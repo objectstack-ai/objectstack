@@ -49,7 +49,7 @@ import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { listedChangedAt, storedEntryChangedAt, storedRowChangedAt, takeListedRowChangedAt } from './listed-row-changed-at.js';
+import { listedChangedAt, storedEntryChangedAt, storedRowChangedAt, takeListedRowChangedAt, withListedRowChangedAt } from './listed-row-changed-at.js';
 import { packagelessRowWithheld, withServedObjectDecorations } from './protocol-meta-item-face.js';
 import {
     declinesPackageLessRowAt,
@@ -1012,7 +1012,14 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // this path (not registry.getAllApps), so the merge must happen here too
     // or every contributed group renders empty.
     if (request.type === 'app' || request.type === 'apps') {
-        items = (items as any[]).map((app) => host.engine.registry.applyNavContributions(app));
+        // [#36894] The fold answers a `structuredClone` when the app has
+        // contributions, which drops the symbol-keyed row time: it is taken
+        // off before the fold and put back on what the fold answers
+        // ({@link takeListedRowChangedAt}).
+        items = (items as any[]).map((app) => {
+            const { item, changedAt } = takeListedRowChangedAt(app);
+            return withListedRowChangedAt(host.engine.registry.applyNavContributions(item), changedAt);
+        });
     }
 
     // [#14375 / ADR-0130 Consequences row 6] A package row carries the

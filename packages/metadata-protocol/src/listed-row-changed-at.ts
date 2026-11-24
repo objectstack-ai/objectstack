@@ -28,10 +28,17 @@
  *
  * The list rebuilds items by spread at several steps (the package stamp, a
  * stand-in's copy, the MetadataService merge, the artifact envelope), and an
- * object spread copies an enumerable symbol member, so the time survives every
- * copy of the body it belongs to. A body built from something else (a view
- * container's expansion, a code item) carries none. The served-row-name mark
- * (`SERVED_ROW_NAME`) travels the same way.
+ * object spread copies an enumerable symbol member, so the time survives each
+ * of those copies of the body it belongs to. A body built from something else
+ * (a view container's expansion, a code item) carries none. The served-row-name
+ * mark (`SERVED_ROW_NAME`) travels the same way.
+ *
+ * ⛔ A copy that is NOT a spread loses it: `structuredClone` copies string keys
+ * only. The one such step on the list is the app nav fold
+ * (`applyNavContributions`, which clones an app that has contributions), so
+ * the list takes the time off before it and puts it back on what it answers. A
+ * step added later that copies an item any other way than by spread owes the
+ * same.
  *
  * The time is taken off each item ({@link takeListedRowChangedAt}) where the
  * list assembles its answer, on every face, so no item it returns carries it:
