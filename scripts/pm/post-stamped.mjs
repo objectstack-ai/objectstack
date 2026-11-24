@@ -489,8 +489,9 @@
  * ## A claim goes out with its labels, never alone
  *
  * A comment whose first keyed line (after the signature) is `Claim:` is `EXIT_REFUSED` with zero writes, and the
- * refusal prints the `label-write.mjs --comment-file … --add pm:dispatched --remove pm:queue --assign LOGIN` stroke
- * that folds the same comment — judged by `judgeBody`, unchanged — with the labels and assignee. Measured: claims
+ * refusal prints the `label-write.mjs --comment-file …` strokes that fold the same comment — judged by `judgeBody`,
+ * unchanged — one arm per card state, as `claimStrokeRefusalText` says why: `--add pm:dispatched --remove pm:queue
+ * --assign LOGIN` for a card not yet dispatched, `--add pm:dispatched` alone for an amendment of one that is. Measured: claims
  * posted here as lone comments left their cards `pm:queue` and unassigned until triage knocked. Judged after the route
  * is resolved, on one arm: on a route resolved `direct` the fold does not exist (it is relay-only) and the claim stays
  * this tool's write, said on stderr. `claimStrokeRefusal` carries why it is not in `judgeBody`. `--comment` only.
@@ -2116,16 +2117,29 @@ export function claimStrokeRefusal(body, { mode, route } = {}) {
   return { line, transport: route && !route.error ? route.transport ?? null : null };
 }
 
-/** The refusal a caller reads, naming the stroke that carries the same comment. */
+/**
+ * The refusal a caller reads, naming the stroke that carries the same comment — one arm per card state, because the
+ * body cannot say which it is: an amendment is a newer `Claim:` of the same shape, and the patrol reads the newest one
+ * (`latestClaimComment`). Pure, so neither arm is chosen from a read that may fail. The amendment arm keeps the
+ * card's state and assignee: on a card already `pm:dispatched` its `--add` is label-write's idempotent no-op and the
+ * stroke is the comment alone; on any other state it makes two state labels, refused (ONE-OF) with nothing written.
+ * The dispatch arm on such a card would add LOGIN as a second assignee unless LOGIN already holds it.
+ */
 export function claimStrokeRefusalText(refusal, { number = 'N', file = null } = {}) {
   const transport = refusal.transport ? `the route resolved \`${refusal.transport}\`` : 'the route could not be decided, so the fold cannot be ruled out';
+  const stroke = `node scripts/pm/label-write.mjs --issue ${number} --comment-file ${file ?? 'PATH'} --add pm:dispatched`;
   return (
     'post-stamped: REFUSED — this comment opens with a `Claim:` line, and a claim is ONE stroke with its labels and ' +
     'assignee. Nothing was written.\n' +
     `  line:  ${offendingSpan(refusal.line, 160)}\n` +
     '  Sent alone, the claim lands and the card stays `pm:queue` with no assignee — readable as free — until someone\n' +
-    '  notices. Fold it into the label write, comment first, in one relay stroke:\n' +
-    `    node scripts/pm/label-write.mjs --issue ${number} --comment-file ${file ?? 'PATH'} --add pm:dispatched --remove pm:queue --assign LOGIN\n` +
+    '  notices. Fold it into the label write, comment first, in one relay stroke — the arm that fits the card now:\n' +
+    '  a card not yet dispatched (`pm:queue`), the claim that dispatches it:\n' +
+    `    ${stroke} --remove pm:queue --assign LOGIN\n` +
+    '  a card already `pm:dispatched` (a claim AMENDMENT), its state and assignee left as they are:\n' +
+    `    ${stroke}\n` +
+    '  There the label is already on, so the stroke is the comment alone; on any other state it is refused (two state\n' +
+    '  labels), nothing written. The first arm on a dispatched card adds LOGIN as a second assignee unless LOGIN holds it.\n' +
     '  The comment is judged there by this file\'s own `judgeBody`, so nothing about the body changes.\n' +
     `  (${transport}; \`--comment-file\` is relay-only, and only on a route resolved \`direct\` does this tool post a claim.)`
   );
@@ -4051,7 +4065,8 @@ const USAGE = [
   '  seat with the tier — never triage.',
   '  A comment whose first line after the signature opens `Claim:` is REFUSED: a claim is ONE stroke with its',
   '  labels and assignee — `label-write.mjs --issue N --comment-file PATH --add pm:dispatched --remove pm:queue',
-  '  --assign LOGIN` folds the same comment. Only on a route resolved `direct`, where that fold does not exist, is',
+  '  --assign LOGIN` folds the same comment; on a card already `pm:dispatched` (an amendment), `--add pm:dispatched`',
+  '  alone, which sends the comment and moves nothing. Only on a route resolved `direct`, where that fold does not exist, is',
   '  the claim written here, with a note on stderr.',
   '  The attribution footer is the caller\'s: its form differs by channel and act, so this tool adds none.',
   '',
@@ -4307,7 +4322,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the one judge: every body refusal on ONE path — `main` and `label-write.mjs --comment-file` call `judgeBody`, never a copy': 8,
   'the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes': 10,
   'the record tier: a record naming `CONTRACT_REVIEW_TIER` is written only on a transcript `verify-review-tier.mjs` passes; another tier and a non-record comment are untouched': 16,
-  'the claim stroke: a comment opening `Claim:` is refused on every route but `direct`, pointing at the `label-write` fold; the same body through that fold passes': 15,
+  'the claim stroke: a comment opening `Claim:` is refused on every route but `direct`, pointing at the `label-write` fold; the same body through that fold passes': 20,
 });
 const SELF_TEST_BATTERY_FLOOR = 30;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
@@ -5877,6 +5892,9 @@ export function selfTest() {
     const text = claimStrokeRefusalText(claimStrokeRefusal(CLAIM, { mode: 'comment', route: RELAY }), { number: 36203, file: 'claim.md' });
     t('⭐ the refusal prints the ONE stroke that folds it — the card, the file, the labels and the assignee — and says nothing was written', ['label-write.mjs --issue 36203 --comment-file claim.md --add pm:dispatched --remove pm:queue --assign LOGIN', 'Nothing was written', 'ONE stroke with its labels'].every((x) => text.includes(x)));
     t('…and placeholders where the caller gave none', claimStrokeRefusalText({ line: 'Claim: x', transport: null }).includes('--issue N --comment-file PATH'));
+    const arms = text.split('\n').filter((l) => l.startsWith('    node scripts/pm/label-write.mjs')).map((l) => l.trim());
+    const [dispatchArm, amendArm] = arms;
+    t('⭐ two arms, each under the card state it fits: the amendment arm adds the state it asserts and moves no other label and no assignee', arms.length === 2 && text.indexOf('not yet dispatched') < text.indexOf(dispatchArm) && text.indexOf('already `pm:dispatched`') < text.lastIndexOf(amendArm) && amendArm.endsWith('--comment-file claim.md --add pm:dispatched') && dispatchArm === `${amendArm} --remove pm:queue --assign LOGIN`);
     const folded = judgeBody(CLAIM, { mode: 'comment' }, NOW_MS, 'label-write');
     t('⭐ control: the SAME claim through `judgeBody` — the path `label-write --comment-file` folds it through — passes, rendered', folded.ok && folded.rendered.body.includes('Claim: PM loop round 1 · 2026-09-10T06:37Z'));
     const dir = mkdtempSync(join(tmpdir(), 'post-stamped-claim-'));
@@ -5891,6 +5909,21 @@ export function selfTest() {
       t('⛔ control: the same claim on the direct route renders (exit 0) and says the labels follow as a second write', direct.status === EXIT_OK && direct.stdout.includes('Claim: PM loop round 1') && direct.stderr.includes('relay-only'));
       const other = run('dispatch', `${SIG}\nRound report {{NOW}}\n`);
       t('⛔ control: a signed comment that is no claim, on the same undecidable route, renders (exit 0) — the refusal keys on the claim', other.status === EXIT_OK && !other.stderr.includes('--comment-file'));
+      // Each printed arm, run as label-write's own dry run on a card in a given state (a child process: label-write imports this file).
+      writeFileSync(join(dir, 'claim.md'), CLAIM, 'utf8');
+      const lw = (arm, labels, assignees) => {
+        const argv = [...(arm ?? '').split(/\s+/u).slice(2).map((a) => (a === 'claim.md' ? join(dir, 'claim.md') : a === 'LOGIN' ? 'os-justin' : a)), '--repo', 'objectstack-ai/objectstack', '--dry-run'];
+        const code = `const { parseOptions, runLabelWrite } = await import(${JSON.stringify(new URL('./label-write.mjs', import.meta.url).href)}); const [argv, labels, assignees] = JSON.parse(process.argv[1]); const p = parseOptions(argv); if (!p.ok) { console.log(JSON.stringify({ exit: 'usage', lines: [p.error] })); process.exit(0); } const card = { state: 'open', html_url: 'https://github.com/objectstack-ai/objectstack/issues/7', labels: labels.map((name) => ({ name })), assignees: assignees.map((login) => ({ login })) }; const lines = []; const r = await runLabelWrite(p.options, { call: async (path) => ({ status: 200, json: card, call: 'GET ' + path }), route: { transport: 'dispatch', session: 'session_01QSeKYmhU5KEj1nukYhp1Tg', error: null, reason: 'self-test' }, send: async () => { throw new Error('a dry run sends nothing'); }, log: (l) => lines.push(l) }); console.log(JSON.stringify({ exit: r.exit, ops: r.payload ? r.payload.actions.map((a) => a.op).join(' > ') : null, lines }));`;
+        const out = spawnSync(process.execPath, ['--input-type=module', '-e', code, JSON.stringify([argv, labels, assignees])], { encoding: 'utf8', env: { ...process.env, GITHUB_TOKEN: '', GH_TOKEN: '' } });
+        try { return JSON.parse(out.stdout.trim().split('\n').pop()); } catch { return { exit: null, ops: null, lines: [out.stderr] }; }
+      };
+      const DISPATCHED = ['pm:dispatched', 'domain:skills'];
+      const QUEUED = ['pm:queue', 'domain:skills'];
+      t('⭐ the amendment arm, through label-write on a card already `pm:dispatched` and assigned: exit 0, ONE stroke that is the comment alone', JSON.stringify([lw(amendArm, DISPATCHED, ['os-justin'])].map((r) => [r.exit, r.ops])) === '[[0,"comment"]]');
+      const early = lw(amendArm, QUEUED, []);
+      t('⛔ control: the SAME arm on a card still `pm:queue` is refused there — two state labels, exit 2, no stroke packed', early.exit === 2 && early.ops === null && early.lines.some((l) => l.includes('ONE-OF')));
+      t('⛔ control: the dispatch arm on that dispatched card, LOGIN another account, packs `assign` — the second assignee the amendment arm exists to avoid', lw(dispatchArm, DISPATCHED, ['huangyiirene']).ops === 'comment > assign');
+      t('…and the dispatch arm stays right where it fits: a `pm:queue` card gets the comment, the state swap and the assignee', lw(dispatchArm, QUEUED, []).ops === 'comment > labels_add > labels_remove > assign');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -5898,7 +5931,7 @@ export function selfTest() {
     const mainOnly = own.slice(own.indexOf('async function main(argv)'), own.indexOf('// --self-test — offline'));
     const judgeOnly = own.slice(own.indexOf('export function judgeBody('), own.indexOf('const USAGE = ['));
     t('structural: main judges the claim after the route is resolved and before the dry-run exit; `judgeBody` never does', mainOnly.indexOf('claimStrokeRefusal(rendered.body') > mainOnly.indexOf('await resolveRoute(') && mainOnly.indexOf('claimStrokeRefusal(rendered.body') < mainOnly.indexOf('if (options.dryRun)') && !judgeOnly.includes('claimStrokeRefusal'));
-    t('the usage says it, with the stroke', USAGE.includes('opens `Claim:` is REFUSED') && USAGE.includes('--comment-file PATH --add pm:dispatched --remove pm:queue'));
+    t('the usage says it, with the stroke', USAGE.includes('opens `Claim:` is REFUSED') && USAGE.includes('--comment-file PATH --add pm:dispatched --remove pm:queue') && USAGE.includes('(an amendment), `--add pm:dispatched`'));
   }
 
   battery('the review route: a `Request: contract-review` knock addressed to triage is refused; to a review or sibling seat, and every other key to triage, it passes');
