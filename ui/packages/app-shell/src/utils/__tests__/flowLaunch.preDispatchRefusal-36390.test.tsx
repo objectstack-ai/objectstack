@@ -140,3 +140,27 @@ describe('the api and script types reach the same door and show the same line', 
         expect(await toastedBy(action, dispatchWith(recordNotFound()))).toEqual([MESSAGE]);
     });
 });
+
+// objectstack#36463 — the approvals door answers its refusals in the flat
+// `{ code, error }` dialect, and a decide refusal of a submitter's own approval
+// marks the decider's language at that body's top level. The `type: 'api'`
+// Approve action on the request's page reads it there, as `@objectstack/client`
+// does, so the toast is the decider's language rather than the English `error`.
+describe('a flat approvals refusal shows its top-level userMessage (objectstack#36463)', () => {
+    const ACTION = { name: 'approval_approve', type: 'api', target: '/api/v1/approvals/requests/{id}/approve' } as ActionDef;
+    const ENGLISH = "'u_sub' submitted this request and holds no slot on it, so they cannot approve it through the administrator override.";
+    const MARKED = '此请求由您提交，且您不在其审批人之列，因此不能以管理员身份代为批准它。';
+
+    it('the marked text is the toast; the English error is not', async () => {
+        const shown = await toastedBy(ACTION, async () =>
+            apiActionRefusalResult({ status: 403 }, { code: 'FORBIDDEN', error: ENGLISH, userMessage: MARKED }, 'HTTP 403', 'zh-CN'));
+        expect(shown).toEqual([MARKED]);
+    });
+
+    it('CONTROL: unmarked, or marked blank, the toast reads the error as before', async () => {
+        for (const body of [{ code: 'FORBIDDEN', error: ENGLISH }, { code: 'FORBIDDEN', error: ENGLISH, userMessage: ' ' }]) {
+            const shown = await toastedBy(ACTION, async () => apiActionRefusalResult({ status: 403 }, body, 'HTTP 403', 'zh-CN'));
+            expect(shown).toEqual([ENGLISH]);
+        }
+    });
+});
