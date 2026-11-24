@@ -392,16 +392,27 @@ describe('recordToDocument withholds credential-class and internal fields', () =
     expect(JSON.stringify(doc)).not.toContain(INTERNAL);
   });
 
-  it('the event-sync path reads the schema off the bound engine', async () => {
+  // The event-sync path builds its document from the row it RE-READS (the
+  // source's `where` decides membership), and that row carries every column —
+  // the payload here carries only the id. The re-read row goes through the same
+  // gate as the reindex walk, so a withheld field stays out of the document
+  // whether the source takes `'*'` or names it.
+  it.each([
+    ["'*'", ['*'], [] as string[], 'Visible\n\nBody', {}],
+    ['named explicitly', ['title', 'api_token', 'lookup_digest'], ['passphrase', 'notes'], 'Visible', { notes: 'Body' }],
+  ])('the event-sync path withholds them from the re-read row (%s)', async (_label, content, meta, text, metadata) => {
     const getSchema = vi.fn((name: string) => (name === 'probe_doc' ? schema : undefined));
-    const svc = new KnowledgeService({ dataEngine: { find: vi.fn(), getSchema } as unknown as IDataEngine });
+    const find = vi.fn(async () => [record()]);
+    const svc = new KnowledgeService({ dataEngine: { find, getSchema } as unknown as IDataEngine });
     const adapter = makeAdapter('memory');
     svc.registerAdapter('memory', adapter);
-    svc.registerSource(source(['*']));
-    await svc.handleRecordUpsert('probe_doc', record());
+    svc.registerSource(source(content, meta));
+    await svc.handleRecordUpsert('probe_doc', { id: 'r1' });
+    expect(find).toHaveBeenCalledTimes(1);
     expect(getSchema).toHaveBeenCalledWith('probe_doc');
     const [docs] = adapter.upsertSpy.mock.calls[0] as unknown as [KnowledgeDocument[]];
-    expect(docs[0].content).toBe('Visible\n\nBody');
+    expect(docs[0].content).toBe(text);
+    expect(docs[0].metadata).toEqual(metadata);
     expect(JSON.stringify(docs)).not.toContain(CREDENTIAL);
     expect(JSON.stringify(docs)).not.toContain(INTERNAL);
   });

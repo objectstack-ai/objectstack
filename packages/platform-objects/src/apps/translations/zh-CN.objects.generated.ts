@@ -4627,5 +4627,90 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         }
       }
     }
+  },
+  sys_task: {
+    label: "任务",
+    pluralLabel: "任务",
+    description: "待办的事项，带负责人和到期时间。",
+    fields: {
+      title: {
+        label: "标题"
+      },
+      description: {
+        label: "说明"
+      },
+      status: {
+        label: "状态",
+        options: {
+          todo: "待办",
+          in_progress: "进行中",
+          done: "完成"
+        }
+      },
+      due_at: {
+        label: "到期时间"
+      },
+      assignee_id: {
+        label: "负责人"
+      },
+      completed_at: {
+        label: "完成时间",
+        help: "状态变为“完成”时由平台写入，离开“完成”时清空。"
+      },
+      owner_id: {
+        label: "所有者"
+      }
+    },
+    _views: {
+      assigned_to_me: {
+        label: "分配给我的",
+        emptyState: {
+          title: "没有分配给你的任务",
+          message: "分配给你的未完成任务会显示在这里。"
+        }
+      },
+      created_by_me: {
+        label: "我创建的",
+        emptyState: {
+          title: "还没有任务",
+          message: "你创建的任务会显示在这里。"
+        }
+      },
+      all: {
+        label: "全部"
+      }
+    }
+  },
+  sys_note: {
+    label: "备忘",
+    pluralLabel: "备忘",
+    description: "备忘：一个标题和一段带格式的正文。",
+    fields: {
+      title: {
+        label: "标题"
+      },
+      body: {
+        label: "正文"
+      },
+      heading: {
+        label: "显示标题",
+        help: "标题；标题为空时取正文第一行。由平台维护。"
+      },
+      owner_id: {
+        label: "所有者"
+      }
+    },
+    _views: {
+      mine: {
+        label: "我的",
+        emptyState: {
+          title: "还没有备忘",
+          message: "你写的备忘会显示在这里。"
+        }
+      },
+      all: {
+        label: "全部"
+      }
+    }
   }
 };
