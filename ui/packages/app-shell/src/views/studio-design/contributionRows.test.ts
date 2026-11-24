@@ -39,6 +39,7 @@ const READ = {
   packageId: BASE,
   overrides: [],
   extensions: [],
+  arrangements: [],
   switchedOff: [],
   contributions: [
     { kind: 'field' as const, object: 'crm_account', name: 'acme_score', packageId: ACME },
@@ -49,7 +50,7 @@ const READ = {
     { kind: 'nav' as const, app: 'crm_app', group: 'ghost_group', name: 'nav_knowledge', packageId: SERVICE },
     { kind: 'nav' as const, app: 'other_app', name: 'nav_elsewhere', packageId: SERVICE },
   ],
-  counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 7 },
+  counts: { overrides: 0, extensions: 0, arrangements: 0, switchedOff: 0, contributions: 7 },
 };
 
 const readState = (): PackageCustomizationsState => ({

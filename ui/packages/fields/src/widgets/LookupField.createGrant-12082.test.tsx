@@ -124,3 +124,27 @@ describe('LookupField "Create new" reads the target object\'s create grant (obje
     expect(await offersCreateNew(null)).toBe(true);
   });
 });
+
+/** Open the picker on a target that HAS candidates and report whether the pinned footer offers "Create new". */
+async function footerOffersCreateNew(perms: MePermissionsResponse | null): Promise<boolean> {
+  const ds = makeDataSource();
+  ds.find.mockResolvedValue({ data: [{ id: 'ct_1', name: 'NDA' }, { id: 'ct_2', name: 'MSA' }], total: 2 });
+  const widget = <LookupField field={field} value={undefined} onChange={vi.fn()} readonly={false} dataSource={ds as any} />;
+  render(perms ? <MePermissionsProvider initialPermissions={perms}>{widget}</MePermissionsProvider> : widget);
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Select/i }));
+  });
+  await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
+  const footer = screen.queryByTestId('lookup-panel-footer');
+  return footer !== null && footer.textContent!.includes('Create new');
+}
+
+describe('the pinned footer reads the same create grant (objectstack#36825)', () => {
+  it('create denied on the target → no "Create new" in the footer', async () => {
+    expect(await footerOffersCreateNew(envelope({ allowCreate: false }))).toBe(false);
+  });
+
+  it('CONTROL — create granted on the target → the footer offers "Create new"', async () => {
+    expect(await footerOffersCreateNew(envelope({ allowCreate: true }))).toBe(true);
+  });
+});

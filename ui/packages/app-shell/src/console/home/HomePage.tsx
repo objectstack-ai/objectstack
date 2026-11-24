@@ -48,6 +48,7 @@ import { useCanAuthorMetadata, useCanReadPendingDrafts } from '../../hooks/useCa
 import { HomeAppsStrip } from './HomeAppsStrip.js';
 import { PhoneAppList } from '../../layout/PhoneAppList.js';
 import { appAddressSegment } from '../../utils/appRoute.js';
+import { inboxPagePath } from '../../views/inbox/inboxPageModel.js';
 import { appSegmentOf, lastOpenedByApp } from './appLastOpened.js';
 import { recentItemObject, recentItemTypeLabel } from './recentItemTypeLabel.js';
 import { RecoveryPasswordReminder } from './RecoveryPasswordReminder.js';
@@ -1073,10 +1074,9 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                 ),
               })
             }
-            /* The bell's own "view all" target (`InboxPopover`): `?view=mine`
-               selects the user-scoped view, so the full page matches what the
-               column showed (objectui#4074). */
-            onOpenInbox={() => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`)}
+            /* The inbox page the bell opens (objectstack#36741), which lists
+               the same signed-in user's messages the column showed. */
+            onOpenInbox={() => navigate(inboxPagePath(hostAppSegment))}
             /* `action_url` is APP-RELATIVE (`/{object}/{id}`, ADR-0030 L5),
                so it has to be hosted under an app before it is a route —
                navigating it verbatim is objectui#5179, where the console
@@ -1092,7 +1092,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
               openInboxNotification(n, isApprovalsInboxLink(n.actionUrl) ? approvalsHostSegment : hostAppSegment, {
                 markRead: markNotificationRead,
                 goTo: (path) => navigate(path),
-                openInbox: () => navigate(`/apps/${hostAppSegment}/sys_inbox_message?view=mine`),
+                openInbox: () => navigate(inboxPagePath(hostAppSegment)),
               })
             }
             t={t}

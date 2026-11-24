@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   cellWrite,
   digestChoices,
+  followOrganizationWrite,
   quietHoursSaveable,
   quietHoursStored,
   QUIET_HOURS_OFF,
@@ -160,5 +161,40 @@ describe('every choice takes effect, the explicit off included', () => {
       id: 'row-g',
       data: { quiet_hours: { off: true } },
     });
+  });
+});
+
+// [objectstack ruling 7073270426 on #35123] Empty is the third state, "not
+// set": the next row decides, in the end the organization's default. Going back
+// to following the organization is an update of the person's own (*, *) row
+// that empties one field, never a delete (the member grant carries none).
+describe('"Follow organization setting" empties one field of the person\'s own (*, *) row', () => {
+  const own: GeneralPreferences = {
+    ownRowId: 'row-g',
+    enabled: { value: true, source: 'own' },
+    digest: { value: 'weekly', source: 'own' },
+    quietHours: { value: { start: '12:00', end: '13:00' }, source: 'own' },
+  };
+
+  it('an own digest or quiet hours is cleared by an update writing that field empty, and nothing else', () => {
+    expect(followOrganizationWrite(own, 'digest')).toEqual({ kind: 'update', id: 'row-g', data: { digest: null } });
+    expect(followOrganizationWrite(own, 'quiet_hours')).toEqual({ kind: 'update', id: 'row-g', data: { quiet_hours: null } });
+  });
+
+  it('the explicit off is the person\'s own answer too, and is cleared the same way', () => {
+    const off: GeneralPreferences = { ...own, digest: { value: 'none', source: 'own' }, quietHours: { value: null, source: 'own' } };
+    expect(followOrganizationWrite(off, 'digest')).toEqual({ kind: 'update', id: 'row-g', data: { digest: null } });
+    expect(followOrganizationWrite(off, 'quiet_hours')).toEqual({ kind: 'update', id: 'row-g', data: { quiet_hours: null } });
+  });
+
+  it('nothing to clear: no own (*, *) row, or a field the door says is not the person\'s own', () => {
+    const noRow: GeneralPreferences = { enabled: own.enabled, digest: own.digest, quietHours: own.quietHours };
+    expect(followOrganizationWrite(noRow, 'digest')).toBeNull();
+    expect(followOrganizationWrite(noRow, 'quiet_hours')).toBeNull();
+    for (const source of ['default', 'builtin'] as const) {
+      const inherited: GeneralPreferences = { ...own, digest: { value: 'daily', source }, quietHours: { value: null, source } };
+      expect(followOrganizationWrite(inherited, 'digest')).toBeNull();
+      expect(followOrganizationWrite(inherited, 'quiet_hours')).toBeNull();
+    }
   });
 });

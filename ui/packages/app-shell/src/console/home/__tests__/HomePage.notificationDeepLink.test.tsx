@@ -278,6 +278,6 @@ describe('Home notification rows follow the deep link to the record (objectui#51
     // `HomePage.inboxLinksTarget.test.tsx`. Repeated here so a change to the
     // deep-link path cannot quietly swallow the no-link case.
     notificationsFixture = [{ id: 'n1', title: 'Weekly digest' }];
-    expect(await clickNotification()).toBe('/apps/crm/sys_inbox_message?view=mine');
+    expect(await clickNotification()).toBe('/apps/crm/inbox');
   });
 });

@@ -114,7 +114,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.collapse": {
         label: "摺疊",
-        helpText: "該分割區能否摺疊，作用於輸入表單和記錄詳細資料頁面。未設定：none。"
+        helpText: "該分割區能否摺疊。輸入表單依設定執行；預設記錄頁面上讀者可以摺疊每個有標題的分組，因此那裡只決定初始狀態：collapsed 先收合，其餘先展開。未設定：none。"
       },
       "fieldGroups.visibleWhen": {
         label: "可見條件",
@@ -239,6 +239,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       "fields.deleteBehavior": {
         label: "刪除行為",
         helpText: "被參照記錄刪除時的處理方式"
+      },
+      "fields.transferBehavior": {
+        label: "轉移行為",
+        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄"
       },
       "fields.multiple": {
         label: "多選",
@@ -768,6 +772,10 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       deleteBehavior: {
         label: "刪除行為",
         helpText: "被參照記錄刪除時的處理方式"
+      },
+      transferBehavior: {
+        label: "轉移行為",
+        helpText: "變更被引用記錄的負責人時，是否也可一併轉移透過此欄位指向它的記錄"
       },
       relatedListFilter: {
         label: "關聯清單篩選",
@@ -2190,7 +2198,8 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "顯示名稱"
       },
       description: {
-        label: "描述"
+        label: "描述",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "類型",
@@ -2272,9 +2281,33 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "日期範圍",
         helpText: "預設時間段與自訂範圍開關。維度必須是資料集的日期維度；資料集只有一個日期維度時可留空"
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "匯出選項",
         helpText: "下載格式（csv、xlsx）與檔案名稱。誰可以下載由資料集物件上的匯出權限決定"
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },

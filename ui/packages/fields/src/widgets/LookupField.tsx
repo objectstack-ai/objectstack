@@ -2000,6 +2000,52 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     ) : null;
 
   // The candidate panel: the popover's body, or the list cell's editor itself.
+  //
+  // In the popover the search row is pinned at the top, the options scroll in
+  // the middle, and "show all results" and quick-create sit in a footer pinned
+  // under the list (objectstack#36825). Inside the room Radix reports the list
+  // is what gives way, so they stay whole and clickable whatever its length,
+  // on either side the popover opens to. The footer reads the same `canCreate`
+  // as the empty state's create button, and is not drawn when it would hold
+  // nothing. The list cell's editor keeps both at the end of its list, above
+  // its own pinned rows.
+  const panelFace: 'popover' | 'cell' = inCell && !props.disabled ? 'cell' : 'popover';
+  const offersShowAll = hasDataSource && totalCount > filteredOptions.length;
+  const showAllButton = offersShowAll ? (
+    <button
+      type="button"
+      className={cn('w-full shrink-0 whitespace-nowrap text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5', PHONE_TOUCH_HEIGHT)}
+      onClick={() => {
+        setIsOpen(false);
+        setIsPickerOpen(true);
+      }}
+      data-testid="show-all-results"
+    >
+      <TableProperties className="size-3.5" />
+      {t('lookup.showAllResults', { count: totalCount })}
+    </button>
+  ) : null;
+  const createButton = canCreate ? (
+    <button
+      type="button"
+      className={cn('w-full min-w-0 flex-1 text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground', PHONE_TOUCH_HEIGHT)}
+      disabled={creating}
+      onClick={() => handleCreateNew(searchQuery)}
+      data-testid="lookup-create-new"
+    >
+      {creating ? <Loader2 className="size-3.5 shrink-0 animate-spin" /> : <Plus className="size-3.5 shrink-0" />}
+      <span className="truncate">{searchQuery ? t('lookup.createNamed', { name: searchQuery }) : t('lookup.createNew')}</span>
+    </button>
+  ) : null;
+  const listShowsOptions = !error && !(loading && filteredOptions.length === 0) && visibleOptions.length > 0;
+  // One row under the list: quick-create on the left (its typed name cut
+  // short when long), "show all" on the right.
+  const pinnedFooter = panelFace === 'popover' && listShowsOptions && (showAllButton || createButton) ? (
+    <div className="flex shrink-0 items-center gap-1 border-t p-1 [&>button]:w-auto" data-testid="lookup-panel-footer">
+      {createButton ?? <span className="flex-1" aria-hidden="true" />}
+      {showAllButton}
+    </div>
+  ) : null;
   const lookupPanelBody = (
     <>
           {/* Search input — not offered on a target whose search resolves to
@@ -2143,38 +2189,16 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                     );
                   })}
                   {/* Show total count when fetched from DataSource */}
-                  {hasDataSource && totalCount > filteredOptions.length && (
+                  {offersShowAll && (
                     <p className="text-xs text-muted-foreground text-center py-2">
                       {t('lookup.showingResults', { shown: filteredOptions.length, total: totalCount })}
                     </p>
                   )}
-                  {/* "Show All Results" button — opens the full Record Picker (Level 2) */}
-                  {hasDataSource && totalCount > filteredOptions.length && (
-                    <button
-                      type="button"
-                      className={cn('w-full text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5', PHONE_TOUCH_HEIGHT)}
-                      onClick={() => {
-                        setIsOpen(false);
-                        setIsPickerOpen(true);
-                      }}
-                      data-testid="show-all-results"
-                    >
-                      <TableProperties className="size-3.5" />
-                      {t('lookup.showAllResults', { count: totalCount })}
-                    </button>
-                  )}
-                  {/* Quick-create entry (below results) */}
-                  {canCreate && (
-                    <button
-                      type="button"
-                      className={cn('w-full text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground', PHONE_TOUCH_HEIGHT)}
-                      disabled={creating}
-                      onClick={() => handleCreateNew(searchQuery)}
-                    >
-                      {creating ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
-                      {searchQuery ? t('lookup.createNamed', { name: searchQuery }) : t('lookup.createNew')}
-                    </button>
-                  )}
+                  {/* The list cell's editor keeps "show all" (opens the full
+                      Record Picker, Level 2) and quick-create at the end of its
+                      list; the popover pins them below it. */}
+                  {panelFace === 'cell' && showAllButton}
+                  {panelFace === 'cell' && createButton}
                 </>
               )}
             </div>
@@ -2188,12 +2212,13 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
             {listMore.below && (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 bottom-0 h-6 rounded-b-md bg-gradient-to-t from-popover to-transparent"
+                className={cn('pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-popover to-transparent', !pinnedFooter && 'rounded-b-md')}
                 data-testid="lookup-list-more-below"
               />
             )}
             </div>
           )}
+          {pinnedFooter}
     </>
   );
 
@@ -2413,7 +2438,12 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         </div>
       ) : (
       <div className="flex items-center gap-1.5">
+      {/* `modal`: the popover is its own scroll-lock layer. Portalled out of
+          a modal form's DOM, a non-modal popover's list sits outside that
+          dialog's scroll lock, which cancels every wheel and touch move on
+          it; as the topmost lock its list scrolls (objectstack#36825). */}
       <Popover
+        modal
         open={isOpen}
         onOpenChange={(o) => {
           if (!dependenciesMissing) setIsOpen(o);

@@ -38,6 +38,7 @@ import {
 import { Edit, Trash2, MoreVertical } from 'lucide-react';
 import { evalRowPredicate, hasDeclaredPredicate, isActionSwitchedOff, type CrudAffordances } from '@object-ui/core';
 import { useObjectTranslation, useRowPredicate, useCapabilityGate, usePredicateScope } from '@object-ui/react';
+import { orderRowMenuActions } from '../rowActionArrangement';
 
 const ROW_ACTION_FALLBACKS: Record<string, string> = {
   'grid.openMenu': 'Open menu',
@@ -269,7 +270,8 @@ export interface RowActionMenuPlan {
   /**
    * Menu-bound defs surviving their own `visible`: the surviving primaries that
    * did not fit an inline slot, then the surviving non-primaries — each group in
-   * declared order, primaries above secondaries as before.
+   * declared order, primaries above secondaries as before. The defs the
+   * object's `actionLayout.record` names lead, in its order (objectstack#36494).
    */
   custom: RowActionDef[];
   /** Legacy string row actions. Predicate-free, so all of them render. */
@@ -363,12 +365,14 @@ export function planRowActionMenu(input: {
   const survivingPrimaries = surviving.filter((def) => def.variant === 'primary');
   const inlineBudget = Math.max(0, input.maxInlineActions ?? 1);
   const inline = survivingPrimaries.slice(0, inlineBudget);
-  const custom = [
+  // objectstack#36494 — the object's `actionLayout.record` order leads the
+  // menu (`rankRowActionDefs`); defs it does not rank keep the order below.
+  const custom = orderRowMenuActions([
     // Primaries that outran the inline budget stay above the secondaries, the
     // menu order this surface has always had.
     ...survivingPrimaries.slice(inlineBudget),
     ...surviving.filter((def) => def.variant !== 'primary'),
-  ];
+  ]);
   const legacy = [...(input.rowActions ?? [])];
   return {
     inline,

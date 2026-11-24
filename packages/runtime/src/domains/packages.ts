@@ -38,6 +38,10 @@ import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES, isCodeArtifactBody } from 
 // (`@objectstack/spec/kernel`, the one spelling of the suffix), and the
 // activation ledger's one reader (`@objectstack/core`).
 import { customizationBasePackageId } from '@objectstack/spec/kernel';
+// [#36626, ADR-0146 D10] The arrangement keys an extension writes, read through
+// the spec's one reading of the frozen list (`CUSTOM_ARRANGEMENT_KEYS`), the one
+// the registry fold and the doors' judge read.
+import { CUSTOM_ARRANGEMENT_KEYS, extensionArrangementKeys } from '@objectstack/spec/data';
 import { listPackageMetadataActivations, METADATA_ACTIVATION_TABLE } from '@objectstack/core';
 import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate, asked by
@@ -3665,8 +3669,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages/:id/customizations → [#28411, ADR-0146 D8 item 4] what
         // this deployment changed on an installed base: its `.custom` pair's
         // served overrides, the members the pair adds to the base's objects,
-        // the base's items switched off in the activation ledger, and the
-        // fields and flows other packages contribute to it (#28722). See
+        // the arrangements the pair's extensions write (#36626), the base's
+        // items switched off in the activation ledger, and the fields and
+        // flows other packages contribute to it (#28722). See
         // {@link readPackageCustomizations}.
         if (parts.length === 2 && parts[1] === 'customizations' && m === 'GET') {
             // The read authority of `GET /packages/:id`, the same gate, asked
@@ -4311,7 +4316,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  */
 /**
  * [#28411, ADR-0146 D8 item 4, D3] The answer of `GET /packages/:id/customizations`
- * for the installed base `baseId`: four lists, each read from the one owner
+ * for the installed base `baseId`: five lists, each read from the one owner
  * of its fact, and their lengths. Served rows and ledger rows only; ⛔ no diff
  * against the base and no `basedOn` verdict (ADR-0146 D2, D6).
  *
@@ -4324,6 +4329,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  *    and folds nothing into an `extend` body), so its `fields`, `validations`
  *    and `indexes` ARE the members it adds: no diff against the base's
  *    definition is needed, and none is made.
+ *  - **arrangements** — [#36626, ADR-0146 D10] the same contributors' whole
+ *    arrangements: each key of `CUSTOM_ARRANGEMENT_KEYS` the body writes
+ *    ({@link extensionArrangementKeys}, the reading the registry fold and the
+ *    doors' judge share), one entry per object and key, named and never
+ *    copied. A stored `object_extension` row is registered as this same
+ *    contributor, its whole parsed body (`registerStoredObjectExtension`), so
+ *    a tab list the record page saves into the pair is read here.
  *  - **switchedOff** — the activation ledger's rows recording the base as their
  *    package with `active: false`, through the ledger's one reader
  *    ({@link listPackageMetadataActivations}). A composition with no ledger
@@ -4335,7 +4347,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  *
  * No per-organization axis (ADR-0131 D6): every source is environment-level,
  * so every caller the read gate admits gets the same answer. A base with no
- * pair package answers empty overrides and extensions, and nothing here
+ * pair package answers empty overrides, extensions and arrangements, and nothing here
  * creates the pair.
  */
 async function readPackageCustomizations(
@@ -4351,6 +4363,9 @@ async function readPackageCustomizations(
     const pairs = pairsOf(baseId, installedManifestsOf(registry));
     type Extension = GetPackageCustomizationsResponse['extensions'][number];
     const extensions: Extension[] = [];
+    type Arrangement = GetPackageCustomizationsResponse['arrangements'][number];
+    const arrangements: Arrangement[] = [];
+    const arranged = new Set<string>();
     const pairIdsToRead = typeof registry?.getAllObjects === 'function' ? pairs : [];
     for (const pairId of pairIdsToRead) {
         for (const object of registry.getAllObjects(pairId) as Array<{ name?: unknown }>) {
@@ -4371,6 +4386,14 @@ async function readPackageCustomizations(
                         fields: Array.isArray(index?.fields) ? index.fields.filter((f: unknown): f is string => typeof f === 'string') : [],
                     });
                 }
+                // [#36626] Each arrangement the extension writes, by its key: one
+                // entry per object and key, whichever of the base's pairs writes it.
+                for (const key of extensionArrangementKeys(body)) {
+                    const seen = `${name}\u0000${key}`;
+                    if (arranged.has(seen)) continue;
+                    arranged.add(seen);
+                    arrangements.push({ object: name, key });
+                }
             }
         }
     }
@@ -4378,6 +4401,8 @@ async function readPackageCustomizations(
     extensions.sort((a, b) => a.object.localeCompare(b.object)
         || kindOrder[a.kind] - kindOrder[b.kind]
         || (a.name ?? '').localeCompare(b.name ?? ''));
+    const keyOrder = (key: Arrangement['key']) => CUSTOM_ARRANGEMENT_KEYS.indexOf(key);
+    arrangements.sort((a, b) => a.object.localeCompare(b.object) || keyOrder(a.key) - keyOrder(b.key));
 
     let ledgerRegistered = true;
     try {
@@ -4398,11 +4423,13 @@ async function readPackageCustomizations(
         packageId: baseId,
         overrides,
         extensions,
+        arrangements,
         switchedOff,
         contributions,
         counts: {
             overrides: overrides.length,
             extensions: extensions.length,
+            arrangements: arrangements.length,
             switchedOff: switchedOff.length,
             contributions: contributions.length,
         },
