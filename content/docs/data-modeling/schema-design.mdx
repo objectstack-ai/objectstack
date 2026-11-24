@@ -329,8 +329,9 @@ export const Account = ObjectSchema.create({
 (ADR-0085 §5).
 
 ⏳ Deferred (future iterations): explicit per-field in-group ordering, nested
-groups. Groups render identically on forms, modals, and detail pages; when a
-single page needs a bespoke layout beyond groups, assign it a custom Page
+groups. Groups use the same members, order and visibility on forms, modals, and
+detail pages (the default record page also lets the reader fold every titled
+group, see `collapse` above); when a single page needs a bespoke layout beyond groups, assign it a custom Page
 schema instead of adding per-surface hints here (ADR-0085).
 
 ---

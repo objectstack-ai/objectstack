@@ -120,8 +120,8 @@ export const objectForm = defineForm({
             { field: 'icon', label: 'Icon', type: 'text', helpText: 'Lucide icon name shown beside the header on the record detail page (e.g. "banknote"). The entry form does not show it.' },
             { field: 'description', label: 'Description', type: 'textarea', helpText: 'Text shown under the header, on the entry form and the record detail page.' },
             { field: 'relatedList', label: 'Related List', type: 'text', helpText: 'Makes this entry a related list\'s table instead of a section of fields: name the child object (or object.field) whose list is drawn at this position in the record\'s details column. Such a group holds no fields; a field that names it as its group is refused, and so is a name that matches no relationship pointing at this object. The parent\'s create and edit forms inline the table too, and the record page\'s Edit saves the record and its rows together.' },
-            { field: 'collapse', label: 'Collapse', type: 'select', helpText: 'Whether the section can be collapsed, on the entry form and the record detail page. Unset: none.', options: [
-              { label: 'None — always open, no toggle', value: 'none' },
+            { field: 'collapse', label: 'Collapse', type: 'select', helpText: 'Whether the section can be collapsed. The entry form follows it as set. The default record page lets the reader fold every titled group, so there it only sets the first state: Collapsed starts closed, the others start open. Unset: none.', options: [
+              { label: 'None — always open on the entry form, no toggle', value: 'none' },
               { label: 'Expanded — collapsible, starts open', value: 'expanded' },
               { label: 'Collapsed — collapsible, starts closed', value: 'collapsed' },
             ] },

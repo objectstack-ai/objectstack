@@ -114,7 +114,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "折りたたみ",
-        helpText: "セクションを折りたためるかどうか。入力フォームとレコード詳細ページに適用されます。未設定の場合は none です。"
+        helpText: "セクションを折りたためるかどうか。入力フォームは設定どおりに動作します。既定のレコードページでは閲覧者がタイトル付きのグループをすべて折りたためるため、そこでは初期状態だけを決めます。collapsed は閉じた状態、それ以外は開いた状態で始まります。未設定の場合は none です。"
       },
       "fieldGroups.visibleWhen": {
         label: "表示条件",

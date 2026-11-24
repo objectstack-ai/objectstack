@@ -114,7 +114,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "Contraer",
-        helpText: "Si la sección se puede contraer, en el formulario de entrada y en la página de detalle del registro. Sin definir: none."
+        helpText: "Si la sección se puede contraer. El formulario de entrada lo aplica tal como está definido. En la página de registro predeterminada el lector puede contraer cualquier grupo con título, así que allí solo fija el estado inicial: Collapsed empieza contraído y los demás, abiertos. Sin definir: none."
       },
       "fieldGroups.visibleWhen": {
         label: "Condición de visibilidad",
