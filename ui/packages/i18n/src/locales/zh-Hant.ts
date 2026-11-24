@@ -164,6 +164,7 @@ const zhHant = {
     completedNamed: '“{{action}}”已完成',
     failed: '操作失敗',
     parallelFailed: '一個或多個並行操作失敗',
+    serviceUnavailable: '此操作所需的服務在當前環境未啟用，請聯絡管理員。',
     selectExactlyOneRow: '此操作針對單條記錄，請只選擇一行。',
     selectRowFirst: '此操作針對單條記錄，請先選擇一行。',
     undo: '撤銷',

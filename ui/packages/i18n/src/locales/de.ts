@@ -155,6 +155,7 @@ const de = {
     completedNamed: 'Aktion abgeschlossen: {{action}}',
     failed: 'Aktion fehlgeschlagen',
     parallelFailed: 'Eine oder mehrere parallele Aktionen sind fehlgeschlagen',
+    serviceUnavailable: 'Diese Aktion benötigt einen Dienst, der in dieser Umgebung nicht verfügbar ist. Wenden Sie sich an Ihren Administrator.',
     selectExactlyOneRow: 'Diese Aktion gilt für einen einzelnen Datensatz – wählen Sie genau eine Zeile aus.',
     selectRowFirst: 'Diese Aktion gilt für einen einzelnen Datensatz – wählen Sie zuerst eine Zeile aus.',
     undo: 'Rückgängig',

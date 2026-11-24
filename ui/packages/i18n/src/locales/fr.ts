@@ -157,6 +157,7 @@ const fr = {
     completedNamed: 'Action effectuée : {{action}}',
     failed: "Échec de l'action",
     parallelFailed: 'Une ou plusieurs actions parallèles ont échoué',
+    serviceUnavailable: 'Cette action nécessite un service qui n’est pas disponible dans cet environnement. Contactez votre administrateur.',
     selectExactlyOneRow: 'Cette action porte sur un seul enregistrement — sélectionnez exactement une ligne.',
     selectRowFirst: 'Cette action porte sur un seul enregistrement — sélectionnez d’abord une ligne.',
     undo: 'Annuler',

@@ -164,6 +164,7 @@ const zh = {
     completedNamed: '“{{action}}”已完成',
     failed: '操作失败',
     parallelFailed: '一个或多个并行操作失败',
+    serviceUnavailable: '此操作所需的服务在当前环境未启用，请联系管理员。',
     selectExactlyOneRow: '此操作针对单条记录，请只选择一行。',
     selectRowFirst: '此操作针对单条记录，请先选择一行。',
     undo: '撤销',

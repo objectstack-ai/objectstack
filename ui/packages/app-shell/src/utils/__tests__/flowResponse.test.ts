@@ -791,3 +791,53 @@ describe('apiActionFailureMessage — a flow-backed api action reads the run ref
         expect(apiActionFailureMessage({ status: 502 }, null, 'HTTP 502', 'en')).toBe('HTTP 502');
     });
 });
+
+describe('apiActionFailureMessage — an api action whose service is absent reads a localized line, not the route text (objectstack#36840)', () => {
+    registerBuiltInLocales();
+
+    // The card's toast, verbatim from a hosted HotCRM's 「打印报价」.
+    const ROUTE_MISS = {
+        success: false,
+        error: {
+            code: 'ROUTE_NOT_FOUND', message: 'Route Not Found: /print/records', httpStatus: 404, route: '/print/records',
+            hint: 'No route is registered for this path.',
+        },
+    };
+    const NOT_COMPOSED = {
+        success: false,
+        error: {
+            code: 'NOT_IMPLEMENTED', httpStatus: 501,
+            message: 'The print door is not available: no print service is registered on this kernel. @objectstack/service-print (PrintServicePlugin) registers it.',
+        },
+    };
+    const NO_ENGINE = {
+        success: false,
+        error: { code: 'SERVICE_UNAVAILABLE', httpStatus: 503, message: 'No print engine is configured. Set OS_PRINT_CHROMIUM_PATH …' },
+    };
+    const TRANSPORT_MISS = { success: false, error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' } };
+
+    it('each absent-service answer reads the line in the host\'s language, never the server prose', () => {
+        for (const [status, json] of [[404, ROUTE_MISS], [501, NOT_COMPOSED], [503, NO_ENGINE], [404, TRANSPORT_MISS]] as const) {
+            const zh = apiActionFailureMessage({ status }, json, `HTTP ${status}`, 'zh-CN');
+            expect(zh, `${status}`).toBe(builtInLocales['zh-Hans'].actions.serviceUnavailable);
+            expect(zh).not.toContain('/print/records');
+            expect(apiActionFailureMessage({ status }, json, `HTTP ${status}`, 'en'), `${status}`)
+                .toBe(builtInLocales.en.actions.serviceUnavailable);
+        }
+        expect(builtInLocales['zh-Hans'].actions.serviceUnavailable).toBe('此操作所需的服务在当前环境未启用，请联系管理员。');
+    });
+
+    it('a locale the registry does not carry falls back to the English line', () => {
+        expect(apiActionFailureMessage({ status: 501 }, NOT_COMPOSED, 'HTTP 501', 'xx-YY')).toBe(builtInLocales.en.actions.serviceUnavailable);
+    });
+
+    it('a producer-marked userMessage still wins over the line', () => {
+        const marked = { success: false, error: { ...NO_ENGINE.error, userMessage: 'Printing is switched off for this workspace.' } };
+        expect(apiActionFailureMessage({ status: 503 }, marked, 'HTTP 503', 'en')).toBe('Printing is switched off for this workspace.');
+    });
+
+    it('a refusal that is not about an absent service keeps its own sentence (control)', () => {
+        const missingRecord = { success: false, error: { code: 'RECORD_NOT_FOUND', message: 'Quote q_1 was not found.' } };
+        expect(apiActionFailureMessage({ status: 404 }, missingRecord, 'HTTP 404', 'zh-CN')).toBe('Quote q_1 was not found.');
+    });
+});

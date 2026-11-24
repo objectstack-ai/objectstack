@@ -283,7 +283,13 @@
  *     today for a second, unrelated reason: the record form reads the same key
  *     as a literal `t()` argument, so the AST pass keeps it live. Drop both the
  *     comment spelling and the form's call and this read goes dark while a
- *     failed flow still shows it.
+ *     failed flow still shows it. A SECOND key is read the same two ways:
+ *     `actions.serviceUnavailable`, the line a `type: 'api'` action shows when
+ *     the service behind its target is absent (objectstack#36840). It too is
+ *     two segments, seen by the full-key probe only through this file's own
+ *     comment spelling, and it has NO literal `t()` call keeping it live
+ *     elsewhere: drop the comment spelling and it reads as dead while every
+ *     such refusal still shows it. ⇒ covered BY COINCIDENCE, and only that.
  *
  * The rest of the matches are TEST-only importers, deliberately not listed one
  * by one. A key read only by a test is not a key a user can see, so a test

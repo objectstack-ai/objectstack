@@ -223,7 +223,7 @@ import { actionCopySource, actionErrorDetail, refusalFieldErrors } from '@object
 import type { ActionResult } from '@object-ui/core';
 import { getLoadedBuiltInLocales, resolveBuiltInLanguage } from '@object-ui/i18n';
 import { declaredUserMessage, delegationScopeMessage, isPermissionError } from '@object-ui/react';
-import { errorCodeIs } from '@object-ui/types';
+import { errorCodeIs, errorCodeIsAnyOf } from '@object-ui/types';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 
 /**
@@ -332,6 +332,40 @@ function permissionDeniedLine(locale: string | undefined): string {
         (tag ? usable((getLoadedBuiltInLocales()[tag] as PermissionLinePack)?.form?.noPermissionToSave) : undefined)
         ?? usable((getLoadedBuiltInLocales().en as PermissionLinePack)?.form?.noPermissionToSave)
         ?? "You don't have permission to save this record."
+    );
+}
+
+/** The one subtree of a resident catalogue {@link serviceUnavailableLine} reads. */
+type ServiceLinePack = { actions?: { serviceUnavailable?: unknown } } | undefined;
+
+/**
+ * [objectstack#36840] The codes a `type: 'api'` action's answer carries when
+ * the service behind its target is not there to serve it: the target's own
+ * `503 SERVICE_UNAVAILABLE` (a print door whose engine this deployment did not
+ * configure), the dispatcher's `501 NOT_IMPLEMENTED` for a kernel that
+ * composes no such service, and a route miss from a host that does not route
+ * the target at all (the dispatcher's `ROUTE_NOT_FOUND`, the transport's
+ * `ENDPOINT_NOT_FOUND`). Each one's message is operator prose — an
+ * environment variable, a package name, `Route Not Found: /print/records` —
+ * that tells the person who clicked nothing they can act on.
+ */
+const SERVICE_ABSENT_CODES = ['SERVICE_UNAVAILABLE', 'NOT_IMPLEMENTED', 'ROUTE_NOT_FOUND', 'ENDPOINT_NOT_FOUND'] as const;
+
+/**
+ * The runner's "this environment does not offer the service" line
+ * (`actions.serviceUnavailable`) in `locale`, read from the resident built-in
+ * catalogue exactly as {@link permissionDeniedLine} reads its line, and by the
+ * same one-chain rule `scripts/check-i18n-dead-keys.mjs` derives the `en` read
+ * from.
+ */
+function serviceUnavailableLine(locale: string | undefined): string {
+    const usable = (line: unknown): string | undefined =>
+        typeof line === 'string' && line.trim() ? line : undefined;
+    const tag = locale ? resolveBuiltInLanguage(locale) : null;
+    return (
+        (tag ? usable((getLoadedBuiltInLocales()[tag] as ServiceLinePack)?.actions?.serviceUnavailable) : undefined)
+        ?? usable((getLoadedBuiltInLocales().en as ServiceLinePack)?.actions?.serviceUnavailable)
+        ?? 'This action needs a service that is not available in this environment. Contact your administrator.'
     );
 }
 
@@ -444,6 +478,9 @@ function refusalEnvelopeMessage(
  * — see the header). A `400 FLOW_FAILED` is a flow the endpoint ran, and reads
  * the run's refusal by the failed arm's rule; `locale` is the host's active
  * language.
+ * An answer that says the target's service is absent ({@link SERVICE_ABSENT_CODES})
+ * and carries no `userMessage` reads the localized
+ * {@link serviceUnavailableLine} (objectstack#36840).
  * Every other answer reads {@link refusalEnvelopeMessage}: its `userMessage`
  * when it carries one, else its message (objectstack#36390).
  */
@@ -453,8 +490,15 @@ export function apiActionFailureMessage(
     fallback: string,
     locale: string | undefined,
 ): string {
-    if (res.status === 400 && errorCodeIs((json as { error?: unknown } | null | undefined)?.error, 'FLOW_FAILED')) {
+    const envelope = (json as { error?: unknown } | null | undefined)?.error;
+    if (res.status === 400 && errorCodeIs(envelope, 'FLOW_FAILED')) {
         return flowFailedEnvelopeMessage(json, fallback, locale);
+    }
+    // [objectstack#36840] The service behind the target is absent: the
+    // person who clicked reads the localized line, never the operator prose.
+    // A producer-marked `userMessage` still wins, as on every other refusal.
+    if (!declaredUserMessage(envelope) && errorCodeIsAnyOf(envelope, SERVICE_ABSENT_CODES)) {
+        return serviceUnavailableLine(locale);
     }
     return refusalEnvelopeMessage(json, fallback, locale);
 }
