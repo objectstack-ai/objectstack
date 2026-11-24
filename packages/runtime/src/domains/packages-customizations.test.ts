@@ -26,6 +26,11 @@
  *    and 200 and no pair is created; a `.custom` id is refused naming its base;
  *    an unknown id answers 404; a caller without the read capability is
  *    refused as `GET /packages/:id` refuses them; a query parameter is refused.
+ *  - [#36626] ARRANGEMENTS: a tab arrangement the record page's writer saves
+ *    into the pair (draft save, then publish, through the real protocol) is
+ *    listed as one entry naming its object and key, while the base's own tab
+ *    list stays as its package declares it; every key of the frozen
+ *    arrangement list is listed, in its order, and no other package's.
  *
  * Test-path resolution: the protocol and the engine are
  * `@objectstack/metadata-protocol`'s and `@objectstack/objectql`'s `dist/`, so a
@@ -47,6 +52,8 @@ const DEPENDENT = 'com.default.acme-extra';
 const OTHER = 'com.example.other';
 const VIEW = 'showcase_task.default';
 const DECLARATION = { package: BASE, basedOn: '1.0.0' } as const;
+/** [#36626] The base object's own tab list, as its package declares it. */
+const BASE_TABS = ['showcase_subtask', 'showcase_comment'] as const;
 
 const sysMetadataObject: ServiceObject = {
     name: 'sys_metadata',
@@ -181,7 +188,17 @@ function baseManifest(): Record<string, unknown> {
             label: 'Task',
             sharingModel: 'private',
             fields: Object.fromEntries(['title', 'status', 'due_date'].map((f) => [f, { name: f, label: f, type: 'text' }])),
-        }],
+            // [#36626] The record page's tab list the pair's arrangement replaces.
+            relatedLists: [...BASE_TABS],
+        }, ...BASE_TABS.map((name) => ({
+            name,
+            label: name,
+            sharingModel: 'private',
+            fields: {
+                title: { name: 'title', label: 'Title', type: 'text' },
+                task: { name: 'task', label: 'Task', type: 'lookup', reference: 'showcase_task' },
+            },
+        }))],
         views: [{
             object: 'showcase_task',
             list: {
@@ -354,9 +371,10 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
             packageId: BASE,
             overrides: [{ type: 'view', name: VIEW, basedOn: '1.0.0', version: expect.any(Number) }],
             extensions: [{ object: 'showcase_task', kind: 'field', name: 'region__c' }],
+            arrangements: [],
             switchedOff: [{ type: 'flow', name: 'showcase_task_reminder' }],
             contributions: [],
-            counts: { overrides: 1, extensions: 1, switchedOff: 1, contributions: 0 },
+            counts: { overrides: 1, extensions: 1, arrangements: 0, switchedOff: 1, contributions: 0 },
         });
         const parsed = GetPackageCustomizationsResponseSchema.safeParse(data);
         expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
@@ -458,9 +476,10 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
             packageId: BASE,
             overrides: [],
             extensions: [],
+            arrangements: [],
             switchedOff: [],
             contributions: [],
-            counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 },
+            counts: { overrides: 0, extensions: 0, arrangements: 0, switchedOff: 0, contributions: 0 },
         });
         expect(engine.registry.getAllPackages().length).toBe(before);
         expect(engine.registry.getPackage(PAIR)).toBeFalsy();
@@ -727,5 +746,85 @@ describe('[#28722] GET /packages/:id/customizations — the navigation items oth
         engine.registry.registerAppNavContribution({ app: 'showcase', items: [navLink('unstamped_link')] });
         engine.registry.registerAppNavContribution({ app: 'showcase', items: [navLink('sentinel_link')] }, 'sys_metadata');
         expect((await navOf(dispatcher)).map((c) => c.name)).toEqual(['acme_sync_log']);
+    });
+});
+
+describe('[#36626] GET /packages/:id/customizations — the arrangements the pair\'s object extensions write', () => {
+    /** The tab arrangement the record page saves: the two tabs swapped, one hidden. */
+    const TABS = ['showcase_comment', { list: 'showcase_subtask', hidden: true }];
+
+    /** The record page's one writer (the Console's): a draft save into the pair, then the per-item publish. */
+    const saveExtension = async (protocol: ObjectStackProtocolImplementation, body: Record<string, unknown>) => {
+        const item = { extend: 'showcase_task', ...body };
+        await protocol.saveMetaItem({ type: 'object_extension', name: 'showcase_task', item, mode: 'draft', packageId: PAIR } as any);
+        await protocol.publishMetaItem({ type: 'object_extension', name: 'showcase_task', packageId: PAIR } as any);
+    };
+
+    /** The base object's own declaration, as its package registered it. */
+    const ownDeclaration = (engine: ObjectQL) => (engine.registry.getObjectContributors('showcase_task') as any[])
+        .find((c) => c.packageId === BASE && c.ownership === 'own')?.definition;
+
+    it('a tab arrangement saved into the pair through the real protocol is listed, and the base\'s own tab list is unchanged', async () => {
+        const { dispatcher, protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        expect(ownDeclaration(engine)?.relatedLists, 'precondition: the base declares its tabs').toEqual([...BASE_TABS]);
+        await saveExtension(protocol, { relatedLists: TABS });
+
+        const r = await customizations(dispatcher, BASE);
+        expect(r.response?.status).toBe(200);
+        const data = r.response?.body?.data;
+        expect(data.arrangements).toEqual([{ object: 'showcase_task', key: 'relatedLists' }]);
+        expect(data.counts.arrangements).toBe(1);
+        // An arrangement is its own kind: it adds no member.
+        expect(data.extensions).toEqual([]);
+        const parsed = GetPackageCustomizationsResponseSchema.safeParse(data);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+
+        // The original package is unchanged; the served object is the pair's arrangement (AGREEMENT).
+        expect(ownDeclaration(engine)?.relatedLists).toEqual([...BASE_TABS]);
+        const served: any = (await protocol.getMetaItem({ type: 'object', name: 'showcase_task' } as any)).item;
+        expect(served.relatedLists).toEqual(['showcase_comment']);
+        expect(served._relatedListsArrangement?.packageId).toBe(PAIR);
+    });
+
+    it('the extension saved again without the key lists no arrangement: the read is the stored extension\'s', async () => {
+        const { dispatcher, protocol } = await boot();
+        await install(protocol, PAIR);
+        await saveExtension(protocol, { relatedLists: TABS });
+        expect((await customizations(dispatcher, BASE)).response?.body?.data.counts.arrangements).toBe(1);
+        await saveExtension(protocol, { fields: { region__c: { name: 'region__c', label: 'Region', type: 'text' } } });
+        const data = (await customizations(dispatcher, BASE)).response?.body?.data;
+        expect(data.arrangements).toEqual([]);
+        expect(data.counts.arrangements).toBe(0);
+        expect(data.extensions).toEqual([{ object: 'showcase_task', kind: 'field', name: 'region__c' }]);
+    });
+
+    it('lists every key of the frozen arrangement list the pair writes, an empty list included, by object then key order, and no other package\'s', async () => {
+        const { dispatcher, protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        extend(engine, PAIR, 'showcase_task', {
+            actionLayout: { record: { primary: [] } },
+            relatedLists: [],
+            fieldGroups: [{ key: 'basic', label: 'Basic', fields: ['title'] }],
+            fields: { region__c: { name: 'region__c', label: 'Region', type: 'text' } },
+        });
+        extend(engine, PAIR, 'showcase_subtask', { relatedLists: ['showcase_comment'] });
+        // Another dependent's arrangement of the base's object (the doors refuse
+        // it outside `.custom`, so it is laid down below them), and the pair's
+        // arrangement of an object the base does not own.
+        extend(engine, DEPENDENT, 'showcase_task', { fieldGroups: [{ key: 'x', label: 'X', fields: ['title'] }] });
+        extend(engine, PAIR, 'other_note', { fieldGroups: [{ key: 'y', label: 'Y', fields: ['body'] }] });
+        const data = (await customizations(dispatcher, BASE)).response?.body?.data;
+        expect(data.arrangements).toEqual([
+            { object: 'showcase_subtask', key: 'relatedLists' },
+            { object: 'showcase_task', key: 'fieldGroups' },
+            { object: 'showcase_task', key: 'relatedLists' },
+            { object: 'showcase_task', key: 'actionLayout' },
+        ]);
+        expect(data.counts.arrangements).toBe(4);
+        expect(data.extensions).toEqual([{ object: 'showcase_task', kind: 'field', name: 'region__c' }]);
+        expect(data.contributions.filter((c: any) => c.packageId === DEPENDENT)).toEqual([]);
+        const parsed = GetPackageCustomizationsResponseSchema.safeParse(data);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     });
 });

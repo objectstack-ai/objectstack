@@ -99,9 +99,10 @@ describe('GET /api/v1/packages/:id/customizations — mounted', () => {
             packageId: BASE,
             overrides: [OVERRIDE],
             extensions: [],
+            arrangements: [],
             switchedOff: [],
             contributions: [],
-            counts: { overrides: 1, extensions: 0, switchedOff: 0, contributions: 0 },
+            counts: { overrides: 1, extensions: 0, arrangements: 0, switchedOff: 0, contributions: 0 },
         });
         const parsed = GetPackageCustomizationsResponseSchema.safeParse(res.body.data);
         expect(parsed.success, JSON.stringify(parsed.success ? null : parsed.error.issues)).toBe(true);
