@@ -63,14 +63,6 @@ export function getAppComponent(ref: string): AppComponentRegistryEntry | undefi
 }
 
 /**
- * Snapshot of all registered components — used by diagnostics surfaces
- * (e.g. a future "Installed UI Components" admin page).
- */
-export function listAppComponents(): AppComponentRegistryEntry[] {
-  return Array.from(REGISTRY.values());
-}
-
-/**
  * Convert `metadata:resource` ↔ URL segments `['metadata', 'resource']`.
  * Component refs are restricted to one colon in MVP, but the helper is
  * future-proofed for nested keys (`metadata:resource:edit`).

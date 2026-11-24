@@ -73,6 +73,9 @@ vi.mock('./packages-io.js', async (importOriginal) => ({
 }));
 
 import { StudioMetadataArea } from './StudioMetadataArea';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const WRITABLE = 'com.example.crm';
 const READ_ONLY = 'com.vendor.hr';
@@ -192,7 +195,6 @@ describe('a pillar type opened from the area opens its pillar', () => {
   for (const [type, pillar] of [
     ['object', 'data'],
     ['flow', 'automations'],
-    ['view', 'interfaces'],
     ['permission', 'access'],
   ] as const) {
     it(`${type} → ${pillar}, with \`?surface=\``, async () => {
@@ -207,6 +209,25 @@ describe('a pillar type opened from the area opens its pillar', () => {
   it('a type no pillar designs opens the generic page', async () => {
     mount(`/studio/${WRITABLE}/metadata/agent/support_bot?package=${WRITABLE}`);
     expect((await page()).page).toBe('item');
+  });
+
+  // objectstack#36502 — the Interfaces pillar is retired, so a view (like a
+  // page, dashboard or report) is read and edited on the generic page.
+  it('a view opens the generic page, no longer the retired Interfaces pillar', async () => {
+    mount(`/studio/${WRITABLE}/metadata/view/item_1?package=${WRITABLE}`);
+    expect((await page()).page).toBe('item');
+    expect(new URL(where(), 'http://x').pathname).toBe(`/studio/${WRITABLE}/metadata/view/item_1`);
+  });
+
+  it('on a read-only package a view opens the Customize editor, the door the retired Interfaces pillar was (objectstack#36502)', async () => {
+    mount(`/studio/${READ_ONLY}/metadata/view/item_1?package=${READ_ONLY}`);
+    expect((await page()).page).toBe('form-editor');
+    expect(JSON.parse(screen.getByTestId('form-editor').getAttribute('data-item') ?? 'null')).toEqual({
+      type: 'view',
+      name: 'item_1',
+      member: null,
+      readOnly: true,
+    });
   });
 
   it('`?review=1` opens the generic page and its review, and the page stays once the review is open', async () => {

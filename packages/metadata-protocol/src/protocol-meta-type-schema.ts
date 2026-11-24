@@ -26,8 +26,8 @@ import {
     stripInjectedSystemColumns,
 } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType, metaUrlSpellingRefusal } from '@objectstack/spec/shared';
-import { type FormView } from '@objectstack/spec/ui';
-import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
+import { type FormView, type MetadataListViewParsed } from '@objectstack/spec/ui';
+import { METADATA_FORM_REGISTRY, METADATA_LIST_REGISTRY } from '@objectstack/spec/system';
 import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { z } from 'zod';
 import {
@@ -56,6 +56,13 @@ import {
  * layout derived from their JSON Schema (acceptable for simple types).
  */
 const TYPE_TO_FORM: Readonly<Record<string, FormView>> = METADATA_FORM_REGISTRY;
+
+/**
+ * Canonical Studio list layout per metadata type — the columns its metadata
+ * list shows — from the shared {@link METADATA_LIST_REGISTRY}, served beside
+ * the form as `list`. Types without an entry get Studio's default list.
+ */
+const TYPE_TO_LIST: Readonly<Record<string, MetadataListViewParsed>> = METADATA_LIST_REGISTRY;
 
 /**
  * The ONE canonical spelling of a metadata type at the `/meta` read/write/delete
@@ -619,6 +626,7 @@ function declaredKeySchema(schema: unknown, key: string, depth: number): z.ZodTy
 export {
     HAND_CRAFTED_SCHEMAS,
     TYPE_TO_FORM,
+    TYPE_TO_LIST,
     canonicalizeMetaRequestType,
     resolveOverlaySchema,
     toJsonSchemaSafe,

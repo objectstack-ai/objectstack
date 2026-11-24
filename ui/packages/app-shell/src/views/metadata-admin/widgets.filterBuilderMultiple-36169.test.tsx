@@ -79,16 +79,12 @@ vi.mock('./useMetadata', async (importOriginal) => {
   return { ...mod, useMetadataClient: () => clients.current };
 });
 
-import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
-import { MetadataClient } from '@object-ui/data-objectstack';
 import { WIDGETS } from './widgets';
 import { loaded } from './loadState';
 import { objectCatalogOf } from './ResourceEditPage';
 import { mapObjectFields } from '../ViewConfigPanel';
 import { ViewVariantInspector } from './inspectors/ViewVariantInspector';
 import { PageBlockInspector } from './inspectors/PageBlockInspector';
-import { ObjectListViewInspector, useObjectListViewDraft } from '../studio-design/ObjectListViewInspector';
-import type { Surface } from '../studio-design/navSurface';
 
 afterEach(() => {
   cleanup();
@@ -273,78 +269,5 @@ describe('every host that builds the filter-builder field list carries `multiple
     const block = await screen.findByTestId('block-filter-rules');
     await waitFor(() => expect(within(block).getByRole('button', { name: 'Add filter' })).toBeInTheDocument());
     expect(await offeredFor(block, 'Regions')).toEqual(labelsFor('select', true));
-  });
-});
-
-/* The Studio list-view inspector, over a REAL `MetadataClient` whose transport
- * serves the object and its default list view as the platform does
- * (`ObjectListViewInspector.hiddenSystemFields-13152.test.tsx`'s harness). */
-
-const VIEW = 'deal.default';
-const json = (status: number, body: unknown) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-const GRID_VIEW = {
-  name: VIEW,
-  object: 'deal',
-  viewKind: 'list',
-  isDefault: true,
-  config: { type: 'grid', data: { provider: 'object', object: 'deal' }, columns: ['name'] },
-};
-
-async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const method = (init?.method ?? 'GET').toUpperCase();
-  const url = new URL(String(input), 'http://studio.test');
-  const meta = url.pathname.match(/^\/api\/v1\/meta\/(.+)$/);
-  if (!meta) return json(404, { error: { code: 'NOT_FOUND', message: 'absent' } });
-  const seg = meta[1].split('/').map(decodeURIComponent);
-  if (seg[0] === '_drafts') return json(200, { drafts: [] });
-  if (method === 'PUT') return json(200, { success: true, version: 'v2', state: 'draft' });
-  if (seg[0] === 'object' && seg.length === 2) return json(200, { type: 'object', name: seg[1], item: DEAL });
-  const isView = seg[0] === 'view' && seg[1] === VIEW;
-  if (seg.length === 3 && seg[2] === 'layers') {
-    return isView
-      ? json(200, { code: null, overlay: GRID_VIEW, overlayScope: 'env', effective: GRID_VIEW })
-      : json(404, { error: { code: 'NOT_FOUND', message: 'absent' } });
-  }
-  if (seg.length === 2 && url.searchParams.get('state') === 'draft') {
-    return json(404, { error: { code: 'NO_DRAFT', message: 'absent' } });
-  }
-  return isView ? json(200, { type: 'view', name: VIEW, item: GRID_VIEW }) : json(404, { error: { code: 'NOT_FOUND', message: 'absent' } });
-}
-
-const METADATA: MetadataContextValue = {
-  apps: [],
-  objects: [DEAL],
-  dashboards: [],
-  reports: [],
-  pages: [],
-  loading: false,
-  error: null,
-  refresh: async () => {},
-  invalidate: () => {},
-  ensureType: async () => [],
-  getItem: async () => null,
-  getItemsByType: () => [],
-};
-
-describe('the Studio list-view inspector’s filter carries `multiple` (objectstack#36169)', () => {
-  it('offers a multiple: true column membership only, and keeps Equals on a single-value control', async () => {
-    const real = new MetadataClient({ baseUrl: '', fetch: vi.fn(serve) as unknown as typeof fetch });
-    clients.current = real;
-    const LEAF: Surface = { type: 'object', name: 'deal', label: 'Deals' };
-    function Host() {
-      const listView = useObjectListViewDraft({ client: real, packageId: 'com.acme.app', leaf: LEAF, publishNonce: 0 });
-      return <ObjectListViewInspector listView={listView} readOnly={false} locale="en" />;
-    }
-    render(
-      <MetadataCtx.Provider value={METADATA}>
-        <Host />
-      </MetadataCtx.Provider>,
-    );
-    const filter = await screen.findByTestId('list-view-filter', {}, { timeout: 5000 });
-    await waitFor(() => expect(within(filter).getByRole('button', { name: 'Add filter' })).toBeInTheDocument());
-    expect(await offeredFor(filter, 'Accounts')).toEqual(labelsFor('lookup', true));
-    await pickFrom(filter, 0, 'Owner');
-    expect(await optionsOf(filter, 1)).toContain('Equals');
   });
 });

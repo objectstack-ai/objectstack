@@ -21,7 +21,10 @@ export function useObjectGridColumnState({
   schema: ObjectGridSchema;
   onColumnStateChange: ObjectGridExternalPaginationProps['onColumnStateChange'];
 }) {
-  // Column state persistence (order and widths)
+  // Column state persistence (order and widths). `@object-ui/auth`'s signed-out
+  // purge keeps the `grid-columns-` family by prefix while an entry holds only
+  // `order` and `widths` (objectstack#36110); a part added to what is stored
+  // here loses the entry at the next sign-out. A change of user clears it.
   const columnStorageKey = React.useMemo(() => {
     return schema.id
       ? `grid-columns-${schema.objectName}-${schema.id}`

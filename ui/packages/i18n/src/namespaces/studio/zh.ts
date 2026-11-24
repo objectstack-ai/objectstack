@@ -3086,6 +3086,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pillar.automations': '自动化',
   'engine.studio.pillar.interfaces': '界面',
   'engine.studio.pillar.access': '权限',
+  // objectstack#36502 — 旧「界面」链接落地时的提示。
+  'engine.studio.interfacesRetired.sentence': '界面的修改已经搬到应用里',
+  'engine.studio.interfacesRetired.backToApp': '回到应用',
+  'engine.studio.interfacesRetired.dismiss': '关闭',
   'engine.studio.pillar.metadata': '全部元数据',
   // Header · package-level publish + app bridge
   'engine.studio.changes': '变更',

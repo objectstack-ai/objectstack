@@ -921,8 +921,8 @@ export function AppHeader({
               left edge of this utility cluster (objectui#12201 item 6).
               Admins jump from the running app to its owning package's design
               surface; on a dashboard route it deep-links to that dashboard's
-              design page in the Interfaces pillar
-              (/studio/:packageId/interfaces?surface=dashboard:NAME), otherwise
+              item in Studio's All metadata area
+              (/studio/:packageId/metadata/dashboard/NAME), otherwise
               the package's Data tab. Hidden for everyone else, for apps
               with no owning package and for a package that is not writable
               (objectui#12615): not rendered, never disabled. An icon button
