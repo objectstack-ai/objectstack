@@ -103,8 +103,9 @@
  * selects is the redaction's to narrow.
  *
  * [#34700] A search the SERVER resolved over these columns is not refused for
- * them: each guard also registers a search-field withholder with the engine
- * ({@link withheldSearchColumns}), so the columns this rule would refuse leave
+ * them: each guard middleware also declares a search-field withholder in its
+ * registration (`withholdSearchFields`, answered by
+ * {@link withheldSearchColumns}), so the columns this rule would refuse leave
  * the server-chosen set before the expansion, as a field the security service
  * says the caller may not query does (#25672). The search then answers over
  * the columns the caller may query. A search whose `searchFields` names one
@@ -333,23 +334,25 @@ export async function readerWithholdsParentField(
   return all.some((field) => !servedSet.has(String(field)));
 }
 
+/**
+ * [#34700] The search-field withholder a guard middleware declares in its
+ * registration options (objectql's `EngineMiddlewareOptions.withholdSearchFields`).
+ * An engine that does not read the option keeps the guard alone, and a
+ * server-chosen search over a guarded column is refused as before.
+ */
+export type GuardSearchFieldWithholder = (request: {
+  object: string;
+  where: unknown;
+  context: unknown;
+  searchFields: readonly string[];
+}) => Promise<readonly string[] | undefined>;
+
 /** The engine slice the declared set is read from: its object registry. */
-export interface ParentObjectRegistryEngine extends ActivityMiddlewareEngine {
+export interface ParentObjectRegistryEngine extends Omit<ActivityMiddlewareEngine, 'registerMiddleware'> {
   registry?: { getAllObjects?(): ReadonlyArray<{ name?: unknown }> };
-  /**
-   * [#34700] The engine's search-field withholder seam
-   * (`ObjectQL#registerSearchFieldWithholder`). Optional: an engine without it
-   * keeps the guard alone, and a server-chosen search over a guarded column
-   * is refused as before.
-   */
-  registerSearchFieldWithholder?(
-    object: string,
-    withholder: (request: {
-      object: string;
-      where: unknown;
-      context: unknown;
-      searchFields: readonly string[];
-    }) => Promise<readonly string[] | undefined>,
+  registerMiddleware?(
+    fn: Parameters<NonNullable<ActivityMiddlewareEngine['registerMiddleware']>>[0],
+    options?: { object?: string; withholdSearchFields?: GuardSearchFieldWithholder },
   ): void;
 }
 
@@ -468,7 +471,7 @@ async function guardRefuses(
 /**
  * [#34700] Which of a search's server-resolved fields the guard would refuse
  * this caller, so the engine leaves them out of the set
- * (`ObjectQL#registerSearchFieldWithholder`) instead of the guard refusing the
+ * (`EngineMiddlewareOptions.withholdSearchFields`) instead of the guard refusing the
  * whole search — the auditor's audit-log search answered 403 for the
  * `old_value` / `new_value` snapshot columns the server had put in it. A
  * column the caller names in `searchFields` is never withheld, so the guard
@@ -536,11 +539,11 @@ function installParentFieldQueryGuard(
       }
       return next();
     },
-    { object: guard.object },
-  );
-  // [#34700] …and tell the search expansion which columns it would refuse.
-  engine.registerSearchFieldWithholder?.(guard.object, (request) =>
-    withheldSearchColumns(engine, guard, getSecurity(), request, logger),
+    {
+      object: guard.object,
+      // [#34700] …and tell the search expansion which columns it would refuse.
+      withholdSearchFields: (request) => withheldSearchColumns(engine, guard, getSecurity(), request, logger),
+    },
   );
 }
 

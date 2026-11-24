@@ -56,7 +56,7 @@ import {
   resolveWhereFilterTokens, rowsWithoutFormulaWidening, whereResolvedTokenJudge, withFileOwnerKey,
   withoutFormulaWidening, writeFailureLogMeta,
 } from './engine-top-level.js';
-import type { EngineReadOptions, OperationContext, SearchFieldWithholder } from './engine-top-level.js';
+import type { EngineMiddlewareEntry, EngineReadOptions, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -87,6 +87,7 @@ export interface FindHost {
   readonly logger: ObjectQL['logger'];
   lowerRelationConditions: ObjectQL['lowerRelationConditions'];
   maskSecretFields: ObjectQL['maskSecretFields'];
+  readonly middlewares: ObjectQL['middlewares'];
   permissionResolution: ObjectQL['permissionResolution'];
   readonly relatedSchemaOf: ObjectQL['relatedSchemaOf'];
   reportFindFailure: ObjectQL['reportFindFailure'];
@@ -98,7 +99,6 @@ export interface FindHost {
   resolveRelateThenLowerWhere: ObjectQL['resolveRelateThenLowerWhere'];
   resolveSearchQueryableFields: ObjectQL['resolveSearchQueryableFields'];
   resolveWhereTokens: ObjectQL['resolveWhereTokens'];
-  readonly searchFieldWithholders: ObjectQL['searchFieldWithholders'];
   stripSearchCompanionFromRead: ObjectQL['stripSearchCompanionFromRead'];
   triggerHooks: ObjectQL['triggerHooks'];
 }
@@ -182,7 +182,7 @@ export class FindFacet {
    * would hand the driver a key it does not read, which is the same silent drop
    * one layer down.
    */
-  static async expandSearchOnAst(this: Pick<FindHost, 'resolveSearchQueryableFields' | 'searchFieldWithholders'>, ast: QueryAST, schema: ServiceObject | undefined, context: ExecutionContext | undefined): Promise<void> {
+  static async expandSearchOnAst(this: Pick<FindHost, 'middlewares' | 'resolveSearchQueryableFields'>, ast: QueryAST, schema: ServiceObject | undefined, context: ExecutionContext | undefined): Promise<void> {
     // The `$search`/`$searchFields` OData spellings are NOT read here: the
     // protocol layer normalizes them to the bare keys before the engine
     // (protocol.ts findData), and a direct engine call carrying one is an
@@ -257,12 +257,12 @@ export class FindFacet {
         ? await this.resolveSearchQueryableFields(ast.object, context)
         : undefined;
       // [#34700] …nor a column a guard of the object's own refuses this caller
-      // (`registerSearchFieldWithholder`): plugin-audit's parent-field query
+      // (`EngineMiddlewareOptions.withholdSearchFields`): plugin-audit's parent-field query
       // guard refused the auditor's whole audit-log search for the snapshot
       // columns the server put in the set. Asked with the caller's `where`, the
       // one the guard will read its pinned parent from.
       const withheldFields = searching
-        ? await FindFacet.resolveSearchWithheldFields(this.searchFieldWithholders, ast, expandOptions, context)
+        ? await FindFacet.resolveSearchWithheldFields(this.middlewares, ast, expandOptions, context)
         : undefined;
       const searchFilter = expandSearchToFilter(raw, { ...expandOptions, queryableFields, withheldFields });
       if (searchFilter) {
@@ -292,20 +292,24 @@ export class FindFacet {
   }
 
   /**
-   * [#34700] The fields the search-field withholders registered for
-   * `ast.object` withhold from this caller's server-resolved search set, or
-   * `undefined` when none is registered, the read carries no context, or none
-   * withholds anything. Each is asked with the set the expansion resolves
-   * before any withholding; their answers are unioned.
+   * [#34700] The fields the search-field withholders of the middlewares that
+   * run for `ast.object` (`EngineMiddlewareOptions.withholdSearchFields`, the
+   * object selector `executeWithMiddleware` applies) withhold from this
+   * caller's server-resolved search set, or `undefined` when none is
+   * registered, the read carries no context, or none withholds anything. Each
+   * is asked with the set the expansion resolves before any withholding; their
+   * answers are unioned.
    */
   static async resolveSearchWithheldFields(
-    withholders: ReadonlyMap<string, readonly SearchFieldWithholder[]>,
+    middlewares: readonly EngineMiddlewareEntry[],
     ast: QueryAST,
     expandOptions: Parameters<typeof resolveSearchFields>[0],
     context: ExecutionContext | undefined,
   ): Promise<ReadonlySet<string> | undefined> {
-    const registered = withholders.get(ast.object);
-    if (!registered?.length || context === undefined) return undefined;
+    const registered = middlewares.flatMap((m) =>
+      m.withholdSearchFields && (!m.object || m.object === '*' || m.object === ast.object) ? [m.withholdSearchFields] : [],
+    );
+    if (registered.length === 0 || context === undefined) return undefined;
     const searchFields = resolveSearchFields(expandOptions);
     if (searchFields.length === 0) return undefined;
     const withheld = new Set<string>();

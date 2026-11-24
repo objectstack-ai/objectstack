@@ -2,21 +2,22 @@
 
 /**
  * [#34700] A `search` resolves only over fields a guard of the object's own
- * lets the caller query (`ObjectQL#registerSearchFieldWithholder`).
+ * lets the caller query (`EngineMiddlewareOptions.withholdSearchFields`, the
+ * withholder a guard middleware declares when it registers).
  *
  * plugin-audit's parent-field query guard (#21154) runs as a middleware after
  * the expansion and refuses a reader withheld any parent field a predicate over
  * the audit log's snapshot columns. The server put those columns in the
  * auto-default search set, so the auditor's whole audit-log search answered
  * 403. The #25672 narrowing asked only the security service, which does not
- * carry that guard. A withholder registered for the object is now asked too,
- * and what it names leaves the server-resolved set.
+ * carry that guard. The withholder of a middleware that runs for the object is
+ * now asked too, and what it names leaves the server-resolved set.
  *
  * Pinned beside the narrowing, so a fix that over-reaches goes red here too: a
  * field the caller NAMES in `searchFields` is never withheld; a context-less
- * read and a blank term ask nothing; a withholder of another object is not
- * asked; a set withheld down to nothing is the #24284 refusal, not every row;
- * and a throw propagates.
+ * read and a blank term ask nothing; a withholder of a middleware for another
+ * object is not asked, one for every object is; a set withheld down to nothing
+ * is the #24284 refusal, not every row; and a throw propagates.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -92,8 +93,11 @@ describe('[#34700] search resolves only over the fields a registered withholder 
             asked.push(request);
             return withhold.filter((f) => request.searchFields.includes(f));
         };
-        engine.registerSearchFieldWithholder('app_ledger', withholder);
-        engine.registerSearchFieldWithholder('app_snapshot_only', withholder);
+        const passThrough = async (_ctx: unknown, next: () => Promise<void>) => next();
+        engine.registerMiddleware(passThrough, { object: 'app_ledger', withholdSearchFields: withholder });
+        engine.registerMiddleware(passThrough, { object: 'app_snapshot_only', withholdSearchFields: withholder });
+        // A middleware without a withholder is not asked anything.
+        engine.registerMiddleware(passThrough, { object: 'app_other' });
     });
 
     const lastWhere = () => seen[seen.length - 1]?.where;
@@ -138,6 +142,18 @@ describe('[#34700] search resolves only over the fields a registered withholder 
         expect([...fieldsOf(lastWhere())]).toEqual(['title']);
     });
 
+    it.each([undefined, '*'])('a withholder on a middleware for every object (object %s) is asked for each, as the middleware runs', async (object) => {
+        const everywhere: string[] = [];
+        engine.registerMiddleware(async (_ctx, next) => next(), {
+            ...(object ? { object } : {}),
+            withholdSearchFields: (request) => { everywhere.push(request.object); return []; },
+        });
+        await engine.find('app_other', { search: 'ann', context: MEMBER as any });
+        await engine.find('app_ledger', { search: 'ann', context: MEMBER as any });
+        expect(everywhere).toEqual(['app_other', 'app_ledger']);
+        expect([...fieldsOf(lastWhere())].sort()).toEqual(['action']);
+    });
+
     it('a set withheld down to nothing is the #24284 refusal, naming the caller, not every row', async () => {
         const err: any = await engine.find('app_snapshot_only', { search: 'ann', context: MEMBER as any }).catch((e) => e);
         expect(err?.code).toBe('INVALID_FIELD');
@@ -147,7 +163,10 @@ describe('[#34700] search resolves only over the fields a registered withholder 
     });
 
     it('a throw from a withholder propagates', async () => {
-        engine.registerSearchFieldWithholder('app_other', async () => { throw new Error('withholder fault'); });
+        engine.registerMiddleware(async (_ctx, next) => next(), {
+            object: 'app_other',
+            withholdSearchFields: async () => { throw new Error('withholder fault'); },
+        });
         await expect(engine.find('app_other', { search: 'ann', context: MEMBER as any })).rejects.toThrow('withholder fault');
     });
 });

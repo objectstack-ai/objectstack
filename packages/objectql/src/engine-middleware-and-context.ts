@@ -46,7 +46,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { ORGANIZATION_OBJECT, SystemWriteOrganizationRequiredError, carriesOrganization, resolveSystemWriteOrganization, resolveTenantFieldName, type SystemWriteOrganizationDecision } from './tenancy/system-write-organization.js';
 import { isFederatedObject } from './federated-object.js';
 import { cascadeBatchIdsOf } from './engine-top-level.js';
-import type { EngineMiddleware, OperationContext, SearchFieldWithholder } from './engine-top-level.js';
+import type { EngineMiddleware, EngineMiddlewareOptions, OperationContext } from './engine-top-level.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -66,7 +66,6 @@ export interface MiddlewareAndContextHost {
   getDriver: ObjectQL['getDriver'];
   readonly logger: ObjectQL['logger'];
   readonly middlewares: ObjectQL['middlewares'];
-  readonly searchFieldWithholders: ObjectQL['searchFieldWithholders'];
   organizationProbeMemo: ObjectQL['organizationProbeMemo'];
   probeInstallOrganizations: ObjectQL['probeInstallOrganizations'];
   resolveEnginePosture: ObjectQL['resolveEnginePosture'];
@@ -107,17 +106,10 @@ export class MiddlewareAndContextFacet {
   }
 
   /** The body of `ObjectQL#registerMiddleware`; the method's docblock there is its contract. */
-  static registerMiddleware(this: Pick<MiddlewareAndContextHost, 'logger' | 'middlewares'>, fn: EngineMiddleware, options?: { object?: string }): void {
-    this.middlewares.push({ fn, object: options?.object });
+  static registerMiddleware(this: Pick<MiddlewareAndContextHost, 'logger' | 'middlewares'>, fn: EngineMiddleware, options?: EngineMiddlewareOptions): void {
+    const withholdSearchFields = options?.withholdSearchFields;
+    this.middlewares.push({ fn, object: options?.object, ...(withholdSearchFields ? { withholdSearchFields } : {}) });
     this.logger.debug('Registered middleware', { object: options?.object, total: this.middlewares.length });
-  }
-
-  /** The body of `ObjectQL#registerSearchFieldWithholder`; the method's docblock there is its contract. */
-  static registerSearchFieldWithholder(this: Pick<MiddlewareAndContextHost, 'logger' | 'searchFieldWithholders'>, object: string, withholder: SearchFieldWithholder): void {
-    const list = this.searchFieldWithholders.get(object) ?? [];
-    list.push(withholder);
-    this.searchFieldWithholders.set(object, list);
-    this.logger.debug('Registered search-field withholder', { object, total: list.length });
   }
 
   /** The body of `ObjectQL#hasObjectMiddleware`; the method's docblock there is its contract. */

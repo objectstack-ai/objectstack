@@ -128,7 +128,7 @@ export interface ExpandSearchOptions extends SearchFieldResolutionOptions {
   queryableFields?: ReadonlySet<string>;
   /**
    * [#34700] Fields a search-field withholder registered for the object
-   * (`ObjectQL#registerSearchFieldWithholder`) says this caller may not query
+   * (`EngineMiddlewareOptions.withholdSearchFields`) says this caller may not query
    * here — a guard of the object's own that the security service's answer
    * does not carry. Withheld from the resolved set exactly as a field missing
    * from {@link queryableFields}: a field the caller named in

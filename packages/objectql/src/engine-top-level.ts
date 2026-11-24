@@ -4347,13 +4347,35 @@ export interface SearchFieldWithholdingRequest {
  * [#34700] A guard of an object's own — a middleware that refuses a query
  * naming some of its columns for some callers — tells the search expansion
  * which of `searchFields` this caller may not query, so a server-chosen search
- * set never names them (`ObjectQL#registerSearchFieldWithholder`). `undefined`
- * or `[]` withholds nothing. A throw propagates, as from the security
- * service's `getQueryableFields`.
+ * set never names them (`EngineMiddlewareOptions.withholdSearchFields`).
+ * `undefined` or `[]` withholds nothing. A throw propagates, as from the
+ * security service's `getQueryableFields`.
  */
 export type SearchFieldWithholder = (
   request: SearchFieldWithholdingRequest,
 ) => Promise<readonly string[] | undefined> | readonly string[] | undefined;
+
+/** The options of `ObjectQL#registerMiddleware`. */
+export interface EngineMiddlewareOptions {
+  /** The object the middleware runs for; absent or `'*'` = every object. */
+  object?: string;
+  /**
+   * [#34700] The middleware is a guard of the object's own (plugin-audit's
+   * parent-field query guard, #21154) and this names the fields a non-blank
+   * `search` must not scan for the caller, asked for the reads the middleware
+   * runs on. They leave the server-resolved search set before the expansion,
+   * beside what the security service's `getQueryableFields` withholds
+   * (#25672). A field the caller names in `searchFields` is never withheld, so
+   * the middleware still refuses it; a context-less read is not asked. The
+   * middleware stays the enforcement.
+   */
+  withholdSearchFields?: SearchFieldWithholder;
+}
+
+/** One registered middleware, as `ObjectQL#registerMiddleware` stores it. */
+export interface EngineMiddlewareEntry extends EngineMiddlewareOptions {
+  fn: EngineMiddleware;
+}
 
 /**
  * "Which of these tombstoned `sys_file` rows is something still holding?"
