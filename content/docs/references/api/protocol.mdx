@@ -1379,6 +1379,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **locales** | `{ code: string; label: string; isDefault?: boolean }[]` | ✅ | Available locales |
 | **sourceLocale** | `string` | optional | The language the app's own text (a plain-string `label`) is written in: the declared `i18n.sourceLocale`, else the default locale. Absent when the server knows neither. Text typed in any other locale is a translation |
+| **fallbackChain** | `string[]` | optional | The locales the server consults, in order, after the requested one and before the authored text: the deployment's declared fallback (`i18n.fallbackLocale`, else `defaultLocale`). Absent when the server declares none; the requested locale alone is then consulted. Not walked for a request in `sourceLocale` |
 
 ### Nested Shape: `GetLocalesResponse.locales[number]`
 
