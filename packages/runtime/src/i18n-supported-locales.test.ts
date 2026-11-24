@@ -37,6 +37,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a clocked case: `AppPlugin` loads it lazily (check:test-source-alias).
+import '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createMemoryI18n } from '@objectstack/core';
