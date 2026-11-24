@@ -2961,6 +2961,7 @@ const zh = {
       targetQueue: '队列',
       queue: '队列',
       queuePlaceholder: '选择队列',
+      declaredQueues: '或已安装应用声明的队列',
       notify: '通知新的负责人',
       alreadyOwner: '此人已是该记录的负责人。',
       submit: '更改负责人',

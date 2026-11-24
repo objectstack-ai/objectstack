@@ -2865,6 +2865,7 @@ const pt = {
       targetQueue: 'Uma fila',
       queue: 'Fila',
       queuePlaceholder: 'Escolha uma fila',
+      declaredQueues: 'Ou uma fila declarada por um aplicativo instalado',
       notify: 'Notificar o novo proprietário',
       alreadyOwner: 'Esta pessoa já é a proprietária deste registro.',
       submit: 'Alterar proprietário',

@@ -2866,6 +2866,7 @@ const fr = {
       targetQueue: 'Une file d’attente',
       queue: 'File d’attente',
       queuePlaceholder: 'Choisir une file d’attente',
+      declaredQueues: 'Ou une file d’attente déclarée par une application installée',
       notify: 'Prévenir le nouveau propriétaire',
       alreadyOwner: 'Cette personne est déjà propriétaire de cet enregistrement.',
       submit: 'Changer de propriétaire',

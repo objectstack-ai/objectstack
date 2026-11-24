@@ -2961,6 +2961,7 @@ const zhHant = {
       targetQueue: '佇列',
       queue: '佇列',
       queuePlaceholder: '選擇佇列',
+      declaredQueues: '或已安裝應用宣告的佇列',
       notify: '通知新的負責人',
       alreadyOwner: '此人已是該記錄的負責人。',
       submit: '更改負責人',
