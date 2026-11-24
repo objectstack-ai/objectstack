@@ -1324,8 +1324,25 @@ export const CEILINGS = new Map([
   // `origin/main` the file was 16164 bytes (4041 tokens, headroom 0); the
   // LANDED file is 16272 bytes -> 4068 tokens, ceiling +27, pinned AT the
   // measurement, zero headroom.
-  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(16272 / 4)
-  ['skills/objectstack-data/rules/security.md', 4068],
+  // 4068 -> 4292 (card #36053, the Skills-docs follow-up of the field-axis
+  // split, ruling of record 6912661484): the three permission axes in the
+  // ruled model's words (object permission, record scope, fields);
+  // `viewAllFields` as "reads every field" (a read vote on every field, never
+  // an edit vote; the set's own `readable: false` row beats it; no object
+  // access and no record; on `'*'` it also votes on a private-posture object's
+  // fields; authored in metadata); the three sensitivity tiers; "from v19"
+  // View All / Modify All open no field; and `maskingRule` beside a field's
+  // `requiredPermissions` — none of which the file taught, so an author
+  // granted View All to open fields. Same standing ruling, tap A, verbatim and
+  // untranslated: 「A:先削重复,余额按实测提高」 (record 6513306068). PAID DOWN
+  // FIRST, 274 bytes: the `when` section's "Locks, never grants" bullet (140;
+  // the choice rule above it already says the other sets keep their grant,
+  // and the new section states the union rule) and the recipe URL (134; the
+  // docs anchor the same bullet keeps links it). On `origin/main` the file was
+  // 16272 bytes (4068 tokens, headroom 0); the LANDED file is 17168 bytes ->
+  // 4292 tokens, ceiling +224, pinned AT the measurement, zero headroom.
+  //   ceil($(wc -c < skills/objectstack-data/rules/security.md) / 4) == ceil(17168 / 4)
+  ['skills/objectstack-data/rules/security.md', 4292],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
