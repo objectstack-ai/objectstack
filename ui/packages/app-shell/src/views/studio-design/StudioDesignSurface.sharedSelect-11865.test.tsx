@@ -3,50 +3,34 @@
 /**
  * The design surface's own pickers are the shared `Select` (objectui#11865).
  *
- * `StudioDesignSurface` drew five pickers as browser-native selects, beside
- * the shared Radix `Select` the rest of Studio picks with: the nav-item
- * inspector's *Link object*, its target picker (`NavTargetSelect`: page,
- * dashboard, report, action, component, doc page, book) and a url entry's
- * *Open in*, plus *New object*'s record sharing (OWD) and *New automation*'s
- * trigger. The card asks for one control for one kind of choice, surface by
- * surface; this suite covers those five.
+ * `StudioDesignSurface` drew its pickers as browser-native selects, beside
+ * the shared Radix `Select` the rest of Studio picks with. This suite covers
+ * the two the surface still draws: *New object*'s record sharing (OWD) and
+ * *New automation*'s trigger. (The Interfaces nav-item inspector's *Link
+ * object*, target and *Open in* pickers were pinned here too, until
+ * objectstack#36502 retired that pillar and its inspector.)
  *
  * What is pinned:
  *   - each picker IS the primitive (a Radix combobox trigger), shows what the
- *     entry or the dialog holds, and no native select is left;
- *   - each picker keeps the accessible name the native control had, and the
- *     object picker, which had none, is named by its *Link to object* label
- *     (objectstack#26732);
- *   - every option of every picker writes what the native control wrote:
- *     the inspector's `onNavPatch` value as JSON text plus the keys it holds
- *     as `undefined` (JSON erases those), the *New object* save and the
- *     *New automation* save as JSON text;
- *   - re-picking the current option writes nothing;
- *   - a value no option carries is what the trigger shows;
+ *     dialog holds, and no native select is left;
+ *   - each picker keeps the accessible name the native control had;
+ *   - every option of every picker writes what the native control wrote: the
+ *     *New object* save and the *New automation* save as JSON text;
  *   - the keyboard alone opens a picker and selects.
  *
- * Read-only: none of the five has such a state. A read-only package closes
- * nav editing, which unmounts the inspector
- * (`StudioDesignSurface.navEditClosesOnReadOnly-11167`, "closes nav editing
- * and the linked item’s inspector"), and offers no *New object*
- * (`StudioDesignSurface.emptyPackage`, "hides the CTA on a read-only
- * package"). The Automations rail's *New* is gated on the same `readOnly` in
- * the source; no suite pins that one.
+ * Read-only: neither picker has such a state. A read-only package offers no
+ * *New object* (`StudioDesignSurface.emptyPackage`, "hides the CTA on a
+ * read-only package"). The Automations rail's *New* is gated on the same
+ * `readOnly` in the source; no suite pins that one.
  *
  * DIRECTION, observed against the native controls: every pin here but two
- * is red there, because each one reads a picker as the primitive's trigger
- * (the object picker by a test id the native control did not carry). The two
- * green there too pin what the conversion kept: the trigger picker's name,
- * and the record sharing default saved untouched. What makes the write pins
- * guards of "the conversion changed nothing the surface writes" is the
+ * is red there, because each one reads a picker as the primitive's trigger.
+ * The two green there too pin what the conversion kept: the trigger picker's
+ * name, and the record sharing default saved untouched. What makes the write
+ * pins guards of "the conversion changed nothing the surface writes" is the
  * literal each compares against: a `change` event on the pre-conversion
  * surface's native control wrote that same value, read once on that
- * component with these fixtures, and so were the names. That
- * probe's `change` event fired for the current option too, which a browser's
- * native select does not do, so the re-pick rows pin the primitive. On an
- * entry whose value no option carried, the native control showed its first
- * option while the entry held the other value; the rows for that entry are
- * the writes each option's `change` made.
+ * component with these fixtures, and so were the names.
  */
 
 // Warmed at module top so the first load of the console's lazily loaded
@@ -59,8 +43,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter } from 'react-router-dom';
 
 const PKG = 'com.acme.app';
-
-type Row = { type: string; pkg: string; item: Record<string, unknown> };
 
 const server = vi.hoisted(() => ({
   rows: [] as Array<{ type: string; pkg: string; item: Record<string, unknown> }>,
@@ -118,36 +100,18 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
-import { AutomationsPillar, DataPillar, StudioNavItemInspector } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
-import { registerAppComponent } from '../../services/componentRegistry';
 import { t } from '../metadata-admin/i18n';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
 
-// A screen registered with the console: what a `component` entry picks from.
-registerAppComponent({ ref: 'acme:board', label: 'Acme board', component: () => null });
-
 const en = (key: string) => t(key, 'en');
 
-/** The nav targets the double serves: this package's, a record page and another package's page left out. */
-const NAV_ROWS: Row[] = [
-  { type: 'page', pkg: PKG, item: { name: 'home', label: 'Home', type: 'app' } },
-  { type: 'page', pkg: PKG, item: { name: 'landing', label: 'Landing', type: 'app' } },
-  { type: 'page', pkg: PKG, item: { name: 'task_detail', label: 'Task detail', type: 'record' } },
-  { type: 'page', pkg: 'com.other.app', item: { name: 'foreign_page', label: 'Foreign', type: 'app' } },
-  { type: 'dashboard', pkg: PKG, item: { name: 'ops_board', label: 'Operations' } },
-  { type: 'report', pkg: PKG, item: { name: 'tasks_by_status', label: 'Tasks by status' } },
-  { type: 'action', pkg: PKG, item: { name: 'sync_all', label: 'Sync all' } },
-  { type: 'action', pkg: PKG, item: { name: 'close_task', label: 'Close task', objectName: 'acme_task' } },
-  { type: 'doc', pkg: PKG, item: { name: 'getting_started', label: 'Getting started' } },
-  { type: 'book', pkg: PKG, item: { name: 'acme_manual', label: 'Acme manual' } },
-];
-
 beforeEach(() => {
-  server.rows = NAV_ROWS.map((r) => JSON.parse(JSON.stringify(r)) as Row);
-  server.draftHeaders = [{ type: 'page', packageId: PKG, name: 'draft_page' }];
+  server.rows = [];
+  server.draftHeaders = [];
   server.saves.length = 0;
   for (const fn of Object.values(mockClient)) (fn as { mockClear?: () => void }).mockClear?.();
   // No read here goes out over the global `fetch`; one double answers "absent".
@@ -161,19 +125,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-
-/** The object picker's handle, kept from when it had no accessible name (the native control had none). */
-const OBJECT_PICKER = 'nav-link-object';
-const CHOOSE_OBJECT = en('engine.studio.nav.chooseObject');
-const CHOOSE = en('engine.inspector.appNav.choose');
-const REPORT_INDEX = en('engine.inspector.appNav.reportIndex');
-const SAME_TAB = en('engine.inspector.appNav.urlTargetSelf');
-const NEW_TAB = en('engine.inspector.appNav.urlTargetBlank');
-
-/** A picker by its accessible name, or the object picker by its test id. */
-function picker(handle: string): HTMLElement {
-  return handle === OBJECT_PICKER ? screen.getByTestId(OBJECT_PICKER) : screen.getByRole('combobox', { name: handle });
-}
 
 /** Open a picker from the keyboard and return its listbox. */
 async function openList(trigger: HTMLElement): Promise<HTMLElement> {
@@ -195,260 +146,6 @@ async function pick(trigger: HTMLElement, label: string): Promise<void> {
   const listbox = await openList(trigger);
   fireEvent.click(await within(listbox).findByRole('option', { name: label }, { timeout: 8000 }));
 }
-
-// ---------------------------------------------------------------------------
-// The nav-item inspector: Link object, the target pickers and Open in
-// ---------------------------------------------------------------------------
-
-const OBJECTS = [
-  { name: 'crm_lead', label: 'Leads' },
-  { name: 'legacy_lead', label: 'Legacy Leads' },
-];
-
-const ENTRIES: Record<string, Record<string, unknown>> = {
-  objBorn: { id: 'nav_item_3', type: 'object' },
-  objBound: { id: 'nav_lead', type: 'object', objectName: 'crm_lead', label: 'Leads' },
-  objUntyped: { id: 'nav_x', label: 'X' },
-  objOutside: { id: 'nav_g', type: 'object', objectName: 'ghost_obj' },
-  objNoId: { type: 'object' },
-  pageBorn: { id: 'nav_item_3', type: 'page' },
-  pageBound: { id: 'nav_p', type: 'page', pageName: 'home', label: 'Home menu' },
-  pageOutside: { id: 'nav_p', type: 'page', pageName: 'ghost_page' },
-  dashBound: { id: 'nav_d', type: 'dashboard', dashboardName: 'ops_board' },
-  reportBorn: { id: 'nav_item_3', type: 'report' },
-  reportBound: { id: 'nav_r', type: 'report', reportName: 'tasks_by_status' },
-  actionBorn: { id: 'nav_item_3', type: 'action' },
-  actionBound: { id: 'nav_a', type: 'action', actionDef: { actionName: 'sync_all' } },
-  compBorn: { id: 'nav_item_3', type: 'component' },
-  docBorn: { id: 'nav_item_3', type: 'doc' },
-  docBound: { id: 'nav_doc', type: 'doc', doc: 'getting_started', book: 'acme_manual' },
-  urlDefault: { id: 'nav_u', type: 'url', url: 'https://example.com' },
-  urlBlank: { id: 'nav_u', type: 'url', url: 'https://example.com', target: '_blank' },
-  urlOutside: { id: 'nav_u', type: 'url', url: 'https://example.com', target: '_top' },
-};
-
-function renderEntry(key: string) {
-  const onNavPatch = vi.fn();
-  const utils = render(
-    <StudioNavItemInspector
-      navId="navigation[0]"
-      appDraft={{ navigation: [ENTRIES[key]] }}
-      objects={OBJECTS}
-      packageId={PKG}
-      onNavPatch={onNavPatch}
-      onClear={() => undefined}
-    />,
-  );
-  return { ...utils, onNavPatch };
-}
-
-/**
- * [entry, picker, option label, the JSON text of the value `onNavPatch`
- * received, the keys the written entry holds as `undefined`]. `null`: nothing
- * is written — the option is the current one.
- */
-const NAV_WRITES: ReadonlyArray<readonly [string, string, string, string | null, readonly string[]]> = [
-  ['objBorn', OBJECT_PICKER, CHOOSE_OBJECT, null, []],
-  ['objBorn', OBJECT_PICKER, 'Leads (crm_lead)', '{"navigation":[{"id":"nav_item_3","type":"object","objectName":"crm_lead"}]}', ['object','path']],
-  ['objBorn', OBJECT_PICKER, 'Legacy Leads (legacy_lead)', '{"navigation":[{"id":"nav_item_3","type":"object","objectName":"legacy_lead"}]}', ['object','path']],
-  ['objBound', OBJECT_PICKER, CHOOSE_OBJECT, '{"navigation":[{"id":"nav_lead","label":"Leads"}]}', ['type','objectName','object']],
-  ['objBound', OBJECT_PICKER, 'Leads (crm_lead)', null, []],
-  ['objBound', OBJECT_PICKER, 'Legacy Leads (legacy_lead)', '{"navigation":[{"id":"nav_lead","type":"object","objectName":"legacy_lead","label":"Leads"}]}', ['object','path']],
-  ['objUntyped', OBJECT_PICKER, CHOOSE_OBJECT, null, []],
-  ['objUntyped', OBJECT_PICKER, 'Leads (crm_lead)', '{"navigation":[{"id":"nav_x","label":"X","type":"object","objectName":"crm_lead"}]}', ['object','path']],
-  ['objUntyped', OBJECT_PICKER, 'Legacy Leads (legacy_lead)', '{"navigation":[{"id":"nav_x","label":"X","type":"object","objectName":"legacy_lead"}]}', ['object','path']],
-  ['objOutside', OBJECT_PICKER, CHOOSE_OBJECT, '{"navigation":[{"id":"nav_g"}]}', ['type','objectName','object']],
-  ['objOutside', OBJECT_PICKER, 'Leads (crm_lead)', '{"navigation":[{"id":"nav_g","type":"object","objectName":"crm_lead"}]}', ['object','path']],
-  ['objOutside', OBJECT_PICKER, 'Legacy Leads (legacy_lead)', '{"navigation":[{"id":"nav_g","type":"object","objectName":"legacy_lead"}]}', ['object','path']],
-  ['objNoId', OBJECT_PICKER, CHOOSE_OBJECT, null, []],
-  ['objNoId', OBJECT_PICKER, 'Leads (crm_lead)', '{"navigation":[{"type":"object","id":"nav_crm_lead","objectName":"crm_lead"}]}', ['object','path']],
-  ['objNoId', OBJECT_PICKER, 'Legacy Leads (legacy_lead)', '{"navigation":[{"type":"object","id":"nav_legacy_lead","objectName":"legacy_lead"}]}', ['object','path']],
-  ['pageBorn', 'Page', CHOOSE, null, []],
-  ['pageBorn', 'Page', 'Home (home)', '{"navigation":[{"id":"nav_item_3","type":"page","pageName":"home"}]}', []],
-  ['pageBorn', 'Page', 'Landing (landing)', '{"navigation":[{"id":"nav_item_3","type":"page","pageName":"landing"}]}', []],
-  ['pageBorn', 'Page', 'draft_page', '{"navigation":[{"id":"nav_item_3","type":"page","pageName":"draft_page"}]}', []],
-  ['pageBound', 'Page', CHOOSE, '{"navigation":[{"id":"nav_p","type":"page","label":"Home menu"}]}', []],
-  ['pageBound', 'Page', 'Home (home)', null, []],
-  ['pageBound', 'Page', 'Landing (landing)', '{"navigation":[{"id":"nav_p","type":"page","pageName":"landing","label":"Home menu"}]}', []],
-  ['pageBound', 'Page', 'draft_page', '{"navigation":[{"id":"nav_p","type":"page","pageName":"draft_page","label":"Home menu"}]}', []],
-  ['pageOutside', 'Page', CHOOSE, '{"navigation":[{"id":"nav_p","type":"page"}]}', []],
-  ['pageOutside', 'Page', 'ghost_page', null, []],
-  ['pageOutside', 'Page', 'Home (home)', '{"navigation":[{"id":"nav_p","type":"page","pageName":"home"}]}', []],
-  ['pageOutside', 'Page', 'Landing (landing)', '{"navigation":[{"id":"nav_p","type":"page","pageName":"landing"}]}', []],
-  ['pageOutside', 'Page', 'draft_page', '{"navigation":[{"id":"nav_p","type":"page","pageName":"draft_page"}]}', []],
-  ['dashBound', 'Dashboard', CHOOSE, '{"navigation":[{"id":"nav_d","type":"dashboard"}]}', []],
-  ['dashBound', 'Dashboard', 'Operations (ops_board)', null, []],
-  // objectstack#27525 — the empty face of a report entry's picker is the
-  // report index; on a bound entry it removes `reportName`.
-  ['reportBorn', 'Report', REPORT_INDEX, null, []],
-  ['reportBound', 'Report', REPORT_INDEX, '{"navigation":[{"id":"nav_r","type":"report"}]}', []],
-  ['reportBorn', 'Report', 'Tasks by status (tasks_by_status)', '{"navigation":[{"id":"nav_item_3","type":"report","reportName":"tasks_by_status"}]}', []],
-  ['actionBorn', 'Action', CHOOSE, null, []],
-  ['actionBorn', 'Action', 'Sync all (sync_all)', '{"navigation":[{"id":"nav_item_3","type":"action","actionDef":{"actionName":"sync_all"}}]}', []],
-  ['actionBound', 'Action', CHOOSE, '{"navigation":[{"id":"nav_a","type":"action"}]}', []],
-  ['actionBound', 'Action', 'Sync all (sync_all)', null, []],
-  ['compBorn', 'Component', CHOOSE, null, []],
-  ['compBorn', 'Component', 'Acme board (acme:board)', '{"navigation":[{"id":"nav_item_3","type":"component","componentRef":"acme:board"}]}', []],
-  ['docBorn', 'Doc page', CHOOSE, null, []],
-  ['docBorn', 'Doc page', 'Getting started (getting_started)', '{"navigation":[{"id":"nav_item_3","type":"doc","doc":"getting_started"}]}', []],
-  ['docBorn', 'Book', CHOOSE, null, []],
-  ['docBorn', 'Book', 'Acme manual (acme_manual)', '{"navigation":[{"id":"nav_item_3","type":"doc","book":"acme_manual"}]}', []],
-  ['docBound', 'Doc page', CHOOSE, '{"navigation":[{"id":"nav_doc","type":"doc","book":"acme_manual"}]}', []],
-  ['docBound', 'Doc page', 'Getting started (getting_started)', null, []],
-  ['docBound', 'Book', CHOOSE, '{"navigation":[{"id":"nav_doc","type":"doc","doc":"getting_started"}]}', []],
-  ['docBound', 'Book', 'Acme manual (acme_manual)', null, []],
-  ['urlDefault', 'Open in', SAME_TAB, null, []],
-  ['urlDefault', 'Open in', NEW_TAB, '{"navigation":[{"id":"nav_u","type":"url","url":"https://example.com","target":"_blank"}]}', []],
-  ['urlBlank', 'Open in', SAME_TAB, '{"navigation":[{"id":"nav_u","type":"url","url":"https://example.com","target":"_self"}]}', []],
-  ['urlBlank', 'Open in', NEW_TAB, null, []],
-  ['urlOutside', 'Open in', SAME_TAB, '{"navigation":[{"id":"nav_u","type":"url","url":"https://example.com","target":"_self"}]}', []],
-  ['urlOutside', 'Open in', NEW_TAB, '{"navigation":[{"id":"nav_u","type":"url","url":"https://example.com","target":"_blank"}]}', []],
-];
-
-function expectNavWrote(onNavPatch: ReturnType<typeof vi.fn>, json: string | null, undefinedKeys: readonly string[]): void {
-  if (json === null) {
-    expect(onNavPatch).not.toHaveBeenCalled();
-    return;
-  }
-  expect(onNavPatch).toHaveBeenCalledTimes(1);
-  const patch = onNavPatch.mock.calls[0][0] as { navigation: Array<Record<string, unknown>> };
-  expect(JSON.stringify(patch)).toBe(json);
-  const entry = patch.navigation[0];
-  expect(Object.keys(entry).filter((k) => entry[k] === undefined)).toEqual(undefinedKeys);
-}
-
-describe('the nav-item inspector picks with the shared Select (objectui#11865)', () => {
-  it('renders each picker as the Radix combobox trigger, showing the entry’s value', async () => {
-    const shown: Record<string, string> = {};
-    for (const [key, handle, loaded] of [
-      ['objBorn', OBJECT_PICKER, undefined],
-      ['objBound', OBJECT_PICKER, undefined],
-      ['pageBound', 'Page', 'Home (home)'],
-      ['urlDefault', 'Open in', undefined],
-      ['urlBlank', 'Open in', undefined],
-    ] as const) {
-      const { container } = renderEntry(key);
-      expect(container.querySelector('select'), key).toBeNull();
-      const trigger = picker(handle);
-      expect(trigger.tagName, key).toBe('BUTTON');
-      expect(trigger, key).toHaveAttribute('role', 'combobox');
-      if (loaded) await waitFor_(() => expect(trigger).toHaveTextContent(loaded));
-      shown[key] = trigger.textContent ?? '';
-      cleanup();
-    }
-    expect(shown).toEqual({
-      objBorn: CHOOSE_OBJECT,
-      objBound: 'Leads (crm_lead)',
-      pageBound: 'Home (home)',
-      urlDefault: SAME_TAB,
-      urlBlank: NEW_TAB,
-    });
-  });
-
-  // The names were read on the native controls; red there only because the object picker is found by its test id.
-  // The object picker had none there; objectstack#26732 names it by its *Link to object* label.
-  it('each picker keeps the name its label gave the native control; the object picker is named by its label', async () => {
-    const names: Record<string, string[]> = {};
-    for (const key of ['objBorn', 'pageBorn', 'dashBound', 'reportBorn', 'actionBorn', 'compBorn', 'docBorn', 'urlDefault']) {
-      renderEntry(key);
-      names[key] = screen.getAllByRole('combobox').map((c) => {
-        // objectui#12455 — the inspector's Icon picker is a combobox named by its label too;
-        // objectstack#26740 — so are its badge style picker and its condition field.
-        const named = ['Link to object', 'Page', 'Dashboard', 'Report', 'Action', 'Component', 'Doc page', 'Book', 'Open in', 'Icon', 'Badge style', 'Visible when'].find(
-          (n) => screen.queryByRole('combobox', { name: n }) === c,
-        );
-        return named ?? '';
-      });
-      cleanup();
-    }
-    expect(names).toEqual({
-      objBorn: ['Link to object', 'Icon', 'Badge style', 'Visible when'],
-      pageBorn: ['Page', 'Icon', 'Badge style', 'Visible when'],
-      dashBound: ['Dashboard', 'Icon', 'Badge style', 'Visible when'],
-      reportBorn: ['Report', 'Icon', 'Badge style', 'Visible when'],
-      actionBorn: ['Action', 'Icon', 'Badge style', 'Visible when'],
-      compBorn: ['Component', 'Icon', 'Badge style', 'Visible when'],
-      docBorn: ['Doc page', 'Book', 'Icon', 'Badge style', 'Visible when'],
-      urlDefault: ['Open in', 'Icon', 'Badge style', 'Visible when'],
-    });
-    renderEntry('objBorn');
-    expect(screen.getByTestId(OBJECT_PICKER)).toHaveAccessibleName('Link to object');
-  });
-
-  it('each picker lists its options in the order the native control did', async () => {
-    renderEntry('objBound');
-    expect(await listed(picker(OBJECT_PICKER))).toEqual([CHOOSE_OBJECT, 'Leads (crm_lead)', 'Legacy Leads (legacy_lead)']);
-    cleanup();
-
-    renderEntry('pageBorn');
-    expect(await listed(picker('Page'), 'Home (home)')).toEqual([CHOOSE, 'Home (home)', 'Landing (landing)', 'draft_page']);
-    cleanup();
-
-    renderEntry('actionBorn');
-    expect(await listed(picker('Action'), 'Sync all (sync_all)')).toEqual([CHOOSE, 'Sync all (sync_all)']);
-    cleanup();
-
-    renderEntry('compBorn');
-    expect(await listed(picker('Component'))).toEqual([CHOOSE, 'Acme board (acme:board)']);
-    cleanup();
-
-    renderEntry('urlDefault');
-    expect(await listed(picker('Open in'))).toEqual([SAME_TAB, NEW_TAB]);
-  });
-
-  it.each(NAV_WRITES.map((row) => [`${row[0]}: ${row[1] === OBJECT_PICKER ? 'Link object' : row[1]} → ${row[2]}`, ...row] as const))(
-    '%s',
-    async (_name, key, handle, label, json, undefinedKeys) => {
-      const { onNavPatch } = renderEntry(key);
-      await pick(picker(handle), label);
-      expectNavWrote(onNavPatch, json, undefinedKeys);
-    },
-  );
-});
-
-describe('a value no option carries is what the nav picker shows', () => {
-  it('an object the package does not offer: shown and listed first, and re-picking it writes nothing', async () => {
-    const { onNavPatch } = renderEntry('objOutside');
-    // The native control showed "— Choose object —" here, as if the entry were unbound.
-    expect(picker(OBJECT_PICKER).textContent).toBe('ghost_obj');
-    expect(await listed(picker(OBJECT_PICKER))).toEqual(['ghost_obj', CHOOSE_OBJECT, 'Leads (crm_lead)', 'Legacy Leads (legacy_lead)']);
-    fireEvent.click(screen.getAllByRole('option')[0]);
-    expect(onNavPatch).not.toHaveBeenCalled();
-  });
-
-  it('an Open in the picker does not offer is shown, not "Same tab"', async () => {
-    const { onNavPatch } = renderEntry('urlOutside');
-    expect(picker('Open in').textContent).toBe('_top');
-    expect(await listed(picker('Open in'))).toEqual(['_top', SAME_TAB, NEW_TAB]);
-    fireEvent.click(screen.getAllByRole('option')[0]);
-    expect(onNavPatch).not.toHaveBeenCalled();
-  });
-
-  it('a target the package does not list is shown, as the native control showed it, and listed after Choose', async () => {
-    renderEntry('pageOutside');
-    expect(picker('Page').textContent).toBe('ghost_page');
-    expect(await listed(picker('Page'), 'Home (home)')).toEqual([CHOOSE, 'ghost_page', 'Home (home)', 'Landing (landing)', 'draft_page']);
-  });
-
-  it('while the package list loads, a bound target shows its own name, as the native control did', () => {
-    renderEntry('pageBound');
-    expect(picker('Page').textContent).toBe('home');
-  });
-});
-
-describe('the keyboard alone picks in the nav inspector', () => {
-  it('Enter opens a picker and Enter on an option selects it', async () => {
-    const { onNavPatch } = renderEntry('objBorn');
-    fireEvent.keyDown(picker(OBJECT_PICKER), { key: 'Enter' });
-    const listbox = await screen.findByRole('listbox');
-    fireEvent.keyDown(within(listbox).getByRole('option', { name: 'Leads (crm_lead)' }), { key: 'Enter' });
-    expectNavWrote(
-      onNavPatch,
-      '{"navigation":[{"id":"nav_item_3","type":"object","objectName":"crm_lead"}]}',
-      ['object', 'path'],
-    );
-  });
-});
 
 // ---------------------------------------------------------------------------
 // New object: record sharing (OWD)

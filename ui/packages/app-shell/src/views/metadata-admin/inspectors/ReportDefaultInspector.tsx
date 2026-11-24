@@ -54,13 +54,14 @@ import {
   type DatasetMeasureInfo,
 } from '../previews/useDatasetCatalog.js';
 import { useStudioDatasetAuthoring } from '../../studio-design/datasetCreate.js';
-import { getReportForm, getReportSchema } from '../report-schema.js';
+import { defaultPeriodLabelKey, getReportForm, getReportSchema, withDefaultPeriodLabels } from '../report-schema.js';
 import { mergeServerFields } from '../mergeServerFields.js';
 import { t, tFormat } from '../i18n.js';
 import { mapLoaded } from '../loadState.js';
 import type { WidgetContext } from '../widgets.js';
 import { datasetPickerOptions, datasetLabelOptions } from './dataset-picker-options.js';
-import { pickLocalized, setLocalized, clearLocalized } from '@object-ui/i18n';
+import { pickLocalized, setLocalized, clearLocalized, useObjectTranslation } from '@object-ui/i18n';
+import { isZhLocale } from '../schema-field-label.js';
 import { WIDGET_TYPE_META } from '../previews/widget-types.js';
 import { shownLabel, writtenLabel, servedLabelNote, useLabelLanguage } from './servedLabel.js';
 import { useServedReportText } from '../../studio-design/servedReportText.js';
@@ -555,17 +556,29 @@ export function ReportDefaultInspector({
   // Graft any server-only top-level fields onto the bundled-spec form so they
   // are directly editable here even when the bundled `@objectstack/spec` lags
   // the running server (skew root-cure).
-  const { schema, form } = React.useMemo(
-    () =>
-      mergeServerFields({
-        bundledSchema: getReportSchema(),
-        bundledForm: getReportForm(locale),
-        serverSchema,
-        excludeFields: REPORT_CURATED_FIELDS,
-        sectionTitle: t('engine.inspector.moreFields', locale),
-      }),
-    [serverSchema, locale],
-  );
+  // The Default Period options carry the spec's English names; a zh designer
+  // reads them from the console's locale packs, the rows the report page's
+  // period chip shows (`withDefaultPeriodLabels`). Every other designer locale
+  // keeps the producer's English, like the rest of this panel.
+  const { t: appT } = useObjectTranslation();
+  const { schema, form } = React.useMemo(() => {
+    const merged = mergeServerFields({
+      bundledSchema: getReportSchema(),
+      bundledForm: getReportForm(locale),
+      serverSchema,
+      excludeFields: REPORT_CURATED_FIELDS,
+      sectionTitle: t('engine.inspector.moreFields', locale),
+    });
+    if (!isZhLocale(locale)) return merged;
+    return {
+      ...merged,
+      form: withDefaultPeriodLabels(merged.form, (value, authored) =>
+        appT(defaultPeriodLabelKey(value), { defaultValue: authored }),
+      ),
+    };
+    // `appT` changes with the app's language and when a locale pack lands, so
+    // the names follow both.
+  }, [serverSchema, locale, appT]);
 
   return (
     <InspectorShell

@@ -259,6 +259,8 @@ export type { CompanionFieldMeta, CompanionObjectMeta } from './search-companion
 // Export Engine
 export { ObjectQL, ObjectRepository, ScopedContext } from './engine.js';
 export type { HookHandler, HookEntry, OperationContext, EngineMiddleware, HeldFileResolver, FieldOwnedFileReadAuthorizer, WriteWallVerdict, WriteWallRowVerdict } from './engine.js';
+// [#34700] The middleware options, and the search-field withholder a guard middleware declares in them.
+export type { EngineMiddlewareOptions, SearchFieldWithholder, SearchFieldWithholdingRequest } from './engine-top-level.js';
 export type { AdmittedValueShapeViolationTally } from './engine.js';
 // The declarative datasource definition the engine indexes, and the element
 // type of `ObjectQL.listDatasourceDefs()`. Exported so a consumer sweeping for
@@ -320,6 +322,15 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // holding the other realm's copy of the class gets `instanceof` === false,
 // silently.
 export { ReadonlyFieldRejectedError, READONLY_FIELD_REJECTED_CODE } from './readonly-strict-errors.js';
+// [ADR-0153 D4] The sync-in pull's write mark and the refusal of a `_sync_`
+// provenance column in any other write. The mark is the pull's alone
+// (`@objectstack/service-automation`); see `sync-provenance-write.ts`.
+export {
+  SYNC_PULL_WRITE,
+  markSyncPullWrite,
+  SyncProvenanceWriteRefusedError,
+  SYNC_PROVENANCE_WRITE_REFUSED_CODE,
+} from './sync-provenance-write.js';
 // [#32768] What `ObjectQL#judgeFieldWriteLock` answers for a field its
 // `readonlyWhen` locks now: the drop reason and the strict refusal's phrase.
 export type { FieldWriteLock } from './engine-field-write-lock.js';

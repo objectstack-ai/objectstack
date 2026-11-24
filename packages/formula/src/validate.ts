@@ -34,7 +34,7 @@ import {
   type FieldCelType,
 } from './cel-engine';
 import { templateEngine } from './template-engine';
-import { findTraversalConflicts, readRootMembers, rootMemberOf, traversalsOf, type RootMemberRead } from './relationship-traversal';
+import { findTraversalConflicts, hopMemberOf, readRootMembers, rootMemberOf, traversalsOf, type RootMemberRead } from './relationship-traversal';
 import { MULTI_OPTION_TYPES, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
 // #13594 — the one reader of cel-js's `found no matching overload for '…'`
 // template. Both this module (which asks whether the name is ADVERTISED, to word
@@ -1567,6 +1567,62 @@ function checkListEquality(
       : undefined;
   };
   const filterCompiled = schema?.filterCompiled === true;
+  forEachListEquality(tree, subjectOf, (read, op, operand) => {
+    errors.push(listEqualityRefusal(source, read, op, operand, filterCompiled));
+  });
+}
+
+/**
+ * [#36237] {@link checkListEquality} one relationship hop away: `==` / `!=`
+ * between a read of a list-valued field ON A HOP TARGET
+ * (`record.account.labels`) and a non-null scalar literal, refused under the
+ * same `list-equality` code, in the root case's words and with its
+ * `has()`-guarded `in` prescription (`record.account.labels` is a
+ * `<root>.<field>` read of the related record the hop hydrates).
+ *
+ * {@link ExprSchemaHint} describes the root object's fields and no hop
+ * target's, so this is a function of its own for the caller that resolves hop
+ * targets — `@objectstack/lint`, at the two sites that serve a hop (a
+ * validation rule's hydrated predicate, a formula's `expression`).
+ * `listLeaves` maps each single-valued reference field of the root object to
+ * the list-valued fields its target declares; a read it does not name gets no
+ * verdict. Only `record` hops are judged ({@link DEFAULT_TRAVERSAL_ROOT}, the
+ * root a hop is served from), and a source that does not compile gets none —
+ * that is `validateExpression`'s `invalid-cel` verdict.
+ */
+export function findHopListEquality(
+  source: string,
+  listLeaves: ReadonlyMap<string, ReadonlySet<string>>,
+): ExprValidationError[] {
+  const errors: ExprValidationError[] = [];
+  if (listLeaves.size === 0 || (!source.includes('==') && !source.includes('!='))) return errors;
+  if (!compileCel(source).result.ok) return errors;
+  const tree = parseCelToAst(source);
+  if (tree == null) return errors;
+  const subjectOf = (node: unknown, bound: ReadonlySet<string>): ListSubjectRead | undefined => {
+    const read = hopMemberOf(node, [DEFAULT_TRAVERSAL_ROOT]);
+    return read && !bound.has(read.root) && listLeaves.get(read.field)?.has(read.leaf)
+      ? { reference: `${read.root}.${read.field}.${read.leaf}`, bare: false }
+      : undefined;
+  };
+  forEachListEquality(tree, subjectOf, (read, op, operand) => {
+    errors.push(listEqualityRefusal(source, read, op, operand, false));
+  });
+  return errors;
+}
+
+/**
+ * Every `==` / `!=` in `tree` with a list subject (`subjectOf`) on one side
+ * and a scalar literal ({@link scalarLiteralOf}) on the other, either order,
+ * handed to `onHit` once per comparison. `subjectOf` is asked with the names
+ * the enclosing comprehension macros bind ({@link COMPREHENSION_MACRO_NAMES}):
+ * the receiver is read outside the binding, the body inside it.
+ */
+function forEachListEquality(
+  tree: unknown,
+  subjectOf: (node: unknown, bound: ReadonlySet<string>) => ListSubjectRead | undefined,
+  onHit: (read: ListSubjectRead, op: '==' | '!=', operand: string) => void,
+): void {
   const walk = (node: unknown, bound: ReadonlySet<string>): void => {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -1592,7 +1648,7 @@ function checkListEquality(
         const read = subjectOf(args[side], bound);
         const operand = read ? scalarLiteralOf(args[1 - side]) : undefined;
         if (!read || operand === undefined) continue;
-        errors.push(listEqualityRefusal(source, read, op, operand, filterCompiled));
+        onHit(read, op, operand);
         break;
       }
     }
@@ -2222,6 +2278,8 @@ export const CEL_STDLIB_FUNCTIONS: string[] = [
   'isBlank', 'isEmpty', 'coalesce', 'len',
   // Options (registered stdlib) — `label(record.<field>)`, a select value's label
   'label',
+  // Working days (registered stdlib, ADR-0157 D4) — counted with the organization's working calendar
+  'addWorkingDays', 'workingDaysBetween', 'addWorkingHours',
   // cel-js built-ins (verified to resolve)
   'size', 'has', 'int', 'string', 'bool', 'double', 'timestamp', 'duration',
 ];

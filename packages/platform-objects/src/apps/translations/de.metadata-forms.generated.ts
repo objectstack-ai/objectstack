@@ -114,7 +114,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
-        helpText: "Ob der Abschnitt im Eingabeformular und auf der Datensatz-Detailseite eingeklappt werden kann. Nicht gesetzt: nein."
+        helpText: "Ob der Abschnitt eingeklappt werden kann. Das Eingabeformular folgt der Einstellung. Auf der Standard-Datensatzseite kann der Leser jede Gruppe mit Titel einklappen; dort legt die Einstellung nur den Anfangszustand fest: Collapsed beginnt eingeklappt, die anderen offen. Nicht gesetzt: nein."
       },
       "fieldGroups.visibleWhen": {
         label: "Sichtbar wenn",
@@ -239,6 +239,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.deleteBehavior": {
         label: "Verhalten beim Löschen",
         helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
+      },
+      "fields.transferBehavior": {
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
       },
       "fields.multiple": {
         label: "Mehrfach",
@@ -769,6 +773,10 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Verhalten beim Löschen",
         helpText: "Was geschieht, wenn der referenzierte Datensatz gelöscht wird"
       },
+      transferBehavior: {
+        label: "Verhalten beim Inhaberwechsel",
+        helpText: "Ob „Inhaber ändern“ am referenzierten Datensatz auch die Datensätze mitnehmen kann, die über dieses Feld auf ihn verweisen"
+      },
       relatedListFilter: {
         label: "Filter der verknüpften Liste",
         helpText: "Standardfilter für die verknüpfte Liste dieser Beziehung auf der Detailseite des übergeordneten Datensatzes – mit UND an den Abgleich mit dem übergeordneten Datensatz gekoppelt, und das Registerkarten-Badge zählt dieselbe Menge"
@@ -1080,15 +1088,54 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   seed: {
     label: "Startdaten",
-    description: "Fixture- bzw. Initialisierungsdaten, die bei der Veröffentlichung angewendet werden"
+    description: "Fixture- bzw. Initialisierungsdaten, die bei der Veröffentlichung angewendet werden",
+    fields: {
+      object: {
+        label: "Objekt"
+      },
+      mode: {
+        label: "Modus"
+      }
+    }
   },
   picklist: {
     label: "Auswahlliste",
-    description: "Gemeinsame Optionsliste, auf die Auswahlfelder per Name verweisen"
+    description: "Gemeinsame Optionsliste, auf die Auswahlfelder per Name verweisen",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      options: {
+        label: "Optionen"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   mapping: {
     label: "Importzuordnung",
-    description: "Wiederverwendbare Feldzuordnung für Import/Export (Umbenennung + Transformationen), beim Import per Name referenziert"
+    description: "Wiederverwendbare Feldzuordnung für Import/Export (Umbenennung + Transformationen), beim Import per Name referenziert",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      targetObject: {
+        label: "Zielobjekt"
+      },
+      mode: {
+        label: "Modus"
+      },
+      sourceFormat: {
+        label: "Quellformat"
+      }
+    }
   },
   view: {
     label: "Ansicht",
@@ -1412,6 +1459,9 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "sharing.lockedBy": {
         label: "Gesperrt von",
         helpText: "Benutzer, der die Ansichtskonfiguration gesperrt hat"
+      },
+      object: {
+        label: "Objekt"
       }
     }
   },
@@ -1618,30 +1668,30 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     fields: {
       name: {
         label: "Name",
-        helpText: "Eindeutige Kennung in snake_case"
+        helpText: "Eindeutiger interner Name dieses Dashboards: Kleinbuchstaben, Ziffern und Unterstriche, beginnend mit einem Buchstaben (zum Beispiel sales_overview)."
       },
       label: {
         label: "Bezeichnung",
-        helpText: "Anzeigename"
+        helpText: "Der Titel, den Benutzer für dieses Dashboard sehen."
       },
       description: {
         label: "Beschreibung"
       },
       columns: {
         label: "Spalten",
-        helpText: "Rasterspalten (Standard 12)"
+        helpText: "Auf wie vielen Spalten die Widgets angeordnet werden, von 1 bis 24. Leer lassen, damit das Dashboard eine Breite wählt, die zu seinen Widgets passt."
       },
       gap: {
         label: "Abstand",
-        helpText: "Abstand zwischen Widgets in Schritten von 0,25rem (4 = 1rem)"
+        helpText: "Wie viel Platz zwischen den Widgets bleibt. Größere Zahlen rücken sie weiter auseinander; leer lassen für den Standardabstand."
       },
       refreshIntervalSeconds: {
         label: "Aktualisierungsintervall (Sekunden)",
-        helpText: "Automatische Aktualisierung (Sekunden)"
+        helpText: "Wie oft das Dashboard seine Daten neu lädt, in Sekunden. Leer lassen oder 0 eingeben, um das automatische Neuladen auszuschalten."
       },
       header: {
         label: "Kopfzeile",
-        helpText: "Konfiguration der Dashboard-Kopfzeile (Titel, Untertitel, Aktionen)"
+        helpText: "Was oben im Dashboard angezeigt wird: Titel, Beschreibung und Aktionsschaltflächen."
       },
       "header.showTitle": {
         label: "Titel anzeigen",
@@ -1669,7 +1719,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       widgets: {
         label: "Widgets",
-        helpText: "Dashboard-Widgets mit Position und Größe"
+        helpText: "Die Diagramme, Kennzahlen und Tabellen dieses Dashboards und wo jedes davon steht."
       },
       "widgets.id": {
         label: "Widget-ID"
@@ -1724,11 +1774,11 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dateRange: {
         label: "Datumsbereich",
-        helpText: "Standardauswahl des Datumsbereichs"
+        helpText: "Der Zeitraum, mit dem das Dashboard öffnet, und ob Betrachter selbst einen Zeitraum wählen dürfen."
       },
       globalFilters: {
         label: "Globale Filter",
-        helpText: "Auf alle Widgets angewendete Filter"
+        helpText: "Filter, mit denen Betrachter alle Widgets auf einmal eingrenzen können oder nur die von Ihnen gewählten."
       },
       "globalFilters.name": {
         label: "Filtername"
@@ -2190,7 +2240,8 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Bezeichnung"
       },
       description: {
-        label: "Beschreibung"
+        label: "Beschreibung",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Typ",
@@ -2272,9 +2323,33 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Datumsbereich",
         helpText: "Standardzeitraum und Umschalter für einen benutzerdefinierten Bereich. Die Dimension muss eine Datumsdimension des Datasets sein; leer lassen, wenn das Dataset genau eine hat."
       },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
+      },
       exportOptions: {
         label: "Exportoptionen",
         helpText: "Download-Formate (csv, xlsx) und Dateiname. Wer herunterladen darf, regelt die Exportberechtigung für das Dataset-Objekt."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
@@ -2543,7 +2618,24 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
     }
   },
   job: {
-    label: "Hintergrundjob"
+    label: "Hintergrundjob",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      schedule: {
+        label: "Zeitplan"
+      },
+      enabled: {
+        label: "Aktiviert"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   datasource: {
     label: "Datenquelle"
@@ -2553,10 +2645,41 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API-Endpunkt",
-    description: "Eine stabile HTTP-URL, die andere Systeme aufrufen, um einen Flow auszuführen oder mit Datensätzen der App zu arbeiten"
+    description: "Eine stabile HTTP-URL, die andere Systeme aufrufen, um einen Flow auszuführen oder mit Datensätzen der App zu arbeiten",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      method: {
+        label: "Methode"
+      },
+      path: {
+        label: "Pfad"
+      },
+      type: {
+        label: "Typ"
+      },
+      "objectParams.object": {
+        label: "Objekt"
+      },
+      "objectParams.operation": {
+        label: "Vorgang"
+      }
+    }
   },
   translation: {
-    label: "Übersetzung"
+    label: "Übersetzung",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      locale: {
+        label: "Gebietsschema"
+      }
+    }
   },
   email_template: {
     label: "E-Mail-Vorlage",
@@ -2633,11 +2756,45 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Dokumentation",
-    description: "Eine in Markdown geschriebene Hilfeseite, die ein Paket mitliefert oder die Sie selbst schreiben"
+    description: "Eine in Markdown geschriebene Hilfeseite, die ein Paket mitliefert oder die Sie selbst schreiben",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      group: {
+        label: "Gruppe"
+      },
+      tags: {
+        label: "Schlagwörter"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   book: {
     label: "Dokumentationsbuch",
-    description: "Ein Inhaltsverzeichnis, das Hilfeseiten in geordnete Abschnitte gruppiert"
+    description: "Ein Inhaltsverzeichnis, das Hilfeseiten in geordnete Abschnitte gruppiert",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      audience: {
+        label: "Zielgruppe"
+      },
+      groups: {
+        label: "Gruppen"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   permission: {
     label: "Berechtigungssatz",
@@ -2741,15 +2898,66 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   sharing_rule: {
     label: "Freigaberegel",
-    description: "Eine Regel, die ein Paket zur Freigabe von Datensätzen deklariert; Organisationen erstellen ihre eigenen in Setup"
+    description: "Eine Regel, die ein Paket zur Freigabe von Datensätzen deklariert; Organisationen erstellen ihre eigenen in Setup",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      object: {
+        label: "Objekt"
+      },
+      sharedWith: {
+        label: "Geteilt mit"
+      },
+      accessLevel: {
+        label: "Zugriffsebene"
+      }
+    }
   },
   queue: {
     label: "Warteschlange",
-    description: "Eine benannte Gruppe von Personen, in der Datensätze liegen können, bis eine von ihnen den Datensatz übernimmt; Organisationen besetzen ihre eigenen in Setup"
+    description: "Eine benannte Gruppe von Personen, in der Datensätze liegen können, bis eine von ihnen den Datensatz übernimmt; Organisationen besetzen ihre eigenen in Setup",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      members: {
+        label: "Mitglieder"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   assignment_rule: {
     label: "Zuweisungsregel",
-    description: "Eine Regel, die ein Paket deklariert, um neue Datensätze an eine Warteschlange oder eine Person zu leiten"
+    description: "Eine Regel, die ein Paket deklariert, um neue Datensätze an eine Warteschlange oder eine Person zu leiten",
+    fields: {
+      name: {
+        label: "Name"
+      },
+      label: {
+        label: "Bezeichnung"
+      },
+      object: {
+        label: "Objekt"
+      },
+      entries: {
+        label: "Einträge"
+      },
+      active: {
+        label: "Aktiv"
+      },
+      description: {
+        label: "Beschreibung"
+      }
+    }
   },
   agent: {
     label: "KI-Agent",
@@ -2831,6 +3039,9 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       guardrails: {
         label: "Schutzmaßnahmen",
         helpText: "Sicherheitsregeln und Inhaltsrichtlinien"
+      },
+      "model.model": {
+        label: "Modell"
       }
     }
   },

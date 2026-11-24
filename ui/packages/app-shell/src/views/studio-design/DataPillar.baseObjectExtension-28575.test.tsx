@@ -149,6 +149,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 // warmed here so its first load is paid at import, not inside a test's clock.
 import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
+import { ObjectExtensionSchema } from '@objectstack/spec/data';
 import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarness';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { emitMetadataRefresh } from '../../assistant/assistantBus';
@@ -235,9 +236,14 @@ async function addFromFormToolbar(label: string): Promise<void> {
   await userEvent.click(within(popover).getByTestId('add-field-create'));
 }
 
-/** A field card of the Form layout, by its label (a base object's layout is read-only). */
-const cardOf = (label: string) =>
-  screen.queryAllByLabelText(tFormat('engine.studio.designer.fieldAriaReadOnly', 'en', { label }));
+/**
+ * A field card of the Field layout, by its label: arranged in the pair's
+ * extension where it is writable (objectstack#36505), read-only where walled.
+ */
+const cardOf = (label: string) => [
+  ...screen.queryAllByLabelText(tFormat('engine.studio.designer.fieldAria', 'en', { label })),
+  ...screen.queryAllByLabelText(tFormat('engine.studio.designer.fieldAriaReadOnly', 'en', { label })),
+];
 
 describe('Studio adds a field to a read-only base object as an extension in its pair (objectstack#28575)', () => {
   it('Add field "Region" asks the ensure door once, writes region__c into an extension at the pair, and sends no body of the base object', async () => {
@@ -561,5 +567,84 @@ describe('a base object follows an extension draft the copilot writes (objectsta
 
     await waitFor(() => expect(cardOf('Region')).toHaveLength(1), { timeout: 8000 });
     expect(extensionDraftReads()).toBe(before + 1);
+  });
+});
+
+/**
+ * objectstack#36505 (ADR-0146 D10) — the 「字段布局」 tab of an installed
+ * object: no longer walled read-only, its edits go into the pair's extension
+ * as the WHOLE arrangement (`fieldGroups`, every group listing its members),
+ * saved and published by the extension's Save with the rest of the buffer;
+ * the base object is never written, and the canvas marks each field's source.
+ */
+describe('the Field layout tab arranges an installed object into its pair (objectstack#36505)', () => {
+  const groupedServed = () => ({
+    ...baseServed(),
+    fieldGroups: [{ key: 'basic', label: 'Basic' }, { key: 'more', label: 'More' }],
+    fields: {
+      name: { type: 'text', label: 'Account Name', required: true, group: 'basic' },
+      industry: { type: 'select', label: 'Industry', options: [{ value: 'technology', label: 'Technology' }], group: 'more' },
+      // Served in `more`, where the pair's published placement put it.
+      region__c: { type: 'text', label: 'Region', group: 'more' },
+    },
+  });
+  const DELETE_GROUP = t('engine.studio.designer.groupDelete', 'en');
+  const sourceOf = (label: string) => within(cardOf(label)[0]!).queryByTestId('field-source-mark')?.getAttribute('data-source');
+
+  beforeEach(() => {
+    srv.served = groupedServed();
+    srv.publishedExt = {
+      extend: OBJECT,
+      fields: { region__c: { type: 'text', label: 'Region' } },
+      fieldPatches: { name: { label: 'Account Name' } },
+      place: [{ field: 'region__c', group: 'more' }, { list: 'crm_contact', after: 'sys_activity' }],
+      _packageId: PAIR,
+    };
+  });
+
+  it('the tab reads Field layout and says where its groups are used; the canvas is editable and marks each source', async () => {
+    await renderBase();
+    expect(FORM).toBe('Field layout');
+    await openForm();
+    expect(screen.getByTestId('form-layout-used-on')).toHaveTextContent(t('engine.studio.data.form.usedOn', 'en'));
+    expect(await screen.findByTestId('form-designer-add-section-footer')).toBeInTheDocument();
+    await waitFor(() => expect(sourceOf('Region')).toBe('environment'), { timeout: 8000 });
+    expect(sourceOf('Account Name')).toBe('base');
+    expect(sourceOf('Industry')).toBe('base');
+  });
+
+  it('deleting a group writes the whole arrangement into the pair, keeps every other key, and never writes the base', async () => {
+    await renderBase();
+    await openForm();
+    await screen.findByDisplayValue('Basic', undefined, { timeout: 8000 });
+    const basic = screen.getByDisplayValue('Basic').closest('.\\@container') as HTMLElement;
+    await userEvent.click(within(basic).getByRole('button', { name: DELETE_GROUP }));
+    await pressStudioSave();
+    await waitFor(() => expect(extensionSaves()).toHaveLength(1), { timeout: 8000 });
+
+    const [, name, body, opts] = extensionSaves()[0];
+    expect([name, opts.packageId]).toEqual([OBJECT, PAIR]);
+    // The whole arrangement, every group listing its members: `name` left
+    // `basic` with it, so it is listed nowhere and shows after the last group.
+    expect(body.fieldGroups).toEqual([{ key: 'more', label: 'More', fields: ['industry', 'region__c'] }]);
+    // Every other key of the stored extension is kept; the field placement
+    // the arrangement replaces is taken off, the tab placement stays.
+    expect(body.fields).toEqual({ region__c: { type: 'text', label: 'Region' } });
+    expect(body.fieldPatches).toEqual({ name: { label: 'Account Name' } });
+    expect(body.place).toEqual([{ list: 'crm_contact', after: 'sys_activity' }]);
+    const parsed = ObjectExtensionSchema.safeParse(body);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(saves().some(([type]) => type === 'object')).toBe(false);
+    expect(mockClient.publish).toHaveBeenCalledWith('object_extension', OBJECT, expect.objectContaining({ packageId: PAIR }));
+  });
+
+  it('CONTROL: walled, the layout stays read-only and nothing is written', async () => {
+    await renderBase({ walled: true });
+    await openForm();
+    await screen.findByText('Basic', undefined, { timeout: 8000 });
+    expect(screen.queryByTestId('form-designer-add-section-footer')).toBeNull();
+    expect(screen.queryByRole('button', { name: DELETE_GROUP })).toBeNull();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(mockClient.save).not.toHaveBeenCalled();
   });
 });

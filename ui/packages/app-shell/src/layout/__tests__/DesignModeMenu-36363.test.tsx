@@ -16,12 +16,12 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { SidebarProvider } from '@object-ui/components';
 import { NavigationRenderer } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
 
-const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en' }));
+const session = vi.hoisted(() => ({ language: 'en', defaultLocale: 'en', sourceLocale: undefined as string | undefined }));
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({
@@ -33,6 +33,10 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 
 const dragEnd = vi.hoisted(() => ({ current: null as null | ((event: unknown) => void) }));
 const dragStart = vi.hoisted(() => ({ current: null as null | ((event: unknown) => void) }));
+/** objectstack#36538 — the editor's cancel handler, its collision rule, and every drag start dnd-kit itself reported. */
+const dragCancel = vi.hoisted(() => ({ current: null as null | ((event: unknown) => void) }));
+const collisionRule = vi.hoisted(() => ({ current: null as null | ((args: unknown) => unknown[]) }));
+const dragStarts = vi.hoisted(() => [] as unknown[]);
 vi.mock('@dnd-kit/core', async (importOriginal) => {
   const real = await importOriginal<typeof import('@dnd-kit/core')>();
   const { createElement } = await import('react');
@@ -41,7 +45,13 @@ vi.mock('@dnd-kit/core', async (importOriginal) => {
     DndContext: (props: React.ComponentProps<typeof real.DndContext>) => {
       dragEnd.current = props.onDragEnd as never;
       dragStart.current = props.onDragStart as never;
-      return createElement(real.DndContext, props);
+      dragCancel.current = props.onDragCancel as never;
+      collisionRule.current = props.collisionDetection as never;
+      const onDragStart: typeof props.onDragStart = (event) => {
+        dragStarts.push(event);
+        props.onDragStart?.(event);
+      };
+      return createElement(real.DndContext, { ...props, onDragStart });
     },
   };
 });
@@ -68,20 +78,37 @@ const listed = vi.hoisted(() => ({
   ],
 }) as Record<string, Array<Record<string, unknown>>>);
 /** objectstack#36364 — names the server holds (`type/name`), and a refusal of the app's save. */
-const server = vi.hoisted(() => ({ held: new Set<string>(), appSave: null as Error | null }));
+const server = vi.hoisted(() => ({ held: new Set<string>(), appSave: null as Error | null, appPublish: null as Error | null }));
 /** The app's menu as served (`null`: `NAVIGATION`). */
 const servedNav = vi.hoisted(() => ({ current: null as unknown[] | null }));
-/** The app's menu as stored (`null`: as served). */
-const storedNav = vi.hoisted(() => ({ current: null as unknown[] | null, failReads: 0 }));
+/**
+ * The app's menu as stored (`null`: as served). objectstack#36538: `missing`
+ * answers every layered read as `MetadataClient.layered` answers a 404;
+ * `gate` holds the next read until it settles; `overlayVersion` is served
+ * when set.
+ */
+const storedNav = vi.hoisted(() => ({
+  current: null as unknown[] | null,
+  failReads: 0,
+  missing: false,
+  gate: null as Promise<void> | null,
+  overlayVersion: undefined as string | undefined,
+}));
 const client = vi.hoisted(() => ({
   list: async (type: string) => listed[type] ?? [],
-  layered: async () => {
+  layered: async (type?: string) => {
+    // objectstack#36504: no menu translation item is stored yet.
+    if (type === 'translation') return { code: null, overlay: null, overlayScope: null, effective: null };
+    const gate = storedNav.gate;
+    storedNav.gate = null;
+    if (gate) await gate;
     if (storedNav.failReads > 0) {
       storedNav.failReads -= 1;
       throw new Error('layered read failed');
     }
+    if (storedNav.missing) return { code: null, overlay: null, overlayScope: null, effective: null };
     const code = { name: 'crm', label: 'CRM', navigation: storedNav.current ?? servedNav.current ?? NAVIGATION };
-    return { code, effective: code };
+    return { code, effective: code, ...(storedNav.overlayVersion ? { overlayVersion: storedNav.overlayVersion } : {}) };
   },
   get: async (type: string, name: string) => (server.held.has(`${type}/${name}`) ? { name } : null),
   save: async (...args: unknown[]) => {
@@ -91,6 +118,7 @@ const client = vi.hoisted(() => ({
   },
   publish: async (...args: unknown[]) => {
     written.push(['publish', ...args]);
+    if (args[0] === 'app' && server.appPublish) throw server.appPublish;
     return {};
   },
   reset: async (...args: unknown[]) => {
@@ -115,9 +143,9 @@ vi.mock('../../utils/getIcon', () => ({ getIcon: () => () => null }));
 import { DesignModeProvider, useDesignMode, useDesignModeController } from '../designMode';
 import { DesignModeBar } from '../DesignModeBar';
 import DesignModeMenu from '../DesignModeMenu';
+import { closestCenter, type CollisionDetection } from '@dnd-kit/core';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
 import { __resetDefaultLocale } from '../designModeMenuSave';
-import { newReportSlotFor } from '../designModeReportSlot';
 
 const NAVIGATION = [
   { id: 'home', type: 'report', reportName: 'pipeline', label: 'Home' },
@@ -212,10 +240,16 @@ beforeEach(() => {
   toastError.mockReset();
   session.language = 'en';
   session.defaultLocale = 'en';
+  session.sourceLocale = undefined;
   storedNav.current = null;
   storedNav.failReads = 0;
+  storedNav.missing = false;
+  storedNav.gate = null;
+  storedNav.overlayVersion = undefined;
+  dragStarts.length = 0;
   server.held.clear();
   server.appSave = null;
+  server.appPublish = null;
   servedNav.current = null;
   __resetDefaultLocale();
   vi.stubGlobal(
@@ -223,7 +257,8 @@ beforeEach(() => {
     vi.fn(async (url: string) => {
       if (String(url).endsWith('/api/v1/i18n/locales')) {
         const locales = ['en', 'zh-CN'].map((code) => ({ code, label: code, isDefault: code === session.defaultLocale }));
-        return new Response(JSON.stringify({ success: true, data: { locales } }), { status: 200 });
+        const sourceLocale = session.sourceLocale ? { sourceLocale: session.sourceLocale } : {};
+        return new Response(JSON.stringify({ success: true, data: { locales, ...sourceLocale } }), { status: 200 });
       }
       throw new Error(`unexpected fetch ${url}`);
     }),
@@ -340,33 +375,65 @@ describe('the menu under the design mode (objectstack#36363)', () => {
     expect(entry('leads')).toHaveTextContent('Prospects');
   });
 
-  // Ruling (4) on review 7081226692: a name is changed in the app's source language only.
-  it('under zh-CN, with English the default, the name is not changed: the field is closed and says why; the icon still is', async () => {
+  // objectstack#36504 relaxes ruling (4) on review 7081226692: a name is changed in any language,
+  // and lands where that language reads it.
+  it('under zh-CN over an English source, the name is changed: the rename says it is a zh-CN name, and the save writes the translation and keeps the stored label', async () => {
     session.language = 'zh-CN';
+    session.defaultLocale = 'zh-CN';
+    session.sourceLocale = 'en';
     start();
     await flush();
     await act_on('leads', 'Rename and icon');
     const dialog = await screen.findByTestId('design-menu-rename');
-    expect(within(dialog).getByLabelText('Name')).toBeDisabled();
-    expect(within(dialog).getByTestId('design-menu-rename-source-only')).toHaveTextContent(
-      "Menu names are changed in the app's source language",
-    );
+    const name = within(dialog).getByLabelText('Name');
+    expect(name).toBeEnabled();
+    expect(within(dialog).getByTestId('design-menu-rename-translation')).toHaveTextContent(/The new name is shown in .+\. The app's other languages keep their names\./);
+    fireEvent.change(name, { target: { value: '潜在客户' } });
     fireEvent.change(within(dialog).getByLabelText('Icon'), { target: { value: 'user-plus' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await flush();
+    expect(entry('leads')).toHaveTextContent('潜在客户');
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    await flush();
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save translation', 'publish translation', 'save app', 'publish app']);
+    expect(written[0][3]).toEqual({ name: 'crm_menu_zh_cn', locale: 'zh-CN', apps: { crm: { navigation: { leads: { label: '潜在客户' } } } } });
+    const leads = (written[2][3] as { navigation: Array<{ children?: Array<Record<string, unknown>> }> }).navigation[1].children![0];
+    expect(leads).toEqual({ id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads', icon: 'user-plus' });
+  });
+
+  it('in the source language, an entry shown under a label other than its stored one is renamed in that language\'s translation', async () => {
+    storedNav.current = NAVIGATION.map((e) => (e.id === 'home' ? { ...e, label: 'apps.crm.home' } : e));
+    start();
+    await flush();
+    await act_on('home', 'Rename and icon');
+    const dialog = await screen.findByTestId('design-menu-rename');
+    expect(within(dialog).getByLabelText('Name')).toBeEnabled();
+    expect(within(dialog).getByTestId('design-menu-rename-translation')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Start' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
     await flush();
     fireEvent.click(screen.getByTestId('design-mode-save'));
     await flush();
     await flush();
-    const leads = (written[0][3] as { navigation: Array<{ children?: Array<Record<string, unknown>> }> }).navigation[1].children![0];
-    expect(leads).toEqual({ id: 'leads', type: 'object', objectName: 'crm_lead', label: 'Leads', icon: 'user-plus' });
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save translation', 'publish translation']);
+    expect(written[0][3]).toMatchObject({ name: 'crm_menu_en', locale: 'en', apps: { crm: { navigation: { home: { label: 'Start' } } } } });
   });
 
-  it('in the default language, an entry shown under a label other than its stored one is not renamed here', async () => {
-    storedNav.current = NAVIGATION.map((e) => (e.id === 'home' ? { ...e, label: 'apps.crm.home' } : e));
+  it('in the source language, over the stored label, the rename says nothing of a translation and writes the stored label', async () => {
     start();
     await flush();
-    await act_on('home', 'Rename and icon');
-    expect(within(await screen.findByTestId('design-menu-rename')).getByLabelText('Name')).toBeDisabled();
+    await act_on('leads', 'Rename and icon');
+    const dialog = await screen.findByTestId('design-menu-rename');
+    expect(within(dialog).queryByTestId('design-menu-rename-translation')).toBeNull();
+    fireEvent.change(within(dialog).getByLabelText('Name'), { target: { value: 'Prospects' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }));
+    await flush();
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    expect(written.map(([verb, type]) => `${verb} ${type}`)).toEqual(['save app', 'publish app']);
   });
 
   it("another package's entry (served, not in the stored menu) says where it is changed, and is not moved or removed here", async () => {
@@ -787,135 +854,45 @@ async function openReports() {
   return picker;
 }
 
-/** A link elsewhere in the app, as the sidebar would follow one. */
-function GoElsewhere() {
-  const navigate = useNavigate();
-  return (
-    <button type="button" onClick={() => navigate('/apps/crm/object/crm_lead')}>
-      go elsewhere
-    </button>
-  );
-}
-
-function startOnBuilderPath() {
-  render(
-    <MemoryRouter initialEntries={['/apps/crm']}>
-      <Harness />
-      <Landing />
-      <GoElsewhere />
-    </MemoryRouter>,
-  );
-  fireEvent.click(screen.getByText('enter'));
-}
-
-const REPORT_BODY = {
-  label: 'Payment analysis',
-  type: 'summary',
-  dataset: 'invoice_metrics',
-  values: ['invoice_count'],
-  chart: { type: 'metric', xAxis: '', yAxis: 'invoice_count' },
-};
-
-describe('a new report from 「Add menu item」 (objectstack#36364, report half)', () => {
-  it('「Reports」 lists 「New report…」 first; it holds the place and opens the report builder, writing nothing', async () => {
-    startOnBuilderPath();
-    const picker = await openReports();
-    const rows = within(within(picker).getByTestId('design-menu-picker-rows')).getAllByRole('button').map((b) => b.textContent);
-    // The report the menu already opens (Home → pipeline) is not offered again.
-    expect(rows).toEqual(['New report…']);
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    expect(screen.queryByTestId('design-menu-picker')).toBeNull();
-    expect(screen.getByTestId('landing')).toHaveTextContent('/apps/crm/reports/new null');
-    // The place stays held, saying what it waits for.
-    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', ['…']]]);
-    expect(screen.getByTestId('design-menu-placeholder')).toHaveTextContent('New report…');
-    expect(newReportSlotFor('/apps/crm/reports/new')).not.toBeNull();
-    expect(newReportSlotFor('/apps/hr/reports/new')).toBeNull();
-    expect(written).toEqual([]);
+/**
+ * objectstack#36692 — the design mode stops hosting the report builder (the
+ * maintainer's 「照 Twenty 分开」): 「Reports」 only links reports that exist;
+ * a new report is made from the reports index, with its own Save.
+ */
+describe('「Reports」 links existing reports only (objectstack#36692)', () => {
+  it('lists the reports not in the menu yet, and no 「New report…」 row', async () => {
+    listed.report = [
+      { name: 'pipeline', label: 'Pipeline' },
+      { name: 'revenue_by_month', label: 'Revenue by month' },
+    ];
+    try {
+      start();
+      const picker = await openReports();
+      const rows = within(within(picker).getByTestId('design-menu-picker-rows')).getAllByRole('button').map((b) => b.textContent);
+      // The report the menu already opens (Home → pipeline) is not offered again.
+      expect(rows).toEqual(['Revenue by month']);
+      expect(within(picker).queryByTestId('design-menu-picker-new-report')).toBeNull();
+      expect(within(picker).queryByText('New report…')).toBeNull();
+    } finally {
+      listed.report = [{ name: 'pipeline', label: 'Pipeline' }];
+    }
   });
 
-  it('the builder\'s Save: the report, then the menu with its entry in the held place and every other staged edit; the mode is left', async () => {
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up'); // another staged edit, saved with it
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    const slot = newReportSlotFor('/apps/crm/reports/new')!;
-    let saved: boolean | undefined;
-    await act(async () => {
-      saved = await slot.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
-    });
-    await flush();
-
-    expect(saved).toBe(true);
-    expect(written.map(([verb, type, name]) => `${verb} ${type} ${name}`)).toEqual([
-      'save report payment_analysis',
-      'publish report payment_analysis',
-      'save app crm',
-      'publish app crm',
-    ]);
-    expect(written[0][3]).toEqual({ ...REPORT_BODY, name: 'payment_analysis' });
-    expect(written[0][4]).toEqual({ mode: 'draft', ifNoneMatch: '*', packageId: 'com.acme.crm' });
-    const navigation = (written[2][3] as { navigation: Array<{ id: string; children?: unknown[] }> }).navigation;
-    expect(navigation[1].children!.map((c) => (c as { id: string }).id)).toEqual(['accounts', 'leads']);
-    expect(navigation[2].children).toEqual([
-      { id: 'nav_item_1', type: 'report', reportName: 'payment_analysis', label: 'Payment analysis' },
-    ]);
-    expect(screen.queryByTestId('design-mode-bar')).toBeNull();
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-  });
-
-  it('a refused menu removes the new report; the mode, the held place and the other staged edits stay', async () => {
-    server.appSave = new Error('the app was refused');
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up');
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    let saved: boolean | undefined;
-    await act(async () => {
-      saved = await newReportSlotFor('/apps/crm/reports/new')!.save('payment_analysis', 'Payment analysis', { ...REPORT_BODY, name: 'payment_analysis' });
-    });
-    await flush();
-
-    expect(saved).toBe(false);
-    expect(written.map(([verb, type, name, opt]) => `${verb} ${type} ${name} ${verb === 'reset' ? JSON.stringify(opt) : ''}`.trim())).toEqual([
-      'save report payment_analysis',
-      'publish report payment_analysis',
-      'save app crm',
-      'reset report payment_analysis {"packageId":"com.acme.crm"}',
-    ]);
-    expect(toastError).toHaveBeenCalledWith('Some changes were not saved: the app was refused');
-    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
-    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', ['…']]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).not.toBeNull();
-  });
-
-  it('the builder\'s Close drops the held place and writes nothing; the mode and its other edits stay', async () => {
-    startOnBuilderPath();
-    await act_on('accounts', 'Move up');
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    act(() => newReportSlotFor('/apps/crm/reports/new')!.cancel());
-    await flush();
-    expect(order()).toEqual(['home', ['sales', ['accounts', 'leads']], ['insights', []]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-    expect(written).toEqual([]);
-    expect(screen.getByTestId('design-mode-save')).toBeEnabled();
-  });
-
-  it('leaving the builder another way drops the held place too', async () => {
-    startOnBuilderPath();
-    const picker = await openReports();
-    fireEvent.click(within(picker).getByTestId('design-menu-picker-new-report'));
-    await flush();
-    fireEvent.click(screen.getByText('go elsewhere'));
-    await flush();
-    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
-    expect(newReportSlotFor('/apps/crm/reports/new')).toBeNull();
-    expect(written).toEqual([]);
+  it('picking one links it in the held place, staged with the mode; nothing is written, nothing navigates', async () => {
+    listed.report = [{ name: 'revenue_by_month', label: 'Revenue by month' }];
+    try {
+      startWithLanding();
+      const picker = await openReports();
+      fireEvent.click(within(picker).getByRole('button', { name: 'Revenue by month' }));
+      await flush();
+      expect(screen.queryByTestId('design-menu-picker')).toBeNull();
+      expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', ['nav_item_1']]]);
+      expect(written).toEqual([]);
+      expect(screen.getByTestId('landing')).toHaveTextContent('/apps/crm null');
+      expect(screen.getByTestId('design-mode-save')).toBeEnabled();
+    } finally {
+      listed.report = [{ name: 'pipeline', label: 'Pipeline' }];
+    }
   });
 });
 
@@ -1077,5 +1054,257 @@ describe('the design-mode menu in the sidebar order (objectstack#36591)', () => 
     expect(orderKeys(saved)).toEqual([0, 1, 2]);
     cleanup();
     expect(sidebarOrder(saved)).toEqual(shown);
+  });
+});
+
+describe('the design-mode menu save and drag, hardened (objectstack#36538)', () => {
+  /** Accounts is another package's entry, appended to Sales when the app is served. */
+  const ACCOUNTS_FOREIGN = () =>
+    NAVIGATION.map((e) => (e.id === 'sales' ? { ...e, children: (e.children ?? []).filter((c) => c.id !== 'accounts') } : e));
+  /** A group another package puts into the menu, with its own entry. */
+  const PARTNER = { id: 'partner', type: 'group', label: 'Partner', children: [{ id: 'partner_cases', type: 'object', objectName: 'crm_case', label: 'Cases' }] };
+
+  function startWhere() {
+    render(
+      <MemoryRouter initialEntries={['/apps/crm']}>
+        <Harness />
+        <Where />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByText('enter'));
+  }
+  const where = () => screen.getByTestId('where').textContent;
+  /** A press on `el`, released, then the click it ends with. */
+  const press = (el: Element) => {
+    fireEvent.pointerDown(el, { button: 0, pointerType: 'mouse' });
+    fireEvent.pointerUp(el, { button: 0, pointerType: 'mouse' });
+    fireEvent.click(el);
+  };
+  /** Opens 「⋮ → Move to group」 of the entry `id` and answers the groups it offers. */
+  async function groupsOffered(id: string): Promise<string[]> {
+    fireEvent.pointerDown(within(entry(id)).getByTestId('design-menu-actions'), { button: 0, pointerType: 'mouse' });
+    await flush();
+    fireEvent.keyDown(await screen.findByRole('menuitem', { name: 'Move to group' }), { key: 'ArrowRight' });
+    await flush();
+    return (await screen.findAllByRole('menuitem')).map((m) => m.textContent ?? '');
+  }
+  /** A clock the editor's click window reads, moved by hand. */
+  function clock() {
+    let now = 1_000_000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    return { pass: (ms: number) => (now += ms), restore: () => spy.mockRestore() };
+  }
+
+  // Item 2 (review N8): the layered read answers a 404 as an empty view.
+  it('a stored read answering 404: 「Save」 writes nothing and the bar says so; on entry no entry reads as another package\'s', async () => {
+    storedNav.missing = true;
+    start();
+    await flush();
+    // CONTROL of the entry read: an empty stored menu would mark every entry another package's and shut 「Move up」.
+    fireEvent.pointerDown(within(entry('accounts')).getByTestId('design-menu-actions'), { button: 0, pointerType: 'mouse' });
+    await flush();
+    expect(screen.queryByTestId('design-menu-contributed')).toBeNull();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move up' }));
+    await flush();
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    expect(written).toEqual([]);
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(String(toastError.mock.calls[0][0])).toContain("This app's saved menu could not be read");
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+  });
+
+  // Item 4 (review N6): the publish is pinned, and a publish landed in between is said.
+  it("「Save」 pins the publish to the read's published row; a publish landed in between is refused, discarded and said", async () => {
+    storedNav.overlayVersion = 'v7';
+    server.appPublish = Object.assign(new Error('conflict'), { status: 409, code: 'METADATA_CONFLICT' });
+    start();
+    await flush();
+    await act_on('accounts', 'Move up');
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    expect(written.map(([verb]) => verb)).toEqual(['save', 'publish', 'reset']);
+    expect(written[1]).toEqual(['publish', 'app', 'crm', { packageId: 'com.acme.crm', ifMatch: 'v7' }]);
+    expect(String(toastError.mock.calls[0][0])).toContain("Someone published this app's menu while you were saving");
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+  });
+
+  // Item 3 (review N9): another package's group takes no own entry.
+  it("another package's group is not offered by 「Move to group」, has no 「Add menu item」, and takes no drop", async () => {
+    servedNav.current = [...NAVIGATION, PARTNER];
+    storedNav.current = NAVIGATION;
+    start();
+    await flush();
+    const offered = await groupsOffered('leads');
+    expect(offered).toContain('Insights'); // CONTROL: an own group is offered
+    expect(offered).not.toContain('Partner');
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await flush();
+    expect(screen.getByTestId('design-menu-add-insights')).toBeInTheDocument(); // CONTROL
+    expect(screen.queryByTestId('design-menu-add-partner')).toBeNull();
+
+    act(() => dragEnd.current!({ active: { id: 'home' }, over: { id: 'design-menu-end:partner' } }));
+    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []], ['partner', ['partner_cases']]]);
+    act(() => dragEnd.current!({ active: { id: 'home' }, over: { id: 'design-menu-end:insights' } })); // CONTROL
+    expect(order()).toEqual([['sales', ['leads', 'accounts']], ['insights', ['home']], ['partner', ['partner_cases']]]);
+  });
+
+  it("「Add an item before / after」 is off on an entry of another package's group, and open on one of an own group", async () => {
+    servedNav.current = [...NAVIGATION, PARTNER];
+    storedNav.current = NAVIGATION;
+    start();
+    await flush();
+    fireEvent.pointerDown(within(entry('partner_cases')).getByTestId('design-menu-actions'), { button: 0, pointerType: 'mouse' });
+    await flush();
+    for (const name of ['Add an item before', 'Add an item after']) {
+      expect(await screen.findByRole('menuitem', { name })).toHaveAttribute('aria-disabled', 'true');
+    }
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await flush();
+    fireEvent.pointerDown(within(entry('accounts')).getByTestId('design-menu-actions'), { button: 0, pointerType: 'mouse' });
+    await flush();
+    expect(await screen.findByRole('menuitem', { name: 'Add an item after' })).not.toHaveAttribute('aria-disabled');
+  });
+
+  // N10: an add made while the stored read is pending is drawn where it is saved, once the read lands.
+  it("an entry added at a group's end while the stored read is pending is drawn before another package's entries once it lands", async () => {
+    storedNav.current = ACCOUNTS_FOREIGN();
+    let land!: () => void;
+    storedNav.gate = new Promise<void>((resolve) => (land = resolve));
+    start();
+    await flush();
+    fireEvent.click(screen.getByTestId('design-menu-add-sales'));
+    const picker = await screen.findByTestId('design-menu-picker');
+    fireEvent.click(within(picker).getByRole('button', { name: 'Objects' }));
+    await flush();
+    fireEvent.click(within(picker).getByRole('button', { name: 'Cases' }));
+    await flush();
+    // CONTROL: still pending, nothing tells Accounts apart, the entry is drawn last.
+    expect(order()).toEqual(['home', ['sales', ['leads', 'accounts', 'nav_item_1']], ['insights', []]]);
+    await act(async () => land());
+    await flush();
+    expect(order()).toEqual(['home', ['sales', ['leads', 'nav_item_1', 'accounts']], ['insights', []]]);
+    fireEvent.click(screen.getByTestId('design-mode-save'));
+    await flush();
+    await flush();
+    const nav = (written[0][3] as { navigation: Array<{ id: string; children?: Array<{ id: string }> }> }).navigation;
+    expect(nav[1].children!.map((c) => c.id)).toEqual(['leads', 'nav_item_1']);
+  });
+
+  // N12: the window starts at the release of the press that dragged.
+  it('a pointer drag cancelled by Escape with the button held: the late release opens nothing; a plain click then opens', async () => {
+    const time = clock();
+    try {
+      startWhere();
+      await flush();
+      const leads = linkOf('leads');
+      fireEvent.pointerDown(leads, { button: 0, pointerType: 'mouse' });
+      act(() => dragStart.current!({ active: { id: 'leads' }, activatorEvent: new MouseEvent('pointerdown') }));
+      act(() => dragCancel.current!({ active: { id: 'leads' } }));
+      time.pass(2_000); // the button held long past the old window
+      fireEvent.pointerUp(leads, { button: 0, pointerType: 'mouse' });
+      fireEvent.click(leads);
+      expect(where()).toBe('/apps/crm');
+      time.pass(1_000);
+      press(linkOf('home')); // CONTROL
+      expect(where()).not.toBe('/apps/crm');
+    } finally {
+      time.restore();
+    }
+  });
+
+  // N15: each clear of the drag flag has its own case.
+  it('a new press clears a drag whose end was never reported: its click opens the page', async () => {
+    startWhere();
+    await flush();
+    act(() => dragStart.current!({ active: { id: 'leads' } })); // started, no end, no pointer held
+    press(linkOf('home'));
+    expect(where()).not.toBe('/apps/crm');
+  });
+
+  it('a window pointercancel clears a drag whose end was never reported: a later click opens the page', async () => {
+    const time = clock();
+    try {
+      startWhere();
+      await flush();
+      act(() => dragStart.current!({ active: { id: 'leads' } }));
+      fireEvent.pointerCancel(window);
+      time.pass(1_000);
+      fireEvent.click(linkOf('home'));
+      expect(where()).not.toBe('/apps/crm');
+    } finally {
+      time.restore();
+    }
+  });
+
+  // N16: a keyboard move keeps the links shut whatever the pointer does.
+  it('a click during a held keyboard move opens nothing; once the move ends, a click opens', async () => {
+    const time = clock();
+    try {
+      startWhere();
+      await flush();
+      act(() => dragStart.current!({ active: { id: 'leads' }, activatorEvent: new KeyboardEvent('keydown', { code: 'Space' }) }));
+      press(linkOf('home'));
+      expect(where()).toBe('/apps/crm');
+      act(() => dragEnd.current!({ active: { id: 'leads' }, over: null }));
+      time.pass(1_000);
+      press(linkOf('home')); // CONTROL
+      expect(where()).not.toBe('/apps/crm');
+    } finally {
+      time.restore();
+    }
+  });
+
+  // N13: Space moves, Enter opens; the editor says so.
+  it('Space on an entry starts a keyboard move; Enter does not, and is left to open the link; the editor says which', async () => {
+    start();
+    await flush();
+    const leads = linkOf('leads');
+    leads.focus();
+    expect(fireEvent.keyDown(leads, { code: 'Enter', key: 'Enter' })).toBe(true); // not taken: the link opens
+    await flush();
+    expect(dragStarts).toHaveLength(0);
+    expect(fireEvent.keyDown(leads, { code: 'Space', key: ' ' })).toBe(false); // taken by the move
+    await flush();
+    expect(dragStarts).toHaveLength(1);
+    fireEvent.keyDown(leads, { code: 'Escape', key: 'Escape' });
+    await flush();
+    // The help the editor shows is the one a screen reader is given for an entry.
+    const hint = screen.getByTestId('design-menu-keyboard-hint').textContent;
+    expect(hint).toBeTruthy();
+    expect(document.getElementById(linkOf('leads').getAttribute('aria-describedby') ?? '')?.textContent).toBe(hint);
+  });
+
+  // N14: a drop outside the menu moves nothing.
+  describe('the collision rule', () => {
+    const rect = { top: 0, left: 0, right: 100, bottom: 20, width: 100, height: 20 };
+    const args = (pointer: { x: number; y: number } | null) =>
+      ({
+        active: { id: 'leads', data: { current: {} }, rect: { current: { initial: null, translated: null } } },
+        collisionRect: rect,
+        droppableRects: new Map([['home', rect]]),
+        droppableContainers: [{ id: 'home', key: 'home', data: { current: {} }, disabled: false, node: { current: null }, rect: { current: rect } }],
+        pointerCoordinates: pointer,
+      }) as unknown as Parameters<CollisionDetection>[0];
+
+    it("the editor's rule: a pointer outside the menu is over nothing; inside it, and from the keyboard, the nearest entry", async () => {
+      start();
+      await flush();
+      vi.spyOn(screen.getByTestId('design-menu-area'), 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 200, 400));
+      const rule = collisionRule.current!;
+      expect(rule(args({ x: 900, y: 900 }))).toEqual([]);
+      expect((rule(args({ x: 50, y: 10 })) as Array<{ id: string }>).map((c) => c.id)).toEqual(['home']);
+      expect((rule(args(null)) as Array<{ id: string }>).map((c) => c.id)).toEqual(['home']);
+      expect(closestCenter(args({ x: 900, y: 900 })).map((c) => c.id)).toEqual(['home']); // CONTROL: the old rule moved it
+    });
+
+    it('a drop the rule answers nothing for moves nothing', async () => {
+      start();
+      await flush();
+      act(() => dragEnd.current!({ active: { id: 'home' }, over: null }));
+      expect(order()).toEqual(['home', ['sales', ['leads', 'accounts']], ['insights', []]]);
+    });
   });
 });

@@ -83,7 +83,7 @@ describe('a report switched to Joined before its first block is held (objectstac
     const body = { ...SWITCHED, blocks: [{ name: 'won' }] };
     expect(reportRefusals(body)).toEqual(['blocks.0.dataset']);
     expect(reportHeldEdit(body, 'en')?.clause).toBe(
-      tFormat('engine.studio.held.listItemNeedsInput', 'en', { input: 'Dataset', n: 1, list: 'Blocks' }),
+      tFormat('engine.studio.held.listItemNeedsInput', 'en', { input: 'Data Source', n: 1, list: 'Blocks' }),
     );
   });
 

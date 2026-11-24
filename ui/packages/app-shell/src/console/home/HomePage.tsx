@@ -93,6 +93,8 @@ import { STUDIO_NEW_PACKAGE_PATH } from '../../views/studio-design/studioNewPack
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
 import { isProductApp } from '../../utils/homePath.js';
 import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js';
+import { studioLandingPath } from '../../views/studio-design/studioAddress.js';
+import { catalogServesBuild } from '../../hooks/surfaceAgent.js';
 
 /**
  * Which AI home CTAs to surface, driven by the live agent catalog (the single
@@ -102,6 +104,10 @@ import { useAddAppEntries, useMayAddApp } from '../../hooks/useAddAppEntries.js'
  *  - `buildAvailable` — a build/authoring agent is deployed → "Build with AI".
  *    That's a cloud / AI-Studio feature, ABSENT on open-source builds.
  *  - `aiEnabled` — any agent at all (AI is on here in some form).
+ *  - `buildServed` — the catalog lists the build agent itself, alias-aware
+ *    (`catalogServesBuild`, objectstack#36969): what the "Build an app" chip
+ *    promises. Where in-app building is closed the catalog keeps `ask` and
+ *    drops `build`, so `aiEnabled` alone would promise a build nothing serves.
  * All false while the catalog loads or when AI isn't enabled, so nothing
  * flashes and no AI CTA appears where there's no agent to back it.
  *
@@ -118,6 +124,7 @@ function useHomeAiAvailability(): {
   aiResolved: boolean;
   askAvailable: boolean;
   buildAvailable: boolean;
+  buildServed: boolean;
 } {
   const apiBase = useMemo(() => resolveAiApiBase(), []);
   const { agents, isLoading } = useAgents({ apiBase });
@@ -130,6 +137,7 @@ function useHomeAiAvailability(): {
     askAvailable: agents.some((a) => isAskAgent(a.name)),
     // cloud#816 — authoring availability by DECLARED capability (name-check fallback inside).
     buildAvailable: agents.some((a) => agentHasCapability(agents, a.name, 'authoring')),
+    buildServed: catalogServesBuild(agents),
   };
 }
 
@@ -511,7 +519,7 @@ export function HomePage({ checklist }: HomePageProps = {}) {
   // AI CTA gating, per agent: "Build with AI" only when a build agent is
   // deployed (cloud / AI Studio); "Ask AI" only when a data agent is; neither
   // when AI isn't enabled. Community builds typically land in the ask-only state.
-  const { aiEnabled, aiResolved, askAvailable, buildAvailable } = useHomeAiAvailability();
+  const { aiResolved, askAvailable, buildAvailable, buildServed } = useHomeAiAvailability();
   // objectstack#8270 — the authoring CTAs below are gated on the SERVER's
   // capability answer, not on the admin ROLE: on the EE multi-tenant deploy an
   // `org_owner` is an admin (`isAdmin === true`) yet deliberately holds no
@@ -958,19 +966,24 @@ export function HomePage({ checklist }: HomePageProps = {}) {
                     * may not author gets no chip rather than a dimmed one (the
                     * template chip beside it still carries the reason). With
                     * agents present nothing changes. The chip waits for the
-                    * catalog's answer, so neither form flashes before the other. */}
-                  {aiStudioEnabled && aiEnabled && (
+                    * catalog's answer, so neither form flashes before the other.
+                    *
+                    * objectstack#36969 — the AI form is drawn only where the
+                    * catalog serves the build agent itself (`buildServed`), not
+                    * any agent: a deployment that closed in-app building still
+                    * serves `ask`, and there the chip takes this Studio form. */}
+                  {aiStudioEnabled && buildServed && (
                     <BuilderChip
                       icon={Hammer}
                       label={t('home.build.title', { defaultValue: 'Build an app' })}
                       tone="soft"
-                      onClick={() => navigate('/studio')}
+                      onClick={() => navigate(studioLandingPath())}
                       disabledReason={!canAuthorMetadata ? authoringGateReason : undefined}
                       reasonId={authoringReasonId}
                       testId="home-build-app"
                     />
                   )}
-                  {aiStudioEnabled && aiResolved && !aiEnabled && canAuthorMetadata && (
+                  {aiStudioEnabled && aiResolved && !buildServed && canAuthorMetadata && (
                     <BuilderChip
                       icon={Hammer}
                       label={t('home.build.inStudio', { defaultValue: 'New in Studio' })}

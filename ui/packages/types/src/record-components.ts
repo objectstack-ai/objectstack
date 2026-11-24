@@ -224,7 +224,10 @@ export interface RecordDetailsComponentProps {
      * Hide this section's empty fields (`sections[].hideEmpty`, `z.boolean()`
      * on the spec row since 17.3.0). Unauthored, `RecordDetailsRenderer` reads
      * it as on (`s.hideEmpty ?? true`), and a section whose fields are ALL
-     * empty then renders nothing; `false` keeps the section — in read-only
+     * empty then renders nothing while the reader hides empty fields (the
+     * record page's field list still counts its fields in its one show-empty
+     * row, and showing them, or a remembered per-object choice to show them,
+     * draws it, objectstack#36593); `false` keeps the section — in read-only
      * mode named in the one line that closes the body, beside every other
      * all-empty section kept this way, and expanding that line draws each as
      * its heading plus one fold row that counts the empty fields and reveals

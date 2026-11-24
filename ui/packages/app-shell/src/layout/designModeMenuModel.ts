@@ -388,7 +388,11 @@ function locate(menu: Menu, keyOf: (entry: MenuEntry) => string | null): Map<str
  * entries without an id the first free `nav_item_<n>` of what the reader was
  * shown (`withEntryIds`), which a stored entry pruned from the reader can
  * already hold. A stored entry without an id is matched to an unmatched served
- * entry by its group, type and target, in order.
+ * entry by its group, type and target, in order; an id-less entry is served
+ * with its stored keys (only an entry with an id is translated), so among
+ * such twins the one whose keys are its own is taken first ({@link servedAs},
+ * objectstack#36538): a twin the reader was not shown (one with other
+ * `requiredPermissions`, say) never takes the shown one's key.
  */
 interface StoredKeyer {
   (entry: MenuEntry): string | null;
@@ -398,6 +402,19 @@ interface StoredKeyer {
 
 function sameThing(a: MenuEntry, b: MenuEntry): boolean {
   return a.type === b.type && targetKeyOf(a) === targetKeyOf(b);
+}
+
+/**
+ * Whether the served entry `served` carries the own keys of the stored entry
+ * `stored`, its `id` (which the editor gives an entry without one) and its
+ * `children` (which the server prunes) left out (objectstack#36538).
+ */
+function servedAs(stored: MenuEntry, served: MenuEntry): boolean {
+  const { id: _a, ...a } = ownKeys(stored);
+  const { id: _b, ...b } = ownKeys(served);
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) if (JSON.stringify(a[key]) !== JSON.stringify(b[key])) return false;
+  return true;
 }
 
 function storedKeyer(served: Menu, stored: Menu): StoredKeyer {
@@ -417,22 +434,26 @@ function storedKeyer(served: Menu, stored: Menu): StoredKeyer {
   };
   byId(stored);
   const unclaimed = [...servedAt.entries()].filter(([id]) => !matched.has(id));
-  const claim = (entry: MenuEntry, parentId: string | null): string | null => {
-    const at = unclaimed.findIndex(([, s]) => s.parentId === parentId && sameThing(s.entry, entry));
+  const claim = (entry: MenuEntry, parentId: string | null, exact: boolean): string | null => {
+    const at = unclaimed.findIndex(
+      ([, s]) => s.parentId === parentId && sameThing(s.entry, entry) && (!exact || servedAs(entry, s.entry)),
+    );
     if (at < 0) return null;
     const [[id]] = unclaimed.splice(at, 1);
     return id;
   };
   // `undefined`: the group was never shown, so nothing in it can be claimed.
+  // Each level claims its twins carrying their own keys first, in order, and
+  // only then the rest, so a twin not shown never takes a shown one's key.
   const adopt = (entries: Menu, parentId: string | null | undefined) => {
-    for (const entry of entries) {
-      let key = keys.get(entry) ?? null;
-      if (!key && !idOf(entry) && parentId !== undefined) {
-        key = claim(entry, parentId);
+    for (const exact of [true, false]) {
+      for (const entry of entries) {
+        if (keys.has(entry) || idOf(entry) || parentId === undefined) continue;
+        const key = claim(entry, parentId, exact);
         if (key) keys.set(entry, key);
       }
-      if (isGroup(entry)) adopt(childrenOf(entry), key ?? undefined);
     }
+    for (const entry of entries) if (isGroup(entry)) adopt(childrenOf(entry), keys.get(entry) ?? undefined);
   };
   adopt(stored, null);
   const keyOf = ((entry: MenuEntry) => keys.get(entry) ?? null) as StoredKeyer;
@@ -496,6 +517,43 @@ function staysInOrder(served: Map<string, Located>, edited: Map<string, Located>
 }
 
 /**
+ * `menu` with each own entry that sits in or after the run of another
+ * package's entries closing its level in `served` put just before that run,
+ * at every depth (objectstack#36538, review N10). Those entries are appended
+ * when the app is served, so an own entry at or past them is stored, and
+ * served, before them; an entry the editor put there before it knew which
+ * entries are another package's is drawn where the save puts it. `foreign`
+ * tells another package's entry by its id. The answer is `menu` itself when
+ * no entry moves.
+ */
+export function withOwnBeforeForeignRuns(menu: Menu, served: Menu, foreign: (id: string) => boolean): Menu {
+  const isForeign = (entry: MenuEntry) => {
+    const id = idOf(entry);
+    return !!id && foreign(id);
+  };
+  const walk = (entries: Menu, parentId: string | null): Menu => {
+    let next: Menu = entries.map((entry) => {
+      if (!isGroup(entry)) return entry;
+      const kids = childrenOf(entry);
+      const fixed = walk(kids, idOf(entry));
+      return fixed === kids ? entry : { ...entry, children: fixed };
+    });
+    if (next.every((entry, i) => entry === entries[i])) next = entries;
+    const shown = siblingsAt(served, parentId) ?? [];
+    let start = shown.length;
+    while (start > 0 && isForeign(shown[start - 1])) start -= 1;
+    const run = new Set(shown.slice(start).map(idOf));
+    const first = next.findIndex((entry) => run.has(idOf(entry)));
+    if (first < 0) return next;
+    const after = next.slice(first);
+    const own = after.filter((entry) => !isForeign(entry));
+    if (own.length === 0) return next;
+    return [...next.slice(0, first), ...own, ...after.filter(isForeign)];
+  };
+  return walk(menu, null);
+}
+
+/**
  * The edits made to `served` (the tree the editor was seeded from, every
  * entry with an id) that turned it into `edited`, applied by entry id to
  * `stored`, the app's navigation as stored (objectstack#36363).
@@ -523,9 +581,16 @@ function staysInOrder(served: Map<string, Located>, edited: Map<string, Located>
  * since the editor read it, is not moved, patched or written, and takes no
  * part in the order comparison. Only an entry `served` does not hold is an
  * addition; one whose id a stored entry already holds is written under a
- * fresh `nav_item_<n>` that neither menu holds.
+ * fresh `nav_item_<n>` that neither menu holds, and `writtenAs`, when given,
+ * is told so (the edited id, then the id written), so what is keyed by the
+ * entry's id elsewhere (its translation, objectstack#36504) follows it.
  */
-export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu {
+export function rebaseMenuEdits(
+  served: Menu,
+  edited: Menu,
+  stored: Menu,
+  writtenAs?: Map<string, string>,
+): Menu {
   const keyOf = storedKeyer(served, stored);
   const s = locate(served, idOf);
   const e = locate(edited, idOf);
@@ -639,7 +704,10 @@ export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu 
     const now = e.get(id)!;
     let entry: MenuEntry;
     if (taken.has(id)) entry = taken.get(id)!;
-    else if (!s.has(id)) entry = keyOf.alias(storedIds.has(id) ? { ...now.entry, id: freshId() } : now.entry, id);
+    else if (!s.has(id)) {
+      entry = keyOf.alias(storedIds.has(id) ? { ...now.entry, id: freshId() } : now.entry, id);
+      if (entry.id !== id) writtenAs?.set(id, String(entry.id));
+    }
     else continue;
     // A group the stored menu lacks: the entry goes to the end of the top level.
     const lost = now.parentId !== null && !groupEntries(result, now.parentId);
@@ -658,4 +726,91 @@ export function rebaseMenuEdits(served: Menu, edited: Menu, stored: Menu): Menu 
     result = replaceGroup(result, parentId, [...siblings.slice(0, at), entry, ...siblings.slice(at)]);
   }
   return result;
+}
+
+/**
+ * Where a label the editor took is stored (objectstack#36504): the language it
+ * was typed in, as the deployment names it (`locale`), and whether that is
+ * the app's source language (`source`), the one its stored labels are in.
+ */
+export interface MenuLabelLanguage {
+  readonly locale: string;
+  readonly source: boolean;
+}
+
+/**
+ * Whether a label typed in `language` for an entry goes to that language's
+ * translation, not to the stored label (objectstack#36504, ruling (4) of
+ * objectstack#36363 relaxed by it). The stored label is the app's own text, so
+ * it takes only a label typed in the source language, and only where the
+ * label shown is the stored one: an entry added in this session (`shown` is
+ * `null`), or one whose served label (`translateApp`'s answer for the reader)
+ * equals its stored label. Every other label is a translation: one typed in
+ * another language, and one typed over a translation shown in the source
+ * language, which the stored label would never reach. An entry the stored
+ * menu does not hold (`stored` absent) has no stored label to take it.
+ */
+export function labelGoesToTranslation(
+  language: MenuLabelLanguage,
+  shown: MenuEntry | null,
+  stored: MenuEntry | null | undefined,
+): boolean {
+  if (!language.source) return true;
+  if (!shown) return false;
+  if (!stored) return true;
+  return JSON.stringify(shown.label) !== JSON.stringify(stored.label);
+}
+
+/** The label edits of a menu that are translations, and the menu left to store. */
+export interface MenuLabelSplit {
+  /** `edited` with each translated label put back as served (an added entry's taken off). */
+  readonly navigation: Menu;
+  /** The translated labels, by the edited entry's id; `null` drops the entry's translation. */
+  readonly labels: ReadonlyMap<string, string | null>;
+}
+
+/**
+ * Split the label edits that turned `served` into `edited` (objectstack#36504):
+ * those {@link labelGoesToTranslation} sends to `language`'s translation come
+ * out as `labels`, and the entry is put back with its served label, so the
+ * stored label is never written from them; an entry added with a label typed
+ * outside the source language is stored without one, its base label left
+ * for the source language to set (review N5 of objectstack#36437). A cleared
+ * name drops the entry's translation (`null`). `storedById` is the stored
+ * entry behind each served one (`storedEntriesById`).
+ */
+export function splitLabelEdits(
+  served: Menu,
+  edited: Menu,
+  storedById: ReadonlyMap<string, MenuEntry>,
+  language: MenuLabelLanguage,
+): MenuLabelSplit {
+  const s = locate(served, idOf);
+  const labels = new Map<string, string | null>();
+  const visit = (entries: Menu): Menu => {
+    let changed = false;
+    const out = entries.map((entry) => {
+      let next = entry;
+      if (isGroup(entry)) {
+        const kids = childrenOf(entry);
+        const kept = visit(kids);
+        if (kept !== kids) next = { ...next, children: kept };
+      }
+      const id = idOf(entry);
+      const was = id ? s.get(id)?.entry ?? null : null;
+      const typed = (entry as Record<string, unknown>).label;
+      const relabelled = was ? JSON.stringify(typed) !== JSON.stringify(was.label) : typed !== undefined;
+      if (id && relabelled && labelGoesToTranslation(language, was, storedById.get(id))) {
+        const text = typeof typed === 'string' && typed ? typed : null;
+        // An entry added without a name has no translation to drop.
+        if (text !== null || was) labels.set(id, text);
+        const { label: _typed, ...rest } = next as Record<string, unknown>;
+        next = was && was.label !== undefined ? { ...rest, label: was.label } : rest;
+      }
+      if (next !== entry) changed = true;
+      return next;
+    });
+    return changed ? out : entries;
+  };
+  return { navigation: visit(edited), labels };
 }

@@ -246,7 +246,7 @@ function LocationProbe(): React.ReactElement {
   return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
 }
 
-function renderStudio(entry = `/studio/${PACKAGE_ID}/interfaces?surface=object%3Ahcpl_borrowing`) {
+function renderStudio(entry = `/studio/${PACKAGE_ID}/data?surface=object%3Ahcpl_borrowing`) {
   return render(
     <MemoryRouter initialEntries={[entry]}>
       <LocationProbe />
@@ -289,15 +289,24 @@ describe('the Studio copilot\'s applied card opens the 变更 drawer in place (o
   });
 
   it('arriving with ?changes=review (the full-page chat\'s link) opens the drawer, then drops the param', async () => {
+    renderStudio(`/studio/${PACKAGE_ID}/data?changes=review`);
+    await waitFor(() => expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'true'));
+    expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-posture', 'review');
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
+  });
+
+  // objectstack#36502 — the link printed before the Interfaces pillar retired
+  // still opens the drawer: the redirect to the Data pillar keeps `?changes=`.
+  it('an old /interfaces?changes=review link lands on the Data pillar with the drawer open', async () => {
     renderStudio(`/studio/${PACKAGE_ID}/interfaces?changes=review`);
     await waitFor(() => expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'true'));
     expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-posture', 'review');
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/interfaces`));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
   });
 
   it('CONTROL: a value the surface does not know opens nothing, and is dropped all the same', async () => {
-    renderStudio(`/studio/${PACKAGE_ID}/interfaces?changes=publish`);
-    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/interfaces`));
+    renderStudio(`/studio/${PACKAGE_ID}/data?changes=publish`);
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(`/studio/${PACKAGE_ID}/data`));
     await act(drain);
     expect(screen.getByTestId('draft-changes-panel')).toHaveAttribute('data-open', 'false');
   });

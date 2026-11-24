@@ -597,18 +597,18 @@ trip is required to edit a draft.
 
 ### New dataset beside the Studio's dataset pickers (objectstack#27518)
 
-The Interfaces pillar provides `StudioDatasetAuthoringContext`
-(`src/views/studio-design/datasetCreate.tsx`): the package being edited and the
-pillar's draft-saved signal. A dataset picker that finds it (the New report
-dialog's `ReportCreateFields` and the dashboard widget inspector) reads the
-draft-overlaid dataset catalog (`useDatasetCatalog(…, { previewDrafts: true })`),
-lists the package's datasets first, and renders `DatasetCreateEntry`: a **New
-dataset** button whose dialog saves a `dataset` draft in the package through
-the draft door (the spec's create seed, the picked object, a dimension per
-group-by field and a `sum` measure per total), re-reads the catalog and binds
-the new name. While no dataset reads one of the package's objects, the entry
-says so. Outside the Studio there is no context: Setup's editors keep the
-published catalog and offer no entry.
+`StudioDatasetAuthoringContext` (`src/views/studio-design/datasetCreate.tsx`)
+carries the package being edited and a draft-saved signal. A dataset picker
+that finds it (the dashboard widget inspector) reads the draft-overlaid dataset
+catalog (`useDatasetCatalog(…, { previewDrafts: true })`), lists the package's
+datasets first, and renders `DatasetCreateEntry`: a **New dataset** button
+whose dialog saves a `dataset` draft in the package through the draft door
+(the spec's create seed, the picked object, a dimension per group-by field and
+a `sum` measure per total), re-reads the catalog and binds the new name. While
+no dataset reads one of the package's objects, the entry says so. Without the
+context there is no entry and the catalog is the published one. Its provider
+was Studio's Interfaces pillar, retired by objectstack#36502, so no surface
+provides it today.
 
 ### AI chat conversation key (ADR-0057)
 
@@ -631,11 +631,15 @@ Inside a running app, workspace admins get an "Edit app" button in the top bar
 (`AppHeader`) — and, at the end of the app switcher's dropdown, an "Edit APP in
 Studio" row to the same target — that deep-links to the app's owning package on
 the Studio design surface. When the current route names a specific interface — a
-dashboard, page, or report — it opens straight to that surface in the Interfaces
-pillar (`/studio/:packageId/interfaces?surface=<type>:<name>`); on an object
-route it opens that object in the Data pillar
+dashboard, page, or report — it opens that item's page in Studio's "All
+metadata" area (`/studio/:packageId/metadata/<type>/<name>`), where it is read
+and edited as metadata; interfaces themselves are designed in the running app,
+since objectstack#36502 retired Studio's Interfaces pillar. On an object route
+it opens that object in the Data pillar
 (`/studio/:packageId/data?surface=object:<name>`), and at the app root the
-package's Data tab (`/studio/:packageId/data`).
+package's Data tab (`/studio/:packageId/data`). An old
+`/studio/:packageId/interfaces` link lands on the Data tab with a one-line
+notice that interface editing moved into the app.
 The route-type → surface-type decision lives in `appStudioRoutePath`. It is the
 reverse of the builder's "Open app" bridge (ADR-0080): the entry only renders
 for admins and only when the app has an owning package (`_packageId`), and

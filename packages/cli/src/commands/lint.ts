@@ -1476,7 +1476,10 @@ export default class Lint extends Command {
         for (const f of result.familiesNotRun) {
           console.log(chalk.dim(`    ${f.family}  ${f.reason}`));
         }
-        console.log(chalk.dim('  Run `os lint` on the project, or publish the draft, for those.'));
+        console.log(chalk.dim(
+          `  Run \`os lint\` on the project for those, or \`os meta register ${result.type} --data ${file} `
+            + '--mode draft --package <id>` to read their publish verdict without publishing.',
+        ));
       }
       if (issues.length > 0) {
         const parts: string[] = [];

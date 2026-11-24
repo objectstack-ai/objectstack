@@ -950,6 +950,15 @@ export const ERROR_CODE_LEDGER = {
     // any standard member: it is neither the client's bad input (the caller is
     // server-side automation) nor a missing precondition on a request.
     'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
+    // [ADR-0153 D4] A write named a `_sync_` provenance column and is not the
+    // sync-in pull's, or a `before*` hook of any write (the pull's included)
+    // assigned, changed or removed one. 400, judged on the caller's payload
+    // before the middleware, the defaults or a hook run, and on the hooks'
+    // writes before the driver, so nothing is written
+    // (`SyncProvenanceWriteRefusedError`, `sync-provenance-write.ts`). Refused
+    // whatever the caller's context, `isSystem` included: the pull is the
+    // columns' only writer.
+    'ERR_SYNC_PROVENANCE_WRITE_REFUSED',
     // [#8846] `transaction({ require: true })` on a driver with no
     // `beginTransaction` — thrown BEFORE the callback runs, so nothing has
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
@@ -1202,6 +1211,14 @@ export const ERROR_CODE_LEDGER = {
     // capability is off, and it is not `PERMISSION_DENIED`, the answer the write
     // path gives a caller who lacks the transfer grant on an object that offers it.
     'CHANGE_OWNER_DISABLED',
+    // [#36261] 404 from the same two Change Owner doors, the same wire path
+    // (`handleRouteError` passthrough): an object of a disabled package is
+    // refused before its switch is read, with the data door's own envelope.
+    // Stamped by `objectPackageDisabledError` (`utils/object-package-disabled.ts`),
+    // the ONE constructor, moved down from `@objectstack/metadata-protocol` so
+    // core's Change Owner rules raise it; metadata-protocol re-exports it and
+    // keeps its row for the data door. Provenance, not identity.
+    'OBJECT_PACKAGE_DISABLED',
     'ERR_BULK_RESULT_MISMATCH',
     'FILTER_TOKEN_UNKNOWN',       // filter references an unknown context token
     'FILTER_TOKEN_UNRESOLVED',

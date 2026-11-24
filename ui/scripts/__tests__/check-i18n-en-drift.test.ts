@@ -729,8 +729,11 @@ describe('the waiver ledger', () => {
  * 6 -> 7 (objectstack#34725). `preview.changes.draftedByCopilot` follows the
  * panel's new name, "AI assistant", in `en` and nine packs; ar already said
  * مساعد الذكاء الاصطناعي (AI assistant), so it had nothing to follow.
+ *
+ * 7 -> 6. `search.placeholder` gains components and docs in `en` and all ten
+ * translations in the same change, so its waiver expired and was deleted.
  */
-const WAIVER_CEILING = 7;
+const WAIVER_CEILING = 6;
 
 describe('the shipped ledger', () => {
   const ledger = readLedger(repoRoot);

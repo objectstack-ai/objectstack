@@ -338,15 +338,15 @@ The body runs in an isolated QuickJS VM, **not** Node:
   a name bound at module scope, e.g. a `const slugify = …` helper sitting next to
   the hook. A `body` must be **self-contained**: inline the helper, or keep that
   hook as a bundled (deprecated) `handler`.
-- **Refused when it does not compile:** a `js` source is compiled, unrun, inside
-  its wrapper, where `ctx` is already declared. So
-  `const ctx = ctx.input || {};` (or `let ctx`, one name declared twice, any
-  syntax error) is `hook-body-does-not-compile`: an **error** from `os validate`,
-  `os build`, `os lint` and a runtime save (`422 INVALID_METADATA`), naming
-  the hook, the `SyntaxError` and its line. Fix: use `ctx` as it is, or rename
-  the local (`const data = ctx.input || {};`). A job's `js` body runs in the
-  same wrapper: `job-body-does-not-compile`, from the three commands. A regex
-  pattern the checking engine refuses is a warning: the runtime may accept it.
+- **Refused when it does not compile:** a `js` source compiles, unrun, in a
+  wrapper that declares `ctx`, so `const ctx = ctx.input || {};` (or `let ctx`,
+  one name declared twice, any syntax error) is `hook-body-does-not-compile`: an
+  **error** from `os validate`, `os build`, `os lint` and a runtime save
+  (`422 INVALID_METADATA`). Fix: use `ctx` or rename the local. A job's `js`
+  body, same wrapper: `job-body-does-not-compile`, from the three commands. A
+  regex pattern the runtime refuses too is that error; only a duplicate named
+  group, a modifier group (`(?i:a)`) or a Unicode property name only the runtime
+  knows (any refused one on a pre-17.0-Unicode host) warns.
 
 > **A deadline stamped from an hours table is wall-clock hours** — nights, weekends and
 > holidays count. Name it `*_WALL_CLOCK_HOURS`, add `hours * 3_600_000` ms, never label it

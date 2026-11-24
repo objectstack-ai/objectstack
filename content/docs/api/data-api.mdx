@@ -475,6 +475,10 @@ Offered only on an object the platform gives a reassignable owner and whose
 included. The switch gates this action only: a plain `owner_id` update (an
 import, a hook, a `PATCH`) still needs the transfer grant and nothing else.
 
+An object whose owning package is disabled is refused first, before its switch
+is read, with the data door's own `404 OBJECT_PACKAGE_DISABLED`: nothing is
+written and nobody is notified. Re-enable the package to change owners again.
+
 **Body**: exactly one target, and an optional notification.
 
 ```json
@@ -509,8 +513,10 @@ A queue move answers `"ownerId": null, "queue": "support_triage"`.
 The same for a list of records: one by-id update per record, each under the
 same rules as the single route. Takes up to **500** ids; an empty list, a list
 over 500 and a list naming an id twice are refused `400` before anything is
-written. An object that does not offer Change Owner is refused as a whole,
-`403 CHANGE_OWNER_DISABLED`, before any record is read.
+written. An object of a disabled package is refused as a whole,
+`404 OBJECT_PACKAGE_DISABLED`, and an object that does not offer Change Owner
+`403 CHANGE_OWNER_DISABLED`, both before any record is read, written or
+notified.
 
 **Body**: `{ "ids": ["lead_1", "lead_2"], "ownerId": "usr_123", "notify": true }`
 (or `queue` in place of `ownerId`).
@@ -538,6 +544,69 @@ queue as `FIELD_NOT_ACCESSIBLE`). None is skipped.
 
 With `notify`, the new owner gets one notification for all the records that
 moved, and none when nothing moved.
+
+### Cascade to related records
+
+A relationship opts in on the child's reference field, beside
+`deleteBehavior`:
+
+```ts
+// on opportunity
+account: { type: 'lookup', reference: 'account', transferBehavior: 'cascade' }
+```
+
+Both routes above then take an optional `cascade` list naming the
+relationships to move along, and only with an `ownerId` target:
+
+```json
+{ "ownerId": "usr_123", "cascade": [{ "object": "opportunity", "field": "account" }] }
+```
+
+For each record that moved, the child records that point at it **and are
+owned by its previous owner** move to the new owner too; no other child record
+moves. Each is updated by id as the caller, so each needs the caller's own
+transfer grant on the child object. A relationship that is not one of the
+object's cascade candidates (see the route below) is refused `400
+VALIDATION_ERROR` before anything is written. `'cascade'` on a multi-value
+reference (`multiple: true`) is refused when the metadata is saved: a record
+there points at several parents, so no single Change Owner decides its owner.
+
+The answer gains one outcome per named relationship:
+
+- a child record the caller's write refuses is listed in `failures` with its
+  id, code and sentence, and counted in `failed` — a child whose `owner_id` is
+  locked on it (read-only, or under a `readonlyWhen` condition that holds) as
+  `FIELD_NOT_ACCESSIBLE`, keeping its owner; the parent's own move stands;
+- one call moves at most **500** child records; the records past that limit
+  are not listed but counted in `remaining`, still with the previous owner;
+- when a relationship's child records could not be read at all, the outcome
+  carries `readFailure` (`code` and `message`) and none of those records moved.
+
+```json
+"cascade": [
+  { "object": "opportunity", "field": "account", "updated": 3, "failed": 1, "remaining": 0,
+    "failures": [{ "id": "opp_9", "code": "PERMISSION_DENIED", "message": "…" }] }
+]
+```
+
+### `GET /data/:object/change-owner/cascades`
+
+The relationships a Change Owner of `object` may cascade along: each child
+reference field to it that declares `transferBehavior: 'cascade'`, on a child
+that offers Change Owner itself. Two more filters apply: a child whose declared
+API exposure does not serve `update` is left out, and so is a child that belongs
+to a disabled package. Whether the caller may transfer on each child
+is the explain engine's `transfer` operation (`POST /security/explain`), which
+the Console's dialog asks before it offers a tick. Takes no query parameter.
+An object of a disabled package is refused `404 OBJECT_PACKAGE_DISABLED`, as by
+the two write doors above, and an object that does not offer Change Owner is
+refused `403 CHANGE_OWNER_DISABLED`.
+
+```json
+{ "success": true, "data": { "object": "account", "cascades": [
+  { "object": "opportunity", "field": "account", "label": "Opportunity", "fieldLabel": "Account" }
+] } }
+```
 
 ---
 
