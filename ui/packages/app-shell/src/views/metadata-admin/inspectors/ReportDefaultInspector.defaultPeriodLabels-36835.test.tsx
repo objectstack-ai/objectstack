@@ -20,6 +20,10 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+// Loaded at module top so the source's dynamic imports of these two are paid
+// during collection, never inside a case's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import { I18nProvider, en } from '@object-ui/i18n';
 import { reportForm } from '@objectstack/spec/ui';
 import { ReportDefaultInspector } from './ReportDefaultInspector';
