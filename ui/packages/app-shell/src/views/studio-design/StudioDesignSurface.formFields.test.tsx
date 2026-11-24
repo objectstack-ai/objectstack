@@ -140,6 +140,8 @@ vi.mock('@object-ui/plugin-form', async (importOriginal) => {
   };
 });
 
+// The source reaches a dynamic `import('@objectstack/lint')`: its first load is paid at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { addFieldFromFormToolbar } from './__tests__/dataPillarAddField';
 
