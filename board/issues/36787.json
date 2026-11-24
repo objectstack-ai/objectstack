@@ -1,0 +1,36 @@
+{
+  "number": 36787,
+  "kind": "pull_request",
+  "title": "fix(studio): the list-view panel does not ask /layers for the fallback default view id",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T22:25:29Z",
+  "updated_at": "2026-11-23T23:11:09Z",
+  "closed_at": "2026-11-23T23:11:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T23:11:06Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36787",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8UNMg9RsSwRntqJjhmPv5uR)_\n\nFixes #36750\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户无感：在 Studio 打开一个还没有默认列表视图的对象时，浏览器不再记一条服务器 404 报错；面板显示和保存都不变。\n- 属于 Studio 评审 9 张卡中的一张（列表视图的多余请求），替开发者清掉控制台里的假报错。\n- 出错时最坏是面板对一个真实存在的默认视图显示「尚未创建」；只在元数据已加载完成时才跳过请求，可直接撤回这个 PR。\n- 无。\n\n## What changes\n\nWith no view of an object flagged default, the Studio list-view buffer edits the fallback id `OBJECT.default` (`listViewTargetOf`). Nothing is published under it until the panel's first edit creates it, yet the buffer read its published layer on every open and the server answered 404 (the client maps that to an empty envelope, but the browser logs the failed request). The draft-only guard (objectui#12508) no longer covers this since a new object is published at once.\n\n- `ObjectListViewInspector.tsx`: new `isFallbackListView(target, views)` and a `targetIsFallback` field on the hook's result. The target is the fallback when it is the default target and no key of the object's merged `listViews` (every served view item, by qualified name, via `mergeViewsIntoObjects`) nor of the package's drafted list views resolves to its id. The layered read is skipped for it when there is no draft. It is read only off an answer that can say so: the package's view drafts have answered AND `getTypeStatus('object') === 'ready'` (the registry composed with the `/meta/view` list). While loading, refetching after a publish, or under a context that reports no status, the layer is read as before. The flag is a load-effect dependency, so a view that appears once metadata lands is re-read.\n- `StudioCustomizeControls.tsx` + `StudioDesignSurface.tsx`: the other caller of the layered read for the same id, the Customize served-override read on a read-only base. `useServedOverride` takes `item.unpublished`; it still reads the pair's draft first, then answers `{ declaration: null, state: null, shipped: 'none' }` without the layered read, exactly what the 404 envelope produced.\n- Other layered-read callers checked: `authoredDraft.ts` runs only on a served draft; `ViewConfigPanel` and the runtime use real tab ids (the runtime fallback tab is `all`, not this id).\n\n## Tests\n\n- New `ObjectListViewInspector.fallbackNoLayers-36750.test.tsx` (real hook over a real `MetadataClient`, in-memory server): fallback id sends no `/layers` and reads \"not created yet\"; CONTROLS: a flagged published default still reads its layer; a view held under bare `default` unflagged still reads it; while objects are `loading` the layer is read, then not again once `ready`; a context without `getTypeStatus` reads as before; `useServedOverride` with `unpublished` skips the layered read after the pair draft read, and without it still reads.\n- `ObjectListViewInspector.layersUnsaved-11799.test.tsx`: docblock updated to say its 404 case holds because its context reports no status.\n- Both suites import `@objectstack/lint` at module top (`check:test-source-alias`).\n\n## Acceptance notes\n\n- Ablation (committed fix first, `scripts/ablation-replace.mjs`, restored to HEAD blob each time): dropping `(!draft && targetIsFallback)` from the layered-read guard turns 2 of 7 new cases red; deleting the `unpublished` early return turns 1 red.\n- Existing fixtures across the list-view suites serve a published `OBJECT.default` their object definition does not list. They use hand-rolled contexts without `getTypeStatus`, so they keep the old read; none was edited.\n- Not checked: whether the runtime ViewConfigPanel on the `all` fallback tab issues its own `/layers` 404 (different id, runtime surface).\n\n## Verification\n\n<details><summary>Local runs on 31dfa887 (fix on e4a8007f)</summary>\n\n- `vitest run` ObjectListViewInspector*, StudioDesignSurface.listView*, InterfacesPillar* : Test Files 38 passed (38), Tests 222 passed (222) (verify-lock VERDICT command-exit 0).\n- Two touched suites after the lint import: Test Files 2 passed, Tests 11 passed.\n- `pnpm --filter @object-ui/app-shell run type-check`: VERDICT command-exit 0.\n- `dispatch-gates.mjs --commands` derived 38 commands: all exit 0 (`check:test-source-alias` first failed on the two touched suites, fixed, re-run exit 0).\n- `overlap-check.mjs`: VERDICT clean (origin/main, #36774, #36781, #36784).\n\n</details>\n\nTwo-minute check: open Studio, Interfaces, pick an object that has no list view flagged default; the Network tab shows no `GET …/meta/view/OBJECT.default/layers`, and the panel shows the default view to create as before.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWBvGf6TP6P9XT1tuo)_\n"
+}

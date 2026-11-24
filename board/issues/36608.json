@@ -2,8 +2,8 @@
   "number": 36608,
   "kind": "issue",
   "title": "Lazy field widgets remember a failed first chunk load and never recover without a page reload (date/datetime/rich text editors, rich text display, filter condition cell, image crop, getLazyFieldWidget cache)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,21 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T02:36:17Z",
-  "updated_at": "2026-11-23T02:38:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T23:36:37Z",
+  "closed_at": "2026-11-23T23:35:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36608",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFamily card filed by the seat from the #36451 dev (PR #36607, which fixes the line-item grid with `GridFieldOnceLoaded`). Not claimed. Related: #36451.\n\nSuggested-grade: p2\nSuggested-domain: `domain:ui`\n\n## What happens\n\nA `React.lazy` component caches its first import promise. When the chunk load fails once (a deploy that replaced the chunk, a dropped connection), every later render reuses the rejected promise, so the widget stays broken until the page is reloaded. #36451 fixed this for the lazy line-item grid only.\n\n## Where (the whole family; each a pin)\n\n- `FieldEditWidget`: date, datetime and rich text editors\n- `richTextDisplay`\n- `FilterConditionCell`\n- the image field's crop dialog\n- `getLazyFieldWidget` in the fields package's `index.tsx`, which caches one lazy component per field type\n\nMeasured by the dev: date, markdown, filter condition and `getLazyFieldWidget('date')`. The rest are read from the code.\n\n## Ask\n\nApply #36607's approach (a once-loaded wrapper that drops a rejected import so the next render retries) to every site above, through one shared helper rather than a copy per site. A test per site pins that a first failed load followed by a successful one renders the widget without a reload.\n\n## Re-check\n\n`git grep -n \"React.lazy\\|lazy(\" ui/packages/fields/src` lists the sites; each one goes through the shared helper when this is fixed."

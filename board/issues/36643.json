@@ -13,18 +13,20 @@
   "labels": [
     "area:ux",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-23T06:58:13Z",
-  "updated_at": "2026-11-23T07:48:19Z",
+  "updated_at": "2026-11-24T02:11:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36643",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate ① · Source: fleet · item 4 of #36430, split off by seat repo:objectstack#1 when PR #36642 (items 1–3) landed. The card thread's edit outside its first surface was not made in that PR.\n\n## What\nAfter PR #36642, a board grouped by a lookup, user, master-detail or tree field draws one lane per referenced record, titled by its name. Cards are bucketed by the foreign key, and a drag writes that key. But the list's lane-field picker still offers only `select` and `radio` fields (`ui/packages/plugin-list/src/ListView.tsx`, the `laneFieldOptions` filter), so an admin cannot choose a reference field from the UI. Only a hand-written `groupBy` reaches it.\n\n## Done when\n- The lane-field picker offers single-valued lookup, user, master-detail and tree fields. A multi-valued reference is not offered.\n- A plugin-list test pins the offered types.\n- Choosing an owner field in the picker gives #36430's acceptance: one lane per owner, and a drag changes the owner.\n\nAlso noted on PR #36642 (sibling, same family): a `swimlaneField` on a reference field still stringifies to `[object Object]` (KanbanImpl). This card may take it if the fix is the same `laneKeyOf` reuse. Otherwise it gets a card of its own.\n\nreach: every admin who builds a board by owner or account from the UI.\nBusiness reason: the fix in #36642 is unreachable from the picker.\nReader: `domain:ui` (plugin-list lane picker, plugin-kanban).\nDedupe: `laneFieldOptions lookup`, `kanban lane picker user field` → none.\nGrade suggestion: p1, as item 4 of the p1 card it was split from. Triage decides."

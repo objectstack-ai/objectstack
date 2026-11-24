@@ -1,0 +1,37 @@
+{
+  "number": 36783,
+  "kind": "pull_request",
+  "title": "fix(record-page): no empty Activity stream tab when an object switches off all three of its sources",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T22:11:16Z",
+  "updated_at": "2026-11-23T23:15:43Z",
+  "closed_at": "2026-11-23T23:15:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T23:15:41Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36783",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ87Aq2qvBEo7uvnH8jmQeYKf)_\n\nFixes #36693\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 记录详情页：对象把讨论、活动、字段变更三个来源都关掉后，「动态」页签不再出现；任一来源开着，页签照旧。\n- 落实你对 36627 的裁决（选 A′）：「动态」页签跟随对象的能力开关，和「附件」跟随文件开关一样；「审批」不变。\n- 只影响默认生成的记录页，手工设计的页面照作者摆放；出错最多是页签多一个或少一个，数据不受影响，可直接撤回。\n- 无。\n\n## What changes\n\nThe default record page's 动态 (Activity stream) tab merges three sources, each switched by the object: the discussion (`enable.feeds`, opt-out), activities (`enable.activities`, opt-out) and field changes (`enable.trackHistory`, opt-in). An object with all three off still drew the tab, empty, on every record page. Ruling A′ on #36627 (the maintainer, project chat, 2026-11-23T11:57Z: 「36627 选 A′」): the stream tab follows the object's capability switches, the way Attachments follows `enable.files`.\n\n- **`@object-ui/plugin-detail`** — `buildDefaultPageSchema` / `buildDefaultTabs` (via `synthTabs`) emit no stream tab and no `record:activity` node when `feeds` and `activities` are both `false` and `trackHistory` is not `true` (new internal `streamHasSource`). The wide layout's 动态 column comes off the same page, so it goes too (`buildDefaultPageColumns` already handles an empty stream). An authored `discussion` slot still draws whatever the switches say; an authored (assigned) page is untouched. A `relatedLists` entry `'sys_activity'` does not bring the tab back: `arrangeDeclaredTabs` only places tabs that were built. A field's own `trackHistory` / `fieldHistory` are not read: they decide whether a change shows its old → new values, not whether changes show.\n- Docs: `content/docs/ui/pages.mdx` (the synthesized default) and `ui/packages/plugin-detail/README.md` say when 动态 is left out.\n- Approvals is unchanged (CONTROL): drawn only when the record has approval requests.\n\nRead first (by risk):\n1. `ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts` — `streamHasSource` and its two call sites (`synthTabs`, `buildDefaultPageSchema`'s `timeline`).\n2. `ui/packages/plugin-detail/src/synth/__tests__/buildDefaultPageSchema.test.ts` — the new describe block.\n\n## Tests\n\nHead `aecc0379`.\n\n- `pnpm --dir ui exec vitest run packages/plugin-detail/src/synth/ packages/plugin-detail/src/__tests__/RecordPageColumns packages/plugin-detail/src/__tests__/RecordTabRow packages/plugin-detail/src/__tests__/RecordTimeline` → `Test Files 27 passed (27)`, `Tests 389 passed (389)`. New: `activity stream tab follows its sources (objectstack#36693)` — all off → `['details']` and no `record:activity`; each one source on → `['details','timeline']` (one key per control); a `'sys_activity'` entry does not revive it (control: with a source on it places the tab); an authored discussion slot still draws; Approvals CONTROL; a details slot keeps the gate.\n- `pnpm --filter @object-ui/plugin-detail type-check` exit 0.\n- Head `7f15e128` (lint half dropped, comment-only change in the source): `pnpm --dir ui exec vitest run packages/plugin-detail/src/synth/` → `Test Files 17 passed (17)`, `Tests 237 passed (237)`; changeset, doc-authoring, doc-anchors, issue-citations, nul-bytes and affected-docs gates exit 0.\n\n## Acceptance notes\n\n- The card's lint warning for a `'sys_activity'` entry on such an object: dropped — new lint warning; new gates default no.\n- The console's own gate for field changes in the stream (`historyEnabled`) also needs `sys_audit_log` registered. The synthesizer reads the object alone, so an object with `trackHistory: true` on a host without the audit object still gets the tab (as today). Not changed here: the card names the object's switches.\n- The Studio \"new record page\" seed also starts from `buildDefaultPageSchema`, so for an all-off object it no longer seeds a `record:activity` block (it would have drawn nothing). An author can still place one.\n\n## Verification\n\n<details><summary>Local gate subset (29 commands from <code>dispatch-gates.mjs --commands</code>, all exit 0 at <code>aecc0379</code>)</summary>\n\nThe doc, changeset, citation, published-file, test-input and type-check-ratchet families from the derived list: `check-adr-0087-registration`, `check-changeset-no-major`, `check-empty-changeset`, `check-closing-keyword-parity`, `check-docs-section-name`, `check-issue-citations`, `check-doc-route-spelling --advisory`, `docs-audit/check-affected-docs`, `docs-audit/check-drift-comment`, lint `check:doc-formula-expressions` and `check:doc-security-posture`, `check:doc-authoring`, `check:doc-anchors`, `check:doc-frontmatter`, `check:docs-single-h1`, `check:docs-spec-enumerations`, `check:issue-citations`, `check:nul-bytes`, `check:published-readme-links`, `check:published-files`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:keyed-text-bounds`, `check:role-word`, `check:corpus-claim-drift`, `check:closed-ceremony-text`, `check:type-check-coverage`, `check:type-check-debt`, `check:changeset-gate-self-tests`. The rest of the derived list and the full farm run in CI.\n\n</details>\n\nBrowser check (showcase app, zh-CN, 1440 × 900 and 900 × 900, `showcase_contact` given `enable: { feeds: false, activities: false }` locally for the run, not committed; frames are attached in the project thread, since GitHub image upload is browser-only):\n\n1. Before (the gate forced open, same record): the right column's tabs read 发票 · 动态, and 动态 has nothing to draw.\n2. After, wide: the right column reads 发票 only; no 动态 anywhere on the page (`document.body.innerText` has no 动态).\n3. After, 900 px: the same, 发票 only.\n4. Control, `showcase_account` (sources on by default, `trackHistory: true`): 详情 · 联系人 · two lookup lists · 动态, unchanged.\n\nThe showcase's `showcase_project` has an authored record page, so it keeps what its author placed; that is the card's \"an assigned page keeps drawing what its author placed\".\n\nTwo-minute check: give `showcase_contact` `enable: { feeds: false, activities: false }`, open any contact: the right column shows 发票 and no 动态. Remove `feeds: false` and 动态 is back at the end.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZqzpvmAjPGjiWCwwS)_\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbZqzpvmAjPGjiWCwwS -->\n"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 36815,
+  "kind": "pull_request",
+  "title": "feat(plugin-grid): row menus follow the object's actionLayout.record order",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-support-ai"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T01:49:13Z",
+  "updated_at": "2026-11-24T02:15:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36815",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwBDHJBvzScLgkhKgms97sNuU)_\nrepo:objectstack#3 · os-support-ai · session_01WGufzhoBbwh8URjwQHde8v\n\nFixes #36494\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 列表里每行的「⋯」菜单和右键菜单,在对象配置了记录区动作排布时,按排布顺序列出动作(先固定,后更多,其余按原顺序);没配置的对象完全不变。\n- 属于「动作排布放在对象上,分列表和记录」那一组工作,让行菜单与记录页头部顺序一致。\n- 出错只会影响菜单里动作的先后,不影响能否执行;可直接撤回本改动。\n- 无。\n\n## What changes\n\n- New `ui/packages/plugin-grid/src/rowActionArrangement.ts`: `rankRowActionDefs(defs, arm)` (run once per grid, where the served object's `actionLayout.record` is read through `readActionLayoutArm` from `@object-ui/types`, the same reader the record header uses) replaces each def the arm names with a copy carrying its rank; `orderRowMenuActions(defs)` lists the ranked defs first by rank (pinned, then more), the rest after in their incoming order.\n- `planRowActionMenu` (`RowActionMenu.tsx`) passes its menu-bound list (primaries past the inline budget, then secondaries, as before) through `orderRowMenuActions`. Every surface that reads the plan follows: the row's \"⋮\" menu, its right-click menu (including the whole-row half of the cell right-click menu), and the list page's one-record selection-bar menu.\n- `ObjectGrid.tsx` ranks the folded row defs, memoised on the arm's content so an unchanged arm hands the menus the same defs.\n- No arm, or an arm naming none of the row's actions, returns the defs by reference: the menus are byte-for-byte today's.\n\n## Tests\n\n- `__tests__/rowActionArrangement-36494.test.ts` (pure): order with pinned + more + rest; no arm / `more` alone / unknown names answer the input by reference; repeated names; order survives a per-row filter; unranked defs are untouched.\n- `__tests__/rowContextMenu-28434.test.tsx`, new top-level describe `objectstack#36494`: through the real ObjectGrid chain, an object with a `record` arm lists both menus in the arm's order; an object without one (no layout, or only a `list` arm) lists exactly today's order in both menus.\n\n<details><summary>Readings (head 7c31bfda0)</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-grid/` under the verify lock: `Test Files 310 passed (310)`, `Tests 2750 passed (2750)`, VERDICT command-exit 0.\n- `pnpm --filter @object-ui/plugin-grid run type-check`: VERDICT command-exit 0.\n- eslint over the five touched files: 0 errors.\n- Ablation (once, the tested behaviour): `scripts/ablation-replace.mjs` replaced `orderRowMenuActions([` with an identity call in `RowActionMenu.tsx` (anchor 1 to 0, blob 8d67804e to 35f134f4); the arm pin went red (`Tests 1 failed | 19 passed (20)`); restore proved blob == HEAD and `git diff HEAD` empty. The no-arm pin stayed green, as it should.\n- `dispatch-gates --commands`: 39 derived commands, all run locally, all exit 0; `--ran` reconciliation: 39 derived, 39 run, 0 unrun.\n</details>\n\n## Acceptance notes\n\n- The inline primary button on a row stays the first declared surviving primary; the card settles the menu order only, so which primary is inline is unchanged. Built-in Edit / Delete keep their positions.\n- The grid reads the arm as served (`getObjectSchema`), which is the same registry-folded `actionLayout` the record header reads (an object extension's arm already replaced server-side). The header additionally draws an arrangement staged in design mode before it is saved; the grid does not preview a staged arrangement, it follows once saved.\n- The selection bar's one-record menu on the list page reads the same plan, so it follows the arm too (one resolver for a row's actions).\n\n## Verification\n\nRead first: `rowActionArrangement.ts` (the order), the `custom` line in `planRowActionMenu` (`RowActionMenu.tsx`), the `rankRowActionDefs` memo in `ObjectGrid.tsx`.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-grid/src/__tests__/rowContextMenu-28434.test.tsx` — expect 20 passed, including the two `objectstack#36494` cases.\n\n<!-- signed: repo:objectstack#3 · os-support-ai · session_01WGufzhoBbwh8URjwQHde8v -->\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

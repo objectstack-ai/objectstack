@@ -1,0 +1,36 @@
+{
+  "number": 36779,
+  "kind": "pull_request",
+  "title": "fix(components): avatar pictures keep their proportions instead of being stretched",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T21:49:41Z",
+  "updated_at": "2026-11-23T23:06:55Z",
+  "closed_at": "2026-11-23T23:06:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T23:06:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36779",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8Ca5yCeCT8dXDvSsj3xKvAJ)_\n\nFixes #36610\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户和组织的头像图片不是正方形时，不再被压扁或拉长塞进圆圈，而是保持原比例、裁掉多出的部分；正方形图片看起来和以前一样。\n- 属于界面体验区的缺陷修复，来自你发现的「头像被压缩变形」问题。\n- 出错的话只是头像边缘被多裁一点，不影响任何数据，可直接撤回。\n- 无。\n\n## What changes\n\nThe shared `AvatarImage` (`ui/packages/components/src/ui/avatar.tsx`) set `aspect-square h-full w-full` and no `object-fit`, so every call site that passed no class drew with the browser default `fill`, which scales each axis on its own: a 400×200 photo became a squashed oval in the circle.\n\n- `AvatarImage` now carries `object-cover` in its default classes: the picture fills the avatar, keeps its proportions and the overflow is cropped. `cn` is `twMerge`, so a caller's `object-contain` (the record-header logo path in `containers.tsx`) replaces it rather than stacking.\n- Dropped the two local `className=\"object-cover\"` patches that the default now covers: `plugin-detail/src/CommentAuthorAvatar.tsx` and `app-shell/src/console/organizations/manage/SettingsPage.tsx`.\n- The record-header picture keeps its explicit cover/contain split; untouched.\n- Changeset: `@object-ui/components`, `@object-ui/plugin-detail`, `@object-ui/app-shell` patch.\n\nNo new prop, no export change.\n\n## Tests\n\n- New `ui/packages/components/src/__tests__/avatar-image-object-fit-36610.test.tsx` (images reported as loaded so Radix draws the `img`): no class ⇒ `object-cover`; `object-contain` passed ⇒ `object-contain` and no `object-cover`; an unrelated class keeps the default.\n- Reverse verification (fix committed first, the default class removed on disk, test run, restored from `HEAD`, blob hash equal to `HEAD`'s): the two default-class tests fail without the fix, the `object-contain` pin passes both ways, as it should.\n- `snapshot-critical.test.tsx` (Avatar snapshots) and `page-header-record-picture-11383.test.tsx` (the cover/contain record picture) pass unchanged: 3 files, 36 tests.\n\n## Acceptance notes\n\n- Not re-shot in the running console: the before/after frame below renders the real `Avatar`/`AvatarImage` from this branch's source with Tailwind compiled from it, next to the pre-fix class string, in Chromium. The card's live re-check (account menu, members page, user field) is the two-minute check below.\n- Out of scope, as the card says: a square-crop step on avatar upload.\n\n## Verification\n\nChromium, a 400×200 picture in avatars of 20, 32, 40 and 64 px, plus a 64 px rounded square passing `object-contain`. Computed `object-fit` read from each `img`: before `fill` ×4 and `contain` ×1; after `cover` ×4 and `contain` ×1. Before, the face is a vertical oval in every circle; after, it is round and the sides are cropped. The `object-contain` logo is identical before and after. (Frame attached in the project thread; GitHub's image store takes browser uploads only.)\n\nRead first:\n1. `ui/packages/components/src/ui/avatar.tsx`: the one default-class change.\n2. `ui/packages/components/src/__tests__/avatar-image-object-fit-36610.test.tsx`: the override pin.\n\nTwo-minute check: set a non-square picture (e.g. 400×200) as your user image and open the account menu: the face keeps its proportions, cropped to the circle.\n\n<details><summary>Local gate subset at `3c517477`: 40 of 40 exit 0; overlap-check clean</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 40 commands; each ran and exited 0 (exit codes captured before any pipe). Reconciliation: `✓ dispatch-gates --ran: 40 derived famil(ies) accounted for — 40 run, 0 NOT-MEASURED (a DERIVED zero — all 40 recorded an exit code and none of them is 3)`.\n- `pnpm --filter @object-ui/components type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): `VERDICT command-exit 0`.\n- `node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0` against `origin/main` e0f0e9f7 and 0 open PR heads sharing a file.\n- Every other family is CI's: read from this PR's check-runs (at `3c517477`: 45 success, 13 skipped, 0 failed), not re-run locally.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbXL1U2QTTXJYXT8afA)_\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbXL1U2QTTXJYXT8afA -->\n"
+}

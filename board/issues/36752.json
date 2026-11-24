@@ -2,8 +2,8 @@
   "number": 36752,
   "kind": "issue",
   "title": "CodeQL: run the security suite instead of security-and-quality, keep test files out, and record a reason on every dismissal, so the 929 open alerts become a list someone can work",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:fleet",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-23T15:40:38Z",
-  "updated_at": "2026-11-23T16:58:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T21:52:09Z",
+  "closed_at": "2026-11-23T21:48:27Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36752",
   "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\nFiling gate: ③ a task the maintainer dispatched · Source: maintainer — in the director session on 2026-11-23, after an evaluation of https://github.com/objectstack-ai/objectstack/security, the maintainer answered 「File the cards」 and then 「Go ahead」 on the plan that named this card.\n\nReader: the `domain:devx` seat (`.github/workflows/codeql.yml` and a new `.github/codeql/codeql-config.yml`, its path face).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue codeql in:title` → 2, both closed: #25771 (CI schedules) and #2681 (one regex fix). `\"code scanning\" in:title` → 0. None changes the scanning configuration.\n\nGrade: p2 · area:fleet · Task · the alert list is too noisy to read, so a real security alert stays open beside hundreds of unused variables.\n\n## 维护者速读\n\n- 要做的：调整 CodeQL 配置，让代码扫描页只留值得看的告警。\n- 为什么：现在开着 929 条，其中 241 条是「未使用的变量」这类代码质量提示，测试文件里也有一大批。真正的安全告警被淹没了。从来没人「忽略」过告警，判过的下次还会出现。\n- 不做会怎样：真正的安全问题没人看得见。\n- 风险：只改扫描配置，不改产品代码；不会少扫产品代码。\n\n## Readings (2026-11-23)\n\n- `.github/workflows/codeql.yml` runs daily (`0 2 * * *`) with `queries: security-and-quality`, language `javascript`. Default setup is `not-configured`, so this workflow is the only scan.\n- Open alerts: 929 (fixed so far 1012, dismissed 0).\n  - By level: high 436, note 249, warning 166, medium 71, error 5, critical 2.\n  - Top rules: `js/unused-local-variable` 241, `js/incomplete-sanitization` 115, `js/file-system-race` 86, `js/polynomial-redos` 73, `js/trivial-conditional` 65.\n- High or critical by path: 311 in tests, scripts or examples, 127 in product code.\n\n## What to change\n\n1. **Query suite:** `security-extended` instead of `security-and-quality`. Code-quality rules (`js/unused-local-variable`, `js/trivial-conditional`, …) leave the security tab; lint already owns them.\n2. **Paths:** a `config-file` with `paths-ignore` for test files only (`**/__tests__/**`, `**/*.test.*`, `**/*.spec.*`, test fixtures).\n   - ⛔ Keep `scripts/**` scanned: the fleet scripts read untrusted text (PR bodies, comments), so a regex or injection alert there can be real.\n3. **Dismissals:** dismiss a false positive with its reason (`false positive` / `used in tests` / `won't fix` plus one line) instead of leaving it open. Write the rule for this in the devx lane's notes, or wherever the seat keeps CI conventions.\n4. **Security alerts in product code are not this card's work.** The security seat triages them from the code-scanning tab under its charter. This card names no alert, path or rule beyond the counts above, and the PR must not either.\n5. **Fixture secrets:** a few test and doc files carry key-shaped strings (`sk_live_…`-style). Make them unmistakably fake, or list them, so the maintainer can turn on secret-scanning push protection without blocking lane pushes.\n\n## Done when\n\n- The workflow runs the new suite and config on `main`.\n- The open count drops by the quality rules and test-path alerts, with no product-path security alert closed by the config change. Read before and after, by rule.\n- The dismissal rule is written down."

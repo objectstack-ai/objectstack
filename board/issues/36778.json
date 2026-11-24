@@ -1,0 +1,36 @@
+{
+  "number": 36778,
+  "kind": "pull_request",
+  "title": "fix(auth): SSO sign-in keeps the safe pre-login redirect",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T21:45:34Z",
+  "updated_at": "2026-11-23T22:29:22Z",
+  "closed_at": "2026-11-23T22:29:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T22:29:19Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36778",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8VwKpuGTiLu4nqkGWLoyEMK)_\n\nFixes #36754\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 未登录的人打开一条记录链接，用工作邮箱走 SSO 登录后，现在回到那条记录；以前落到上次用的应用。\n- 补齐登录体验：密码登录和第三方账号按钮早就会带人回原链接，只有邮箱 SSO 漏了。\n- 只认本站内的链接，外站地址一律丢弃、照常落到默认应用；出错最多是落回默认应用，可直接撤回。\n- 无。\n\n## What changes\n\n`LoginForm`'s \"Sign in with SSO\" (email-domain SSO, `POST /api/v1/auth/sign-in/sso`) built its `callbackURL` from the console base plus a fixed `/`, so the `?redirect=` the sign-in page carries was lost. It now:\n\n- with a **safe** `?redirect=` on the sign-in page, sends `callbackURL` = the sign-in page's own path with only that redirect (`/login?redirect=ENCODED`, or `/_console/login?redirect=ENCODED` under a mount). The identity provider returns the browser to the sign-in page, which finishes sign-in its own way (org auto-select, the mobile hand-off, the OAuth-provider replay) and then lands on the link through its own `isSafeRedirect`. This is the same return the provider buttons (`SocialSignInButtons`, default callback = the current page) and direct sign-in (`directSignInStartUrl`) already use;\n- with **no** redirect or an **unsafe** one, keeps `callbackURL` = base + `/` exactly as before (#36732).\n\n\"Safe\" is the console `LoginPage`'s own rule, byte for byte: starts with `/` and not `//`. It is not loosened, and the console page applies it again on the final hop. The predicate stays module-private (no new export). Only `redirect` travels, never the rest of the query (a previous attempt's `error` would otherwise come back with a successful sign-in).\n\nWhy back to the sign-in page rather than straight to `base + redirect`: the mobile hand-off rules (`handoffRedirect.ts`, rule 2) say the hand-off route is never handed to a provider as its `callbackURL`; going through the sign-in page keeps that, and keeps the org auto-select step a direct landing would skip.\n\n## Tests\n\nNew `ui/packages/auth/src/__tests__/ssoCallbackRedirect-36754.test.tsx` (8 tests) drives the real form: sets the page URL, presses \"Sign in with SSO\", reads the request body.\n\n- safe redirect at `/login` returns to `/login?redirect=ENCODED`, and the redirect decodes back to the record path;\n- under `/_console/login` with `error` / `error_description` beside it: returns to `/_console/login?redirect=ENCODED`, nothing else carried;\n- dropped, callback `/`: absolute URL, protocol-relative `//host`, a non-root-relative path, an empty value;\n- unsafe redirect under the mount: callback `/_console/`;\n- CONTROL: no redirect gives `/` and `/_console/`, as before.\n\n<details><summary>Readings (head dcd0d78e)</summary>\n\n- `pnpm exec vitest run packages/auth/src/__tests__/ssoCallbackRedirect-36754.test.tsx packages/auth/src/__tests__/LoginForm.test.tsx` (from `ui/`): Test Files 2 passed (2), Tests 46 passed (46).\n- `pnpm --filter @object-ui/auth type-check` then `pnpm exec vitest run packages/auth/`: exit 0, Test Files 49 passed (49), Tests 502 passed (502).\n- Ablation (fix committed first, `LoginForm.tsx` taken from `origin/main`, `ssoCallbackURL` count 0 on disk): the two carry tests turn red (`2 failed | 6 passed (8)`); the drop and control tests stay green, as expected, since main always drops. Restored with `git checkout HEAD --`, blob hash equal to HEAD's (`eaba863d`).\n- Local gates: `check-changeset-no-major`, `check-empty-changeset`, `check-adr-0087-registration` (all `--base origin/main`), `check:nul-bytes`, `check-sdui-manifest`: exit 0. `overlap-check`: VERDICT clean. Every other derived family is left to this PR's CI.\n\n</details>\n\n## Acceptance notes\n\n- **Browser check: NOT MEASURED, no SSO provider locally.** Email-domain SSO needs a registered identity provider (`@better-auth/sso`), which a local dev stack does not have, so the browser leg is pinned by the test above, as the card allows.\n- better-auth accepts the new callback: its relative-path check (`isSafeRelativeURL`, better-auth 1.7.12) refuses protocol-relative values and encoded separators in the path; the redirect rides the query, percent-encoded by `encodeURIComponent`.\n- The package's other sign-in page, app-shell's exported `DefaultLoginPage`, has no in-repo user and does not honour `?redirect=` for any sign-in (its password success navigates to `/`). Through it, SSO now returns to that page like its provider buttons already do. Noted, not changed.\n\n## Verification\n\nRead first: `ui/packages/auth/src/LoginForm.tsx` `ssoCallbackURL` (the only behaviour change), then the new test file.\n\nTwo-minute check: from `ui/`, `pnpm exec vitest run packages/auth/src/__tests__/ssoCallbackRedirect-36754.test.tsx`: expect 8 passed.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbWcpizQKnJmTb6cTpa)_\n"
+}

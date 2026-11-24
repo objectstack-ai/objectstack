@@ -1,0 +1,37 @@
+{
+  "number": 36800,
+  "kind": "pull_request",
+  "title": "docs(skills): seeds.md says a seeded roll-up value is never stored, not stored as written",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-alice"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T00:28:58Z",
+  "updated_at": "2026-11-24T01:19:25Z",
+  "closed_at": "2026-11-24T01:19:22Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-24T01:19:22Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36800",
+  "body": "Fixes #36122\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用数据技能写演示数据的 AI 作者,读到的说明从「写进汇总字段的数会原样存下」改成「不会存、加载时提醒一次、由子记录算出」。\n- 为什么做:平台行为已在上周改掉(种子数据不再存汇总值),技能里的理由成了错话,这次让文字跟上已发布的行为。\n- 出错会怎样:只改一句说明和一条评测期望;写错了作者会学到错的模型,撤回这次合并即可恢复原文。\n- 要你做什么:无\n\n## What changes\n\n- `skills/objectstack-data/references/seeds.md` (the validation-rules paragraph): the rule \"Never seed the roll-up\" and the record-order point stay. Only the consequence changes, from \"a seeded `amount_paid` is stored as written, and a cap on payments refuses those it counts\" to \"a seeded `amount_paid` is never stored (a warning per dataset); the child rows compute it.\"\n- `skills/objectstack-data/evals/hooks-security-seeds-datasources.json`, case id 32: `expected_output` now says the seed loader never stores a supplied `amount_paid` and logs one warning per dataset naming the fields. It adds a \"does not say a seeded `amount_paid` is stored or makes the rule refuse the payments\" line. `prompt`, `must_contain` and `must_not_contain` (`amount_paid: 4800`, `amount_paid: 2000`) are unchanged, so the case still requires invoice rows with no roll-up value.\n- `.changeset/36122-seeds-rollup-never-stored.md`: `patch` on `@objectstack/skills`, as earlier skills-text changes carry.\n\nShipped behaviour the sentence states, read at `packages/metadata-protocol/src/seed-loader.ts` on `origin/main` bbc7e037f3:\n\n- lines 794-801 (`summaryFieldNames`): only fields with `type === 'summary'` are taken out, every aggregate, `readonly` or not. Formula and autonumber fields have no such path in the loader.\n- lines 2304-2311: the value is deleted from the record copy before the replay compare and before the engine write, so no validation rule ever sees it.\n- lines 3268-3277: one `logger.warn` per dataset, naming the object, the fields and the count of values not written.\n\nRead first: the one changed sentence in `seeds.md`, then eval case 32.\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs` prints `skills/objectstack-data/references/seeds.md is 1898 tokens (ceiling 1898; headroom 0)` and exits 0.\n\n## Skill size readings\n\nHead a2b90f7fb0 against `origin/main` bbc7e037f3.\n\n| Reading | Before | After |\n|:---|---:|---:|\n| `seeds.md` lines | 190 | 190 |\n| `seeds.md` bytes | 7590 | 7589 |\n| `seeds.md` tokens (ceiling 1898) | 1898 | 1898 |\n| eval file lines | 361 | 361 |\n| all `SKILL.md` lines, whole catalog | 4947 | 4947 |\n| ratcheted authored tokens, whole catalog (ceiling 202541) | 197570 | 197570 |\n\nNo ceiling moves and `scripts/check-skills-token-ratchet.mjs` is not edited.\n\n## Tests\n\nText only: no code or tested behaviour changes, so there is no package test to run and no ablation. The eval file parses as JSON.\n\n## Acceptance notes\n\n- Other evals in the data skill that mention seeding a roll-up: none. A search of `skills/objectstack-data/evals/` for seed cases naming a roll-up, a summary field or `amount_paid` hits case 32 only. The two `task_count` summary cases in the same file (ids near lines 257 and 267) are about read access, not seeding.\n- The first wording was one byte over the old sentence; the second commit trims it to one byte under.\n- The branch carries one merge of `origin/main` (22 commits, none touching these files).\n\n## Verification\n\nLocal run of the 49 commands `node scripts/pm/dispatch-gates.mjs --commands` derives for this diff, on head a2b90f7fb0: 44 exit 0, 5 exit 3. `--ran` reconciliation: 49 derived, 49 run, 0 unrun.\n\nExit 0 on the families that read these files: `check-skills-token-ratchet` (and its self-test), spec `check:skill-refs`, spec `check:skill-served-sections`, `check:skill-links`, `check:skill-identifier-liveness`, `check:skill-compatibility`, `check:skill-frame-sync`, `check:doc-authoring`, `check:nul-bytes`, `check:pm-skill-id-lint`, `check:published-files`, `check-empty-changeset`, `check-changeset-no-major`, `check-adr-0087-registration`.\n\nNOT MEASURED locally (exit 3, each asks for a build this text-only diff does not owe; CI runs them): lint `check:doc-formula-expressions`, `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`.\n\n`node scripts/pm/overlap-check.mjs`: `VERDICT clean exit 0` against `origin/main` bbc7e037f3.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_011y7As6FyXmJyGyHNKXUkV7)_\n"
+}

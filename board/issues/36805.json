@@ -1,0 +1,31 @@
+{
+  "number": 36805,
+  "kind": "issue",
+  "title": "fleet-write: the relay can set an unpublished advisory's severity",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T01:18:30Z",
+  "updated_at": "2026-11-24T01:21:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36805",
+  "body": "security#1 · os-mickey · session_01ASNY8XNef4ywkQio6S9ju4\n\nFiling class ③ (a task the maintainer dispatched directly) · Source: maintainer\n\n## Need\n\nThe relay (`scripts/pm/fleet-write`) can create, read, list, note, rewrite, version and move the state of a repository security advisory. It cannot set an advisory's **severity**. `ADVISORY_REWRITE_FIELDS` is `summary` and `description` only, and `advisory_report`'s optional `severity` applies to a new report only.\n\nA seat that grades an advisory, or takes a hand-over graded differently from the field, cannot make the field agree. That matters because:\n- the field is what the publish-or-not list is ordered by;\n- the field is what a published advisory shows the public.\n\nToday the only route is the maintainer editing each advisory by hand in the GitHub UI. A seat's direct `PATCH …/security-advisories/{ghsa_id}` from the session is refused by the session proxy (HTTP 403, measured 2026-11-24 by security#1). That refusal is correct, because advisory writes belong to the relay.\n\nThe maintainer's word, in the security#1 session, verbatim:\n- 2026-11-24: 「级别也你修改」;\n- after the seat reported that no relay row sets severity: 「先立卡处理，支持车队改级别」.\n\n## Rule to deliver\n\nA new relay row, say `advisory_severity`, sets the `severity` of an advisory that is not published, through the same stroke-scoped `repository-advisories` token the other advisory rows use.\n\n- **Inputs:** `ghsa_id`, plus `severity` from a closed enum: `low | medium | high | critical`.\n  - Whether to also take `cvss_vector_string` (and how the platform treats severity when a vector is set) is the dev's to measure against the REST description and state.\n  - No free text, so nothing needs sealing. The row carries no prose.\n- **Refusals:** refuse a published advisory. Refuse a value outside the enum by name, never echoing anything else.\n- **Read-back:**\n  - the executor confirms the stored `severity` from the PATCH answer;\n  - the seat side confirms it through the existing sealed `advisory_list` field `severity`;\n  - nothing else of the advisory leaves the run.\n- **Pins:** the op table's closed-shape tests, a validator refusal per bad input, and the executor's read-back. Follow the pattern of `advisory_state` and `advisory_versions`.\n- **Docs:** the lane charter's write list (`references/lanes/security.md`, `security-findings.md` §3) gains the row only if the dev's PR is on that surface; otherwise a one-line pointer in the relay's header is enough. A skills-surface edit is its own governed PR.\n\n## Readers\n\n- Who builds it: the lane triage routes this to. The precedent relay-row card #36662 (closed) carried `domain:devx`; triage decides.\n- Who uses it: the security seats (`security#1`, `security#2`). Each one sets the field the moment its grading or the maintainer's word differs from it.\n\n## Dedupe\n\nIssue search on `repo:objectstack-ai/objectstack is:issue`, open and closed:\n- `advisory_severity`: 0 hits;\n- `advisory severity relay`: 128 hits, none about setting severity. The nearest are #29410 (closed, `advisory_create`), #31368 (closed, `advisory_list`) and #36662 (closed, `advisory_rewrite`), each a different row.\n\nGrading: p2. A wrong severity misorders the publish list and would publish a wrong grade. The maintainer's UI is a working route meanwhile."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 36775,
+  "kind": "pull_request",
+  "title": "docs(skills): the data skill teaches field-change values as on by default",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T21:01:05Z",
+  "updated_at": "2026-11-23T22:21:08Z",
+  "closed_at": "2026-11-23T22:21:06Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-23T22:21:06Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36775",
+  "body": "Fixes #36419\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用 AI 建数据模型的人,AI 不再把“字段改动前后的值”当成要手动打开的功能;它现在知道这项默认就开,并知道在对象或单个字段上怎么关。\n- 为什么做:平台已把字段变更值改成默认显示(“字段变更值默认显示”那项改动),对外发布的数据建模技能还在教旧说法,这次补齐。\n- 出错会怎样:最坏是 AI 多写或少写一个历史开关;只改技能文字,不动任何运行逻辑,撤回本次合并即可恢复。\n- 要你做什么:这是对外发布的技能文字,需要你审过后亲手合并。\n\n## What changes\n\n`skills/objectstack-data/SKILL.md`, section \"Object Capabilities (`enable`)\" — the only place in `skills/objectstack-data/**` that taught field history as opt-in (`trackHistory`, default `false`, \"Field-level audit trail\").\n\n- New `fieldHistory` row (default: on). A changed field's old → new values show on the activity timeline, served per the reader's field read rule. `false` turns them off for the object. A field opts out with its own `fieldHistory: false`; a media or structured field (`json`, `address`, `code` and the like) shows values only with `true`; a credential never. `sys_audit_log` keeps its own grant.\n- `trackHistory` row rewritten to what the flag still does: the ledger view on the record page and the `history` API verb, and that it is not the values switch.\n- Card item 2 said the ledger is \"admin only\". The dispatch order corrects that reading (a read-only viewer's wildcard grant reads the ledger object too), so the row says the ledger keeps its own grant and names no audience.\n- Card item 1 as corrected by the card's own correction comment: the per-field off switch is `fieldHistory: false`, not `trackHistory: false`.\n- `references/examples-objects.md` keeps `enable.trackHistory: true`: it is still valid (the ledger view) and is not an opt-in claim about values.\n\nPaid for in the same file (token ratchet, ceiling not moved):\n\n- `aiReadable` row cut to what an app author needs: platform objects only, refused at parse on an app object, `false` included. The list of verbs and the two excluded platform objects are dropped; an app object can never declare the key.\n- Restating phrases shortened: the `feeds` and `activities` rows (\"opt-out: explicit\" beside a `true` default), `sharingModel` (\"absence is not a decision\" after \"refused\"), `nameField` (\"Canonical\"), `fieldGroups`, `label`, `files`, `datasource`, the `lifecycle` default cell, \"not by habit\", \"not silently dropped\" after \"refused\", and the mirror-maintenance sentence.\n\nSkill size, the two readings:\n\n| Reading | Before | After |\n|:--|:--|:--|\n| `skills/objectstack-data/SKILL.md` lines | 471 | 471 |\n| `skills/objectstack-data/SKILL.md` tokens (ratchet's count) | 6706 | 6709 (ceiling 6710) |\n| All `skills/*/SKILL.md` lines | 4947 | 4947 |\n| All `skills/*/SKILL.md` tokens (sum of the ratchet's rows) | 65222 | 65225 |\n\nRead first, by risk:\n\n1. `skills/objectstack-data/SKILL.md`, the `fieldHistory` and `trackHistory` rows: every clause against `packages/spec/src/data/field-history-default.ts` (`resolveFieldHistory`) and the `enable.fieldHistory` / field `fieldHistory` descriptions in `packages/spec/src/data/object.zod.ts` and `field.zod.ts`.\n2. The same file, the `aiReadable` row: confirm the dropped detail is not needed by an app author.\n3. `.changeset/36419-skills-field-history-default.md`.\n\nTwo-minute check: `node scripts/check-skills-token-ratchet.mjs` prints `skills/objectstack-data/SKILL.md is 6709 tokens (ceiling 6710; headroom 1)` and exits 0; `git grep -n trackHistory -- skills/objectstack-data` shows the rewritten row, the quick-start example, and one eval `must_not_contain` entry.\n\n## Tests\n\nWording-only diff on a published skill; no behaviour under test changed, so no ablation. All readings on head `710841dae1`.\n\n<details>\n<summary>Local gates: the 50 commands `dispatch-gates --commands` derives</summary>\n\n`dispatch-gates --ran`: `50 derived famil(ies) accounted for — 46 run, 4 NOT-MEASURED (4 DERIVED from a recorded exit 3)`.\n\n46 exited 0, among them `node scripts/check-skills-token-ratchet.mjs`, `pnpm check:skill-links`, `pnpm check:skill-identifier-liveness`, `pnpm check:skill-frame-sync`, `pnpm check:skill-compatibility`, `pnpm check:pm-skill-id-lint`, `pnpm check:corpus-claim-drift`, `pnpm check:doc-authoring`, `pnpm check:role-word`, `pnpm check:nul-bytes`, `pnpm check:published-files`, `pnpm --filter @objectstack/spec run check:skill-docs`, `pnpm --filter @objectstack/spec run check:skill-served-sections`, `pnpm --filter @objectstack/lint run check:doc-formula-expressions`, `node scripts/check-changeset-no-major.mjs --base origin/main`, `node scripts/check-empty-changeset.mjs --base origin/main`, `node scripts/check-adr-0087-registration.mjs --base origin/main`.\n\nNOT MEASURED locally (exit 3, PREREQUISITE NOT MET: they read every package's `dist/`, and only `@objectstack/spec` and the `@objectstack/lint` closure were built): `pnpm check:dts-closure`, `pnpm check:dual-build-cjs-loads`, `pnpm check:lean-entry-closure`, `pnpm check:sourcemap-no-sources-content`. The diff touches no package source; CI's reading is the evidence.\n\nOutside the derived list, also run: `pnpm check:skill-top-level-keys`, exit 0.\n\n</details>\n\n## Acceptance notes\n\n- Acceptance \"no sentence in `skills/objectstack-data/**` describes field history as opt-in\": `git grep -n -i -E 'trackHistory|fieldHistory' -- skills/objectstack-data` now returns the two rewritten rows, the quick-start example's `enable.trackHistory: true` (ledger view, valid) and one eval `must_not_contain` entry. No other file in the skill states a history default.\n- The skill evals were not edited; no eval asserts the old row.\n- Noted, not fixed here: two refusal texts in `packages/spec/src/data/object.zod.ts` (the retired `enable.trash` and `versioning` keys) still send an author to per-field `trackHistory` \"for field-level history\". On a field whose values already show, that flag changes nothing.\n\n## Verification\n\n- Premise re-read on `origin/main` `70f454a23c` before the edit: the old row was at `skills/objectstack-data/SKILL.md:110`; the contract is `enable.fieldHistory` (absent: values show; `false`: off for the object) plus the field's own `fieldHistory`.\n- CI families are read from this PR's check runs; none re-run locally beyond the list above.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZeHNsF3RWcWpj7rGj)_\n"
+}

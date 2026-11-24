@@ -1,0 +1,33 @@
+{
+  "number": 36780,
+  "kind": "issue",
+  "title": "维护者读数：CodeQL 新配置首次运行后，对比开放告警数（#36752 收尾）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:awaiting-maintainer",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-23T21:50:36Z",
+  "updated_at": "2026-11-23T22:33:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/36780",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nMaintainer-action: after the first CodeQL run on main with the config from #36762 (the daily 02:00Z run on 2026-11-24, or a manual run of the CodeQL workflow), read the repository's code-scanning open alert count, by rule, and compare it with the count before (929 open, 1012 fixed, 0 dismissed, recorded on #36752). No seat account can read the code-scanning alert API (it answers 403).\nDone-when: the open count dropped by the quality rules and the test-path alerts, and no product-path security alert was closed by the config change. Post the two counts (before, after) on this card; no alert, path or rule names.\n\nParent: objectstack-ai/objectstack#36752 (Part of).\n\n## 维护者速读\n\n- 要做的：等新的 CodeQL 配置第一次跑完（明天 02:00Z 的每日运行，或手动跑一次），到仓库的「Security → Code scanning」看开放告警数，和之前的 929 比。\n- 为什么：配置改动（#36762）已合并，只扫安全类规则、不扫代码质量类和测试目录。我们的账号读不到告警接口，只有你能看。\n- 怎么算完：开放告警数下降，降掉的是质量类规则和测试目录的告警，产品代码里的安全告警一条都没被这次改动关掉。在这张卡上回两个数字就行，不要写具体告警。"
+}

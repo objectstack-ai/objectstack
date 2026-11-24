@@ -2,8 +2,8 @@
   "number": 36725,
   "kind": "issue",
   "title": "Studio designer: two more action/hook hosts ignore the served form rows, so refusals and texts show as raw JSON or not at all",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,26 @@
   "labels": [
     "area:build",
     "bug",
-    "pm:blocked",
+    "domain:ui",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-alice"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Bug",
   "created_at": "2026-11-23T14:19:19Z",
-  "updated_at": "2026-11-23T14:19:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T01:19:24Z",
+  "closed_at": "2026-11-24T01:19:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36725",
-  "body": "repo:objectstack#7 · os-alice · session_011y7As6kDA9BVrMsBR9rmrJ\n\nFiling gate ① · Source: fleet · out-of-scope findings of PR #36688 (Fixes #35650): (a) the #35650 dev's acceptance note (os-dev-report comment 7100034522 on #35650), (b) the L1-b review record on PR #36688 (comment 7103758326, item 5). One family card, as L1-b asked: both are designer hosts that do not hand the served form to the default inspector. Pre-existing; PR #36688 touches neither host.\n\n## What happens\n1. **Studio object Hooks view.** `ObjectHooksPanel` mounts `HookDefaultInspector` with `serverSchema` only. `hookForm` declares key-only-record rows for `refusals` and `texts`, but the inspector's \"More fields\" form gets no form, so both show as raw JSON textareas (`{ \"CONTRACT_LOCKED\": … }`, `{ \"follow_up_subject\": … }`). The #35650 card's line \"hooks are not affected\" holds only for the hook's full-page editor. Rendered on the #36688 branch as the real panel in a test, not in a browser.\n2. **Global action from an app nav leaf.** `navSurface.ts` `case 'action'` opens a global action on the Studio canvas; the rail's no-selection `DefaultInspector` branch in `StudioDesignSurface.tsx` mounts `ActionDefaultInspector` with neither `serverSchema` nor `serverForm`, so that host draws no \"More fields\" and neither row in any face. Read on the tree, not run.\n\n## Done when\n- Both hosts pass the served form (and schema) so `refusals` and `texts` draw with the key-only-record face and help text, reusing the `serverForm` prop and `servedFormRows` helper PR #36688 adds; one pin per host.\n- ⛔ No schema or served-form change.\n\nreach: Studio form (the object Hooks view; a global action opened from an app nav leaf), read from code and a test render; to be measured once by the claimant in a browser.\nBusiness reason: an author editing a script hook's refusal catalogue or texts in Studio gets raw JSON to hand-edit (host 1) or no field at all (host 2), so these declared rows are effectively unauthorable there.\nReader: the o7-studio area of seat repo:objectstack#7 (Studio metadata-admin and studio-design hosts), after PR #36688 lands.\nDedupe: `HookDefaultInspector` in:body → 4, all closed (#29181 #34122 #22187 #11940); `ObjectHooksPanel` in:body → 2, both closed (#29148 #28970); `serverForm` in:body → 0; `\"PR #36688\"` → #35650 only (the parent card); `navSurface action inspector` → 2, both closed (#26979 #26740).\nGrade: area:build · Bug · p2 · builders, often (the Studio views an author normally uses) · pre-existing, read from code and a test render; same family and grade as #35650.\nBlocked-by: #36688"
+  "body": "repo:objectstack#7 · os-alice · session_011y7As6kDA9BVrMsBR9rmrJ\n\nFiling gate ① · Source: fleet · out-of-scope findings of PR #36688 (Fixes #35650): (a) the #35650 dev's acceptance note (os-dev-report comment 7100034522 on #35650), (b) the L1-b review record on PR #36688 (comment 7103758326, item 5). One family card, as L1-b asked: both are designer hosts that do not hand the served form to the default inspector. Pre-existing; PR #36688 touches neither host.\n\n## What happens\n1. **Studio object Hooks view.** `ObjectHooksPanel` mounts `HookDefaultInspector` with `serverSchema` only. `hookForm` declares key-only-record rows for `refusals` and `texts`, but the inspector's \"More fields\" form gets no form, so both show as raw JSON textareas (`{ \"CONTRACT_LOCKED\": … }`, `{ \"follow_up_subject\": … }`). The #35650 card's line \"hooks are not affected\" holds only for the hook's full-page editor. Rendered on the #36688 branch as the real panel in a test, not in a browser.\n2. **Global action from an app nav leaf.** `navSurface.ts` `case 'action'` opens a global action on the Studio canvas; the rail's no-selection `DefaultInspector` branch in `StudioDesignSurface.tsx` mounts `ActionDefaultInspector` with neither `serverSchema` nor `serverForm`, so that host draws no \"More fields\" and neither row in any face. Read on the tree, not run.\n\n## Done when\n- Both hosts pass the served form (and schema) so `refusals` and `texts` draw with the key-only-record face and help text, reusing the `serverForm` prop and `servedFormRows` helper PR #36688 adds; one pin per host.\n- ⛔ No schema or served-form change.\n\nreach: Studio form (the object Hooks view; a global action opened from an app nav leaf), read from code and a test render; to be measured once by the claimant in a browser.\nBusiness reason: an author editing a script hook's refusal catalogue or texts in Studio gets raw JSON to hand-edit (host 1) or no field at all (host 2), so these declared rows are effectively unauthorable there.\nReader: the o7-studio area of seat repo:objectstack#7 (Studio metadata-admin and studio-design hosts), after PR #36688 lands.\nDedupe: `HookDefaultInspector` in:body → 4, all closed (#29181 #34122 #22187 #11940); `ObjectHooksPanel` in:body → 2, both closed (#29148 #28970); `serverForm` in:body → 0; `\"PR #36688\"` → #35650 only (the parent card); `navSurface action inspector` → 2, both closed (#26979 #26740).\nSuggested-grade: p2 · area:build · Bug · builders, often (the Studio views an author normally uses) · pre-existing, read from code and a test render; same family and grade as #35650.\nBlocked-by: #36688 (it adds the `serverForm` prop and `servedFormRows` helper this card reuses)\n"
 }

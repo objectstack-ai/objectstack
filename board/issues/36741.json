@@ -2,8 +2,8 @@
   "number": 36741,
   "kind": "issue",
   "title": "电脑端点铃铛进整页收件箱：左边列表、右边直接处理，取代右侧面板（#36107 子卡）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-23T15:25:15Z",
-  "updated_at": "2026-11-23T15:44:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T00:36:52Z",
+  "closed_at": "2026-11-24T00:35:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36741",
   "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nChild of epic #36107. Maintainer's ruling 2026-11-23 15:22Z, decision card 「整页收件箱取代右侧面板」.\n\n## 维护者原话 / 裁定\n- 2026-11-23 14:30Z「左侧栏的通知点击之后目前是右侧打开，是否建议全屏打开，并优化效果」\n- 14:31Z「画一个设计图给我看。」→ 效果图 https://claude.ai/artifact/EewYeVx9CahdoZtFJoRgeG（两张：审批页签、通知页签）\n- 15:22Z 选择卡选项 0「整页收件箱取代右侧面板」：点铃铛进整页，左边列表、右边内容，三个页签；电脑端不再有右侧面板，手机不动。\n\n## 现状（主干 e343ab7c，读代码，没在浏览器实测）\n- 铃铛（#36112 之后在侧栏搜索框右边）打开的是 `ui/packages/app-shell/src/layout/InboxPopover.tsx`：Sheet 从右侧展开，宽 440，有通知、审批、动态三个页签，每个页签最多 20 条。待审批置顶，可以直接处理（#34589，维护者 11-17 的要求）。\n- 底部的「查看全部通知」「查看全部动态」跳到 sys_inbox_message、sys_activity 两个对象的普通列表；审批有自己的整页 `/apps/<app>/system/approvals`。\n- 通知按 (topic, title) 合并（`inboxGrouping.ts`）；角标 = 未读话题数 + 待审批数。\n\n## 要做的（照效果图）\n1. 电脑端（768 px 起）点铃铛进整页收件箱，地址是固定的（席位定），可以收藏，也能用浏览器后退。页面放在当前应用的外壳里，侧栏不变。\n2. 顶部：标题「收件箱」，通知 / 审批 / 动态三个页签带数字，右边是「只看未读」（审批页签里是「只看待我处理」）和「全部标为已读」。\n3. 左栏是列表：每条标出来自哪个应用、类型、时间、标题、摘要；未读有圆点；重复的通知照现在的规则合并。通知页签最上面一条「需要你处理：N 条待审批」，点了切到审批页签。\n4. 右栏是选中那一条的内容：\n   - 审批：关键字段、审批进度、申请人说明、意见框、通过 / 驳回（沿用现有的审批动作和禁用规则），还有「打开记录」。处理完自动选下一条。\n   - 通知：对应记录的摘要和触发这条通知的内容（比如评论里提到你，就能直接回复），还有「打开完整记录」「标为未读」。看过自动标已读。\n   - 动态：对应记录的摘要。\n5. J / K 上下切换。\n6. 电脑端去掉右侧面板。「查看全部」不再需要；sys_inbox_message、sys_activity 的后台列表不再是普通用户的入口。\n7. 正在编辑、有未保存内容时点铃铛，沿用现有的未保存提醒。\n\n## 不做\n- 手机端：底部的通知、审批不动。\n- 通知和审批本身的数据与规则（合并规则、角标算法、审批动作）不改。\n\n## 和别的卡的关系\n- #36732（平台首页下线）：铃铛是唯一的待办入口；两张卡都会改到铃铛，先后顺序由席位排。\n- #36062（评论专题）：通知右栏里的「回复」用评论专题的组件，没有就先只放「打开完整记录」。\n\n## 验收\n- 1280 宽点铃铛进整页，三个页签和数字都对；后退能回到原来的页面。\n- 审批页签：选一条，右边有通过 / 驳回，处理后自动跳到下一条，角标减一。\n- 通知页签：选一条，右边显示对应记录；看过的变成已读；「只看未读」能过滤。\n- 一次触发很多次的定时通知合并成一条。\n- 电脑端不再出现右侧面板；手机宽度和改动前一样。\n\n## Order\nAfter #36732 (PR #36738) merges. Both touch the bell's entry, so they run serially.\n\nGrading (proposed): `area:ux` · Feature · epic child at the epic's grade ⇒ p2. Evidence: read (InboxPopover.tsx, inboxGrouping.ts on main e343ab7c; the mock).\n\nDedupe: #34589 (the right panel with in-place approval) is what this replaces; no open card asks for a full-page inbox."

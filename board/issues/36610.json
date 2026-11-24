@@ -2,8 +2,8 @@
   "number": 36610,
   "kind": "issue",
   "title": "Avatars are stretched out of shape when the picture is not square: the shared AvatarImage has no object-fit, so most call sites draw it with the browser default fill",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "baozhoutao",
@@ -15,18 +15,21 @@
     "bug",
     "domain:ui",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T02:44:25Z",
-  "updated_at": "2026-11-23T02:45:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T23:31:04Z",
+  "closed_at": "2026-11-23T23:06:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36610",
   "body": "Filed from a maintainer-driven session at the maintainer's request (「头像显示是不是有问题啊，被压缩的变形了」 → 「创建issue」). Read from the code on main `e7399fcd`, not measured live. Not claimed.\n\nSuggested-grade: p2\nSuggested-domain: `domain:ui`\n\n## What happens\n\nA non-square user photo or org logo is squashed or stretched to fit the round avatar. A square picture looks fine, so the defect only shows for some users.\n\n## Why\n\n`ui/packages/components/src/ui/avatar.tsx` (`AvatarImage`) sets `aspect-square h-full w-full` on the `<img>` and no `object-fit`. The browser default is `fill`, which scales each axis on its own.\n\nA few call sites patch it locally with `className=\"object-cover\"` (`plugin-detail/src/CommentAuthorAvatar.tsx`, `app-shell/.../manage/SettingsPage.tsx`) or choose cover/contain (`components/src/renderers/layout/containers.tsx`, the record-header picture). Every other `AvatarImage` draws stretched, including:\n\n- `app-shell/src/layout/AccountMenu.tsx` (header account button and its menu)\n- `app-shell/src/console/organizations/manage/MembersPage.tsx`, `OrganizationsPage.tsx`\n- `fields/src/index.tsx` (user field cells), `fields/src/widgets/AvatarField.tsx`, `LookupField.tsx` (single value and chips), `PersonRow.tsx`, `SelectionTray.tsx`\n- `plugin-kanban/src/KanbanImpl.tsx` (card owner), `plugin-detail/src/HistoryTimeline.tsx`, `plugin-chatbot/src/index.tsx`\n- `components/src/renderers/data-display/avatar.tsx` (the schema `avatar` renderer)\n\n## How other products handle it\n\nAvatar components in common UI libraries (shadcn/ui, Ant Design, MUI, Chakra) draw the image with `object-fit: cover` by default: scale to fill the circle, keep the aspect ratio, crop the overflow. Products such as GitHub and Slack also crop to a square at upload time. Logos are the usual exception and use `contain`. The record-header picture here already makes that split.\n\n## Ask\n\n1. Make `object-cover` the default on the shared `AvatarImage`, so every call site is fixed in one place. A caller that wants a logo-style fit still passes `object-contain`, which overrides it.\n2. Drop the local `object-cover` patches that become redundant.\n3. Pin it with a test: `AvatarImage` renders with `object-cover` when no class is given, and a passed `object-contain` wins.\n\n## Out of scope\n\n- A square-crop step in `AvatarField`'s upload. Worth its own card if wanted.\n\n## Re-check\n\nSet a non-square picture (e.g. 400×200) as a user's image and open the account menu, the members page, and a record with a user field: the face keeps its proportions and is cropped to the circle when this is fixed."

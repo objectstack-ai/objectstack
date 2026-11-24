@@ -15,18 +15,20 @@
     "domain:spec",
     "enhancement",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-support-ai"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T04:24:23Z",
-  "updated_at": "2026-11-23T04:28:12Z",
+  "updated_at": "2026-11-24T02:17:08Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36626",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nMeasured by the #36499 dev (PR #36624). Not claimed. Related: #36499 (its acceptance line moves here), #36505 (same gap for `fieldGroups`).\n\nSuggested-grade: p2\nSuggested-domain: `domain:spec` (response schema), with the runtime producer riding along (`domain:server`)\n\n## What happens\n\n`GET /api/v1/packages/<package>/customizations` answers through the strict `GetPackageCustomizationsResponseSchema` (`packages/spec/src/api/`), whose per-kind contribution entries cover an extension's fields, validations and indexes only. An object extension that carries a `relatedLists` arrangement (record tab order, titles, hidden entries; #36499 writes it into the paired `.custom` package) has no place in that answer, so the customization is invisible on the package's customizations read. It can be read back through `GET /meta/object_extension/<object>?package=<package>.custom`. `fieldGroups` arrangements (#36505) have the same gap.\n\n## Ask\n\nWiden the customizations answer with an arrangement entry for an extension's `relatedLists` and `fieldGroups`, produced by the runtime from the stored extension, so an admin who lists a package's customizations sees a tab or group arrangement they made. `Clause-②: yes (widening)`.\n\n## Acceptance (moved from #36499)\n\nHotCRM 「线索」 record page: reorder and hide a tab, save; `GET /api/v1/packages/<HotCRM package>/customizations` lists that arrangement; the original package is unchanged."

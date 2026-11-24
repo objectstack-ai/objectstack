@@ -2,8 +2,8 @@
   "number": 36601,
   "kind": "issue",
   "title": "Studio save goes live: two admins saving the same published object, the later save silently overwrites the earlier one (the published layer has no version a save can pin)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "bug",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T01:59:43Z",
-  "updated_at": "2026-11-23T14:17:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T00:16:26Z",
+  "closed_at": "2026-11-23T20:34:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36601",
   "body": "repo:objectstack#2 · os-steve · session_01ADHkmRY38EZf38Yy3zthbY\n\nFiled by the seat from #36511 (Studio Save/Cancel, save goes live), PR #36597 `## Acceptance notes` first bullet. Not claimed. Related: #36511.\n\nSuggested-grade: p2\nSuggested-domain: `domain:server` (the publish/save routes; the version field on the answer is a `domain:spec` widening that rides along)\n\n## What happens\n\nBefore #36511 every Studio edit went to a draft, and the draft-version guard refused a second editor whose draft read was stale (conflict dialog: reload or overwrite). With save going live, a Save publishes and leaves no draft. Two admins who opened the same object with no pending draft both save: the later Save asserts \"no draft\" and succeeds, replacing the earlier editor's published change without a word. The server serves no version of the published layer that a save could pin.\n\n## Ask\n\nRestore the lost-update guard on the published layer, server side:\n1. The single-item publish/save routes the Studio Save uses answer the published layer's version (an opaque token; the standard `ETag` header is the precedent, the existing draft-version guard is the in-repo one).\n2. A save that names a stale version is refused with a typed conflict, and the Studio shows the same reload-or-overwrite dialog it shows for a stale draft today.\n3. A save that names no version keeps today's behaviour (no narrowing of existing callers in this card).\n\nSeat ruling on the interim (on #36511): no client-only re-read before save (it narrows the window but cannot close it); the window stays open until this card lands.\n\n## Re-check\n\nOn main after this card: open one object in two sessions with no pending draft, save a change in each; the second save shows the conflict dialog instead of succeeding."

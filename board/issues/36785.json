@@ -1,0 +1,36 @@
+{
+  "number": 36785,
+  "kind": "pull_request",
+  "title": "fix(studio): conditional formatting refuses == on a list field while typing",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T22:23:47Z",
+  "updated_at": "2026-11-23T23:09:11Z",
+  "closed_at": "2026-11-23T23:09:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T23:09:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36785",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8M6sbZjBjat5VcHCF9RcSaz)_\n\nFixes #36459\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 在视图的「条件格式」里，管理员写「标签等于 VIP」这类把多选字段当单值比较的规则时，编辑框会当场标红并给出改写建议（改成「VIP 在标签里」），保存按钮在改好之前不放行；以前这种规则能存下来，但永远不会给任何一行上色。\n- 属于界面体验专题，是「多选字段不能用等于比较」这一修复（字段属性面板已做）在条件格式编辑器上的补齐。\n- 出错的话只是条件格式编辑框多报或少报一条提示，不改已有视图和数据，可直接撤回。\n- 无。\n\n## What changes\n\n`CelPredicateField` has taken the object's field definitions (`fieldDefs`: name, `type`, `multiple`) since the field inspector's list-equality work: it reads the list-valued fields through `isMultiValueField` and hands them to the lint as `multiValueFields`, so the engine refuses `record.LISTFIELD == 'x'` (`list-equality`) with the membership rewrite. The view conditional formatting editor mounted one `CelPredicateField` per rule but never passed `fieldDefs`, so no field was judged a list there and such a rule linted clean, saved, and never matched a row.\n\n- `ConditionalFormattingEditor` takes an optional `fieldDefs` prop and hands it to every rule's `CelPredicateField`. Omitted, the lint is what it was.\n- Both mount sites pass it: `ViewVariantInspector` (metadata admin view page) builds it from the `useObjectFields` catalog it already reads; `ListViewMoreSection` (Studio list-view panel) builds it from the loaded `fieldCatalog` it already receives, which already carries `multiple`.\n- The refusal is an `error`, so it counts in the editor's existing blocking-issue report: the host's Save (metadata admin) and autosave hold (Studio panel) stay shut until the rule is rewritten.\n\nNo spec, rule shape or server change. `ConditionalFormattingEditor` is not in `@object-ui/app-shell`'s published exports, so no export changes (Clause-② no). Changeset: `@object-ui/app-shell` patch.\n\nCard item 2 (should the view save refuse the same shape) is dropped by the seat; see Acceptance notes.\n\n## Tests\n\nNew file `ui/packages/app-shell/src/views/metadata-admin/ConditionalFormattingEditor.listEquality-36459.test.tsx`, against the real `@objectstack/formula` engine:\n\n- editor: `record.tags == 'vip'` and `record.tags != 'vip'` on a `select` declared `multiple: true` show the \"holds a list\" finding with the `in` rewrite and report 1 blocking issue;\n- editor: `'vip' in record.tags` is clean (0 blocking);\n- control: `record.stage == 'open'` on a single-value `select` is clean;\n- mount sites: the view variant inspector (fed `objectFieldsOverride`) and the Studio list-view panel (fed a loaded `fieldCatalog`) both show the finding; the panel reports 1 blocking issue.\n\nReverse verification at `7c65f8b9`, through `scripts/ablation-replace.mjs` (anchor hit 1 → 0, blob changed, restored blob == HEAD, `git diff HEAD` empty): with the `fieldDefs={fieldDefs}` pass-through deleted from `ConditionalFormattingEditor`, the 4 refusing cases fail and the 2 clean cases pass.\n\n<details><summary>Local runs under the verify lock (head 7c65f8b9)</summary>\n\n```\npnpm --dir ui exec vitest run ConditionalFormattingEditor.listEquality-36459.test.tsx ConditionalFormattingEditor.test.tsx ConditionalFormattingEditor.celGate.test.tsx\n Test Files  3 passed (3)\n      Tests  36 passed (36)\nos-verify-lock: VERDICT command-exit 0\n\npnpm --filter @object-ui/app-shell run type-check\nos-verify-lock: VERDICT command-exit 0\n\nablation (pass-through deleted)\n      Tests  4 failed | 2 passed (6)\nablation-replace: ok restored: blob == HEAD and `git diff HEAD` is empty\n```\n\n```\ndispatch-gates --commands (derived from the branch, head 7c65f8b9): 38 families, each run locally, every one exit 0\n✓ dispatch-gates --ran: 38 derived famil(ies) accounted for — 38 run, 0 NOT-MEASURED (a DERIVED zero — all 38 recorded an exit code and none of them is 3).\n```\n</details>\n\nThe full `@object-ui/app-shell` suite and every other family run in CI (`Test UI`, `Type Check UI`); their check-runs are the verdict.\n\n## Acceptance notes\n\n- Card item 2 (the view save refusing the same shape): dropped — new save-door lint site; new gates default no. On `main` a view's `conditionalFormatting[].condition` is not CEL-linted at save at all (`validate-expressions` lints a field's own `conditionalFormatting`; the `view` write path runs the bulk-confirm text pass only), so refusing it there would be a new gate. Not filed.\n\n## Verification\n\nRead first:\n1. `ConditionalFormattingEditor.tsx`: the new `fieldDefs` prop and its pass-through to `CelPredicateField`.\n2. `ListViewMoreSection.tsx`: `fieldDefs` built from `fieldCatalog` only when it is loaded (riskiest hunk: `undefined` while loading means no list judgement until the catalog arrives).\n3. `ViewVariantInspector.tsx`: `celFieldDefs` from the same catalog the field name list comes from.\n\nTwo-minute check: in Studio, open a list view of an object with a multi-select field, add a conditional formatting rule and type `record.FIELD == 'x'` for that field: the box shows \"holds a list\" with the `in` rewrite and the view does not save; type `'x' in record.FIELD`: the finding clears.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbXAtnodnKm6tuyEbxU)_\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbXAtnodnKm6tuyEbxU -->\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 36781,
+  "kind": "pull_request",
+  "title": "fix(studio): 流程页头信息条按顺序逐个让位，不再整排缩成单字 (#36745)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-23T21:52:29Z",
+  "updated_at": "2026-11-23T23:06:54Z",
+  "closed_at": "2026-11-23T23:06:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-23T23:06:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/36781",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8CSSa72mrtYoeegnZzNftqp)_\n\nFixes #36745\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 在 Studio 自动化里打开一个流程，标题旁那排「触发 · 状态 · 运行身份 · 版本 · 出错时」在右侧属性面板打开、位置变窄时，不再整排挤成一个字一个省略号；放不下的从后往前整项收起，鼠标悬停这一排能看到收起的内容。\n- 来自你 11-23 的 Studio 评审（第 r07 项），属于界面体验缺陷修复。\n- 出错的话最多是这一排显示的项目多一个或少一个，不影响流程本身和任何数据，可直接撤回。\n- 无。\n\n## What changes\n\n`FlowMetaPills`' header variant laid its items on a one-row grid whose columns could all shrink to zero (objectui#13135), so a short meta slot (about 80 px with the property panel open) shrank every item at once, to one character each.\n\n- `ui/packages/app-shell/src/views/metadata-admin/previews/FlowPreview.tsx`\n  - New `FlowMetaHeaderRow`: every item is laid out whole (`shrink-0`, `whitespace-nowrap`), each after its `·` separator, in a row that takes the slot's width and clips. After each render and on resize (`ResizeObserver` on the row) it measures each item's width and the row's, keeps the first N whole items, and makes the rest `invisible` + `aria-hidden` (still laid out, so still measured: they come back when the row widens). The row's `title` names each hidden item's whole `Label: value`, one per line, in row order; with nothing hidden there is no `title`.\n  - New `fitFlowMetaItems(widths, available, floor = 2)`: as many whole items from the front as fit (half-pixel slack). Fewer than the floor (Trigger + Status) ⇒ 0: the row shows nothing.\n  - Drop order is the row order from the end: On error, then version, then Run as. Trigger and Status are the floor.\n  - The header `Pill` no longer truncates (`min-w-0 truncate` → `whitespace-nowrap`), and the per-pill cut measurement (`useCutText`, objectui#13135) is removed: nothing in the header can be cut any more. A shown pill keeps its own hover text (Status: the run status's reason; Trigger: the object's API name).\n  - The designer's info bar (`variant=\"bar\"`) is unchanged.\n- `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`: the `auto-flow-meta` wrapper goes `inline-flex` → `flex` (plus a comment line), so the row reads the meta slot's whole width rather than its own content width.\n- Tests: `FlowPreview.headerMetaTruncate-13135.test.tsx` is deleted (it pinned the `truncate` class this card replaces); `FlowPreview.headerMetaGiveWay-36745.test.tsx` is added.\n- Changeset: `@object-ui/app-shell` patch. `fitFlowMetaItems` is a module export, not on the package index.\n\nReading taken on the card: \"Keep Status and Trigger whole … hide the slot when not even one item fits\". The card names On error, version and Run as as the items that drop, so Trigger + Status are read as the floor: when those two do not both fit whole, the row hides. (The other reading, dropping Status and then Trigger one by one, would drop an item the card says stays.)\n\n## Tests\n\n- `FlowPreview.headerMetaGiveWay-36745.test.tsx`, 11 tests, widths stubbed per element (each item 120/110/80/30/60 px):\n  - 400 px: all five shown, no row title;\n  - 320 px: version and On error hidden, title = `v3` + `On error: …`;\n  - 240 px: Run as hidden too, Trigger and Status stay;\n  - 200 px (below the floor): every item hidden and `aria-hidden`, title names all five;\n  - re-render wider: items come back; no header item carries `truncate`;\n  - CONTROLS: a shown Status keeps its run-status hover text; the `bar` variant has no give-way row;\n  - `fitFlowMetaItems` at the boundaries (399/400, 229/230) and fractional widths.\n- Ablation (`fitFlowMetaItems` returning every item regardless of width): 6 of 11 red; restored, `git diff HEAD` empty.\n- The test file imports `@objectstack/lint` at module top (`check:test-source-alias`: the source under test reaches its dynamic import; the load is paid at collection, not inside a clocked case).\n- Also run: `AutomationsPillar.tabs-12454.test.tsx`, `StudioItemHeader.statusPlace-12524.test.tsx` (they read `auto-flow-meta`): 20/20 with the new file. `pnpm --filter @object-ui/app-shell type-check`: exit 0.\n\n## Acceptance notes\n\nBrowser run on the showcase app (Studio › Automations › \"Notify on Task Completed\", zh-CN, 1440×900 unless named; its meta has four items, no On error). Shots are attached on the project thread (GitHub image upload is browser-only). Readings are the row's own `data-shown`, item widths and `title`:\n\n| Frame | Slot width | Items shown | Row hover text |\n|---|---|---|---|\n| Property panel open (the r07 case) | 81 px | none (Trigger 123 + Status 82 = 205 px do not fit) | 触发 / 状态 / 运行身份 / v1, one per line |\n| Panel closed | 441 px | all four, whole | none |\n| Panel closed, 1300 px viewport | 301 px | Trigger, Status, Run as | `v1` |\n| Panel closed, 1220 px viewport | 221 px | Trigger, Status | 运行身份: 用户 / v1 |\n| Panel closed, 1150 px viewport | 151 px | none | all four |\n\nNo frame shows a cut or single-character item. Native `title` tooltips do not render headless, so the hover text is evidenced by the attribute.\n\n## Verification\n\n- Two-minute check: in Studio › Automations, open a flow with the property panel closed (wide header: every item shows whole), then open the property panel: the row keeps Trigger and Status whole or hides, never single characters; hover the row to read what was dropped.\n\n<details><summary>Local gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands`: 38 derived families, all run; 37 exit 0 at `9f6fc4fa`. `check:test-source-alias` exited 1 there (the module-top lint import above), fixed and re-run at `d37f9470`: exit 0. `--ran` reconciliation: `38 run, 0 NOT-MEASURED (a DERIVED zero — all 38 recorded an exit code and none of them is 3)`. Results: project file `issue-36745/gate-results-d37f9470.tsv`.\n- `node scripts/pm/overlap-check.mjs` at `d37f9470`: `VERDICT clean exit 0` against `origin/main`, #36774 and #36784 (both share `StudioDesignSurface.tsx`, merge cleanly).\n- Every other family is CI's: read from this PR's check-runs, not re-run locally.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbXxhLfnaEFoHNkAeGh)_\n\n<!-- signed: repo:objectstack#1 · os-warren · session_01JQwxbXxhLfnaEFoHNkAeGh -->\n"
+}

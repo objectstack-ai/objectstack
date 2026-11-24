@@ -2,8 +2,8 @@
   "number": 36740,
   "kind": "issue",
   "title": "pm: put the topic-and-area board builder in the repo (scripts/pm/topic-board.mjs + page template + runbook), so any triage seat can refresh it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,21 +14,22 @@
     "area:fleet",
     "domain:devx",
     "enhancement",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [
-    "os-warren"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-23T15:23:24Z",
-  "updated_at": "2026-11-23T16:21:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-23T21:37:09Z",
+  "closed_at": "2026-11-23T21:30:08Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36740",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSource: maintainer, in the triage session, 2026-11-23: 「看板代码要放进仓库，立卡派发」. Filed by triage#1, which wrote the board and has refreshed it every 3 hours since 2026-11-21.\n\n## Why\n\nThe topic-and-area board (two tabs: objectstack and cloud) is built by a script that exists only in triage#1's session scratchpad. That scratchpad is ephemeral. When the session ends, or another account takes the triage seat, nobody can rebuild the board. The maintainer wants a new triage seat, possibly on another account, to be able to keep refreshing it.\n\nThe reference implementation is a Python script plus a page template. Both are attached verbatim as the two comments below; the hard-coded scratchpad path is replaced by `<out-dir>`.\n\n## Rule to deliver\n\n### 1. `scripts/pm/topic-board.mjs`\n\nA Node port of the reference `build.py`, in the repo's `scripts/pm` style (header doc, `--self-test`).\n\n- **Read-only.** GitHub reads only, through the same read path the other `scripts/pm` readers use. No write of any kind.\n- **Arguments.** `--repo=objectstack|cloud` (default `objectstack`) and `--out=<dir>`.\n- **Output files.** `epics<suf>.json` and `areas<suf>.json`, where `<suf>` is `''` for objectstack and `_cloud` for cloud. The lanes output of the reference is retired; do not port it.\n- **Topic (epic) set.**\n  - An open card counts as a topic when any of these holds:\n    - it is labelled `pm:epic`;\n    - its title matches `^(\\[(Epic|专题)[^\\]]*\\]|专题[:：])`;\n    - it is labelled `tracking` and has open sub-issues (`sub_issues_summary`).\n  - Exclude cards labelled `pm:seat`, `pm:mailbox`, `qa-run`, `eval-run` or `status:parked`.\n- **Topic members.** Each topic's members are, among open cards:\n  - its sub-issues;\n  - their sub-issues;\n  - cards whose body names the topic as parent (the \"unlinked\" count).\n- **Tree.**\n  - A topic's parent is the topic that holds it as a direct sub-issue; failing that, the smallest topic that contains it. No cycles.\n  - Each row carries `parent`, `depth` and `kids`.\n  - A parent's numbers roll up its descendant topics' cards.\n- **Epic row fields.** epic, area (the topic's own `area:*`), parent, depth, kids, title, state, total, closed, open, unlinked, p1, p2, p3, doing, queue, blocked, hold, decide, merge, none, areas, updated.\n- **Area table.**\n  - Counts only open cards that are in no topic, by `area:*`.\n  - Skips `pm:seat`, `pm:mailbox`, `qa-run`, `eval-run`, `tracking`, `pm:epic` and `status:parked`.\n  - Fields: area, open, p1, p2, p3, topic, nontopic, doing, queue, blocked, hold, decide, none, asof, topic_skipped.\n  - A card with no `area:*` lands in a row named 「（未定 area）」.\n- **Area lists.**\n  - objectstack: the eight North Star areas, in this order: ai, build, data, workflow, ux, package, fleet, cloud.\n  - cloud: the areas in cloud `docs/strategy/core-functions.md`: control, environment, marketplace, ai, enterprise, security, ops, ux, fleet.\n- **Pacing.** Keep the reference's footprint: one paginated list of open issues, plus one sub-issues read per topic. No deep pagination of comments, and no search loops. Fleet accounts have been suspended before, so stay polite.\n- **`--self-test`.** Runs offline on a small fixture and pins all of the following:\n  - topic detection;\n  - parent choice;\n  - rollup;\n  - topic cards left out of the area table;\n  - the 「（未定 area）」 row.\n\n### 2. `scripts/pm/topic-board/page.html`\n\nThe attached page template, unchanged except for whatever path or name fixes the move needs. It is a Data-type artifact page with:\n- datasets `epics`, `areas`, `epics_cloud`, `areas_cloud`;\n- two tabs and a sticky header;\n- one table per tab: area group rows, then each area's topics as a collapsible tree, then a 「专题以外」 row.\n\n### 3. `scripts/pm/topic-board/README.md`\n\nThe runbook. Every 3 hours, on the triage patrol fires at UTC hours 0, 3, …, 21:\n1. Run the script for both repos.\n2. Upload the four JSON files as assets of the board artifact, one per call.\n3. Point the four dataset docs at the new blobs, pinned with `if_version`.\n4. Delete the superseded blobs.\n\nThe runbook also says three more things:\n- The artifact belongs to the claude.ai account that created it. A seat on another account needs edit access shared to it, or publishes a new board.\n- A card touched after the build shows up as a stateless or 「（未定 area）」 row; rebuild, or fold it into its area by hand.\n- Do not put the artifact's URL in the repo.\n\n### 4. Skill pointer\n\nAdd one line to `references/lanes/triage.md` (or `triage-duties.md`) naming the runbook as the 3-hourly board duty, through the normal skills PR path.\n\n## Done when\n\n- `node scripts/pm/topic-board.mjs --repo=objectstack --out=<dir>` and `--repo=cloud` produce JSON that the attached page renders. Check this against a live read: the counts should match what triage#1's last refresh published, within cards that changed in between.\n- `node scripts/pm/topic-board.mjs --self-test` is green offline.\n- The README and the skill line have landed.\n\n## Out of scope\n\n- Publishing the artifact. That stays with the triage seat's Artifact tool, not CI.\n- Any GitHub write.\n\nTriage: lands in `area:fleet` · `domain:devx` · `priority:p2` · Feature · `pm:queue`; rationale: maintainer-ordered fleet tooling, so the board survives a seat change. Nothing breaks today while triage#1 is seated, so p2."
