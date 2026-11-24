@@ -402,9 +402,10 @@ export function ReportView({ dataSource }: { dataSource?: DataSource }) {
         // A customization pair the list already names is probed for a pending
         // draft of this report, as `openDashboardForEdit` reads the pair
         // first: a Studio draft staged there is refused here, at open, not at
-        // Save. The buffer stays the authored read at the package the report
-        // is served from, which names the pair itself once an override of it
-        // is served (ADR-0150 D5).
+        // Save. The buffer stays the layered authored read at the package the
+        // report is served from: its effective layer already carries a
+        // published customization of the pair, so a second edit starts from
+        // the first one.
         const pairAt =
           target.kind === 'customization' && target.pair && target.pair !== packageId
             ? { packageId: target.pair }
