@@ -285,21 +285,18 @@ export function publicFormItemOf(model: PublicFormModel, base: FormDoc | null): 
   };
   if (!read || model.thankYouTitle !== read.thankYouTitle || model.thankYouMessage !== read.thankYouMessage) {
     const was = isDoc(config.submitBehavior) && config.submitBehavior.kind === 'thank-you' ? config.submitBehavior : null;
-    if (model.thankYouTitle || model.thankYouMessage) {
-      const thankYou: FormDoc = { ...(was ?? {}), kind: 'thank-you' };
-      // Each of the two texts is kept as stored unless it was edited.
-      for (const [key, value, before] of [
-        ['title', model.thankYouTitle, read?.thankYouTitle],
-        ['message', model.thankYouMessage, read?.thankYouMessage],
-      ] as const) {
-        if (was && value === before) continue;
-        if (value) thankYou[key] = value;
-        else delete thankYou[key];
-      }
-      config.submitBehavior = thankYou;
-    } else if (was) {
-      delete config.submitBehavior;
+    const thankYou: FormDoc = { ...(was ?? {}), kind: 'thank-you' };
+    // Each of the two texts is kept as stored unless it was edited.
+    for (const [key, value, before] of [
+      ['title', model.thankYouTitle, read?.thankYouTitle],
+      ['message', model.thankYouMessage, read?.thankYouMessage],
+    ] as const) {
+      if (was && value === before) continue;
+      if (value) thankYou[key] = value;
+      else delete thankYou[key];
     }
+    if (thankYou.title !== undefined || thankYou.message !== undefined) config.submitBehavior = thankYou;
+    else if (was) delete config.submitBehavior;
   }
   item.name = model.name;
   item.object = model.object;

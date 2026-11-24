@@ -14,7 +14,8 @@
  *  - the preview renders the form being edited;
  *  - a form the app ships cannot be deleted; a form of a writable package can;
  *  - a new form's name may be no other view item's;
- *  - a save and a publish carry the form's on/off switch as stored at that time.
+ *  - a save and a publish carry the form's on/off switch as stored at that time,
+ *    and write nothing when it cannot be read.
  *
  * The runtime form renderer is stubbed: it renders the sections it is given.
  */
@@ -108,7 +109,13 @@ function clientDouble(opts: { owner?: string; appDoc?: Record<string, unknown> }
   const owner = opts.owner ?? BASE;
   const appDoc = opts.appDoc ?? contactUs();
   // What is stored now: the served contact-us form (Setup may switch it meanwhile), and the drafts saved.
-  const stored = { served: { ...contactUs(), _packageId: owner } as Record<string, any>, drafts: new Map<string, Record<string, any>>([['crm_lead.event_rsvp', drafted]]) };
+  // The served form is read at the package that ships it (a read at a customization package finds no served item there).
+  const stored = {
+    served: { ...contactUs(), _packageId: owner } as Record<string, any>,
+    drafts: new Map<string, Record<string, any>>([['crm_lead.event_rsvp', drafted]]),
+    /** A layered read fails (the server is unreachable). */
+    readsFail: false,
+  };
   const client = {
     stored,
     list: vi.fn(async () => [
@@ -119,11 +126,13 @@ function clientDouble(opts: { owner?: string; appDoc?: Record<string, unknown> }
     ]),
     listDrafts: vi.fn(async () => [{ type: 'view', name: 'crm_lead.event_rsvp', packageId: owner }]),
     getDraft: vi.fn(async (_t: string, name: string) => stored.drafts.get(name) ?? null),
-    layered: vi.fn(async (_t: string, name: string) =>
-      name === 'crm_lead.web_to_lead'
-        ? { code: appDoc, effective: stored.served, draft: stored.drafts.get(name) ?? null }
-        : { code: null, effective: null, draft: stored.drafts.get(name) ?? null },
-    ),
+    layered: vi.fn(async (_t: string, name: string, options?: { packageId?: string }) => {
+      if (stored.readsFail) throw new Error('503 Service Unavailable');
+      const draft = stored.drafts.get(name) ?? null;
+      if (name !== 'crm_lead.web_to_lead') return { code: null, effective: null, draft };
+      const atOwner = options?.packageId === undefined || options.packageId === owner;
+      return { code: atOwner ? appDoc : null, effective: atOwner ? stored.served : null, draft };
+    }),
     save: vi.fn(async (_t: string, name: string, body: Record<string, any>) => {
       stored.drafts.set(name, body);
       return {};
@@ -406,6 +415,74 @@ describe('Studio public form designer (objectstack#36444)', () => {
     await waitFor(() => expect(client.save).toHaveBeenCalledTimes(1));
     await user.click(screen.getByTestId('public-form-publish'));
     await waitFor(() => expect(client.publish).toHaveBeenCalledTimes(1));
+    expect(client.save).toHaveBeenCalledTimes(1);
+  });
+  it('publishes an installed app\'s form with the switch as stored at the app, after it was switched off', async () => {
+    const user = userEvent.setup();
+    const client = clientDouble();
+    const custom = customization();
+    renderDesigner(client, { customization: custom as never });
+    await user.click(await screen.findByTestId('public-form-item-crm_lead.web_to_lead'));
+    await user.type(await screen.findByTestId('public-form-title'), '!');
+    await user.click(screen.getByTestId('public-form-save'));
+    await waitFor(() => expect(client.save).toHaveBeenCalledTimes(1));
+    expect((client.save.mock.calls[0] as unknown as [string, string, any])[2].config.sharing.enabled).toBe(true);
+
+    // Switched off in Setup while the draft waits: the draft (on) is saved again, off, before it goes live.
+    switchServed(client, false);
+    // The draft read for display comes back translated; the one written back is the stored draft, never that.
+    client.getDraft.mockImplementation(async (_t: string, name: string) => {
+      const d = client.stored.drafts.get(name);
+      return d ? { ...d, config: { ...d.config, title: '¡Gracias!' } } : null;
+    });
+    client.layered.mockClear();
+    await user.click(screen.getByTestId('public-form-publish'));
+    await waitFor(() => expect(client.publish).toHaveBeenCalledWith('view', 'crm_lead.web_to_lead', { packageId: PAIR }));
+    // The customization package serves nothing yet, so the switch is read where the app ships the form.
+    // (The list's own refresh reads afterwards.)
+    expect(client.layered.mock.calls.slice(0, 2).map((c) => (c as unknown[])[2])).toEqual([{ packageId: PAIR }, { packageId: BASE }]);
+    expect(client.save).toHaveBeenCalledTimes(2);
+    const [, , again, options] = client.save.mock.calls[1] as unknown as [string, string, any, any];
+    expect(again.config.sharing.enabled).toBe(false);
+    expect(again.config.title).toBe('!');
+    expect(again.overrides).toEqual({ package: BASE, basedOn: '4.0.0' });
+    expect(options).toMatchObject({ mode: 'draft', packageId: PAIR });
+    expect(client.save.mock.invocationCallOrder[1]).toBeLessThan(client.publish.mock.invocationCallOrder[0]);
+  });
+
+  it('saves nothing when the form\'s switch cannot be read', async () => {
+    const user = userEvent.setup();
+    const client = clientDouble({ owner: 'com.acme.sales' });
+    renderDesigner(client, { readOnly: false, customization: null, packageId: 'com.acme.sales' });
+    await user.click(await screen.findByTestId('public-form-item-crm_lead.web_to_lead'));
+    await user.type(await screen.findByTestId('public-form-title'), '!');
+    client.stored.readsFail = true;
+    await user.click(screen.getByTestId('public-form-save'));
+    expect(await screen.findByTestId('public-form-notice')).toBeInTheDocument();
+    expect(client.save).not.toHaveBeenCalled();
+  });
+
+  it('publishes nothing when the draft cannot be read', async () => {
+    const user = userEvent.setup();
+    const client = clientDouble({ owner: 'com.acme.sales' });
+    renderDesigner(client, { readOnly: false, customization: null, packageId: 'com.acme.sales' });
+    await user.click(await screen.findByTestId('public-form-item-crm_lead.web_to_lead'));
+    await user.type(await screen.findByTestId('public-form-title'), '!');
+    await user.click(screen.getByTestId('public-form-save'));
+    await waitFor(() => expect(client.save).toHaveBeenCalledTimes(1));
+
+    // The read fails outright.
+    client.stored.readsFail = true;
+    await user.click(screen.getByTestId('public-form-publish'));
+    expect(await screen.findByTestId('public-form-notice')).toBeInTheDocument();
+    // The read answers, but with no draft in it.
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByTestId('public-form-notice')).toBeNull();
+    client.stored.readsFail = false;
+    client.stored.drafts.delete('crm_lead.web_to_lead');
+    await user.click(screen.getByTestId('public-form-publish'));
+    expect(await screen.findByTestId('public-form-notice')).toBeInTheDocument();
+    expect(client.publish).not.toHaveBeenCalled();
     expect(client.save).toHaveBeenCalledTimes(1);
   });
 });

@@ -251,24 +251,28 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
   const shippedByApp = open !== null && readOnly && open.owner !== null && open.owner === customization?.base;
 
   /**
-   * The form's on/off switch as stored now. Switching is Setup's, never the
+   * The form's on/off switch as stored now, and its pending draft as stored
+   * (the layered read, untranslated). Switching is Setup's, never the
    * designer's, so a save carries the switch as it stands at save time, not as
    * it stood when the form was opened: the served item when there is one, else
-   * the draft or the shipped document; a form never stored is on.
+   * the draft or the shipped document; a form never stored is on. Throws when
+   * it cannot be read, so nothing is written on a guess.
    */
-  const currentSwitch = async (form: OpenForm): Promise<boolean> => {
-    if (form.base === null) return form.model.enabled;
+  const storedNow = async (form: OpenForm): Promise<{ enabled: boolean; draft: FormDoc | null }> => {
+    // A form never stored: nothing to read yet.
+    if (form.base === null && !form.hasDraft) return { enabled: form.model.enabled, draft: null };
     const enabledIn = (doc: unknown): boolean | undefined =>
       isDoc(doc) && isDoc(doc.config) && isDoc(doc.config.sharing) ? doc.config.sharing.enabled === true : undefined;
     const read = async (at: string | null) => client.layered<FormDoc>('view', form.name, at ? { packageId: at } : {});
     const where = form.at ?? form.owner;
     const reads = [(await read(where)) as FormDoc];
+    const draft = isDoc(reads[0].draft) ? (reads[0].draft as FormDoc) : null;
     // Saved at a customization package: the served item may be read at the package that ships it.
     if (!isDoc(reads[0].effective) && form.owner && form.owner !== where) reads.push((await read(form.owner)) as FormDoc);
     const first = (layer: 'effective' | 'draft' | 'code') => reads.map((r) => enabledIn(r[layer])).find((v) => v !== undefined);
-    const now = first('effective') ?? first('draft') ?? first('code');
-    if (now === undefined) throw new Error(tFormat('engine.studio.publicForms.unreadable', locale, { name: form.model.title || form.name }));
-    return now;
+    const enabled = first('effective') ?? first('draft') ?? first('code');
+    if (enabled === undefined) throw new Error(tFormat('engine.studio.publicForms.unreadable', locale, { name: form.model.title || form.name }));
+    return { enabled, draft };
   };
 
   /** Where a save lands, and the body it writes. */
@@ -289,7 +293,7 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
     setBusy('save');
     setNotice(null);
     try {
-      const target = await writeTarget({ ...open.model, enabled: await currentSwitch(open) });
+      const target = await writeTarget({ ...open.model, enabled: (await storedNow(open)).enabled });
       await client.save('view', open.model.name, target.body, {
         mode: 'draft',
         packageId: target.packageId,
@@ -316,13 +320,12 @@ export function PublicFormsDesigner(props: PublicFormsDesignerProps): React.Reac
     setNotice(null);
     try {
       // The draft goes live with the switch as it stands now: a draft that carries another is saved again first.
-      const enabled = await currentSwitch(open);
-      const draft = (await client.getDraft<FormDoc>('view', open.model.name, { packageId: open.at }).catch(() => null)) as FormDoc | null;
-      const drafted = isDoc(draft) && isDoc(draft.item) ? draft.item : draft;
-      const draftSwitch = isDoc(drafted) && isDoc(drafted.config) && isDoc(drafted.config.sharing) ? drafted.config.sharing.enabled === true : undefined;
-      if (isDoc(drafted) && draftSwitch !== enabled) {
-        const body = { ...drafted, config: { ...drafted.config, sharing: { ...drafted.config.sharing, enabled } } };
-        for (const key of Object.keys(body)) if (key.startsWith('_')) delete (body as FormDoc)[key];
+      const { enabled, draft } = await storedNow(open);
+      if (!draft) throw new Error(tFormat('engine.studio.publicForms.unreadable', locale, { name: open.model.title || open.model.name }));
+      const draftSwitch = isDoc(draft.config) && isDoc(draft.config.sharing) ? draft.config.sharing.enabled === true : undefined;
+      if (draftSwitch !== enabled) {
+        const body: FormDoc = { ...draft, config: { ...(isDoc(draft.config) ? draft.config : {}), sharing: { ...(isDoc(draft.config?.sharing) ? draft.config.sharing : {}), enabled } } };
+        for (const key of Object.keys(body)) if (key.startsWith('_')) delete body[key];
         await client.save('view', open.model.name, body, { mode: 'draft', packageId: open.at, surface: 'studio' } as never);
       }
       await client.publish('view', open.model.name, { packageId: open.at });

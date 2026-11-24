@@ -244,6 +244,12 @@ describe('writing back a form stored in other shapes the spec allows', () => {
     expect(edited.config.sections[0].label).toBe('Who you are');
   });
 
+  it('keeps a thank-you title stored as translations when only the message is cleared', () => {
+    const translated = { ...stored, config: { ...stored.config, submitBehavior: { kind: 'thank-you', title: { en: 'Thanks', 'zh-CN': '谢谢' }, message: 'We will be in touch.' } } };
+    const item = publicFormItemOf({ ...publicFormModelOf(translated), thankYouMessage: '' }, translated);
+    expect(item.config.submitBehavior).toEqual({ kind: 'thank-you', title: { en: 'Thanks', 'zh-CN': '谢谢' } });
+  });
+
   it('writes no column count onto a section that had none', () => {
     const model = withSection(newPublicFormModel('crm_lead', 'Demo signup', 'demo-signup', lead), 'More');
     const item = publicFormItemOf(model, null);
