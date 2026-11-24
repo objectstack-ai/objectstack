@@ -169,7 +169,7 @@ describe('Data pillar consumers with the registries POPULATED (#6846 contrast)',
     assertRegistriesPopulated();
     renderPillar();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     const card = (await screen.findByText('Title')).closest('.cursor-grab') as HTMLElement;
     expect(card).toBeTruthy();
     fireEvent.click(card);

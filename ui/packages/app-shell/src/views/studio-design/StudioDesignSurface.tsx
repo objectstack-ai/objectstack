@@ -437,8 +437,11 @@ import {
   readFields,
   writeFields,
   newField,
+  readGroups,
+  groupArrangement,
   type FieldEntry,
 } from '../metadata-admin/previews/object-fields-io.js';
+import { extensionWithArrangement } from '../objectExtensionArrangementSave.js';
 import type { FieldTypeId } from '../metadata-admin/previews/field-types.js';
 import {
   ExternalObjectNotice,
@@ -453,6 +456,7 @@ import { StudioGridAddFieldButton, StudioGridAddFieldProvider, type StudioGridAd
 import { useDraftAutoSave, type DraftSend } from './useDraftAutoSave.js';
 import { FLOW_PRESETS, flowPresetTrigger, type FlowPreset } from './flowPresets.js';
 import { FormToolbar, ObjectFormDesigner } from './ObjectFormDesigner.js';
+import { fieldLayoutSourcesOf } from './fieldLayoutSources.js';
 import { isStudioHiddenSystemField } from './studioHiddenSystemField.js';
 import { ObjectGroupInspector } from './ObjectGroupInspector.js';
 import { ObjectValidationsPanel } from './ObjectValidationsPanel.js';
@@ -520,6 +524,7 @@ import {
   foldObjectExtension,
   objectExtensionBodyOf,
   routeFoldedFieldsEdit,
+  withoutReplacedPlacements,
   type CustomizeBlock,
   type ObjectExtensionBody,
   type ServedOverride,
@@ -5733,6 +5738,10 @@ export function DataPillar({
   // answer names every write, ⛔ never a `<base>.custom` spelled here.
   const extWalled = customization?.walled === true;
   const extWritable = extOpen !== null && !extWalled;
+  // objectstack#36505 (ADR-0146 D10) — an installed object's field layout is
+  // arranged in its pair's extension: the 「字段布局」 tab is editable where
+  // that extension is (not walled), and stays read-only where it is not.
+  const layoutWritable = extendsBase && extWritable;
   const shownDraft = React.useMemo(
     () => (extOpen ? foldObjectExtension(objDraft, extOpen.body, extOpen.published) : objDraft),
     [objDraft, extOpen],
@@ -6938,6 +6947,43 @@ export function DataPillar({
     },
     [extWritable, objDraft],
   );
+  // objectstack#36505 (ADR-0146 D10) — an edit of an installed object's field
+  // layout, written into the pair's extension of it as the WHOLE arrangement
+  // (`fieldGroups`, every group listing its members, the objectstack#36498
+  // shape), composed by the shared arrangement writer's own composer
+  // (`extensionWithArrangement`) over the extension this buffer holds. The
+  // fields half of the edit (a pair field's dropped `group`) goes the way a
+  // field edit goes; a base field's `group` is not the extension's to write,
+  // and the arrangement places it. Saved by the extension's Save with the
+  // rest of the buffer, so one Save publishes the object's whole
+  // customization (objectstack#36511) and no second writer races this buffer.
+  const onExtLayoutPatch = React.useCallback(
+    (patch: Record<string, unknown>) => {
+      if (!extWritable || !('fieldGroups' in patch || 'fields' in patch)) return;
+      setExt((prev) => {
+        if (!prev) return prev;
+        const folded = foldObjectExtension(objDraft, prev.body, prev.published);
+        const fieldsAfter = 'fields' in patch ? patch.fields : folded.fields;
+        const groupsAfter = readGroups('fieldGroups' in patch ? patch.fieldGroups : folded.fieldGroups);
+        let body: ObjectExtensionBody =
+          'fields' in patch
+            ? routeFoldedFieldsEdit({
+                before: folded.fields,
+                after: patch.fields,
+                baseOwned: baseOwnedFieldNames(objDraft, prev.body, prev.published),
+                ext: prev.body,
+              })
+            : prev.body;
+        body = withoutReplacedPlacements(body);
+        body = extensionWithArrangement(body, prev.body.extend, {
+          fieldGroups: groupArrangement(readFields(fieldsAfter), groupsAfter),
+        });
+        return { ...prev, body };
+      });
+      setExtDirty(true);
+    },
+    [extWritable, objDraft],
+  );
   // objectstack#27485 — an unsent edit the CEL verdict holds is named like an
   // incomplete one: the held line, the surface's Publish and the rail's
   // question all read it, so it outlives the inspector without going unseen.
@@ -7285,9 +7331,26 @@ export function DataPillar({
     () => contributedFieldsOf(baseContributionsOf(customizationMarks), current?.name),
     [customizationMarks, current?.name],
   );
+  // objectstack#36505 — where each field of an installed object comes from,
+  // for the Field layout canvas: the original package or this environment
+  // (a contributed field is named by its own mark).
+  const fieldLayoutSources = React.useMemo(
+    () =>
+      extendsBase
+        ? fieldLayoutSourcesOf(shownDraft.fields, {
+            contributed: contributedFields,
+            environment: [...extensionFieldNames(extOpen?.body), ...(extOpen?.published ?? [])],
+          })
+        : undefined,
+    [extendsBase, shownDraft.fields, contributedFields, extOpen],
+  );
   const selectedContributedField =
     fieldSel?.kind === 'field' ? (contributedFields.get(String(fieldSel.id)) ?? null) : null;
-  const fieldRailReadOnly = (readOnly && !(extWritable && fieldSel?.kind === 'field')) || selectedContributedField !== null;
+  // objectstack#36505 — a group of an installed object is arranged in the
+  // pair's extension too, so its inspector edits like a field's.
+  const fieldRailReadOnly =
+    (readOnly && !(extWritable && (fieldSel?.kind === 'field' || fieldSel?.kind === 'group'))) ||
+    selectedContributedField !== null;
   const selectedBaseField =
     extWritable &&
     fieldSel?.kind === 'field' &&
@@ -7380,9 +7443,9 @@ export function DataPillar({
         // at all, so neither draft caption is true of it (objectui#11781), and
         // its read-only sentence is the header link's title (objectui#12453).
         title={
-          readOnly
+          readOnly && !layoutWritable
             ? undefined
-            : dirty
+            : (layoutWritable ? extDirty : dirty)
               ? t('engine.studio.data.form.layoutBadge', locale)
               : t('engine.studio.data.form.layoutBadgeClean', locale)
         }
@@ -7402,19 +7465,14 @@ export function DataPillar({
     </div>
   );
   // objectstack-ai/objectstack#36425 — the create and edit dialogs lay out by
-  // the object's field groups, never by an internal form view, so the Form tab
-  // always edits the field groups and says so.
+  // the object's field groups, never by an internal form view, so the Field
+  // layout tab always edits the field groups. objectstack#36505 — it says
+  // where they are used, in one sentence, in place of the chip that named the
+  // field groups beside a form view.
   const formLayoutSource = current ? (
-    <div className="inline-flex items-center gap-2" data-testid="form-layout-source">
-      <span
-        data-testid="form-layout-source-chip"
-        data-source="field-groups"
-        title={t('engine.studio.data.form.layoutSource.fieldGroupsTitle', locale)}
-        className="inline-flex h-6 items-center rounded bg-muted px-2 text-[11px] text-muted-foreground"
-      >
-        {t('engine.studio.data.form.layoutSource.fieldGroups', locale)}
-      </span>
-    </div>
+    <span data-testid="form-layout-used-on" className="text-xs text-muted-foreground">
+      {t('engine.studio.data.form.usedOn', locale)}
+    </span>
   ) : null;
   // objectstack#28575 — on a base object the Form toolbar's Add field sits
   // beside the Layout / Preview control: the designer, read-only on a base
@@ -7712,7 +7770,7 @@ export function DataPillar({
                   <StudioReadOnlyLink
                     item={current}
                     title={
-                      viewMode === 'form'
+                      viewMode === 'form' && !layoutWritable
                         ? t('engine.studio.data.form.layoutBadgeReadOnly', locale)
                         : t('engine.studio.pkg.readonlyHint', locale)
                     }
@@ -8054,7 +8112,9 @@ export function DataPillar({
                   draft={shownDraft}
                   objectName={current.name}
                   systemFieldNames={STUDIO_SYSTEM_FIELD_NAMES}
-                  onChange={onPatch}
+                  // objectstack#36505 — an installed object's layout goes
+                  // into its pair's extension, as the whole arrangement.
+                  onChange={layoutWritable ? onExtLayoutPatch : onPatch}
                   selectedField={fieldSel?.kind === 'field' ? fieldSel.id : null}
                   onSelectField={(name) => setFieldSel({ kind: 'field', id: name })}
                   selectedGroup={fieldSel?.kind === 'group' ? fieldSel.id : null}
@@ -8062,10 +8122,12 @@ export function DataPillar({
                   // objectstack#30057 — on a base object a new field goes into
                   // the pair's extension, from the toolbar beside the mode control.
                   onAddField={canAddFields && !extendsBase ? addField : undefined}
-                  readOnly={readOnly}
+                  readOnly={readOnly && !layoutWritable}
                   modeControl={formToolbarLeading}
                   contributedFields={contributedFields}
                   draftMarkedFields={agentMarkedFields}
+                  arrangeContributed={layoutWritable}
+                  fieldSources={fieldLayoutSources}
                 />
                 </>
               ) : (
@@ -8234,12 +8296,12 @@ export function DataPillar({
               {(() => {
                 const fieldRailContent = fieldSel.kind === 'group' ? (
                   <ObjectGroupInspector
-                    draft={objDraft}
+                    draft={shownDraft}
                     objectName={current.name}
                     groupKey={fieldSel.id}
-                    onPatch={onPatch}
+                    onPatch={layoutWritable ? onExtLayoutPatch : onPatch}
                     onClose={() => setFieldSel(null)}
-                    readOnly={readOnly}
+                    readOnly={readOnly && !layoutWritable}
                     locale={locale}
                   />
                 ) : inspector ? (

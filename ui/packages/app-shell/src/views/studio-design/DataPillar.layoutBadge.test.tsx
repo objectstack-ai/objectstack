@@ -85,7 +85,7 @@ async function openFormTab(props: Partial<React.ComponentProps<typeof DataPillar
     </MemoryRouter>,
   );
   // First object auto-selects; the Form tab is the second segmented control.
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   // `formMode` defaults to 'layout', so the layout caption is on screen once
   // its sub-mode control is. (Not awaited on the caption text: a read-only
   // package has its own caption since objectui#11781.)

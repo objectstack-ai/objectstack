@@ -1,19 +1,24 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ObjectFormDesigner — the WYSIWYG form-layout designer for the Studio Data
- * pillar's Form view. An admin arranges the form the app opens for the object:
- * fields grouped into **sections**, drag-reordered within a section and
- * dragged **across** sections, with per-field selection opening the same
- * protocol field inspector the grid uses.
+ * ObjectFormDesigner — the WYSIWYG field-layout designer of the Studio Data
+ * pillar's 「字段布局」 (Field layout) tab. An admin arranges the object's
+ * field groups: fields grouped into **sections**, drag-reordered within a
+ * section and dragged **across** sections, with per-field selection opening
+ * the same protocol field inspector the grid uses. The record page, the
+ * right-side preview and the app's create and edit dialogs all lay the
+ * object's fields out by these groups (objectstack-ai/objectstack#36425: no
+ * internal form view is loaded), so this one arrangement is what they show.
  *
- * The app's create and edit dialogs lay out the object's own fields by its
- * `fieldGroups` (objectstack-ai/objectstack#36425: no internal form view is
- * loaded), so the sections are the object's `fieldGroups`: membership and
- * in-group order persist to the object draft (`fields[].group` +
- * `fieldGroups`) via the pillar's draft → publish, through the tested
- * `object-fields-io` helpers (readFields/writeFields · readGroups/addGroup/
- * renameGroup/removeGroup/moveGroup · clearFieldGroup).
+ * Membership and in-group order persist in the spelling
+ * `fieldGroups[].fields` keeps (objectstack#35900, objectstack#36505): each
+ * group lists its members, and an object still written with the older
+ * per-field `group` converts on its first save (`groupListLayout`), with no
+ * visible change. Writes go through the tested `object-fields-io` helpers
+ * (readFields/writeFields · readGroups/addGroup/renameGroup/removeGroup/
+ * moveGroup · groupListLayout · writeGroupLayout); the host routes the patch:
+ * the object draft for a writable package, the paired `.custom` extension's
+ * whole arrangement for an installed object (ADR-0146 D10).
  *
  * Build boundary: this component is only the drag/section CHROME. No new
  * metadata shape.
@@ -52,6 +57,7 @@ import {
   moveGroup,
   clearFieldGroup,
   groupMembership,
+  groupListLayout,
   writeGroupLayout,
   type FieldEntry,
 } from '../metadata-admin/previews/object-fields-io.js';
@@ -332,7 +338,26 @@ export interface ObjectFormDesignerProps {
    * carry the 草稿 chip the properties panel shows.
    */
   draftMarkedFields?: ReadonlySet<string>;
+  /**
+   * objectstack#36505 (ADR-0146 D10) — on an installed object whose paired
+   * `.custom` extension takes the arrangement, a field another package
+   * contributes is arranged like any other (the arrangement lists any field
+   * the object has, whoever declares it): its card is dragged, and a click
+   * still opens its read-only inspector.
+   */
+  arrangeContributed?: boolean;
+  /**
+   * objectstack#36505 — on an installed object, where each field the object
+   * itself carries comes from, by name: the original package, or this
+   * environment (the paired `.custom` package). A field another package
+   * contributes is named by `contributedFields` instead. Omit on a writable
+   * package: every field there is its own.
+   */
+  fieldSources?: ReadonlyMap<string, FieldLayoutSource>;
 }
+
+/** Where a field the object itself carries comes from, on an installed object. */
+export type FieldLayoutSource = 'base' | 'environment';
 
 /** One section on the canvas: a field group. */
 interface DesignerSection {
@@ -350,6 +375,33 @@ const NO_CONTRIBUTED_FIELDS: ReadonlyMap<string, ContributedOnObject> = new Map(
 const ContributedFieldsContext = React.createContext<ReadonlyMap<string, ContributedOnObject>>(NO_CONTRIBUTED_FIELDS);
 const NO_DRAFT_MARKED_FIELDS: ReadonlySet<string> = new Set();
 const DraftMarkedFieldsContext = React.createContext<ReadonlySet<string>>(NO_DRAFT_MARKED_FIELDS);
+/** objectstack#36505 — whether a contributed card is dragged, and each own field's source (installed objects). */
+const LayoutSourcesContext = React.createContext<{
+  arrangeContributed: boolean;
+  fieldSources: ReadonlyMap<string, FieldLayoutSource> | null;
+}>({ arrangeContributed: false, fieldSources: null });
+
+/**
+ * objectstack#36505 — where a field of an installed object comes from: the
+ * original package or this environment, drawn as the contributed mark is
+ * (a package another package's field names is that mark's).
+ */
+function FieldSourceMark({ source, locale }: { source: FieldLayoutSource; locale: string }): React.ReactElement {
+  const text = t(source === 'base' ? 'engine.studio.designer.source.base' : 'engine.studio.designer.source.environment', locale);
+  return (
+    <span
+      data-testid="field-source-mark"
+      data-source={source}
+      title={t(
+        source === 'base' ? 'engine.studio.designer.source.baseTitle' : 'engine.studio.designer.source.environmentTitle',
+        locale,
+      )}
+      className="inline-flex h-[18px] min-w-0 max-w-[55%] shrink-[4] items-center rounded-[5px] bg-muted px-1.5 text-[11px] font-medium text-muted-foreground"
+    >
+      <span className="truncate">{text}</span>
+    </span>
+  );
+}
 
 /**
  * The Form tab's one toolbar row (objectui#12451): the host's mode control and
@@ -457,7 +509,11 @@ function SortableField({
   // read-only card on any surface, and names its package.
   const contributed = React.useContext(ContributedFieldsContext).get(entry.name) ?? null;
   const draftMarked = React.useContext(DraftMarkedFieldsContext).has(entry.name);
-  const locked = readOnly || contributed !== null;
+  const { arrangeContributed, fieldSources } = React.useContext(LayoutSourcesContext);
+  const source = contributed ? null : (fieldSources?.get(entry.name) ?? null);
+  // objectstack#36505 — on an installed object's `.custom` arrangement a
+  // contributed card is dragged like any other; it stays read-only to a click.
+  const locked = readOnly || (contributed !== null && !arrangeContributed);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: fid(entry.name),
     // objectui#11872 — the role a screen reader announces for the card, in the
@@ -486,8 +542,9 @@ function SortableField({
       {...attributes}
       // objectstack#29786 — a contributed card takes no drag listener: it is
       // never a drag source. Not `useSortable`'s `disabled`, which would mark
-      // it `aria-disabled` while a click still selects it.
-      {...(contributed ? {} : listeners)}
+      // it `aria-disabled` while a click still selects it. objectstack#36505:
+      // unless the installed object's arrangement takes it.
+      {...(contributed && locked ? {} : listeners)}
       // objectui#11924 — dnd-kit points every card's `aria-describedby` at the
       // canvas's drag instructions, and `useSortable` cannot take it away
       // (`disabled` keeps it and adds `aria-disabled`, though a click still
@@ -530,6 +587,7 @@ function SortableField({
         {contributed && (
           <ContributionMark packageName={contributed.packageName} packageId={contributed.packageId} locale={locale} />
         )}
+        {source && <FieldSourceMark source={source} locale={locale} />}
         <span
           className={cn(
             'shrink-0 text-[10px] font-semibold uppercase tracking-wider',
@@ -751,10 +809,21 @@ export function ObjectFormDesigner({
   modeControl,
   contributedFields = NO_CONTRIBUTED_FIELDS,
   draftMarkedFields = NO_DRAFT_MARKED_FIELDS,
+  arrangeContributed = false,
+  fieldSources,
 }: ObjectFormDesignerProps): React.ReactElement {
   const locale = useMetadataLocale();
   const view = React.useMemo(() => readFields(draft.fields), [draft.fields]);
   const fieldGroups = React.useMemo(() => readGroups(draft.fieldGroups), [draft.fieldGroups]);
+  // objectstack#36505 — what every write starts from: the grouping in the
+  // `fieldGroups[].fields` spelling, so a write of an object still in the
+  // older per-field `group` spelling converts it whole, membership and order
+  // unchanged (the canvas reads the same membership from either).
+  const listed = React.useMemo(() => groupListLayout(view, fieldGroups), [view, fieldGroups]);
+  const layoutSources = React.useMemo(
+    () => ({ arrangeContributed, fieldSources: fieldSources ?? null }),
+    [arrangeContributed, fieldSources],
+  );
   // The sections the canvas draws: the object's field groups.
   const groups = React.useMemo<DesignerSection[]>(
     () =>
@@ -930,10 +999,30 @@ export function ObjectFormDesigner({
   );
 
   /**
+   * Hand a write to the host, the conversion to the list spelling included
+   * (objectstack#36505): an edit of an object still written with the older
+   * per-field `group` carries the converted `fields` and `fieldGroups` with
+   * it, whichever of the two the edit itself changed.
+   */
+  const emit = React.useCallback(
+    (patch: { fields?: unknown; fieldGroups?: unknown }) => {
+      const out: Record<string, unknown> = { ...patch };
+      if (listed.changed) {
+        if (out.fields === undefined) out.fields = writeFields(listed.view);
+        if (out.fieldGroups === undefined) out.fieldGroups = listed.groups;
+      }
+      onChange(out);
+    },
+    [listed, onChange],
+  );
+
+  /**
    * Persist the container map. On the object's own groups the layout is
    * written where `fieldGroups[].fields` keeps it: each changed group's list,
    * never the object's field declaration order (objectstack#35900) —
-   * `writeGroupLayout` says exactly what moves.
+   * `writeGroupLayout` says exactly what moves. A drop that changes nothing
+   * the object can hold is put back (objectstack#36505: the ungrouped bucket
+   * of an installed object, whose declaration order is the package's).
    */
   const commit = React.useCallback(
     (next: Record<string, string[]>) => {
@@ -951,16 +1040,16 @@ export function ObjectFormDesigner({
       const was = derived[bucket] ?? [];
       const now = next[bucket] ?? [];
       const reorderUngrouped = was.length !== now.length || was.some((id, i) => id !== now[i]);
-      const patch = writeGroupLayout(view, fieldGroups, layout, { reorderUngrouped });
-      if (patch.fields !== undefined || patch.fieldGroups !== undefined) onChange(patch);
+      const patch = writeGroupLayout(listed.view, listed.groups, layout, { reorderUngrouped });
+      if (patch.fields !== undefined || patch.fieldGroups !== undefined) emit(patch);
+      else setItems(derived);
     },
     [
       containerOrder,
       entryByName,
-      view,
       derived,
-      onChange,
-      fieldGroups,
+      emit,
+      listed,
     ],
   );
 
@@ -1000,17 +1089,18 @@ export function ObjectFormDesigner({
   };
 
   const newLabel = t('engine.studio.designer.newGroup', locale);
-  const addSection = () => onChange({ fieldGroups: addGroup(fieldGroups, newLabel) });
-  const renameSection = (key: string, label: string) => onChange({ fieldGroups: renameGroup(fieldGroups, key, label) });
-  const moveSection = (key: string, dir: -1 | 1) => onChange({ fieldGroups: moveGroup(fieldGroups, key, dir) });
+  const addSection = () => emit({ fieldGroups: addGroup(listed.groups, newLabel) });
+  const renameSection = (key: string, label: string) => emit({ fieldGroups: renameGroup(listed.groups, key, label) });
+  const moveSection = (key: string, dir: -1 | 1) => emit({ fieldGroups: moveGroup(listed.groups, key, dir) });
   const deleteSection = (key: string) =>
-    onChange({ fieldGroups: removeGroup(fieldGroups, key), fields: writeFields(clearFieldGroup(view, key)) });
+    emit({ fieldGroups: removeGroup(listed.groups, key), fields: writeFields(clearFieldGroup(listed.view, key)) });
 
   const activeEntry = activeId && !activeId.startsWith('g:') ? entryByName.get(unFid(activeId)) : null;
 
   return (
     <ContributedFieldsContext.Provider value={contributedFields}>
     <DraftMarkedFieldsContext.Provider value={draftMarkedFields}>
+    <LayoutSourcesContext.Provider value={layoutSources}>
     <div className="flex min-h-0 flex-1 flex-col">
       <FormToolbar
         leading={modeControl}
@@ -1109,6 +1199,7 @@ export function ObjectFormDesigner({
         </DndContext>
       </div>
     </div>
+    </LayoutSourcesContext.Provider>
     </DraftMarkedFieldsContext.Provider>
     </ContributedFieldsContext.Provider>
   );

@@ -553,7 +553,78 @@ export function foldObjectExtension(
     if (at >= 0) entries[at] = { name, def };
     else entries.push({ name, def });
   }
-  return { ...object, fields: writeFields({ shape: view.shape, entries }) };
+  if (!Array.isArray(ext.fieldGroups)) return { ...object, fields: writeFields({ shape: view.shape, entries }) };
+  return applyExtensionFieldGroups({ ...object, fields: writeFields({ shape: view.shape, entries }) }, ext.fieldGroups, own);
+}
+
+/**
+ * objectstack#36505 (ADR-0146 D10) — `body` without the `place` entries a
+ * written `fieldGroups` replaces: a `{ field }` or `{ group }` placement
+ * beside the whole arrangement is refused at save
+ * (`refusePlacementsTheArrangementReplaces` on `ObjectExtensionSchema`), and
+ * the arrangement already lists the field, or holds the group, where the
+ * placement put it. A `{ list }` placement stays (the tab list is not
+ * replaced by `fieldGroups`); `place` left empty is taken off.
+ */
+export function withoutReplacedPlacements(body: ObjectExtensionBody): ObjectExtensionBody {
+  if (!Array.isArray(body.place)) return body;
+  const kept = body.place.filter((entry: unknown) => {
+    if (!isPlainRecord(entry)) return true;
+    return typeof entry.field !== 'string' && !isPlainRecord(entry.group);
+  });
+  if (kept.length === body.place.length) return body;
+  const out: ObjectExtensionBody = { ...body };
+  if (kept.length > 0) out.place = kept;
+  else delete out.place;
+  return out;
+}
+
+/**
+ * objectstack#36505 (ADR-0146 D10) — the extension's whole field arrangement
+ * laid over `object`, the way the registry fold serves it
+ * (`applyCustomArrangement`, `@objectstack/objectql`): its `fieldGroups`
+ * replace the object's, a field a group lists follows that group, and a
+ * field the extension does not declare (`own`) loses a `group` naming a
+ * listing group or a group the arrangement does not have, so it shows after
+ * the last group. The served object already holds the PUBLISHED
+ * arrangement; this shows the buffer's before it is saved.
+ */
+function applyExtensionFieldGroups(
+  object: Record<string, unknown>,
+  arrangement: unknown[],
+  own: Record<string, unknown>,
+): Record<string, unknown> {
+  const groups = arrangement.filter(isPlainRecord).map((g) => ({ ...g }));
+  const listedIn = new Map<string, string>();
+  const keys = new Set<string>();
+  const listing = new Set<string>();
+  const tables = new Set<string>();
+  for (const g of groups) {
+    if (typeof g.key !== 'string') continue;
+    keys.add(g.key);
+    if (typeof g.relatedList === 'string') {
+      tables.add(g.key);
+      continue;
+    }
+    if (!Array.isArray(g.fields)) continue;
+    listing.add(g.key);
+    for (const name of g.fields) if (typeof name === 'string' && !listedIn.has(name)) listedIn.set(name, g.key);
+  }
+  const view = readFields(object.fields);
+  const entries = view.entries.map((e) => {
+    const group = e.def.group;
+    if (typeof group !== 'string') return e;
+    const listedAt = listedIn.get(e.name);
+    if (listedAt !== undefined) return listedAt === group ? e : { name: e.name, def: { ...e.def, group: listedAt } };
+    const declaredHere = Object.prototype.hasOwnProperty.call(own, e.name);
+    if (tables.has(group) || ((!keys.has(group) || listing.has(group)) && !declaredHere)) {
+      const def = { ...e.def };
+      delete def.group;
+      return { name: e.name, def };
+    }
+    return e;
+  });
+  return { ...object, fieldGroups: groups, fields: writeFields({ shape: view.shape, entries }) };
 }
 
 /**

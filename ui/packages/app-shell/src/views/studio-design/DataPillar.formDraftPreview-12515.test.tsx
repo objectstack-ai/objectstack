@@ -159,7 +159,7 @@ async function openPreview() {
     </MemoryRouter>,
   );
   await settle();
-  fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
   await settle();
   // The Records grid (the landing tab) reads the published definition through
   // the adapter; only what the Preview asks is counted.

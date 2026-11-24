@@ -185,7 +185,7 @@ function Harness(): React.ReactElement {
 async function mountSettledFormPreview(): Promise<void> {
   render(<Harness />);
   await waitFor(() => expect(dataSource.find).toHaveBeenCalled(), { timeout: 4000 });
-  fireEvent.click(screen.getByRole('button', { name: 'Form' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Field layout' }));
   fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
   await waitFor(() => expect(dataSource.getObjectSchema).toHaveBeenCalled(), { timeout: 4000 });
   await settle();

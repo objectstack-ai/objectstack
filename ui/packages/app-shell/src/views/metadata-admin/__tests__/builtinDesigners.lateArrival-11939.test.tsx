@@ -93,7 +93,7 @@ describe('Data pillar field rail — the built-in designers arrive after it rend
         <DataPillar packageId="com.example.showcase" />
       </MemoryRouter>,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Form' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Field layout' }));
     const card = (await screen.findByText('Title')).closest('.cursor-grab') as HTMLElement;
     expect(card).toBeTruthy();
     fireEvent.click(card);
