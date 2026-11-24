@@ -193,7 +193,8 @@ describe('the directory under the area (objectstack#28561)', () => {
 
 describe('the list under the area', () => {
   const rowLink = (container: HTMLElement, name: string) => container.querySelector<HTMLAnchorElement>(`a[href*="/${name}"]`);
-  const createButton = () => screen.queryByRole('button', { name: new RegExp(t('engine.list.create', 'en-US')) });
+  // Anchored: a read-only base's row offers "New similar" (objectstack#36905), which is no create.
+  const createButton = () => screen.queryByRole('button', { name: new RegExp(`^${t('engine.list.create', 'en-US')}$`) });
 
   it('a package\'s area lists that package\'s rows, with no repair, and offers create', async () => {
     const { container } = mount(crmArea(), `/studio/${PROJECT}/metadata/permission?package=${PROJECT}`, <MetadataResourceListPage type="permission" />);
