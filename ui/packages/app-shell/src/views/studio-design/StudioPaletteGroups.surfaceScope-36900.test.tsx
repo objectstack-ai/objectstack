@@ -369,7 +369,8 @@ describe("on a package, the palette lists the left menu and the package's items 
     });
     const { open } = mount(PKG);
     await waitFor(() => expect(reads.state.calls.length).toBeGreaterThan(0));
-    // A menu entry is selected at open; the query filters it away.
+    // A menu entry is selected at open; the query filters it away, and the
+    // row it asks for mounts only when the lists answer (cmdk selects it then).
     type('pipeline');
     expect(values('studio-item ')).toEqual([]);
     release();
