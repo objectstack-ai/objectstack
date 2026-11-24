@@ -2865,9 +2865,6 @@ const fr = {
       targetQueue: 'Une file d’attente',
       queue: 'File d’attente',
       queuePlaceholder: 'Choisir une file d’attente',
-      queuesLoading: 'Chargement des files d’attente…',
-      queuesFailed: 'Impossible de lire les files d’attente : {{message}}',
-      noQueues: 'Aucune file d’attente n’est configurée.',
       notify: 'Prévenir le nouveau propriétaire',
       alreadyOwner: 'Cette personne est déjà propriétaire de cet enregistrement.',
       submit: 'Changer de propriétaire',
@@ -2882,7 +2879,6 @@ const fr = {
       skipped_one: '{{count}} enregistrement sélectionné ne propose pas « Changer de propriétaire » et est ignoré.',
       skipped_many: '{{count}} d\'enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
       skipped_other: '{{count}} enregistrements sélectionnés ne proposent pas « Changer de propriétaire » et sont ignorés.',
-      noClient: 'Le propriétaire ne peut pas être modifié ici.',
       cascadeHeading: 'Transférer aussi les enregistrements liés',
       cascadeHelp: 'Les enregistrements liés qui pointent vers celui-ci et appartiennent à l\'ancien propriétaire passent aussi au nouveau propriétaire.',
       cascadeOption: '{{object}} ({{field}})',
@@ -2890,6 +2886,7 @@ const fr = {
       cascadeReport: '{{object}} ({{field}}) : {{moved}} transférés, {{failed}} n\'ont pas pu l\'être.',
       cascadeRemaining: 'Restés à l\'ancien propriétaire, au-delà de la limite de 500 enregistrements par changement : {{count}}.',
       cascadeReadFailure: '{{object}} ({{field}}) : impossible de lire les enregistrements liés : {{message}}',
+      gridOnly: 'Pour changer le propriétaire de plusieurs enregistrements à la fois, passez à une vue en grille.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
