@@ -28,6 +28,11 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ReportDefaultInspector } from './ReportDefaultInspector';
 import type { DatasetCatalogEntry } from '../previews/useDatasetCatalog';
+// The inspector reaches the console's dynamic `@objectstack/lint` and
+// `@objectstack/formula` imports; their first load is paid here, at collection,
+// never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
+import '@objectstack/formula';
 
 type FormNode = { field?: unknown; fields?: unknown[] };
 type FormShape = { sections?: Array<{ fields?: unknown[] }> };

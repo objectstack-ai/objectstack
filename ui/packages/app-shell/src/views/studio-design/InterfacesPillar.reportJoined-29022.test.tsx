@@ -92,6 +92,10 @@ import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
 import { ReportDefaultInspector } from '../metadata-admin/inspectors/ReportDefaultInspector';
 import { t, tFormat } from '../metadata-admin/i18n';
+// The pillar reaches the console's dynamic `@objectstack/lint` imports; their
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 
 // A stub canvas: the leaf needs a registered preview to be draft-editable,
 // and the canvas's own drawing is not what this file pins.
