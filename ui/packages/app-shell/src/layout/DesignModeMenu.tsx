@@ -21,13 +21,14 @@
  *   opens its page (objectstack#36538, review N13). A drop outside the menu
  *   moves nothing (review N14).
  *
- * A name is changed only in the app's source language (objectstack#36363,
- * ruling (4)): the stored labels are the app's own, and a translation is
- * written elsewhere. The rename's name field is open when the session
- * language is the deployment's default (`GET /i18n/locales`, the server
- * stating no source language of its own yet, objectstack#36504) and the
- * entry's shown label is its stored one; else it is closed and says why.
- * The icon, adding and moving are open in every language.
+ * A name is changed in any language, and lands where that language reads it
+ * (objectstack#36504, relaxing ruling (4) of objectstack#36363): in the app's
+ * source language (`sourceLocale` on `GET /i18n/locales`) over an entry shown
+ * by its stored label, the stored label; in any other language, or over a
+ * translation, that language's translation of the entry, the stored label
+ * kept (`saveAppMenu`). The rename says so when the name will be a
+ * translation. A link added outside the source language takes its name the
+ * same way: stored without one, translated (review N5 of objectstack#36437).
  *
  * An entry another package puts into the menu (its manifest's
  * `navigationContributions`, appended when the app is served) is not in the
@@ -165,15 +166,17 @@ import {
   withEntryIds,
   withOwnBeforeForeignRuns,
   type Menu,
+  labelGoesToTranslation,
   type MenuEntry,
   type MenuTargetKind,
 } from './designModeMenuModel.js';
 import {
   consoleAppMenuDoors,
-  fetchDefaultLocale,
-  isSameLanguage,
+  fetchDeploymentLocales,
+  labelLanguageOf,
   readStoredMenu,
   saveAppMenu,
+  type DeploymentLocales,
 } from './designModeMenuSave.js';
 import { freeItemName, isNewMenuItemKind, saveAppMenuWithNewItem, type NewMenuItemKind } from './designModeMenuCreate.js';
 import { dashboardEditArrival } from './designModeArrival.js';
@@ -262,14 +265,20 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
       publishedMoved: t('designMode.menu.publishedMoved', {
         defaultValue: "Someone published this app's menu while you were saving, so nothing was saved. Save again to apply your changes over theirs.",
       }),
+      translationPendingDraft: t('designMode.menu.translationPendingDraft', {
+        defaultValue: "This app's menu names in this language have unpublished changes in Studio. Publish or discard them there, then save again.",
+      }),
     }),
     [t],
   );
   const appName = app.name;
+  // The language the labels of an edit are typed in, as the edit is staged
+  // (objectstack#36504): the save stores each label where that language reads it.
+  const labels = React.useMemo(() => ({ language }), [language]);
   const commit = React.useCallback(
     (navigation: Menu) =>
-      saveAppMenu({ appName, packageId, served, navigation }, texts, consoleAppMenuDoors(client as never)),
-    [appName, packageId, served, texts, client],
+      saveAppMenu({ appName, packageId, served, navigation, labels }, texts, consoleAppMenuDoors(client as never)),
+    [appName, packageId, served, labels, texts, client],
   );
   const stage = change.stage;
   const update = React.useCallback((next: Menu) => stage(next, commit), [stage, commit]);
@@ -277,14 +286,14 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   const [addAt, setAddAt] = React.useState<AddAt | null>(null);
   const [renaming, setRenaming] = React.useState<string | null>(null);
 
-  // The stored menu and the deployment's default language, for the rename's
-  // source-language rule; both `undefined` while read.
+  // The stored menu and the deployment's languages, for where a rename lands
+  // (objectstack#36504); both `undefined` while read.
   const [storedMenu, setStoredMenu] = React.useState<Menu | null | undefined>(undefined);
-  const [defaultLocale, setDefaultLocale] = React.useState<string | null | undefined>(undefined);
+  const [locales, setLocales] = React.useState<DeploymentLocales | null | undefined>(undefined);
   React.useEffect(() => {
     let cancelled = false;
     void readStoredMenu(appName, packageId, client as never).then((nav) => !cancelled && setStoredMenu(nav));
-    void fetchDefaultLocale().then((code) => !cancelled && setDefaultLocale(code));
+    void fetchDeploymentLocales().then((read) => !cancelled && setLocales(read));
     return () => {
       cancelled = true;
     };
@@ -483,7 +492,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     };
     const saved = await saveWith(insertEntry(menu, addAt.parentId, addAt.index, entry), (navigation) =>
       saveAppMenuWithNewItem(
-        { appName, packageId, served, navigation, item },
+        { appName, packageId, served, navigation, labels, item },
         itemTexts,
         consoleAppMenuDoors(client as never),
       ),
@@ -521,7 +530,7 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
     };
     const saved = await saveWith(insertEntry(menu, addAt.parentId, addAt.index, entry), (navigation) =>
       saveAppMenuWithNewItem(
-        { appName, packageId, served, navigation, item: { kind: 'report', name, label, body } },
+        { appName, packageId, served, navigation, labels, item: { kind: 'report', name, label, body } },
         itemTexts,
         consoleAppMenuDoors(client as never),
       ),
@@ -648,13 +657,17 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
   };
 
   const renamed = renaming ? entryOf(menu, renaming) : null;
-  /** Whether the entry `id`'s name may be changed here (ruling (4)). */
-  const nameOpen = (id: string): boolean => {
-    if (!defaultLocale || !isSameLanguage(language, defaultLocale)) return false;
-    const shown = entryOf(served, id);
-    if (!shown) return true; // added in this session: its name is the editor's own
-    const stored = storedById?.get(id);
-    return !!stored && labelOf(shown) === labelOf(stored);
+  /**
+   * The language a name typed for the entry `id` is a translation in, or
+   * `null` when it is the stored label (objectstack#36504): the save's own
+   * rule (`labelGoesToTranslation`), read here to say so. Unsaid while the
+   * languages or the stored menu are read.
+   */
+  const translatedIn = (id: string): string | null => {
+    if (locales === undefined || storedMenu === undefined) return null;
+    const typedIn = labelLanguageOf(language, locales);
+    const goes = labelGoesToTranslation(typedIn, entryOf(served, id), storedById?.get(id));
+    return goes ? typedIn.locale : null;
   };
 
   return (
@@ -697,12 +710,14 @@ export default function DesignModeMenu({ app, basePath, resolveTargetLabel, reso
         <RenameDialog
           label={labelOf(renamed)}
           icon={typeof renamed.icon === 'string' ? renamed.icon : ''}
-          nameLocked={!nameOpen(String(renamed.id))}
+          translatedIn={translatedIn(String(renamed.id))}
+          language={language}
           onClose={() => setRenaming(null)}
           onDone={(label, icon) => {
-            // A name left as it was stays inherited (or as authored); a cleared one inherits again.
+            // A name left as it was stays inherited (or as authored); a cleared one inherits again
+            // (one that is a translation drops it). Where the name is stored is the save's.
             const patch: Record<string, unknown> = { icon: icon || undefined };
-            if (nameOpen(String(renamed.id)) && label !== labelOf(renamed)) patch.label = label || undefined;
+            if (label !== labelOf(renamed)) patch.label = label || undefined;
             update(patchEntry(menu, String(renamed.id), patch));
             setRenaming(null);
           }}
@@ -1242,17 +1257,32 @@ function NewItemDialog({
   );
 }
 
+/** The name of the language `locale`, in the language `reader`; the tag itself where the runtime names none. */
+function languageName(locale: string, reader: string): string {
+  try {
+    return new Intl.DisplayNames([reader, 'en'], { type: 'language' }).of(locale) ?? locale;
+  } catch {
+    return locale;
+  }
+}
+
 function RenameDialog({
   label,
   icon,
-  nameLocked,
+  translatedIn,
+  language,
   onClose,
   onDone,
 }: {
   label: string;
   icon: string;
-  /** The name is shown, not changed: the session is not in the app's source language. */
-  nameLocked: boolean;
+  /**
+   * The language a new name is that language's translation in, the stored
+   * name kept (objectstack#36504); `null` when it is the stored name.
+   */
+  translatedIn: string | null;
+  /** The reader's language, the one the hint names a language in. */
+  language: string;
   onClose: () => void;
   onDone: (label: string, icon: string) => void;
 }) {
@@ -1277,15 +1307,17 @@ function RenameDialog({
             <Label htmlFor="design-menu-rename-label">{t('designMode.menu.name', { defaultValue: 'Name' })}</Label>
             <Input
               id="design-menu-rename-label"
-              autoFocus={!nameLocked}
-              disabled={nameLocked}
-              aria-describedby={nameLocked ? 'design-menu-rename-label-hint' : undefined}
+              autoFocus
+              aria-describedby={translatedIn ? 'design-menu-rename-label-hint' : undefined}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
-            {nameLocked && (
-              <p id="design-menu-rename-label-hint" className="text-xs text-muted-foreground" data-testid="design-menu-rename-source-only">
-                {t('designMode.menu.renameSourceOnly', { defaultValue: "Menu names are changed in the app's source language" })}
+            {translatedIn && (
+              <p id="design-menu-rename-label-hint" className="text-xs text-muted-foreground" data-testid="design-menu-rename-translation">
+                {t('designMode.menu.renameTranslation', {
+                  defaultValue: "The new name is shown in {{language}}. The app's other languages keep their names.",
+                  language: languageName(translatedIn, language),
+                })}
               </p>
             )}
           </div>
@@ -1295,7 +1327,7 @@ function RenameDialog({
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border">
                 {preview}
               </span>
-              <Input id="design-menu-rename-icon" autoFocus={nameLocked} value={iconName} onChange={(e) => setIconName(e.target.value)} placeholder="briefcase" />
+              <Input id="design-menu-rename-icon" value={iconName} onChange={(e) => setIconName(e.target.value)} placeholder="briefcase" />
             </div>
             <p className="text-xs text-muted-foreground">
               {t('designMode.menu.iconHint', { defaultValue: 'A Lucide icon name, such as "briefcase".' })}
