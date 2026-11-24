@@ -1076,9 +1076,11 @@ function ApprovalsQueue() {
   // Forward), never on a REPLACE, which is this page's own write.
   const [query, setQuery] = useState(urlState.q);
   const navigationType = useNavigationType();
-  useEffect(() => {
+  const [draftLocationKey, setDraftLocationKey] = useState(location.key);
+  if (draftLocationKey !== location.key) {
+    setDraftLocationKey(location.key);
     if (navigationType !== 'REPLACE') setQuery(urlState.q);
-  }, [location.key, navigationType, urlState.q]);
+  }
   const serverQuery = tab === 'pending' ? '' : urlState.q;
   // Client-side ordering of the visible rows (#2762 P1-3), `sortKey` above.
   // Default keeps the server's newest-first; the others let a reviewer triage
