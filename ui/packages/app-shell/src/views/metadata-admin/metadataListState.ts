@@ -176,7 +176,17 @@ export interface ListRowReader<R> {
   active?: (row: R) => boolean | null;
 }
 
-const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const COLLATORS = new Map<string, Intl.Collator>();
+
+/** The comparison the sort uses, in the reader's display locale (numbers in number order, case ignored). */
+function collatorFor(locale: string): Intl.Collator {
+  let collator = COLLATORS.get(locale);
+  if (!collator) {
+    collator = new Intl.Collator(locale, { numeric: true, sensitivity: 'base' });
+    COLLATORS.set(locale, collator);
+  }
+  return collator;
+}
 
 function sortValue<R>(row: R, key: ListSortKey, read: ListRowReader<R>): string {
   if (key === 'label') {
@@ -188,10 +198,18 @@ function sortValue<R>(row: R, key: ListSortKey, read: ListRowReader<R>): string 
 
 /**
  * The rows the list shows for `state`, in the order it shows them: filtered
- * by every offered filter, then sorted by `state.sort`. Ties break on the
- * name, then on the rows' own order, so the order is total and stable.
+ * by every offered filter, then sorted by `state.sort`, compared in `locale`
+ * (the reader's display locale — the list and the detail pass the same one).
+ * Ties break on the name, then on the rows' own order, so the order is total
+ * and stable.
  */
-export function applyListState<R>(rows: readonly R[], state: MetadataListState, read: ListRowReader<R>): R[] {
+export function applyListState<R>(
+  rows: readonly R[],
+  state: MetadataListState,
+  read: ListRowReader<R>,
+  locale: string,
+): R[] {
+  const collator = collatorFor(locale);
   const kept = rows.filter((row) => {
     if (state.query && !read.matches(row, state.query)) return false;
     if (state.source !== 'all' && read.source(row) !== state.source) return false;
@@ -206,9 +224,9 @@ export function applyListState<R>(rows: readonly R[], state: MetadataListState, 
   return kept
     .map((row, at) => ({ row, at }))
     .sort((a, b) => {
-      const primary = COLLATOR.compare(sortValue(a.row, state.sort.key, read), sortValue(b.row, state.sort.key, read));
+      const primary = collator.compare(sortValue(a.row, state.sort.key, read), sortValue(b.row, state.sort.key, read));
       if (primary !== 0) return sign * primary;
-      const byName = COLLATOR.compare(read.name(a.row), read.name(b.row));
+      const byName = collator.compare(read.name(a.row), read.name(b.row));
       if (byName !== 0) return sign * byName;
       return a.at - b.at;
     })
@@ -249,10 +267,15 @@ export function scopeListRows<R extends { item: Record<string, unknown> }>(rows:
  * With {@link DEFAULT_LIST_STATE} — no list context — this is every row by
  * name, A to Z.
  */
-export function orderedListNames<R>(rows: readonly R[], state: MetadataListState, read: ListRowReader<R>): string[] {
+export function orderedListNames<R>(
+  rows: readonly R[],
+  state: MetadataListState,
+  read: ListRowReader<R>,
+  locale: string,
+): string[] {
   const seen = new Set<string>();
   const names: string[] = [];
-  for (const row of applyListState(rows, state, read)) {
+  for (const row of applyListState(rows, state, read, locale)) {
     const name = read.name(row);
     if (!name || seen.has(name)) continue;
     seen.add(name);

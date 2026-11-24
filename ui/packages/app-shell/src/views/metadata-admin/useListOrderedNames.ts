@@ -27,6 +27,7 @@ import { customizationPackageId } from '@objectstack/spec/kernel';
 import { matchesQuery, useMetadataClient, useMetadataTypes } from './useMetadata.js';
 import { bundleMemberOf, resolveResourceConfig } from './registry.js';
 import { isEnvironmentScope } from './catalog-scope.js';
+import { useMetadataLocale } from './i18n.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { hasCatalogActivation, isCatalogHolderActive, readCatalogLedger, type CatalogLedgerRead } from './catalog-activation.js';
 import { holdersOfName, servedHolderOf } from './permission-set-holder.js';
@@ -89,6 +90,8 @@ export function useListOrderedNames(type: string): ListOrderedNames {
   const bundleMemberField = config.bundleMemberField;
 
   const host = useMetadataAreaHost();
+  // The list compares in the display locale; the same one here keeps the order equal.
+  const locale = useMetadataLocale();
   const activePackage = envScope ? null : host ? host.packageId : urlPackage;
   const unscoped = envScope || activePackage === null;
   const pairId = React.useMemo(() => {
@@ -182,7 +185,7 @@ export function useListOrderedNames(type: string): ListOrderedNames {
           }
         : {}),
     };
-    return { status: 'ready', names: orderedListNames(scoped, state, read), fromList };
+    return { status: 'ready', names: orderedListNames(scoped, state, read, locale), fromList };
     // Keyed on the config members read, never on `config`, rebuilt every render.
-  }, [rows, type, state, fromList, customizations, needsLedger, ledger, envScope, unscoped, activePackage, pairId, primaryKey, listFilter, bundleMemberField, searchKey]);
+  }, [rows, type, locale, state, fromList, customizations, needsLedger, ledger, envScope, unscoped, activePackage, pairId, primaryKey, listFilter, bundleMemberField, searchKey]);
 }

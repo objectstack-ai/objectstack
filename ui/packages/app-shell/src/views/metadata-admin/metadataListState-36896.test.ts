@@ -121,7 +121,7 @@ describe('the list-state codec (objectstack#36896)', () => {
 
 describe('the ordered names for the detail ‹ › (objectstack#36896)', () => {
   it('with no list context: every row, by API name, numbers in number order', () => {
-    expect(orderedListNames(ROWS, DEFAULT_LIST_STATE, read)).toEqual([
+    expect(orderedListNames(ROWS, DEFAULT_LIST_STATE, read, 'en')).toEqual([
       'account_flow',
       'beta_flow',
       'case_flow',
@@ -133,12 +133,12 @@ describe('the ordered names for the detail ‹ › (objectstack#36896)', () => {
 
   it('with a filter and a sort: the rows the list shows, in its order', () => {
     // Runtime rows only, by label Z to A; a row without a label sorts by its name.
-    expect(orderedListNames(ROWS, state({ source: 'runtime', sort: { key: 'label', dir: 'desc' } }), read)).toEqual([
+    expect(orderedListNames(ROWS, state({ source: 'runtime', sort: { key: 'label', dir: 'desc' } }), read, 'en')).toEqual([
       'case_flow',
       'account_flow',
     ]);
-    expect(orderedListNames(ROWS, state({ query: 'flow1' }), read)).toEqual(['flow10']);
-    expect(orderedListNames(ROWS, state({ sort: { key: 'label', dir: 'asc' } }), read)).toEqual([
+    expect(orderedListNames(ROWS, state({ query: 'flow1' }), read, 'en')).toEqual(['flow10']);
+    expect(orderedListNames(ROWS, state({ sort: { key: 'label', dir: 'asc' } }), read, 'en')).toEqual([
       'account_flow',
       'beta_flow',
       'case_flow',
@@ -149,13 +149,13 @@ describe('the ordered names for the detail ‹ › (objectstack#36896)', () => {
   });
 
   it('applies "only customizations" and the status only where the list offers them', () => {
-    expect(orderedListNames(ROWS, state({ customizedOnly: true }), read)).toEqual(['account_flow', 'case_flow']);
+    expect(orderedListNames(ROWS, state({ customizedOnly: true }), read, 'en')).toEqual(['account_flow', 'case_flow']);
     // An unknown state (`null`) matches neither status.
-    expect(orderedListNames(ROWS, state({ status: 'inactive' }), read)).toEqual(['account_flow']);
-    expect(orderedListNames(ROWS, state({ status: 'active' }), read)).not.toContain('case_flow');
+    expect(orderedListNames(ROWS, state({ status: 'inactive' }), read, 'en')).toEqual(['account_flow']);
+    expect(orderedListNames(ROWS, state({ status: 'active' }), read, 'en')).not.toContain('case_flow');
     // Not offered: the state is ignored, as the page draws no control for it.
     const plain: ListRowReader<Row> = { ...read, customized: undefined, active: undefined };
-    expect(orderedListNames(ROWS, state({ customizedOnly: true, status: 'inactive' }), plain)).toHaveLength(ROWS.length);
+    expect(orderedListNames(ROWS, state({ customizedOnly: true, status: 'inactive' }), plain, 'en')).toHaveLength(ROWS.length);
   });
 
   it('rows sharing a name are one entry, at the first row', () => {
@@ -164,12 +164,12 @@ describe('the ordered names for the detail ‹ › (objectstack#36896)', () => {
       { item: { name: 'alpha', label: 'C' }, source: 'artifact' },
       { item: { name: 'welcome', label: 'A' }, source: 'runtime' },
     ];
-    expect(applyListState(twins, state({ sort: { key: 'label', dir: 'asc' } }), read).map((r) => r.item.label)).toEqual([
+    expect(applyListState(twins, state({ sort: { key: 'label', dir: 'asc' } }), read, 'en').map((r) => r.item.label)).toEqual([
       'A',
       'B',
       'C',
     ]);
-    expect(orderedListNames(twins, state({ sort: { key: 'label', dir: 'asc' } }), read)).toEqual(['welcome', 'alpha']);
+    expect(orderedListNames(twins, state({ sort: { key: 'label', dir: 'asc' } }), read, 'en')).toEqual(['welcome', 'alpha']);
   });
 
   it('the package scope holds the active package and its pair, or every package unscoped', () => {

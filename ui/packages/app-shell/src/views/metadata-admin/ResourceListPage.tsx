@@ -716,7 +716,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         }
       : {}),
   };
-  const filtered = applyListState(scopedItems, listState, rowReader);
+  const filtered = applyListState(scopedItems, listState, rowReader, locale);
   // The list context every row link carries to its detail (decision 10).
   const listContext = listContextQuery(listState);
 
