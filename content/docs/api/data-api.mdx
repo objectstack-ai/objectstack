@@ -568,7 +568,9 @@ there points at several parents, so no single Change Owner decides its owner.
 The answer gains one outcome per named relationship:
 
 - a child record the caller's write refuses is listed in `failures` with its
-  id, code and sentence, and counted in `failed`;
+  id, code and sentence, and counted in `failed` — a child whose `owner_id` is
+  locked on it (read-only, or under a `readonlyWhen` condition that holds) as
+  `FIELD_NOT_ACCESSIBLE`, keeping its owner; the parent's own move stands;
 - one call moves at most **500** child records; the records past that limit
   are not listed but counted in `remaining`, still with the previous owner;
 - when a relationship's child records could not be read at all, the outcome
