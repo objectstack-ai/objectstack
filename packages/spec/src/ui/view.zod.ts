@@ -2373,16 +2373,16 @@ export const EmptyStateSchema = lazySchema(() => strictObject({
 /**
  * objectstack#36370 — a board lane's foot statistic (`kanban.summary`).
  *
- * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`: the
- * board computes these in the browser, so the set is exactly what a reader
- * computes. `count` counts the lane's records (the lane's own count, the one
- * its header shows); `sum` totals a number field (`field` required) over the
- * cards the lane has LOADED, not over every record of the lane, and says so
- * at the foot when the lane holds more than it drew; `none` shows nothing,
- * also over `summarizeField`. A sum over the whole lane, and an average, a
- * minimum or a maximum, wait for a lane aggregate the query answers
- * (objectstack#36520): over a lane that has loaded only part of its cards none
- * of them is even a bound.
+ * Its own closed set, not the list footer's `ColumnSummaryConfigSchema`.
+ * `count` counts the lane's records (the lane's own count, the one its header
+ * shows); `sum` totals a number field over every record of the lane, `avg`
+ * averages it, and `min` / `max` show its smallest / largest value
+ * (`field` required for all four); `none` shows nothing, also over
+ * `summarizeField`. objectstack#36520: the four aggregates are computed in the
+ * query — one grouped aggregate over the board's filter and search, grouped by
+ * the lane field, under the reader's permissions — never added up over the
+ * cards a lane has loaded, so a lane longer than its page still shows the
+ * whole lane's figure. A field the reader may not read shows no figure.
  */
 export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('type', [
   strictObject({
@@ -2402,9 +2402,30 @@ export const KanbanLaneSummarySchema = lazySchema(() => z.discriminatedUnion('ty
     history: VIEW_HISTORY,
   }, {
     type: z.literal('sum'),
-    field: z.string().min(1).describe('The number field the lane totals over its loaded cards (e.g. amount)'),
+    field: z.string().min(1).describe('The number field the lane totals over all of its records (e.g. amount)'),
   }),
-]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum of a number field over the lane\'s loaded cards'));
+  strictObject({
+    surface: 'this `avg` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('avg'),
+    field: z.string().min(1).describe('The number field the lane averages over all of its records (e.g. amount)'),
+  }),
+  strictObject({
+    surface: 'this `min` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('min'),
+    field: z.string().min(1).describe('The field whose smallest value over all of the lane\'s records the lane shows (e.g. amount)'),
+  }),
+  strictObject({
+    surface: 'this `max` lane statistic',
+    history: VIEW_HISTORY,
+  }, {
+    type: z.literal('max'),
+    field: z.string().min(1).describe('The field whose largest value over all of the lane\'s records the lane shows (e.g. amount)'),
+  }),
+]).describe('Lane foot statistic: none, the count of the lane\'s records, or the sum, average, minimum or maximum of a field over all of the lane\'s records'));
 
 /**
  * Kanban Settings
@@ -2472,19 +2493,21 @@ export const KanbanConfigSchema = lazySchema(() => strictObject({
   /**
    * objectstack#36370 — the statistic each lane shows at its foot
    * ({@link KanbanLaneSummarySchema}): `{ type: 'count' }` counts the lane's
-   * records; `{ type: 'sum', field }` totals a number field over the cards
-   * the lane has loaded (not the lane's every record: objectstack#36520);
-   * `{ type: 'none' }` shows nothing, also over a `summarizeField`. Without
-   * it a lane shows the sum of `summarizeField` where that is set, as before
-   * this key, and nothing otherwise.
+   * records; `{ type: 'sum' | 'avg' | 'min' | 'max', field }` totals, averages,
+   * or takes the smallest / largest value of a field over all of the lane's
+   * records, computed in the query (objectstack#36520); `{ type: 'none' }`
+   * shows nothing, also over a `summarizeField`. Without it a lane shows the
+   * sum of `summarizeField` where that is set, as before this key, and nothing
+   * otherwise.
    *
    * ⛔ No spec-side default: absence keeps a board stored before this key
    * exactly as it was.
    */
   summary: KanbanLaneSummarySchema.optional().describe(
     'The statistic each lane shows at its foot. `{ type: \'count\' }` counts the lane records; '
-    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over the cards the lane has loaded, '
-    + 'not every record of the lane (the foot says so when the lane holds more); `{ type: \'none\' }` shows nothing. '
+    + '`{ type: \'sum\', field: \'amount\' }` totals a number field over all of the lane records, '
+    + '`avg` averages it, and `min` / `max` show its smallest / largest value, each computed by the query '
+    + '(a field the reader may not read shows no figure); `{ type: \'none\' }` shows nothing. '
     + 'Takes precedence over summarizeField. Omit to keep summarizeField\'s sum, or no statistic without it.',
   ),
   /**

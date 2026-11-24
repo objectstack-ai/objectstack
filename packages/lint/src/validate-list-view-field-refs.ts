@@ -469,6 +469,7 @@
  */
 
 import {
+  BOOLEAN_VALUE_TYPES,
   FieldType,
   classifyDottedFilterHead,
   isAggregateCompatibleWithFieldType,
@@ -973,28 +974,44 @@ export function columnSummaryRefusal(
  * [#36370] The field-naming position inside `kanban.summary`, the lane foot
  * statistic. Its own table rather than a `POSITIONS` row: the key lives one
  * record further down, as `columns[].summary.field` does. A stale name draws
- * nothing: the board finds no such field on the object and every lane's foot
- * goes blank, the statistic the author asked for gone without a word. The
+ * nothing: the board finds no such field on the object, asks no lane read, and
+ * every lane's foot goes blank, the statistic the author asked for gone without a word. The
  * `columns[].summary.field` level, not `summarizeField`'s.
  */
 const KANBAN_SUMMARY_POSITIONS: Array<{ key: string; severity: Sev }> = [{ key: 'field', severity: 'error' }];
 
 /**
- * [#36370] The refusal a `kanban.summary` of type `sum` earns over the field it
- * totals on `object`, or `undefined` when nothing is judged or the pair is
- * accepted. The same verdict `columns[].summary` asks ({@link columnSummaryRefusal}):
- * the aggregate × field-type table's `sum` row over the field's declaration,
- * less the true / false class the board does not add. The board totals its loaded cards in the browser today, and a value that is
- * no number blanks the lane's foot; the whole lane's figure is the server's
- * `sum`, so the pair is judged by the door that will answer it. `count` and
- * `none` compare no value.
+ * [#36370, #36520] The aggregates a `kanban.summary` may name, each with what
+ * a refused pair fails to compute. The board answers all four by one grouped
+ * aggregate over every record of the lane, so a pair the aggregate door
+ * refuses is a lane foot with no figure.
+ */
+const KANBAN_SUMMARY_AGGREGATES: Readonly<Record<string, string>> = {
+  sum: 'totals no number',
+  avg: 'averages no number',
+  min: 'has no smallest value',
+  max: 'has no largest value',
+};
+
+/**
+ * [#36370, #36520] The refusal a `kanban.summary` of type `sum`, `avg`, `min`
+ * or `max` earns over the field it aggregates on `object`, or `undefined` when
+ * nothing is judged or the pair is accepted. The same verdict `columns[].summary`
+ * asks ({@link columnSummaryRefusal}): the aggregate × field-type table's row
+ * for that function over the field's declaration, less the spec's boolean
+ * class (`BOOLEAN_VALUE_TYPES`), which the board does not aggregate. The lane
+ * read is the server's aggregate, so the pair is judged by the door that
+ * answers it. `count` and `none` compare no value.
  */
 function kanbanSummaryRefusal(
   summary: Record<string, unknown>,
   graph: ObjectGraph,
   object: string,
 ): { message: string; hint: string } | undefined {
-  if (summary.type !== 'sum') return undefined;
+  const fn = typeof summary.type === 'string' && Object.prototype.hasOwnProperty.call(KANBAN_SUMMARY_AGGREGATES, summary.type)
+    ? (summary.type as 'sum' | 'avg' | 'min' | 'max')
+    : undefined;
+  if (!fn) return undefined;
   const field = strName(summary.field);
   if (!field || field.includes('.')) return undefined;
   const verdict = resolveFieldPath(graph, object, field);
@@ -1002,24 +1019,25 @@ function kanbanSummaryRefusal(
   const fieldType = verdict.meta?.type;
   if (!isJudgeableAggregateType(fieldType)) return undefined;
   const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
-  // A true / false field the door would sum as a count of trues; the board
-  // totals numbers only (a `true` reads as no number and blanks the foot), so
-  // the board's picker leaves the class out and so does this verdict.
-  const yesNo = fieldType === 'boolean' || fieldType === 'toggle';
-  if (!yesNo && aggregateAcceptsDeclaration('sum', shape)) return undefined;
-  if (yesNo) {
+  const lacks = KANBAN_SUMMARY_AGGREGATES[fn];
+  const hint = `Aggregate a number field of "${object}", or count each lane's cards with \`summary: { type: 'count' }\`.`;
+  // A true / false field the door would aggregate as 0 / 1 (a sum is then a
+  // count of trues); the board's picker leaves the class out and so does this
+  // verdict, read off the spec's class rather than a list of its own.
+  if (BOOLEAN_VALUE_TYPES.has(fieldType)) {
     return {
       message:
-        `summary "sum" over "${field}" (${declaredAs(shape)}) totals no number: the board adds number values, ` +
-        'and a true / false value draws no figure at the lane\'s foot',
-      hint: `Total a number field of "${object}", or count each lane's cards with \`summary: { type: 'count' }\`.`,
+        `summary "${fn}" over "${field}" (${declaredAs(shape)}) ${lacks}: the board aggregates the values of a number ` +
+        'field, and a true / false field draws no figure at the lane\'s foot',
+      hint,
     };
   }
+  if (aggregateAcceptsDeclaration(fn, shape)) return undefined;
   return {
     message:
-      `summary "sum" over "${field}" (${declaredAs(shape)}) totals no number: the aggregate door refuses ` +
-      'the pair (400 INVALID_FIELD), and the board\'s own total over its loaded cards draws no figure',
-    hint: `Total a number field of "${object}", or count each lane's cards with \`summary: { type: 'count' }\`.`,
+      `summary "${fn}" over "${field}" (${declaredAs(shape)}) ${lacks}: the aggregate door refuses ` +
+      'the pair (400 INVALID_FIELD), so the lane\'s foot draws no figure',
+    hint,
   };
 }
 
@@ -1623,8 +1641,8 @@ export function validateListViewFieldRefs(
 
     checkKanbanLanes(listView, bound, where, path);
 
-    // [#36370] The lane foot statistic: the field it names, then the `sum`
-    // over that field's declaration.
+    // [#36370, #36520] The lane foot statistic: the field it names, then the
+    // `sum` / `avg` / `min` / `max` over that field's declaration.
     const kanbanSummary = isRec(listView.kanban) ? listView.kanban.summary : undefined;
     if (isRec(kanbanSummary)) {
       for (const { key, severity } of KANBAN_SUMMARY_POSITIONS) {
