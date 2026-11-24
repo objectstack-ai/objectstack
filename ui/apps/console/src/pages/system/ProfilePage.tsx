@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from '@object-ui/components';
 import { useUpload } from '@object-ui/fields';
+import { toast } from 'sonner';
 import { ConsolePageHeader } from '@object-ui/app-shell';
 import { resolveBuiltInLanguage, useDisplayLocale, useObjectTranslation, type TranslateFn } from '@object-ui/i18n';
 import { useAdapter, extractFieldErrors, extractWriteErrorMessage } from '@object-ui/react';
@@ -686,6 +687,15 @@ function LanguageCard({ userId }: LanguageCardProps) {
       });
       setStored(choice);
       setSaved(true);
+      // The inline alert above is local state, and a save that changes the
+      // interface language loses it: the signed-in user's locale reader
+      // applies the new column to the UI language, and the console shell
+      // remounts every page under `key={language}` (objectstack#36972). The
+      // console's toaster sits above that key, so the same sentence is also a
+      // toast, which the remount does not take away.
+      toast.success(t('profile.language.saved', { defaultValue: 'Language preference updated.' }), {
+        id: 'profile-language-saved',
+      });
     } catch (err) {
       // A malformed tag comes back as `400 VALIDATION_FAILED` carrying
       // `{ field: 'locale', code: 'invalid_format' }` and a localized message.
