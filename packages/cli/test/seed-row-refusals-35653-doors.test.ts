@@ -33,7 +33,9 @@ const stack = (records: Array<Record<string, unknown>>) => ({
       sharingModel: 'private',
       fields: {
         name: { type: 'text', label: 'Reference' },
-        amount: { type: 'currency', label: 'Amount' },
+        // Required, so the rule's `<=` never meets a null operand (the
+        // authoring rule `expression-invalid` refuses a nullable one first).
+        amount: { type: 'currency', label: 'Amount', required: true },
       },
       validations: [
         { type: 'script', name: 'amount_positive', condition: 'record.amount <= 0', message: 'A payment amount must be positive.' },
