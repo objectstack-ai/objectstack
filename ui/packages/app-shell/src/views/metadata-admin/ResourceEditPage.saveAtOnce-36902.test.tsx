@@ -26,6 +26,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic import of this module: its first load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -404,20 +406,35 @@ describe('the AI assistant\'s draft (objectstack#36902 item 3, decision 1)', () 
     expect(server.drafts.get('doc/guide')?.body).toMatchObject({ content: '# edited' });
   });
 
-  it('discard asks first when the page holds unsaved edits; Cancel keeps both the draft and the edits', async () => {
+  it('discard asks first, in the page\'s own dialog, when the page holds unsaved edits; Cancel keeps both the draft and the edits', async () => {
     await openGuide({ draft: aiDraft() });
     await editSource('# unsaved');
     fireEvent.click(screen.getByTestId('studio-ai-draft-discard'));
-    expect(confirmSpy).toHaveBeenCalledWith(t('engine.studio.aiDraft.discardConfirmUnsaved', 'en-US'));
+    expect(await screen.findByTestId('resource-edit-confirm-body')).toHaveTextContent(
+      t('engine.studio.aiDraft.discardConfirmUnsaved', 'en-US'),
+    );
+    expect(confirmSpy).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('resource-edit-confirm-cancel'));
     await settle();
     expect(server.writes).toEqual([]);
     expect(await source()).toHaveValue('# unsaved');
+    expect(server.drafts.has('doc/guide')).toBe(true);
+  });
+
+  it('discard with unsaved edits, confirmed: the draft and the edits go, and the live version is back', async () => {
+    await openGuide({ draft: aiDraft() });
+    await editSource('# unsaved');
+    fireEvent.click(screen.getByTestId('studio-ai-draft-discard'));
+    fireEvent.click(await screen.findByTestId('resource-edit-confirm-action'));
+    await waitFor(() => expect(server.drafts.has('doc/guide')).toBe(false), { timeout: 8000 });
+    await waitFor(async () => expect(await source()).toHaveValue('# Live'), { timeout: 8000 });
   });
 
   it('discard drops that one item\'s draft at its address and goes back to the live version', async () => {
     await openGuide({ draft: aiDraft() });
     fireEvent.click(screen.getByTestId('studio-ai-draft-discard'));
     // Nothing unsaved, so nothing to ask.
+    expect(screen.queryByTestId('resource-edit-confirm-dialog')).toBeNull();
     expect(confirmSpy).not.toHaveBeenCalled();
     await waitFor(() => expect(server.drafts.has('doc/guide')).toBe(false), { timeout: 8000 });
     expect(server.writes).toEqual([expect.objectContaining({ method: 'DELETE', search: '?state=draft' })]);

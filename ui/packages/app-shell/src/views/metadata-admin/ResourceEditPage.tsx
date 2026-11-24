@@ -2355,7 +2355,7 @@ function MetadataResourceEditPageImpl({
   // uses), never the browser's native `confirm()`. One slot holds whichever
   // is open; its copy is computed when it opens, from the body loaded then.
   const [pendingConfirm, setPendingConfirm] = React.useState<{
-    kind: 'reset' | 'delete' | 'discard';
+    kind: 'reset' | 'delete' | 'discard' | 'discardAi';
     title: string;
     description: string;
     actionLabel: string;
@@ -2581,9 +2581,23 @@ function MetadataResourceEditPageImpl({
   // objectstack#36902 (decision 1, the designers' rule of objectstack#36660) —
   // drop the AI assistant's draft of this one item, at the package and member
   // it was read at (`DELETE /meta/:type/:name?state=draft`), back to the live
-  // version. Edits not yet saved go with it, so they are asked about first.
-  async function discardAiDraft() {
-    if (isDirty && !window.confirm(t('engine.studio.aiDraft.discardConfirmUnsaved', locale))) return;
+  // version. Edits not yet saved go with it, so they are asked about first,
+  // in the page's in-app confirm (objectui#13333), not the native one.
+  function discardAiDraft() {
+    if (isDirty) {
+      setPendingConfirm({
+        kind: 'discardAi',
+        title: t('engine.studio.aiDraft.discard', locale),
+        description: t('engine.studio.aiDraft.discardConfirmUnsaved', locale),
+        actionLabel: t('engine.studio.aiDraft.discard', locale),
+        item: ownItemLabel() || `${type}/${name ?? ''}`,
+      });
+      return;
+    }
+    void runDiscardAiDraft();
+  }
+
+  async function runDiscardAiDraft() {
     setDiscardingAiDraft(true);
     setError(null);
     setPublishRefused(null);
@@ -3268,7 +3282,7 @@ function MetadataResourceEditPageImpl({
             {aiDraft && (
               <StudioAiDraftNotice
                 locale={locale}
-                onDiscard={canWrite ? () => void discardAiDraft() : undefined}
+                onDiscard={canWrite ? discardAiDraft : undefined}
                 busy={discardingAiDraft || saving || publishing}
               />
             )}
@@ -4025,7 +4039,7 @@ function MetadataResourceEditPageImpl({
       {/* objectui#11773 — the draft-version conflict, apart from the
           destructive-change confirmation above: two different 409s. */}
       {draftConflictDialog}
-      {/* objectui#13333 — reset / delete / discard-draft, asked in-app. */}
+      {/* objectui#13333 — reset / delete / discard-draft / discard the AI's draft, asked in-app. */}
       <AlertDialog
         open={pendingConfirm !== null}
         onOpenChange={(open) => {
@@ -4051,6 +4065,7 @@ function MetadataResourceEditPageImpl({
                 setPendingConfirm(null);
                 if (!pending) return;
                 if (pending.kind === 'discard') void runDiscardDraft(pending.item);
+                else if (pending.kind === 'discardAi') void runDiscardAiDraft();
                 else void runReset(pending.kind === 'reset');
               }}
             >
