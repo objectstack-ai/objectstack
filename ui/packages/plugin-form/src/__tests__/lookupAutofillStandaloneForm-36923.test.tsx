@@ -125,8 +125,8 @@ async function pick(trigger: HTMLElement, title: string): Promise<void> {
 }
 
 /** The development-build warnings that name `field` as a `lookupAutofill` not run. */
-const refusals = (warn: ReturnType<typeof vi.spyOn>, field: string) =>
-  warn.mock.calls.filter(([m]) => typeof m === 'string' && m.includes(`lookupAutofill on "${field}" is not executed`));
+const refusals = (warn: { mock: { calls: unknown[][] } }, field: string) =>
+  warn.mock.calls.filter(([m]: unknown[]) => typeof m === 'string' && m.includes(`lookupAutofill on "${field}" is not executed`));
 
 function renderBareForm(lookup: Record<string, unknown>) {
   const ds = makeDS();
