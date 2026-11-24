@@ -8,7 +8,7 @@
  * shared spelling lives here.
  *
  * The Console builds the same two addresses with `studioChangesReviewPath`
- * and `studioItemReviewPath` (`ui/packages/app-shell`, `studioAddress.ts`),
+ * and `studioItemReviewPath` (`studioAddress.ts` in the Console's app-shell package),
  * which does not depend on this package; both sides are pinned to the same
  * literals, and to the literals the `objectstack-mcp-build` skill's evals
  * quote (`studio-review-routes.test.ts`).
