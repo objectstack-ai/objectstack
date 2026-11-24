@@ -1,0 +1,36 @@
+{
+  "number": 37030,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): severity-raise comments carry pm:retriage, triage merge vs dispatch fold, evaluation keep on every close path, one size scale",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T16:05:35Z",
+  "updated_at": "2026-11-24T17:55:28Z",
+  "closed_at": "2026-11-24T17:55:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T17:55:25Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37030",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67x8Be2AAcUBhodBsvnWLd3Xs)_\n\nPart of #35855 (items A1, B4, B7, C1). Item A5 stays on the card for its own North Star PR; the card stays open until that one merges.\nRefs #35855 (items A1, B4, B7, C1)\n\nRule-change: ruled\nRuling-ref: 7135874506 — 「照推荐：采纳 5 条」 (maintainer, decision card, 2026-11-24T15:20Z)\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 用户能看到什么变化:用户无感;只改车队分诊与立卡规则的四处措辞。\n- 为什么做:执行你在分诊规则卡上「照推荐：采纳 5 条」的裁决里落在技能参考文件的四条(北极星那句另走一个需 os-zhuang 批的 PR)。\n- 出错会怎样:最坏是席位读错一条分诊规则,例如漏挂请分诊改判的标签;只是文字,可直接撤回。\n- 要你做什么:无。\n\n## What changes\n\nFour items of ruling record 7135874506, each in the form that ruling adopted, all in `.claude/skills/pm-dispatch/references/**`:\n\n- **A1** (`filing-gate.md`, the dedupe-hit comment line): a comment that raises severity or reach is posted together with the existing `pm:retriage` label, and triage answers it and sets the grade; the filer still does not change the grade. Human-set grades are excepted, because the line five rows below (an objection to a human-set grade is one comment line, grade and card state untouched) already governs them and triage may not change a human grade anyway.\n- **B4** (`triage-duties.md`, the first-touch merge row): every other use of the word fold in that file except `Fold-with:` means this merge of cards, which does not pass the five dispatch-fold gates or their five-card cap.\n- **B7** (`triage-duties.md`): the evaluation keep leaves the p3 keep list and becomes its own line: a card that affects evaluation is not closed not_planned on any triage close path; merging it into another card or moving it onto a weekly sweep card stays allowed. The p3 standard's \"wins over every keep rule in this file and the filing gate\" clause now excepts that line, so the two do not contradict each other.\n- **C1** (`triage-duties.md`, `execution-duties.md`): drop the optional size/model suggestion line from the audit comment, rewrite the effort criterion's `size/l` label as `size L`, and reword the effort section's line to read the triage size instead of a suggestion line. The audit comment's `· size XS|S|M|L` is the one scale. \"L/XL\" elsewhere is left as it is (the ruled form). No script, no PR `size/*` label (`scripts/pr-labels.mjs`) and no repository label is touched.\n\nA6 (remainder) and B2 are not written, per the ruling.\n\n### Byte ratchet (ruled raise)\n\n| File | Before | After | Ceiling move |\n|:--|--:|--:|:--|\n| `references/filing-gate.md` | 9089 | 9124 | 9089 → 9124 (+35), ruling record 7135874506 (A1) |\n| `references/triage-duties.md` | 13544 | 13709 | 13544 → 13709 (+165), ruling record 7135874506 (B4, B7, C1) |\n| `references/execution-duties.md` | 22316 | 22307 | lowered 22316 → 22307 (−9) |\n\nNet +191 bytes across the three files. Each raised CEILINGS row in `scripts/pm/check-skill-line-ratchet.mjs` quotes ruling record 7135874506 and its measured delta, as the ratchet header's \"RAISING one is authorized by the RULING OF RECORD\" requires. No rewrap was used as payment.\n\n## Tests\n\nText-only change to fleet rule files plus three ceiling rows; no tested behaviour changed, so there is no ablation. Readings are at head `84260754`.\n\n<details><summary>Local gates: 43 derived, 43 run, all exit 0</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (change set from the merge base `a73edb3c`): 43 commands.\n- Every one exited 0, exit code captured before any pipe. `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first exited 3 (prerequisite not met: `@objectstack/formula` and `@objectstack/lint` not built); after the build under the verify lock (VERDICT command-exit 0) it exited 0.\n- `pnpm check:pm-skill-ratchet`: self-test passes; filing-gate 9124 (ceiling 9124), triage-duties 13709 (ceiling 13709), execution-duties 22307 (ceiling 22307), each with 0 bytes of headroom.\n- `pnpm check:pm-skill-id-lint`: \"131 file(s) clean\".\n- `pnpm check:pm-dispatch-gates`: \"2273 cases pass\", exit 0.\n- `dispatch-gates --ran`: \"43 derived famil(ies) accounted for, 43 run, 0 NOT-MEASURED (a DERIVED zero)\".\n- `node scripts/check-commit-card-trailers.mjs --range origin/main..HEAD`: clean. `node scripts/pm/overlap-check.mjs`: VERDICT clean exit 0 (against origin/main and one PR that shares `triage-duties.md`, which merges cleanly).\n\n</details>\n\n## Acceptance notes\n\n- B7 sits in `triage-duties.md` and says \"any triage close path\". That covers the missing-parts close in `filing-gate.md` too, but nothing in `filing-gate.md` repeats it (to keep within the byte budget). The p3 standard is the only neighbouring rule that claimed to win over keep rules, so it is the only one given an explicit exception.\n- No test or script pins any phrase that was cut: `git grep` over `scripts/**`, `packages/**`, `.github/**` and `.claude/**` for each one hits only the edited lines.\n- The CEILINGS header sentence \"Three rows were later raised by an ordinary ruled raise\" stays true: the same three rows.\n\n## Verification\n\nFiles to read first, by risk: `triage-duties.md`, the B7 line and the p3 standard's new exception (the hunk at the old lines 59–63); `filing-gate.md` line 33 (A1); the three CEILINGS rows.\n\nTwo-minute check: `node scripts/pm/check-skill-line-ratchet.mjs` exits 0 and prints the three references at 0 bytes of headroom (9124, 13709, 22307).\n\nSigned: repo:objectstack#2 · huangyiirene · session_01J8VVAoSJk7wyvTDfsdxoeG\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01J8VVAoSJk7wyvTDfsdxoeG)_\n"
+}

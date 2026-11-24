@@ -12,17 +12,20 @@
   },
   "labels": [
     "area:ai",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T14:14:56Z",
-  "updated_at": "2026-11-24T14:14:56Z",
+  "updated_at": "2026-11-24T20:01:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36997",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed. Source: topic #36996.\nGrading: area:ai · Task · p2 (blocks the epic's children from being dispatched) · reach: n/a · evidence: read.\n\n## 维护者速读\n- 做什么：把「记录资料包」怎么声明、怎么读、怎么交给模型，以及「问 AI」按钮、对话焦点、技能指定资料包、答复引用的格式写成一份决定记录。\n- 需要你做的：手工合并这份 ADR；后面的子卡等它。\n\n## What\nOne ADR in `docs/adr/`, with a `## Provenance` section naming the cloud record (objectstack-ai/cloud#4960) and its date. It decides:\n1. Admission of the `ai_context` metadata type under ADR-0088 (own lifecycle, declarable governance, a real consumer), and its v1 keys. Only keys with an enforcer in the first implementation PR are listed (ADR-0049); a body fallback to knowledge search is named as later work.\n2. Why the recipe is not on the object: `packages/spec/src/data/ai-read-exposure.ts` keeps the object-level `ai` key refused on business objects, and this ADR does not reopen that ruling.\n3. The render contract: read as the caller; labelled fields with option labels; \"not visible to you\" for a field hidden by field-level rules; an unreadable related row is absent; a long body becomes an outline; output wrapped as data, not instructions (one shared wrapper).\n4. `get_record_context`: one definition in spec, one executor, every transport (ADR-0149 D2); under `data:read`; the system-object and API-exposure refusals of the record tools apply.\n5. Which package owns the render service (a name here is a proposal; the tree's precedent decides, AGENTS.md).\n6. `ToolExecutionContext.focus` (client-reported, advisory, one record in phase 1) beside `surfaceContext`.\n7. The `ask_ai` action type: an action that dispatches to the assistant, never materialised as an action tool, absent where the edition has no in-app assistant.\n8. The skill key `context` (names a context pack) and its readers (MCP skill prompts in this repository; the in-app runtime in cloud).\n9. The citation shape an answer may carry (`object`, `id`, optional anchor, quote). Shape only; rendering is a later card.\n10. Not decided here: field egress.\n\n## Acceptance\n- PR open, Status Proposed; anchors under `scripts/adr-anchors/` are left to the implementing cards. Governed surface: the maintainer merges by hand.\n\nBlocked-by: objectstack-ai/cloud#4960\nParent: #36996. Reader: the seat that takes spec ADR text.\nDedupe: `is:open metadata type admission ADR-0088` 3 (#36868: precedent, no overlap) · `ai_context` 0."

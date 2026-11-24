@@ -1,0 +1,36 @@
+{
+  "number": 37050,
+  "kind": "pull_request",
+  "title": "fix(plugin-list): label and format a formula or summary amount on a gallery card",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T17:32:44Z",
+  "updated_at": "2026-11-24T18:20:23Z",
+  "closed_at": "2026-11-24T18:20:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T18:20:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37050",
+  "body": "Fixes #37008\nClause-②: yes\nMetadata-protocol: none\n\n## 维护者速读\n\n- 手机上看记录的相关列表(以及任何卡片式列表)时,公式或汇总得出的金额、数字、百分比,现在会带字段名并按桌面表格同样的格式显示,例如从光秃秃的「12,000」变成「总计 12,000.00」。\n- 属于界面体验修整:替在手机上查看商机产品明细等相关列表、却分不清那个数字是什么的用户解决问题。\n- 出错时最坏情况是某张卡片上多出或少了一个字段名、或金额小数位与表格不一致,不涉及数据读写,可直接撤回。\n- 无。\n\n## What changes\n\nA gallery card (which is also how a phone draws a related list's rows) now treats a `formula` or `summary` column whose result is a number, an amount or a percentage like a stored number: it prefixes the field label and draws the value in the format the related-list table gives the same field.\n\nTwo halves, both in `ui/packages/plugin-list/src/ObjectGallery.tsx`:\n\n1. **Label.** The card's label gate looked only at the renderer type (`number` / `currency` / `percent` / `integer` / `decimal`); a formula or summary resolves to renderer type `formula` / `summary`, so it never got a label. For those two renderer types the gate now asks the face the formula cell itself draws, through a new export of `@object-ui/fields`, `resolveFormulaValueType(field, value)`. `FormulaCellRenderer` now calls the same function instead of computing the face inline (a pure extraction, same expression), so the card's label and the cell's face cannot disagree. A text result stays unlabeled.\n2. **Format.** `buildEnrichedField` did not hand the cell `returnType` or `currencyConfig`, so a `returnType: 'currency'` formula fell through to the number face (`12,000`) and a summary was never money. It now copies both, with the same presence tests the RelatedList table builder uses. Side effect on the same seam: a plain `currency` field with a fixed `currencyConfig` now shows its own currency on a card instead of the tenant default, as it already does in the table.\n\nRead first (by risk):\n1. `ui/packages/fields/src/index.tsx`, the `FormulaCellRenderer` hunk: the inline face rule replaced by the call. The risk is a behaviour change in every formula cell; the new module keeps the same expression (`returnType ?? (number ? 'number' : 'text')`, summary money first) and the fields suite is green.\n2. `ui/packages/plugin-list/src/ObjectGallery.tsx`, the `showLabel` hunk and `FORMULA_FACED_RENDERER_TYPES`.\n3. `ui/packages/fields/src/formulaValueType.ts`.\n\n## Tests\n\nNew top-level `describe` in the shared gallery cell harness `ui/packages/plugin-list/src/__tests__/ObjectGallery.cells.test.tsx`, through the real `ObjectGallery` render:\n\n- a `returnType: 'currency'` formula row shows `Total` and `12,000.00`, and no bare `12,000`;\n- a `summary` declaring `currencyConfig` shows `Rolled-up amount` and `12,000.00`;\n- control: a `returnType: 'text'` formula row shows `Gold tier` with no `Tier` label.\n\nRed on main, green after, each half ablated once (mutations through `scripts/ablation-replace.mjs`, anchor hit 1 to 0, restore proven by blob equal to HEAD and an empty `git diff HEAD`; the test subject resolves through the ui vitest alias to `src`, so no `dist` leg applies):\n\n| Leg | Result | What failed |\n|---|---|---|\n| fix (HEAD) | 7/7 passed | none |\n| label half ablated (gate reads `rendererType` again) | 2 failed, 5 passed | `Unable to find ... text: Total` and `... Rolled-up amount` |\n| format half ablated (`currencyConfig` + `returnType` not copied) | 2 failed, 5 passed | `Unable to find ... text: 12,000.00` (both rows) |\n| `ObjectGallery.tsx` at the base commit (main) | 2 failed, 5 passed | `Unable to find ... text: Total` and `... Rolled-up amount` |\n\nThe text-formula control passed in every leg.\n\n## Acceptance notes\n\n- A `record`-mode amount (formula or summary following its row's currency code) on a card is drawn without the row as `dependentValues`, so it reads the plain-number fallback rather than the row's code; the gallery never passes the row to any cell today, plain `currency` fields included. Not changed here.\n- The rule that picks a formula's face is still spelled twice: in the cell (now via `resolveFormulaValueType`) and in the lazily loaded `FormulaField` widget's read-only branch, which the existing comment says may not import the barrel. The new leaf module could serve both; left as is to keep this PR to the card.\n\n## Verification\n\nTwo-minute check: `cd ui && pnpm exec vitest run --maxWorkers=2 packages/plugin-list/src/__tests__/ObjectGallery.cells.test.tsx` after building the spec (`pnpm --filter @objectstack/spec build`); expect 7 passed, including the three `objectstack#37008` cases. In the app: HotCRM, an opportunity with product lines, phone-width viewport, the product-lines related list: the total reads `总计 12,000.00`.\n\n<details><summary>Local runs (head cee9037e09b, origin/main merged in)</summary>\n\n- `pnpm --filter @object-ui/plugin-list test`: exit 0, Test Files 187 passed (187), Tests 2050 passed (2050)\n- `pnpm --filter @object-ui/plugin-list type-check`: exit 0\n- `pnpm --filter @object-ui/fields type-check`: exit 0\n- `pnpm --filter @object-ui/fields test`: exit 0, Test Files 329 passed, 1 skipped (330), Tests 5016 passed, 7 skipped (5023)\n- package suites and type-checks above ran on 8d7ec8e8b57 (pre-merge); the merge changed nothing under `ui/packages/fields` or `ui/packages/plugin-list` (it did change one `packages/spec` file, `system/validation-message.ts`, which this diff does not read). On cee9037e09b: `ObjectGallery.cells.test.tsx` re-run, Test Files 1 passed (1), Tests 7 passed (7).\n- `node scripts/pm/dispatch-gates.mjs --commands`: exit 0, 39 families; 37 run locally on cee9037e09b, each `:: exit 0`. `--ran` reconciliation: exit 0, 39 derived, 0 UNRUN.\n- NOT MEASURED: `pnpm check:type-check-debt`, reason: its closure build never got a turn on the shared verify lock (exit 3, PREREQUISITE NOT MET); CI's Lint and Repo Gates job carries it.\n- NOT MEASURED: `pnpm --dir ui exec vitest run scripts/`, reason: queue-timeout (exit 99) on the shared verify lock; the diff touches nothing under `ui/scripts`; CI carries it.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYpEsWWE9Y5YtSsDgqZ)_\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ -->\n"
+}

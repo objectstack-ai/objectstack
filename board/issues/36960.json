@@ -2,8 +2,8 @@
   "number": 36960,
   "kind": "issue",
   "title": "Approvals inbox: the status filter has no Cancelled option, although the list shows cancelled requests",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "sunhaolin",
@@ -14,7 +14,6 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T11:15:19Z",
-  "updated_at": "2026-11-24T13:02:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T15:03:40Z",
+  "closed_at": "2026-11-24T15:02:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36960",
   "body": "## What happens\n\nIn the approvals inbox, on the **My requests** and **All** tabs, the status filter lists five statuses: Pending, Approved, Rejected, Recalled, Returned for revision. A request can also be **Cancelled** (the terminal state added by #13568), and such a request is shown in the list with its own badge — but the filter has no Cancelled entry, so cancelled requests cannot be filtered for.\n\nSeen on `@objectstack/*` 18.6.0 (HotCRM 6.6.0, zh-CN UI); the select is the same on `main`.\n\n## Steps to reproduce\n\n1. Have a request whose status is `cancelled` (in my run: an expense report under approval was deleted by an admin; its request shows \"related record deleted\" and the Cancelled badge).\n2. Open `/_console/apps/<app>/component/approvals/inbox`, tab **All**. The cancelled request is in the list.\n3. Open the status filter.\n\n**Actual:** the options are All statuses / Pending / Approved / Rejected / Recalled / Returned for revision. There is no Cancelled.\n\n**Expected:** every status a row can show is offered by the filter, Cancelled included. The server already accepts it: `GET /api/v1/approvals/requests?status=cancelled` answers the cancelled rows.\n\n## Why\n\n`ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx` on `main`, lines 1839–1852:\n\n```tsx\n<SelectContent>\n  <SelectItem value=\"all\">{tr('allStatuses', 'All statuses')}</SelectItem>\n  <SelectItem value=\"pending\">{statusLabel('pending')}</SelectItem>\n  <SelectItem value=\"approved\">{statusLabel('approved')}</SelectItem>\n  <SelectItem value=\"rejected\">{statusLabel('rejected')}</SelectItem>\n  <SelectItem value=\"recalled\">{statusLabel('recalled')}</SelectItem>\n  <SelectItem value=\"returned\">{statusLabel('returned')}</SelectItem>\n</SelectContent>\n```\n\n`statusLabel` (line 874) and `STATUS_CLASSES` (line 131) both already know `cancelled`, and the locale files carry `statusCancelled`; only the select was not extended when the state was added.\n\n## Impact\n\nA submitter or an admin looking for the requests that ended without a decision (record deleted, process cancelled) has to scroll the whole list; with more than one page loaded on demand they may not find them at all.\n\n## Related\n\n- #30525 (closed) covered the docs page omitting `cancelled` and a refusal text, not this select.\n"

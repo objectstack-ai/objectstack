@@ -1,0 +1,31 @@
+{
+  "number": 37088,
+  "kind": "issue",
+  "title": "First-party sources author forms as `form` items: examples move to `forms:`, skills and docs teach `forms:` (ADR-0159, card ④a)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:docs",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T19:21:58Z",
+  "updated_at": "2026-11-24T19:39:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37088",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nSource: ADR-0159 (PR #36957), Execution plan row ④. Parent: #36868, card ④ of five (this repository's examples and docs; the published skill is its own `domain:skills` card, #37105, and HotCRM's sources are HotCRM's card).\n\nBlocked-by: #37086\nBlocked-by: #37087\nMetadata-protocol: none\nClause-②: no\n\nGrading: `area:build` · Enhancement · first-party examples and docs author forms as `form` items · app authors and AI authors · evidence: `git grep -lE \"formViews|viewKind: 'form'\" -- examples content/docs` at `main` `62692b7f8b` (examples: `app-crm` lead view, three showcase views, the showcase contact object and translations; docs: the forms, public data collection, views, create-versus-edit, i18n-standard and CLI pages). p2.\n\n## Why this waits for card ③\n\nUntil card ③ lands, the shipped console reads forms from `view` (the form page reads `GET /api/v1/meta/view/NAME`; Setup's page lists type `view`), and ADR-0159 D5 freezes `view` reads to the old shapes. A form moved to `forms:` before card ③ would answer not found when its action opens it and would drop out of Setup's list, with its switch. ⛔ Do not start this card beside card ③.\n\n## What to do\n\n1. Move every named form in `examples/` that has a consumer (a public link, or an action of type `form` targeting it) from its view container to `forms:`, under the name it is served as today (the projection's name: `OBJECT.KEY` for a `formViews` entry, the expansion's name for a container's default `form`), so no action target, link or stored override changes. Lists stay where they are.\n   - **Before the move**: `examples/app-crm/src/views/lead.view.ts` and `examples/app-showcase/src/ui/views/inquiry.view.ts` both publish `/forms/contact-us`. As old shapes that is first-match; as `form` items ruled question 3 refuses the second at publish in any environment that installs both. Check whether any fixture, dogfood boot or CI job installs both example apps in one environment. If one does, stop and report: one of the two addresses must change, and that is a served address (name the checklist items that probe it).\n2. Delete internal record forms nothing opens; their layout belongs to the object's `fieldGroups`. List each deletion in the PR. The set is ADR-0159 D7's: a form in a record-form slot (the default `form`, `formViews.default`, `formViews.create`, an item with `isDefault: true` or named `OBJECT.create`) that declares no `sharing.publicLink` and that no action of type `form` targets (the third part of D7's set, \"not standing over a linked base\", is carried at source level by the `overrides` rule below). ⛔ A form that declares a `sharing.publicLink` is never deleted, switched on or off, in whatever slot: move it with its `sharing` block as written. `form-view-internal-not-loaded` tests `sharing.enabled`, so it also reports a switched-off public form; do not take its report as the deletion list. ⛔ An item that declares `overrides` is never deleted on its own body either: with no link of its own, over a base form that declares one, it is what keeps that address closed (ADR-0159 D7-b). Move it with its declaration.\n3. Move the translation tails of the moved forms to the `forms` family, and re-key by hand a `label` or `description` written under `_views.KEY` for a moved form (they are not form tails and no conversion moves them, ADR-0159 D8).\n4. Rewrite the docs pages under `content/docs` to teach `forms:` as the one way to declare a form, and `views:` as lists. ⛔ No file under `skills/**` is in this card: the published skill is #37105 (`domain:skills`, Tier H).\n5. Update the platform checklist anchors that name moved symbols.\n\n## Done when\n\n- On each example app, `GET /api/v1/meta/form` returns the same names before and after the move, and after it none is marked as projected (card ②'s read-envelope mark).\n- `git grep -lE \"formViews|viewKind: 'form'\" -- examples content/docs ':!**/CHANGELOG.md'` (the generated references tree and the releases tree excluded) returns nothing but pages that describe the migration, listed in the PR. No `defineView` container under `examples/` keeps a `form:` member (the grep does not match that shape; read each container).\n- `os validate` on both example apps reports no `form-view-internal-not-loaded` and no consumer-less form warning.\n- Each example's public form answers at its address before and after (resolve and submit), and each moved action-opened form still opens.\n- The i18n bundles regenerate clean (`node scripts/check-i18n-bundles.mjs --write`, then `pnpm check:i18n`).\n- `Skills-docs:` line present in the PR body as the claim spells it, naming #37105 for the skill.\n- A changeset per AGENTS.md Post-Task Checklist step 3 for each example package that carries a `CHANGELOG.md`.\n\n## Not in this card\n\n- HotCRM's sources (its own card in that repository).\n- The published skill under `skills/**` (#37105).\n- No spec or server change; no tombstone.\n\nDedupe words: examples forms collection move, docs forms page form type.\n\nDomain: left to triage — the surface is `examples/**` and `content/docs/**`. `skills/**` is not in it.\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ -->\n"
+}

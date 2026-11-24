@@ -2,8 +2,8 @@
   "number": 36897,
   "kind": "issue",
   "title": "Studio 重构（1-1b）：元数据列表换成 ObjectGrid，所有类型同一种表格；「新建」在只读底包上落到配对的 .custom 包",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -14,7 +14,6 @@
     "area:ux",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T08:06:31Z",
-  "updated_at": "2026-11-24T13:08:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T16:23:18Z",
+  "closed_at": "2026-11-24T16:22:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36897",
   "body": "repo:objectstack#3 · os-support-ai · session_01WGufzufqmKuir7GiTdwGd3Z\n\n③ topic child · Source: topic #36890 (「所有类型的列表用同一种表格，列来自 #36860」). Part of #36890.\n\n## 今天（读代码确认，主干 0819cab1）\n\n- 先例：`ui/packages/plugin-designer/src/ObjectManager.tsx:99-121` 用 `ValueDataSource` 喂 `ObjectGrid`，但它今天不在控制台路由上（`ui/apps/console/src/main.tsx:59-62`）；在跑的是对象「记录」页签（`SD/studio-object-records-canvas.tsx`）。\n- `ObjectGrid` 没有宿主自定义单元格属性：列来自 schema，单元格按类型内部渲染；宿主只能插 `rowAdornment`、`recordLinkAdornment`、`rowOperations`、`onRowClick`，行底色只认 `schema.rowColor`（`ui/packages/plugin-grid/src/ObjectGrid.tsx:347-381, 464, 3999`）。\n- `ResourceListPage` 里要保住的：诊断着色、锁图标、启用开关加持有者确认（`MA/ResourceListPage.tsx:254-265, 498-553, 1213-1226`）、共享规则克隆（`:300, 1227-1241`）、控制台自带 `render` 的列（视图类型、手册受众、岗位持有人数，`AS/services/builtinComponents.tsx:387-430, 498-515`）。\n- `ObjectGrid` 按列做 `$select`，`_packageId`、`_lock`、`_diagnostics` 要由宿主按名字另查（`ObjectManager.tsx:124-125`）；`ValueDataSource.getObjectSchema` 从第一行猜类型，要由适配器给真 schema（`ObjectGrid.tsx:222-246`）。\n- 自定义 `ListPage`（只有 datasource，Studio 里转去设置，`SD/StudioMetadataArea.tsx:250`）、`listFilter`（view）、`listInclude`（permission）留在宿主一层。\n- 只读包的 `/:type/new` 直接跳回列表（`SD/StudioMetadataArea.tsx:186-194`）；分区里的新建经「确保配对包」落到 `.custom`（`SDS:5681-5687`）。\n\n## 要做的\n\n1. 适配器：把 `/meta/:type` 转成 `ValueDataSource`，给出真 schema；行信息（包、锁、诊断）按名字另查。\n2. 给 `ObjectGrid` 加通用的宿主单元格和行着色属性（`plugin-grid`，通用块，不加产品命名的组件），承接上面的列和标记；启用开关保留持有者确认。\n3. 关掉 `ObjectGrid` 带来的个性化列、导出、批量选择、行内编辑。\n4. 列来自 #36860 下发的列声明；排序、搜索、分页用受控属性，接 1-1a 的地址状态。\n5. 列表「新建」：只读底包上走配对包落到 `.custom`；对象新建带组织级默认共享选择（`SDS:8326-8385`）和「新对象加入应用菜单」（`SD/newObjectJoinsAppMenu.ts`）；流程新建带预设（`SD/flowPresets.ts`）。（三个设计器卡会把它们自己的新建入口删掉，依赖这里。）\n6. 仪表盘、报表列表的「新建」按决定 13 留给 3-4 接。\n7. `ValueDataSource` 是内存数据源：在 `~all` 下量一次最大类型的全量规模，写进 PR。\n\n## 验收\n\n- 每种类型列表都是同一种表格，原有的诊断、锁、启用开关、克隆、自带列都在。\n- 在 HotCRM（安装来的应用）上新建对象、流程，落到 `.custom` 包；在自建应用上新建落到本包。\n- 引用列表页的测试（约 37 个文件）通过。\n\nBlocked-by: #36896\n\nGrading: `area:ux · Feature · metadata list (each type renders a different table) · builders, every list visit · evidence: read from code`. Topic child ⇒ p2.\nDedupe: `ObjectGrid metadata list` / `ValueDataSource` (open: #35836, #35834 are ValueDataSource comparand bugs, not this change).\nReader: seat repo:objectstack#3, one os-dev card. Size L. `Metadata-protocol: none`. Wave 2."

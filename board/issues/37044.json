@@ -1,0 +1,36 @@
+{
+  "number": 37044,
+  "kind": "pull_request",
+  "title": "docs(skills): lookupAutofill copies a currency amount only between fields in the same currency",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T17:13:42Z",
+  "updated_at": "2026-11-24T18:29:13Z",
+  "closed_at": "2026-11-24T18:29:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T18:29:10Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37044",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFixes #36349\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；读「数据建模」技能的 AI 助手现在知道，选取关联记录时金额只在两边币种相同的情况下才会自动带出，不同币种时目标字段保持原值并说明原因，平台不做换算。\n- 为什么做：这是「选产品不跨币种抄价格」那项改动欠下的技能文字，替按技能写应用的 AI 助手补上，免得它继续承诺一定会带出价格。\n- 出错会怎样：只是技能里的两句说明、一处指引和几处表格用词，不影响任何运行行为；可以直接撤回这一个合并。\n- 要你做什么：无。\n\n## What changes\n\n`skills/objectstack-data/rules/field-types.md`, the `lookupAutofill` paragraph. It ended at the sentence about the grid's same-named `autofill` copy and stated no currency condition. Two sentences are appended there, covering the declared pair and the same-named copy together:\n\n> Either copy moves a `currency` amount only between fields in the same currency (`fixed` or per-record); else the target is left as it was and the form says why. Nothing is converted.\n\nThis is what the merged code does (`crossCurrencyRefusal` and `judgePickWrites` in `ui/packages/fields/src/widgets/lookupAutofill.ts`, used by the record form and by the grid's `planLookupAutofill`; the spec describe of `FieldSchema.lookupAutofill` states the same rule for both copies).\n\n`skills/objectstack-data/rules/relationships.md`, the \"Catalog auto-fill\" bullet (the grid's same-named copy), now ends \"picking a record fills those cells (a `currency` amount only in the same currency: field-types.md → `lookupAutofill`)\": a pointer to the sentence above instead of a second statement of the rule. It fits that file's headroom (4180 to 4202 of 4203 tokens); nothing was deleted there.\n\n`field-types.md` sat at its token ceiling (3541 of 3541), so its sentences are paid for in the same file, by deletion and with no ceiling moved:\n\n- the paragraph's own example is shortened from the full pair literal to \"`unit_price` from a product's `list_price`\" (the heading already spells the pair shape), and \"(single-value `lookup` / `master_detail`)\" becomes \"(single-value only)\" (the table rows directly above name the two types);\n- fourteen \"When to Use\" cells that only restated the type name lose the restating words: `date`, `time`, `datetime`, `number`, `file`, `markdown`, `html`, `richtext`, `boolean`, `signature`, `location`, `avatar`, `tags`, `slider` keep a shorter cell with the same meaning (for example \"Date only (no time component)\" is now \"Date only\").\n\nPublished-skill size, measured at `b01d8f97e9` (before) and `a141c91fb2` (after): `rules/field-types.md` lines 267 / 270; `rules/field-types.md` tokens 3541 / 3540 (ceiling 3541); `rules/relationships.md` tokens 4180 / 4202 (ceiling 4203); whole `skills/` tree lines 22996 / 23000; whole bundle tokens 294236 / 294257.\n\nA `patch` changeset for `@objectstack/skills` is included: the skill text ships in that package.\n\nRead first: the appended sentence (the risk is a promise the runtime does not keep); then the trimmed table cells (the risk is a lost hint).\n\n## Tests\n\nNo code or test changes. No case under `skills/objectstack-data/evals/` mentions `lookupAutofill` or the grid `autofill` copy, so no eval asserts the old promise and none was edited. The evals are model-graded fixtures and were not run live here: NOT MEASURED, reason: no local runner.\n\n<details><summary>Local gates at a141c91fb2</summary>\n\nThe gate list was derived with `node scripts/pm/dispatch-gates.mjs --commands` (48 families). 43 ran and exited 0, among them:\n\n- `node scripts/check-skills-token-ratchet.mjs`: exit 0, \"60 authored bundle file(s) within their ceilings\"; the rows read `field-types.md 3540 / 3541 (-1)` and `relationships.md 4202 / 4203 (-1)`\n- `pnpm --filter @objectstack/spec run check:skill-served-sections`, `pnpm check:skill-links`, `pnpm check:skill-identifier-liveness`, `pnpm check:skill-compatibility`, `pnpm check:skill-frame-sync`, `pnpm check:doc-authoring`, `pnpm check:nul-bytes`, `pnpm check:pm-skill-id-lint`, `pnpm check:role-word`: exit 0\n- `node scripts/check-empty-changeset.mjs --base origin/main`, `node scripts/check-changeset-no-major.mjs --base origin/main`, `node scripts/check-adr-0087-registration.mjs --base origin/main`, `pnpm check:published-files`: exit 0\n\nFive exited 3 (PREREQUISITE NOT MET, they read built output and nothing was built for a text-only diff) and are NOT MEASURED locally, left to CI: `check:doc-formula-expressions`, `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`.\n\n`node scripts/pm/overlap-check.mjs` at a141c91fb2: \"VERDICT clean exit 0\" against `origin/main` and against the other open pull that edits both files.\n\n</details>\n\n## Acceptance notes\n\n- The card's wording is \"the target stays empty\". The merged code leaves the target as it was: empty on a fresh line, and holding its earlier value on a re-pick or an `overwrite: true` pair. The sentence says \"left as it was\" so that it promises only what the runtime does.\n- \"The same currency\" also covers two amounts that both sit in the home currency (neither declares one), which copy as before.\n- The rule also has finer cases the sentence does not spell out (a target whose record holds no code yet, a parent code that could not be read): each is the same outcome, target left as it was with a stated reason.\n- The grid's catalog auto-fill bullet points at the field-types sentence rather than restating it. The grid leaves a refused cell as it was and shows a note under the line (`planLookupAutofill`'s `withheld` list, drawn by `GridFieldWidget`).\n\n## Verification\n\n`node scripts/check-skills-token-ratchet.mjs` prints `field-types.md 3540 / 3541 (-1)` and `relationships.md 4202 / 4203 (-1)` and ends with a line starting with a check mark.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr)_\n"
+}

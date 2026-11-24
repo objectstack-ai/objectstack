@@ -2,8 +2,8 @@
   "number": 36990,
   "kind": "issue",
   "title": "专题：知识服务正确性（同步执行索引条件、恢复后重进索引、重建分页、权限过滤后补取、命中标题、嵌入分批）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "duplicate",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,17 +13,21 @@
   "labels": [
     "area:ai",
     "pm:epic",
-    "priority:p2"
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-24T14:13:16Z",
-  "updated_at": "2026-11-24T14:17:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T15:01:31Z",
+  "closed_at": "2026-11-24T15:01:31Z",
+  "closed_by": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36990",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic parent). Source: maintainer. Key words (maintainer, 2026-11-24, this session): 「先立专题 ① 记录范围 AI 问询 ；⑤ 应用技能进入应用内 AI ，M0 那几项知识服务缺陷 也立专题，目前开发的策略是按专题派」「这几个专题任务用fable 审核之后立卡」「专题 ② 知识检索平台化 也一起立」. Reviewed by an independent Fable pass before filing.\nBatch-of: 4 epics filed together on 2026-11-24 (this one, 「知识检索平台化」, 「记录范围 AI 问询」, cloud 「应用技能进入应用内 AI」).\n\n## 维护者速读\n\n- 做什么：修知识服务里已发布行为的缺陷。知识源声明了索引条件（比如只索引现行版本），但记录变更时不看它，失效记录还能被搜到；回收站恢复的记录不会重新进索引；全量重建一次把整张表读进内存；按权限过滤后不补，能看的记录少的人搜不到；命中结果的标题只认名为 title 的字段；嵌入时所有文本一次发出去，不分批。\n- 不做：新的接口、知识源写成元数据、切分、向量存储、按记录返回（在「知识检索平台化」专题里）。\n- 需要你做的：无。\n\n## Children\n\n| Milestone | Child | Blocked-by | Lane |\n|---|---|---|---|\n| M0 | 1. (filed below) event sync honours the source `where`; a restored record re-enters the index | #36650 | server |\n| M0 | 2. (filed below) `reindexSource` pages instead of one unbounded read | 1 | server |\n| M0 | 3. (filed below) search refills after the permission filter | #36839 | server |\n| M0 | 4. (filed below) hit title from the object's display field | 1, #36839 | server |\n| M0 | 5. (filed below) `embedder-openai` sends every input in one request | none | plugins |\n| later | 6. sync-failure counts per source — row only: filed once a named reader exists (the reconcile work in 「知识检索平台化」 is the expected one) | — | — |\n\nAll five touch `service-knowledge` or `embedder-openai`; 1–4 touch the same file as #36650 (PR #36823) and #36839, hence the edges.\n\n## Rulings that bound every child\n\n- No new adapter-contract members (list, drop, capabilities, typed filters) here; they wait for the knowledge-platform ADR. A child that finds it needs one stops and says so on the card.\n- The count of hits removed by the permission filter is never returned to the caller; logs only.\n- `aiExposed` stays enforced at the tool layer (#36650), not in `IKnowledgeService.search`.\n- `IKnowledgeService.search` keeps its public signature and return type.\n\n## Done when\n\nAll children closed; `service-knowledge` and `embedder-openai` tests cover each fix.\n\nRelated, not children: #36650 and PR #36823 (MCP knowledge tool, same file), #36839 (in flight, same function), #33933 (knowledge settings only where the service is mounted; the 2026-11-15 ruling that knowledge is not a focus is superseded by the maintainer's 2026-11-24 words above — that card's own change stays valid).\nReader: the server lane for `service-knowledge`; the plugins lane for child 5.\nDedupe: `knowledge where event sync is:open` 4 (none on this mechanism) · `handleRecordUpsert` 4 (all closed: #20573, #4672, #20288, #14646) · `reindexSource` 3 (all closed) · `knowledge search permission filter topK` 1 (#36839, different mechanism) · `embedder-openai` 159 / `embedder batch` 117 (none open on this)."

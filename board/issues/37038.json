@@ -1,0 +1,33 @@
+{
+  "number": 37038,
+  "kind": "issue",
+  "title": "check-governed-merges: git() drops stdin, so `--pr` and the post-merge audit read every moved path as explained (check-attr --stdin)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T16:10:09Z",
+  "updated_at": "2026-11-24T18:17:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37038",
+  "body": "repo:objectstack#2 · huangyiirene · session_01J8VVAm8Y73VGNq3PkTe3dc\n\nFiling gate: ① defect with a named location and a reproduction · Source: fleet (found by area f2-C's dev while fixing #36537; os-dev-report 7137165935 on #36537)\n\n## What happens\n\nIn `scripts/pm/check-governed-merges.mjs`, `git(root, args)` spawns git with stdin ignored, and that function is handed as `runGit` to the guard's readers by `--pr` (`pullRecordStage`) and by `readArmLanding`. `unexplainedPathsBetween` feeds the moved paths to `git check-attr --stdin`; with stdin dropped, check-attr reads nothing, so every moved path reads as explained and `regenCarry` can read a false carry.\n\n## Reproduction (measured by the dev)\n\nPR #36509's trees `4342cf009..bf71994326` (base `e4e3bcfe`): 14 unexplained paths when stdin is passed, 0 when stdin is ignored.\n\n## Reach\n\nThe queue guard passes input itself, so the merge gate is not affected. Wrong today: the `--pr` reading a seat takes before landing, and the post-merge governed audit. A seat that trusts `--pr` on a regen PR can arm a landing the queue then refuses, and the audit under-reports.\n\n## Expected\n\nThe `runGit` handed to these readers passes stdin through (or the readers that need stdin take their own spawner), with a self-test case that fails today: a moved path with a non-regen attribute reads as unexplained.\n\nSurface: `scripts/pm/check-governed-merges.mjs` (+ its self-test). Guard instrument ⇒ always Tier H.\nBusiness reason: the seats' pre-landing reading and the governed audit are the maintainer's after-the-fact defence for governed merges; a reader that always says \"explained\" hides exactly the case it exists to show.\nReader who acts: seat `repo:objectstack#2`, area f2-C (lease extended to this file).\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open check-governed-merges stdin` → 2 hits (#36537, the source card, whose fix is in label-write.mjs, not this file; #6015, the triage seat post); `is:issue is:open unexplainedPathsBetween` → 1 hit (#36537, the same).\nClause-②: no · Metadata-protocol: none\nGrade: area:fleet · Bug · wrong reading in a fleet guard's report paths, merge gate unaffected → p2."
+}

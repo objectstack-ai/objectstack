@@ -1,0 +1,36 @@
+{
+  "number": 37079,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): a phone list card never repeats a formula title in its subtitle",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T18:58:33Z",
+  "updated_at": "2026-11-24T19:48:34Z",
+  "closed_at": "2026-11-24T19:48:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T19:48:32Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37079",
+  "body": "Fixes #37010\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:手机上打开工单、线索这类以公式字段作标题的列表时,卡片副标题不再重复标题里的内容,而是显示紧急程度、客户等下一批信息。\n- 为什么做:手机列表卡片的标题与副标题重复,用户在一张卡上看不到记录的其他关键信息。\n- 出错会怎样:最坏情况是手机卡片副标题少显示或多显示一列,数据与保存都不受影响,可直接撤回本改动。\n- 要你做什么:无\n\n## What changes\n\n`buildMobileCardRenderer` in `ui/packages/plugin-grid/src/ObjectGrid.tsx`: when the object's declared name field is a `formula`, the card's subtitle skips every shown column whose field the formula reads, and takes the next shown columns instead. The reads are the formula's `record.FIELD` references as `collectPredicateFieldRefs` (`@object-ui/core`) names them, the same reader this grid's projection already uses for a CEL expression's reads (`objectGridQueryInputs.ts`); a read through a lookup (`record.account.name`) names the lookup, so its column is skipped too. This holds whether or not the formula column itself is shown. A name field that is not a formula reads nothing, so its card is unchanged. Status chip and amount line are untouched.\n\nCase list, as filed: title `CASE-00037 - Demo case 29 — critical problem`, subtitle `紧急 · Polar Cargo` (was `CASE-00037 · Demo case 29 — critical problem`).\n\nChangeset: `.changeset/37010-phone-card-formula-title-subtitle.md`, `@object-ui/plugin-grid` patch.\n\nRead first (by risk):\n1. `ObjectGrid.tsx`, the `titleReads` block and the `subtitleColumns` filter in `buildMobileCardRenderer`.\n2. `__tests__/phoneCardFormulaTitle-37010.test.tsx`.\n\nTwo-minute check: `cd ui/packages/plugin-grid && pnpm exec vitest run --root ../.. packages/plugin-grid/src/__tests__/phoneCardFormulaTitle-37010.test.tsx` shows 3 passed.\n\n## Tests\n\nNew file `ui/packages/plugin-grid/src/__tests__/phoneCardFormulaTitle-37010.test.tsx`, through the real `ObjectGrid` card renderer at 375 px with the object schema served by the data source:\n\n- formula name field over the two leading columns: subtitle is `紧急 · Polar Cargo`;\n- the formula column shown as well: the subtitle still skips the formula's parts;\n- CONTROL: a text name field (`subject`) keeps `CASE-00037 · 紧急`.\n\n## Acceptance notes\n\n- Reader choice: the platform's AST member reader for a formula's reads is `analyzeRelationshipTraversals` (`@objectstack/formula`), which `planObjectFormulas` in `@object-ui/core` uses. `@object-ui/plugin-grid` does not depend on `@objectstack/formula`, and adding it (its `package.json` and `pnpm-lock.yaml`) is outside this card's claimed file surface. This PR uses `collectPredicateFieldRefs`, already a dependency of this grid for the same question. The two readers differ only on spellings a name formula does not use in practice (a `record.FIELD` inside a string literal, a `data.FIELD` root); either difference can only skip a column, never draw a wrong value.\n- Seat decision on that reader question: option A, `collectPredicateFieldRefs`, the reader this grid's projection already uses, with no new dependency.\n- Overlap with #36978 (also edits `ObjectGrid.tsx`): `scripts/pm/overlap-check.mjs` VERDICT clean exit 0, against origin/main and against #36978.\n\n## Verification\n\nAll readings at head `84c9eec38eb`.\n\n<details><summary>New test file</summary>\n\n`phoneCardFormulaTitle-37010.test.tsx`: Test Files 1 passed, Tests 3 passed.\n\n</details>\n\n<details><summary>Ablation (one run)</summary>\n\n`scripts/ablation-replace.mjs` replaced the anchor `!titleReads.has(c.accessorKey)` with a marker. Anchor count went 1 to 0, blob `5fbd40d54cf4` to `52c21da6b1a0`. Result: 2 failed and 1 passed (the control). Both failures received `CASE-00037 · Demo case 29 — critical problem`, which is the filed defect. After restore the blob equals the HEAD blob (`5fbd40d54cf4`) and `git diff HEAD` is empty. The first attempt was a no-op that the tool refused (the replacement was a substring of the anchor), so no test ran then. It was redone with a distinct marker.\n\n</details>\n\n<details><summary>Package @object-ui/plugin-grid</summary>\n\n`type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`) passed. vitest: Test Files 311 passed, Tests 2763 passed.\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n`dispatch-gates --commands` derived 39 commands. On the first pass 37 exited 0.\n\n- `pnpm --dir ui exec vitest run scripts/` exited 1. Four tests in three files hit the 15000 ms timeout while the box was contended, and none of them touch this diff. Those three files were re-run under the lock: 231/231 passed.\n- `pnpm check:type-check-debt` exited 3 (lock queue-timeout, NOT MEASURED). The re-run under the lock exited 0.\n\n`--ran` reconciliation on the first-pass codes: 39 derived, 38 run, 1 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYpEsWWE9Y5YtSsDgqZ)_\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ -->\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 37043,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui teaches the object's actionLayout",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "pm:awaiting-merge",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T17:06:10Z",
+  "updated_at": "2026-11-24T19:19:57Z",
+  "closed_at": "2026-11-24T19:19:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-24T19:19:54Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37043",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFixes #36630\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:让 AI 写应用元数据的客户,在给对象安排按钮顺序时,AI 现在知道该怎么写、哪些写法会被拒绝;此前技能包里没有这部分说明。\n- 为什么做:记录页头部按钮可排序的功能已经上线,技能包欠这一段教学(属于「设计模式:记录页头部按钮」这条线)。\n- 出错会怎样:只是教学文字和一条评测用例,写错最多让 AI 给出不准确的建议,可直接撤回。\n- 要你做什么：批准合并。这个 PR 只改技能文字，但同时把技能字数上限脚本里的一个数字从 3711 调到 3880（同一文件先删 49 字节，再按实测抬高），因此需要人工批准。契约审核已通过：PASS 记录 7139491356，Head-sha `63287424a22bff43b285da9d0b731e506c965d25`；席位核对 7139306737。\n\n## What changes\n\n`skills/objectstack-ui/rules/actions.md` gains one section, \"Button Order (`actionLayout`)\", placed after the `locations` table. It is taught from the merged code, not from the prose of the pull that added the key:\n\n- shape and limit: `packages/spec/src/data/object-action-layout.ts` (one arm per scope, `pinned` required and at most 3, `more` optional, a name once across both parts, the list scope's `$import` / `$export` pinned only);\n- what each arm reaches: `arrangedHeaderActions` in `ui/packages/types/src/ui-action.ts` (record header, the side preview and the phone bar draw the same header) and `ui/packages/plugin-grid/src/rowActionArrangement.ts` (a row's menu lists in the record arm's order);\n- the reference refusals: `validateObjectActionLayout` in `packages/lint` (a name that is no action of the object, or one not placed in the arm's scope);\n- the `.custom` writer: `CUSTOM_ARRANGEMENT_KEYS` in `packages/spec/src/data/field-customization.ts` and the `actionLayout` description on `ObjectExtensionSchema`; the section points at objectstack-data, which already teaches the sibling `fieldGroups` rule and its refusal doors, instead of restating them.\n\n`skills/objectstack-ui/evals/views-apps-actions-pages.json` gains case 24: four header buttons are requested, so a correct answer pins three and leads `more` with the fourth, pins `$export` in the list arm, and does not renumber `order` or author a page.\n\nA `patch` changeset for `@objectstack/skills`.\n\n### Size readings (published skills)\n\n| | before | after |\n|:--|:--|:--|\n| `rules/actions.md` | 256 lines, 14842 bytes, 3711 tokens | 268 lines, 15519 bytes, 3880 tokens |\n| `evals/views-apps-actions-pages.json` (measured, not ratcheted) | 235 lines, 6235 tokens | 245 lines, 6591 tokens |\n| every `SKILL.md`, summed | 4942 lines | 4942 lines |\n| bundle total, whole shipped tree | 294236 tokens | 294761 tokens |\n\nNet added lines under `skills/**`: 22 (rules +13 -1, evals +10).\n\n### Token ratchet: paid down first, then the measured remainder\n\nThe row for `skills/objectstack-ui/rules/actions.md` had zero headroom. Under the standing ruling 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B):\n\n- Paid down first, 49 bytes of restatement in the same file: the example in parentheses beside `description` on the copy-holes bullet (a sentence choosing a new owner, written with a record-name hole). The `helpText` bullet right below it and the Reassign Lead block's `successMessage` show the same hole spelling.\n- Arithmetic: the new section adds 726 bytes, the cut removes 49, so the file is 14842 to 15519 bytes, 3880 tokens. The row moves 3711 to 3880 (+169), the measured remainder only, pinned at the measurement, with its note in `scripts/check-skills-token-ratchet.mjs`.\n- Other passages read for restatement and kept, each a rule or a pointer no other sentence states: the \"parameterized bulk mutation is `script`\" cue, the `refreshAfter` note, the `objectOverride` and `defaultFromRow` sentences, the `newTabUrl` constraint, the \"never via `params`\" warning.\n\n## Tests\n\nNo code changes; no behaviour to ablate. Readings on head `63287424a2`:\n\n- `node ui/scripts/check-skill-eval-tokens.mjs` (run from `ui/`): exit 0, \"Every must_contain token is taught by its own skill bundle.\"\n- `pnpm --filter @objectstack/spec check:skill-docs`: exit 0, \"Skill docs in sync\"\n- `pnpm --filter @objectstack/spec check:skill-refs`: exit 0, \"10 generated files in sync with packages/spec\"\n- `check-skill-links`, `check-skill-identifier-liveness`, `check-skill-compatibility-version`, `check-skill-frame-sync`, `check-doc-authoring`, `check-role-word`, `check-corpus-claim-drift`, `pm/check-skill-id-lint`, `check-nul-bytes`, `check-closing-keyword-parity`, `check-doc-route-spelling --advisory`, `check-empty-changeset --base origin/main`, ratchet `--self-test`: each exit 0\n- `node scripts/check-skills-token-ratchet.mjs`: exit 0, \"skills/objectstack-ui/rules/actions.md is 3880 tokens (ceiling 3880; headroom 0)\"\n- NOT MEASURED: `check:skill-examples` (spec and ui), reason: both stop at PREREQUISITE NOT MET without a built client closure, and this diff adds no marked example block. CI runs them.\n\n## Acceptance notes\n\n- The section's inline example names two actions the same file already declares on `lead` at `record_header` (`crm_convert_lead`, `crm_print_a3`), so it is consistent with the reference rule it describes.\n- Left out on purpose, as the schema serves them: the alias spellings the strict object refuses by name, and that a pinned action hidden from a reader leaves its slot empty, and the shape refusals (a fourth pin, a name given twice).\n- The evals README's one-line summary of this fixture is unchanged (outside the file surface); it does not mention the button-order case, and no gate reads that summary.\n- File surface: the changeset is a file the claim did not name; the skills package is published, so the changeset rule requires it. The ratchet row and its note were added to the surface by the seat for this round.\n\n## Verification\n\nFirst files to read, by risk: `skills/objectstack-ui/rules/actions.md` (the new section, 9 body lines), then case 24 at the end of the evals file.\n\nTwo-minute check: `git grep -n actionLayout -- skills/objectstack-ui` now lists both files; before this pull it listed nothing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr)_\n\n<!-- signed: repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ -->\n"
+}

@@ -2,8 +2,8 @@
   "number": 36860,
   "kind": "issue",
   "title": "元数据列表列改为在 spec 里声明，经 /meta/types 下发（像表单布局一样）；第一批补上 hook、flow、job 等类型的关键列",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-support-ai",
@@ -23,9 +23,13 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-24T05:12:01Z",
-  "updated_at": "2026-11-24T13:54:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T14:27:12Z",
+  "closed_at": "2026-11-24T14:27:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 8,
   "locked": false,

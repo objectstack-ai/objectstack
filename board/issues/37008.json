@@ -1,0 +1,37 @@
+{
+  "number": 37008,
+  "kind": "issue",
+  "title": "Phone related-list card draws a currency formula column as a bare unlabeled number (12,000 beside 销售单价 6,000.00; desktop shows 总计 12,000.00)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T14:45:25Z",
+  "updated_at": "2026-11-24T18:32:39Z",
+  "closed_at": "2026-11-24T18:20:23Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37008",
+  "body": "## What happens\n\nOn a phone, a record page's related list draws its rows as gallery cards (`RelatedList.tsx` hands `object-gallery` the first column as title and columns 2 to 4 as `visibleFields`). A column that is a **formula returning currency** is drawn on the card as a bare number: no field label, and not in the money format the same column has on desktop.\n\nMeasured on `@objectstack/*` 18.6.0 with HotCRM 6.6.0, 375×812 viewport, zh-CN:\n\n| Surface | Quantity | Unit price (`currency`) | Total (`formula`, `returnType: 'currency'`) |\n|---|---|---|---|\n| Desktop related-list table | `2` | `6,000.00` | `12,000.00` under the header 总计 |\n| Phone card | `数量 2` | `销售单价 6,000.00` | `12,000` with no label |\n\nSo a card reads \"数量 2 / 销售单价 6,000.00 / 12,000\", and the reader cannot tell what 12,000 is. This is the case the comment on `LOW_SEMANTIC_RENDERER_TYPES` in `ui/packages/plugin-list/src/ObjectGallery.tsx` says the label exists to prevent (\"the user has no way to tell whether `5,000,000` is revenue, headcount, or pipeline value\").\n\n## Why (read on `main`)\n\n`ObjectGallery.tsx` prefixes the label only when the resolved renderer type is one of `number`, `currency`, `percent`, `integer`, `decimal`. A formula (and, by the same reading, a summary) whose result is a number or an amount resolves to a renderer type outside that set, so `showLabel` is false. The value is also drawn without the two decimals the table gives the same field, and `buildEnrichedField` in the same file copies `type`, `label`, `options`, `currency`, `precision`, `scale`, `useGrouping` from the field definition but not `returnType`, so the cell renderer cannot know the formula is an amount.\n\n## Steps\n\n1. HotCRM, Sales app, open an opportunity that has product lines (object `crm_opportunity_line_item`; `total_price` is `Field.formula({ returnType: 'currency' })`).\n2. Narrow the viewport to a phone width and look at the 商机产品明细 related list.\n\n## Expected\n\nA formula or summary column whose result is a number, an amount or a percentage gets the same label prefix as a stored number on the card, and the same format as the desktop table cell (`总计 12,000.00`).\n\n## Actual\n\n`12,000`, unlabeled, beside `销售单价 6,000.00`.\n"
+}

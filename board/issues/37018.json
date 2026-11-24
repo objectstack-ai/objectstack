@@ -1,0 +1,34 @@
+{
+  "number": 37018,
+  "kind": "issue",
+  "title": "Mobile navigation drawer announces a hard-coded English name and description (\"Sidebar\" / \"Displays the mobile sidebar.\") in every locale",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T15:48:46Z",
+  "updated_at": "2026-11-24T19:54:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37018",
+  "body": "## What happens\n\nOn a phone, the navigation drawer (bottom bar → 更多) is a dialog whose accessible name and description are hard-coded English, whatever the user's language:\n\n- name: `Sidebar`\n- description: `Displays the mobile sidebar.`\n\nEverything visible inside the drawer is translated (zh-CN here: 搜索菜单, 点星标把菜单项固定到底部栏…), so a screen-reader user of a zh-CN / ja-JP / es-ES workspace hears an English announcement on opening it, then the translated menu.\n\nObserved on `@objectstack/*` 18.6.0 at 375×812, user locale zh-CN; still the same on `main`.\n\n## Where\n\n`ui/packages/components/src/ui/sidebar.tsx`, the mobile branch of `Sidebar`:\n\n```tsx\n<SheetHeader className=\"sr-only\">\n  <SheetTitle>Sidebar</SheetTitle>\n  <SheetDescription>Displays the mobile sidebar.</SheetDescription>\n</SheetHeader>\n```\n\n## Expected\n\nBoth strings come from the console's translations (or from props the shell passes), like the rest of the drawer. Scope: screen-reader text only, nothing visible changes.\n\n## Steps\n\n1. Sign in with a non-English locale, open any app at a phone width.\n2. Tap 更多 in the bottom bar.\n3. Inspect the dialog's accessible name / description.\n"
+}

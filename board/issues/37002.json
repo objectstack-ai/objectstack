@@ -12,17 +12,18 @@
   },
   "labels": [
     "area:cloud",
-    "priority:p3"
+    "pm:blocked",
+    "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-24T14:17:23Z",
-  "updated_at": "2026-11-24T14:17:23Z",
+  "updated_at": "2026-11-24T14:35:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37002",
   "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed. Source: topic objectstack-ai/cloud#4961.\nGrading: area:cloud · Task · p3 · reach: n/a · evidence: read.\n\n## 维护者速读\n- 做什么：把发布给应用作者的技能文档和协议说明改成实情：应用技能在应用内问数助手里怎么生效、哪些工具拿不到、触发条件能读哪些字段，以及这些字段来自界面、不能当权限用。\n- 需要你做的：这次改动含受管面（技能文档、ADR 指针），PR 要你手工合并。\n\n## What\n1. `skills/objectstack-ai/SKILL.md`: a package skill with `surface` `ask` / `both` is loaded for the app the user is in (the `build` side is not served while in-app build is closed); tools outside the allow-set are dropped with a diagnostic; the context fields a condition can read (`appName`, `objectName`, `recordId`, `selectionKind`).\n2. `packages/spec/src/ai/skill.zod.ts`: the `triggerConditions` describe adds that the fields are reported by the client and are routing, never access control. Regenerate the reference page and baselines.\n3. `docs/adr/0063-…` and `0064-…`: one add-only pointer line each to the cloud record (cited as `cloud ADR-NNNN`).\n4. Optional, only if the allow-set constant is published in spec by then: a lint warning for an `ask`-surface package skill naming a tool outside it.\n\n## Acceptance\n- The skill's eval case that describes `ask` picking skills up by surface still passes and names the allow-set; the skill reference page regenerated; changeset.\n\nBlocked-by: objectstack-ai/cloud#4935, objectstack-ai/cloud#4963 (the text describes behaviour that must be installable first)\nParent: objectstack-ai/cloud#4961. Reader: skills / spec text seat.\nDedupe: `triggerConditions` 23 (all closed)."

@@ -1,0 +1,36 @@
+{
+  "number": 37005,
+  "kind": "issue",
+  "title": "fleet-write: advisory_versions can drop a listed package the seat names, and accepts a prerelease bound",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T14:32:39Z",
+  "updated_at": "2026-11-24T18:18:26Z",
+  "closed_at": "2026-11-24T18:17:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37005",
+  "body": "security#1 · os-mickey · session_01ASNY8XNef4ywkQio6S9ju4\n\nFiling class ③ (a task the maintainer dispatched directly) · Source: maintainer\n\n## Need\n\nThe relay row `advisory_versions` (`scripts/pm/fleet-write`) sets an unpublished advisory's affected packages and version ranges. It is the step before a publish, and publishing goes through the `versions` fence.\n\n**The block.** The row replaces the advisory's list only when every package already listed is named by the action. The executor's fence refuses an action that leaves a listed package out (\"a listed package the action does not name\"). That rule stops a silent drop. But it also stops a deliberate correction, so the relay can no longer publish a correct record in one case. When a report lists a package that the fix never touched, the seat's corrected list must leave that package out, and the fence refuses it. The relay then has two choices:\n- publish the package as affected, which is false and sends an upgrade alert to its users;\n- leave the advisory unpublished until the maintainer deletes the entry by hand in the GitHub UI.\n\nOn 2026-11-24, security#1 published a maintainer-approved list. Six of its advisories stopped at this fence and are parked in draft with their public text in place:\n- for 1 of them, the correction both adds and drops packages;\n- for 5, it only drops.\n\n**A second limit on the same row.** The validator refuses a prerelease bound, such as `>= 17.0.0-rc.6, < 18.6.0` (\"an operator, one space and a release version each\"). Some fixes first shipped in a `-rc.N` or `-next.N` prerelease. The seat therefore had to raise those lower bounds to the first stable release, which under-reports prerelease installs. Whether the platform accepts prerelease versions in `vulnerable_version_range` is the dev's to measure.\n\nThe maintainer's word, in the security#1 session, verbatim: 「先立卡解决中继的问题」. It answered the seat's report of this block.\n\n## Rule to deliver\n\n1. **An explicit drop.** `advisory_versions` takes an optional `drop`: a list of npm package names. Each must be currently listed on the advisory, and each is removed by name. The fence stays as it is for everything not named, so an unnamed listed package is still refused, and a silent drop stays impossible.\n   - Refuse a `drop` name that is not listed.\n   - Refuse a name that is both in `drop` and in `versions`.\n   - Refuse a drop that would leave the list empty.\n   - Refuse a non-npm entry.\n   - Each refusal names its reason and echoes no value beyond the package name.\n   - Read-back: the stored list equals the sent entries, and no dropped name remains.\n2. **Prerelease bounds.** If the platform accepts them, the range validator admits a prerelease version (`X.Y.Z-tag.N`) as either bound. If it does not, the validator's refusal says so by name, and the card records the measurement.\n\n**Pins:** the op table's closed-shape tests, one validator refusal per bad input above, and the executor's fence and read-back, each case refused or landed. Follow the existing `advisory_versions` batteries.\n\n**Docs:** the relay's header row for `advisory_versions`. A lane-charter edit is not needed, because the charter names the row, not its fields.\n\n## Readers\n\n- Who builds it: the lane triage routes this to. The precedent relay-row cards #36662 and #36805 sit in the same area.\n- Who uses it: the security seats, at every publish whose package list a review corrected.\n\n## Dedupe\n\nIssue search on `repo:objectstack-ai/objectstack is:issue advisory_versions` found 5 hits, none about dropping a listed package or prerelease bounds:\n- #36805 (open): severity;\n- #32424 (closed): note;\n- #30110 (closed): the publish path that introduced the row;\n- #36662 (closed): rewrite;\n- #31447 (closed): mint comment.\n\n**Grading: p2.** Six approved publications are parked behind it. The maintainer's UI is a working route meanwhile."
+}

@@ -1,0 +1,30 @@
+{
+  "number": 37068,
+  "kind": "issue",
+  "title": "CI: no guard catches a package whose types resolve only through pnpm's hidden hoist (the #37015 Mac build failure family)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T18:09:25Z",
+  "updated_at": "2026-11-24T18:37:30Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37068",
+  "body": "repo:objectstack#2 · huangyiirene · session_01J8VVAm8Y73VGNq3PkTe3dc\n\nFiling gate: ③ fleet follow-up with named locations · Source: fleet (area f2-F's fix for #37015, draft PR #37066, os-dev-report 7140190970: \"no durable family guard\")\n\n## What is missing\n\n#37015 was the maintainer's macOS build failing at `@object-ui/i18n` with TS2339. The cause is that 31 lockfile packages ship `.d.ts` files that import `react` without declaring `@types/react`. They resolve it only through pnpm's hidden hoist (`node_modules/.pnpm/node_modules`). With `hoist=false` the console build also fails at `@object-ui/components` (lucide-react, input-otp, cmdk), and 24 more tasks cascade behind that. PR #37066 fixes today's 31 packages with a `packageExtensions` block in `pnpm-workspace.yaml`, plus one guard test in i18n.\n\nNothing stops the next dependency from bringing the same gap. CI installs with the hoist on, so it stays green, and only a machine whose install does not hoist sees the failure.\n\n## Expected\n\nOne durable guard, either of:\n- a check script that lists the lockfile's packages whose published types import a package they neither depend on nor peer, and fails on any not covered by `packageExtensions`; or\n- a CI leg that installs with `--config.hoist=false` and runs the console build and the type-check sweep.\n\nSurface: `scripts/` (a check) and/or `.github/workflows/**` (a leg, Tier H). Lands after #37066.\nBusiness reason: a contributor or the maintainer on a non-hoisting install loses a build with an error that names a file far from the cause. #37015 took a day of rounds to trace.\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open hoist types guard` → #37015 only (being fixed by #37066).\nClause-②: no · Metadata-protocol: none\nGrade: area:fleet · Task · CI guard for a build regression that hit the maintainer (#37015, p1) → p2."
+}

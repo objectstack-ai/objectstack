@@ -1,0 +1,38 @@
+{
+  "number": 37010,
+  "kind": "issue",
+  "title": "Phone list card repeats the title in its subtitle when the name field is a formula over the view's leading columns",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "sunhaolin",
+    "id": 6194896,
+    "type": "User"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T15:17:36Z",
+  "updated_at": "2026-11-24T19:48:34Z",
+  "closed_at": "2026-11-24T19:48:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37010",
+  "body": "## What happens\n\nOn a phone, a list card whose object names its records with a **formula name field** shows the same values twice: once in the title and again in the subtitle line. The two slots the subtitle has are spent on fields the title already prints, so nothing else about the record (priority, account, owner, due date) reaches the card.\n\nObserved on `@objectstack/*` 18.6.0, viewport 375×812, two objects of one app:\n\n| Object | `nameField` (formula) | View's first columns | Card title | Card subtitle |\n|---|---|---|---|---|\n| case | `display_title` = `case_number - subject` | `case_number`, `subject`, `status`, `priority`, account, … | `CASE-00037 - Demo case 29 — critical problem` | `CASE-00037 · Demo case 29 — critical problem` |\n| lead | `display_title` = `full name - company` | name, `company`, `status`, … | `Mira Costa - Atlas Construction` | `Mira Costa · Atlas Construction` |\n\nThe desktop table of the same view is fine: it shows `case_number`, `subject`, priority, account… as separate columns and no `display_title` column at all.\n\n## Why\n\n`ui/packages/plugin-grid/src/ObjectGrid.tsx`, `buildMobileCardRenderer`:\n\n```ts\nconst titleCol = nameFieldKey !== undefined ? colMap.get(nameFieldKey) : displayColumns[0];\nconst titleKey = titleCol?.accessorKey ?? nameFieldKey;\n// The body never repeats the title: it is every shown column but the one that titles the card\nconst bodyColumns = displayColumns.filter((c) => c !== titleCol);\n...\nconst subtitleColumns = bodyColumns.filter((c) => c !== statusCol && c !== amountCol).slice(0, 2);\n```\n\nSince objectui#13150 the title is the declared name field even when no column shows it. When that name field is a formula built from other fields, the view naturally shows the *parts* as its leading columns (a table has no use for the concatenation), so `titleCol` is `undefined`, nothing is filtered out of `bodyColumns`, and the first two body columns are exactly the parts the title is made of. The comment's promise, \"the body never repeats the title\", holds only when the name field is itself a shown column.\n\n## Expected\n\nThe subtitle skips columns whose fields the name field's formula is built from (the formula's field references are known from the object schema), and takes the next two shown columns instead. For the case list that gives `CASE-00037 - Demo case 29 — critical problem` / `紧急 · Polar Cargo`.\n\n## Steps\n\n1. An object with `nameField` pointing at a formula field that concatenates two other fields; a grid view whose first two columns are those two fields.\n2. Open the list at a phone width.\n3. Each card's subtitle repeats the title's two values.\n"
+}

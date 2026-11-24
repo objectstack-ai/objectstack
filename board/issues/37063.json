@@ -1,0 +1,36 @@
+{
+  "number": 37063,
+  "kind": "pull_request",
+  "title": "docs(skills): objectstack-ui teaches the board's lane statistic and card settings",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T17:52:55Z",
+  "updated_at": "2026-11-24T18:45:30Z",
+  "closed_at": "2026-11-24T18:45:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T18:45:28Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37063",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFixes #36422\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化:用 AI 助手搭看板的应用作者,拿到的看板配置会带上每条泳道底部的统计(计数、合计、平均、最小、最大),以及卡片上「是否显示字段名」「是否隐藏空字段」两个开关;此前助手只会写旧的求和写法。\n- 为什么做:这是「看板视图有了自己的设置」这项工作的收尾,技能文档此前没有教这些新设置。\n- 出错会怎样:助手会照着错的说明去写看板配置;本次只改文字,可以直接撤回。\n- 要你做什么:无。\n\n## What changes\n\n`skills/objectstack-ui/rules/list-views.md`, section \"Configuring Kanban Views\":\n\n- The board example writes `kanban.summary` (`{ type: 'sum', field: 'estimate_hours' }`) in place of `summarizeField`, and sets `showFieldLabels` and `hideEmptyFields`, each with its default (`true`) in the trailing comment.\n- One note under the example: the six `summary.type` values (`none`, `count`, `sum`, `avg`, `min`, `max`); the four aggregates take a `field` and are computed by the query over every record of the lane, not only the loaded cards; the known gap the spec names (lanes over a lookup field, or a view with grouping: `sum` covers one fetched page and the other three show nothing); `summary` takes precedence over the older sum-only `summarizeField`.\n- `summarizeField` is still an accepted key (`KanbanConfigSchema` in `packages/spec/src/ui/view.zod.ts` declares it, no tombstone, no conversion), so it is named once as the older spelling and no longer taught as the way to write a lane statistic. No other file under `skills/` mentions it (`git grep summarizeField -- skills` at this head: one hit, the new note).\n\nEvery sentence was written from the spec's describe text and JSDoc for `KanbanLaneSummarySchema`, `summary`, `showFieldLabels` and `hideEmptyFields` at main a68b475bbc.\n\n### Paid for in the same file\n\nThe file had 4 bytes of token headroom, so the new teaching is paid by cutting restatement in `list-views.md` itself. No ratchet row moves.\n\n| Cut | Restates |\n|:---|:---|\n| search example comment \"No `searchableFields` ...\" | the \"key omitted\" row of the table below it |\n| search example comment \"This list only ...\" | the `searchableFields` line under it |\n| \"The full `dropdown / tabs / toggle` range applies only to page lists ...\" | \"`tabs` is page-only\" in the same bullet |\n| \"the whole search box, for every user and every term: no result at all\" | its own heading, \"One bad entry 400s EVERY search on that list\" |\n| \"errors, not warnings\" | \"fails the build\" in the same sentence |\n| comment \"no search box\" | the sentence introducing the example |\n| \"one lane per option\" on `groupByField` | the `lanes` note under the example |\n| \"the default `list` and every other view untouched\" | \"a NEW `listViews` entry that coexists with the views the object has\" |\n| gantt comments \"task bar start\" / \"task bar end\" | the key names `startDateField` / `endDateField` |\n\n### Skills size readings\n\n| | before (a68b475bbc) | after (7d7ca6db24) |\n|:---|:---|:---|\n| `rules/list-views.md` lines | 409 | 411 |\n| `rules/list-views.md` bytes / tokens | 17788 / 4447 | 17775 / 4444 (ceiling 4448) |\n| all `SKILL.md` files, lines | 4942 | 4942 (none touched) |\n| bundle total, tokens | 295195 (the measured after, plus this file's 3) | 295192 (measured) |\n\nNet lines in `skills/**`: +2 (17 added, 15 removed), against a budget of +12.\n\n## Tests\n\nHead 7d7ca6db24. Text only: no tested behaviour changes, so no ablation.\n\n- `pnpm --filter @objectstack/spec run check:skill-examples` (spec and the client-react closure built first, under the verify lock): exit 0, \"350 prose examples type-check across 3 surface(s)\". This is the gate that type-checks the board example against `ListView`.\n- `node scripts/check-skills-token-ratchet.mjs`: exit 0, \"skills/objectstack-ui/rules/list-views.md is 4444 tokens (ceiling 4448; headroom 4)\".\n\n## Acceptance notes\n\n- Card acceptance: the board example uses all three keys the board gained (`summary`, `showFieldLabels`, `hideEmptyFields`); the scope addition's three statistics (`avg`, `min`, `max`) are named with what they cover.\n- No eval case was added. No case in `evals/views-apps-actions-pages.json` exercises these keys, and a case was drafted, but `scripts/pm/overlap-check.mjs` answered exit 1 against open PR #37043, which appends to the same file. The case was dropped so this branch does not queue behind that pull (overlap-check at this head: `VERDICT clean exit 0`). A case for the lane statistic can follow once that pull lands.\n- The example sets `showFieldLabels: false` and `hideEmptyFields: false`, the non-default values, so the keys are visible in the example; the comments carry the defaults.\n\n## Verification\n\nFirst files to read: `skills/objectstack-ui/rules/list-views.md` (the hunk at \"Configuring Kanban Views\" is the teaching; every other hunk is a cut).\n\nTwo-minute check: open the spec describe text for `summary`, `showFieldLabels` and `hideEmptyFields` in `packages/spec/src/ui/view.zod.ts` beside the new note. Expected: every clause of the note has a source sentence there.\n\nLocal gate subset (derived by `dispatch-gates.mjs --commands`, 48 families): 43 exit 0; 5 exit 3, PREREQUISITE NOT MET because the full workspace is not built here (`check:doc-formula-expressions`, `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`, `check:sourcemap-no-sources-content`). Those five are NOT MEASURED locally and left to CI; none reads a skills file's prose.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYo86w1wqy2z2fMrryr)_\n"
+}

@@ -1,0 +1,29 @@
+{
+  "number": 37107,
+  "kind": "issue",
+  "title": "knowledge-turso moves into objectstack: Apache-2.0, the platform embedder and splitter, listing, generations, the contract suite",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Feature",
+  "created_at": "2026-11-24T19:39:37Z",
+  "updated_at": "2026-11-24T19:40:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37107",
+  "body": "maintainer · os-bob · session_012dn2AecKpLaYkUtNRiqtby\n\nFiling gate: ③ maintainer-directed (topic child). Source: topic #37000 (phase 2, row 7 moved up from phase 3); maintainer 2026-11-24 「现在就调整」, with 「用fable评审，并分拆第二阶段的任务」; boundary cloud ADR-0119 D5 (objectstack-ai/cloud#4968: 「都放开源」). The phase-2 batch was reviewed by an independent Fable pass before filing.\nGrading: area:ai · Feature · p2 (topic) · reach: every deployment not on PostgreSQL, including `os dev` · evidence: read.\n\n## 维护者速读\n- 做什么：把 cloud 仓库里的 libSQL 向量存储 `knowledge-turso` 搬进 objectstack 开源，改用平台的嵌入器和切分器，补上「列出文档」和换模型时的新一代索引，跑和 pgvector 同一套契约测试。\n- 谁受益：本地开发（`os dev` 默认 SQLite）也能用中文向量检索，存在本地一个 libSQL 文件里；PostgreSQL 部署用 pgvector。托管云以后也用它（托管接入在阶段三第 14 行）。\n- 需要你做的：无。从 cloud 仓库删掉旧包是另一张 cloud 卡，这张落地后由维护者会话处理。\n\n## What\nSource: cloud `packages/knowledge-turso` (origin/main): libSQL native vectors (`F32_BLOB` + DiskANN `libsql_vector_idx`); URL `libsql://`, `file:` or `:memory:`, or a client passed in; its own `OpenAIEmbeddingProvider` (`src/embedding.ts`); one table per source, `knowledge_`` &lt;source.id&gt;ˋ ``, with `chunk_id TEXT PRIMARY KEY` (`${documentId}#${idx}`), `document_id`, `source_record_id`, `content`, `title`, `metadata`, `embedding F32_BLOB(<dim>)`; its own chunker (`chunkTarget`, 800).\n1. `packages/plugins/knowledge-turso` (new in objectstack). `LICENSE` is Apache-2.0 text (today the cloud package's `LICENSE` holds BSL 1.1 text while `package.json` and headers say Apache-2.0; ADR-0119 D5 settles it). Same package name `@objectstack/knowledge-turso`; the next version is published from objectstack.\n2. Embedder: drop `src/embedding.ts`; use `EMBEDDER_SERVICE` (#37094 registers it in the open edition) or a constructor `embedder: IEmbedder`.\n3. Chunks: drop its own chunker; take the service's chunks (#37098) and declare that it accepts them.\n4. Layout changes the contract needs (today's layout has no hash, organization or generation):\n   - One table per source and generation, `knowledge_``` &lt;source.id&gt; ```_g<n>` (the vector column's dimension is fixed per table, so a model with another dimension needs a new table anyway), plus a generation table: `source_id`, `generation`, `fingerprint`, `dim`, `model`, `state`, `created_at`.\n   - Columns added: `doc_hash` (for `listDocuments`, #37096), `chunk_hash` (unchanged text is not re-embedded), `organization_id` (filtered before ranking from `organizationIds`, #37097).\n   - Chunk ids stay `${documentId}#${idx}`, unique inside a generation table; they are not citation anchors.\n   - A legacy `knowledge_```` &lt;source.id&gt;ˋ ```` table (no generation) is treated as stale: search answers \"reindex needed\"; it is dropped after the first new generation is active.\n5. Fingerprint: the one #37001 defines, handed in by the service (same member #37100 reads). Mismatch → \"reindex needed\", as in #37100. A build (#37099's trigger) writes a new generation table; when the walk ends, #37096's purge reconciles, the generation becomes active, the old table is dropped. One builder per source (a lock row in the generation table, since libSQL has no advisory locks).\n6. Implements `listDocuments` (#37096). Runs the #37096 contract suite in CI on `file:` and `:memory:` libSQL (no special image); the PR confirms `@libsql/client` vector functions (`vector32`, `vector_top_k`) work on the CI runner.\n7. Default local location when the runtime mounts it (#37102): a libSQL file beside the dev database under `.objectstack/data/`, configurable.\n8. Docs: `content/docs/protocol/knowledge.mdx` adapter section, `content/docs/ai/knowledge-rag.mdx`.\n\n## Acceptance\n- The #37096 suite passes on `file:` and `:memory:`.\n- Chinese text indexed and found with a fixed fake embedder.\n- Same content re-indexed → no embed call.\n- Model changed (same and different dimension) → new generation table, old one not served, then dropped.\n- Two organizations never see each other's hits.\n- A legacy table → \"reindex needed\", then replaced.\n- Container run per AGENTS.md.\n\n## Out of scope\n- Removing the package from the cloud repo (a cloud card, filed and done by the maintainer's session after this lands).\n- Hosted kernel registration (row 14, phase 3).\n- Typed filters (row 11).\n- Changing `os dev`'s default database (#37106 evaluates it; this store runs on its own libSQL file either way).\n\nBlocked-by: #37001, #37096, #37098, #37097 (organization member).\nParent: #37000. Reader: `domain:server` lane (`packages/plugins/knowledge-*`).\nDedupe: `knowledge-turso` 70 (open 12: this batch, #37000, #37001, #37106 — an evaluation of the dev default database, related, not a duplicate; none moves the package) · `libsql vector` 10 (open 5: #37106, #37001, seat posts)."
+}

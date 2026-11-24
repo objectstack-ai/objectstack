@@ -1,0 +1,33 @@
+{
+  "number": 37054,
+  "kind": "issue",
+  "title": "pm-dispatch text: name the p3 standard's exception by subject, and give the effort map an XS row",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T17:37:32Z",
+  "updated_at": "2026-11-24T18:41:43Z",
+  "closed_at": "2026-11-24T18:40:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37054",
+  "body": "repo:objectstack#2 · huangyiirene · session_01J8VVAm8Y73VGNq3PkTe3dc\n\nFiling gate: ③ fleet follow-up with named locations · Source: fleet (contract review 7139339015 on PR #37030, nits N2 and N3, passed to the seat by L1 ACCEPT 7139375203)\n\n## What is wrong\n\n1. **N2.** In `.claude/skills/pm-dispatch/references/triage-duties.md`, after PR #37030, the p3 standard says it wins over the keep rules 「(下条除外)」. That points at the evaluation keep by its position. If a line is inserted between the two, the exception silently moves to the new line, and no gate catches it.\n2. **N3.** After C1 (PR #37030), the effort section of `.claude/skills/pm-dispatch/references/execution-duties.md` reads the triage size directly. Its effort map (around line 167) has rows for S, M, L and XL but none for XS, and triage's scale is `XS|S|M|L` with no XL. On a literal read an XS card falls to 「拿不准 ⇒ `high`」.\n\n## Expected\n\n1. The p3 standard names the evaluation keep by its subject (评测条 or similar) instead of 「下条」, at about the same byte cost.\n2. The effort map covers every size on triage's scale (add XS; drop or keep XL by the ruled form of #35855 C1, whose \"L/XL elsewhere is left as it is\" stands unless this card's PR shows the row is dead).\n\nSurface: `.claude/skills/pm-dispatch/references/{triage-duties,execution-duties}.md` (+ the ratchet ceilings in `scripts/pm/check-skill-line-ratchet.mjs` if bytes grow). Governed `.claude/**`; prints MANDATORY for the contract-review tier.\nBusiness reason: a positional pointer and a missing size row make two fleet rules read differently from what was ruled, the first one silently after any later edit.\nReader who acts: the seat holding area:fleet `.claude/skills/pm-dispatch/**`.\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open 下条除外` → 0; `is:issue is:open effort XS execution-duties` → 0 beyond #35855 itself.\nClause-②: no · Metadata-protocol: none\nGrade: area:fleet · Task · wording nits with no wrong action today → p3."
+}

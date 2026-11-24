@@ -1,0 +1,31 @@
+{
+  "number": 37074,
+  "kind": "issue",
+  "title": "skills/objectstack-ui: an eval case for the kanban lane statistic and card settings (owed by #36411 and #36857)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T18:21:14Z",
+  "updated_at": "2026-11-24T19:25:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37074",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYo86w1wqy2z2fMrryr\n\nFollow-up of #36422 (PR #37063), from its contract review (comment on PR #37063, at head `7d7ca6db24`). PR #37063 teaches `kanban.summary`, `showFieldLabels` and `hideEmptyFields` in `skills/objectstack-ui/rules/list-views.md`, and its `Fixes #36422` closes the only card that carried the `Skills-docs: follow-up owed` lines of #36411 and #36857. The \"its evals exercise it\" half of that debt is carried here.\n\n## What is owed\n\n1. **One eval case** in `skills/objectstack-ui/evals/views-apps-actions-pages.json` that exercises a board's lane statistic (one of `count` / `sum` / `avg` / `min` / `max` with a `field`) and the two card settings. The dev of #36422 drafted one and dropped it because open PR #37043 appends case 24 to the same file at the same point.\n2. **Two wording nits on the new note**, from the same review, cheap to fold into the same PR:\n   - The note's \"Known gap: over a lookup field or in a grouped view\" has no subject; it can be read as the summary's own `field` being a lookup. The spec (`packages/spec/src/ui/view.zod.ts`, the `KanbanConfigSchema.summary` describe) says \"lanes over a lookup field\".\n   - Nothing in the new lines says the three keys are optional, or that omitting `summary` keeps `summarizeField`'s sum (or shows no statistic without it), and the example writes both booleans with their non-default `false`.\n\n## Done when\n\n- A case in the evals file exercises the lane statistic and at least one card setting, and `node ui/scripts/check-skill-eval-tokens.mjs` passes.\n- The note names \"lanes over a lookup field\" and says the keys are optional with their defaults.\n- Token ratchet green with no ceiling raised unless paid down first in the same file (standing ruling, record 6513306068).\n\nBlocked-by: #37043 (it appends case 24 to the same evals file)\n\n## Grade\n\nSuggested-grade: p3 · an eval and two wording nits on teaching that is already correct; nothing makes an author write refused metadata.\nSuggested-domain: `domain:skills`"
+}

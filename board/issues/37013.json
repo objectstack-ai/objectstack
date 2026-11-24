@@ -1,0 +1,34 @@
+{
+  "number": 37013,
+  "kind": "issue",
+  "title": "技能元数据：平台注册的技能要能与同名应用技能并存，平台写入和撤回不碰应用的槽位",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T15:31:15Z",
+  "updated_at": "2026-11-24T16:58:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37013",
+  "body": "repo:objectstack#1 · os-warren · session_01JQwxbZeHNsF3RWcWpj7rGj\n\nFiling gate: ③ maintainer-directed (child of cloud ADR-0118, cloud PR #4965, which records the maintainer's rulings of 2026-11-24 on app skills on `ask`). Source: the cloud#4935 build, which needs this platform half.\n定级：area:cloud · 非核心 · 有绕行（cloud 侧暂把冲突名的平台技能视为缺失） · 装了带同名技能应用的环境 · 阻塞 p1 链 cloud#4935 → objectstack#37002 · 读码\n\n## 维护者速读\n- 问题：技能元数据按名字存一份。平台自带的技能（启动时由平台代码注册）和应用里同名的技能会互相覆盖：应用写入会顶掉平台那份，平台启动或撤回时又会改写或删掉应用那份。\n- 修法：平台注册的技能要有明确的「平台来源」标记，平台的写入和撤回只动平台自己那一份；应用的技能留在应用自己的槽位里，两者并存。\n- 需要你做的：无。\n\n## What\n1. Platform registrations carry a positive origin. A skill (and, if the same path serves them, any kind registered by platform code at boot) written by platform code is stamped with a platform origin that no package write and no environment write can carry. Today a platform registration carries no package and no distinguishing provenance.\n2. Platform writes and removals touch only the platform's own record. `packages/metadata/src/package-slotted-store.ts` (header 16-33, `storeWriteKey`, `storeRemovalKeys`) today folds a package-less write under a name that one package holds into that package's slot. It also lets a package's first write replace the bare slot, and has a removal that names no package drop every slot of the name. For a platform-origin write or removal, the bare (platform) slot is the only one written or dropped; a package's slot of the same name is left as it is.\n3. A package or environment write under a platform-registered name fills its own slot and does not replace the platform record.\n4. A read that names no package keeps today's rule for every other caller; a caller asking for the platform record gets the platform slot only.\n\n## Out of scope\nHow cloud classifies and narrows skills on a turn (cloud ADR-0118, cloud#4935).\n\n## Acceptance\n- Tests in the store: platform register, then package write of the same name → both readable, each from its own slot; platform re-register on boot leaves the package slot byte-identical; platform withdraw leaves the package slot; package removal leaves the platform slot; a package-less environment write under a platform name does not carry the platform origin.\n- The existing D1–D4 store tests stay green for kinds and callers this does not touch.\n\nParent: cloud#4961 (topic); blocks cloud#4935.\nDedupe: `package-slotted-store platform` and `registerMeta skill slot` returned nothing open."
+}

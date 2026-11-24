@@ -2,8 +2,8 @@
   "number": 36930,
   "kind": "issue",
   "title": "Kanban: a reference swimlane heading ignores the target object's declared nameField, so swimlane and column-lane headings can name the same record differently",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T09:40:10Z",
-  "updated_at": "2026-11-24T10:32:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T19:18:06Z",
+  "closed_at": "2026-11-24T19:17:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36930",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① an experience defect, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7127703645). Source: a follow-up from PR #36925 (#36841, kanban swimlanes keyed by reference id).\n\nBlocked-by: #36925\n\n## What happens\n\nAfter PR #36925, a kanban board whose swimlanes group by a lookup field titles each swimlane with the referenced record's title. That title does not read the target object's declared `nameField`. A column lane over the same reference does read it, so the same record can be named differently in a swimlane heading and in a column heading on one board.\n\nreach: boards that group swimlanes by a lookup to an object whose `nameField` is not its default title field.\n\n## Expected\n\nSwimlane headings name a referenced record the same way column-lane headings do, through the target object's `nameField`.\n\n## Acceptance\n\n- `ObjectKanban` reads the swimlane field's target object schema once per board (`useSettledSchema`) and passes it down through `KanbanBoardCore`, `index.tsx` and `KanbanImpl`. This is the dev's sizing: S.\n- A test pins a swimlane over a lookup whose target declares a non-default `nameField`: the heading shows that field, and it matches the column-lane heading for the same record.\n\nDedupe: open issues for swimlane headings and `nameField` return only #36841, the parent that #36925 fixes."

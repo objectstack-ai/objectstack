@@ -1,0 +1,34 @@
+{
+  "number": 37015,
+  "kind": "issue",
+  "title": "console build on macOS: @object-ui/i18n fails TS2339 at packNamespace.ts:302 (I18nContext read as {})",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T15:38:34Z",
+  "updated_at": "2026-11-24T18:11:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37015",
+  "body": "repo:objectstack#2 · huangyiirene · session_01J8VVAm8Y73VGNq3PkTe3dc\n\nFiling gate: ① defect with a named location and a reproduction, and ③ maintainer direct dispatch · Source: maintainer\n\nThe maintainer ran the #36777 acceptance on a Mac and sent the output to this account's fleet project, twice (2026-11-24 ~15:22Z, and ~15:37Z after the seat asked for a clean reinstall), with the seat's standing offer 「还失败的话把输出发我，我立缺陷卡派人修」 answered by the second run. Verbatim excerpt of the second run:\n\n> ```\n> @object-ui/i18n:build: src/namespaces/packNamespace.ts:302:48 - error TS2339: Property 'i18n' does not exist on type'{}'.\n> @object-ui/i18n:build: 302     const instance = (useContext(I18nContext)?.i18n ?? getI18n()) as I18nInstance | undefined;\n> Tasks:    22 successful, 25 total\n> Cached:    22 cached, 25 total\n> Failed:    @object-ui/i18n#build\n> ```\n> `node -v` → `v26.7.0`\n\n## What happens\n\n`pnpm console:build` on macOS stops at `@object-ui/i18n#build` (`tsc`): `useContext(I18nContext)` is typed `{}` there, so `.i18n` does not exist. The console cannot be built on a Mac, and #36777 (the Mac acceptance of #36753) cannot complete.\n\n## What the seat measured (Linux, not the Mac)\n\n- `origin/main` 4c4a6777, `pnpm install --frozen-lockfile` (pnpm 10.31.0, the `packageManager` pin), then `pnpm turbo run build --filter=@object-ui/i18n`: **passes**, 5/5 tasks.\n- The lockfile holds one `react-i18next` (17.0.11; its `index.d.ts:312` declares `I18nContext: React.Context<{ i18n: i18n }>`) and one `@types/react` (19.3.0).\n- `react-i18next`'s typings import `react`, but the package does not depend on `@types/react`; in the pnpm store, `node_modules/.pnpm/react-i18next@17.0.11…/node_modules/` holds no `@types/react`. On Linux the import resolves only through pnpm's hidden hoist, `node_modules/.pnpm/node_modules/@types/react`. Hypothesis, NOT verified on a Mac: where that hoist is absent (another pnpm major or a user-level `hoist` setting; the maintainer's `pnpm` is a user install, version unread), `React.Context` does not resolve and `useContext` infers `{}`. Node 26.7.0 against `engines.node >=22` is a second difference, not a likely cause for a type error.\n\n## Expected\n\n`pnpm console:build` passes on macOS from a clean checkout, and the i18n package's type check does not depend on pnpm's hidden hoisting.\n\n## For the dev (questions, not fences)\n\n- Confirm or falsify the hoist hypothesis on Linux: install with the hoist disabled (e.g. `--config.hoist=false`, or the pnpm major the maintainer has) and build `@object-ui/i18n`. A reproduction on Linux is the regression test's base.\n- Fix at the root: the package should read the context with types it owns or a dependency it declares, not a phantom hoist. Whether that is a typed local read, a declared `@types/react` resolution, or a workspace `public-hoist-pattern`, is the dev's reading; name what else in `ui/**` imports a third-party React context the same way (`grep -rn \"useContext(\" ui/packages --include=*.ts*`) and cover the whole family.\n- Acceptance: the hoist-disabled Linux build passes; then the maintainer re-runs #36777 on the Mac.\n\nBusiness reason: every developer on a Mac (the maintainer included) cannot build the console; #36777 stays open until it can.\nReader who acts: seat `repo:objectstack#2` (area f2-F, lease extended to `ui/packages/i18n/**`), on the maintainer's direct dispatch.\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open packNamespace` → 1 hit (#36777, the acceptance card this blocks, not a fix); `is:issue is:open TS2339 I18nContext` → 1 hit (the same). Parent context: #36753 (closed, p1, area:build).\nClause-②: no · Metadata-protocol: none\nGrade: area:build · Bug · broken × developers building the console on macOS, the same reach that graded #36753 p1 → p1."
+}

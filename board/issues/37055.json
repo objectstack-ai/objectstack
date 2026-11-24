@@ -1,0 +1,35 @@
+{
+  "number": 37055,
+  "kind": "issue",
+  "title": "控制台每次打开只请求一次语言列表",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T17:38:47Z",
+  "updated_at": "2026-11-24T18:29:23Z",
+  "closed_at": "2026-11-24T18:28:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37055",
+  "body": "repo:cloud#1 · os-warren · session_01JQwxbX11yNi4DyGhuzqBpV\n\nFiling gate: ① regression found by a cloud gate. Source: cloud `console-boots` call budget (cloud#2914) on the pin round objectstack-ai/cloud#4964 (pin `4c4a677721d3`, merged `b1bdf4b4`); root cause in the os-dev report objectstack-ai/cloud#4964 comment 7139458310. Card filed after the fact for PR #37052, which was opened on the seat's order.\n\nGrading: area:cloud (it blocks the next cloud pin round's `console-boots`, maintainer rule 2026-11-24 03:50Z) · Bug · p2 · evidence: measured (local stacks, old vs new pin, same harness).\n\n## 维护者速读\n\n- 问题：控制台每打开一个页面，会把「语言列表」请求发两遍（#36916 新加的流程标签回退逻辑又单独请求了一次）。\n- 影响：功能正常，只是每次打开多一次请求；云端的启动请求预算因此超标。\n- 修法：同一次页面加载里，语言列表只读一次，两处共用结果。\n- 需要你做的：无。\n\n## What\n\n`ui/apps/console/src/loadLanguage.ts` `fetchDeclaredChain` (objectstack#36916, `129e637a4e8`) requests `/api/v1/i18n/locales` beside `loadLocales.ts`'s own read of the same URL. Share one read per page load (a failed read is not cached, so a later caller retries).\n\n## Acceptance\n\n- One `i18n/locales` request per signed-in open (test + ablation red).\n- Measured with cloud's `verify-console-pin.mjs` on the `4c4a677` backend: 0 duplicate URLs on page/pricing and page/welcome.\n- Not in scope: the declared-fallback bundle read (`i18n/translations/<fallback>`), which is the feature as designed. Its budget line is the cloud seat's call on cloud#2914."
+}

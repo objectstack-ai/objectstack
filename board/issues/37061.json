@@ -1,0 +1,31 @@
+{
+  "number": 37061,
+  "kind": "issue",
+  "title": "Running-app report save and existing-view settings save name no package, so an installed app's item writes the package-unbound row, not its paired .custom package (ADR-0146 D2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-24T17:48:39Z",
+  "updated_at": "2026-11-24T18:36:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37061",
+  "body": "repo:objectstack#2 · huangyiirene · session_01J8VVAm8Y73VGNq3PkTe3dc\n\nFiling gate: ① suspected defect with a named location, reproduction not yet run · Source: fleet (found while revising ADRs for #36086; PR #37045 \"Noted, not filed\", contract review 7139668897 note N4)\n\n## What the code does (read, not run)\n\n`ui/packages/app-shell/src/views/runtime-metadata-persistence.ts`, `saveAndPublishRuntimeMetadata` (line 568) passes a package only when it saves a **new** view. A report's save, and a change to an **existing** view's settings, made from the running app name no package. For an item of an installed package whose stored rows are not bound to exactly one package, the server then addresses the package-unbound row.\n\n## Why it matters\n\nADR-0146 D2 says a customization of an installed package's item lands in that package's paired `.custom` package. These two saves land in a place ADR-0146 does not describe. PR #37045's ADR note records this as true of main; it is not the ruled design.\n\n## Not measured\n\nWhether some door refuses the write, and what an upgrade of the installed package then does to the change. The first step is to reproduce it: install a package with a report and a view, save both from the running app, and read which row was written.\n\n## Expected\n\nEither both saves name the paired `.custom` package for an installed package's item, as ADR-0146 D2 does, or the ADR records the exception with a reason.\n\nBusiness reason: a builder's change to an installed app's report or view could sit outside the package that keeps customizations, so an upgrade or uninstall may not treat it as theirs.\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open saveAndPublishRuntimeMetadata package` → 0; `is:issue is:open ADR-0146 custom package report save` → 0.\nClause-②: no · Metadata-protocol: none\nGrade: proposal for triage, unmeasured: area:build · Bug · not yet reproduced, so ungraded here."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 37049,
+  "kind": "pull_request",
+  "title": "fix(components): the sort builder words a numeric sort direction as size",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T17:31:37Z",
+  "updated_at": "2026-11-24T20:07:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37049",
+  "body": "repo:objectstack#4 · os-justin · session_01QSeKYnagJvGbCtNg2PhvgW\n\nFixes #37027\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 列表「全部排序层级」和手机上的排序面板里,数字、百分比、进度、金额字段的方向选项从「A → Z / Z → A」改为「小 → 大 / 大 → 小」;日期仍是「最早 → 最新」,文本仍是字母序。\n- 列表页重做专题的里程碑验收发现的显示错误,让排序方向的说法与字段类型一致。\n- 出错时只是方向文字不对,排序结果本身不变;可直接撤回。\n- 无\n\n## What changes\n- `SortBuilder` (`ui/packages/components/src/custom/sort-builder.tsx`) had its own direction table that knew only `date` / `datetime`, so every other type read \"A → Z\". It now words a level by a module-local `sortWording` + `sortDirectionLabel` (no new package export): date-like types (`FILTER_DATE_LIKE_TYPES`) read as time, the spec's numeric family (`FILTER_NUMBER_LIKE_TYPES`: number, currency, percent, rating, slider, progress, summary) plus boolean as size, anything else as the alphabet, over the `listConditions.sort.{time,size,alphabet}_{asc,desc}` rows every locale already carries. No i18n key is added.\n- The phone sort sheet's levels (`ui/packages/plugin-list/src/phone/PhoneListPanels.tsx`) had the same date-only table over `sortBuilder.*` keys. They now read `sortDirectionLabel` from `plugin-list`'s `conditions/conditionModel.ts` (an internal module, not a package export), with the same three-way rule and the same keys. The list's former `sortWording` / `ListConditionControls.sortDirectionLabel` pair, which had no non-test caller, is folded into that one helper.\n- Trade-off, stated: the rule lives twice, module-local in `@object-ui/components` and in `plugin-list`'s condition model, both over the same `@object-ui/types` type lists and the same locale keys. One copy would need a new published export from `@object-ui/components` (or `@object-ui/types`), which would make this `Clause-②: yes (widening)`.\n- `plugin-list`'s provider-less defaults drop the four `sortBuilder.ascending/descending/oldestFirst/newestFirst` rows. The matching locale rows in `@object-ui/i18n` now have no reader in this repo (`check:i18n-dead-keys` lists them) but are left in place: removing rows from the published `./locales/*` packs would be a narrowing.\n\n## Tests\n- `ui/packages/components/src/__tests__/sort-builder-date-direction-duplicates-27520.test.tsx`, new describe: number, progress, percent and currency rows offer \"Low → High\" / \"High → Low\"; CONTROL: date keeps time, text keeps the alphabet. It also replaces the removed plugin-list unit test of the dead helper (same date / currency / text assertions, on the live component).\n- `ui/packages/plugin-list/src/__tests__/ListView.phonePanels-35884.test.tsx`, new describe on the real phone `ListView`: number, progress, percent and currency levels read \"Low → High\"; CONTROL: date reads as time, text as the alphabet.\n\n## Acceptance notes\n- Browser check in the showcase app (zh-CN, `showcase_task`, desktop and phone width) was not run: the verify lock was held by other runs for the whole window. The DOM tests above drive the real components.\n\n## Verification\n<details><summary>Head 5615c99db: targeted tests, fails-before, typecheck</summary>\n\n- `cd ui && pnpm exec vitest run --maxWorkers=2 packages/plugin-list/src/__tests__/ListView.phonePanels-35884.test.tsx packages/plugin-list/src/conditions packages/components/src/__tests__/sort-builder`: VERDICT command-exit 0, Test Files 6 passed (6), Tests 113 passed (113).\n- Fails-before, SortBuilder (sort-builder.tsx at origin/main bytes): command-exit 1, 1 failed (the numeric case) | 9 passed; controls green.\n- Fails-before, phone (PhoneListPanels.tsx and conditionTranslations.ts at origin/main bytes): command-exit 1, 4 failed (number, progress, percent, currency) | 13 passed; controls green. Both restored from HEAD, hash equal, `git diff HEAD` empty.\n- `pnpm --filter @object-ui/plugin-list --filter @object-ui/components run type-check`: command-exit 0, both packages Done.\n</details>\n\n<details><summary>Head 5615c99db: gates</summary>\n\n- `dispatch-gates --ran`: 38 derived families accounted for: 36 run with exit 0, 2 not measured locally (`check:query-options-erasure`: local timeout; `vitest run scripts/`: lock queue timeout), both covered by this PR's CI check-runs.\n- i18n: `check:i18n-keys` 0, `check:i18n-drift` 0, `check:i18n-dead-keys` 0 (report: the four `sortBuilder.*` direction rows are now dead). `check:i18n` / `check:i18n-coverage`: exit 3, prerequisite not met (CLI not built), not measured.\n- overlap-check: VERDICT clean exit 0.\n- CI check-runs on 5615c99db: 45 success, 13 skipped, none failing.\n</details>\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QSeKYnagJvGbCtNg2PhvgW\n"
+}

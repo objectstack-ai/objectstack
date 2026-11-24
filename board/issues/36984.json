@@ -2,7 +2,7 @@
   "number": 36984,
   "kind": "pull_request",
   "title": "fix(auth, console): saving your profile keeps the page on screen and shows its confirmation",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-24T13:33:42Z",
-  "updated_at": "2026-11-24T13:59:01Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-24T14:27:14Z",
+  "closed_at": "2026-11-24T14:27:10Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T14:27:10Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/36984",

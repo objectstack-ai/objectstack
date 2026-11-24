@@ -1,0 +1,37 @@
+{
+  "number": 37052,
+  "kind": "pull_request",
+  "title": "fix(console): a signed-in open asks /i18n/locales once, not twice",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-24T17:35:36Z",
+  "updated_at": "2026-11-24T18:28:35Z",
+  "closed_at": "2026-11-24T18:28:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-24T18:28:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/37052",
+  "body": "Fixes #37055\n\nPart of objectstack-ai/cloud#4964 (the console-boots call budget, cloud#2914).\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：用户无感；控制台每次打开页面少发一次「语言列表」请求，界面与行为不变。\n- 为什么做：云端控制台启动检查的请求预算超标，其中一次是框架新功能把同一个语言列表请求重复发了两遍，这里合并成一次。\n- 出错会怎样：最坏是语言菜单或流程标签的回退语言读不到，退回内置语言包，不影响使用；可直接撤回。\n- 要你做什么：无。\n\n## What changes\n\n`GET /api/v1/i18n/locales` has two readers in the console, and since objectstack#36916 each sent its own request on every signed-in page open:\n\n- `loadLocales` (the globe menu's locale codes), read after the first paint;\n- `loadLanguage`, which since objectstack#36916 reads the declared `fallbackChain` / `sourceLocale` / codes beside the active language's bundle.\n\nThe cloud control-plane call budget measured it as `i18n/locales x2` on both counted pages (cloud#4964, job 138590046931).\n\n- `ui/apps/console/src/localesRead.ts` (new): `readLocales()`, one shared request per page load. The parsed body is shared; each reader keeps its own parse and its own degrade-quietly rule. A failed read (non-2xx, network error, unparsable body) is handed to the readers that shared it and then forgotten, so the next reader asks again, as before.\n- `loadLocales.ts` and `loadLanguage.ts` read through it. A language switch now reuses the page load's answer instead of asking again.\n- Test seam `__resetLocalesRead()`, called in `afterEach` of the five test files that drive the real loaders (each case is its own page load).\n\nRead first, by risk: `localesRead.ts` (the cache lifetime and the failure rule), then `loadLocales.ts` (the warn lines moved out of the `try`).\n\nTwo-minute check: sign in to any console and open a page with DevTools on Network, filter `i18n/locales`. Expect one request, where `main` shows two.\n\n## Tests\n\n- New: `localesRead.sharedRead-4964.test.ts`, 3 cases:\n  - the boot's two loaders together ask once and each gets its answer;\n  - a later reader and a language switch reuse the answer;\n  - a failed read is not kept.\n- Ablation, run once: with `pending = read;` changed to `pending = null;` through `scripts/ablation-replace.mjs`, cases 1 and 2 go red (`expected 2 to be 1`, `expected 3 to be 1`) and case 3 stays green. The file was then restored, and `git diff HEAD` came back empty.\n- The `@object-ui/console` vitest project in full, at 419db2802cc: Test Files 333 passed (333), Tests 3568 passed (3568). The commit after it adds only the changeset.\n- `pnpm --filter @object-ui/console type-check`: exit 0. `--listFiles` includes the new test file.\n\n## Acceptance notes\n\nRoot cause of the cloud#4964 console-boots red: pricing went from 24 to 27 calls. I measured with the same harness (`verify-console-pin.mjs`) on local stacks, old pin 0e83fe03 against new pin 4c4a677:\n\n- `i18n/locales` asked twice. This duplicate comes from objectstack#36916 (129e637a4e8), whose `fetchDeclaredChain` added a second request. This PR fixes it.\n- `i18n/translations/en` is new. It is also objectstack#36916: the console now fetches the declared fallback locale's bundle for its `flows` group on every open where the active language is not the authored one. That is the feature working as designed, not a duplicate; the budget question is the cloud seat's.\n- `data/sys_user_preference?top=1` (the `ui.recent` per-key re-read) appeared in the CI run only. In 3 local new-pin runs and 2 old-pin runs it never showed. It is the write path's `findExisting` when a recents write goes out before its own load answered, which is a timing race and not a range regression.\n- Preference writes on open vary between 1 and 2 on both pins: old pin pricing measured 24 and then 23.\n\nMeasured with this branch's console, 3 runs: pricing 25 calls, 0 duplicates; welcome 25 and 26, 0 duplicates. Without it, on the new pin, 3 runs: pricing 26 with `i18n/locales x2` each time.\n\n## Verification\n\n<details><summary>Local gates (derived with dispatch-gates --commands, 37 families, all exit 0; reconciliation 37 derived, 37 run)</summary>\n\nEvery derived command exited 0. That covers:\n- `check:nul-bytes`, `check:published-files`, `check:test-source-alias`, `check:type-check-coverage` and `check:type-check-debt`;\n- `check-empty-changeset --base origin/main` and `check-changeset-no-major --base origin/main`;\n- `pnpm --dir ui exec vitest run scripts/` (Test Files 172 passed, 2 skipped).\n\n`dispatch-gates --ran`: \"37 derived famil(ies) accounted for — 37 run, 0 NOT-MEASURED\". The repo-wide lint and the rest of the farm are left to CI.\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbX11yNi4DyGhuzqBpV)_\n\n<!-- signed: repo:cloud#1 · os-warren · session_01JQwxbX11yNi4DyGhuzqBpV -->"
+}

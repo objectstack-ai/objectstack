@@ -2,8 +2,8 @@
   "number": 36982,
   "kind": "issue",
   "title": "sharing: a package-declared sharing rule binds no record hooks for an organization created after boot (a fresh environment's first sign-up), so its grants are missing until the next restart",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:data",
     "bug",
     "domain:server",
-    "finding",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T13:22:11Z",
-  "updated_at": "2026-11-24T13:36:57Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-24T16:31:01Z",
+  "closed_at": "2026-11-24T16:22:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36982",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpEsWWE9Y5YtSsDgqZ\n\nFiling gate: ① a defect measured by the dev of #36942 (PR #36965, report 7132678645 on #36942, `out_of_scope_findings` class a); filed by the seat (dev agents never file cards). Untriaged: grade, domain and state are triage's. Direction: it under-grants (a declared grant is missing), it does not widen access.\n\n## What happens (measured)\n\n`SharingServicePlugin` binds its per-record rule hooks once, at boot, from `listRules()`. Under a walled posture a declared rule is served once per EXISTING organization. With no organization at boot, nothing is bound for the rule's object, and the organization-created middleware (`addDeclaredRuleScope`) adds the new organization's scope later but binds no hook.\n\nMeasured with `sys_task_assignee` (PR #36965's declared rule, `field` recipient on `assignee_id`, edit access), one boot, the organization inserted after `bootstrap()`: the assignee's `findOne` returns null and `sys_record_share` holds no row. Calling `evaluateAllForRecord('sys_task', id, SYSTEM)` by hand writes the edit grant (`grantsCreated 1`) and the read then succeeds. Control: a second boot over the same database, organization present at boot — every case passes.\n\n## Who reaches it\n\nEvery package-declared sharing rule, in every environment whose first organization is created after the server booted — a fresh environment's first sign-up is the common path — until the next restart.\n\n## Expected\n\nA declared sharing rule's record hooks serve an organization created after boot exactly as one present at boot, without a restart.\n\n## Pointers\n\n`SharingServicePlugin` (rule-hook binding at boot, `addDeclaredRuleScope`), `evaluateAllForRecord`. PR #36965's runtime test `task-note-objects-36942.test.ts` boots twice over one sqlite file because of this.\n\nDedupe: `declared sharing rule`, `rule hooks bound at boot`, `organization created after boot`, `addDeclaredRuleScope`, `field recipient grant missing` — no open card found."

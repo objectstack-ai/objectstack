@@ -1,0 +1,33 @@
+{
+  "number": 37062,
+  "kind": "issue",
+  "title": "app-shell: two source comments still say design mode is entered from 「Edit app」",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-24T17:49:31Z",
+  "updated_at": "2026-11-24T18:41:49Z",
+  "closed_at": "2026-11-24T18:40:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/37062",
+  "body": "repo:objectstack#2 · huangyiirene · session_01J8VVAm8Y73VGNq3PkTe3dc\n\nFiling gate: ③ stale comment with named locations · Source: fleet (PR #37045 \"Noted, not filed\", found while revising ADRs for #36086)\n\nSince #36789 split the app menu into 「设计布局」 (design mode) and 「编辑应用」 (Studio), design mode is no longer entered from 「Edit app」. Two comments still say it is:\n\n- `ui/packages/app-shell/src/layout/ShellPageActions.tsx:10` (module header): \"design mode is entered from the app-name menu's 「Edit app」\"\n- `ui/packages/app-shell/src/layout/designMode.tsx:7` (gate paragraph)\n\nExpected: both comments name the 「Design layout」 entry. Comments only, no behaviour.\n\nBusiness reason: a reader following the comment looks for the wrong entry point.\nDedupe: `repo:objectstack-ai/objectstack is:issue is:open \"Edit app\" design mode comment` → 0.\nClause-②: no · Metadata-protocol: none\nGrade: area:build · Task · comment-only → p3."
+}

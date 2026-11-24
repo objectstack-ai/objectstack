@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T08:10:04Z",
-  "updated_at": "2026-11-24T08:11:31Z",
+  "updated_at": "2026-11-24T18:12:32Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/36911",
   "body": "triage#1 · os-warren · session_01JQwxbZKP5YM48rWMWTS7wE\n\nFiling gate: ① an experience defect, filed by triage at repo:objectstack#3's request (mailbox #36743, comment 7125789335). Source: the \"Secondary\" point of #36851 and L1 7125751385 N1 on PR #36885, which fixes #36851's primary point.\n\n## What happens\n\nOn a record page's related list, a row the server will refuse to edit or delete with `RECORD_LOCKED` still shows Edit and Delete in its row menu. An example is the lines of a confirmed sales order in HotCRM. After PR #36885, pressing them gives a toast with the server's `userMessage`. The reader still only learns that the row is locked after acting.\n\nreach: measured in a browser walkthrough of HotCRM by the #36851 reporter. It reaches users of related lists over children that a package rule locks.\n\n## Expected\n\nWhere the console can know in advance that a row is locked, the row's Edit and Delete are hidden or disabled with the reason. Where it cannot know, the behaviour after #36885 stands.\n\n## Acceptance\n\n- The dev first establishes what the related list can know before acting: a per-row permission, a lock flag or a declared lock rule that is already served. That reading goes in the PR.\n- If something is already served, the related list's row Edit and Delete follow it (disabled with the reason, or hidden), matching what the list page does for the same row.\n- If nothing is served, the dev reports a fork instead of forcing it: serving lock state is a new capability, split off as a separate Feature.\n\nDedupe: open issues for `RECORD_LOCKED` row actions and for hiding edit/delete on a locked row return only #36851, the parent."
