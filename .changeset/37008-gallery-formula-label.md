@@ -5,7 +5,7 @@
 
 fix(plugin-list): a gallery card labels and formats a formula or summary column whose result is a number, an amount or a percentage
 
-Clause-②: no
+Clause-②: yes
 Metadata-protocol: none
 
 A gallery card, which is also how a phone draws a related list's rows, now gives a `formula` or `summary` column the same treatment as a stored number when its result is a number, an amount or a percentage: the field's label before the value, and the format the related-list table gives the same field. A `returnType: 'currency'` formula reads `Total 12,000.00` on the card, as it does in the table. Before, it read a bare `12,000` beside `Unit price 6,000.00`, so the reader could not tell what the figure was. A summary declaring its `currencyConfig` reads as money in the same way. A formula whose result is text stays unlabeled, as a text field does.
