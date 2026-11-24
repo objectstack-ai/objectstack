@@ -2191,7 +2191,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "描述",
-        helpText: "One sentence on what this report shows, displayed under its name."
+        helpText: "一句话说明这张报表看什么，显示在名称下方"
       },
       type: {
         label: "类型",
@@ -2274,32 +2274,32 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
       },
       "dateRange.dimension": {
-        label: "Date Field",
-        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+        label: "日期字段",
+        helpText: "时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空"
       },
       "dateRange.defaultRange": {
-        label: "Default Period",
-        helpText: "The period the report opens with."
+        label: "默认时间段",
+        helpText: "打开报表时显示的时间段"
       },
       "dateRange.allowCustomRange": {
-        label: "Allow Custom Range",
-        helpText: "Let people pick their own start and end dates."
+        label: "允许自定义范围",
+        helpText: "允许使用者自己选择开始和结束日期"
       },
       exportOptions: {
         label: "导出选项",
         helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
       },
       "exportOptions.formats": {
-        label: "Formats",
-        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+        label: "格式",
+        helpText: "可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载"
       },
       "exportOptions.includeHeaders": {
-        label: "Include Headers",
-        helpText: "Put the column names in the first row of the downloaded file."
+        label: "包含表头",
+        helpText: "在下载文件的第一行写入列名"
       },
       "exportOptions.fileNamePrefix": {
-        label: "File Name",
-        helpText: "The start of the downloaded file’s name, used instead of the report name."
+        label: "文件名",
+        helpText: "下载文件名的开头，用来代替报表名称"
       }
     }
   },

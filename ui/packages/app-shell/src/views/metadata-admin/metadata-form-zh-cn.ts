@@ -19,9 +19,7 @@
  * for; it is hand-worded here and marked so at its row. The second is the
  * `report` form's wording leaves (objectstack#36373, marked ⟨36373⟩): the
  * report panel speaks business wording — 数据来源 / 分组 / 指标 — and this
- * overlay is the only source of its residual rows' words. The `dateRange` and
- * `exportOptions` children (objectstack#36447, marked ⟨36447⟩) are the first
- * kind: shown by the report panel, not yet translated by the platform.
+ * overlay is the only source of its residual rows' words.
  *
  * ## Two depths, by who renders the form
  *
@@ -350,8 +348,8 @@ export const ZH_CN_SPEC_FORMS: NonNullable<TranslationData['metadataForms']> = {
       // ⟨36373⟩ dateRange · exportOptions
       dateRange: { label: '日期范围', helpText: '默认时间段与自定义范围开关。按数据来源里的一个日期分组筛选；只有一个日期分组时可留空' },
       exportOptions: { label: '导出选项', helpText: '下载格式（csv、xlsx）与文件名。谁可以下载由数据来源对象上的导出权限决定' },
-      // ⟨36447⟩ the children `report.form.ts` declares for both composites. The
-      // platform bundle has no zh for them yet, and the report panel shows them.
+      // The children `report.form.ts` declares for both composites (objectstack#36447),
+      // copied from the platform zh-CN bundle like every unmarked row here.
       'dateRange.dimension': { label: '日期字段', helpText: '时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空' },
       'dateRange.defaultRange': { label: '默认时间段', helpText: '打开报表时显示的时间段' },
       'dateRange.allowCustomRange': { label: '允许自定义范围', helpText: '允许使用者自己选择开始和结束日期' },

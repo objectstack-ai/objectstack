@@ -2191,7 +2191,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "説明",
-        helpText: "One sentence on what this report shows, displayed under its name."
+        helpText: "このレポートで何がわかるかを一文で。名前の下に表示されます。"
       },
       type: {
         label: "型",
@@ -2274,32 +2274,32 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "既定の期間とカスタム範囲の切り替え。ディメンションはデータセットの日付ディメンションである必要があります。データセットに日付ディメンションが 1 つだけの場合は空欄のままにします。"
       },
       "dateRange.dimension": {
-        label: "Date Field",
-        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+        label: "日付フィールド",
+        helpText: "期間を適用する、データソースの日付グループ。データソースに日付グループが 1 つしかない場合は空のままにします。"
       },
       "dateRange.defaultRange": {
-        label: "Default Period",
-        helpText: "The period the report opens with."
+        label: "既定の期間",
+        helpText: "レポートを開いたときに表示される期間。"
       },
       "dateRange.allowCustomRange": {
-        label: "Allow Custom Range",
-        helpText: "Let people pick their own start and end dates."
+        label: "カスタム範囲を許可",
+        helpText: "開始日と終了日を利用者が自分で選べるようにします。"
       },
       exportOptions: {
         label: "エクスポートオプション",
         helpText: "ダウンロード形式（csv, xlsx）とファイル名。ダウンロードできるユーザーは、データセットのオブジェクトのエクスポート権限で決まります。"
       },
       "exportOptions.formats": {
-        label: "Formats",
-        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+        label: "形式",
+        helpText: "ダウンロードできる形式。未設定なら csv と xlsx の両方、空のリストならダウンロードはオフになります。"
       },
       "exportOptions.includeHeaders": {
-        label: "Include Headers",
-        helpText: "Put the column names in the first row of the downloaded file."
+        label: "見出しを含める",
+        helpText: "ダウンロードしたファイルの 1 行目に列名を入れます。"
       },
       "exportOptions.fileNamePrefix": {
-        label: "File Name",
-        helpText: "The start of the downloaded file’s name, used instead of the report name."
+        label: "ファイル名",
+        helpText: "ダウンロードするファイル名の先頭部分。レポート名の代わりに使われます。"
       }
     }
   },

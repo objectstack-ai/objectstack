@@ -2191,7 +2191,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "Descripción",
-        helpText: "One sentence on what this report shows, displayed under its name."
+        helpText: "Una frase sobre lo que muestra este informe; aparece bajo su nombre."
       },
       type: {
         label: "Tipo",
@@ -2274,32 +2274,32 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         helpText: "Periodo predeterminado e interruptor de rango personalizado. La dimensión debe ser una dimensión de fecha del conjunto de datos; déjela vacía cuando el conjunto de datos tenga exactamente una."
       },
       "dateRange.dimension": {
-        label: "Date Field",
-        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+        label: "Campo de fecha",
+        helpText: "La agrupación de fecha de la fuente de datos a la que se aplica el período. Déjelo vacío si la fuente de datos solo tiene una."
       },
       "dateRange.defaultRange": {
-        label: "Default Period",
-        helpText: "The period the report opens with."
+        label: "Período predeterminado",
+        helpText: "El período con el que se abre el informe."
       },
       "dateRange.allowCustomRange": {
-        label: "Allow Custom Range",
-        helpText: "Let people pick their own start and end dates."
+        label: "Permitir rango personalizado",
+        helpText: "Permite que cada persona elija sus propias fechas de inicio y fin."
       },
       exportOptions: {
         label: "Opciones de exportación",
         helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto del conjunto de datos."
       },
       "exportOptions.formats": {
-        label: "Formats",
-        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+        label: "Formatos",
+        helpText: "Los formatos de descarga ofrecidos. Sin definir, se ofrecen csv y xlsx; una lista vacía desactiva las descargas."
       },
       "exportOptions.includeHeaders": {
-        label: "Include Headers",
-        helpText: "Put the column names in the first row of the downloaded file."
+        label: "Incluir encabezados",
+        helpText: "Pone los nombres de columna en la primera fila del archivo descargado."
       },
       "exportOptions.fileNamePrefix": {
-        label: "File Name",
-        helpText: "The start of the downloaded file’s name, used instead of the report name."
+        label: "Nombre de archivo",
+        helpText: "El inicio del nombre del archivo descargado, en lugar del nombre del informe."
       }
     }
   },
