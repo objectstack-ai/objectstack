@@ -166,10 +166,13 @@ export function addSortLevel(items: readonly SortItem[], field: string, order: '
 /**
  * The words for one sort direction on a field of `type`: time for the date
  * family, size for the numeric family and `boolean`, the alphabet otherwise.
- * The phone sort sheet's levels read it. `SortBuilder` in
- * `@object-ui/components` words its levels with the same three-way rule over
- * the same `listConditions.sort.*` rows; it keeps its copy module-local
- * because sharing it would add a published export to that package.
+ * The phone sort sheet's levels read it.
+ *
+ * Twin: `sortWording` / `sortDirectionLabel` in
+ * `ui/packages/components/src/custom/sort-builder.tsx` word `SortBuilder`'s
+ * levels by the same three-way rule over the same `listConditions.sort.*`
+ * rows. That copy stays module-local because sharing it would add a published
+ * export to `@object-ui/components`; change both together.
  */
 export function sortDirectionLabel(
   type: string | undefined,

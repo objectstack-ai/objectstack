@@ -46,6 +46,11 @@ const SIZE_SORT_TYPES: ReadonlySet<string> = new Set<string>([...FILTER_NUMBER_L
  * Which words name a sort direction on a field of `type`, over the
  * `listConditions.sort.*` rows every locale carries. An unknown or absent type
  * reads as the alphabet.
+ *
+ * Twin: `sortDirectionLabel` in `ui/packages/plugin-list/src/conditions/conditionModel.ts`
+ * words the phone sort sheet's levels by the same rule over the same rows. It
+ * is a copy, not an import, because sharing it would add a published export
+ * to this package; change both together.
  */
 function sortWording(type: string | undefined): SortWording {
   if (type && TIME_SORT_TYPES.has(type)) return 'time'

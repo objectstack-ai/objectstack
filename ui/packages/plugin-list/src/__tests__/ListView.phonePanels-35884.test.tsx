@@ -344,6 +344,8 @@ describe('the phone sort levels word a direction by the field\'s type', () => {
     progress: { type: 'progress', label: 'Progress' },
     done: { type: 'percent', label: 'Done' },
     budget: { type: 'currency', label: 'Budget' },
+    active: { type: 'boolean', label: 'Active' },
+    starts: { type: 'time', label: 'Starts' },
   };
   const directionOf = async (field: string) => {
     mount({ fields: Object.keys(TYPED) }, {}, TYPED);
@@ -357,6 +359,14 @@ describe('the phone sort levels word a direction by the field\'s type', () => {
       expect(await directionOf(field)).toContain('Low → High');
     });
   }
+
+  it('a boolean level reads as size', async () => {
+    expect(await directionOf('active')).toContain('Low → High');
+  });
+
+  it('a time level reads as time', async () => {
+    expect(await directionOf('starts')).toContain('Oldest → Newest');
+  });
 
   it('CONTROL: a date level reads as time, a text level as the alphabet', async () => {
     expect(await directionOf('due')).toContain('Oldest → Newest');
