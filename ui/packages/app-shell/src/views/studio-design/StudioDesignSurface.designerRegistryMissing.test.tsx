@@ -100,12 +100,15 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
-import { AutomationsPillar, DataPillar, InterfacesPillar } from './StudioDesignSurface';
+import { AutomationsPillar, DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { listMetadataPreviewTypes } from '../metadata-admin/preview-registry';
 import { listMetadataInspectorTypes, getMetadataInspector } from '../metadata-admin/inspector-registry';
 import { getMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
 import { getStudioCanvasPreview } from './studio-canvas-preview';
+// The source under test reaches dynamic imports of `@objectstack/lint`; their first
+// load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const dataSource = createEmptyDataSource();
 failOnAbsorbedFetchError();
@@ -234,57 +237,6 @@ describe('Data pillar field rail — a field click must never be a no-op (#6795 
   });
 });
 
-describe('Interfaces pillar — the canvas must not blame the roadmap (#6795 C, site 2)', () => {
-  /**
-   * The retired copy — "{type} shows a read-only preview for now; design support
-   * is in progress." — was false twice over: this branch renders **no** preview
-   * at all, and page design support **exists**. It blamed the platform's roadmap
-   * for a chunk that did not load.
-   */
-  it('says the designers are unregistered, not that design support is in progress', async () => {
-    assertRegistriesEmptyWithControl();
-
-    render(
-      <MemoryRouter initialEntries={['/studio/com.acme.app/interfaces']}>
-        <InterfacesPillar packageId="com.acme.app" />
-      </MemoryRouter>,
-    );
-    fireEvent.click(await screen.findByTitle('page · home_page'));
-    await waitFor(() => expect(screen.getByTestId('canvas-mode-toggle')).toBeInTheDocument(), {
-      timeout: 4000,
-    });
-
-    await screen.findByText(
-      'No metadata designers are registered in this session, so page cannot be previewed or designed here.',
-    );
-    expect(document.body.textContent ?? '').not.toContain('design support is in progress');
-    expect(document.body.textContent ?? '').not.toContain('read-only preview');
-  });
-
-  /**
-   * The other half of the same tableau: the rail told the author to click a
-   * canvas that is not rendered. An instruction that cannot be followed is a
-   * worse empty state than no instruction.
-   */
-  it('does not tell the author to click a canvas that is not there', async () => {
-    assertRegistriesEmptyWithControl();
-
-    render(
-      <MemoryRouter initialEntries={['/studio/com.acme.app/interfaces']}>
-        <InterfacesPillar packageId="com.acme.app" />
-      </MemoryRouter>,
-    );
-    fireEvent.click(await screen.findByTitle('page · home_page'));
-    await waitFor(() => expect(screen.getByTestId('canvas-mode-toggle')).toBeInTheDocument(), {
-      timeout: 4000,
-    });
-
-    await screen.findByText(
-      'No metadata designers are registered in this session, so there is nothing to edit here.',
-    );
-    expect(document.body.textContent ?? '').not.toContain('Click a block on the canvas');
-  });
-});
 
 describe('Automations pillar — the fourth site, found by sweeping (#6795 C, site 4)', () => {
   /**

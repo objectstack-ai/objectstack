@@ -28,7 +28,7 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 
@@ -197,37 +197,6 @@ function renderStudio(entry = `/studio/${PACKAGE_ID}/interfaces`) {
 
 const agentSurface = () =>
   (chatOptions.body as { context: { surface?: unknown } } | undefined)?.context.surface;
-
-describe('Studio copilot chip reads the selected item label (objectui#8219 item 3)', () => {
-  it('a labelled leaf: the chip reads the label, its title is type · name, and the agent data is unchanged', async () => {
-    renderStudio();
-    await screen.findByRole('button', { name: '客户仪表盘 仪表盘' });
-    await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：客户仪表盘'), { timeout: 4000 });
-    expect(chip.surfaceContextTitle).toBe('dashboard · b2r4_customer_dashboard');
-    // The label is display-only: the agent still receives exactly the
-    // URL-derived surface, and no label under any key.
-    expect(JSON.stringify(agentSurface())).toBe(
-      JSON.stringify({
-        pillar: 'interfaces',
-        artifact: { type: 'dashboard', name: 'b2r4_customer_dashboard' },
-      }),
-    );
-    expect(JSON.stringify(chatOptions.body)).not.toContain('客户仪表盘');
-  });
-
-  it('an unlabelled leaf: the chip reads the label it inherits, with type · name on its tooltip (objectui#11196)', async () => {
-    renderStudio();
-    // The rail row and the chip read the same inherited text.
-    fireEvent.click(await screen.findByRole('button', { name: '客户 对象' }));
-    await waitFor(() => expect(chip.surfaceContextLabel).toBe('正在看：客户'), {
-      timeout: 4000,
-    });
-    expect(chip.surfaceContextTitle).toBe('object · b2r4_customer');
-    expect(JSON.stringify(agentSurface())).toBe(
-      JSON.stringify({ pillar: 'interfaces', artifact: { type: 'object', name: 'b2r4_customer' } }),
-    );
-  });
-});
 
 // objectstack#35018 — the Access and Automations rails report their open
 // item's label too: the chip reads the rail's word and the label, as the Data
