@@ -274,3 +274,27 @@ describe('readSidebarStateCookie', () => {
     expect(readSidebarStateCookie(COOKIE)).toBeUndefined();
   });
 });
+
+describe('a provider with its own cookieName keeps its own state (objectstack#36899)', () => {
+  const OWN = 'studio_menu_state';
+
+  it('writes and reads its own cookie, and leaves the shared one alone', () => {
+    document.cookie = `${COOKIE}=true; path=/`;
+    render(
+      <SidebarProvider cookieName={OWN}>
+        <SidebarTrigger />
+      </SidebarProvider>,
+    );
+    fireEvent.click(screen.getByRole('button'));
+    expect(readSidebarStateCookie(OWN)).toBe(false);
+    expect(readSidebarStateCookie(COOKIE)).toBe(true);
+
+    cleanup();
+    const own = renderSidebar({ cookieName: OWN });
+    expect(own.sequence[0]).toBe('collapsed');
+    cleanup();
+    // CONTROL — the default provider still reads the shared cookie.
+    const shared = renderSidebar();
+    expect(shared.sequence[0]).toBe('expanded');
+  });
+});

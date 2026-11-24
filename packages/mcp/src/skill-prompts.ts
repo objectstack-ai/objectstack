@@ -211,6 +211,7 @@ export async function listSkillPrompts(bridge: McpSkillBridge): Promise<SkillPro
 async function listSkillPromptsServedBy(
   bridge: McpSkillBridge,
   served: ReadonlySet<string> | undefined,
+  onWithheld?: (prompt: SkillPrompt, unserved: readonly string[]) => void,
 ): Promise<SkillPrompt[]> {
   const rows = (await bridge.listSkills()) ?? [];
   const namespaceOf = typeof bridge.packageNamespace === 'function'
@@ -219,9 +220,12 @@ async function listSkillPromptsServedBy(
   const out: SkillPrompt[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
-    if (served && !skillBindingServed(row, served)) continue;
     const prompt = projectSkillPrompt(row, namespaceOf);
     if (!prompt) continue;
+    if (served && !skillBindingServed(row, served)) {
+      onWithheld?.(prompt, unservedBindingEntries(row, served));
+      continue;
+    }
     const holding = `${prompt.packageId ?? ''}\u0000${prompt.name}`;
     if (seen.has(holding)) continue;
     seen.add(holding);
@@ -268,6 +272,23 @@ export function skillBindingServed(raw: unknown, served: ReadonlySet<string>): b
   const binding = (raw as Record<string, unknown>).tools;
   if (!Array.isArray(binding)) return true;
   return binding.every((entry) => typeof entry !== 'string' || bindingEntryServed(entry, served));
+}
+
+/** The entries of a raw skill row's `tools` binding that `served` does not serve, in binding order. */
+function unservedBindingEntries(raw: unknown, served: ReadonlySet<string>): string[] {
+  const binding = (raw as Record<string, unknown>).tools;
+  if (!Array.isArray(binding)) return [];
+  return binding.filter((entry): entry is string => typeof entry === 'string' && !bindingEntryServed(entry, served));
+}
+
+/**
+ * The line a withheld skill is reported with: the skill, and each tool its
+ * binding names that this connection does not serve.
+ */
+export function withheldSkillPromptMessage(prompt: SkillPrompt, unserved: readonly string[]): string {
+  return `[MCP] Skill "${prompt.name}" (prompt "${prompt.face}") is not offered on this connection: it binds `
+    + `${unserved.map((name) => `"${name}"`).join(', ')}, which this connection does not serve, so its instructions `
+    + 'would teach the model a tool it cannot call.';
 }
 
 /**
@@ -434,6 +455,8 @@ export function skillPromptResult(prompt: SkillPrompt) {
  * metadata. [#32767] Only the skills whose tool binding this server serves
  * ({@link skillBindingServed} over {@link servedToolNames}): a withheld skill
  * is not listed, and `prompts/get` answers it as it answers an unknown name.
+ * With `options.logger`, each listing reports every withheld skill at
+ * `debug` ({@link withheldSkillPromptMessage}).
  *
  * Uses the low-level request handlers rather than `McpServer.registerPrompt`
  * because the projection must be **read at call time**: the HTTP transport
@@ -449,10 +472,22 @@ export function skillPromptResult(prompt: SkillPrompt) {
  * - The caller MUST have declared the `prompts` capability on this server
  *   before calling (the SDK refuses a handler for an undeclared capability).
  */
-export function registerSkillPrompts(server: McpServer, bridge: McpSkillBridge): void {
+export function registerSkillPrompts(
+  server: McpServer,
+  bridge: McpSkillBridge,
+  options: { logger?: { debug(message: string): void } } = {},
+): void {
+  // Absence must be loud: a withheld skill is said once per listing, at
+  // `debug` (the HTTP transport lists per request), naming the tools this
+  // connection lacks, so an author can find out why a skill is missing
+  // without listing prompts on a live connection.
+  const reportWithheld = options.logger
+    ? (prompt: SkillPrompt, unserved: readonly string[]) =>
+      options.logger!.debug(withheldSkillPromptMessage(prompt, unserved))
+    : undefined;
   // [ADR-0150 D6] Listed by face, each face once ({@link skillPromptListEntry}).
   server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-    prompts: skillPromptFaces(await listSkillPromptsServedBy(bridge, servedToolNames(server))).map(
+    prompts: skillPromptFaces(await listSkillPromptsServedBy(bridge, servedToolNames(server), reportWithheld)).map(
       skillPromptListEntry,
     ),
   }));
