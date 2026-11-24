@@ -9,7 +9,7 @@
  * dispatcher-owned (moving it into one provider would 404 the other).
  *
  * Routes (path is the sub-path after `/i18n`):
- *   GET /locales                    → getLocales
+ *   GET /locales                    → getLocales (+ the source locale)
  *   GET /translations/:locale       → getTranslations (locale from path)
  *   GET /translations?locale=xx     → getTranslations (locale from query)
  *   GET /labels/:object/:locale     → getFieldLabels  (both from path)
@@ -237,11 +237,17 @@ export async function handleI18nRequest(
         // array through made one endpoint answer in two shapes depending on
         // which provider mounted it, the dispatcher's contradicting the SDK's
         // own `GetLocalesResponse` type.
-        const locales = toLocaleDescriptors(
-            i18nService.getLocales(),
-            typeof i18nService.getDefaultLocale === 'function' ? i18nService.getDefaultLocale() : undefined,
-        );
-        return { handled: true, response: deps.success({ locales }) };
+        const defaultLocale = typeof i18nService.getDefaultLocale === 'function' ? i18nService.getDefaultLocale() : undefined;
+        const locales = toLocaleDescriptors(i18nService.getLocales(), defaultLocale);
+        // [#36504] The language the app's own text is authored in: the
+        // declared `i18n.sourceLocale`, else the default locale — the
+        // collapse every metadata-document translator makes, and the CALLER's
+        // to make (`II18nService.getSourceLocale` reports only what was
+        // declared). A client that edits labels reads it to tell an edit of
+        // the source text from a translation. Absent when neither is known.
+        const declaredSource = typeof i18nService.getSourceLocale === 'function' ? i18nService.getSourceLocale() : undefined;
+        const sourceLocale = declaredSource || defaultLocale || undefined;
+        return { handled: true, response: deps.success({ locales, ...(sourceLocale ? { sourceLocale } : {}) }) };
     }
 
     // GET /i18n/translations/:locale  OR  /i18n/translations?locale=xx

@@ -108,7 +108,7 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-function mountDeals(allowed: boolean, objects: any[] = OBJECTS) {
+function mountDeals(allowed: boolean, objects: any[] = OBJECTS, viewId = 'all') {
   transferAsks = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: { body?: string }) => {
     if (String(url).endsWith('/api/v1/security/explain')) {
@@ -133,7 +133,7 @@ function mountDeals(allowed: boolean, objects: any[] = OBJECTS) {
     <I18nProvider instance={i18n}>
       <ConsoleToaster />
       <ExpressionProvider user={{ id: 'u1', name: 'Sales Manager' }}>
-        <MemoryRouter initialEntries={['/apps/crm/crm_deal/view/all']}>
+        <MemoryRouter initialEntries={[`/apps/crm/crm_deal/view/${viewId}`]}>
           <Routes>
             <Route
               path="/apps/:appName/:objectName/view/:viewId"
@@ -202,6 +202,60 @@ describe('objectstack#35403 — bulk Change Owner is reachable without bulk Dele
     await screen.findByText('Alpha', undefined, { timeout: 5000 });
     await act(async () => {});
     expect(document.querySelectorAll('tbody [role="checkbox"]')).toHaveLength(0);
+    expect(transferAsks).toEqual([]);
+  });
+});
+
+/**
+ * objectstack#36395 — bulk Change Owner is the grid's: a layout that selects no
+ * rows says so in one line, to the reader the grid would offer it to. The
+ * object-level `transfer` verdict is asked while such a layout is on screen.
+ */
+describe('objectstack#36395 — a kanban says plainly that bulk Change Owner is in the grid', () => {
+  const BOARD_OBJECTS = [
+    {
+      ...OBJECTS[0],
+      fields: {
+        ...OBJECTS[0].fields,
+        stage: { type: 'select', label: 'Stage', options: [{ label: 'Open', value: 'open' }, { label: 'Won', value: 'won' }] },
+      },
+      listViews: {
+        ...OBJECTS[0].listViews,
+        board: { name: 'board', label: 'Board', type: 'kanban', columns: ['name'], kanban: { groupByField: 'stage' } },
+      },
+    },
+  ];
+  const note = () => screen.queryByTestId('object-view-bulk-change-owner-grid-only');
+
+  it('a kanban, with the object offering Change Owner and the transfer verdict allowing it: the note is drawn', async () => {
+    mountDeals(true, BOARD_OBJECTS, 'board');
+    const drawn = await screen.findByTestId('object-view-bulk-change-owner-grid-only', undefined, { timeout: 5000 });
+    expect(drawn.textContent).toBe('To change the owner of several records at once, switch to a grid view.');
+    expect(transferAsks).toEqual([{ object: 'crm_deal', operation: 'transfer' }]);
+  });
+
+  it('a kanban, with the transfer verdict refused: no note', async () => {
+    mountDeals(false, BOARD_OBJECTS, 'board');
+    await waitFor(() => expect(transferAsks).toHaveLength(1), { timeout: 5000 });
+    await act(async () => {});
+    expect(note()).toBeNull();
+  });
+
+  it('a grid, with the transfer verdict allowing it: no note, and nothing asked on open', async () => {
+    mountDeals(true, BOARD_OBJECTS, 'all');
+    await rowBoxes();
+    await act(async () => {});
+    expect(note()).toBeNull();
+    expect(transferAsks).toEqual([]);
+  });
+
+  it('CONTROL: a kanban of an object that does not offer Change Owner: no note, and nothing asked', async () => {
+    mountDeals(true, [{ ...BOARD_OBJECTS[0], ownership: 'none' }], 'board');
+    // The page is drawn on the board view (its tab is on screen); the note's
+    // inputs are the object and the layout, both read on this render.
+    await screen.findAllByText('Board', undefined, { timeout: 5000 });
+    await act(async () => {});
+    expect(note()).toBeNull();
     expect(transferAsks).toEqual([]);
   });
 });

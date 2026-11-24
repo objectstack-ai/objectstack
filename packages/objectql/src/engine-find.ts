@@ -29,6 +29,7 @@
  * evaluation cycle. `index.ts` re-exports nothing from this module.
  */
 
+import { formulaWorkCalendarsFor } from './formula-work-calendars.js';
 import { SortNodeSchema, lowerFilterCondition, resolveSearchFieldResolution } from '@objectstack/spec/data';
 import type { EngineAggregateOptions, EngineCountOptions, EngineQueryOptions, FilterCondition, FilterLoweringOptions, HookContext, QueryAST, QueryInput, ServiceObject } from '@objectstack/spec/data';
 import { mergeDriverOptionsIntoHookView } from './engine-driver-options.js';
@@ -633,7 +634,8 @@ export class FindFacet {
               // [#24197] One batched read per reference field for this PAGE —
               // the rows the driver returned, after limit/offset.
               _findSchema, _findFormula.plan, result, opCtx.context, query,
-            ), this.formulaOptionLabels(_findSchema, _findFormula.plan, opCtx.context));
+            ), this.formulaOptionLabels(_findSchema, _findFormula.plan, opCtx.context),
+            await formulaWorkCalendarsFor(this.facade, _findFormula.plan, result, opCtx.context));
           }
 
           // Post-process: expand related records if expand is requested
@@ -907,7 +909,8 @@ export class FindFacet {
           objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
         ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(
           _findOneSchema, _findOneFormula.plan, [result], opCtx.context, query,
-        ), this.formulaOptionLabels(_findOneSchema, _findOneFormula.plan, opCtx.context));
+        ), this.formulaOptionLabels(_findOneSchema, _findOneFormula.plan, opCtx.context),
+            await formulaWorkCalendarsFor(this.facade, _findOneFormula.plan, [result], opCtx.context));
       }
 
       // Post-process: expand related records if expand is requested

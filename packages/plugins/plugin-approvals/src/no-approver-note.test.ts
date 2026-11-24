@@ -11,10 +11,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { noApproverNoteText, noApproverNotice, noApproverWho } from './no-approver-note.js';
+import { noApproverNoteText, noApproverNotice, noApproverWho, submitterRefusalUserMessage } from './no-approver-note.js';
 import { interpolate, type ApprovalTextParam } from './approval-notification-text.js';
 import type { ApprovalSentenceRender } from './admin-rescue-note.js';
-import { approvalMessages, enMessages } from './translations/messages.js';
+import { approvalMessages, enMessages, NO_APPROVER_NOTICE_MAX_SLOTS } from './translations/messages.js';
 
 type Locale = keyof typeof approvalMessages;
 
@@ -128,11 +128,105 @@ describe('[#36308] the submitter\'s notice', () => {
     }
   });
 
-  it('several slots ride as one English `who`, each position by its declared label; none and a stored `who` as before', () => {
-    expect(noApproverNotice({ slots: ['position:legal', 'team:ops'] }, (name) => (name === 'legal' ? 'Legal Counsel' : undefined)))
-      .toEqual({ id: 'approvalNoApproverHolding', params: { who: "position 'Legal Counsel', team 'ops'" } });
+  it('none and a stored `who` as before', () => {
     expect(noApproverNotice({})).toEqual({ id: 'approvalNoApprover', params: {} });
     expect(noApproverNotice({ who: "position 'legal'" }))
       .toEqual({ id: 'approvalNoApproverHolding', params: { who: "position 'legal'" } });
+  });
+});
+
+describe('[#36463] the submitter\'s notice names several slots in the reader\'s language', () => {
+  const declared = (name: string) => (name === 'legal' ? 'Legal Counsel' : undefined);
+
+  it('a slate of two slots spells each inline, keyed, in the slate\'s order', () => {
+    const notice = noApproverNotice({ slots: ['position:legal', 'team:ops'] }, declared);
+    expect(notice).toEqual({
+      id: 'approvalNoApproverHoldingSlots2',
+      params: {
+        type1: { key: 'messages.approvalApproverTypePosition', fallback: 'position' },
+        value1: { key: 'positions.legal.label', fallback: 'Legal Counsel' },
+        type2: { key: 'messages.approvalApproverTypeTeam', fallback: 'team' },
+        value2: 'ops',
+      },
+    });
+    // The acceptance: a zh-CN submitter reads it entirely in Chinese, the
+    // position by its pack label, else as stored (its declared label).
+    expect(deliveredIn('zh-CN', notice, { 'positions.legal.label': '法务' })).toBe(
+      '目前还没有其他人能审批此请求。组织管理员需要添加一名担任岗位「法务」、团队「ops」的成员，之后由该成员决定。',
+    );
+    const asStored = deliveredIn('zh-CN', notice);
+    expect(asStored).toContain('担任岗位「Legal Counsel」、团队「ops」的成员');
+    expect(asStored).not.toMatch(/position|team/);
+    // The English a recipient with no pack reads is the sentence the row stores, the declared label inside it.
+    expect(deliveredIn('en', notice)).toBe('No one else can approve this request yet. An organization administrator '
+      + "must add a member who holds position 'Legal Counsel', team 'ops'; that member can then decide it.");
+  });
+
+  it('for every slate size it spells, in every pack, the notice reads the timeline\'s sentence for the same slate', () => {
+    const kinds = ['position:legal', 'team:ops', 'department:west', 'org_membership_level:admin', 'role:admin'];
+    for (let n = 2; n <= NO_APPROVER_NOTICE_MAX_SLOTS; n++) {
+      const slate = Array.from({ length: n }, (_, i) => `${kinds[i % kinds.length]}_${i}`);
+      for (const locale of Object.keys(approvalMessages) as Locale[]) {
+        expect(deliveredIn(locale, noApproverNotice({ slots: slate })), `${locale} ${n}`)
+          .toBe(noApproverNoteText({ slots: slate }, renderIn(locale)));
+      }
+    }
+  });
+
+  it('a slate of more slots than it spells keeps one English `who` inside the reader\'s sentence', () => {
+    const slate = Array.from({ length: NO_APPROVER_NOTICE_MAX_SLOTS + 1 }, (_, i) => `team:t${i}`);
+    const notice = noApproverNotice({ slots: slate });
+    expect(notice.id).toBe('approvalNoApproverHolding');
+    expect(notice.params).toEqual({ who: noApproverWho(slate) });
+  });
+});
+
+describe('[#36463] the decision door\'s refusal of a submitter\'s own approval, as the end user reads it', () => {
+  const label = (name: string) => (name === 'legal' ? '法务' : undefined);
+  const SLATE = ['position:legal', 'team:ops'];
+
+  it('a zh-CN decider reads each refusal entirely in Chinese, the position by its label', () => {
+    const excluded = submitterRefusalUserMessage('excludeSubmitter', SLATE, renderIn('zh-CN'), label);
+    expect(excluded).toBe('此请求由您提交，而其审批步骤不允许提交人批准自己的请求，因此您不能批准它。'
+      + '目前还没有其他人能审批此请求。组织管理员需要添加一名担任岗位「法务」、团队「ops」的成员，之后由该成员决定。');
+    const override = submitterRefusalUserMessage('override', SLATE, renderIn('zh-CN'), label);
+    expect(override).toBe('此请求由您提交，且您不在其审批人之列，因此不能以管理员身份代为批准它。'
+      + '目前还没有其他人能审批此请求。组织管理员需要添加一名担任岗位「法务」、团队「ops」的成员，之后由该成员决定。'
+      + '如需撤销，请驳回或撤回该请求。');
+    // No English word but the team's stored value.
+    for (const text of [excluded, override]) expect(text.replace('ops', '')).not.toMatch(/[A-Za-z]/);
+  });
+
+  it('with another approver on the slate, the remedy names that approver; a slate with no literal names the plain remedy', () => {
+    expect(submitterRefusalUserMessage('excludeSubmitter', undefined, renderIn('zh-CN')))
+      .toBe('此请求由您提交，而其审批步骤不允许提交人批准自己的请求，因此您不能批准它。'
+        + '由该步骤的其他审批人决定；如果只有您持有审批席位，请将其转交给其他人。');
+    expect(submitterRefusalUserMessage('override', undefined, renderIn('zh-CN')))
+      .toMatch(/^此请求由您提交，且您不在其审批人之列.*由该步骤的审批人决定。/);
+    expect(submitterRefusalUserMessage('excludeSubmitter', ['u_sub'], renderIn('zh-CN')))
+      .toContain(approvalMessages['zh-CN'].approvalNoApprover);
+  });
+
+  it('every shipped pack composes every refusal in its own language, with no hole left', () => {
+    for (const locale of Object.keys(approvalMessages) as Locale[]) {
+      for (const refusal of ['excludeSubmitter', 'override'] as const) {
+        for (const slate of [SLATE, undefined]) {
+          const text = submitterRefusalUserMessage(refusal, slate, renderIn(locale), label);
+          expect(text, `${locale} ${refusal}`).not.toMatch(/\{\{/);
+          if (locale !== 'en') expect(text, `${locale} ${refusal}`).not.toContain('You submitted');
+        }
+      }
+    }
+  });
+
+  it('with no reader language, and when the pack lacks a sentence, the whole text is English, never half of each', () => {
+    const english = submitterRefusalUserMessage('override', ['position:legal'], undefined, (n) => (n === 'legal' ? 'Legal Counsel' : undefined));
+    expect(english).toBe('You submitted this request and hold no slot on it, so you cannot approve it through the '
+      + 'administrator override. No one else can approve this request yet. An organization administrator must add a '
+      + "member who holds position 'Legal Counsel'; that member can then decide it. To withdraw it instead, reject it or recall it.");
+    for (const dropped of ['approvalDecideRefusedOverrideOwnRequest', 'approvalDecideRefusedOverrideWithdraw', 'approvalNoApproverHolding']) {
+      expect(submitterRefusalUserMessage('override', ['position:legal'], renderIn('zh-CN', [dropped]), (n) => (n === 'legal' ? 'Legal Counsel' : undefined)), dropped)
+        .toBe(english);
+    }
   });
 });

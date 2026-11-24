@@ -4768,7 +4768,8 @@ export class RestServer {
      * Translate the `entries` payload returned by `getMetaTypes()` — applies
      * the active locale to each entry's `label`, `description`, the
      * nested `form` layout (section labels, field labels, helpText,
-     * placeholders) and the derived JSON `schema` (a `title` per node the
+     * placeholders), the `list` layout's column headers (through the same
+     * field-label slots) and the derived JSON `schema` (a `title` per node the
      * bundle names — the only channel that reaches a repeater row's column
      * headers, #16458) via the `metadataForms.<type>` translation namespace.
      *
@@ -4787,6 +4788,7 @@ export class RestServer {
             resolveMetadataTypeDescription,
             resolveMetadataFormLabels,
             resolveMetadataFormSchemaTitles,
+            resolveMetadataListLabels,
         } = await import('@objectstack/spec/system');
         const opts = RestServer.translateOptionsFor(i18n, locale);
         const entries = payload.entries.map((entry: any) => {
@@ -4797,6 +4799,9 @@ export class RestServer {
             if (desc !== undefined) next.description = desc;
             if (entry.form) {
                 next.form = resolveMetadataFormLabels(entry.form, entry.type, bundle, opts);
+            }
+            if (entry.list) {
+                next.list = resolveMetadataListLabels(entry.list, entry.type, bundle, opts);
             }
             if (entry.schema && typeof entry.schema === 'object') {
                 next.schema = resolveMetadataFormSchemaTitles(entry.schema, entry.type, bundle, opts);

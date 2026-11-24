@@ -182,13 +182,16 @@ describe('objectstack#26902 — a result screen is acknowledged, never cancelled
     const { onClose, onComplete } = setup(RESULT, authFetch as unknown as ReturnType<typeof completedResume>);
     fireEvent.click(await screen.findByRole('button', { name: 'Done' }));
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
-    expect(authFetch).toHaveBeenCalledTimes(1);
+    // Counted as RESUMES: the failure also re-reads the run's screen first
+    // (objectstack#36831), a GET that resumes nothing.
+    const resumeCount = () => authFetch.mock.calls.filter((call) => (call as unknown[])[0] === RESUME_URL).length;
+    expect(resumeCount()).toBe(1);
     fireEvent.click(dismissX());
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
     // Neither close resumed again; Done is still the retry.
-    expect(authFetch).toHaveBeenCalledTimes(1);
+    expect(resumeCount()).toBe(1);
     expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
     expect(onComplete).not.toHaveBeenCalled();
   });

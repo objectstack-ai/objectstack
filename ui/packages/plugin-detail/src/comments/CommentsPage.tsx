@@ -15,12 +15,18 @@ import { CommentComposer } from './CommentComposer';
 import { CommentsFilterMenu } from './CommentsFilterMenu';
 import { CommentThread, type CommentItemActions } from './CommentThread';
 import { DEFAULT_COMMENT_THREAD_FILTER, filterCommentThreads, type CommentThreadFilter } from './commentThreads';
+import { scrollCommentIntoView } from './scrollToComment';
 import { useCommentPress } from './useCommentPress';
 import { useRecordComments } from './useRecordComments';
 
 export interface CommentsPageProps {
   /** The thread the page shows, by its top-level comment's id; `null`: the list. */
   threadId: string | null;
+  /**
+   * objectstack#36410 — the comment in `threadId` a link opened the page at
+   * (a comment notification): the thread opens scrolled to it, marked.
+   */
+  focusCommentId?: string | null;
   /** A thread in the list was opened: the host shows `threadId` (it pushes a history entry). */
   onOpenThread: (rootId: string) => void;
   /** 「‹」: from a thread back to the list, from the list back to the record. */
@@ -83,6 +89,7 @@ const HEADER_BUTTON =
  */
 export const CommentsPage: React.FC<CommentsPageProps> = ({
   threadId,
+  focusCommentId = null,
   onOpenThread,
   onBack,
   backLabel,
@@ -150,6 +157,16 @@ export const CommentsPage: React.FC<CommentsPageProps> = ({
     else if (el && seen.id !== threadId) el.scrollTop = 0;
     seenReplies.current = { id: threadId, count: replyCount };
   }, [threadId, replyCount]);
+  // After it, so a linked comment wins over the thread's top or foot:
+  // scrolled to once, when the thread is drawn.
+  const focusKey = inThread && focusCommentId ? `${threadId}\n${focusCommentId}` : null;
+  const settledFocus = React.useRef<string | null>(null);
+  React.useLayoutEffect(() => {
+    const el = threadRef.current;
+    if (!el || !focusKey || !focusCommentId || settledFocus.current === focusKey) return;
+    scrollCommentIntoView(el, focusCommentId);
+    settledFocus.current = focusKey;
+  }, [focusKey, focusCommentId, replyCount]);
 
   const backRef = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => {
@@ -274,6 +291,7 @@ export const CommentsPage: React.FC<CommentsPageProps> = ({
             thread={thread}
             comments={comments}
             mode="page"
+            targetId={focusCommentId}
             onOpen={() => setComposerFocus((n) => n + 1)}
             itemInteraction={threadPress.bind}
             heldId={heldId}

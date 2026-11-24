@@ -1345,6 +1345,9 @@ const en = {
       kanbanShowFieldLabels: "Show field names",
       kanbanHideEmptyFields: "Hide empty fields",
       kanbanSummary: "Column summary",
+      kanbanSummaryAvg: "Average",
+      kanbanSummaryMin: "Minimum",
+      kanbanSummaryMax: "Maximum",
       kanbanHiddenLanes: "Hidden columns",
       kanbanHiddenLanesHint: "Cards of a hidden column show under Uncategorized.",
       viewName: 'View name',
@@ -1399,9 +1402,6 @@ const en = {
       hideHint: "Its cards move to Uncategorized",
       createIn: "New record in {{column}}",
       create: "New",
-    },
-    laneStatistic: {
-      loadedOnly: "loaded cards",
     },
     addCard: 'Add card',
     addColumn: 'Add column',
@@ -2207,9 +2207,10 @@ const en = {
       settings: 'Report settings',
       pendingDraft: 'This report has unpublished changes. Publish or discard them above, then save.',
       nameTaken: 'Every name made from this one is already taken. Give the report another name, then save.',
-      addsToMenu: 'Saving creates this report and adds it to the menu where you placed it, with your other design changes.',
       adminOnlyTitle: 'Only workspace admins can build reports',
       adminOnly: 'A report is shared with everyone in the workspace, so an admin builds it.',
+      designModeOnTitle: 'Finish designing the layout first',
+      designModeOn: 'A report is built outside the design mode. Save or cancel the layout, and the builder opens here.',
       type: {
         label: 'Report type',
         snapshot: 'Current state',
@@ -2939,6 +2940,7 @@ const en = {
     },
     reportIndex: {
       title: 'Reports',
+      newReport: 'New report',
       emptyTitle: 'No reports',
       emptyDescription: 'This app has no reports you can open.',
       otherApps: 'Reports in your other apps:',
@@ -3474,9 +3476,6 @@ const en = {
       targetQueue: 'A queue',
       queue: 'Queue',
       queuePlaceholder: 'Pick a queue',
-      queuesLoading: 'Loading queues…',
-      queuesFailed: 'The queues could not be read: {{message}}',
-      noQueues: 'No queue is set up.',
       notify: 'Notify the new owner',
       alreadyOwner: 'This person already owns this record.',
       submit: 'Change Owner',
@@ -3490,7 +3489,6 @@ const en = {
       skipped: '{{count}} selected records do not offer Change Owner and are left out.',
       skipped_one: '{{count}} selected record does not offer Change Owner and is left out.',
       skipped_other: '{{count}} selected records do not offer Change Owner and are left out.',
-      noClient: 'The owner cannot be changed here.',
       cascadeHeading: 'Also move related records',
       cascadeHelp: 'Related records that point at this one and belong to its previous owner go to the new owner too.',
       cascadeOption: '{{object}} ({{field}})',
@@ -3498,6 +3496,7 @@ const en = {
       cascadeReport: '{{object}} ({{field}}): moved {{moved}}, {{failed}} could not be moved.',
       cascadeRemaining: 'Left with the previous owner, past the 500-record limit of one change: {{count}}.',
       cascadeReadFailure: '{{object}} ({{field}}): the related records could not be read: {{message}}',
+      gridOnly: 'To change the owner of several records at once, switch to a grid view.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
@@ -4340,6 +4339,7 @@ const en = {
     title: 'Design layout',
     leaveUnsaved: 'Leave Design layout? Your unsaved changes will be lost.',
     saveFailed: 'Some changes were not saved: {{reason}}',
+    editorOpen: 'Save or cancel your dashboard or report changes before designing the layout.',
     menu: {
       title: 'Menu',
       addItem: 'Add menu item',
@@ -4352,7 +4352,7 @@ const en = {
       addBefore: 'Add an item before',
       addAfter: 'Add an item after',
       rename: 'Rename and icon',
-      renameSourceOnly: 'Menu names are changed in the app\'s source language',
+      renameTranslation: 'The new name is shown in {{language}}. The app\'s other languages keep their names.',
       remove: 'Remove from menu',
       contributed: 'Another package adds this item. It is moved, renamed or removed there.',
       pickerTitle: 'Add menu item',
@@ -4380,16 +4380,15 @@ const en = {
       notWritable: 'This app\'s customization package cannot be written, so its menu cannot be saved.',
       storedUnread: 'This app\'s saved menu could not be read, so nothing was saved.',
       publishedMoved: 'Someone published this app\'s menu while you were saving, so nothing was saved. Save again to apply your changes over theirs.',
+      translationPendingDraft: 'This app\'s menu names in this language have unpublished changes in Studio. Publish or discard them there, then save again.',
       keyboardHint: 'Drag an item to move it, or focus it and press Space, then the arrow keys. Enter opens it.',
       newDashboard: 'New dashboard…',
       newDashboardTitle: 'New dashboard',
-      newReport: 'New report…',
       newItemSavesAll: 'Creating it saves your other design changes too, then opens it for editing.',
       create: 'Create',
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
-      newReportLeft: 'The new report "{{name}}" could not be removed again; remove it in Studio.',
     },
     pins: {
       button: 'Header buttons',
@@ -6413,6 +6412,11 @@ const en = {
     // Terminal success, used only when the flow declares no `successMessage`
     // of its own.
     completed: 'Flow "{{flow}}" completed',
+    // A resume whose answer was lost had already gone through: the dialog now
+    // shows the step the run waits on (objectstack#36831).
+    alreadySubmitted: 'Your previous submission went through. The flow has moved on to this step.',
+    // ...or the run waits on no screen any more, so Submit is withdrawn.
+    noLongerWaiting: 'This step may already have been processed. Close this dialog and check the record before trying again.',
   },
   // Console › System › Applications (objectui#4307). The page's OWN chrome —
   // headings, controls, badges and the frames of its toasts.

@@ -78,6 +78,7 @@ import {
 } from '@object-ui/components';
 import { toast } from 'sonner';
 import { useAuth } from '@object-ui/auth';
+import { declaredUserMessage } from '@object-ui/react';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
 import { APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
 import {
@@ -877,6 +878,12 @@ function ApprovalsQueue() {
 
   /** Map raw API errors to business-readable toasts (no `HTTP_404: Not found`). */
   const humanizeError = useCallback((err: any, fallback: string): string => {
+    // A refusal the server marked for the end user (`userMessage`, already in
+    // the request's language) is shown as written, before any generic line:
+    // the decide refusal of a submitter's own approval names what to do
+    // instead (objectstack#36463). `call` parks the body on `err.details`.
+    const marked = declaredUserMessage(err);
+    if (marked) return marked;
     const code = err?.code ?? '';
     const status = err?.status ?? 0;
     if (code === 'NOT_IMPLEMENTED' || status === 501) {
