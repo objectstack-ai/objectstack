@@ -4748,6 +4748,23 @@ const ar = {
     filterUnread: "غير مقروء",
     filterAll: "الكل",
   },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: 'العودة إلى القائمة',
+    openFullRecord: 'فتح السجل كاملاً',
+    occurrences: 'كل مرة أُرسل فيها',
+    moreApprovals: 'اطّلع على البقية في صندوق الموافقات',
+    goApprove: 'مراجعة ›',
+    loadEarlier: 'تحميل الإشعارات الأقدم',
+    loadEarlierFailed: 'تعذّر التحميل. أعد المحاولة',
+    pickApproval: 'اختر طلبًا لمراجعته هنا.',
+    pickItem: 'اختر عنصرًا لعرضه هنا.',
+    openRequest: 'فتح الطلب',
+    nextHint: 'ينتقل إلى التالي بعد القرار · J / K للتنقل',
+    openLink: 'فتح',
+    unreadOnly: 'غير المقروءة فقط',
+    allApprovals: 'كل الموافقات',
+  },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
     title: 'مشاركة {{label}}',

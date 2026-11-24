@@ -4368,6 +4368,23 @@ const ja = {
     filterUnread: "未読",
     filterAll: "すべて",
   },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: '一覧に戻る',
+    openFullRecord: 'レコード全体を開く',
+    occurrences: '送信された各回',
+    moreApprovals: '残りは承認受信箱で確認',
+    goApprove: '承認へ ›',
+    loadEarlier: '以前の通知を読み込む',
+    loadEarlierFailed: '読み込めませんでした。再試行',
+    pickApproval: '申請を選ぶと、ここで処理できます。',
+    pickItem: '項目を選ぶと、ここに表示されます。',
+    openRequest: '申請を開く',
+    nextHint: '処理後は次へ自動で移動 · J / K で移動',
+    openLink: '開く',
+    unreadOnly: '未読のみ',
+    allApprovals: 'すべての承認',
+  },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
     title: '{{label}}を共有',

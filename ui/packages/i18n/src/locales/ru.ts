@@ -4567,6 +4567,23 @@ const ru = {
     filterUnread: "Непрочитанные",
     filterAll: "Все",
   },
+  // objectstack#36741 — the full-page inbox the bell opens from 768 px up.
+  inboxPage: {
+    backToList: 'Назад к списку',
+    openFullRecord: 'Открыть запись полностью',
+    occurrences: 'Каждая отправка',
+    moreApprovals: 'Остальное — во входящих согласованиях',
+    goApprove: 'Рассмотреть ›',
+    loadEarlier: 'Загрузить более ранние уведомления',
+    loadEarlierFailed: 'Не удалось загрузить. Повторить',
+    pickApproval: 'Выберите заявку, чтобы рассмотреть её здесь.',
+    pickItem: 'Выберите элемент, чтобы увидеть его здесь.',
+    openRequest: 'Открыть заявку',
+    nextHint: 'После решения переходит к следующей · J / K для перехода',
+    openLink: 'Открыть',
+    unreadOnly: 'Только непрочитанные',
+    allApprovals: 'Все согласования',
+  },
   // objectui#13460 — the share-link dialog (`@object-ui/components` `ShareDialog`).
   shareDialog: {
     title: 'Поделиться: {{label}}',
