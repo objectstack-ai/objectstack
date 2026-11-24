@@ -8,7 +8,7 @@
 
 feat(approvals): a decided request's step line says where the record's approval went next: on to a later step, or ended
 
-Clause-②: yes (widening)
+Clause-②: yes
 Metadata-protocol: none
 
 The single approval request read (`GET /api/v1/approvals/requests/ID`) serves one more fact on a decided request's own route: `flow_route.outcome`, beside `ahead: 'decided'`. Before, a decided route stopped at the request's own step, so an approver reopening a request they had decided could not tell whether the record's approval went on to a later step or ended.
