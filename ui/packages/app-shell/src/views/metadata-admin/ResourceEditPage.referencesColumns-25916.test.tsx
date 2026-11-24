@@ -9,6 +9,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic import of this module: its first load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, cleanup, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';

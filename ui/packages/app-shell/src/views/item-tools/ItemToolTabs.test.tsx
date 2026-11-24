@@ -30,6 +30,13 @@ vi.mock('../../chrome/unsavedEdits', async (importOriginal) => ({
   confirmUnsavedLeave: (go: () => unknown) => confirmSpy(go),
 }));
 
+// Monaco's loader fails (offline), so the JSON source editor is its textarea.
+vi.mock('@monaco-editor/react', () => {
+  const Editor = () => null;
+  return { Editor, default: Editor, loader: { init: () => Promise.reject(new Error('offline')) } };
+});
+vi.mock('@object-ui/plugin-editor', () => ({ configureBundledMonaco: () => Promise.resolve() }));
+
 import {
   ItemToolTabPanel,
   ItemToolTabStrip,

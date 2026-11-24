@@ -34,6 +34,8 @@
  *  - assigning holders stays writable for the walled tenant, on both halves.
  */
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches a dynamic import of this module: its first load is paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
