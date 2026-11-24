@@ -101,7 +101,9 @@ export type ConnectionListing =
 const JSON_HEADERS = { Accept: 'application/json' } as const;
 
 /** The console's authenticated fetch: the stored bearer token beside the session cookie. */
-const authFetch = createAuthenticatedFetch();
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 const STATUSES = new Set(['not_connected', 'connected', 'reconnect_required']);
 
 function dataOf(payload: unknown): Record<string, unknown> | undefined {

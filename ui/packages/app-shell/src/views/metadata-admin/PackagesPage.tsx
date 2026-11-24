@@ -223,7 +223,9 @@ type UncheckedPackageRow = Omit<InstalledPackageRow, 'source' | 'writable'> & {
 const API = '/api/v1/packages';
 
 /** The console's authenticated fetch: the stored bearer token beside the session cookie. */
-const authFetch = createAuthenticatedFetch();
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * The code `PATCH /packages/:id/disable` answers, with `409`, while a

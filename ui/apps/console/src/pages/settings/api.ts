@@ -21,7 +21,9 @@ const BASE = `${SERVER_URL}/api/settings`;
  * reads and writes settings like the rest of the console, and a `401` reaches
  * the console's session-ended check.
  */
-const authFetch = createAuthenticatedFetch();
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * Unwrap the platform's declared success envelope, `{ success, data }`

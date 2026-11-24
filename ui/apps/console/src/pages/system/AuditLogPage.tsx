@@ -89,7 +89,9 @@ const API_BASE = `${SERVER_URL}/api/v1`;
  * cookie, as every other console data read sends it; a `401` reaches the
  * console's session-ended check.
  */
-const authFetch = createAuthenticatedFetch();
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 interface AuditRow {
   id: string;

@@ -115,7 +115,9 @@ export function readCredentialWrite(status: number, payload: unknown): Credentia
 const JSON_HEADERS = { Accept: 'application/json' } as const;
 
 /** The console's authenticated fetch: the stored bearer token beside the session cookie. */
-const authFetch = createAuthenticatedFetch();
+function authFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 function doorUrl(ref?: string): string {
   const base = `${apiBase()}/automation/connectors/credential-refs`;

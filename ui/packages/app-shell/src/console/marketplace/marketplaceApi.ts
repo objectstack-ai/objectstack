@@ -28,7 +28,9 @@ const API_BASE = `${SERVER_URL}/api/v1/marketplace`;
  * plane's own origin (`getCloudBase()`), which must not see this runtime's
  * bearer; the browse calls keep `credentials: 'omit'` in {@link call}.
  */
-const serverFetch = createAuthenticatedFetch();
+function serverFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return createAuthenticatedFetch()(input, init);
+}
 
 /**
  * Attach the Bearer token to same-origin `/api/v1/cloud-connection/*` calls.
