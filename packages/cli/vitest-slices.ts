@@ -20,8 +20,8 @@
  * 13.4-13.9 min whole leg plus 17.3-18.0 min of CLI slice on the three logs
  * read. Equal counts are not equal seconds: on five such runs' per-file
  * readings (45342138743, 45213635210, 45032942394, 45116811975, 45383396882)
- * the three slices summed 1172/2347/2164, 1749/2270/1637, 1786/2275/2115,
- * 1590/2252/1418 and 1374/2178/1692 seconds of file time -- the same files,
+ * the three slices summed 1171/2347/2164, 1748/2270/1638, 1786/2275/2115,
+ * 1589/2253/1418 and 1373/2178/1692 seconds of file time -- the same files,
  * slice 2 the heaviest on all five, because a handful of files carry most of
  * the suite (one reads 532 s, the top 25 about half of it) and sha1 put more
  * of them into slice 2.
@@ -39,8 +39,8 @@
  *
  * Replayed on those five runs' readings, placing the files heaviest first into
  * the lightest slice (readers seeded into theirs first) moves the heaviest
- * slice's file time 2347 -> 1955, 2270 -> 2096, 2275 -> 2225, 2253 -> 1927 and
- * 2178 -> 1842 seconds: lower on every run, by 2-17%. A perfect split of the
+ * slice's file time 2347 -> 2014, 2270 -> 2076, 2275 -> 2203, 2253 -> 1928 and
+ * 2178 -> 1912 seconds: lower on every run, by 3.2-14.4%. A perfect split of the
  * same seconds would read 1894, 1885, 2059, 1753 and 1748 -- the budgets are
  * ceilings, not readings, so the split recovers part of that, never all.
  *
