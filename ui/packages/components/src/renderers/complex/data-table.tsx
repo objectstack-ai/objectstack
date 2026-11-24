@@ -6038,9 +6038,11 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                       data-testid={figure != null ? `data-table-summary-${col.accessorKey}` : undefined}
                       className={cn(
                         "h-8 px-3 py-0 whitespace-nowrap text-xs font-medium text-muted-foreground tabular-nums bg-background",
-                        spansLeading && "pl-4",
                         col.align === 'right' && 'text-right',
                         col.align === 'center' && 'text-center',
+                        // After the align arms: `list-frame-geometry-35548.spec.ts`
+                        // reads the base class and the right-aligned arm as adjacent lines.
+                        spansLeading && "pl-4",
                         isFrozen && 'sticky z-20',
                         isFrozen && colIndex === frozenColumns - 1 && scrolledX && FROZEN_EDGE_SHADOW,
                         isPinnedRight && 'sticky right-0 z-20',
