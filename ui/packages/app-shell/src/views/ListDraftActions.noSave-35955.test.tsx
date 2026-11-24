@@ -1,8 +1,8 @@
 /**
- * objectstack#35955 — Discard and Save where no save is offered (personal
+ * objectstack#35955 — the draft's actions where no save is offered (personal
  * views not ready, or no grant to create one on a shared view): both faces
- * are Discard alone. The narrow face never draws a Save that holds nothing
- * to save.
+ * are Reset alone. The narrow face never draws a save button that holds
+ * nothing to save.
  */
 
 import * as React from 'react';
@@ -13,8 +13,8 @@ import { ListDraftActions } from './ListDraftActions';
 
 afterEach(() => cleanup());
 
-describe('Discard and Save with no save offered (objectstack#35955)', () => {
-  it('draws Discard on both faces and no Save at all', () => {
+describe('Reset and Update view with no save offered (objectstack#35955)', () => {
+  it('draws Reset on both faces and no save button at all', () => {
     const onDiscard = vi.fn();
     render(<ListDraftActions parts={['sort']} onDiscard={onDiscard} />);
 
@@ -28,11 +28,11 @@ describe('Discard and Save with no save offered (objectstack#35955)', () => {
     expect(onDiscard).toHaveBeenCalledTimes(1);
   });
 
-  it('CONTROL: with a save offered, the narrow face is one Save whose menu holds Discard', () => {
+  it('CONTROL: with a save offered, the narrow face is one save button whose menu holds Reset', () => {
     render(<ListDraftActions parts={['sort']} onDiscard={() => {}} onSaveAsMyView={() => {}} />);
 
     expect(screen.getByTestId('list-draft-compact')).toBeTruthy();
-    // Discard lives inside that menu, not beside it.
+    // Reset lives inside that menu, not beside it.
     expect(screen.queryByTestId('list-draft-compact-discard')).toBeNull();
   });
 });
@@ -71,5 +71,50 @@ describe('「重置 / 更新视图」: the view\'s own actions (objectstack#3673
     const menu = await screen.findByTestId('list-draft-compact-menu');
     expect(menu.querySelector('[data-testid="list-draft-save-as"]')?.textContent).toBe('Save as my view');
     expect(menu.querySelector('[data-testid="list-draft-compact-discard"]')?.textContent).toBe('Reset');
+  });
+});
+
+/**
+ * objectstack#36737 (seat review S1) — the button names the save its menu
+ * holds: 「更新视图」 where the open view can take the change, else
+ * 「另存为我的视图」, the one save there is (a view a read-only package ships,
+ * or a reader who may not write the view), on both faces.
+ */
+describe('the save button names the save it offers (objectstack#36737)', () => {
+  const draw = (language: string, saveToView: boolean) =>
+    render(
+      <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }} persistLanguage={false}>
+        <ListDraftActions
+          parts={['sort']}
+          onDiscard={() => {}}
+          onSaveToView={saveToView ? () => {} : undefined}
+          onSaveAsMyView={() => {}}
+        />
+      </I18nProvider>,
+    );
+  const faces = () => [
+    screen.getByTestId('list-draft-save').textContent?.trim(),
+    screen.getByTestId('list-draft-compact').textContent?.trim(),
+  ];
+
+  it('zh: 更新视图 where the view can take the change, 另存为我的视图 where it cannot', () => {
+    draw('zh', true);
+    expect(faces()).toEqual(['更新视图', '更新视图']);
+    cleanup();
+    draw('zh', false);
+    expect(faces()).toEqual(['另存为我的视图', '另存为我的视图']);
+    expect(screen.getByTestId('list-draft-discard').textContent?.trim()).toBe('重置');
+  });
+
+  it('en: Update view where the view can take the change, Save as my view where it cannot', async () => {
+    draw('en', false);
+    expect(faces()).toEqual(['Save as my view', 'Save as my view']);
+    fireEvent.pointerDown(screen.getByTestId('list-draft-save'), { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    const menu = await screen.findByTestId('list-draft-save-menu');
+    expect(menu.querySelector('[data-testid="list-draft-save-to-view"]')).toBeNull();
+    expect(menu.querySelector('[data-testid="list-draft-save-as"]')?.textContent).toBe('Save as my view');
+    cleanup();
+    draw('en', true);
+    expect(faces()).toEqual(['Update view', 'Update view']);
   });
 });

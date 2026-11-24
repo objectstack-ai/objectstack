@@ -87,6 +87,7 @@ import { __resetDefaultLocale } from '../../layout/designModeMenuSave';
 import { DesignModeProvider, useDesignModeChange, useDesignModeController } from '../../layout/designMode';
 import { DesignModeBar } from '../../layout/DesignModeBar';
 import { confirmUnsavedLeave } from '../../chrome/unsavedEdits';
+import { toast } from 'sonner';
 
 const lookup = { type: 'lookup', reference: 'account' };
 const OBJECTS = [
@@ -296,9 +297,14 @@ describe('the tabs are part of the design mode (objectstack#36737)', () => {
     expect(screen.queryByTestId('record-tabs-editor')).toBeNull();
   });
 
-  it("the mode's 「Cancel」 drops the draft and writes nothing", async () => {
+  it("the mode's 「Cancel」 drops the draft, a tab hidden by default shown again included, and writes nothing", async () => {
     await open();
+    const hiddenArea = () => screen.getByTestId('record-tabs-hidden');
     fireEvent.click(screen.getByRole('button', { name: 'Hide Tasks' }));
+    // Cases is hidden by default (the object names no entry for it): show it.
+    fireEvent.click(screen.getByRole('button', { name: 'Show Cases' }));
+    expect(hiddenArea().querySelector('[data-record-tabs-hidden-tab="case.account"]')).toBeNull();
+    expect(screen.getByTestId('record-tabs-editor').querySelector('[data-record-tabs-tab="case.account"]')).not.toBeNull();
     fireEvent.click(screen.getByTestId('design-mode-cancel'));
     await flush();
     expect(screen.queryByTestId('record-tabs-editor')).toBeNull();
@@ -306,8 +312,30 @@ describe('the tabs are part of the design mode (objectstack#36737)', () => {
     // Back in the mode, the tabs open as the object has them.
     fireEvent.click(screen.getByText('design'));
     await ready();
-    expect(screen.getByTestId('record-tabs-hidden').querySelector('[data-record-tabs-hidden-tab="task.account"]')).toBeNull();
+    expect(hiddenArea().querySelector('[data-record-tabs-hidden-tab="task.account"]')).toBeNull();
+    expect(hiddenArea().querySelector('[data-record-tabs-hidden-tab="case.account"]')).not.toBeNull();
     expect(save()).toBeDisabled();
+  });
+
+  it("a save that fails keeps the editor on the draft and the mode on, and says why through the mode", async () => {
+    const publish = client.publish;
+    client.publish = async () => {
+      throw new Error('publish refused');
+    };
+    try {
+      await open();
+      fireEvent.click(screen.getByRole('button', { name: 'Hide Tasks' }));
+      fireEvent.click(save());
+      await flush();
+      await flush();
+      expect(toast.error).toHaveBeenCalledWith('Some changes were not saved: publish refused');
+      expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+      expect(screen.getByTestId('record-tabs-hidden').querySelector('[data-record-tabs-hidden-tab="task.account"]')).not.toBeNull();
+      expect(screen.getByTestId('preview')).toHaveTextContent(JSON.stringify([{ list: 'contact', label: 'People' }]));
+      expect(save()).toBeEnabled();
+    } finally {
+      client.publish = publish;
+    }
   });
 
   it('the draft stays staged while the page is left for another page of the app, and is drawn again on return', async () => {

@@ -6,7 +6,9 @@
  * design, the design mode turns the tab row into the tabs editor in place,
  * under the mode's one bar: the page draws no bar of its own for it, and the
  * record's ⋯ offers no 「Configure tabs」 entry, in the mode or out of it.
- * Out of the mode the tab row is the page's own (the control).
+ * Out of the mode the tab row is the page's own (the control). While the
+ * record's own edit state is open, the tab row is not the editor (the gate
+ * the old ⋯ entry kept), and it is again once the edit state is left.
  *
  * Read through the real `RecordDetailView` (synthesized default page, full
  * page) under the real `useDesignModeController` and `DesignModeBar`. Fakes:
@@ -102,9 +104,37 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function mount() {
+/** A page that draws a master-detail body table (so Edit opens the record's edit state) and one related tab. */
+const QUOTE_OBJECTS = [
+  {
+    name: 'crm_quote',
+    label: 'Quote',
+    _packageId: 'app.crm',
+    fields: { id: { type: 'text', label: 'Id', group: 'basic' }, name: { type: 'text', label: 'Name', group: 'basic' } },
+    fieldGroups: [
+      { key: 'basic', label: 'Basic' },
+      { key: 'lines', label: 'Lines', relatedList: 'crm_line' },
+    ],
+  },
+  {
+    name: 'crm_line',
+    label: 'Line',
+    pluralLabel: 'Lines',
+    _packageId: 'app.crm',
+    fields: { id: { type: 'text', label: 'Id' }, product: { type: 'text', label: 'Product' }, quote: { type: 'master_detail', reference: 'crm_quote', label: 'Quote' } },
+  },
+  {
+    name: 'crm_note',
+    label: 'Note',
+    pluralLabel: 'Notes',
+    _packageId: 'app.crm',
+    fields: { id: { type: 'text', label: 'Id' }, body: { type: 'text', label: 'Body' }, quote: { type: 'lookup', reference: 'crm_quote', label: 'Quote' } },
+  },
+];
+
+function mount({ objects = OBJECTS as any[], objectName = 'crm_account' }: { objects?: any[]; objectName?: string } = {}) {
   const metadata = {
-    objects: OBJECTS,
+    objects,
     pages: [],
     apps: [],
     loading: false,
@@ -112,12 +142,13 @@ function mount() {
     refresh: async () => {},
     invalidate: () => {},
     ensureType: async () => [],
-    getItem: async (type: string, name: string) => (type === 'object' ? OBJECTS.find((o) => o.name === name) ?? null : null),
+    getItem: async (type: string, name: string) => (type === 'object' ? objects.find((o) => o.name === name) ?? null : null),
     getItemsByType: () => [],
   } as any;
   const dataSource = {
     find: vi.fn(async () => ({ data: [] })),
     findOne: vi.fn(async () => ({ id: RECORD_ID, name: 'Acme' })),
+    getObjectSchema: vi.fn(async (o: string) => objects.find((d) => d.name === o) ?? null),
     create: vi.fn(async () => ({})),
     update: vi.fn(async () => ({})),
     delete: vi.fn(async () => ({})),
@@ -126,13 +157,13 @@ function mount() {
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }} persistLanguage={false}>
       <MetadataCtx.Provider value={metadata}>
         <FavoritesProvider>
-          <MemoryRouter initialEntries={[`/apps/crm/crm_account/record/${RECORD_ID}`]}>
+          <MemoryRouter initialEntries={[`/apps/crm/${objectName}/record/${RECORD_ID}`]}>
             <Shell>
               <RecordDetailView
                 dataSource={dataSource}
-                objects={OBJECTS}
+                objects={objects}
                 onEdit={vi.fn()}
-                objectNameOverride="crm_account"
+                objectNameOverride={objectName}
                 recordIdOverride={RECORD_ID}
               />
             </Shell>
@@ -196,5 +227,39 @@ describe('objectstack#36737 — the record tabs in the design mode', () => {
     const items = await moreMenuItems();
     expect(items).toContain('Share');
     expect(items).not.toContain('Configure tabs');
+  });
+});
+
+describe('objectstack#36737 — the record tabs and the record\'s own edit state', () => {
+  beforeEach(() => {
+    const measure = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.hasAttribute('data-record-page-root')) return measure.call(this);
+      return { x: 0, y: 0, top: 0, left: 0, right: 1440, bottom: 800, width: 1440, height: 800, toJSON: () => ({}) } as DOMRect;
+    });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A button of the record page by its text, never one of the mode's bar (whose 「Cancel」 would leave the mode). */
+  const button = (label: string) =>
+    (Array.from(document.querySelectorAll('button')).find(
+      (b) => (b.textContent ?? '').trim() === label && !b.closest('[data-testid="design-mode-bar"]'),
+    ) as HTMLButtonElement | undefined) ?? null;
+
+  it('while the edit state is open the tab row is not the editor; leaving it brings the editor back', async () => {
+    mount({ objects: QUOTE_OBJECTS, objectName: 'crm_quote' });
+    await waitFor(() => expect(button('Edit')).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(screen.getByText('design'));
+    await screen.findByTestId('record-tabs-editor');
+    // CONTROL: the editor is on; the record's Edit opens its edit state.
+    fireEvent.click(button('Edit')!);
+    await waitFor(() => expect(document.querySelector('[data-body-table-editor]')).not.toBeNull(), { timeout: 5000 });
+    expect(screen.queryByTestId('record-tabs-editor')).toBeNull();
+    expect(screen.getByTestId('design-mode-bar')).toBeInTheDocument();
+    fireEvent.click(button('Cancel')!);
+    await waitFor(() => expect(document.querySelector('[data-body-table-editor]')).toBeNull(), { timeout: 5000 });
+    expect(await screen.findByTestId('record-tabs-editor')).toBeInTheDocument();
   });
 });

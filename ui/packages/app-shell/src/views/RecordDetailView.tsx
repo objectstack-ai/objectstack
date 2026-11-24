@@ -909,7 +909,7 @@ function ApprovalGroupBeacon({ onHosted }: { onHosted: (update: (n: number) => n
   return null;
 }
 
-/** The reader's arrangement is not written while the tab configuration previews the default (objectstack#36499). */
+/** The reader's arrangement is not written while the design mode's tab editor previews the default (objectstack#36499, objectstack#36737). */
 const ignoreArrangementChange = (): void => {};
 
 export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverride, recordIdOverride, embedded }: RecordDetailViewProps) {
@@ -2635,7 +2635,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const tabsConfig = useRecordTabsConfig({
     objectDef,
     objects,
-    enabled: !embedded && !phone && pageColumnsEligible,
+    // Not while the record's own edit state is open: the record is being
+    // edited there, so its tab row is not the layout's (the gate the record's
+    // ⋯ entry kept before the tabs joined the design mode).
+    enabled: !embedded && !phone && pageColumnsEligible && !recordEditState,
     canRead: canReadChild,
     titleOf: (list) => {
       if (list.title) return list.title;
@@ -6453,8 +6456,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     detailsWidth={detailsWidth}
                     onDetailsWidthChange={setDetailsWidth}
                     onShownTabChange={setShownRecordTab}
-                    // objectstack#36499 — the edit state previews the
-                    // default order, the reader's own arrangement set aside.
+                    // objectstack#36499, objectstack#36737 — the design
+                    // mode's tab editor previews the default order, the
+                    // reader's own arrangement set aside.
                     relatedArrangement={tabsConfig.active ? EMPTY_RELATED_ARRANGEMENT : relatedArrangement}
                     onRelatedArrangementChange={tabsConfig.active ? ignoreArrangementChange : setRelatedArrangement}
                     tabRowEditor={tabsConfig.editor ?? undefined}

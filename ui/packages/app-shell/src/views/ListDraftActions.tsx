@@ -10,7 +10,9 @@
  * - **Update view** opens its choices: 「Save to this view」 (`onSaveToView`,
  *   offered only where the host may write the open view) and 「Save as my
  *   view」 (`onSaveAsMyView`, which asks a name first). The menu names what is
- *   unsaved, so a reader sees what a save keeps.
+ *   unsaved, so a reader sees what a save keeps. Where the open view cannot
+ *   take the change, the button reads 「Save as my view」, the one save its
+ *   menu holds, so it never promises an update it does not offer.
  *
  * The two read as the view's own actions, not as a page's Cancel and Save
  * (objectstack#36737, Twenty's 「Reset / Update view」): a view is its own
@@ -101,7 +103,10 @@ export function ListDraftActions({
   };
   const discardLabel = t('console.objectView.draft.discard');
   const discardTitle = t('console.objectView.draft.discardTitle');
-  const saveLabel = t('console.objectView.draft.save');
+  // The button names what its menu does: 「Update view」 where the open view
+  // can take the change, else the one save there is, 「Save as my view」 (a
+  // view a read-only package ships, or a reader who may not write it).
+  const saveLabel = onSaveToView ? t('console.objectView.draft.save') : t('console.objectView.draft.saveAsMyView');
   const offersSave = !!onSaveToView || !!onSaveAsMyView;
 
   const saveItems = (
@@ -129,7 +134,7 @@ export function ListDraftActions({
 
   return (
     <span className={cn('flex shrink-0 items-center gap-1', className)} data-testid="list-draft">
-      {/* The wide face: Discard beside Save ▾. */}
+      {/* The wide face: Reset beside Update view ▾. */}
       <ConditionDiscardButton
         label={discardLabel}
         title={discardTitle}
@@ -156,8 +161,8 @@ export function ListDraftActions({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      {/* The narrow face: one Save, whose menu also holds Discard. With no
-          save offered, a Save would hold nothing to save: Discard alone. */}
+      {/* The narrow face: one Update view, whose menu also holds Reset. With
+          no save offered, it would hold nothing to save: Reset alone. */}
       {offersSave ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
