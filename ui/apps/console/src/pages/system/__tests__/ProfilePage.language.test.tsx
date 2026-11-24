@@ -277,76 +277,6 @@ describe('ProfilePage — my language (objectui#7501)', () => {
   });
 });
 
-describe('ProfilePage — a stored spelling of a table language (objectstack#30514)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
-    appContent.value = null;
-    writable.value = true;
-    update.mockResolvedValue({});
-  });
-
-  it('reads a stored zh-CN as the offered zh-Hans: one option, nothing to save', async () => {
-    // The provider offers table tags; every first-party account that picked
-    // Chinese before the table existed stores `zh-CN`.
-    offerable.value = ['en', 'zh-Hans'];
-    findOne.mockResolvedValue({ id: 'usr_1', locale: 'zh-CN' });
-    const select = await renderProfile();
-
-    const options = await listed(select);
-    // Deployment default + the two offered entries: no stray 中文（中国）
-    // prepended beside 简体中文.
-    expect(options).toHaveLength(3);
-    expect(options).not.toContain('中文（中国）');
-    expect(select).toHaveTextContent(options[2]);
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-  });
-
-  it('still shows a stored tag the table does not name', async () => {
-    offerable.value = ['en', 'zh-Hans'];
-    findOne.mockResolvedValue({ id: 'usr_1', locale: 'th' });
-    const select = await renderProfile();
-
-    expect(await listed(select)).toHaveLength(4);
-    expect(select).toHaveTextContent('ไทย');
-  });
-
-  it('says the app content shows in the default language for a chosen language the app does not ship (objectstack#35425)', async () => {
-    offerable.value = ['en', 'zh-Hans', 'ja'];
-    appContent.value = ['en', 'zh-Hans'];
-    findOne.mockResolvedValue({ id: 'usr_1', locale: 'en' });
-    const select = await renderProfile();
-
-    // A shipped language, and the deployment default: no hint.
-    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
-    await pick(select, 'Use the deployment default');
-    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
-
-    // 日本語 is offered (every table language is) but the app ships no `ja`.
-    await pick(select, '日本語');
-    expect(screen.getByTestId('profile-language-app-content-default')).toHaveTextContent(
-      'App content shows in the default language',
-    );
-  });
-
-  it('marks nothing while the app list is not known', async () => {
-    offerable.value = ['en', 'zh-Hans', 'ja'];
-    findOne.mockResolvedValue({ id: 'usr_1', locale: 'ja' });
-    await renderProfile();
-
-    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
-  });
-
-  it('does not mark a stored tag outside the table', async () => {
-    appContent.value = ['en'];
-    offerable.value = ['en', 'zh-Hans'];
-    findOne.mockResolvedValue({ id: 'usr_1', locale: 'th' });
-    await renderProfile();
-
-    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
-  });
-});
-
 /**
  * The language save's confirmation survives the remount a language change
  * causes (objectstack#36972).
@@ -424,5 +354,75 @@ describe('ProfilePage — the language save confirms after a language remount (o
     // No remount: the same select, and the card's own inline alert beside the toast.
     expect(document.contains(select)).toBe(true);
     expect(screen.getByRole('alert')).toHaveTextContent('Language preference updated.');
+  });
+});
+
+describe('ProfilePage — a stored spelling of a table language (objectstack#30514)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
+    appContent.value = null;
+    writable.value = true;
+    update.mockResolvedValue({});
+  });
+
+  it('reads a stored zh-CN as the offered zh-Hans: one option, nothing to save', async () => {
+    // The provider offers table tags; every first-party account that picked
+    // Chinese before the table existed stores `zh-CN`.
+    offerable.value = ['en', 'zh-Hans'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'zh-CN' });
+    const select = await renderProfile();
+
+    const options = await listed(select);
+    // Deployment default + the two offered entries: no stray 中文（中国）
+    // prepended beside 简体中文.
+    expect(options).toHaveLength(3);
+    expect(options).not.toContain('中文（中国）');
+    expect(select).toHaveTextContent(options[2]);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('still shows a stored tag the table does not name', async () => {
+    offerable.value = ['en', 'zh-Hans'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'th' });
+    const select = await renderProfile();
+
+    expect(await listed(select)).toHaveLength(4);
+    expect(select).toHaveTextContent('ไทย');
+  });
+
+  it('says the app content shows in the default language for a chosen language the app does not ship (objectstack#35425)', async () => {
+    offerable.value = ['en', 'zh-Hans', 'ja'];
+    appContent.value = ['en', 'zh-Hans'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'en' });
+    const select = await renderProfile();
+
+    // A shipped language, and the deployment default: no hint.
+    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
+    await pick(select, 'Use the deployment default');
+    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
+
+    // 日本語 is offered (every table language is) but the app ships no `ja`.
+    await pick(select, '日本語');
+    expect(screen.getByTestId('profile-language-app-content-default')).toHaveTextContent(
+      'App content shows in the default language',
+    );
+  });
+
+  it('marks nothing while the app list is not known', async () => {
+    offerable.value = ['en', 'zh-Hans', 'ja'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'ja' });
+    await renderProfile();
+
+    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
+  });
+
+  it('does not mark a stored tag outside the table', async () => {
+    appContent.value = ['en'];
+    offerable.value = ['en', 'zh-Hans'];
+    findOne.mockResolvedValue({ id: 'usr_1', locale: 'th' });
+    await renderProfile();
+
+    expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
   });
 });
