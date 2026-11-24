@@ -493,22 +493,19 @@ export const CAPABILITY_TAG_CHECKS: Readonly<Record<string, TagCheck>> = Object.
   },
 
   'records-forms.master-detail-inline-edit': {
-    asserts: 'every master-detail field resolves, and one of them is edited inline on its master (a field group of the master names it, `fieldGroups[].relatedList`, or it declares the form factor `inlineEdit: \'grid\'` / `\'form\'`)',
+    asserts: 'every master-detail field resolves, and one of them is edited inline on its master: a field group of the master places the child (`fieldGroups[].relatedList`)',
     run(f) {
       const rels = relationships(f.graph, 'master_detail');
       // Placement is the runtime's own test (objectui `attachInlineSubforms`):
-      // the master's form inlines the child when a field group of the MASTER
-      // names it (`relatedList`: the child object, or `object.field`) and a
-      // group may place that FK. A lone `inlineEdit` places nothing since the
-      // field-group ruling on #35889; `'grid'` / `'form'` is still credited as
-      // the declared form factor, and the retired `true` is not.
-      const inline = rels.filter(({ object, field }) => {
-        const def = rawField(f, object, field.name);
-        const master = rawObject(f, field.reference!);
-        if (isGroupPlaceableRelationship(def) && fieldGroupsPlaceRelationship(master?.fieldGroups, object, field.name)) return true;
-        const mode = def?.inlineEdit;
-        return mode === 'grid' || mode === 'form';
-      });
+      // the master's form inlines the child only when a field group of the
+      // MASTER names it (`relatedList`: the child object, or `object.field`)
+      // and a group may place that FK. `inlineEdit` takes no part: since the
+      // field-group ruling on #35889 it only picks the form factor of a child
+      // a group places, so no value of it (`true`, `'grid'`, `'form'`) credits.
+      const inline = rels.filter(({ object, field }) =>
+        isGroupPlaceableRelationship(rawField(f, object, field.name))
+        && fieldGroupsPlaceRelationship(rawObject(f, field.reference!)?.fieldGroups, object, field.name),
+      );
       return {
         checks: [
           check('master-detail-field-exists', rels.length > 0, `${rels.length} master-detail field(s)`),

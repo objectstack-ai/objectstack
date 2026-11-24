@@ -425,7 +425,7 @@ const grade = (a: Bag, tag: string, card: ScenarioArtifactCard = CARD, namespace
   gradeCapabilityTags(readArtifactFacts(a), { ...card, capabilities: [tag] }, namespace === undefined ? {} : { namespace })[0]!;
 const pairs = (v: { checks: Array<{ check: string; pass: boolean }> }) => v.checks.map((c) => [c.check, c.pass]);
 
-describe('master-detail inline edit — placed by a field group of the master, or a declared form factor', () => {
+describe('master-detail inline edit — placed by a field group of the master, never by `inlineEdit` alone', () => {
   const inline = (a: Bag) => grade(a, 'records-forms.master-detail-inline-edit').checks.find((c) => c.check === 'master-detail-inline-edit');
   const noGroup = (a: Bag) => { delete (a.objects[0] as Bag).fieldGroups; return a; };
 
@@ -451,9 +451,17 @@ describe('master-detail inline edit — placed by a field group of the master, o
     expect(inline(a)).toEqual({ check: 'master-detail-inline-edit', pass: false, detail: '0 edited inline' });
   });
 
-  it("still credits a declared form factor, `'grid'` or `'form'`, with no placing group", () => {
+  it("does not credit a form factor, `'grid'` or `'form'`, with no placing group (it inlines nothing at runtime)", () => {
     for (const mode of ['grid', 'form']) {
       const a = noGroup(richArtifact());
+      field(a, 'task', 'project').inlineEdit = mode;
+      expect(inline(a)?.pass).toBe(false);
+    }
+  });
+
+  it("credits a placed child whatever form factor it declares, `'grid'` or `'form'`", () => {
+    for (const mode of ['grid', 'form']) {
+      const a = richArtifact();
       field(a, 'task', 'project').inlineEdit = mode;
       expect(inline(a)?.pass).toBe(true);
     }
