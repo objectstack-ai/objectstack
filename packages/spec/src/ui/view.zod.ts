@@ -3905,6 +3905,55 @@ export const ListViewSchema = lazySchema(() =>
     .superRefine(checkListViewTimesheetBinding));
 
 /**
+ * How a metadata list cell draws its value. The vocabulary is closed: each value
+ * names a renderer the Studio metadata list ships.
+ *
+ * - `text` (the default): the value as written.
+ * - `badge`: a short enum value, as a chip.
+ * - `boolean`: a yes/no mark.
+ * - `count`: how many entries an array or a keyed record holds.
+ * - `list`: the entries of an array, joined; a single value as itself.
+ * - `summary`: the scalar members of an object value, joined in key order.
+ */
+export const MetadataListCellTypeSchema = lazySchema(() => z.enum([
+  'text',
+  'badge',
+  'boolean',
+  'count',
+  'list',
+  'summary',
+]).describe('How a metadata list cell draws its value'));
+
+/**
+ * One column of a metadata type's list: {@link ListColumnSchema} narrowed to the
+ * three members a platform list declares. `field` names a key of the type's own
+ * schema (or a dotted path into it), `label` is the English header, and `type`
+ * picks the cell renderer from {@link MetadataListCellTypeSchema}.
+ *
+ * The header is translated through the same slot as the type's form field of
+ * that path: `metadataForms.<type>.fields.<field>.label`.
+ */
+export const MetadataListColumnSchema = lazySchema(() => ListColumnSchema
+  .pick({ field: true, label: true, type: true })
+  .extend({
+    field: z.string().min(1).describe('Key of the metadata type\'s schema: a top-level key, or a dotted path into it'),
+    type: MetadataListCellTypeSchema.optional().describe('Cell renderer; `text` when absent'),
+  })
+  .describe('One column of a metadata type list'));
+
+/**
+ * The list layout of a metadata type in Studio: {@link ListViewSchema} narrowed
+ * to its data binding and its columns, the list counterpart of a
+ * {@link defineForm} layout. Build one with {@link defineList}.
+ */
+export const MetadataListViewSchema = lazySchema(() => ListViewShapeSchema
+  .pick({ data: true, columns: true })
+  .extend({
+    columns: z.array(MetadataListColumnSchema).min(1).describe('Columns of the list, in display order'),
+  })
+  .describe('List layout of a metadata type: its schema binding and its columns'));
+
+/**
  * [commit c459da6bc] Form-view select option — {@link SelectOptionSchema} minus the
  * per-option `default` key (maintainer-ruled narrowing, 2026-08-28, on the
  * objectui#6263 analysis; disposition 甲).
@@ -8203,6 +8252,39 @@ export function defineForm(
 }
 
 /**
+ * Type-safe factory for a metadata type's Studio list layout — the list
+ * counterpart of {@link defineForm}. It binds the columns to the type's JSON
+ * Schema (`data.provider === 'schema'`) and validates them against
+ * {@link MetadataListViewSchema} at definition time, so a malformed column
+ * fails at module load.
+ *
+ * @example
+ * ```ts
+ * export const hookList = defineList({
+ *   schemaId: 'hook',
+ *   columns: [
+ *     { field: 'name', label: 'Name' },
+ *     { field: 'object', label: 'Object', type: 'list' },
+ *     { field: 'events', label: 'Events', type: 'list' },
+ *   ],
+ * });
+ * ```
+ */
+export function defineList(
+  config: Omit<z.input<typeof MetadataListViewSchema>, 'data'> & { schemaId: string },
+): MetadataListViewParsed {
+  const { schemaId, ...rest } = config;
+  const parsed = MetadataListViewSchema.safeParse({
+    ...rest,
+    data: { provider: 'schema', schemaId },
+  });
+  if (parsed.success) return parsed.data;
+  const refusal = new z.ZodRealError(parsed.error.issues);
+  z.core.util.captureStackTrace(refusal, defineList);
+  throw refusal;
+}
+
+/**
  * [#19678] The remedy {@link defineForm}'s refusal of an unspellable inline
  * option `value` carries — ruling 乙 (record 5805845085, narrowing ruling
  * 不动 + 声明): the bound stays, an enum-typed row may still list spellable
@@ -8338,6 +8420,13 @@ export type FormSelectOptionParsed = z.infer<typeof FormSelectOptionSchema>;
 export type ListColumn = z.input<typeof ListColumnSchema>;
 /** Post-parse shape of {@link ListColumn} — defaults applied, transforms run (ADR-0122). */
 export type ListColumnParsed = z.infer<typeof ListColumnSchema>;
+export type MetadataListCellType = z.input<typeof MetadataListCellTypeSchema>;
+export type MetadataListColumn = z.input<typeof MetadataListColumnSchema>;
+/** Post-parse shape of {@link MetadataListColumn} — defaults applied, transforms run (ADR-0122). */
+export type MetadataListColumnParsed = z.infer<typeof MetadataListColumnSchema>;
+export type MetadataListView = z.input<typeof MetadataListViewSchema>;
+/** Post-parse shape of {@link MetadataListView} — defaults applied, transforms run (ADR-0122). */
+export type MetadataListViewParsed = z.infer<typeof MetadataListViewSchema>;
 // `FormField` is declared next to FormFieldSchema — it IS that schema's
 // annotation, so it cannot be inferred back out of it (#4171).
 export type SelectionConfig = z.input<typeof SelectionConfigSchema>;

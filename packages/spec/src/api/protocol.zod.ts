@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { ViewSchema } from '../ui/view.zod';
+import { MetadataListViewSchema, ViewSchema } from '../ui/view.zod';
 import { I18nLabelSchema } from '../ui/i18n.zod';
 import { DiscoverySchema } from './discovery.zod';
 import {
@@ -223,6 +223,7 @@ export const GetMetaTypesResponseSchema = lazySchema(() => z.object({
     domain: z.enum(['data', 'ui', 'automation', 'system', 'security', 'ai']).describe('Protocol domain'),
     overrideSource: z.enum(['registry', 'env']).describe('Whether allowEnvironmentOverlay comes from the static registry or is elevated by the OS_METADATA_WRITABLE environment variable'),
     createSeed: z.unknown().optional().describe('Authoritative minimal valid create seed for this type — Studio/CLI/API derive create defaults from it (single source of truth in @objectstack/spec). Absent for canvas-create types whose shape is built interactively.'),
+    list: MetadataListViewSchema.optional().describe('Studio list layout of this type: the columns its metadata list shows, each naming a key of the type schema, headers in the request locale. Absent for a type with no declared list, which Studio lists by name, label and description.'),
   })).optional().describe('Enriched per-type registry entries (Phase 3a)'),
 }));
 
