@@ -57,8 +57,8 @@ const ALIAS_CONTRADICTS_TYPE = { name: 'acct_conflict', label: 'Account', type: 
 /** Second control: a non-record page kind with an object stays unbound. */
 const APP_PAGE = { name: 'acct_app', label: 'Account', type: 'app', object: OBJECT, regions: REGIONS };
 
-/** A `fetch` answer carrying only the `json()` this component reads. */
-const answer = (body: unknown) => ({ json: async () => body }) as unknown as Response;
+/** A `fetch` answer carrying the `json()` this component reads, and the `headers` the authenticated fetch reads. */
+const answer = (body: unknown) => ({ headers: new Headers(), json: async () => body }) as unknown as Response;
 
 /** Serve both reads the record binding makes; record every URL asked for. */
 function stubFetch(): string[] {

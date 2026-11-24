@@ -40,7 +40,7 @@ let calls: Call[];
 function respond(body: unknown, status = 200) {
   const text = JSON.stringify(body);
   return {
-    ok: status >= 200 && status < 300,
+    headers: new Headers(), ok: status >= 200 && status < 300,
     status,
     text: async () => text,
     json: async () => JSON.parse(text),

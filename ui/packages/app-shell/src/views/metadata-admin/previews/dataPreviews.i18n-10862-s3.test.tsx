@@ -278,7 +278,7 @@ function expectHint(lang: Lang, key: string, vars?: Vars) {
 }
 
 /** A `fetch` answer carrying only the `json()` the previews read. */
-const answer = (body: unknown) => ({ ok: true, json: async () => body }) as unknown as Response;
+const answer = (body: unknown) => ({ headers: new Headers(), ok: true, json: async () => body }) as unknown as Response;
 
 // ─── ObjectPreview ───────────────────────────────────────────────────────────
 

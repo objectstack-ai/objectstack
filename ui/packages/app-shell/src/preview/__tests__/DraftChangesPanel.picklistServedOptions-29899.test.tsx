@@ -63,8 +63,8 @@ const SERVED_TIER = { ...STORED_TIER, options: TIER_OPTIONS };
 function mockRoutes(type: string, name: string, draft: Body, published: Body) {
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-    const notFound = { ok: false, status: 404, json: async () => ({}) };
+    const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
+    const notFound = { headers: new Headers(), ok: false, status: 404, json: async () => ({}) };
     if (url.includes('/_drafts')) return ok([{ type, name, packageId: 'com.test.showcase' }]);
     if (url.includes('state=draft')) return ok({ type, name, item: { ...draft, _draft: true } });
     if (url.includes(`/meta/${type}/${name}`)) return ok({ type, name, item: published });

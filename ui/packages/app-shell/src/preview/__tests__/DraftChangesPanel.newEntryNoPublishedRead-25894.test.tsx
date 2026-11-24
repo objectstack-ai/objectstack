@@ -41,8 +41,8 @@ const DRAFT_ROWS = [
   { type: 'object', name: 'st_queue', packageId: PKG, label: 'Queue' },
 ];
 
-const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body });
-const notFound = () => ({ ok: false, status: 404, json: async () => ({}) });
+const ok = (body: unknown) => ({ headers: new Headers(), ok: true, status: 200, json: async () => body });
+const notFound = () => ({ headers: new Headers(), ok: false, status: 404, json: async () => ({}) });
 
 let publishedList: () => Promise<unknown> = async () => ok([{ name: 'st_queue' }]);
 const requests: string[] = [];
@@ -115,7 +115,7 @@ describe('objectstack-ai/objectstack#25894 — a NEW draft is not asked for its 
   });
 
   it('CONTROL: a type whose classification fails is read both ways, as before', async () => {
-    publishedList = async () => ({ ok: false, status: 500, json: async () => ({}) });
+    publishedList = async () => ({ headers: new Headers(), ok: false, status: 500, json: async () => ({}) });
     renderConfirm();
     await waitFor(() => expect(publishedReads('st_ticket')).toHaveLength(1));
     await waitFor(() => expect(publishedReads('st_queue')).toHaveLength(1));
