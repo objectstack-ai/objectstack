@@ -612,6 +612,14 @@ export interface MetadataLayered<T = unknown> {
    */
   draft?: T | null;
   /**
+   * objectstack#36601 — the published row's version (spec
+   * `GetMetaItemLayeredResponseSchema.overlayVersion`): the token a pinned
+   * publish sends as `If-Match`, `null` when no published row is stored at the
+   * read's address. ABSENT when the server served none (a server from before
+   * the field): a caller then pins nothing. Forwarded only when served.
+   */
+  overlayVersion?: string | null;
+  /**
    * Load-time validation result for `effective` (server-computed via
    * the same Zod registry used at save time). Undefined for types
    * without a registered Zod schema. Surfaced by the Studio as a
@@ -1821,6 +1829,8 @@ export class MetadataClient {
         effective: (envelope.effective ?? null) as T | null,
         // objectstack#29793 — the draft layer, forwarded only when served.
         ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
+        // objectstack#36601 — the published version a pinned publish sends, forwarded only when served.
+        ...(envelope.overlayVersion !== undefined ? { overlayVersion: envelope.overlayVersion } : {}),
         ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
         lock: envelope.lock,
         ...(envelope.lockReason !== undefined ? { lockReason: envelope.lockReason } : {}),
@@ -1854,6 +1864,7 @@ export class MetadataClient {
       overlayScope: body.overlayScope ?? null,
       effective: body.effective ?? null,
       ...('draft' in body ? { draft: (body.draft ?? null) as T | null } : {}),
+      ...(body.overlayVersion !== undefined ? { overlayVersion: body.overlayVersion as string | null } : {}),
       ...(body._diagnostics ? { _diagnostics: body._diagnostics as MetadataDiagnostics } : {}),
       ...(body.lock !== undefined ? { lock: body.lock as MetadataLayered['lock'] } : {}),
       ...(body.lockReason !== undefined ? { lockReason: body.lockReason as string } : {}),

@@ -71,7 +71,9 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
   const meta = url.pathname.match(/^\/api\/v1\/meta\/(.+)$/);
   if (!meta) return json(200, []);
   const seg = meta[1].split('/').map(decodeURIComponent);
-  if (seg[0] === '_drafts') return json(200, { drafts: [] });
+  if (seg[0] === '_drafts') {
+    return json(200, { drafts: [...server.drafts.keys()].map((k) => ({ type: k.split('/')[0], name: k.split('/')[1] })) });
+  }
   if (seg.length === 1) return json(200, { items: [{ name: 'alpha' }, { name: 'guide' }, { name: 'zeta' }] });
   const key = `${seg[0]}/${seg[1]}`;
   const headers = new Headers(init?.headers);
@@ -87,6 +89,8 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
           overlay: row.body,
           overlayScope: 'env',
           effective: row.body,
+          // The stored draft layer, as the framework serves it to an author.
+          draft: server.drafts.get(key)?.body ?? null,
           overlayVersion: row.version,
           editable: true,
           deletable: true,
