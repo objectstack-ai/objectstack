@@ -49,9 +49,48 @@ export interface AdapterSearchOptions {
   traceId?: string;
 }
 
+/** Options accepted by `IKnowledgeAdapter.listDocuments`. */
+export interface AdapterListDocumentsOptions {
+  /**
+   * Where to continue: the `nextCursor` of the page before. Omitted for the
+   * first page. Opaque to the service — the adapter alone gives it meaning.
+   */
+  cursor?: string;
+  /** Most entries this page may hold. A positive integer. */
+  limit: number;
+}
+
+/** One entry of a `listDocuments` page. */
+export interface AdapterListedDocument {
+  /** The stored document's id (`KnowledgeDocument.id`). */
+  documentId: string;
+  /**
+   * The `docHash` the document was stored with, returned as stored. An entry
+   * without one reads as changed: the next complete reindex writes it again.
+   */
+  docHash?: string;
+}
+
+/** One page of `IKnowledgeAdapter.listDocuments`. */
+export interface AdapterListDocumentsPage {
+  /** This page's entries; empty when the source holds nothing past `cursor`. */
+  documents: AdapterListedDocument[];
+  /**
+   * Pass back as `cursor` for the next page. Absent when the listing is
+   * complete. A page may be followed by an empty one.
+   */
+  nextCursor?: string;
+}
+
 /**
  * Plugin-implemented adapter. **One per backend**. Stateless across
  * source ids — the source is supplied per-call.
+ *
+ * Every member past `upsert` / `search` / `delete` is optional (ADR-0161 K8,
+ * rule 2): an adapter that lacks one keeps working, and the service does what
+ * it did before that member existed and says so where its result can carry it.
+ * The contract test suite every adapter can run is exported by
+ * `@objectstack/service-knowledge/testing`.
  */
 export interface IKnowledgeAdapter {
   /** Stable adapter id used in `KnowledgeSource.adapter`. */
@@ -65,6 +104,20 @@ export interface IKnowledgeAdapter {
 
   /** Remove documents by id. */
   delete(documentIds: string[], ctx: AdapterContext): Promise<void>;
+
+  /**
+   * List the documents the adapter holds for `ctx.source`, one page at a
+   * time (ADR-0161 K8, item 1): each entry is a document id and the
+   * `docHash` it was stored with. It lists the generation that writes go to.
+   * A document written while a listing runs may be missing from it — the
+   * safe direction, because a missing entry is never a purge candidate.
+   *
+   * The service reads it before a complete reindex: an unchanged document
+   * (same `docHash`) is not written again, and a listed document the walk did
+   * not see is a purge candidate. An adapter without it gets no skip and no
+   * purge, and the reindex result says `purged: null`.
+   */
+  listDocuments?(ctx: AdapterContext, opts: AdapterListDocumentsOptions): Promise<AdapterListDocumentsPage>;
 
   /**
    * Optional liveness probe. When implemented, used by the service's
