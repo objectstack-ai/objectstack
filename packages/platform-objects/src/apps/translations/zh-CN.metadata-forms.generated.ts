@@ -114,7 +114,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fieldGroups.collapse": {
         label: "折叠",
-        helpText: "该分区能否折叠，作用于录入表单和记录详情页。未设置：none。"
+        helpText: "该分区能否折叠。录入表单按设置执行；默认记录页上读者可以折叠每个有标题的分组，因此那里只决定初始状态：collapsed 先收起，其余先展开。未设置：none。"
       },
       "fieldGroups.visibleWhen": {
         label: "可见条件",
@@ -2198,7 +2198,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "显示名称"
       },
       description: {
-        label: "描述"
+        label: "描述",
+        helpText: "一句话说明这张报表看什么，显示在名称下方"
       },
       type: {
         label: "类型",
@@ -2280,9 +2281,33 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "日期范围",
         helpText: "默认时间段与自定义范围开关。维度必须是数据集的日期维度；数据集只有一个日期维度时可留空"
       },
+      "dateRange.dimension": {
+        label: "日期字段",
+        helpText: "时间段按数据来源里的哪个日期分组筛选；只有一个日期分组时可留空"
+      },
+      "dateRange.defaultRange": {
+        label: "默认时间段",
+        helpText: "打开报表时显示的时间段"
+      },
+      "dateRange.allowCustomRange": {
+        label: "允许自定义范围",
+        helpText: "允许使用者自己选择开始和结束日期"
+      },
       exportOptions: {
         label: "导出选项",
         helpText: "下载格式（csv、xlsx）与文件名。谁可以下载由数据集对象上的导出权限决定"
+      },
+      "exportOptions.formats": {
+        label: "格式",
+        helpText: "可下载的格式。不设置时提供 csv 与 xlsx；空列表则关闭下载"
+      },
+      "exportOptions.includeHeaders": {
+        label: "包含表头",
+        helpText: "在下载文件的第一行写入列名"
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "文件名",
+        helpText: "下载文件名的开头，用来代替报表名称"
       }
     }
   },

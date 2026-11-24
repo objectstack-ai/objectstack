@@ -168,7 +168,10 @@ describe('a related row opens in the same drawer, one level down (ruling 5)', ()
     // objectstack#35853 — at the root with no list context the navigation
     // row names the object, not ← and a path; the record row names the record.
     expect(screen.getByTestId('record-drawer-crumb').textContent).toBe('Lead');
-    expect(document.querySelector('[data-record-drawer-title]')?.textContent).toBe('#L-1');
+    // objectstack#36235 — the body never reports a title (a read in flight):
+    // the record row holds a placeholder, never the raw id.
+    expect(document.querySelector('[data-record-drawer-title-pending]')).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title]')).toBeNull();
     expect(trail()).toBeNull();
 
     fireEvent.click(button('open task row'));
@@ -343,7 +346,10 @@ describe('on the record page, a related row opens a drawer over the page (target
     expect(where()).toBe(`/apps/${APP}/crm_lead/record/L-1`);
     // The drawer's root is the task, named in the record row; the navigation
     // row steps ↑ ↓ over the rows and counts them (objectstack#35853).
-    expect(document.querySelector('[data-record-drawer-title]')?.textContent).toBe('#T-1');
+    // objectstack#36235 — the body never reports a title (a read in flight):
+    // the record row holds a placeholder, never the raw id.
+    expect(document.querySelector('[data-record-drawer-title-pending]')).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title]')).toBeNull();
     expect(document.querySelector('[data-record-top-bar-position]')?.textContent).toBe('1 of 3');
     expect(screen.queryByTestId('record-drawer-crumb')).toBeNull();
     fireEvent.click(button('Next record'));

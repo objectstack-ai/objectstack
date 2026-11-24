@@ -310,9 +310,9 @@ describe('the breadcrumb while the record is read (objectstack#35412)', () => {
 });
 
 /** The list host's pane, drawing the record embedded (`objectViewRecordOverlay.tsx`'s shape). */
-function PaneHost({ dataSource }: { dataSource: unknown }) {
+function PaneHost({ dataSource, objectName = LEAD }: { dataSource: unknown; objectName?: string }) {
   const [recordId, setRecordId] = React.useState('r-1');
-  const root = React.useMemo(() => ({ objectName: LEAD, recordId, siblings: ROWS }), [recordId]);
+  const root = React.useMemo(() => ({ objectName, recordId, siblings: ROWS }), [objectName, recordId]);
   const stack = useRecordDrawerStack({ root, onRootStep: setRecordId });
   return (
     <RecordStackDrawer
@@ -366,6 +366,70 @@ describe('the pane\'s top bar names the record (objectstack#27524)', () => {
     // The step keys stay: j names the next record once its header draws.
     fireEvent.keyDown(document.body, { key: 'j' });
     await waitFor(() => expect(paneTitle()).toBe('Record r-2'), { timeout: 5000 });
+  });
+});
+
+describe('the pane\'s bar while the record is read (objectstack#36235)', () => {
+  it('holds a placeholder in the record row until the read lands, never the record\'s id', async () => {
+    const read = deferredRead('r-1');
+    render(
+      <MemoryRouter initialEntries={[`/apps/${APP}/${LEAD}?recordId=r-1`]}>
+        <MetadataCtx.Provider value={metadata}>
+          <PaneHost dataSource={read.dataSource} />
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(read.dataSource.findOne).toHaveBeenCalled(), { timeout: 5000 });
+    const bar = () => document.querySelector('[data-record-top-bar]') as HTMLElement | null;
+    expect(bar()).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title-pending]')).not.toBeNull();
+    expect(document.querySelector('[data-record-drawer-title]')).toBeNull();
+    expect(bar()!.textContent).not.toMatch(/#r-1/);
+    read.answer();
+    await waitFor(() => expect(document.querySelector('[data-record-bar-title] h1')?.textContent).toBe('Record r-1'), { timeout: 5000 });
+    expect(document.querySelector('[data-record-drawer-title-pending]')).toBeNull();
+  });
+});
+
+describe('the pane\'s bar once the read settles without a record (objectstack#36235)', () => {
+  const failing = (answer: () => Promise<unknown>) => {
+    const dataSource = makeDataSource();
+    dataSource.findOne = vi.fn(answer) as never;
+    return dataSource;
+  };
+  const mountPane = (dataSource: unknown, objectName?: string) => render(
+    <MemoryRouter initialEntries={[`/apps/${APP}/${objectName ?? LEAD}?recordId=r-1`]}>
+      <MetadataCtx.Provider value={metadata}>
+        <PaneHost dataSource={dataSource} objectName={objectName} />
+      </MetadataCtx.Provider>
+    </MemoryRouter>,
+  );
+  const barText = () => (document.querySelector('[data-record-top-bar]') as HTMLElement | null)?.textContent ?? '';
+  const settledTitle = () => document.querySelector('[data-record-drawer-title]')?.textContent ?? null;
+
+  // `missing` (a null answer) and `accessEnded` (a null answer for a record
+  // the page already decided) are one branch of the read; a record a write
+  // deleted and the named page refused report through the same
+  // `settledWithoutRecord` → `recordCrumbName` path as the cases below.
+  const settledCases: ReadonlyArray<readonly [string, () => Promise<unknown>, string]> = [
+    ['not found', async () => null, 'record-not-found'],
+    ['forbidden', async () => { throw Object.assign(new Error('Forbidden'), { httpStatus: 403 }); }, 'record-access-denied'],
+    ['failed', async () => { throw Object.assign(new Error('Boom'), { httpStatus: 500 }); }, 'record-load-failed'],
+  ];
+  it.each(settledCases)('%s: the placeholder ends with the read and the row names the object, never the id', async (_name, answer, stateId) => {
+    mountPane(failing(answer));
+    await screen.findByTestId(stateId, undefined, { timeout: 5000 });
+    await waitFor(() => expect(document.querySelector('[data-record-drawer-title-pending]')).toBeNull(), { timeout: 5000 });
+    expect(settledTitle()).toBe('Lead');
+    expect(barText()).not.toMatch(/#r-1/);
+  });
+
+  it('an object the console does not know: the placeholder ends too, and no id is drawn', async () => {
+    mountPane(makeDataSource(), 'crm_ghost');
+    await screen.findByTestId('object-not-found', undefined, { timeout: 5000 });
+    await waitFor(() => expect(document.querySelector('[data-record-drawer-title-pending]')).toBeNull(), { timeout: 5000 });
+    expect(settledTitle()).toBeTruthy();
+    expect(barText()).not.toMatch(/#r-1/);
   });
 });
 

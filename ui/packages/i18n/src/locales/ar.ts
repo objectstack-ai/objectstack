@@ -3086,9 +3086,6 @@ const ar = {
       targetQueue: 'قائمة انتظار',
       queue: 'قائمة الانتظار',
       queuePlaceholder: 'اختر قائمة انتظار',
-      queuesLoading: 'جارٍ تحميل قوائم الانتظار…',
-      queuesFailed: 'تعذّرت قراءة قوائم الانتظار: {{message}}',
-      noQueues: 'لم يتم إعداد أي قائمة انتظار.',
       notify: 'إشعار المالك الجديد',
       alreadyOwner: 'هذا الشخص هو مالك هذا السجل بالفعل.',
       submit: 'تغيير المالك',
@@ -3106,7 +3103,6 @@ const ar = {
       skipped_few: 'تم استبعاد {{count}} سجلات من التحديد لأنها لا تتيح تغيير المالك.',
       skipped_many: 'تم استبعاد {{count}} سجلًا من التحديد لأنها لا تتيح تغيير المالك.',
       skipped_other: 'تم استبعاد {{count}} سجل من التحديد لأنها لا تتيح تغيير المالك.',
-      noClient: 'لا يمكن تغيير المالك هنا.',
       cascadeHeading: 'نقل السجلات المرتبطة أيضًا',
       cascadeHelp: 'تنتقل إلى المالك الجديد أيضًا السجلات المرتبطة التي تشير إلى هذا السجل ويملكها المالك السابق.',
       cascadeOption: '{{object}} ({{field}})',
@@ -3114,6 +3110,7 @@ const ar = {
       cascadeReport: '{{object}} ({{field}}): نُقل {{moved}}، وتعذّر نقل {{failed}}.',
       cascadeRemaining: 'بقيت مع المالك السابق بعد تجاوز حد 500 سجل في التغيير الواحد: {{count}}.',
       cascadeReadFailure: '{{object}} ({{field}}): تعذّرت قراءة السجلات المرتبطة: {{message}}',
+      gridOnly: 'لتغيير مالك عدة سجلات دفعة واحدة، انتقل إلى عرض الشبكة.',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.

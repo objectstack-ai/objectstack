@@ -2796,9 +2796,6 @@ const ja = {
       targetQueue: 'キュー',
       queue: 'キュー',
       queuePlaceholder: 'キューを選択',
-      queuesLoading: 'キューを読み込んでいます…',
-      queuesFailed: 'キューを読み込めませんでした: {{message}}',
-      noQueues: 'キューが設定されていません。',
       notify: '新しい所有者に通知する',
       alreadyOwner: 'このユーザーはすでにこのレコードの所有者です。',
       submit: '所有者の変更',
@@ -2812,7 +2809,6 @@ const ja = {
       skipped: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
       skipped_one: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
       skipped_other: '選択したレコードのうち {{count}} 件は所有者の変更に対応していないため除外されます。',
-      noClient: 'ここでは所有者を変更できません。',
       cascadeHeading: '関連レコードも移管する',
       cascadeHelp: 'このレコードを参照し、以前の所有者が所有する関連レコードも新しい所有者に移ります。',
       cascadeOption: '{{object}}（{{field}}）',
@@ -2820,6 +2816,7 @@ const ja = {
       cascadeReport: '{{object}}（{{field}}）: {{moved}} 件を移管、{{failed}} 件は移管できませんでした。',
       cascadeRemaining: '1 回の変更の上限 500 件を超え、以前の所有者のままのレコード: {{count}} 件。',
       cascadeReadFailure: '{{object}}（{{field}}）: 関連レコードを読み込めませんでした: {{message}}',
+      gridOnly: '複数のレコードの所有者をまとめて変更するには、グリッドビューに切り替えてください。',
     },
     objectView: {
       // objectui#13330 — Setup → Users on a managed environment.
