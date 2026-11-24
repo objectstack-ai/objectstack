@@ -6104,8 +6104,8 @@ const ar = {
       time_desc: 'الأحدث ← الأقدم',
       size_asc: 'الأصغر ← الأكبر',
       size_desc: 'الأكبر ← الأصغر',
-      alphabet_asc: 'A ← Z',
-      alphabet_desc: 'Z ← A',
+      alphabet_asc: 'A → Z',
+      alphabet_desc: 'Z → A',
     },
     chips: {
       region: 'شروط الفرز والتصفية',

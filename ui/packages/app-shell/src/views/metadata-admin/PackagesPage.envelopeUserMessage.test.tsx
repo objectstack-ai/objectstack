@@ -31,6 +31,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { PackagesPage } from './PackagesPage';
+// Loaded at import so their first load is not paid inside a test's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 
 /** The generic sentence the 5xx prose withhold substitutes (`INTERNAL_ERROR_MESSAGE`). */
 const GENERIC = 'Internal server error';
@@ -49,6 +52,7 @@ function stubBody(status: number, body: unknown) {
     vi.fn(async () => ({
       ok: status >= 200 && status < 300,
       status,
+      headers: new Headers(),
       text: async () => JSON.stringify(body),
     })) as unknown as typeof fetch,
   );

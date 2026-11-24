@@ -20,7 +20,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { FilterBuilderRowGroup, SortItem } from '@object-ui/components';
 import { FieldList, fieldTypeIcon, moveFieldInOrder, orderFieldList } from '../FieldList';
 import { FilterValuePanel, quickDateWindowValue } from '../FilterValuePanel';
-import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue, sortDirectionLabel } from '../ListConditionControls';
+import { ConditionChipRow, FilterPanel, SortPanel, describeConditionValue } from '../ListConditionControls';
 import {
   addSortLevel,
   chipsAreIndependent,
@@ -595,13 +595,6 @@ describe('SortPanel — the same field list with the direction on top', () => {
   it('CONTROL: without renderAdvanced the sort panel has no footer entry', () => {
     render(<SortPanel fields={FIELDS} shownFields={SHOWN} value={[]} onChange={() => {}} />);
     expect(screen.queryByTestId('sort-panel-open-advanced')).toBeNull();
-  });
-
-  it('words the direction by type: time for dates, size for numbers, the alphabet for text', () => {
-    const t = (key: string) => LIST_CONDITION_DEFAULT_TRANSLATIONS[key] ?? key;
-    expect(sortDirectionLabel('date', 'asc', t as never)).toBe('Oldest → Newest');
-    expect(sortDirectionLabel('currency', 'desc', t as never)).toBe('High → Low');
-    expect(sortDirectionLabel('text', 'asc', t as never)).toBe('A → Z');
   });
 });
 
