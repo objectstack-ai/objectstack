@@ -179,7 +179,8 @@ function openPanel() {
 
 /** Open the hook by its label and type a condition into its Expression tab: nothing is sent. */
 async function edit(label: string, condition: string): Promise<void> {
-  fireEvent.click(await screen.findByText(label, undefined, WAIT));
+  // The rail's row: the open hook's label shows in its inspector too.
+  fireEvent.click((await screen.findAllByText(label, undefined, WAIT))[0]!);
   fireEvent.click(await screen.findByText('Expression'));
   const box = screen.getAllByRole('combobox').find((el) => el.tagName === 'TEXTAREA') as HTMLTextAreaElement;
   fireEvent.change(box, { target: { value: condition } });

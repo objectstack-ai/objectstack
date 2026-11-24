@@ -199,6 +199,8 @@ import { StudioSaveHarness, pressStudioSave } from './__tests__/studioSaveHarnes
 import { createEmptyDataSource } from './__tests__/emptyDataSource';
 import { registerBuiltinInspectors } from '../metadata-admin/inspectors';
 import { t } from '../metadata-admin/i18n';
+import { indexCustomizations } from './customizationMarks';
+import type { PackageCustomizationsState } from './CustomizationMark';
 
 const dataSource = createEmptyDataSource();
 registerBuiltinInspectors();
@@ -206,6 +208,19 @@ registerBuiltinInspectors();
 const L = (key: string) => t(key, 'en');
 const ensure = vi.fn(async (): Promise<string> => PAIR);
 const WAIT = { timeout: 8000 };
+
+/** The base's customization read: the pair overrides nothing. */
+function marksRead(): PackageCustomizationsState {
+  const read = {
+    packageId: BASE,
+    overrides: [],
+    extensions: [],
+    switchedOff: [],
+    contributions: [],
+    counts: { overrides: 0, extensions: 0, switchedOff: 0 },
+  } as never;
+  return { status: 'read', read, index: indexCustomizations(BASE, read)!, baseName: 'CRM', contributorNames: new Map() };
+}
 
 function customization(): StudioBaseCustomization {
   return {
@@ -216,7 +231,7 @@ function customization(): StudioBaseCustomization {
     pairId: PAIR,
     ensure,
     ensurePackage: vi.fn() as unknown as StudioBaseCustomization['ensurePackage'],
-    marks: { status: 'off' },
+    marks: marksRead(),
   };
 }
 
