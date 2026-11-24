@@ -2198,7 +2198,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Etiqueta"
       },
       description: {
-        label: "Descripción"
+        label: "Descripción",
+        helpText: "Una frase sobre lo que muestra este informe; aparece bajo su nombre."
       },
       type: {
         label: "Tipo",
@@ -2280,9 +2281,33 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Rango de fechas",
         helpText: "Periodo predeterminado e interruptor de rango personalizado. La dimensión debe ser una dimensión de fecha del conjunto de datos; déjela vacía cuando el conjunto de datos tenga exactamente una."
       },
+      "dateRange.dimension": {
+        label: "Campo de fecha",
+        helpText: "La agrupación de fecha de la fuente de datos a la que se aplica el período. Déjelo vacío si la fuente de datos solo tiene una."
+      },
+      "dateRange.defaultRange": {
+        label: "Período predeterminado",
+        helpText: "El período con el que se abre el informe."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Permitir rango personalizado",
+        helpText: "Permite que cada persona elija sus propias fechas de inicio y fin."
+      },
       exportOptions: {
         label: "Opciones de exportación",
         helpText: "Formatos de descarga (csv, xlsx) y nombre de archivo. Quién puede descargar lo determina el permiso de exportación del objeto del conjunto de datos."
+      },
+      "exportOptions.formats": {
+        label: "Formatos",
+        helpText: "Los formatos de descarga ofrecidos. Sin definir, se ofrecen csv y xlsx; una lista vacía desactiva las descargas."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Incluir encabezados",
+        helpText: "Pone los nombres de columna en la primera fila del archivo descargado."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "Nombre de archivo",
+        helpText: "El inicio del nombre del archivo descargado, en lugar del nombre del informe."
       }
     }
   },

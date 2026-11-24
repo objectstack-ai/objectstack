@@ -2174,15 +2174,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       dataset_binding: {
         label: "Dataset binding",
-        description: "The semantic-layer dataset this report renders. Values are the dataset’s measures; rows are its dimensions."
+        description: "Where the report’s numbers come from, how they are grouped and sorted, and which records open when you click a row."
       },
       joined_blocks: {
         label: "Joined blocks",
-        description: "Additional dataset-bound blocks stacked into a single report (joined reports only)."
+        description: "Other blocks stacked into the same report, each with its own data source (joined reports only)."
       },
       filter_and_chart: {
         label: "Filter & chart",
-        description: "Render-time scope filter and chart presentation."
+        description: "Filter conditions and how the chart is shown."
       },
       period_and_export: {
         label: "Period & export",
@@ -2198,45 +2198,46 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Label"
       },
       description: {
-        label: "Description"
+        label: "Description",
+        helpText: "One sentence on what this report shows, displayed under its name."
       },
       type: {
         label: "Type",
-        helpText: "Report type: tabular/summary/matrix/joined"
+        helpText: "Report type: tabular, summary, matrix or joined."
       },
       dataset: {
         label: "Dataset",
-        helpText: "Dataset to bind (measures/dimensions come from its semantic layer)"
+        helpText: "The report reads its numbers from here; everyone sees only the records they have access to."
       },
       values: {
         label: "Values",
-        helpText: "Measure names (from the dataset) to display"
+        helpText: "The metrics to total or count (from the data source)."
       },
       rows: {
         label: "Rows",
-        helpText: "Dimension names (from the dataset) to group rows by"
+        helpText: "The fields to group by (from the data source)."
       },
       columns: {
         label: "Columns",
-        helpText: "Dimension names across (matrix only)"
+        helpText: "Groups spread across the columns (matrix reports only)."
       },
       order: {
-        label: "Order",
-        helpText: "Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default."
+        label: "Sort Order",
+        helpText: "What to sort by, most important first (a grouping or a metric). Time groupings sort in date order by default."
       },
       "order.by": {
-        label: "Order By"
+        label: "Sort By"
       },
       "order.direction": {
         label: "Direction"
       },
       drilldown: {
         label: "Drilldown",
-        helpText: "Click an aggregated row/cell to open the underlying records"
+        helpText: "Click a summarized row or cell to open the records behind it."
       },
       blocks: {
         label: "Blocks",
-        helpText: "Dataset-bound sub-reports (joined report only)"
+        helpText: "Sub-reports, each with its own data source (joined reports only)."
       },
       "blocks.name": {
         label: "Name"
@@ -2251,38 +2252,62 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Block Type"
       },
       "blocks.dataset": {
-        label: "Dataset"
+        label: "Data Source"
       },
       "blocks.rows": {
-        label: "Rows"
+        label: "Group By"
       },
       "blocks.columns": {
-        label: "Columns"
+        label: "Group Columns By"
       },
       "blocks.values": {
-        label: "Values"
+        label: "Metrics"
       },
       "blocks.runtimeFilter": {
         label: "Runtime Filter"
       },
       "blocks.order": {
-        label: "Order"
+        label: "Sort Order"
       },
       runtimeFilter: {
         label: "Runtime Filter",
-        helpText: "Render-time scope filter, ANDed at query time"
+        helpText: "A filter applied whenever the report is shown, on top of the data source’s own conditions."
       },
       chart: {
         label: "Chart",
-        helpText: "Chart config (type, legend, colors)"
+        helpText: "Chart type and settings."
       },
       dateRange: {
         label: "Date Range",
-        helpText: "Default period and custom-range switch. The dimension must be a date dimension of the dataset; leave it empty when the dataset has exactly one."
+        helpText: "The period the report opens with, and whether people may choose their own range."
+      },
+      "dateRange.dimension": {
+        label: "Date Field",
+        helpText: "The date grouping of the data source the period applies to. Leave it empty when the data source has only one."
+      },
+      "dateRange.defaultRange": {
+        label: "Default Period",
+        helpText: "The period the report opens with."
+      },
+      "dateRange.allowCustomRange": {
+        label: "Allow Custom Range",
+        helpText: "Let people pick their own start and end dates."
       },
       exportOptions: {
         label: "Export Options",
-        helpText: "Download formats (csv, xlsx) and file name. Who may download is the export permission on the dataset object."
+        helpText: "Download formats (csv, xlsx) and file name. Who may download is set by the export permission on the data source’s object."
+      },
+      "exportOptions.formats": {
+        label: "Formats",
+        helpText: "The download formats offered. Left unset, both csv and xlsx are offered; an empty list turns downloads off."
+      },
+      "exportOptions.includeHeaders": {
+        label: "Include Headers",
+        helpText: "Put the column names in the first row of the downloaded file."
+      },
+      "exportOptions.fileNamePrefix": {
+        label: "File Name",
+        helpText: "The start of the downloaded file’s name, used instead of the report name."
       }
     }
   },
