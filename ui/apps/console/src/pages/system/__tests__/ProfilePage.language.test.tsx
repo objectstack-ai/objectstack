@@ -59,6 +59,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Toaster, toast } from 'sonner';
 import { normaliseClientError } from '@object-ui/data-objectstack';
+import { builtInLocales } from '@object-ui/i18n/locales';
 
 const { user, updateUser, findOne, update, offerable, appContent, writable } = vi.hoisted(() => ({
   user: { value: { id: 'usr_1', name: 'Ada', email: 'ada@example.com' } as Record<string, unknown> | null },
@@ -424,5 +425,38 @@ describe('ProfilePage — a stored spelling of a table language (objectstack#305
     await renderProfile();
 
     expect(screen.queryByTestId('profile-language-app-content-default')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The card's description is the only place the page says what this control
+ * does. Both the card and the globe menu write `sys_user.locale`, and the
+ * shell applies that column as the interface language (`useUserLocale` in
+ * `@object-ui/app-shell`), so the text must name ONE setting: a description
+ * that offers the card as "notifications only" makes a user who picks a
+ * language for their email switch the whole console. The English pack is held
+ * to the call site's own fallback so the two cannot drift apart again.
+ */
+describe('ProfilePage — the language card names one setting with the globe menu', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    user.value = { id: 'usr_1', name: 'Ada', email: 'ada@example.com' };
+    offerable.value = ['en', 'zh', 'ja'];
+    appContent.value = null;
+    writable.value = true;
+    findOne.mockResolvedValue({ id: 'usr_1' });
+  });
+
+  it('says the globe menu is the same setting, not a separate interface language', async () => {
+    await renderProfile();
+    const description = screen.getByText((_content, el) =>
+      el?.tagName !== 'BODY' && /globe menu/.test(el?.textContent ?? '') && el?.children.length === 0,
+    );
+    const text = description.textContent ?? '';
+
+    expect(text).toMatch(/interface/);
+    expect(text).toMatch(/same setting as the globe menu/);
+    expect(text).not.toMatch(/separately/);
+    expect(text).toBe(builtInLocales.en.profile.language.description);
   });
 });
