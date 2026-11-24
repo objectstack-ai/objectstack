@@ -128,6 +128,9 @@ import {
   pageWindow,
   type MetadataGridColumn,
 } from './metadataListGrid.js';
+import { useListChangedAt } from './listChangedAt.js';
+import { useListDraftMarks } from './listDraftMarks.js';
+import { ListChangedCell } from './ListChangedCell.js';
 
 /**
  * objectui#12982 — the Clone dialog of a declaration-only catalog
@@ -656,6 +659,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       cancelled = true;
     };
   }, [client, type, refreshKey, listInclude]);
+  // objectstack#36898 — each item's change time and its pending-draft mark.
+  const changedAt = useListChangedAt(client, type, listInclude ? { include: listInclude } : undefined, refreshKey);
+  const draftMarkOf = useListDraftMarks(client, type, refreshKey);
 
   const searchableFields = config.searchableFields ?? ['name', 'label', 'description'];
   // Structural scope — every row this package could ever show for this
@@ -732,6 +738,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // one implementation the detail's ‹ › order reads too (`metadataListState.ts`).
   const rowReader: ListRowReader<ItemRow> = {
     name: (row) => String(row.item[config.primaryKey ?? 'name'] ?? ''),
+    changedAt: (row) => changedAt?.[String(row.item[config.primaryKey ?? 'name'] ?? '')],
     label: (row) => (typeof row.item.label === 'string' ? row.item.label : undefined),
     matches: (row, q) => matchesQuery(row.item, q, searchableFields),
     source: (row) => row.source,
@@ -909,6 +916,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       name,
       holding,
       rowPkg,
+      member: member || undefined,
       href,
       invalid,
       warnOnly: !invalid && warnList.length > 0,
@@ -925,6 +933,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       label: localizeColumnLabel(ci === 0 && labelColumn ? labelColumn : c),
       width: c.width,
     })),
+    // objectstack#36898 — the item's change time and its pending-draft mark.
+    { key: CHANGED_COLUMN, label: t('engine.list.col.changedAt', locale) },
     { key: SOURCE_COLUMN, label: t('engine.list.col.source', locale) },
     ...(activation || CloneDialog
       ? [
@@ -939,7 +949,15 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // A header sorts by what it reads: the first column drawn label-first is
   // headed (and sorted by) the label, otherwise by the API name.
   const sortKeyOfColumn = (c: MetadataGridColumn): ListSortKey | undefined =>
-    c.key === primaryKey ? (labelColumn ? 'label' : 'name') : c.key === 'label' ? 'label' : undefined;
+    c.key === primaryKey
+      ? labelColumn
+        ? 'label'
+        : 'name'
+      : c.key === 'label'
+        ? 'label'
+        : c.key === CHANGED_COLUMN
+          ? 'changed'
+          : undefined;
   const typeEntryLabel = entry?.label ?? type;
   const gridSchema = React.useMemo(
     () => metadataListGridSchema(type, gridColumns, sortKeyOfColumn, LIST_PAGE_SIZE),
@@ -1057,7 +1075,20 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       );
     };
   });
-  cellDraws[metadataGridField(shownColumns.length)] = (_value, rec) => {
+  // The page's own columns are drawn under their place in `gridColumns`.
+  const pageField = (key: string) => metadataGridField(gridColumns.findIndex((c) => c.key === key));
+  cellDraws[pageField(CHANGED_COLUMN)] = (_value, rec) => {
+    const info = rowInfoOf(rec);
+    if (!info) return null;
+    return (
+      <ListChangedCell
+        changedAt={changedAt?.[info.name]}
+        draft={draftMarkOf({ name: info.name, packageId: info.rowPkg, member: info.member })}
+        locale={locale}
+      />
+    );
+  };
+  cellDraws[pageField(SOURCE_COLUMN)] = (_value, rec) => {
     const info = rowInfoOf(rec);
     if (!info) return null;
     const { row } = info;
@@ -1110,7 +1141,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     );
   };
   if (activation || CloneDialog) {
-    cellDraws[metadataGridField(shownColumns.length + 1)] = (_value, rec) => {
+    cellDraws[pageField(CONTROLS_COLUMN)] = (_value, rec) => {
       const info = rowInfoOf(rec);
       if (!info) return null;
       return (
@@ -1509,6 +1540,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
 }
 
 /** The page columns after the list's own (`metadataListGrid.ts` keys none of them as a field). */
+const CHANGED_COLUMN = '__changed';
 const SOURCE_COLUMN = '__source';
 const CONTROLS_COLUMN = '__controls';
 
@@ -1522,6 +1554,8 @@ interface MetadataRowInfo {
   name: string;
   holding: PermissionSetHolding | undefined;
   rowPkg: string | undefined;
+  /** The bundle member the row is (objectstack#26649), for its draft mark. */
+  member: string | undefined;
   href: string;
   invalid: boolean;
   warnOnly: boolean;

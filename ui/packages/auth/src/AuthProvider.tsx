@@ -546,8 +546,19 @@ export function AuthProvider({
     async (data: Partial<AuthUser>) => {
       setError(null);
       try {
-        const updated = await client.updateUser(data);
-        setUser(updated);
+        await client.updateUser(data);
+        // The write's answer is NOT the user: better-auth's `/update-user`
+        // answers `{ status: true }`. Installed as the session user, it was a
+        // user with no `id`, `name` or `email` until the rotation re-read below
+        // landed, and every consumer keyed on the identity (the console's
+        // `/auth/me/permissions` request key among them) dropped its children
+        // and remounted them: the page blanked and lost its local state, the
+        // profile card's "saved" confirmation included (objectstack#36972).
+        // So the same user keeps its identity and takes the fields it just
+        // wrote, which is how better-auth itself builds the stored row
+        // (the session user spread with the written fields). A later
+        // re-resolution (`loadSession`) replaces it with the server's copy.
+        setUser((prev) => (prev ? { ...prev, ...data } : prev));
       } catch (err) {
         const authError = err instanceof Error ? err : new Error(String(err));
         setError(authError);

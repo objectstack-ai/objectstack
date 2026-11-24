@@ -31,6 +31,13 @@ describe('renderListCell', () => {
     expect(text(renderListCell('summary', { type: 'cron', expression: '0 0 * * *', timezone: 'UTC' }))).toBe('cron · 0 0 * * * · UTC');
   });
 
+  it('summary reads an expression envelope member as its source — a served cron schedule shows when it runs', () => {
+    const served = { type: 'cron', expression: { dialect: 'cron', source: '0 2 * * *' }, timezone: 'UTC' };
+    expect(text(renderListCell('summary', served))).toBe('cron · 0 2 * * * · UTC');
+    // Control: an object member with no `source` stays out, as before.
+    expect(text(renderListCell('summary', { type: 'cron', expression: { dialect: 'cron' }, timezone: 'UTC' }))).toBe('cron · UTC');
+  });
+
   it('boolean marks, badge shows the value, text shows a scalar as written', () => {
     expect(text(renderListCell('boolean', true))).toBe('✓');
     expect(text(renderListCell('boolean', false))).toBe('✗');
