@@ -37,8 +37,12 @@ test('Save makes the edit live at once, and an unsaved edit is guarded on × but
     }
   });
   try {
+    // The list first, then the item by its row: an in-app navigation, so the
+    // browser's Back below is the app's own history entry (a full page load
+    // would make Back a cross-document unload, which the reload guard asks about).
     await page.goto('/studio/~all/metadata/page');
-    await page.goto(`/studio/~all/metadata/page/${name}`);
+    await page.getByText(name, { exact: true }).first().click();
+    await expect(page).toHaveURL(new RegExp(`/metadata/page/${name}`));
     await expect(page.getByTestId('metadata-edit-page')).toBeVisible();
 
     await test.step('an edit stays on the page: no auto-save sends it', async () => {
