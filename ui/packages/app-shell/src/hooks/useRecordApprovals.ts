@@ -129,6 +129,19 @@ export interface ApprovalRequestLite {
   flow_route?: {
     steps: Array<{ id: string; label: string; state: 'done' | 'current' | 'upcoming' }>;
     ahead: 'end' | 'undecided' | 'decided';
+    /**
+     * On a decided route only (objectstack#35863): where the record's
+     * approval stands now. `step` is the run's latest request when it is a
+     * later one (absent: the approval stands at this request), `status` that
+     * request's status (`pending`: waiting on that step), `ended` whether the
+     * run has stopped for good. Absent when the server knows nothing past
+     * this request.
+     */
+    outcome?: {
+      step?: { id: string; label: string };
+      status: string;
+      ended: boolean;
+    };
   };
   /** The flow run that opened this request; every request of one run shares it. */
   flow_run_id?: string;

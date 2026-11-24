@@ -30,6 +30,10 @@
  * connector tint) is pinned over the same `ApprovalStepLine` markup in
  * `RecordApprovalsPanel.stepProgressVertical.test.tsx`. The declared actions
  * bar is doubled.
+ *
+ * objectstack#35863: a decided request's route carries `outcome`, where the
+ * record's approval stands now; one line under the decided step says it, and
+ * nothing is drawn when no outcome is served.
  */
 
 import * as React from 'react';
@@ -230,5 +234,82 @@ describe('ApprovalDecisionPanel — a decided request draws its own step and its
     cleanup();
     const decidedNoRoute = mount(requestRow({ status: 'rejected', flow_route: undefined }));
     expect(within(decidedNoRoute).queryByTestId('approval-decision-progress')).toBeNull();
+  });
+});
+
+describe('ApprovalDecisionPanel — a decided request says where the approval stands now (objectstack#35863)', () => {
+  const EN = (builtInLocales as unknown as { en: { approvalsInbox: Record<string, string> } }).en.approvalsInbox;
+  const fill = (key: string, vars: Record<string, string>) =>
+    EN[key].replace(/\{\{(\w+)\}\}/g, (_, name: string) => vars[name] ?? '');
+  /** The manager's request, decided at the first step of the reported route. */
+  const decidedAtManager = (status: string, outcome: Route['outcome']) => requestRow({
+    id: 'areq_mgr',
+    status,
+    flow_node_id: 'manager_review',
+    current_step: 'manager_review',
+    step_label: MANAGER,
+    flow_route: {
+      steps: [{ id: 'manager_review', label: MANAGER, state: status === 'approved' ? 'done' : 'current' }],
+      ahead: 'decided',
+      ...(outcome ? { outcome } : {}),
+    },
+  });
+  const outcomeLine = (panel: HTMLElement) => within(panel).queryByTestId('approval-step-outcome');
+
+  it('decided at step 1 while step 2 is pending: the line names step 2 and that it waits on a decision', () => {
+    const panel = mount(decidedAtManager('approved', {
+      step: { id: 'finance_only', label: FINANCE }, status: 'pending', ended: false,
+    }));
+    const line = outcomeLine(panel);
+    expect(line).toHaveTextContent(fill('outcomeWaiting', { step: FINANCE }));
+    // Under the step line, and never one of its steps.
+    const steps = within(panel).getByLabelText(STEP_LINE_NAME);
+    expect(steps.compareDocumentPosition(line!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(1);
+  });
+
+  it('decided at the last step and the run ended: the line says the approval ended here', () => {
+    const panel = mount(decidedAtManager('approved', { status: 'approved', ended: true }));
+    expect(outcomeLine(panel)).toHaveTextContent(EN.outcomeEndedHere);
+  });
+
+  it('went on and ended at a later step: the line names that step and its decision', () => {
+    const panel = mount(decidedAtManager('approved', {
+      step: { id: 'finance_only', label: FINANCE }, status: 'rejected', ended: true,
+    }));
+    expect(outcomeLine(panel)).toHaveTextContent(fill('outcomeEndedAt', { step: FINANCE, decision: EN.statusRejected }));
+  });
+
+  it('went on and a later step stands decided while the run goes on: the line names that step and its decision', () => {
+    const panel = mount(decidedAtManager('approved', {
+      step: { id: 'finance_only', label: FINANCE }, status: 'returned', ended: false,
+    }));
+    expect(outcomeLine(panel)).toHaveTextContent(fill('outcomeNow', { step: FINANCE, decision: EN.statusReturned }));
+  });
+
+  it('no outcome served, or an outcome with nothing to say: no line, and the step line as before', () => {
+    const none = mount(decidedAtManager('approved', undefined));
+    expect(outcomeLine(none)).toBeNull();
+    expect(within(none).getByLabelText(STEP_LINE_NAME)).toBeTruthy();
+    cleanup();
+    const notEnded = mount(decidedAtManager('rejected', { status: 'rejected', ended: false }));
+    expect(outcomeLine(notEnded)).toBeNull();
+  });
+
+  it('a pending route never draws the line, even if an outcome were served', () => {
+    const panel = mount(requestRow({
+      flow_route: { ...SERVED_ROUTE, outcome: { step: { id: 'x', label: 'X' }, status: 'pending', ended: false } },
+    }));
+    expect(within(panel).getByLabelText(STEP_LINE_NAME)).toBeTruthy();
+    expect(outcomeLine(panel)).toBeNull();
+  });
+
+  it('every locale pack carries the four outcome rows', () => {
+    const packs = builtInLocales as unknown as Record<string, { approvalsInbox?: Record<string, string> }>;
+    for (const [locale, pack] of Object.entries(packs)) {
+      for (const key of ['outcomeWaiting', 'outcomeNow', 'outcomeEndedAt', 'outcomeEndedHere']) {
+        expect(pack.approvalsInbox?.[key], `${locale} approvalsInbox.${key}`).toBeTruthy();
+      }
+    }
   });
 });
