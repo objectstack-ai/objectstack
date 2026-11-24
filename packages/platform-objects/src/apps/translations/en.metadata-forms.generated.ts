@@ -2170,11 +2170,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       joined_blocks: {
         label: "Joined blocks",
-        description: "Additional dataset-bound blocks stacked into a single report (joined reports only)."
+        description: "Other blocks stacked into the same report, each with its own data source (joined reports only)."
       },
       filter_and_chart: {
         label: "Filter & chart",
-        description: "Render-time scope filter and chart presentation."
+        description: "Filter conditions and how the chart is shown."
       },
       period_and_export: {
         label: "Period & export",
@@ -2194,7 +2194,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       type: {
         label: "Type",
-        helpText: "Report type: tabular/summary/matrix/joined"
+        helpText: "Report type: tabular, summary, matrix or joined."
       },
       dataset: {
         label: "Dataset",
@@ -2210,11 +2210,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       columns: {
         label: "Columns",
-        helpText: "Dimension names across (matrix only)"
+        helpText: "Groups spread across the columns (matrix reports only)."
       },
       order: {
-        label: "Order",
-        helpText: "Sort keys, most significant first (a rows/columns dimension or a values measure). Time dimensions are chronological by default."
+        label: "Sort order",
+        helpText: "What to sort by, most important first (a grouping or a metric). Time groupings sort in date order by default."
       },
       "order.by": {
         label: "Order By"
@@ -2228,7 +2228,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       blocks: {
         label: "Blocks",
-        helpText: "Dataset-bound sub-reports (joined report only)"
+        helpText: "Sub-reports, each with its own data source (joined reports only)."
       },
       "blocks.name": {
         label: "Name"
@@ -2266,15 +2266,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       chart: {
         label: "Chart",
-        helpText: "Chart config (type, legend, colors)"
+        helpText: "Chart type and settings."
       },
       dateRange: {
         label: "Date Range",
-        helpText: "Default period and custom-range switch. The dimension must be a date dimension of the dataset; leave it empty when the dataset has exactly one."
+        helpText: "The default period, and whether people may choose their own range. It applies to one date grouping of the data source, which can stay empty when the data source has only one."
       },
       exportOptions: {
         label: "Export Options",
-        helpText: "Download formats (csv, xlsx) and file name. Who may download is the export permission on the dataset object."
+        helpText: "Download formats (csv, xlsx) and file name. Who may download is set by the export permission on the data source’s object."
       }
     }
   },
