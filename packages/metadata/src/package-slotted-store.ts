@@ -881,8 +881,13 @@ export function storeRowWriteKey(
  * with `origin: 'platform'` stamps it. Every other write the metadata service
  * and the metadata protocol make strips it ({@link withoutPlatformOrigin}):
  * `register` without the option, `registerInMemory`, `save`, `rollback`, the
- * protocol's save door and its restore doors. A stored row the boot pass
- * re-registers keeps it only when the row held it as read.
+ * protocol's save door and its restore doors; and a `rollback` whose row is
+ * the platform's own record is refused, never written. Two undo writes of the
+ * metadata protocol put a row back as the same operation found it, byte for
+ * byte (`undoLandedPromotions`, `undoBatchRowWrite`): the mark comes back only
+ * where the row held it. A stored row the boot pass re-registers keeps it only
+ * when the row held it as read. A served body carries it on its top level only
+ * when the stored item does (`getPublished` included), never in a snapshot.
  */
 export const PLATFORM_PROVENANCE = 'platform';
 

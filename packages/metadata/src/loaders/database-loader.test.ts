@@ -4592,6 +4592,68 @@ describe('[#37013] the mark has one place on an item, and every write and serve 
     expect(await managerOver().getPlatformItem('skill', 'helper')).toBeUndefined();
   });
 
+  it('a rollback at the environment\'s address whose row is the platform\'s own record is refused 409, nothing written, and a primed read naming the package answers the package\'s item (BASE: the platform\'s row was written unmarked)', async () => {
+    const address = { packageId: null };
+    const manager = managerOver();
+    await manager.register('skill', 'helper', { name: 'helper', label: 'platform v1', instructions: 'p' }, { notify: false, origin: 'platform' });
+    await manager.register('skill', 'helper', { name: 'helper', label: 'platform v2', instructions: 'p' }, { notify: false, origin: 'platform' });
+    await manager.register('skill', 'helper', { name: 'helper', label: 'pkg', instructions: 'k', _packageId: PKG }, { notify: false });
+    const before = await rowsOf('skill', 'helper');
+    await expect(manager.rollback('skill', 'helper', 1, address as never)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(await rowsOf('skill', 'helper')).toEqual(before);
+    const primed = managerOver();
+    expect(((await primed.get('skill', 'helper', PKG)) as any)?.label).toBe('pkg');
+    expect(((await primed.getPlatformItem('skill', 'helper')) as any)?.label).toBe('platform v2');
+  });
+
+  it('a rollback of a type outside the by-package set whose row is the platform\'s own record is refused 409, nothing written', async () => {
+    const manager = managerOver();
+    await manager.register('view', 'probe_view', { name: 'probe_view', label: 'platform v1' }, { notify: false, origin: 'platform' });
+    await manager.register('view', 'probe_view', { name: 'probe_view', label: 'platform v2' }, { notify: false, origin: 'platform' });
+    const before = await rowsOf('view', 'probe_view');
+    await expect(manager.rollback('view', 'probe_view', 1)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(await rowsOf('view', 'probe_view')).toEqual(before);
+  });
+
+  describe('getPublished serves the mark on the top level only when the stored item carries it there', () => {
+    it('a skill whose publish snapshot carries the value: served without it (BASE: echoed)', async () => {
+      const manager = managerOver();
+      await manager.register('skill', 'helper', {
+        name: 'helper', label: 'env', instructions: 'e',
+        publishedDefinition: { name: 'helper', label: 'published', instructions: 'e', _provenance: 'platform' },
+      }, { notify: false });
+      const answer = (await manager.getPublished('skill', 'helper')) as Record<string, unknown>;
+      expect(answer.label).toBe('published');
+      expect(answer._provenance).toBeUndefined();
+    });
+
+    it('a connector whose authored `metadata` record carries the value: served without it (BASE: echoed)', async () => {
+      const manager = managerOver();
+      await manager.register('connector', 'erp', { name: 'erp', label: 'ERP', type: 'api', metadata: { _provenance: 'platform' } }, { notify: false });
+      const answer = (await manager.getPublished('connector', 'erp')) as Record<string, unknown>;
+      expect(answer).toBeTypeOf('object');
+      expect(answer._provenance).toBeUndefined();
+    });
+
+    it('a snapshot nested in a snapshot is served without it too, even under the platform\'s own record', async () => {
+      const manager = managerOver();
+      await manager.register('skill', 'helper', {
+        name: 'helper', label: 'platform', instructions: 'p',
+        publishedDefinition: { name: 'helper', label: 'published', instructions: 'p', publishedDefinition: { name: 'helper', label: 'older', _provenance: 'platform' } },
+      }, { notify: false, origin: 'platform' });
+      const answer = (await manager.getPublished('skill', 'helper')) as Record<string, any>;
+      expect(answer.label).toBe('published');
+      expect(answer.publishedDefinition?.label).toBe('older');
+      expect(answer.publishedDefinition?._provenance).toBeUndefined();
+    });
+
+    it('CONTROL: the platform\'s own record is served with its mark', async () => {
+      const manager = managerOver();
+      await manager.register('skill', 'helper', { name: 'helper', label: 'platform', instructions: 'p' }, { notify: false, origin: 'platform' });
+      expect(((await manager.getPublished('skill', 'helper')) as Record<string, unknown>)._provenance).toBe('platform');
+    });
+  });
+
   it('a host that declares a package id: after a restart, the platform\'s withdrawal of a view takes the registry\'s copy too (BASE: get and list kept answering it)', async () => {
     const first = managerOver();
     await first.register('view', 'probe_view', { name: 'probe_view', label: 'platform' }, { notify: false, origin: 'platform' });

@@ -113,6 +113,7 @@ import {
   storeWriteKey,
   environmentStoreKey,
   readPlatformEntry,
+  carriesPlatformStamp,
   isPlatformOrigin,
   withPlatformOrigin,
   withoutPlatformOrigin,
@@ -729,6 +730,23 @@ function redactServedDocument(
   const result = redactor(peeled ? authored : record);
   if (result.redactedKeys.length === 0 && !bookkeepingChanged) return record;
   return peeled ? { ...result.item, ...bookkeeping } : result.item;
+}
+
+/**
+ * [#37013] A served body without the platform's mark: removed from the top
+ * level unless `keepTop`, and from every publish snapshot it nests under
+ * `publishedDefinition` (a snapshot is a body another write stored, never the
+ * platform's registration). Returns the same object when nothing is removed.
+ */
+function withoutServedPlatformMarks(body: unknown, keepTop: boolean): unknown {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
+  let served = (keepTop ? body : withoutPlatformOrigin(body)) as Record<string, unknown>;
+  const snapshot = served.publishedDefinition;
+  if (snapshot !== undefined) {
+    const unmarked = withoutServedPlatformMarks(snapshot, false);
+    if (unmarked !== snapshot) served = { ...served, publishedDefinition: unmarked };
+  }
+  return served;
 }
 
 /**
@@ -3467,7 +3485,11 @@ export class MetadataManager implements IMetadataService {
     const meta = item as any;
     // Fall back to current definition (metadata field or the item itself)
     const body = meta.publishedDefinition !== undefined ? meta.publishedDefinition : (meta.metadata ?? item);
-    return this.redactServedBody(type, body);
+    // [#37013] The platform's mark is served on the answer's top level only
+    // when the stored item itself carries it there: a body another writer
+    // stored (a publish snapshot, an authored `metadata` record) is served
+    // without it, at the top level and in every snapshot it nests.
+    return withoutServedPlatformMarks(this.redactServedBody(type, body), carriesPlatformStamp(item));
   }
 
   /**

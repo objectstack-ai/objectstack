@@ -1871,6 +1871,11 @@ export class DatabaseLoader implements MetadataLoader {
     if (!existing && !restoresBinding) {
       throw new Error(`Metadata ${type}/${name}${member === undefined ? '' : ` (member ${member ?? 'canonical'})`} not found for rollback`);
     }
+    // [#37013] The platform's own record is written by the platform's
+    // registration alone: a rollback never restores it (a restored body is
+    // written without the platform's mark, so the row would stop being the
+    // platform's record). Refused before anything is written.
+    if (existing && isPlatformOrigin(storedRowBodyOf(existing))) refusePlatformRecordRollback(type, name);
     if (restoresBinding) {
       // [#32540 C8] Refused before any write: an object the column cannot
       // store, or an object-less binding whose place an unnameable row holds.
@@ -2620,6 +2625,21 @@ function generateId(): string {
  * text), for reading a stamp off it; `undefined` for a missing row or a body
  * that does not parse, which is then no platform record.
  */
+/**
+ * [#37013] Refuse a rollback whose row is the platform's own record: `409
+ * RESOURCE_CONFLICT`, naming the fix. Only the platform's registration writes
+ * that record; a rollback restores a package's or the environment's item.
+ */
+function refusePlatformRecordRollback(type: string, name: string): never {
+  const err = new Error(
+    `${type}/${name}: the row this rollback would restore is the platform's own record, which only the platform's registration writes. ` +
+    'It is not rolled back: the platform registers it again at its next boot. To restore an earlier version of a package\'s item of the name, name that package.',
+  ) as Error & { code?: string; status?: number };
+  err.code = 'RESOURCE_CONFLICT';
+  err.status = 409;
+  throw err;
+}
+
 function storedRowBodyOf(row: Record<string, unknown> | undefined): unknown {
   const stored = row?.metadata;
   if (typeof stored !== 'string') return stored ?? undefined;

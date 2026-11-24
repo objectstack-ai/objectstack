@@ -34,6 +34,8 @@ function makeEngine() {
     /** Every other table: reads find nothing, as the stand-in has none. */
     const others: Row[] = [];
     let next = 1;
+    /** The one `sys_metadata_commit` row a revert reads, when a case serves one. */
+    let commit: Row | null = null;
     const tableOf = (t: string) => (t === 'sys_metadata_history' ? historyRows : t === 'sys_metadata' ? rows : null);
     const matches = matchesWhere;
     const engine: any = {
@@ -44,6 +46,7 @@ function makeEngine() {
         },
         async findOne(t: string, opts: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(t, opts);
+            if (t === 'sys_metadata_commit') return commit;
             return (tableOf(t) ?? []).find((r) => matches(r, opts.where)) ?? null;
         },
         async insert(t: string, data: Row) {
@@ -78,13 +81,13 @@ function makeEngine() {
             getPackage: () => undefined,
         },
     };
-    return { engine, rows, historyRows };
+    return { engine, rows, historyRows, serveCommit: (c: Row) => { commit = c; } };
 }
 
 
 const skill = (label: string) => ({ name: 'helper', label, instructions: 'help', tools: ['query_records'] });
 
-describe('[#37013] rollbackMetaItem writes a version back without the platform\'s mark', () => {
+describe('[#37013] the protocol\'s save and restore doors write a body without the platform\'s mark', () => {
     it('a version that held the mark is restored without it (BASE: the row was marked again)', async () => {
         const { engine, rows, historyRows } = makeEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
@@ -96,6 +99,36 @@ describe('[#37013] rollbackMetaItem writes a version back without the platform\'
 
         await protocol.rollbackMetaItem({ type: 'skill', name: 'helper', toVersion: 1 });
 
+        const stored = JSON.parse(String(rows.find((r) => r.name === 'helper')!.metadata));
+        expect(stored.label).toBe('v1');
+        expect(stored._provenance).not.toBe('platform');
+    });
+
+    it('the save door stores a body that carried the mark without it (BASE: stored as sent)', async () => {
+        const { engine, rows } = makeEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({ type: 'skill', name: 'helper', item: { ...skill('v1'), _provenance: 'platform' } });
+        const stored = JSON.parse(String(rows.find((r) => r.name === 'helper')!.metadata));
+        expect(stored.label).toBe('v1');
+        expect(stored._provenance).not.toBe('platform');
+    });
+
+    it('revertCommit\'s restore limb writes a version that held the mark back without it (BASE: the row was marked again)', async () => {
+        const { engine, rows, historyRows, serveCommit } = makeEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({ type: 'skill', name: 'helper', item: skill('v1') });
+        const v1 = historyRows.find((r) => r.name === 'helper')!;
+        v1.metadata = JSON.stringify({ ...JSON.parse(String(v1.metadata)), _provenance: 'platform' });
+        await protocol.saveMetaItem({ type: 'skill', name: 'helper', item: skill('v2') });
+        serveCommit({
+            id: 'c1', commit_id: 'c1', organization_id: null, operation: 'apply', message: 'the commit under revert', created_at: '2026-01-01T00:00:00Z',
+            items: JSON.stringify([{ type: 'skill', name: 'helper', existedBefore: true, prevVersion: 1 }]),
+        });
+
+        const res = await protocol.revertCommit({ commitId: 'c1' });
+
+        expect(res.failed).toEqual([]);
+        expect(res.revertedCount).toBe(1);
         const stored = JSON.parse(String(rows.find((r) => r.name === 'helper')!.metadata));
         expect(stored.label).toBe('v1');
         expect(stored._provenance).not.toBe('platform');
