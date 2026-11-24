@@ -239,7 +239,21 @@ export class KnowledgeService implements IKnowledgeService {
           topK,
           filter: opts.filter,
         });
-        for (const hit of hits) rawHits.push(hit);
+        // A hit is served as the source it was searched for. One whose
+        // `sourceId` names another source (an adapter answering from a store
+        // two sources share) is dropped: that source's admission was never
+        // asked for this hit, so serving it would skip the gates above.
+        let foreign = 0;
+        for (const hit of hits) {
+          if (hit.sourceId === source.id) rawHits.push(hit);
+          else foreign++;
+        }
+        if (foreign > 0) {
+          this.options.logger?.warn?.(
+            `[knowledge] adapter '${source.adapter}' answered ${foreign} hit(s) for source '${source.id}' that name ` +
+              'another source; dropped — a hit is served only as the source it was searched for.',
+          );
+        }
       } catch (err) {
         this.options.logger?.error?.(
           `[knowledge] adapter '${source.adapter}' search failed for source '${source.id}': ${(err as Error).message}`,
@@ -338,18 +352,33 @@ export class KnowledgeService implements IKnowledgeService {
    * caller — see `knowledge-source-admission.ts` for the gates and why they are
    * asked at source granularity. Computed once per (caller, object) per search.
    *
-   * Asked only for a caller that carries a non-system context and only with a
-   * data engine bound: the system context bypasses (as it bypasses the row
-   * re-check), and the two other cases already drop every object-source hit in
-   * {@link applyPermissionFilter}. Fails CLOSED: a gate that throws refuses
-   * every source over that object, logged at `error`.
+   * The system context bypasses, as it bypasses the row re-check. A caller
+   * with NO context, or a service with no data engine bound, cannot be judged
+   * and is served no `object` source at all — never searched, so no passage of
+   * one can reach the caller through a hit the row re-check cannot place (a
+   * hit with no `sourceRecordId`). Fails CLOSED: a gate that throws refuses
+   * every source over that object, reported once at `error`. The objects'
+   * admissions are asked concurrently.
    */
   private async admitSources(
     sources: KnowledgeSource[],
     ctx: ExecutionContext | undefined,
   ): Promise<KnowledgeSource[]> {
+    if (ctx?.isSystem) return sources;
     const engine = this.options.dataEngine;
-    if (!ctx || ctx.isSystem || !engine) return sources;
+    if (!ctx || !engine) {
+      const kept = sources.filter((source) => source.source.kind !== 'object');
+      if (kept.length < sources.length) {
+        this.options.logger?.warn?.(
+          !ctx
+            ? '[knowledge] retrieval with no ExecutionContext — object sources are not searched: a missing ' +
+                'identity is not a grant of authority, so retrieval fails closed rather than searching the whole corpus unscoped. ' +
+                'Pass the caller identity (or an explicit system context) to retrieve object-backed knowledge.'
+            : '[knowledge] no IDataEngine bound — object sources are not searched, to stay safe.',
+        );
+      }
+      return kept;
+    }
     const deps = {
       readSchema: (object: string): unknown => {
         const getSchema = (engine as { getSchema?: (name: string) => unknown }).getSchema;
@@ -359,7 +388,19 @@ export class KnowledgeService implements IKnowledgeService {
         registryObjectPackageDisabled((engine as { registry?: unknown }).registry)(object),
       resolveSecurity: (): KnowledgeFieldSecurity | undefined => this.options.resolveSecurity?.(),
     };
-    const byObject = new Map<string, Promise<ObjectAdmission | Error>>();
+    const byObject = new Map<string, Promise<ObjectAdmission | undefined>>();
+    for (const source of sources) {
+      if (source.source.kind !== 'object') continue;
+      const object = (source.source as ObjectKnowledgeSource).object;
+      if (byObject.has(object)) continue;
+      byObject.set(
+        object,
+        admitObject(object, ctx, deps).catch((err: unknown) => {
+          this.reportGateFailure(object, err instanceof Error ? err : new Error(String(err)));
+          return undefined;
+        }),
+      );
+    }
     const out: KnowledgeSource[] = [];
     for (const source of sources) {
       if (source.source.kind !== 'object') {
@@ -367,21 +408,10 @@ export class KnowledgeService implements IKnowledgeService {
         continue;
       }
       const objSource = source.source as ObjectKnowledgeSource;
-      const object = objSource.object;
-      let pending = byObject.get(object);
-      if (!pending) {
-        pending = admitObject(object, ctx, deps).catch((err: unknown) =>
-          err instanceof Error ? err : new Error(String(err)),
-        );
-        byObject.set(object, pending);
-      }
-      const objectAdmission = await pending;
-      if (objectAdmission instanceof Error) {
-        this.reportGateFailure(source.id, object, objectAdmission);
-        continue;
-      }
+      const objectAdmission = await byObject.get(objSource.object);
+      if (!objectAdmission) continue; // the gate threw: reported once, refused.
       const verdict: KnowledgeSourceAdmission = objectAdmission.refused
-        ? { admitted: false, reason: objectAdmission.refused, object }
+        ? { admitted: false, reason: objectAdmission.refused, object: objSource.object }
         : admitSourceFields(objSource, objectAdmission);
       if (verdict.admitted) {
         out.push(source);
@@ -395,11 +425,11 @@ export class KnowledgeService implements IKnowledgeService {
     return out;
   }
 
-  /** A gate lookup threw: the source is refused (fail-closed), reported at `error`, `warn` as the fallback. */
-  private reportGateFailure(sourceId: string, object: string, err: Error): void {
+  /** A gate lookup threw: every source over `object` is refused (fail-closed), reported once at `error`, `warn` as the fallback. */
+  private reportGateFailure(object: string, err: Error): void {
     const report =
       `[knowledge] the exposure or field-level read rules of object '${object}' could not be resolved ` +
-      `(${err.message}); source '${sourceId}' is not searched for this caller (fail-closed).`;
+      `(${err.message}); no source over it is searched for this caller (fail-closed).`;
     if (this.options.logger?.error) this.options.logger.error(report);
     else this.options.logger?.warn?.(report);
   }
@@ -410,8 +440,9 @@ export class KnowledgeService implements IKnowledgeService {
 
   /**
    * Drop hits whose underlying ObjectQL record the caller can't read.
-   * For hits without a `sourceRecordId` (file/http sources) we keep
-   * them — adapter is responsible for any ACL enforcement there.
+   * Hits of a registered file / http source are kept — the adapter is
+   * responsible for any ACL enforcement there; an object-source hit with no
+   * `sourceRecordId` cannot be re-checked and is dropped.
    *
    * Identity handling (#2981): an **explicit** `isSystem` context (indexing /
    * trusted server jobs) passes every hit through — it is a deliberate,
@@ -428,20 +459,12 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<KnowledgeHit[]> {
     // Explicit elevation → pass through (indexing / trusted jobs).
     if (ctx?.isSystem) return hits;
-    // No identity → fail closed on object-backed hits (keep file/http hits).
-    if (!ctx) {
-      this.options.logger?.warn?.(
-        '[knowledge] retrieval with no ExecutionContext — dropping object-source hits to stay safe: a missing ' +
-          'identity is not a grant of authority, so retrieval fails closed rather than searching the whole corpus unscoped. ' +
-          'Pass the caller identity (or an explicit system context) to retrieve object-backed knowledge.',
-      );
-      return hits.filter((h) => !h.sourceRecordId);
-    }
-    if (!this.options.dataEngine) {
-      this.options.logger?.warn?.(
-        '[knowledge] no IDataEngine bound — dropping object-source hits to stay safe.',
-      );
-      return hits.filter((h) => !h.sourceRecordId);
+    // No identity, or no engine to re-check with → keep only hits of a
+    // registered file / http source. `admitSources` already kept object
+    // sources out of the search; this holds the same line for any hit that
+    // still claims one (or claims no registered source at all).
+    if (!ctx || !this.options.dataEngine) {
+      return hits.filter((h) => this.isNonObjectSourceHit(h));
     }
 
     // Group hits by object so we make one query per object.
@@ -476,12 +499,20 @@ export class KnowledgeService implements IKnowledgeService {
     }
 
     return hits.filter((hit) => {
-      if (!hit.sourceRecordId) return true; // file / http hit
+      if (this.isNonObjectSourceHit(hit)) return true; // file / http hit
+      // An object-source hit the re-check cannot place — no record id, or a
+      // source nobody registered — is not provably readable: dropped.
       const source = this.sources.get(hit.sourceId);
-      if (!source || source.source.kind !== 'object') return true;
+      if (!source || !hit.sourceRecordId) return false;
       const objName = (source.source as ObjectKnowledgeSource).object;
       return allowed.has(`${objName}#${hit.sourceRecordId}`);
     });
+  }
+
+  /** A hit of a REGISTERED source that is not an `object` source (file / http): the adapter owns its ACL. */
+  private isNonObjectSourceHit(hit: KnowledgeHit): boolean {
+    const source = this.sources.get(hit.sourceId);
+    return source !== undefined && source.source.kind !== 'object';
   }
 }
 

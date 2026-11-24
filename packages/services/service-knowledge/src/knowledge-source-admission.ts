@@ -169,7 +169,9 @@ export async function admitObject(
   if (!canServeApiOperation(enable, KNOWLEDGE_SEARCH_OPERATION)) {
     return { object, schema, refused: 'object-api-not-served' };
   }
-  if (isSystemObjectName(object) && !isAiReadExposed(schema)) {
+  const declaredName = (schema as { name?: unknown } | null | undefined)?.name;
+  const isSystemObject = isSystemObjectName(object) || (typeof declaredName === 'string' && isSystemObjectName(declaredName));
+  if (isSystemObject && !isAiReadExposed(schema)) {
     return { object, schema, refused: 'system-object-not-ai-readable' };
   }
 

@@ -13,6 +13,23 @@ import type { KnowledgeFieldSecurity } from './knowledge-source-admission.js';
 import { createKnowledgeReapGuard, guardedObjectsFor } from './knowledge-reap-guard.js';
 
 /**
+ * Whether `err` is the kernel's refusal for a service NOTHING registered under
+ * `name` — the one miss a caller may read as absence.
+ *
+ * Both in-repo kernels answer a sync `getService` miss by throwing, and
+ * `ObjectKernel` keeps the two faults that share that branch apart on purpose,
+ * in their messages: `[Kernel] Service 'NAME' not found…` when nothing
+ * registered the name, and `Service 'NAME' is async - use await` when a
+ * factory registered it and the sync accessor cannot instantiate it
+ * (`LiteKernel` answers only the first). The first is absence; the second, and
+ * any other throw, is a service that exists and cannot be used.
+ */
+export function isServiceNotRegisteredError(err: unknown, name: string): boolean {
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  return message.startsWith(`[Kernel] Service '${name}' not found`);
+}
+
+/**
  * Configuration options for the `KnowledgeServicePlugin`.
  */
 export interface KnowledgeServicePluginOptions {
@@ -119,15 +136,20 @@ export class KnowledgeServicePlugin implements Plugin {
       logger,
       defaultTopK: this.options.defaultTopK,
       // The field gate's `security` service, resolved per search so plugin
-      // order is free (plugin-security registers it in its own start()). A
-      // lookup that misses — the in-repo kernels answer one by throwing —
-      // reads as "no security service": the contract's fallback applies
-      // (every field declaring a `maskingRule` is not queryable).
+      // order is free (plugin-security registers it in its own start()).
+      // Only a GENUINE absence reads as "no security service" (the contract's
+      // fallback then applies: every field declaring a `maskingRule` is not
+      // queryable): a lookup answering nothing, or the kernel's own
+      // not-registered refusal. Any other throw — a registration that cannot
+      // be used, such as a factory the sync accessor cannot instantiate —
+      // propagates, and the service refuses the source fail-closed, as the
+      // analytics door refuses an unusable security service.
       resolveSecurity: () => {
         try {
           return ctx.getService<KnowledgeFieldSecurity | undefined>('security') ?? undefined;
-        } catch {
-          return undefined;
+        } catch (err) {
+          if (isServiceNotRegisteredError(err, 'security')) return undefined;
+          throw err;
         }
       },
     });

@@ -21,7 +21,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
 import { KnowledgeService, type KnowledgeLogger } from '../knowledge-service.js';
 import type { KnowledgeFieldSecurity } from '../knowledge-source-admission.js';
-import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
+import { KnowledgeServicePlugin, isServiceNotRegisteredError } from '../knowledge-service-plugin.js';
 
 const MEMBER: ExecutionContext = { userId: 'u_member', positions: ['member'], permissions: [], isSystem: false };
 const MANAGER: ExecutionContext = { userId: 'u_manager', positions: ['manager'], permissions: [], isSystem: false };
@@ -255,6 +255,63 @@ describe('exposure gate — an object the caller\'s exposure decision refuses is
   });
 });
 
+describe('no context, no engine, foreign hits — an object source no gate can judge is never served', () => {
+  it('no context: an object source is not searched, even when its hits carry no `sourceRecordId`', async () => {
+    const adapter = makeAdapter();
+    adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
+      { chunkId: 'c', documentId: 'd', sourceId: opts.source.id, score: 0.9, snippet: 'passage' },
+    ]);
+    const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('notes', 'ticket', ['body']));
+    svc.registerSource({ id: 'web', label: 'web', adapter: 'memory', source: { kind: 'http', urls: ['https://x.test'] } as KnowledgeSource['source'] });
+    expect(ids(await svc.search('q'))).toEqual(['web']);
+    expect((adapter.search as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.id)).toEqual(['web']);
+    // Preservation: the system context still reaches the object source.
+    expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['notes', 'web']);
+  });
+
+  it('no data engine: an object source is not searched for an end-user context', async () => {
+    const adapter = makeAdapter();
+    adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
+      { chunkId: 'c', documentId: 'd', sourceId: opts.source.id, score: 0.9, snippet: 'passage' },
+    ]);
+    const svc = new KnowledgeService();
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('notes', 'ticket', ['body']));
+    expect(await svc.search('q', { executionContext: MANAGER })).toEqual([]);
+    expect(adapter.search).not.toHaveBeenCalled();
+  });
+
+  it('an admitted object source\'s hit with no `sourceRecordId` cannot be re-checked and is dropped', async () => {
+    const adapter = makeAdapter();
+    adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [
+      { chunkId: 'a', documentId: 'a', sourceId: opts.source.id, sourceRecordId: 'rec_1', score: 0.9, snippet: 'row' },
+      { chunkId: 'b', documentId: 'b', sourceId: opts.source.id, score: 0.8, snippet: 'unplaced' },
+    ]);
+    const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('notes', 'ticket', ['body']));
+    expect((await svc.search('q', { executionContext: MANAGER })).map((h) => h.chunkId)).toEqual(['a']);
+  });
+
+  it('a hit naming another source than the one searched is dropped (a store two sources share)', async () => {
+    const adapter = makeAdapter();
+    // Every search answers the refused source's passage as well as its own.
+    adapter.search = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) =>
+      opts.source.id === 'notes' ? [hitFor('notes')] : [hitFor(opts.source.id), hitFor('notes')]);
+    const warn = vi.fn();
+    const svc = new KnowledgeService({ dataEngine: makeEngine([TICKET]), resolveSecurity: () => salaryHiddenFromMembers, logger: { warn } });
+    svc.registerAdapter('memory', adapter);
+    svc.registerSource(objectSource('notes', 'ticket', ['body', 'salary_note']));
+    svc.registerSource(objectSource('bodies', 'ticket', ['body']));
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['bodies']);
+    expect(warn).toHaveBeenCalled();
+    // Preservation: the manager reaches both sources, each once.
+    expect(ids(await svc.search('q', { executionContext: MANAGER }))).toEqual(['bodies', 'notes']);
+  });
+});
+
 describe('KnowledgeServicePlugin wires the field gate to the registered `security` service', () => {
   class FakeHostPlugin implements Plugin {
     name = 'test.fake.host';
@@ -288,5 +345,35 @@ describe('KnowledgeServicePlugin wires the field gate to the registered `securit
     const { kernel, svc } = await boot(false);
     expect(ids(await svc.search('raise', { executionContext: MEMBER }))).toEqual(['notes']);
     await kernel.shutdown();
+  });
+
+  it('a `security` lookup that throws anything but the not-registered miss fails closed, reported once at error', async () => {
+    const error = vi.fn();
+    const plugin = new KnowledgeServicePlugin({ enableEventSync: false, sources: [objectSource('notes', 'ticket', ['body']), objectSource('titles', 'ticket', ['title'])] });
+    const services: Record<string, unknown> = { objectql: makeEngine([TICKET]) };
+    const ctx = {
+      getService: (name: string) => {
+        if (name === 'security') throw new Error("Service 'security' is async - use await");
+        if (name in services) return services[name];
+        throw new Error(`[Kernel] Service '${name}' not found`);
+      },
+      registerService: (name: string, svc: unknown) => { services[name] = svc; },
+      logger: { info: vi.fn(), warn: vi.fn(), error, debug: vi.fn() },
+    } as unknown as PluginContext;
+    await plugin.init(ctx);
+    const svc = services.knowledge as KnowledgeService;
+    svc.registerAdapter('memory', makeAdapter());
+    expect(await svc.search('q', { executionContext: MANAGER })).toEqual([]);
+    expect(error).toHaveBeenCalledOnce();
+    expect(String(error.mock.calls[0][0])).toMatch(/fail-closed/);
+    // Preservation: the system context bypasses the gate.
+    expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['notes', 'titles']);
+  });
+
+  it('isServiceNotRegisteredError reads only the kernel\'s not-registered miss as absence', () => {
+    expect(isServiceNotRegisteredError(new Error("[Kernel] Service 'security' not found"), 'security')).toBe(true);
+    expect(isServiceNotRegisteredError(new Error("Service 'security' is async - use await"), 'security')).toBe(false);
+    expect(isServiceNotRegisteredError(new Error("[Kernel] Service 'other' not found"), 'security')).toBe(false);
+    expect(isServiceNotRegisteredError(new Error('boom'), 'security')).toBe(false);
   });
 });
