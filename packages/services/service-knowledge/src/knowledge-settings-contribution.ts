@@ -59,6 +59,37 @@ function keysOf(manifest: { specifiers: ReadonlyArray<{ key?: string }> }): Set<
   return new Set(manifest.specifiers.map((s) => s.key).filter((k): k is string => typeof k === 'string'));
 }
 
+/**
+ * Whether the served `ai` manifest IS the bundled declaration (#33933, L2 S1).
+ *
+ * Judged by identity, not by its key set: a host may register its own `ai`
+ * manifest with the bundled keys and a different scope, permission, default or
+ * option table, and that manifest must be left as the host wrote it. The hub
+ * serves the registered declaration itself, or, where an option source serves a
+ * key, a shallow copy whose sourced specifiers differ only in `options`
+ * (`servedManifest`); every other field and specifier is the same object.
+ */
+export function isBundledAiManifest(served: unknown): boolean {
+  if (served === aiSettingsManifest) return true;
+  if (!served || typeof served !== 'object') return false;
+  const m = served as Record<string, unknown> & { specifiers?: unknown };
+  const fields = new Set([...Object.keys(m), ...Object.keys(aiSettingsManifest)]);
+  for (const field of fields) {
+    if (field === 'specifiers') continue;
+    if (m[field] !== (aiSettingsManifest as unknown as Record<string, unknown>)[field]) return false;
+  }
+  const bundled = aiSettingsManifest.specifiers as ReadonlyArray<Record<string, unknown>>;
+  if (!Array.isArray(m.specifiers) || m.specifiers.length !== bundled.length) return false;
+  return (m.specifiers as Array<Record<string, unknown> | undefined>).every((spec, i) => {
+    const own = bundled[i];
+    if (spec === own) return true;
+    if (!spec || typeof spec !== 'object') return false;
+    const keys = new Set([...Object.keys(spec), ...Object.keys(own)]);
+    for (const k of keys) if (k !== 'options' && spec[k] !== own[k]) return false;
+    return true;
+  });
+}
+
 function embedderKeys(): string[] {
   return aiEmbedderSettingsSpecifiers.map((s) => s.key).filter((k): k is string => typeof k === 'string');
 }
@@ -92,7 +123,7 @@ export function contributeKnowledgeSettings(ctx: PluginContext, version: string)
   offered.knowledge = true;
 
   // The embedder section joins the `ai` namespace — the bundled one only,
-  // recognised by its keys, and registered from its DECLARATION
+  // recognised as that very declaration (`isBundledAiManifest`), and registered from its DECLARATION
   // (`aiSettingsManifest`), never from the served copy `getManifest` returns
   // (that copy carries option-source tables in place of declared ones). A host
   // that registered its own `ai` manifest keeps it untouched and is told why
@@ -104,9 +135,8 @@ export function contributeKnowledgeSettings(ctx: PluginContext, version: string)
     ai = undefined;
   }
   const served = ai ? keysOf(ai) : new Set<string>();
-  const bundled = keysOf(aiSettingsManifest);
   const declaresEmbedder = aiEmbedderSettingsSpecifiers.some((s) => s.key !== undefined && served.has(s.key));
-  const isBundled = served.size === bundled.size && [...bundled].every((k) => served.has(k));
+  const isBundled = isBundledAiManifest(ai);
   if (ai && (declaresEmbedder || isBundled)) {
     if (!declaresEmbedder) settings.registerManifest(withAiEmbedderSection(aiSettingsManifest));
     settings.registerAction('ai', 'test_embedder', aiTestEmbedderActionHandler);
