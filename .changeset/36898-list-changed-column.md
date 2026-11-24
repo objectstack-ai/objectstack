@@ -6,7 +6,7 @@
 
 feat(console): the metadata list shows when each item last changed and marks items with unpublished changes
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 The generic metadata list (Setup's catalog lists and Studio's "All metadata" area) gains a 「修改时间」 / "Modified" column, read off the list answer's `changedAt` sibling. Only an item served from a stored row has a time; a code-shipped item shows an empty cell. The sort control gains "Modified (newest first)" and "Modified (oldest first)", which ride the address as `sort=-changed` / `sort=changed`; items without a time sort last either way, and the item page's ‹ › follow the same order.
