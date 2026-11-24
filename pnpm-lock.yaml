@@ -2547,6 +2547,9 @@ importers:
       '@objectstack/service-messaging':
         specifier: workspace:*
         version: link:../../services/service-messaging
+      '@objectstack/service-print':
+        specifier: workspace:*
+        version: link:../../services/service-print
       '@objectstack/service-storage':
         specifier: workspace:*
         version: link:../../services/service-storage
