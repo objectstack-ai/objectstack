@@ -114,7 +114,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       "fieldGroups.collapse": {
         label: "摺疊",
-        helpText: "該分割區能否摺疊，作用於輸入表單和記錄詳細資料頁面。未設定：none。"
+        helpText: "該分割區能否摺疊。輸入表單依設定執行；預設記錄頁面上讀者可以摺疊每個有標題的分組，因此那裡只決定初始狀態：collapsed 先收合，其餘先展開。未設定：none。"
       },
       "fieldGroups.visibleWhen": {
         label: "可見條件",

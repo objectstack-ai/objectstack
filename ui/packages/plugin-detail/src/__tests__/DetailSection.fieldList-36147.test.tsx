@@ -139,6 +139,70 @@ describe('a group: title left, chevron at the right end, down folded and up open
   });
 });
 
+/**
+ * objectstack#36269 — on the synthesized record page every titled group
+ * folds, whatever its `collapse`: the reader folds it, and `collapse` only
+ * picks the first state. A group that declares nothing (or `'none'`) reaches
+ * `DetailSection` with no `collapsible`; `'collapsed'` reaches it collapsible
+ * and `defaultCollapsed`.
+ */
+describe('every titled group folds on the record page; `collapse` picks the first state (objectstack#36269)', () => {
+  it('a titled group that declares no `collapse` folds from its title row, starting open', () => {
+    const { container } = render(
+      <Page list={makeList()}>
+        <DetailSection section={section} data={data} objectSchema={objectSchema} />
+      </Page>,
+    );
+    const toggle = screen.getByRole('button', { name: 'Overview' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.lastElementChild?.getAttribute('class')).toContain('lucide-chevron-up');
+    expect(rows(container).length).toBeGreaterThan(0);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.lastElementChild?.getAttribute('class')).toContain('lucide-chevron-down');
+    expect(rows(container)).toHaveLength(0);
+  });
+
+  it('the same on the full page laid out by width (cap 3)', () => {
+    render(
+      <Page list={makeList()} cap={3}>
+        <DetailSection section={section} data={data} objectSchema={objectSchema} />
+      </Page>,
+    );
+    expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it("a group declaring `collapse: 'collapsed'` starts closed", () => {
+    const { container } = render(
+      <Page list={makeList()}>
+        <DetailSection
+          section={{ ...section, collapsible: true, defaultCollapsed: true } as DetailViewSection}
+          data={data}
+          objectSchema={objectSchema}
+        />
+      </Page>,
+    );
+    expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-expanded')).toBe('false');
+    expect(rows(container)).toHaveLength(0);
+  });
+
+  it('the untitled ungrouped bucket has no toggle', () => {
+    const { container } = render(
+      <Page list={makeList()}>
+        <DetailSection section={{ fields: section.fields } as DetailViewSection} data={data} objectSchema={objectSchema} />
+      </Page>,
+    );
+    expect(container.querySelector('section button[aria-expanded]')).toBeNull();
+    expect(rows(container).length).toBeGreaterThan(0);
+  });
+
+  it("control: off the synthesized page a `collapse: 'none'` group keeps its plain heading, no toggle", () => {
+    render(<DetailSection section={section} data={data} objectSchema={objectSchema} />);
+    expect(screen.queryByRole('button', { name: 'Overview' })).toBeNull();
+    expect(screen.getByText('Overview')).toBeTruthy();
+  });
+});
+
 describe('no pencil: a click on an editable value edits it (objectstack#36147 item 7)', () => {
   it('a single click on an editable value enters edit; a read-only value takes no click', () => {
     const onEnter = vi.fn();
@@ -222,8 +286,11 @@ describe('empty fields fold into the list’s one last row (objectstack#36147 it
     const row = container.querySelector('[data-empty-fields-row]') as HTMLElement;
     expect(row.getAttribute('data-empty-fields-count')).toBe('2');
     expect(row.querySelectorAll('button')).toHaveLength(1);
-    // The section draws no toggle of its own: the list's row is the only one.
-    expect(container.querySelectorAll('button[aria-expanded]')).toHaveLength(1);
+    // The section draws no empty-fields toggle of its own: the list's row is
+    // the only one. Its one other disclosure is the group's fold
+    // (objectstack#36269).
+    const disclosures = Array.from(container.querySelectorAll('button[aria-expanded]'));
+    expect(disclosures.filter((b) => !b.closest('[data-empty-fields-row]')).map((b) => b.textContent)).toEqual(['Overview']);
     fireEvent.click(row.querySelector('button')!);
     expect(list.toggleShowEmpty).toHaveBeenCalledTimes(1);
   });

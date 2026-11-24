@@ -7460,13 +7460,18 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     ? {
         laneField: boardLaneField,
         // objectstack#36370 — the fields the board can lane on: a select or a
-        // radio, whose options are the lanes. A lookup, user, master-detail or
-        // tree field draws no sensible lanes yet (the board keys a lane on the
-        // stored value, and an expanded reference is an object), and a boolean
-        // has no options to title its lanes, so the picker leaves them out.
+        // radio, whose options are the lanes, and a single-valued reference
+        // (`EXPANDABLE_FIELD_TYPES`: lookup, user, master-detail, tree), whose
+        // lanes are the referenced records, keyed by the foreign key and
+        // titled by name (objectstack#36643). A many-valued reference puts one
+        // card in several lanes and a drag cannot say which to replace, and a
+        // boolean has no options to title its lanes, so the picker leaves
+        // them out.
         laneFieldOptions: groupOptions.filter((option) => {
-          const type = (objectDef?.fields as Record<string, { type?: unknown } | undefined> | undefined)?.[option.value]?.type;
-          return type === 'select' || type === 'radio';
+          const def = (objectDef?.fields as Record<string, { type?: unknown; multiple?: unknown } | undefined> | undefined)?.[option.value];
+          const type = typeof def?.type === 'string' ? def.type : undefined;
+          if (type === 'select' || type === 'radio') return true;
+          return !!type && EXPANDABLE_FIELD_TYPES.has(type) && def?.multiple !== true;
         }),
         // A new lane field draws every lane it offers: the lanes chosen on the
         // old field name none of its values.

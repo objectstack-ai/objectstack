@@ -114,7 +114,7 @@ export const deMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fieldGroups.collapse": {
         label: "Einklappen",
-        helpText: "Ob der Abschnitt im Eingabeformular und auf der Datensatz-Detailseite eingeklappt werden kann. Nicht gesetzt: nein."
+        helpText: "Ob der Abschnitt eingeklappt werden kann. Das Eingabeformular folgt der Einstellung. Auf der Standard-Datensatzseite kann der Leser jede Gruppe mit Titel einklappen; dort legt die Einstellung nur den Anfangszustand fest: Collapsed beginnt eingeklappt, die anderen offen. Nicht gesetzt: nein."
       },
       "fieldGroups.visibleWhen": {
         label: "Sichtbar wenn",
