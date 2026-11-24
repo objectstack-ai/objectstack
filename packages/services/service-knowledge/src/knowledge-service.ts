@@ -302,8 +302,9 @@ export class KnowledgeService implements IKnowledgeService {
    * — and the database answers, not the payload:
    *
    * - a row comes back → the document is built from THAT row, through the same
-   *   {@link recordToDocument} gate as the reindex walk (credential-class and
-   *   `internal` fields withheld; only the fields the source lists). A payload
+   *   {@link recordToDocument} gate as the reindex walk: the fields the source
+   *   lists and the record `title`, never a credential-class or `internal`
+   *   field. A payload
    *   missing a field (a projected write result, a formula the write did not
    *   return) therefore cannot leave the document short;
    * - nothing comes back → the row does not match (a draft, or a row that
@@ -324,8 +325,11 @@ export class KnowledgeService implements IKnowledgeService {
    * subscriber in turn, so this handler runs inside the write's async context,
    * and its system-context re-read rides the same open transaction through the
    * engine's ambient transaction store: it sees the row the write just made.
-   * If that unit then rolls back, the document stays built from a row that
-   * never committed, until the row's next event or a `reindexSource`.
+   * If that unit then rolls back, the index is wrong in one of two ways until
+   * the row's next event or a `reindexSource`: on a match, the document stays
+   * built from a row that never committed; on a miss, the uncommitted row did
+   * not match and the document was deleted, so the committed row — which may
+   * still match — is missing from the index.
    * `data.record.restored` is published after the restore's own unit has
    * committed. Bulk events (`data.records.*`) carry a count, not records, and
    * are not synced here — see the plugin's event bridge.
@@ -333,7 +337,10 @@ export class KnowledgeService implements IKnowledgeService {
    * Syncs of one document are serialized in this process
    * ({@link serializeRecordSync}), so two opposite events for one row cannot
    * interleave: each sync re-reads after the previous one finished, and the
-   * last one leaves the index agreeing with the database.
+   * last one leaves the index agreeing with the database. The chain is awaited
+   * inline, so a write's sync can wait behind an earlier in-flight sync of the
+   * same document (on a single-connection pool, up to the pool's acquire
+   * timeout); the index still ends consistent.
    */
   async handleRecordUpsert(object: string, record: Record<string, unknown>): Promise<void> {
     const recordId = record.id;

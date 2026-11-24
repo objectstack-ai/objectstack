@@ -358,8 +358,8 @@ when the source has no `where`).
 - **A row comes back** — the document is built from the re-read row, not from
   the event's `after`, so a write result that omits a field (a projected
   result, a formula the write did not return) cannot leave the document
-  short. The same field rules as a reindex apply: only the fields the source
-  lists, and never a credential-class or `internal` field.
+  short. The same field rules as a reindex apply: the fields the source lists
+  and the record `title`, never a credential-class or `internal` field.
 - **No row comes back** — the row does not match (a draft, or a row that
   stopped matching), and its document is deleted. Deleting an absent document
   changes nothing.
@@ -372,7 +372,10 @@ when the source has no `where`).
 A delete removes the document named by the event's required `recordId`. Syncs
 of one document run one after another in the process, so two events for the
 same row cannot interleave: each re-reads after the previous one finished, and
-the last leaves the index agreeing with the database.
+the last leaves the index agreeing with the database. Because the sync is
+inline, a write's sync can wait behind an earlier in-flight sync of the same
+document (on a single-connection pool, up to the pool's acquire timeout); the
+index still ends consistent.
 
 **When the sync runs.** The engine publishes `data.record.created` and
 `data.record.updated` from inside the write, after its `after*` hooks — before
@@ -380,8 +383,15 @@ any unit of work around the write commits (the write's own unit, opened when a
 metadata hook can abort it, or a caller's `engine.transaction(…)`). The
 in-process realtime service awaits each subscriber, so the re-read runs inside
 the same open transaction and sees the row the write just made. If that unit
-then rolls back, the document stays built from a row that never committed,
-until the row's next event or a `reindexSource`. `data.record.restored` is
+then rolls back, the index is wrong in one of two ways until the row's next
+event or a `reindexSource`:
+
+- **The uncommitted row matched** — the document stays built from a row that
+  never committed.
+- **The uncommitted row did not match** — the document was deleted, so the
+  committed row, which may still match, is missing from the index.
+
+`data.record.restored` is
 published after the restore's own unit has committed.
 
 - **MVP (Phase 1):** synchronous, inline with the originating mutation.
