@@ -869,7 +869,16 @@ export class ProtocolSaveFacet {
                     host, 'save', request.type, writeType, request.name, itemDiscriminator(writeType, request.item), address,
                 );
                 if (holderRefusal) throw holderRefusal;
-                if (address.packageId !== null) request = { ...request, packageId: address.packageId };
+                // [#35524] …and a named non-canonical member only a dependent
+                // holds, where the read naming no package takes the row-held
+                // base's address: the base's row, as the save naming the base
+                // writes it ({@link packagelessRowHeldBaseAddress}), never the
+                // dependent's row the read does not serve there.
+                const base = address.candidates.length === 1
+                    ? await packagelessRowHeldBaseAddress(host, writeType, request.name, member)
+                    : undefined;
+                const resolved = base ?? address.packageId;
+                if (resolved !== null) request = { ...request, packageId: resolved };
             }
         }
 
@@ -901,8 +910,11 @@ export class ProtocolSaveFacet {
         // draft save's inherited package (the named-base rule and the late
         // override re-judgment): the base is judged exactly as the save
         // naming it is, an id no installed package has refused `422`.
+        // [#35524] …and the same where the active rows at the member are bound
+        // to the one dependent whose addition the read naming no package does
+        // not serve (it takes the base's address there): the base's draft.
         let followedBase: string | undefined;
-        if (draftAddress?.kind === 'ambiguous') {
+        if (draftAddress !== undefined && (draftAddress.kind === 'ambiguous' || draftAddress.into !== null)) {
             const base = await packagelessRowHeldBaseAddress(
                 host, singularType, request.name, itemDiscriminator(singularType, request.item),
             );
@@ -3285,9 +3297,13 @@ export async function packagelessRowHeldBaseAddress(
         return undefined;
     }
     const address = await host.packagelessAddress(singular, name, member, 'active', activeRows);
-    if (address.candidates.length < 2 || address.unbound) return undefined;
+    if (address.candidates.length === 0 || address.unbound) return undefined;
     const base = await rowHeldBaseAddressOf(host, singular, name, member, activeRows);
-    return base !== undefined && address.candidates.includes(base) ? base : undefined;
+    if (base === undefined) return undefined;
+    // [#35524] Two or more holders at the member: the base is one of them. One
+    // holder: a dependent's addition the base holds no row of, where the read
+    // takes the base's address (`rowHeldBaseAddressOf`'s S1-guarded arm).
+    return address.candidates.includes(base) === address.candidates.length > 1 ? base : undefined;
 }
 
 /**
