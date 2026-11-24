@@ -12,7 +12,8 @@ import { test as base, expect, type APIRequestContext, type Page, type Request, 
  *      type's list) — not what the canvas draws.
  *   2. Restore package original: the pair's draft and row are deleted at the
  *      pair, and the three reads serve the shipped column set again.
- *   3. Add `region__c`: Add field on the base object's Form, then the top
+ *   3. Add `region__c`: Add field on the base object's Field layout tab
+ *      (字段布局, formerly Form; objectstack#36505), then the top
  *      bar's Save (objectstack#36511), writes an `object_extension` into the
  *      pair and publishes that one item there, so the base object is served
  *      with the field at once and the pair's own read and export carry it.
@@ -226,7 +227,7 @@ test('a read-only base is customized, restored and extended through Studio, and 
 
     await test.step(`Add ${FIELD.name}: an extension in the pair, served on the base object`, async () => {
       await page.goto(`/studio/${BASE}/data?surface=${encodeURIComponent(`object:${OBJECT}`)}`);
-      await page.getByTestId('data-object-header').getByRole('button', { name: 'Form', exact: true }).click();
+      await page.getByTestId('data-object-header').getByRole('button', { name: 'Field layout', exact: true }).click();
       await page.getByTestId('data-form-add-extension-field').click();
       await page.getByTestId('add-field-label-input').fill(FIELD.label);
       await expect(page.getByTestId('add-field-api-name-preview')).toContainText(FIELD.name);
